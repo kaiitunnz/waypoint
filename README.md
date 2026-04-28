@@ -12,8 +12,15 @@ Waypoint is a personal remote-control companion for Claude Code and Codex sessio
 
 - `backend/` — FastAPI daemon, tmux/session runtime, auth, persistence
 - `frontend/` — Next.js PWA client
+- `3rdparty/codex/` — pinned Codex submodule used for the local app-server SDK
 
 ## Quick start
+
+Initialize the Codex submodule before syncing backend dependencies:
+
+```bash
+git submodule update --init --recursive
+```
 
 ### Backend
 
@@ -24,6 +31,8 @@ cp .env.example .env
 uv sync --group dev
 uv run waypoint serve
 ```
+
+Waypoint uses the Python SDK from `../3rdparty/codex/sdk/python` for managed Codex app-server sessions.
 
 To install the backend as a macOS LaunchAgent:
 

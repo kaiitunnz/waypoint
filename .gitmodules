@@ -1,0 +1,3 @@
+[submodule "3rdparty/codex"]
+	path = 3rdparty/codex
+	url = https://github.com/openai/codex.git

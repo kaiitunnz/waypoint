@@ -56,26 +56,6 @@ class RemoteCodexSshConfig(BaseModel):
         return (ssh_bin, *self.ssh_args, self.ssh_destination, remote_command)
 
 
-class ServerConfig(BaseModel):
-    codex_remote: RemoteCodexSshConfig | None = None
-
-
-def load_server_config(path: Path | None) -> ServerConfig:
-    if path is None:
-        return ServerConfig()
-    expanded = path.expanduser()
-    if not expanded.exists():
-        raise FileNotFoundError(f"waypoint config file not found: {expanded}")
-    try:
-        import yaml
-    except ModuleNotFoundError as exc:
-        raise RuntimeError(
-            "PyYAML is required to load WAYPOINT_CONFIG_PATH files. Run `uv sync --group dev` in `backend/`."
-        ) from exc
-    payload = yaml.safe_load(expanded.read_text(encoding="utf-8")) or {}
-    return ServerConfig.model_validate(payload)
-
-
 def build_remote_codex_client_factory(remote: RemoteCodexSshConfig):
     def factory(cwd: str, approval_handler):
         return AppServerClient(

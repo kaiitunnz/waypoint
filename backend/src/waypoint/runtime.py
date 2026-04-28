@@ -15,7 +15,7 @@ from waypoint.config import Settings
 from waypoint.codex_app_server import CodexAppServerAdapter
 from waypoint.git_meta import resolve_git_meta
 from waypoint.normalizer import TerminalNormalizer
-from waypoint.server_config import ServerConfig, build_remote_codex_client_factory
+from waypoint.server_config import build_remote_codex_client_factory
 
 log = logging.getLogger("waypoint.runtime")
 from waypoint.schemas import (
@@ -71,14 +71,13 @@ class BroadcastHub:
 
 
 class SessionRuntime:
-    def __init__(self, settings: Settings, storage: Storage, server_config: ServerConfig | None = None) -> None:
+    def __init__(self, settings: Settings, storage: Storage) -> None:
         self.settings = settings
         self.storage = storage
-        self.server_config = server_config or ServerConfig()
         self.tmux = TmuxAdapter()
         self.normalizer = TerminalNormalizer()
         self.broadcast = BroadcastHub()
-        remote_codex = self.server_config.codex_remote
+        remote_codex = self.settings.codex_remote
         client_factory = None
         if remote_codex is not None and remote_codex.enabled:
             client_factory = build_remote_codex_client_factory(remote_codex)
@@ -357,14 +356,14 @@ class SessionRuntime:
         return self.normalizer.clean(snapshot)
 
     def _codex_start_message(self, cwd: str) -> str:
-        remote_codex = self.server_config.codex_remote
+        remote_codex = self.settings.codex_remote
         if remote_codex is not None and remote_codex.enabled:
             remote_cwd = remote_codex.resolve_remote_cwd(cwd)
             return f"Codex app-server session started via SSH on {remote_codex.ssh_destination} ({remote_cwd})"
         return "Codex app-server session started"
 
     def _codex_restore_message(self, cwd: str) -> str:
-        remote_codex = self.server_config.codex_remote
+        remote_codex = self.settings.codex_remote
         if remote_codex is not None and remote_codex.enabled:
             remote_cwd = remote_codex.resolve_remote_cwd(cwd)
             return f"Codex session restored via SSH on {remote_codex.ssh_destination} ({remote_cwd})"

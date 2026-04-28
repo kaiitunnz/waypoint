@@ -14,16 +14,30 @@ uv sync --group dev
 uv run waypoint serve
 ```
 
-## Optional remote Codex over SSH
+## Configuration
 
-Waypoint can route managed `codex` sessions through SSH instead of starting a local Codex app-server. Create a YAML file from `waypoint.example.yaml`, then either set `WAYPOINT_CONFIG_PATH` in `backend/.env` or start with:
+Waypoint now supports a single YAML config file for backend defaults. Start from `waypoint.example.yaml`, then either set `WAYPOINT_CONFIG_PATH` in `backend/.env` or start with:
 
 ```bash
 uv run waypoint serve --config ./waypoint.yaml
 ```
 
+Precedence is:
+
+- CLI flags such as `--host`, `--port`, and `--config`
+- environment variables such as `WAYPOINT_HOST`
+- YAML values from `waypoint.yaml`
+- built-in defaults
+
+Keep env vars for machine-specific overrides and secrets. Prefer the YAML file for structured settings and grouped config such as remote Codex SSH options.
+
+## Optional remote Codex over SSH
+
+Waypoint can route managed `codex` sessions through SSH instead of starting a local Codex app-server.
+
 The current config shape supports one optional `codex_remote` profile with:
 
+- top-level backend defaults such as `host`, `port`, `password`, and `data_dir`
 - `ssh_destination` and optional `ssh_args`
 - `codex_bin` on the remote host
 - `remote_env` for secrets such as `OPENAI_API_KEY`

@@ -1,20 +1,16 @@
 from pathlib import Path
 import os
+from typing import Any
 
-from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+import yaml
+
+from waypoint.server_config import RemoteCodexSshConfig
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(BACKEND_ROOT / ".env")
-
-
-def default_data_dir() -> Path:
-    override = os.environ.get("WAYPOINT_DATA_DIR")
-    if override:
-        return Path(os.path.expandvars(override)).expanduser()
-    return Path.home() / "Library" / "Application Support" / "Waypoint"
-
 
 DEFAULT_CORS_ORIGINS: tuple[str, ...] = ()
 DEFAULT_CORS_ORIGIN_REGEX = (
@@ -24,41 +20,42 @@ DEFAULT_CORS_ORIGIN_REGEX = (
 )
 
 
-def parse_cors_origins() -> list[str]:
-    raw = os.environ.get("WAYPOINT_CORS_ORIGINS")
+def default_data_dir() -> Path:
+    return Path.home() / "Library" / "Application Support" / "Waypoint"
+
+
+def parse_cors_origins(raw: str | None) -> list[str]:
     if raw is None:
         return list(DEFAULT_CORS_ORIGINS)
-    parts = [item.strip() for item in raw.split(",") if item.strip()]
-    return parts
+    return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-def parse_cors_origin_regex() -> str | None:
-    raw = os.environ.get("WAYPOINT_CORS_ORIGIN_REGEX")
+def parse_cors_origin_regex(raw: str | None) -> str | None:
     if raw is None:
         return DEFAULT_CORS_ORIGIN_REGEX
     return raw or None
 
 
-def parse_config_path() -> Path | None:
-    raw = os.environ.get("WAYPOINT_CONFIG_PATH")
+def parse_config_path(raw: str | None) -> Path | None:
     if not raw:
         return None
     return Path(os.path.expandvars(raw)).expanduser()
 
 
 class Settings(BaseModel):
-    host: str = Field(default_factory=lambda: os.environ.get("WAYPOINT_HOST", "127.0.0.1"))
-    port: int = Field(default_factory=lambda: int(os.environ.get("WAYPOINT_PORT", "8787")))
-    password: str = Field(default_factory=lambda: os.environ.get("WAYPOINT_PASSWORD", "change-me"))
-    config_path: Path | None = Field(default_factory=parse_config_path)
+    host: str = "127.0.0.1"
+    port: int = 8787
+    password: str = "change-me"
+    config_path: Path | None = None
     data_dir: Path = Field(default_factory=default_data_dir)
     sessions_dir_name: str = "sessions"
     database_name: str = "waypoint.db"
     token_ttl_seconds: int = 60 * 60 * 24 * 7
     stream_poll_interval: float = 1.0
     tail_snapshot_lines: int = 200
-    cors_origins: list[str] = Field(default_factory=parse_cors_origins)
-    cors_allow_origin_regex: str | None = Field(default_factory=parse_cors_origin_regex)
+    cors_origins: list[str] = Field(default_factory=lambda: list(DEFAULT_CORS_ORIGINS))
+    cors_allow_origin_regex: str | None = DEFAULT_CORS_ORIGIN_REGEX
+    codex_remote: RemoteCodexSshConfig | None = None
 
     @property
     def database_path(self) -> Path:
@@ -71,3 +68,54 @@ class Settings(BaseModel):
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
+
+
+def load_settings(config_path_override: Path | None = None) -> Settings:
+    config_path = config_path_override or parse_config_path(os.environ.get("WAYPOINT_CONFIG_PATH"))
+    payload = _load_config_payload(config_path)
+    payload["config_path"] = config_path
+    payload.update(_env_overrides())
+    payload = _normalize_payload(payload)
+    return Settings.model_validate(payload)
+
+
+def _load_config_payload(config_path: Path | None) -> dict[str, Any]:
+    if config_path is None:
+        return {}
+    expanded = config_path.expanduser()
+    if not expanded.exists():
+        raise FileNotFoundError(f"waypoint config file not found: {expanded}")
+    data = yaml.safe_load(expanded.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise ValueError("waypoint config file must contain a top-level mapping")
+    return dict(data)
+
+
+def _env_overrides() -> dict[str, Any]:
+    overrides: dict[str, Any] = {}
+    if "WAYPOINT_HOST" in os.environ:
+        overrides["host"] = os.environ["WAYPOINT_HOST"]
+    if "WAYPOINT_PORT" in os.environ:
+        overrides["port"] = int(os.environ["WAYPOINT_PORT"])
+    if "WAYPOINT_PASSWORD" in os.environ:
+        overrides["password"] = os.environ["WAYPOINT_PASSWORD"]
+    if "WAYPOINT_DATA_DIR" in os.environ:
+        overrides["data_dir"] = Path(os.path.expandvars(os.environ["WAYPOINT_DATA_DIR"])).expanduser()
+    if "WAYPOINT_CORS_ORIGINS" in os.environ:
+        overrides["cors_origins"] = parse_cors_origins(os.environ["WAYPOINT_CORS_ORIGINS"])
+    if "WAYPOINT_CORS_ORIGIN_REGEX" in os.environ:
+        overrides["cors_allow_origin_regex"] = parse_cors_origin_regex(os.environ["WAYPOINT_CORS_ORIGIN_REGEX"])
+    return overrides
+
+
+def _normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    if "config_path" in normalized and normalized["config_path"] is not None:
+        normalized["config_path"] = Path(normalized["config_path"]).expanduser()
+    if "data_dir" in normalized and normalized["data_dir"] is not None:
+        normalized["data_dir"] = Path(normalized["data_dir"]).expanduser()
+    if "cors_origins" in normalized and normalized["cors_origins"] is None:
+        normalized["cors_origins"] = list(DEFAULT_CORS_ORIGINS)
+    if "cors_allow_origin_regex" in normalized and normalized["cors_allow_origin_regex"] is None:
+        normalized["cors_allow_origin_regex"] = None
+    return normalized

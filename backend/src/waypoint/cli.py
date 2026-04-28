@@ -8,7 +8,7 @@ from typing import Any
 import uvicorn
 
 from waypoint.api import AppContext, create_app
-from waypoint.config import Settings
+from waypoint.config import Settings, load_settings
 from waypoint.schemas import Backend, SessionAttachRequest, SessionCreateRequest
 
 
@@ -61,7 +61,7 @@ def main() -> None:
 
 
 def run_doctor(settings: Settings | None = None) -> None:
-    settings = settings or Settings()
+    settings = settings or load_settings()
     checks = {
         "tmux": shutil.which("tmux"),
         "codex": shutil.which("codex"),
@@ -98,6 +98,4 @@ async def run_session_command(args: argparse.Namespace) -> None:
 
 
 def _settings_from_arg(raw: str | None) -> Settings:
-    if not raw:
-        return Settings()
-    return Settings(config_path=Path(raw).expanduser())
+    return load_settings(Path(raw).expanduser() if raw else None)

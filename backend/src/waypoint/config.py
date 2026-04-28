@@ -12,6 +12,8 @@ from waypoint.server_config import RemoteCodexSshConfig
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(BACKEND_ROOT / ".env")
 
+DEFAULT_CONFIG_PATH = BACKEND_ROOT / "waypoint.yaml"
+
 DEFAULT_CORS_ORIGINS: tuple[str, ...] = ()
 DEFAULT_CORS_ORIGIN_REGEX = (
     r"^https?://(localhost|127\.0\.0\.1|"
@@ -71,20 +73,29 @@ class Settings(BaseModel):
 
 
 def load_settings(config_path_override: Path | None = None) -> Settings:
-    config_path = config_path_override or parse_config_path(os.environ.get("WAYPOINT_CONFIG_PATH"))
-    payload = _load_config_payload(config_path)
-    payload["config_path"] = config_path
+    explicit = config_path_override or parse_config_path(os.environ.get("WAYPOINT_CONFIG_PATH"))
+    if explicit is not None:
+        config_path: Path | None = explicit
+        require_exists = True
+    else:
+        config_path = DEFAULT_CONFIG_PATH
+        require_exists = False
+    payload = _load_config_payload(config_path, require_exists=require_exists)
+    expanded = config_path.expanduser() if config_path is not None else None
+    payload["config_path"] = expanded if expanded is not None and expanded.exists() else None
     payload.update(_env_overrides())
     payload = _normalize_payload(payload)
     return Settings.model_validate(payload)
 
 
-def _load_config_payload(config_path: Path | None) -> dict[str, Any]:
+def _load_config_payload(config_path: Path | None, require_exists: bool = True) -> dict[str, Any]:
     if config_path is None:
         return {}
     expanded = config_path.expanduser()
     if not expanded.exists():
-        raise FileNotFoundError(f"waypoint config file not found: {expanded}")
+        if require_exists:
+            raise FileNotFoundError(f"waypoint config file not found: {expanded}")
+        return {}
     data = yaml.safe_load(expanded.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict):
         raise ValueError("waypoint config file must contain a top-level mapping")

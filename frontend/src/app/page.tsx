@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { LaunchPanel } from "@/components/LaunchPanel";
 import { LoginForm } from "@/components/LoginForm";
 import { SessionList } from "@/components/SessionList";
-import { attachTmux, connectSessionsSocket, createSession, fetchSessions, login } from "@/lib/api";
+import { attachTmux, connectSessionsSocket, createSession, fetchSessions, isAuthError, login } from "@/lib/api";
 import { clearToken, readHost, readToken, writeHost, writeToken } from "@/lib/store";
 import { Backend, SessionEnvelope, SessionRecord } from "@/lib/types";
 
@@ -35,18 +35,30 @@ export default function HomePage() {
       })
       .catch((fetchError) => {
         if (active) {
+          if (isAuthError(fetchError)) {
+            resetAuthState("Session expired. Log in again.");
+            return;
+          }
           setError(fetchError instanceof Error ? fetchError.message : "failed to fetch sessions");
         }
       });
-    const socket = connectSessionsSocket(host, token, (message: SessionEnvelope) => {
-      if (message.type === "session_list_update") {
-        setSessions(message.payload.sessions as SessionRecord[]);
-      }
-      if (message.type === "auth_revoked") {
-        clearToken();
-        setToken("");
-      }
-    });
+    const socket = connectSessionsSocket(
+      host,
+      token,
+      (message: SessionEnvelope) => {
+        if (message.type === "session_list_update") {
+          setSessions(message.payload.sessions as SessionRecord[]);
+        }
+        if (message.type === "auth_revoked") {
+          resetAuthState("Session expired. Log in again.");
+        }
+      },
+      () => {
+        if (active) {
+          resetAuthState("Session expired. Log in again.");
+        }
+      },
+    );
     return () => {
       active = false;
       socket.close();
@@ -63,22 +75,45 @@ export default function HomePage() {
   }
 
   async function handleCreate(backend: Backend, cwd: string, title: string) {
-    const session = await createSession(host, token, {
-      backend,
-      cwd,
-      title: title || null,
-      source_mode: "managed",
-      args: [],
-    });
-    setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)]);
+    try {
+      const session = await createSession(host, token, {
+        backend,
+        cwd,
+        title: title || null,
+        source_mode: "managed",
+        args: [],
+      });
+      setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)]);
+    } catch (createError) {
+      if (isAuthError(createError)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      setError(createError instanceof Error ? createError.message : "failed to create session");
+    }
   }
 
   async function handleAttach(target: string, backendHint: Backend) {
-    const session = await attachTmux(host, token, {
-      tmux_target: target,
-      backend_hint: backendHint,
-    });
-    setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)]);
+    try {
+      const session = await attachTmux(host, token, {
+        tmux_target: target,
+        backend_hint: backendHint,
+      });
+      setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)]);
+    } catch (attachError) {
+      if (isAuthError(attachError)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      setError(attachError instanceof Error ? attachError.message : "failed to attach session");
+    }
+  }
+
+  function resetAuthState(message: string) {
+    clearToken();
+    setToken("");
+    setSessions([]);
+    setError(message);
   }
 
   return (

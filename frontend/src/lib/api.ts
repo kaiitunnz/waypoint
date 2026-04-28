@@ -2,6 +2,13 @@
 
 import { EventRecord, SessionEnvelope, SessionRecord } from "@/lib/types";
 
+export class AuthError extends Error {
+  constructor(message = "session expired") {
+    super(message);
+    this.name = "AuthError";
+  }
+}
+
 export async function login(host: string, password: string): Promise<string> {
   const response = await fetch(`${host}/api/auth/login`, {
     method: "POST",
@@ -20,9 +27,7 @@ export async function fetchSessions(host: string, token: string): Promise<Sessio
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
-  if (!response.ok) {
-    throw new Error("failed to fetch sessions");
-  }
+  await ensureOk(response, "failed to fetch sessions");
   const payload = await response.json();
   return payload.sessions as SessionRecord[];
 }
@@ -32,9 +37,7 @@ export async function fetchSession(host: string, token: string, sessionId: strin
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
-  if (!response.ok) {
-    throw new Error("failed to fetch session");
-  }
+  await ensureOk(response, "failed to fetch session");
   const payload = await response.json();
   return payload.session as SessionRecord;
 }
@@ -44,9 +47,7 @@ export async function fetchEvents(host: string, token: string, sessionId: string
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
-  if (!response.ok) {
-    throw new Error("failed to fetch events");
-  }
+  await ensureOk(response, "failed to fetch events");
   const payload = await response.json();
   return payload.events as EventRecord[];
 }
@@ -56,9 +57,7 @@ export async function fetchTerminalSnapshot(host: string, token: string, session
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
-  if (!response.ok) {
-    throw new Error("failed to fetch terminal snapshot");
-  }
+  await ensureOk(response, "failed to fetch terminal snapshot");
   const payload = await response.json();
   return payload.text as string;
 }
@@ -76,9 +75,7 @@ export async function createSession(
     },
     body: JSON.stringify(payload),
   });
-  if (!response.ok) {
-    throw new Error("failed to create session");
-  }
+  await ensureOk(response, "failed to create session");
   const body = await response.json();
   return body.session as SessionRecord;
 }
@@ -96,9 +93,7 @@ export async function attachTmux(
     },
     body: JSON.stringify(payload),
   });
-  if (!response.ok) {
-    throw new Error("failed to attach session");
-  }
+  await ensureOk(response, "failed to attach session");
   const body = await response.json();
   return body.session as SessionRecord;
 }
@@ -113,9 +108,7 @@ export async function postAction(
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!response.ok) {
-    throw new Error(`failed to ${action}`);
-  }
+  await ensureOk(response, `failed to ${action}`);
 }
 
 export async function sendInput(
@@ -132,20 +125,24 @@ export async function sendInput(
     },
     body: JSON.stringify({ text, submit: true }),
   });
-  if (!response.ok) {
-    throw new Error("failed to send input");
-  }
+  await ensureOk(response, "failed to send input");
 }
 
 export function connectSessionsSocket(
   host: string,
   token: string,
   onMessage: (message: SessionEnvelope) => void,
+  onAuthFailure?: () => void,
 ): WebSocket {
   const url = `${host.replace(/^http/, "ws")}/ws/sessions?token=${encodeURIComponent(token)}`;
   const socket = new WebSocket(url);
   socket.onmessage = (event) => {
     onMessage(JSON.parse(event.data) as SessionEnvelope);
+  };
+  socket.onclose = (event) => {
+    if (event.code === 4401) {
+      onAuthFailure?.();
+    }
   };
   return socket;
 }
@@ -155,11 +152,41 @@ export function connectSessionSocket(
   token: string,
   sessionId: string,
   onMessage: (message: SessionEnvelope) => void,
+  onAuthFailure?: () => void,
 ): WebSocket {
   const url = `${host.replace(/^http/, "ws")}/ws/sessions/${sessionId}?token=${encodeURIComponent(token)}`;
   const socket = new WebSocket(url);
   socket.onmessage = (event) => {
     onMessage(JSON.parse(event.data) as SessionEnvelope);
   };
+  socket.onclose = (event) => {
+    if (event.code === 4401) {
+      onAuthFailure?.();
+    }
+  };
   return socket;
+}
+
+export function isAuthError(error: unknown): error is AuthError {
+  return error instanceof AuthError;
+}
+
+async function ensureOk(response: Response, fallbackMessage: string): Promise<void> {
+  if (response.ok) {
+    return;
+  }
+  const detail = await readErrorDetail(response);
+  if (response.status === 401) {
+    throw new AuthError(detail ?? "session expired");
+  }
+  throw new Error(detail ?? fallbackMessage);
+}
+
+async function readErrorDetail(response: Response): Promise<string | null> {
+  try {
+    const payload = (await response.json()) as { detail?: string };
+    return payload.detail ?? null;
+  } catch {
+    return null;
+  }
 }

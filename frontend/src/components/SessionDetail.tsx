@@ -1,19 +1,31 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { connectSessionSocket, fetchEvents, fetchSession, fetchTerminalSnapshot, postAction, sendInput } from "@/lib/api";
+import {
+  connectSessionSocket,
+  fetchEvents,
+  fetchSession,
+  fetchTerminalSnapshot,
+  isAuthError,
+  postAction,
+  sendInput,
+} from "@/lib/api";
+import { clearToken } from "@/lib/store";
 import { EventRecord, SessionEnvelope, SessionRecord } from "@/lib/types";
 
 interface SessionDetailProps {
   host: string;
   token: string;
   sessionId: string;
+  onAuthFailure?: () => void;
 }
 
 type ViewMode = "chat" | "terminal";
 
-export function SessionDetail({ host, token, sessionId }: SessionDetailProps) {
+export function SessionDetail({ host, token, sessionId, onAuthFailure }: SessionDetailProps) {
+  const router = useRouter();
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [snapshot, setSnapshot] = useState("");
@@ -34,25 +46,42 @@ export function SessionDetail({ host, token, sessionId }: SessionDetailProps) {
           return;
         }
         setSession(loadedSession);
-        setEvents(loadedEvents);
-        setSnapshot(loadedSnapshot);
+        setEvents(loadedEvents.map(sanitizeEvent));
+        setSnapshot(stripAnsi(loadedSnapshot));
       } catch (loadError) {
         if (active) {
+          if (isAuthError(loadError)) {
+            handleAuthFailure();
+            return;
+          }
           setError(loadError instanceof Error ? loadError.message : "failed to load session");
         }
       }
     }
     load();
-    const socket = connectSessionSocket(host, token, sessionId, (message: SessionEnvelope) => {
-      if (message.type === "event") {
-        const event = message.payload.event as EventRecord;
-        setEvents((current) => mergeEvents(current, event));
-        setSnapshot((current) => `${current}${current ? "\n\n" : ""}${event.text}`);
-      }
-      if (message.type === "session_state") {
-        setSession(message.payload.session as SessionRecord);
-      }
-    });
+    const socket = connectSessionSocket(
+      host,
+      token,
+      sessionId,
+      (message: SessionEnvelope) => {
+        if (message.type === "event") {
+          const event = sanitizeEvent(message.payload.event as EventRecord);
+          setEvents((current) => mergeEvents(current, event));
+          setSnapshot((current) => `${current}${current ? "\n\n" : ""}${stripAnsi(event.text)}`);
+        }
+        if (message.type === "session_state") {
+          setSession(message.payload.session as SessionRecord);
+        }
+        if (message.type === "auth_revoked") {
+          handleAuthFailure();
+        }
+      },
+      () => {
+        if (active) {
+          handleAuthFailure();
+        }
+      },
+    );
     return () => {
       active = false;
       socket.close();
@@ -63,12 +92,34 @@ export function SessionDetail({ host, token, sessionId }: SessionDetailProps) {
     if (!draft.trim()) {
       return;
     }
-    await sendInput(host, token, sessionId, draft);
-    setDraft("");
+    try {
+      await sendInput(host, token, sessionId, draft);
+      setDraft("");
+    } catch (sendError) {
+      if (isAuthError(sendError)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(sendError instanceof Error ? sendError.message : "failed to send input");
+    }
   }
 
   async function runAction(action: "interrupt" | "resume") {
-    await postAction(host, token, sessionId, action);
+    try {
+      await postAction(host, token, sessionId, action);
+    } catch (actionError) {
+      if (isAuthError(actionError)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(actionError instanceof Error ? actionError.message : `failed to ${action}`);
+    }
+  }
+
+  function handleAuthFailure() {
+    clearToken();
+    onAuthFailure?.();
+    router.replace("/");
   }
 
   return (
@@ -143,4 +194,18 @@ function mergeEvents(current: EventRecord[], incoming: EventRecord): EventRecord
     return current;
   }
   return [...current, incoming];
+}
+
+function sanitizeEvent(event: EventRecord): EventRecord {
+  return {
+    ...event,
+    text: stripAnsi(event.text),
+  };
+}
+
+function stripAnsi(text: string): string {
+  return text
+    .replace(/\u001B\][\s\S]*?(?:\u0007|\u001B\\)/g, "")
+    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\u001B[@-_]/g, "");
 }

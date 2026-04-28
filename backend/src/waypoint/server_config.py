@@ -1,3 +1,5 @@
+import json
+import secrets
 import shlex
 import shutil
 from pathlib import Path
@@ -5,6 +7,7 @@ from pathlib import Path
 from codex_app_server.client import AppServerClient, AppServerConfig
 from pydantic import BaseModel, Field, field_validator
 
+from waypoint.claude_cli import ClaudeLaunchSpec
 from waypoint.schemas import Backend
 
 
@@ -91,6 +94,82 @@ def build_remote_codex_client_factory(target: SshLaunchTargetConfig):
     return factory
 
 
+def build_remote_claude_launch_factory(
+    target: SshLaunchTargetConfig,
+    hook_script_path: Path,
+    hook_secret: str,
+    local_backend_port: int,
+    permission_mode: str = "default",
+):
+    hook_script = hook_script_path.read_text(encoding="utf-8")
+
+    def factory(
+        session_id: str, cwd: str, claude_session_id: str, resume: bool
+    ) -> ClaudeLaunchSpec:
+        remote_cwd = cwd or target.default_remote_cwd
+        reverse_port = _random_reverse_tunnel_port()
+        remote_dir = f"~/.waypoint/claude/{session_id}"
+        hook_path = f"{remote_dir}/claude_pretool_hook.py"
+        settings_path = f"{remote_dir}/claude_settings.json"
+        settings_payload = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "^(?:Bash|Edit|Write|MultiEdit|NotebookEdit|Task|WebFetch|WebSearch)$",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": hook_path,
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+        claude_args = [
+            target.claude_bin,
+            "-p",
+            "--input-format=stream-json",
+            "--output-format=stream-json",
+            "--include-hook-events",
+            "--verbose",
+            "--settings",
+            settings_path,
+            "--permission-mode",
+            permission_mode,
+        ]
+        if resume:
+            claude_args.extend(["--resume", claude_session_id])
+        else:
+            claude_args.extend(["--session-id", claude_session_id])
+        remote_command = _build_remote_claude_command(
+            target=target,
+            remote_cwd=remote_cwd,
+            remote_dir=remote_dir,
+            hook_path=hook_path,
+            settings_path=settings_path,
+            hook_script=hook_script,
+            settings_payload=json.dumps(settings_payload, indent=2),
+            claude_args=claude_args,
+            hook_secret=hook_secret,
+            hook_url=f"http://127.0.0.1:{reverse_port}",
+            session_id=session_id,
+        )
+        args = [
+            _resolve_local_binary(target.ssh_bin),
+            *target.ssh_args,
+            "-o",
+            "ExitOnForwardFailure=yes",
+            "-R",
+            f"{reverse_port}:127.0.0.1:{local_backend_port}",
+            target.ssh_destination,
+            remote_command,
+        ]
+        return ClaudeLaunchSpec(args=args)
+
+    return factory
+
+
 def _quote_remote_path(path: str) -> str:
     """Quote a path for the remote shell while preserving tilde expansion.
 
@@ -119,3 +198,55 @@ def _resolve_local_binary(binary: str) -> str:
     if resolved is None:
         raise FileNotFoundError(f"binary not found on PATH: {binary}")
     return resolved
+
+
+def _build_remote_claude_command(
+    *,
+    target: SshLaunchTargetConfig,
+    remote_cwd: str,
+    remote_dir: str,
+    hook_path: str,
+    settings_path: str,
+    hook_script: str,
+    settings_payload: str,
+    claude_args: list[str],
+    hook_secret: str,
+    hook_url: str,
+    session_id: str,
+) -> str:
+    launch_line = [
+        f"cd {_quote_remote_path(remote_cwd)}",
+        "&&",
+        "exec",
+        "env",
+    ]
+    combined_env = {
+        **target.remote_env,
+        "WAYPOINT_HOOK_URL": hook_url,
+        "WAYPOINT_HOOK_SECRET": hook_secret,
+        "WAYPOINT_SESSION_ID": session_id,
+    }
+    for key, value in sorted(combined_env.items()):
+        launch_line.append(shlex.quote(f"{key}={value}"))
+    launch_line.append(shlex.join(claude_args))
+    remote_parts = [
+        f"mkdir -p {_quote_remote_path(remote_dir)}",
+        _render_remote_file_write(hook_path, hook_script),
+        f"chmod 755 {_quote_remote_path(hook_path)}",
+        _render_remote_file_write(settings_path, settings_payload),
+        " ".join(launch_line),
+    ]
+    return "\n".join(remote_parts)
+
+
+def _render_remote_file_write(path: str, content: str) -> str:
+    delimiter = f"__WAYPOINT_{secrets.token_hex(8)}__"
+    return (
+        f"cat > {_quote_remote_path(path)} <<'{delimiter}'\n"
+        f"{content}\n"
+        f"{delimiter}"
+    )
+
+
+def _random_reverse_tunnel_port() -> int:
+    return 20000 + secrets.randbelow(30000)

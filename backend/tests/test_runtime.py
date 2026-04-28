@@ -8,12 +8,14 @@ from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     Backend,
     EventKind,
+    SessionCreateRequest,
     SessionInputRequest,
     SessionRecord,
     SessionSource,
     SessionStatus,
     SessionTransport,
 )
+from waypoint.server_config import SshLaunchTargetConfig
 from waypoint.storage import Storage
 
 
@@ -27,6 +29,24 @@ class FakeStructuredAdapter:
 
     def has_pending_approval(self, session_id: str) -> bool:
         return self.pending
+
+
+class FakeClaudeAdapter(FakeStructuredAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.start_calls: list[tuple[str, str, str, Any]] = []
+
+    async def start_session(
+        self,
+        session_id: str,
+        cwd: str,
+        claude_session_id: str,
+        launch_factory_override: Any = None,
+    ) -> str:
+        self.start_calls.append(
+            (session_id, cwd, claude_session_id, launch_factory_override)
+        )
+        return claude_session_id
 
 
 def make_runtime(tmp_path) -> tuple[SessionRuntime, Storage, Settings]:
@@ -102,3 +122,69 @@ async def test_handle_input_builtin_permissions_reports_pending_approval(tmp_pat
     assert events[-1].kind == EventKind.SYSTEM_NOTE
     assert "Pending approval: yes" in events[-1].text
     assert "Approve for session" in events[-1].text
+
+
+@pytest.mark.asyncio
+async def test_create_session_uses_structured_claude_for_ssh_target(
+    monkeypatch, tmp_path
+) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        ssh_targets=[
+            SshLaunchTargetConfig(
+                id="devbox",
+                name="Devbox",
+                ssh_destination="dev@example.com",
+                supported_backends=[Backend.CLAUDE_CODE],
+                default_remote_cwd="~/workspace",
+            )
+        ],
+    )
+    settings.ensure_dirs()
+    storage = Storage(settings.database_path)
+    runtime = SessionRuntime(settings, storage)
+    fake = FakeClaudeAdapter()
+    runtime.claude = cast(Any, fake)
+    runtime.claude_hook = cast(
+        Any,
+        type(
+            "HookBundle",
+            (),
+            {
+                "hook_script_path": tmp_path / "hook.py",
+                "secret": "hook-secret",
+            },
+        )(),
+    )
+    runtime.claude_hook.hook_script_path.write_text(
+        "#!/usr/bin/env python3\nprint('hook')\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(
+        "waypoint.runtime.build_remote_claude_launch_factory",
+        lambda *args, **kwargs: "remote-launch-factory",
+    )
+
+    session = await runtime.create_session(
+        SessionCreateRequest(
+            backend=Backend.CLAUDE_CODE,
+            cwd="/tmp/project",
+            remote_cwd="~/workspace",
+            launch_target_id="devbox",
+            title=None,
+            args=[],
+            source_mode=SessionSource.MANAGED,
+        )
+    )
+
+    assert session.transport == SessionTransport.CLAUDE_CLI
+    assert session.launch_target_id == "devbox"
+    assert session.remote_cwd == "~/workspace"
+    assert fake.start_calls == [
+        (
+            session.id,
+            "~/workspace",
+            session.thread_id,
+            "remote-launch-factory",
+        )
+    ]

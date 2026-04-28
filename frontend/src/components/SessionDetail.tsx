@@ -1,7 +1,16 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  KeyboardEvent,
+  memo,
+  startTransition,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import {
   approveSession,
@@ -44,7 +53,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [snapshot, setSnapshot] = useState("");
   const [snapshotLoading, setSnapshotLoading] = useState(false);
-  const [draft, setDraft] = useState("");
   const [view, setView] = useState<ViewMode>("chat");
   const [filterMode, setFilterMode] = useState<FilterMode>("important");
   const [error, setError] = useState("");
@@ -52,6 +60,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const nearBottomRef = useRef(true);
+  const pendingEventsRef = useRef<EventRecord[]>([]);
+  const flushFrameRef = useRef<number | null>(null);
+  const renderedEvents = useDeferredValue(events);
 
   const handleAuthFailure = useCallback(() => {
     clearToken();
@@ -78,6 +89,31 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     transcriptEndRef.current?.scrollIntoView({ behavior, block: "end" });
   }, []);
+
+  const flushPendingEvents = useCallback(() => {
+    flushFrameRef.current = null;
+    const pending = pendingEventsRef.current;
+    if (!pending.length) {
+      return;
+    }
+    pendingEventsRef.current = [];
+    startTransition(() => {
+      setEvents((current) =>
+        pending.reduce<EventRecord[]>((acc, event) => mergeEvents(acc, event), current),
+      );
+    });
+  }, []);
+
+  const queueIncomingEvent = useCallback(
+    (event: EventRecord) => {
+      pendingEventsRef.current.push(event);
+      if (flushFrameRef.current !== null) {
+        return;
+      }
+      flushFrameRef.current = window.requestAnimationFrame(flushPendingEvents);
+    },
+    [flushPendingEvents],
+  );
 
   useEffect(() => {
     let active = true;
@@ -122,7 +158,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         (message: SessionEnvelope) => {
           if (message.type === "event") {
             const event = sanitizeEvent(message.payload.event as EventRecord);
-            setEvents((current) => mergeEvents(current, event));
+            queueIncomingEvent(event);
           }
           if (message.type === "session_state") {
             setSession(message.payload.session as SessionRecord);
@@ -161,9 +197,14 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer);
       }
+      if (flushFrameRef.current !== null) {
+        window.cancelAnimationFrame(flushFrameRef.current);
+        flushFrameRef.current = null;
+      }
+      pendingEventsRef.current = [];
       socket?.close();
     };
-  }, [handleAuthFailure, host, token, sessionId]);
+  }, [handleAuthFailure, host, token, sessionId, queueIncomingEvent]);
 
   useEffect(() => {
     if (view === "terminal") {
@@ -193,28 +234,33 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   }, [view]);
 
   useEffect(() => {
-    if (view === "chat" && nearBottomRef.current) {
-      scrollToBottom("auto");
-    }
-  }, [events.length, view, scrollToBottom]);
-
-  async function submitInput() {
-    if (!draft.trim()) {
+    if (view !== "chat" || !nearBottomRef.current) {
       return;
     }
+    const frame = window.requestAnimationFrame(() => {
+      scrollToBottom("auto");
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [renderedEvents, view, scrollToBottom]);
+
+  const submitInput = useCallback(async (text: string) => {
+    if (!text.trim()) {
+      return false;
+    }
     try {
-      await sendInput(host, token, sessionId, draft);
-      setDraft("");
+      await sendInput(host, token, sessionId, text);
+      return true;
     } catch (sendError) {
       if (isAuthError(sendError)) {
         handleAuthFailure();
-        return;
+        return false;
       }
       setError(sendError instanceof Error ? sendError.message : "failed to send input");
+      return false;
     }
-  }
+  }, [handleAuthFailure, host, token, sessionId]);
 
-  async function runAction(action: "interrupt" | "resume") {
+  const runAction = useCallback(async (action: "interrupt" | "resume") => {
     try {
       await postAction(host, token, sessionId, action);
     } catch (actionError) {
@@ -224,9 +270,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       }
       setError(actionError instanceof Error ? actionError.message : `failed to ${action}`);
     }
-  }
+  }, [handleAuthFailure, host, token, sessionId]);
 
-  async function terminate() {
+  const terminate = useCallback(async () => {
     if (!window.confirm("Terminate this session? Any running command will be stopped.")) {
       return;
     }
@@ -239,9 +285,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       }
       setError(terminateError instanceof Error ? terminateError.message : "failed to terminate");
     }
-  }
+  }, [handleAuthFailure, host, token, sessionId]);
 
-  async function removeFromList() {
+  const removeFromList = useCallback(async () => {
     if (!window.confirm("Delete this session and its transcript? This cannot be undone.")) {
       return;
     }
@@ -255,7 +301,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       }
       setError(deleteError instanceof Error ? deleteError.message : "failed to delete");
     }
-  }
+  }, [handleAuthFailure, host, router, token, sessionId]);
 
   async function submitApproval(decision: string) {
     try {
@@ -273,9 +319,17 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     session && supportsStructuredApproval(session.transport) && session.status === "waiting_input"
       ? findPendingApproval(events)
       : null;
-  const visibleEvents = filterMode === "all" ? events : events.filter(isImportantEvent);
-  const hiddenEventCount = events.length - visibleEvents.length;
+  const visibleEvents = filterMode === "all" ? renderedEvents : renderedEvents.filter(isImportantEvent);
+  const hiddenEventCount = renderedEvents.length - visibleEvents.length;
   const usageSummary = extractUsageSummary(events);
+  const composerDisabled = session?.status === "exited";
+  const canResume = Boolean(session && supportsResume(session.transport));
+  const interruptSession = useCallback(() => {
+    void runAction("interrupt");
+  }, [runAction]);
+  const resumeSession = useCallback(() => {
+    void runAction("resume");
+  }, [runAction]);
 
   return (
     <section className="stack">
@@ -372,58 +426,109 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           <pre>{snapshot || (snapshotLoading ? "Loading…" : "No terminal output yet.")}</pre>
         </section>
       )}
-      <section className="panel stack">
-        <label className="field">
-          <span>Reply</span>
-          <textarea
-            rows={4}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            disabled={session?.status === "exited"}
-          />
-        </label>
-        <div className="action-row">
-          <button
-            className="primary"
-            onClick={() => void submitInput()}
-            type="button"
-            disabled={session?.status === "exited"}
-          >
-            Send
-          </button>
-          <button
-            className="secondary"
-            onClick={() => void runAction("interrupt")}
-            type="button"
-            disabled={session?.status === "exited"}
-          >
-            Interrupt
-          </button>
-          {session && supportsResume(session.transport) ? (
-            <button
-              className="secondary"
-              onClick={() => void runAction("resume")}
-              type="button"
-              disabled={session.status === "exited"}
-            >
-              Resume
-            </button>
-          ) : null}
-          {session && session.status !== "exited" ? (
-            <button className="danger" onClick={() => void terminate()} type="button">
-              Terminate
-            </button>
-          ) : null}
-          {session && session.status === "exited" ? (
-            <button className="danger" onClick={() => void removeFromList()} type="button">
-              Delete
-            </button>
-          ) : null}
-        </div>
-      </section>
+      <ReplyComposer
+        canDelete={Boolean(session?.status === "exited")}
+        canResume={canResume}
+        canTerminate={Boolean(session && session.status !== "exited")}
+        disabled={composerDisabled}
+        onDelete={removeFromList}
+        onInterrupt={interruptSession}
+        onResume={resumeSession}
+        onSend={submitInput}
+        onTerminate={terminate}
+      />
     </section>
   );
 }
+
+interface ReplyComposerProps {
+  canDelete: boolean;
+  canResume: boolean;
+  canTerminate: boolean;
+  disabled: boolean;
+  onDelete: () => void | Promise<void>;
+  onInterrupt: () => void | Promise<void>;
+  onResume: () => void | Promise<void>;
+  onSend: (text: string) => Promise<boolean>;
+  onTerminate: () => void | Promise<void>;
+}
+
+const ReplyComposer = memo(function ReplyComposer({
+  canDelete,
+  canResume,
+  canTerminate,
+  disabled,
+  onDelete,
+  onInterrupt,
+  onResume,
+  onSend,
+  onTerminate,
+}: ReplyComposerProps) {
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+
+  async function handleSend() {
+    if (!draft.trim()) {
+      return;
+    }
+    setSending(true);
+    try {
+      const sent = await onSend(draft);
+      if (sent) {
+        setDraft("");
+      }
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function handleDraftKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.nativeEvent.isComposing || event.key !== "Enter" || !event.metaKey || event.shiftKey) {
+      return;
+    }
+    event.preventDefault();
+    void handleSend();
+  }
+
+  return (
+    <section className="panel stack">
+      <label className="field">
+        <span>Reply</span>
+        <textarea
+          rows={4}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={handleDraftKeyDown}
+          disabled={disabled}
+        />
+      </label>
+      <p className="muted">Press Cmd+Enter to send.</p>
+      <div className="action-row">
+        <button className="primary" onClick={() => void handleSend()} type="button" disabled={disabled || sending}>
+          Send
+        </button>
+        <button className="secondary" onClick={() => void onInterrupt()} type="button" disabled={disabled}>
+          Interrupt
+        </button>
+        {canResume ? (
+          <button className="secondary" onClick={() => void onResume()} type="button" disabled={disabled}>
+            Resume
+          </button>
+        ) : null}
+        {canTerminate ? (
+          <button className="danger" onClick={() => void onTerminate()} type="button">
+            Terminate
+          </button>
+        ) : null}
+        {canDelete ? (
+          <button className="danger" onClick={() => void onDelete()} type="button">
+            Delete
+          </button>
+        ) : null}
+      </div>
+    </section>
+  );
+});
 
 function mergeEvents(current: EventRecord[], incoming: EventRecord): EventRecord[] {
   const dup = current.some((event) => event.id === incoming.id || event.sequence === incoming.sequence);

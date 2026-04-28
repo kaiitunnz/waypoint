@@ -33,6 +33,7 @@ from waypoint.schemas import (
 )
 from waypoint.server_config import (
     SshLaunchTargetConfig,
+    build_remote_claude_launch_factory,
     build_remote_codex_client_factory,
 )
 from waypoint.storage import Storage
@@ -142,9 +143,23 @@ class SessionRuntime:
                 status=SessionStatus.EXITED,
             )
             return
+        if (
+            session.launch_target_id
+            and self._find_launch_target(session.launch_target_id) is None
+        ):
+            self.storage.update_session(session.id, status=SessionStatus.ERROR)
+            await self._record_system_event(
+                session.id,
+                f"Claude session launch target {session.launch_target_id} is no longer configured",
+                status=SessionStatus.ERROR,
+            )
+            return
         try:
             await self.claude.restore_session(
-                session.id, session.cwd, session.thread_id
+                session.id,
+                session.remote_cwd or session.cwd,
+                session.thread_id,
+                self._claude_launch_factory(session.launch_target_id),
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(
@@ -164,7 +179,7 @@ class SessionRuntime:
         self.storage.update_session(session.id, status=SessionStatus.IDLE)
         await self._record_system_event(
             session.id,
-            "Claude session restored from previous backend process",
+            self._claude_restore_message(session.remote_cwd, session.launch_target_id),
             status=SessionStatus.IDLE,
         )
 
@@ -310,11 +325,7 @@ class SessionRuntime:
                 status=SessionStatus.IDLE,
             )
             return self.get_session(session.id)
-        if (
-            request.backend == Backend.CLAUDE_CODE
-            and launch_target is None
-            and self.claude is not None
-        ):
+        if request.backend == Backend.CLAUDE_CODE and self.claude is not None:
             raw_log.touch(exist_ok=True)
             claude_session_id = self._generate_claude_session_id()
             session = SessionRecord(
@@ -325,7 +336,7 @@ class SessionRuntime:
                 title=title,
                 cwd=request.cwd,
                 remote_cwd=remote_cwd,
-                launch_target_id=None,
+                launch_target_id=launch_target.id if launch_target else None,
                 repo_name=git_meta.repo_name,
                 branch=git_meta.branch,
                 status=SessionStatus.STARTING,
@@ -339,7 +350,10 @@ class SessionRuntime:
             self.storage.create_session(session)
             try:
                 await self.claude.start_session(
-                    session_id, request.cwd, claude_session_id
+                    session_id,
+                    remote_cwd or request.cwd,
+                    claude_session_id,
+                    self._claude_launch_factory(session.launch_target_id),
                 )
             except (ClaudeCliError, FileNotFoundError, OSError) as exc:
                 self.storage.update_session(session.id, status=SessionStatus.ERROR)
@@ -349,7 +363,9 @@ class SessionRuntime:
             self.storage.update_session(session.id, status=SessionStatus.IDLE)
             await self._record_system_event(
                 session.id,
-                f"Claude session started ({claude_session_id})",
+                self._claude_start_message(
+                    claude_session_id, remote_cwd, launch_target
+                ),
                 status=SessionStatus.IDLE,
             )
             return self.get_session(session.id)
@@ -692,6 +708,32 @@ class SessionRuntime:
             )
         return "Codex session restored from previous backend process"
 
+    def _claude_start_message(
+        self,
+        claude_session_id: str,
+        cwd: str | None,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> str:
+        if launch_target is not None:
+            remote_cwd = cwd or launch_target.default_remote_cwd
+            return (
+                f"Claude session started via SSH target {launch_target.name} "
+                f"on {launch_target.ssh_destination} ({remote_cwd}) ({claude_session_id})"
+            )
+        return f"Claude session started ({claude_session_id})"
+
+    def _claude_restore_message(
+        self, cwd: str | None, launch_target_id: str | None = None
+    ) -> str:
+        launch_target = self._find_launch_target(launch_target_id)
+        if launch_target is not None:
+            remote_cwd = cwd or launch_target.default_remote_cwd
+            return (
+                f"Claude session restored via SSH target {launch_target.name} "
+                f"on {launch_target.ssh_destination} ({remote_cwd})"
+            )
+        return "Claude session restored from previous backend process"
+
     def _resolve_remote_cwd(
         self,
         request: SessionCreateRequest,
@@ -749,6 +791,21 @@ class SessionRuntime:
         if launch_target is None:
             return None
         return build_remote_codex_client_factory(launch_target)
+
+    def _claude_launch_factory(self, launch_target_id: str | None):
+        launch_target = self._find_launch_target(launch_target_id)
+        if (
+            launch_target is None
+            or self.claude_hook is None
+            or self.claude is None
+        ):
+            return None
+        return build_remote_claude_launch_factory(
+            launch_target,
+            hook_script_path=self.claude_hook.hook_script_path,
+            hook_secret=self.claude_hook.secret,
+            local_backend_port=self.settings.port,
+        )
 
     def _managed_start_message(
         self,

@@ -19,6 +19,10 @@ EmitEvent = Callable[
     [str, EventKind, str, dict[str, Any], SessionStatus],
     Coroutine[Any, Any, None],
 ]
+LaunchFactory = Callable[
+    [str, str, str, bool],
+    "ClaudeLaunchSpec",
+]
 
 # Tools we surface to the user for approval. Other tools (Read, Grep, Glob, ...)
 # are left to Claude's own permission policy.
@@ -42,6 +46,13 @@ class ClaudePendingApproval:
     tool_use_id: str
     payload: dict[str, Any]
     future: asyncio.Future[dict[str, str]]
+
+
+@dataclass
+class ClaudeLaunchSpec:
+    args: list[str]
+    cwd: str | None = None
+    env: dict[str, str] | None = None
 
 
 @dataclass
@@ -71,6 +82,7 @@ class ClaudeCliAdapter:
         hook_url: str,
         binary: str | None = None,
         permission_mode: str = "default",
+        launch_factory: LaunchFactory | None = None,
     ) -> None:
         self._emit_event = emit_event
         self._hook_settings_path = hook_settings_path
@@ -78,19 +90,40 @@ class ClaudeCliAdapter:
         self._hook_url = hook_url
         self._binary = binary
         self._permission_mode = permission_mode
+        self._launch_factory = launch_factory
         self._sessions: dict[str, ClaudeSessionState] = {}
         self._approval_lock = asyncio.Lock()
 
     async def start_session(
-        self, session_id: str, cwd: str, claude_session_id: str
+        self,
+        session_id: str,
+        cwd: str,
+        claude_session_id: str,
+        launch_factory_override: LaunchFactory | None = None,
     ) -> str:
-        state = await self._spawn(session_id, cwd, claude_session_id, resume=False)
+        state = await self._spawn(
+            session_id,
+            cwd,
+            claude_session_id,
+            resume=False,
+            launch_factory_override=launch_factory_override,
+        )
         return state.claude_session_id
 
     async def restore_session(
-        self, session_id: str, cwd: str, claude_session_id: str
+        self,
+        session_id: str,
+        cwd: str,
+        claude_session_id: str,
+        launch_factory_override: LaunchFactory | None = None,
     ) -> None:
-        await self._spawn(session_id, cwd, claude_session_id, resume=True)
+        await self._spawn(
+            session_id,
+            cwd,
+            claude_session_id,
+            resume=True,
+            launch_factory_override=launch_factory_override,
+        )
 
     async def send_input(self, session_id: str, text: str) -> None:
         state = self._require_session(session_id)
@@ -240,7 +273,39 @@ class ClaudeCliAdapter:
         cwd: str,
         claude_session_id: str,
         resume: bool,
+        launch_factory_override: LaunchFactory | None = None,
     ) -> ClaudeSessionState:
+        launch_factory = launch_factory_override or self._launch_factory
+        if launch_factory is None:
+            spec = self._build_local_launch_spec(
+                session_id, cwd, claude_session_id, resume
+            )
+        else:
+            spec = launch_factory(session_id, cwd, claude_session_id, resume)
+        process = await asyncio.create_subprocess_exec(
+            *spec.args,
+            cwd=spec.cwd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=spec.env,
+        )
+        state = ClaudeSessionState(
+            session_id=session_id,
+            cwd=cwd,
+            process=process,
+            claude_session_id=claude_session_id,
+            stdout_task=asyncio.create_task(asyncio.sleep(0)),  # placeholder
+            stderr_task=asyncio.create_task(asyncio.sleep(0)),
+        )
+        state.stdout_task = asyncio.create_task(self._read_stdout(state))
+        state.stderr_task = asyncio.create_task(self._read_stderr(state))
+        self._sessions[session_id] = state
+        return state
+
+    def _build_local_launch_spec(
+        self, session_id: str, cwd: str, claude_session_id: str, resume: bool
+    ) -> ClaudeLaunchSpec:
         binary = self._binary or shutil.which("claude")
         if binary is None:
             raise ClaudeCliError("claude binary not found on PATH")
@@ -267,26 +332,11 @@ class ClaudeCliAdapter:
             "WAYPOINT_HOOK_SECRET": self._hook_secret,
             "WAYPOINT_SESSION_ID": session_id,
         }
-        process = await asyncio.create_subprocess_exec(
-            *args,
+        return ClaudeLaunchSpec(
+            args=args,
             cwd=str(cwd_path) if cwd_path.exists() else None,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
             env=env,
         )
-        state = ClaudeSessionState(
-            session_id=session_id,
-            cwd=cwd,
-            process=process,
-            claude_session_id=claude_session_id,
-            stdout_task=asyncio.create_task(asyncio.sleep(0)),  # placeholder
-            stderr_task=asyncio.create_task(asyncio.sleep(0)),
-        )
-        state.stdout_task = asyncio.create_task(self._read_stdout(state))
-        state.stderr_task = asyncio.create_task(self._read_stderr(state))
-        self._sessions[session_id] = state
-        return state
 
     async def _read_stdout(self, state: ClaudeSessionState) -> None:
         assert state.process.stdout is not None

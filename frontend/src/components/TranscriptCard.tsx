@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import { EventRecord, SessionTransport } from "@/lib/types";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 
@@ -6,12 +8,12 @@ interface TranscriptCardProps {
   transport: SessionTransport;
 }
 
-export function TranscriptCard({ event, transport }: TranscriptCardProps) {
+export const TranscriptCard = memo(function TranscriptCard({ event, transport }: TranscriptCardProps) {
   if (transport === "codex_app_server" || transport === "claude_cli") {
     return <StructuredCard event={event} transport={transport} />;
   }
   return <HeuristicCard event={event} />;
-}
+});
 
 function StructuredCard({ event, transport }: { event: EventRecord; transport: SessionTransport }) {
   const agentLabel = transport === "claude_cli" ? "claude" : "codex";

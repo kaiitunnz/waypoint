@@ -6,6 +6,7 @@ from waypoint.schemas import Backend
 from waypoint.server_config import (
     SshLaunchTargetConfig,
     _quote_remote_path,
+    build_remote_claude_launch_factory,
     build_remote_codex_client_factory,
 )
 
@@ -156,3 +157,48 @@ def test_ssh_target_remote_command_supports_claude(monkeypatch) -> None:
     assert command[:2] == ("/usr/bin/ssh", "dev@example.com")
     assert "cd ~/workspace" in command[2]
     assert "/opt/claude/bin/claude --resume" in command[2]
+
+
+def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    monkeypatch.setattr("waypoint.server_config.secrets.randbelow", lambda _: 1234)
+    config = SshLaunchTargetConfig(
+        id="devbox",
+        name="Devbox",
+        ssh_destination="dev@example.com",
+        remote_env={"OPENAI_API_KEY": "sk-test"},
+        claude_bin="/opt/claude/bin/claude",
+    )
+    hook_script = tmp_path / "hook.py"
+    hook_script.write_text("#!/usr/bin/env python3\nprint('hook')\n", encoding="utf-8")
+
+    factory = build_remote_claude_launch_factory(
+        config,
+        hook_script_path=hook_script,
+        hook_secret="secret-123",
+        local_backend_port=8787,
+    )
+    launch = factory("claude-sess", "~/workspace", "claude-uuid", resume=True)
+
+    assert launch.cwd is None
+    assert launch.env is None
+    assert launch.args[:6] == [
+        "/usr/bin/ssh",
+        "-o",
+        "ExitOnForwardFailure=yes",
+        "-R",
+        "21234:127.0.0.1:8787",
+        "dev@example.com",
+    ]
+    remote_command = launch.args[6]
+    assert "mkdir -p ~/.waypoint/claude/claude-sess" in remote_command
+    assert "claude_pretool_hook.py" in remote_command
+    assert "claude_settings.json" in remote_command
+    assert "WAYPOINT_HOOK_URL=http://127.0.0.1:21234" in remote_command
+    assert "WAYPOINT_HOOK_SECRET=secret-123" in remote_command
+    assert "WAYPOINT_SESSION_ID=claude-sess" in remote_command
+    assert "OPENAI_API_KEY=sk-test" in remote_command
+    assert "/opt/claude/bin/claude -p" in remote_command
+    assert "--resume claude-uuid" in remote_command

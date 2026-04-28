@@ -1,0 +1,66 @@
+# Waypoint Issue Tracker
+
+Outstanding work from `WAYPOINT_DESIGN.md`. Items 1–5 of the doc's "Recommended Next Steps For The New Engineer" landed in commits `20b927d..3ed0a83`. Item 6 (Codex restart durability) and the bulk of the Backend / Frontend lists landed in commits `0c81866..` (this round).
+
+## Recommended next steps (remaining)
+
+- [x] Decide whether managed Codex sessions should survive backend restart. **Decision: Restore.** Implemented in `3757910` via `AppServerClient.thread_resume(thread_id)` on backend boot.
+- [x] **Richer Claude Code integration.** Replaced tmux+regex with a `ClaudeCliAdapter` that drives `claude -p --input-format=stream-json --output-format=stream-json` as a long-lived per-session process. Approvals route through a PreToolUse hook script that long-polls a new internal `/api/internal/hooks/claude/approval` endpoint, secured by a per-installation hook secret. New `SessionTransport.CLAUDE_CLI`. Restoration uses `--resume <claude_session_id>`. Tmux + heuristic normalizer remains for `attached_tmux` sessions only.
+
+## Backend
+
+- [ ] Introduce a formal `SessionTransport` adapter interface so `SessionRuntime` stops branching on `transport ==` literals for create/input/interrupt/resume/approve. Partial: `_default_client_factory` cleaned up codex client construction, but `SessionRuntime` still branches inline.
+- [x] Add tests for `CodexAppServerAdapter` with mocked notifications and approval callbacks. Done in `f00d3a7`.
+- [ ] Decide the Codex App Server process model: one process per Waypoint session vs one per workspace. **Decision: per-session.** Tracked in case we revisit for resource pressure.
+- [x] Enrich session metadata with git repo and branch. Done in `9d80315`.
+- [x] Tighten CORS — env-driven origin list + regex override in `026a688`.
+- [x] Replace in-memory bearer-token storage with SQLite-backed tokens in `0c81866`.
+- [x] Add structured logging for adapter failures (`waypoint.codex` / `waypoint.runtime` loggers) in `de26083`.
+- [ ] Improve tmux state recovery and dead-pane handling — `_refresh_state` now logs transitions but still flips status to `EXITED` on a single `TmuxError`. Could distinguish transient errors from real pane death.
+- [ ] Decide what Codex terminal snapshots should contain — today they are just concatenated `commandExecution` output fragments, which is thin compared to the tmux raw-log path.
+
+## Frontend
+
+- [x] Split transcript rendering for Codex structured events vs tmux heuristic chunks. Done in commit for task #12.
+- [x] Improve terminal view so it does not simply concatenate every event's `text` into one running buffer. Now fetches `/terminal-snapshot` on demand.
+- [x] Add clearer loading and reconnection states. Done — banner + exponential backoff up to 15s on both home and session pages.
+- [ ] Consider push / check-in UX once the product becomes more notification-driven.
+
+## Product
+
+- [ ] Decide whether Waypoint stays explicitly single-user or grows multi-device / multi-account support.
+- [ ] Define a stable internal event contract before expanding the UI further — `EventKind` is currently the de-facto contract but isn't versioned.
+- [ ] Decide whether attached tmux sessions remain a secondary feature or become a primary path.
+
+## Bugs Report
+
+- [x] **CORS default rejected Tailscale-IP origins.** Phones at `100.x.y.z:3000` hit `OPTIONS … 400` because the default origin allowlist was localhost-only. Fixed by defaulting `cors_allow_origin_regex` to cover localhost + Tailscale CGNAT.
+- [x] **Stale token caused websocket reconnect storm.** `websocket.close(code=4401)` was called before `accept()`, so Starlette served HTTP 403 and the browser saw close code 1006 instead of 4401. Frontend never cleared the token. Fixed by accepting first, then closing with 4401.
+- [x] **Codex agent messages split per word.** The adapter emitted one `agent_output` event per `item/agentMessage/delta` AND a duplicate on `item/completed`. Fixed by tagging delta events with `item_id`, suppressing the agentMessage completion event, and merging incoming `agent_output` events with the same `item_id` in the frontend (both initial history and live stream).
+- [x] **Streamed tool output was split into multiple tool results.** Fixed by coalescing structured `tool_result` events on the frontend by `item_id`, appending streamed deltas into a single in-progress entry, and suppressing Codex `item/completed` tool-result duplicates when that tool already emitted streamed output. This keeps long-running command output such as `pytest` grouped under one result card.
+- [x] **Backend termination stuck (codex side).** `terminate_session` issued `turn_interrupt` while the streaming task held `state.transport_lock` parked in an uncancellable `to_thread(next_notification)`, so shutdown deadlocked until a second Ctrl+C force-killed uvicorn. Fixed by closing the codex client first (drops EOF on stdio, releases the lock and lets the streaming task observe its cancellation) and dropping the now-redundant `turn_interrupt` from the termination path.
+- [x] **Backend termination stuck (websocket side).** Even after the codex fix, an active websocket held uvicorn through Ctrl+C. `await queue.get()` raised `CancelledError` on shutdown, which our handler didn't catch; Starlette's exception machinery then tried to send a 1011 close frame on the tearing-down transport and that send hung. Fixed by catching `CancelledError` alongside `WebSocketDisconnect` in both ws handlers, sending our own best-effort close in `finally`, and capping uvicorn's `timeout_graceful_shutdown` to 5s so any future regression can't hold the process indefinitely. Single Ctrl+C now exits in ~1s with an active ws.
+- [x] **Failed to fetch when working directory is ~.** The frontend sent the literal `~/` and the backend passed it straight to `subprocess.Popen(cwd=...)`, which doesn't expand tilde. For local launches `runtime.create_session` now resolves `~` via `Path.expanduser()` before storing or launching. For SSH launches the remote path was also being single-quoted via `shlex.quote`, suppressing the remote shell's tilde expansion; `_quote_remote_path` now leaves the `~`-prefix bare and quotes only the suffix so `cd ~/foo` reaches the remote shell intact.
+- [x] **Mobile webpage has weird aspect ratio.** Fixed by switching the app shell away from `100vw` sizing, adding an explicit mobile viewport declaration, and hardening overflow wrapping so long URLs / transcript content no longer push the page wider on phones.
+- [x] **Auto-scroll does not work well.** Fixed by making the session view auto-scroll on streamed transcript updates as well as appended events, using the full `events` array rather than only `events.length`.
+- [x] **Performance issues.** Fixed by batching streamed websocket events into one React update per animation frame, rendering the transcript from a deferred event view, and memoizing transcript cards so unchanged rows do not re-render on every tool-result delta.
+- [x] **Slow response when typing into the reply textbox.** Fixed by moving the draft state into a memoized reply composer so typing no longer re-renders the full transcript on each keystroke.
+
+## Feature Requests
+
+- [x] **Switch to the session page when launched.** Done in this round for both managed launches and tmux attach.
+- [x] **Log only important events on the session UI.** Done in this round; chat view now defaults to high-signal events with an `All events` toggle for debugging.
+- [x] **Add terminate session buttons on the main page.** Done in this round; exited sessions still show delete instead.
+- [x] **Support remote access through SSH.** Done in `064b678` and follow-ups; backend startup config can enable remote Codex-over-SSH with explicit remote cwd selection from the frontend.
+- [x] **Fill in the default working directory and backend (codex/claude code).** Done in this round; the frontend now reads `default_backend` and `default_cwd` from backend config through `/api/me`.
+- [x] **Render markdown in the frontend transcript.** Implemented with safe markdown rendering for agent and user messages, including links, inline code, fenced code blocks, lists, and preserved line breaks for streamed content.
+- [x] **Collapse tool calls and tool results by default.** Structured tool events now render as collapsed disclosures with a preview summary so long command and file-output transcripts do not dominate the session view.
+- [x] **Add a scroll-to-bottom control on the session page.** The chat view now surfaces a `Latest` control when the user scrolls away from the live tail, and auto-scrolls only when already near the bottom.
+- [x] **Add a feature to cleanup all exited sessions.** The home page now offers a bulk delete action for exited sessions with confirmation before deletion.
+- [x] **Add usage limit tracker UI.** The session page now shows the latest structured usage telemetry, including turn cost, output-token count, permission denials, and the most recent Claude rate-limit event when available.
+- [x] **Handle built-in commands.** Structured Codex and Claude sessions now intercept `/help`, `/status`, and `/permissions` inside Waypoint instead of forwarding them as normal model input.
+- [x] **Add Cmd+Enter support for desktop client.** Done in this round on the session reply composer, with plain Enter preserved for newlines.
+- [x] **Tool calls and results are rendered separately.** Structured tool events sharing the same `item_id` now collapse into a single grouped disclosure card showing call and result side-by-side, with a status pill that flips from `pending` to `complete` when the result lands.
+- [x] **Improve UI.** Replaced the marketing-style hero with a compact app bar (brand mark, eyebrow, live connection pill), shifted the palette to a slate/amber control-deck look, switched typography to a system sans + JetBrains Mono accent + serif display heads, and tightened spacing/badges so the chrome reads less like a generic AI template.
+- [x] **Backend code restructuring.** Introduced a `transports/` package with `TransportAdapter` ABC + `CodexTransport`/`ClaudeTransport`/`TmuxTransport` concrete classes; `SessionRuntime` now dispatches `handle_input`/`interrupt`/`resume`/`terminate`/`approve`/`terminal_snapshot` polymorphically through `transport_for(session)` instead of branching on `transport ==` literals. Scheduler logic also lives in its own module (`waypoint.scheduler`).
+- [x] **Add feature to schedule session creation.** New `ScheduledSessionRecord` schema + `scheduled_sessions` SQLite table, a `Scheduler` background task that wakes for the soonest due entry and launches the session (auto-sending the optional initial prompt), `POST/GET/DELETE /api/schedules` endpoints, and a `SchedulePanel` on the home page with delay-from-now / specific-time modes plus upcoming + recent lists.

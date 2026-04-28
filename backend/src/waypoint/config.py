@@ -2,7 +2,6 @@ from pathlib import Path
 import os
 from typing import Any
 
-from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 import yaml
 
@@ -10,7 +9,6 @@ from waypoint.server_config import RemoteCodexSshConfig
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(BACKEND_ROOT / ".env")
 
 DEFAULT_CONFIG_PATH = BACKEND_ROOT / "waypoint.yaml"
 

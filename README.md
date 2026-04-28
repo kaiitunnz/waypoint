@@ -26,8 +26,8 @@ git submodule update --init --recursive
 
 ```bash
 cd backend
-cp .env.example .env
-# edit .env and set a real WAYPOINT_PASSWORD
+cp waypoint.example.yaml waypoint.yaml
+# edit waypoint.yaml and set a real password
 uv sync --group dev
 uv run waypoint serve
 ```
@@ -41,26 +41,14 @@ cd backend
 ./scripts/install_launchd.sh
 ```
 
-Backend `.env`:
-
-- `WAYPOINT_PASSWORD` — login password, defaults to `change-me`
-- `WAYPOINT_HOST` — bind host; use `0.0.0.0` for phone/Tailscale access
-- `WAYPOINT_PORT` — bind port, defaults to `8787`
-- `WAYPOINT_DATA_DIR` — app data directory
-- `WAYPOINT_CONFIG_PATH` — optional YAML startup config path
-
 Backend config precedence:
 
 - CLI flags such as `waypoint serve --host ... --port ... --config ...`
-- `WAYPOINT_*` environment variables
+- `WAYPOINT_*` environment variables (set in your shell, systemd unit, or LaunchAgent)
 - values from `backend/waypoint.yaml`
 - built-in defaults
 
-Remote Codex mode:
-
-- Copy `backend/waypoint.example.yaml` to a local YAML file and set `WAYPOINT_CONFIG_PATH`, or run `uv run waypoint serve --config ./waypoint.yaml`.
-- The YAML file can hold both core backend settings and `codex_remote` SSH settings.
-- When `codex_remote.enabled` is true, managed Codex sessions launch through SSH on the configured host while Claude/tmux sessions stay local.
+The YAML file is the canonical place for settings; env vars are an escape hatch for machine-specific overrides. See `backend/waypoint.example.yaml` for the full schema, including the optional `codex_remote` block that routes managed Codex sessions through SSH.
 
 ### Frontend
 
@@ -74,7 +62,7 @@ Frontend dev notes:
 
 - `npm run dev` binds to `0.0.0.0` so the phone can reach the dev server over Tailscale.
 - The dev config auto-allows the machine's non-internal IPv4 addresses, including typical Tailscale `100.x.x.x` addresses, and emits both bare hosts and full `http://host:3000` origins.
-- If you still need extra origins, create `frontend/.env.local` from `frontend/.env.example` and set `NEXT_ALLOWED_DEV_ORIGINS` as a comma-separated list.
+- If you still need extra origins, set `NEXT_ALLOWED_DEV_ORIGINS` (comma-separated) in your shell or in a `frontend/.env.local` you create yourself.
 - For the most reliable phone check-in flow, prefer `npm run build && npm run start` over `npm run dev`.
 
 The frontend stores the backend base URL and bearer token in local storage.

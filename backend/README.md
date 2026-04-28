@@ -8,28 +8,24 @@ Managed Codex sessions use the local Codex App Server SDK from `../3rdparty/code
 
 ```bash
 git submodule update --init --recursive
-cp .env.example .env
-# edit .env
+cp waypoint.example.yaml waypoint.yaml
+# edit waypoint.yaml and set a real password
 uv sync --group dev
 uv run waypoint serve
 ```
 
 ## Configuration
 
-Waypoint now supports a single YAML config file for backend defaults. Start from `waypoint.example.yaml`, then either set `WAYPOINT_CONFIG_PATH` in `backend/.env` or start with:
+Waypoint reads a single YAML config file. By default it looks at `backend/waypoint.yaml` (silently treated as empty if missing); override the location with `--config <path>` or `WAYPOINT_CONFIG_PATH=<path>`.
 
-```bash
-uv run waypoint serve --config ./waypoint.yaml
-```
-
-Precedence is:
+Precedence:
 
 - CLI flags such as `--host`, `--port`, and `--config`
-- environment variables such as `WAYPOINT_HOST`
+- environment variables such as `WAYPOINT_HOST` (handy for systemd/launchd units)
 - YAML values from `waypoint.yaml`
 - built-in defaults
 
-Keep env vars for machine-specific overrides and secrets. Prefer the YAML file for structured settings and grouped config such as remote Codex SSH options.
+Prefer the YAML file for structured settings and grouped config such as remote Codex SSH options. Use env vars only for machine-specific overrides where editing the YAML is awkward.
 
 ## Optional remote Codex over SSH
 

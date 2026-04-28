@@ -173,11 +173,19 @@ class CodexAppServerAdapter:
                 if kind is not None and text:
                     if notification.method == "item/commandExecution/outputDelta":
                         state.terminal_fragments.append(text)
+                    metadata: dict[str, Any] = {
+                        "method": notification.method,
+                        "payload": payload,
+                        "status": status,
+                    }
+                    item_id = self._extract_item_id(payload)
+                    if item_id is not None:
+                        metadata["item_id"] = item_id
                     await self._emit_event(
                         state.session_id,
                         kind,
                         text,
-                        {"method": notification.method, "payload": payload, "status": status},
+                        metadata,
                         status,
                     )
                 if notification.method == "turn/completed":
@@ -259,8 +267,10 @@ class CodexAppServerAdapter:
             return EventKind.AGENT_OUTPUT, item.get("text", ""), SessionStatus.RUNNING
         return EventKind.SYSTEM_NOTE, f"Started {item_type or 'item'}", SessionStatus.RUNNING
 
-    def _format_item_completed(self, item: dict[str, Any]) -> tuple[EventKind, str, SessionStatus]:
+    def _format_item_completed(self, item: dict[str, Any]) -> tuple[EventKind | None, str, SessionStatus]:
         item_type = item.get("type")
+        if item_type == "agentMessage":
+            return None, "", SessionStatus.RUNNING
         if item_type == "commandExecution":
             output = item.get("aggregatedOutput") or ""
             suffix = f"\n{output}" if output else ""
@@ -270,9 +280,18 @@ class CodexAppServerAdapter:
             paths = ", ".join(change.get("path", "") for change in item.get("changes", []))
             status = SessionStatus.IDLE if item.get("status") == "completed" else SessionStatus.RUNNING
             return EventKind.TOOL_RESULT, f"File changes completed: {paths}", status
-        if item_type == "agentMessage":
-            return EventKind.AGENT_OUTPUT, item.get("text", ""), SessionStatus.RUNNING
         return EventKind.SYSTEM_NOTE, f"Completed {item_type or 'item'}", SessionStatus.RUNNING
+
+    def _extract_item_id(self, payload: dict[str, Any]) -> str | None:
+        candidate = payload.get("itemId")
+        if isinstance(candidate, str) and candidate:
+            return candidate
+        item = self._extract_item(payload) if "item" in payload else None
+        if isinstance(item, dict):
+            inner = item.get("id")
+            if isinstance(inner, str) and inner:
+                return inner
+        return None
 
     def _extract_item(self, payload: dict[str, Any]) -> dict[str, Any]:
         item = payload.get("item", {})

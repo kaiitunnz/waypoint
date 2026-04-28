@@ -213,6 +213,21 @@ def test_map_notification_command_execution_started() -> None:
     assert "ls -la" in text
 
 
+def test_format_item_completed_drops_agent_message_duplicate() -> None:
+    adapter = CodexAppServerAdapter(lambda *_: None, client_factory=lambda *_: None)  # type: ignore[arg-type]
+    kind, text, status = adapter._format_item_completed({"type": "agentMessage", "text": "hello"})
+    assert kind is None
+    assert text == ""
+    assert status == SessionStatus.RUNNING
+
+
+def test_extract_item_id_pulls_top_level_and_nested_ids() -> None:
+    adapter = CodexAppServerAdapter(lambda *_: None, client_factory=lambda *_: None)  # type: ignore[arg-type]
+    assert adapter._extract_item_id({"itemId": "abc", "delta": "x"}) == "abc"
+    assert adapter._extract_item_id({"item": {"id": "xyz", "type": "agentMessage"}}) == "xyz"
+    assert adapter._extract_item_id({}) is None
+
+
 def test_map_decision_table() -> None:
     adapter = CodexAppServerAdapter(lambda *_: None, client_factory=lambda *_: None)  # type: ignore[arg-type]
     assert adapter._map_decision("approve") == "accept"

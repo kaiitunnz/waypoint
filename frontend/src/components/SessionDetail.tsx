@@ -78,7 +78,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           return;
         }
         setSession(loadedSession);
-        setEvents(loadedEvents.map(sanitizeEvent));
+        const coalesced = loadedEvents
+          .map(sanitizeEvent)
+          .reduce<EventRecord[]>((acc, event) => mergeEvents(acc, event), []);
+        setEvents(coalesced);
         setSnapshot(stripAnsi(loadedSnapshot));
       } catch (loadError) {
         if (active) {
@@ -296,11 +299,36 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
 }
 
 function mergeEvents(current: EventRecord[], incoming: EventRecord): EventRecord[] {
-  const exists = current.some((event) => event.id === incoming.id || event.sequence === incoming.sequence);
-  if (exists) {
+  const dup = current.some((event) => event.id === incoming.id || event.sequence === incoming.sequence);
+  if (dup) {
     return current;
   }
+  const incomingItemId = readItemId(incoming);
+  if (incoming.kind === "agent_output" && incomingItemId) {
+    const index = current.findIndex(
+      (event) => event.kind === "agent_output" && readItemId(event) === incomingItemId,
+    );
+    if (index !== -1) {
+      const next = current.slice();
+      const existing = next[index];
+      next[index] = {
+        ...existing,
+        text: `${existing.text}${incoming.text}`,
+        ts: incoming.ts,
+        sequence: incoming.sequence,
+      };
+      return next;
+    }
+  }
   return [...current, incoming];
+}
+
+function readItemId(event: EventRecord): string | null {
+  const meta = event.metadata;
+  if (typeof meta?.item_id === "string" && meta.item_id) {
+    return meta.item_id;
+  }
+  return null;
 }
 
 function findPendingApproval(events: EventRecord[]): EventRecord | null {

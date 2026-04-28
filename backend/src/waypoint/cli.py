@@ -51,7 +51,11 @@ def main() -> None:
         app = create_app(_settings_from_arg(args.config))
         host = args.host or app.state.context.settings.host
         port = args.port or app.state.context.settings.port
-        uvicorn.run(app, host=host, port=port)
+        # Cap graceful-shutdown so a stuck websocket can never hold uvicorn
+        # past Ctrl+C. The first SIGINT triggers shutdown; any in-flight ws
+        # connection that doesn't close on cancel within this window gets
+        # force-closed.
+        uvicorn.run(app, host=host, port=port, timeout_graceful_shutdown=5)
         return
     if args.command == "doctor":
         run_doctor(_settings_from_arg(args.config))

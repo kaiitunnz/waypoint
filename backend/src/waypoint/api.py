@@ -1,5 +1,6 @@
+import asyncio
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
@@ -205,10 +206,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             while True:
                 message = await queue.get()
                 await websocket.send_json(message)
-        except WebSocketDisconnect:
+        except (WebSocketDisconnect, asyncio.CancelledError):
+            # Either the client disconnected or the server is shutting down —
+            # treat both as an orderly exit so we don't surface a 500/close
+            # 1011 through Starlette's exception machinery (that close attempt
+            # during teardown was hanging shutdown).
             pass
         finally:
             context.runtime.broadcast.unsubscribe_global(queue)
+            with suppress(Exception):
+                await websocket.close()
 
     @app.websocket("/ws/sessions/{session_id}")
     async def ws_session(websocket: WebSocket, session_id: str) -> None:
@@ -229,9 +236,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             while True:
                 message = await queue.get()
                 await websocket.send_json(message)
-        except WebSocketDisconnect:
+        except (WebSocketDisconnect, asyncio.CancelledError):
             pass
         finally:
             context.runtime.broadcast.unsubscribe_session(session_id, queue)
+            with suppress(Exception):
+                await websocket.close()
 
     return app

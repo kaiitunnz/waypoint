@@ -618,6 +618,9 @@ function isImportantEvent(event: EventRecord): boolean {
       return true;
     case "system_note":
     case "status_update":
+      if (typeof event.metadata?.builtin_command === "string") {
+        return true;
+      }
       return /(approval response|attached|started|terminated|interrupt|resume|failed|error|exited)/i.test(event.text);
     case "raw_terminal_chunk":
       return false;

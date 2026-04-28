@@ -96,6 +96,7 @@ async def test_handle_input_builtin_status_intercepts_structured_session(tmp_pat
     assert events[0].text == "/status"
     assert "Transport: codex_app_server" in events[1].text
     assert "Thread: thread-1" in events[1].text
+    assert events[1].metadata["builtin_command"] == "/status"
 
 
 @pytest.mark.asyncio
@@ -122,6 +123,29 @@ async def test_handle_input_builtin_permissions_reports_pending_approval(tmp_pat
     assert events[-1].kind == EventKind.SYSTEM_NOTE
     assert "Pending approval: yes" in events[-1].text
     assert "Approve for session" in events[-1].text
+    assert events[-1].metadata["builtin_command"] == "/permissions"
+
+
+@pytest.mark.asyncio
+async def test_handle_input_unknown_slash_command_forwards_to_structured_session(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeStructuredAdapter()
+    runtime.codex = cast(Any, fake)
+    session = make_session(settings)
+    storage.create_session(session)
+
+    updated = await runtime.handle_input(
+        "sess", SessionInputRequest(text="/model", submit=True)
+    )
+
+    assert fake.inputs == [("sess", "/model")]
+    assert updated.status == SessionStatus.RUNNING
+    events = storage.list_events("sess")
+    assert len(events) == 1
+    assert events[0].kind == EventKind.USER_INPUT
+    assert events[0].text == "/model"
 
 
 @pytest.mark.asyncio

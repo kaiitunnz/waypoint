@@ -633,39 +633,49 @@ class SessionRuntime:
         if not command.startswith("/"):
             return None
         name = command.split(None, 1)[0].lower()
-        await self._record_user_event(
-            session.id,
-            request.text,
-            submit=request.submit,
-            status=session.status,
-        )
         if name == "/status":
+            await self._record_user_event(
+                session.id,
+                request.text,
+                submit=request.submit,
+                status=session.status,
+            )
             await self._record_system_event(
                 session.id,
                 self._format_builtin_status(session),
                 status=session.status,
+                metadata={"builtin_command": name},
             )
             return self.get_session(session.id)
         if name == "/permissions":
+            await self._record_user_event(
+                session.id,
+                request.text,
+                submit=request.submit,
+                status=session.status,
+            )
             await self._record_system_event(
                 session.id,
                 self._format_builtin_permissions(session),
                 status=session.status,
+                metadata={"builtin_command": name},
             )
             return self.get_session(session.id)
         if name == "/help":
+            await self._record_user_event(
+                session.id,
+                request.text,
+                submit=request.submit,
+                status=session.status,
+            )
             await self._record_system_event(
                 session.id,
                 "Supported built-in commands: /help, /status, /permissions",
                 status=session.status,
+                metadata={"builtin_command": name},
             )
             return self.get_session(session.id)
-        await self._record_system_event(
-            session.id,
-            f"Unsupported built-in command: {name}. Supported commands: /help, /status, /permissions",
-            status=session.status,
-        )
-        return self.get_session(session.id)
+        return None
 
     def session_events(
         self, session_id: str, cursor: int | None = None
@@ -874,16 +884,17 @@ class SessionRuntime:
         session_id: str,
         text: str,
         status: SessionStatus | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
-        metadata: dict[str, Any] = {}
+        event_metadata = dict(metadata or {})
         if status is not None:
-            metadata["status"] = status
+            event_metadata["status"] = status
         event = EventRecord(
             session_id=session_id,
             ts=datetime.now(UTC),
             kind=EventKind.SYSTEM_NOTE,
             text=text,
-            metadata=metadata,
+            metadata=event_metadata,
             sequence=self.storage.next_sequence(session_id),
         )
         persisted = self.storage.append_event(event)

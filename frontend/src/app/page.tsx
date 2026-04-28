@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { BackendSwitcher } from "@/components/BackendSwitcher";
 import { LaunchPanel } from "@/components/LaunchPanel";
 import { LoginForm } from "@/components/LoginForm";
 import { SessionList } from "@/components/SessionList";
@@ -153,6 +154,15 @@ export default function HomePage() {
     setError(message);
   }
 
+  function handleSwitchBackend(nextHost: string) {
+    writeHost(nextHost);
+    clearToken();
+    setHost(nextHost);
+    setToken("");
+    setSessions([]);
+    setError("Switched backend. Log in to continue.");
+  }
+
   return (
     <main className="page-shell">
       <section className="hero">
@@ -164,6 +174,14 @@ export default function HomePage() {
         </p>
       </section>
       {!token ? <LoginForm defaultHost={host} onSubmit={handleLogin} /> : null}
+      {token ? (
+        <BackendSwitcher
+          host={host}
+          token={token}
+          onSwitch={handleSwitchBackend}
+          onAuthFailure={() => resetAuthState("Session expired. Log in again.")}
+        />
+      ) : null}
       {token ? <LaunchPanel onAttach={handleAttach} onCreate={handleCreate} /> : null}
       {error ? <p className="error">{error}</p> : null}
       {token && connection !== "open" && connection !== "idle" ? (

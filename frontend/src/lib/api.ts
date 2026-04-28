@@ -1,6 +1,13 @@
 "use client";
 
-import { EventRecord, MeResponse, SessionEnvelope, SessionRecord } from "@/lib/types";
+import {
+  EventRecord,
+  MeResponse,
+  ScheduleCreateRequest,
+  ScheduledSession,
+  SessionEnvelope,
+  SessionRecord,
+} from "@/lib/types";
 
 export class AuthError extends Error {
   constructor(message = "session expired") {
@@ -127,6 +134,42 @@ export async function postAction(
     headers: { Authorization: `Bearer ${token}` },
   });
   await ensureOk(response, `failed to ${action}`);
+}
+
+export async function fetchSchedules(host: string, token: string): Promise<ScheduledSession[]> {
+  const response = await fetch(`${host}/api/schedules`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch schedules");
+  const payload = await response.json();
+  return payload.schedules as ScheduledSession[];
+}
+
+export async function createSchedule(
+  host: string,
+  token: string,
+  payload: ScheduleCreateRequest,
+): Promise<ScheduledSession> {
+  const response = await fetch(`${host}/api/schedules`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  await ensureOk(response, "failed to create schedule");
+  const body = await response.json();
+  return body.schedule as ScheduledSession;
+}
+
+export async function cancelSchedule(host: string, token: string, scheduleId: string): Promise<void> {
+  const response = await fetch(`${host}/api/schedules/${scheduleId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, "failed to cancel schedule");
 }
 
 export async function deleteSession(host: string, token: string, sessionId: string): Promise<void> {

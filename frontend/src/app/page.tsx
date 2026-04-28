@@ -1,26 +1,36 @@
 "use client";
 
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { BackendSwitcher } from "@/components/BackendSwitcher";
 import { LaunchPanel } from "@/components/LaunchPanel";
 import { LoginForm } from "@/components/LoginForm";
+import { SchedulePanel } from "@/components/SchedulePanel";
 import { SessionList } from "@/components/SessionList";
 import {
   attachTmux,
+  cancelSchedule as cancelScheduleRequest,
   connectSessionsSocket,
+  createSchedule as createScheduleRequest,
   createSession,
   deleteSession as deleteSessionRequest,
   fetchMe,
+  fetchSchedules,
   fetchSessions,
   isAuthError,
   login,
   postAction,
 } from "@/lib/api";
 import { clearToken, readHost, readLaunchTarget, readToken, writeHost, writeLaunchTarget, writeToken } from "@/lib/store";
-import { Backend, LaunchTargetSummary, SessionEnvelope, SessionRecord } from "@/lib/types";
+import {
+  Backend,
+  LaunchTargetSummary,
+  ScheduleCreateRequest,
+  ScheduledSession,
+  SessionEnvelope,
+  SessionRecord,
+} from "@/lib/types";
 
 type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
 
@@ -39,6 +49,7 @@ export default function HomePage() {
   const [defaultCwd, setDefaultCwd] = useState("~/");
   const [launchTargets, setLaunchTargets] = useState<LaunchTargetSummary[]>([]);
   const [activeLaunchTargetId, setActiveLaunchTargetId] = useState("");
+  const [schedules, setSchedules] = useState<ScheduledSession[]>([]);
 
   useEffect(() => {
     const currentHost = readHost();
@@ -54,8 +65,12 @@ export default function HomePage() {
       return;
     }
     let active = true;
-    Promise.all([fetchSessions(host, token), fetchMe(host, token)])
-      .then(([items, me]) => {
+    Promise.all([
+      fetchSessions(host, token),
+      fetchMe(host, token),
+      fetchSchedules(host, token).catch(() => [] as ScheduledSession[]),
+    ])
+      .then(([items, me, scheduleItems]) => {
         if (!active) {
           return;
         }
@@ -63,6 +78,7 @@ export default function HomePage() {
         setDefaultBackend(me.default_backend);
         setDefaultCwd(me.default_cwd || "~/");
         setLaunchTargets(me.launch_targets);
+        setSchedules(scheduleItems);
         const storedTargetId = readLaunchTarget(host);
         const nextTargetId = me.launch_targets.some((target) => target.id === storedTargetId) ? storedTargetId : "";
         setActiveLaunchTargetId(nextTargetId);
@@ -89,6 +105,9 @@ export default function HomePage() {
         (message: SessionEnvelope) => {
           if (message.type === "session_list_update") {
             setSessions(message.payload.sessions as SessionRecord[]);
+          }
+          if (message.type === "schedule_list_update") {
+            setSchedules(message.payload.schedules as ScheduledSession[]);
           }
           if (message.type === "auth_revoked") {
             resetAuthState("Session expired. Log in again.");
@@ -184,7 +203,44 @@ export default function HomePage() {
     setDefaultCwd("~/");
     setLaunchTargets([]);
     setActiveLaunchTargetId("");
+    setSchedules([]);
     setError(message);
+  }
+
+  async function handleCreateSchedule(payload: ScheduleCreateRequest) {
+    try {
+      const created = await createScheduleRequest(host, token, {
+        ...payload,
+        launch_target_id: activeLaunchTargetId || null,
+      });
+      setSchedules((current) => [
+        created,
+        ...current.filter((item) => item.id !== created.id),
+      ]);
+    } catch (createError) {
+      if (isAuthError(createError)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      throw createError;
+    }
+  }
+
+  async function handleCancelSchedule(scheduleId: string) {
+    try {
+      await cancelScheduleRequest(host, token, scheduleId);
+      setSchedules((current) =>
+        current.map((schedule) =>
+          schedule.id === scheduleId ? { ...schedule, status: "cancelled" } : schedule,
+        ),
+      );
+    } catch (cancelError) {
+      if (isAuthError(cancelError)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      setError(cancelError instanceof Error ? cancelError.message : "failed to cancel");
+    }
   }
 
   async function handleDelete(sessionId: string) {
@@ -254,25 +310,31 @@ export default function HomePage() {
     : supportedBackends[0];
   const effectiveRemoteCwd = activeLaunchTarget?.default_remote_cwd ?? null;
 
+  const connectionLabel = token
+    ? connection === "open"
+      ? "live"
+      : connection === "reconnecting"
+        ? "reconnecting"
+        : connection === "connecting"
+          ? "connecting"
+          : "idle"
+    : "signed out";
+
   return (
     <main className="page-shell">
-      <section className="hero">
-        <div className="brand">
-          <Image
-            src="/icons/icon-192.png"
-            alt="Waypoint"
-            width={48}
-            height={48}
-            priority
-          />
-          <p className="eyebrow">Waypoint</p>
+      <header className="app-bar">
+        <div className="app-bar-brand">
+          <div className="app-bar-mark" aria-hidden="true">W</div>
+          <div className="app-bar-titles">
+            <p className="app-bar-eyebrow">Waypoint</p>
+            <h1 className="app-bar-title">Coding session control deck</h1>
+          </div>
         </div>
-        <h1>Remote control for live AI coding sessions.</h1>
-        <p className="lede">
-          Check in on Claude Code and Codex from your phone, respond when they need input, and drop to raw terminal
-          when the transcript gets fuzzy.
-        </p>
-      </section>
+        <div className="app-bar-meta">
+          <span className={`app-bar-status ${connection}`}>{connectionLabel}</span>
+          {host ? <span className="muted">{host}</span> : null}
+        </div>
+      </header>
       {!token ? <LoginForm defaultHost={host} onSubmit={handleLogin} /> : null}
       {token ? (
         <BackendSwitcher
@@ -293,6 +355,18 @@ export default function HomePage() {
           supportedBackends={supportedBackends}
           onAttach={handleAttach}
           onCreate={handleCreate}
+        />
+      ) : null}
+      {token ? (
+        <SchedulePanel
+          defaultBackend={effectiveDefaultBackend}
+          defaultCwd={defaultCwd}
+          defaultRemoteCwd={effectiveRemoteCwd}
+          targetLabel={activeLaunchTarget?.name ?? null}
+          supportedBackends={supportedBackends}
+          schedules={schedules}
+          onCreate={handleCreateSchedule}
+          onCancel={handleCancelSchedule}
         />
       ) : null}
       {error ? <p className="error">{error}</p> : null}

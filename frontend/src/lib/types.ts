@@ -69,7 +69,43 @@ export interface LaunchTargetSummary {
   default_remote_cwd?: string | null;
 }
 
+export type ScheduleStatus = "pending" | "launched" | "cancelled" | "failed";
+
+export interface ScheduledSession {
+  id: string;
+  backend: Backend;
+  cwd: string;
+  remote_cwd?: string | null;
+  launch_target_id?: string | null;
+  title?: string | null;
+  args: string[];
+  initial_prompt?: string | null;
+  scheduled_at: string;
+  created_at: string;
+  status: ScheduleStatus;
+  session_id?: string | null;
+  failure_reason?: string | null;
+}
+
+export interface ScheduleCreateRequest {
+  backend: Backend;
+  cwd: string;
+  remote_cwd?: string | null;
+  launch_target_id?: string | null;
+  title?: string | null;
+  args?: string[];
+  initial_prompt?: string | null;
+  delay_seconds?: number | null;
+  scheduled_at?: string | null;
+}
+
 export interface SessionEnvelope {
-  type: "session_list_update" | "event" | "session_state" | "terminal_snapshot_ready" | "auth_revoked";
+  type:
+    | "session_list_update"
+    | "event"
+    | "session_state"
+    | "terminal_snapshot_ready"
+    | "auth_revoked"
+    | "schedule_list_update";
   payload: Record<string, unknown>;
 }

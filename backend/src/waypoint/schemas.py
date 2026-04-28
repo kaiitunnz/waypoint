@@ -134,6 +134,41 @@ class TerminalSnapshot(BaseModel):
     from_raw_log: bool = True
 
 
+class ScheduleStatus(StrEnum):
+    PENDING = "pending"
+    LAUNCHED = "launched"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+
+
+class ScheduledSessionRecord(BaseModel):
+    id: str
+    backend: Backend
+    cwd: str
+    remote_cwd: str | None = None
+    launch_target_id: str | None = None
+    title: str | None = None
+    args: list[str] = Field(default_factory=list)
+    initial_prompt: str | None = None
+    scheduled_at: datetime
+    created_at: datetime
+    status: ScheduleStatus = ScheduleStatus.PENDING
+    session_id: str | None = None
+    failure_reason: str | None = None
+
+
+class ScheduleCreateRequest(BaseModel):
+    backend: Backend
+    cwd: str
+    remote_cwd: str | None = None
+    launch_target_id: str | None = None
+    title: str | None = None
+    args: list[str] = Field(default_factory=list)
+    initial_prompt: str | None = None
+    delay_seconds: int | None = None
+    scheduled_at: datetime | None = None
+
+
 class SessionEnvelope(BaseModel):
     type: str
     payload: Mapping[str, Any]

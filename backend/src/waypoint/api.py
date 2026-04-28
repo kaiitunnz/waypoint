@@ -23,6 +23,7 @@ from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     LoginRequest,
     MeResponse,
+    ScheduleCreateRequest,
     SessionApprovalRequest,
     SessionAttachRequest,
     SessionCreateRequest,
@@ -200,6 +201,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         session = await context.runtime.attach_tmux(request)
         return {"session": session.model_dump(mode="json")}
+
+    @app.get("/api/schedules")
+    async def list_schedules(_: Annotated[str, Depends(token_dependency())]) -> Any:
+        schedules = [
+            schedule.model_dump(mode="json")
+            for schedule in context.runtime.scheduler.list_schedules()
+        ]
+        return {"schedules": schedules}
+
+    @app.post("/api/schedules")
+    async def create_schedule(
+        request: ScheduleCreateRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        schedule = context.runtime.scheduler.create_schedule(request)
+        return {"schedule": schedule.model_dump(mode="json")}
+
+    @app.delete("/api/schedules/{schedule_id}")
+    async def cancel_schedule(
+        schedule_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        schedule = context.runtime.scheduler.cancel_schedule(schedule_id)
+        return {"schedule": schedule.model_dump(mode="json")}
 
     @app.get("/api/sessions/{session_id}/events")
     async def list_events(

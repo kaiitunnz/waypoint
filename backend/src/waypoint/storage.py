@@ -4,7 +4,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from waypoint.schemas import EventRecord, SessionRecord, SessionStatus, SessionTransport
+from waypoint.schemas import (
+    Backend,
+    EventRecord,
+    ScheduledSessionRecord,
+    ScheduleStatus,
+    SessionRecord,
+    SessionStatus,
+    SessionTransport,
+)
 
 
 class Storage:
@@ -56,6 +64,22 @@ class Storage:
                 token TEXT PRIMARY KEY,
                 expires_at TEXT NOT NULL,
                 created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS scheduled_sessions (
+                id TEXT PRIMARY KEY,
+                backend TEXT NOT NULL,
+                cwd TEXT NOT NULL,
+                remote_cwd TEXT,
+                launch_target_id TEXT,
+                title TEXT,
+                args TEXT NOT NULL DEFAULT '[]',
+                initial_prompt TEXT,
+                scheduled_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                session_id TEXT,
+                failure_reason TEXT
             );
             """)
         self._ensure_column("sessions", "transport", "TEXT NOT NULL DEFAULT 'tmux'")
@@ -224,6 +248,84 @@ class Storage:
         self.connection.commit()
         return cursor.rowcount or 0
 
+    def create_schedule(
+        self, schedule: ScheduledSessionRecord
+    ) -> ScheduledSessionRecord:
+        self.connection.execute(
+            """
+            INSERT INTO scheduled_sessions (
+                id, backend, cwd, remote_cwd, launch_target_id, title, args,
+                initial_prompt, scheduled_at, created_at, status, session_id,
+                failure_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                schedule.id,
+                schedule.backend,
+                schedule.cwd,
+                schedule.remote_cwd,
+                schedule.launch_target_id,
+                schedule.title,
+                json.dumps(list(schedule.args)),
+                schedule.initial_prompt,
+                schedule.scheduled_at.isoformat(),
+                schedule.created_at.isoformat(),
+                schedule.status,
+                schedule.session_id,
+                schedule.failure_reason,
+            ),
+        )
+        self.connection.commit()
+        return schedule
+
+    def list_schedules(
+        self, statuses: list[ScheduleStatus] | None = None
+    ) -> list[ScheduledSessionRecord]:
+        query = "SELECT * FROM scheduled_sessions"
+        params: list[Any] = []
+        if statuses:
+            placeholders = ",".join(["?"] * len(statuses))
+            query += f" WHERE status IN ({placeholders})"
+            params.extend(status.value for status in statuses)
+        query += " ORDER BY scheduled_at ASC, created_at ASC"
+        rows = self.connection.execute(query, params).fetchall()
+        return [self._schedule_from_row(row) for row in rows]
+
+    def get_schedule(self, schedule_id: str) -> ScheduledSessionRecord | None:
+        row = self.connection.execute(
+            "SELECT * FROM scheduled_sessions WHERE id = ?", (schedule_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._schedule_from_row(row)
+
+    def update_schedule(
+        self, schedule_id: str, **fields: Any
+    ) -> ScheduledSessionRecord:
+        if not fields:
+            current = self.get_schedule(schedule_id)
+            if current is None:
+                raise KeyError(schedule_id)
+            return current
+        assignments = ", ".join(f"{name} = ?" for name in fields)
+        values = [self._serialize_field(value) for value in fields.values()]
+        values.append(schedule_id)
+        self.connection.execute(
+            f"UPDATE scheduled_sessions SET {assignments} WHERE id = ?", values
+        )
+        self.connection.commit()
+        updated = self.get_schedule(schedule_id)
+        if updated is None:
+            raise KeyError(schedule_id)
+        return updated
+
+    def delete_schedule(self, schedule_id: str) -> bool:
+        cursor = self.connection.execute(
+            "DELETE FROM scheduled_sessions WHERE id = ?", (schedule_id,)
+        )
+        self.connection.commit()
+        return (cursor.rowcount or 0) > 0
+
     def next_sequence(self, session_id: str) -> int:
         row = self.connection.execute(
             "SELECT COALESCE(MAX(sequence), 0) AS max_sequence FROM events WHERE session_id = ?",
@@ -240,6 +342,20 @@ class Storage:
             payload.get("transport", SessionTransport.TMUX)
         )
         return SessionRecord.model_validate(payload)
+
+    def _schedule_from_row(self, row: sqlite3.Row) -> ScheduledSessionRecord:
+        payload = dict(row)
+        for field_name in ("scheduled_at", "created_at"):
+            payload[field_name] = datetime.fromisoformat(payload[field_name])
+        payload["status"] = ScheduleStatus(payload.get("status", "pending"))
+        payload["backend"] = Backend(payload["backend"])
+        raw_args = payload.get("args") or "[]"
+        try:
+            parsed_args = json.loads(raw_args)
+        except json.JSONDecodeError:
+            parsed_args = []
+        payload["args"] = parsed_args if isinstance(parsed_args, list) else []
+        return ScheduledSessionRecord.model_validate(payload)
 
     def _event_from_row(self, row: sqlite3.Row) -> EventRecord:
         payload = dict(row)

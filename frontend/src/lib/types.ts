@@ -1,6 +1,6 @@
 export type Backend = "claude_code" | "codex";
 export type SessionSource = "managed" | "attached_tmux";
-export type SessionTransport = "tmux" | "codex_app_server";
+export type SessionTransport = "tmux" | "codex_app_server" | "claude_cli";
 export type SessionStatus =
   | "starting"
   | "idle"

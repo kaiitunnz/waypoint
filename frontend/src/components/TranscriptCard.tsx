@@ -6,13 +6,18 @@ interface TranscriptCardProps {
 }
 
 export function TranscriptCard({ event, transport }: TranscriptCardProps) {
-  if (transport === "codex_app_server") {
-    return <CodexCard event={event} />;
+  if (transport === "codex_app_server" || transport === "claude_cli") {
+    return <StructuredCard event={event} transport={transport} />;
   }
   return <HeuristicCard event={event} />;
 }
 
-function CodexCard({ event }: { event: EventRecord }) {
+function StructuredCard({ event, transport }: { event: EventRecord; transport: SessionTransport }) {
+  const agentLabel = transport === "claude_cli" ? "claude" : "codex";
+  return <CodexCard event={event} agentLabel={agentLabel} />;
+}
+
+function CodexCard({ event, agentLabel = "codex" }: { event: EventRecord; agentLabel?: string }) {
   switch (event.kind) {
     case "user_input":
       return (
@@ -28,7 +33,7 @@ function CodexCard({ event }: { event: EventRecord }) {
       return (
         <article className="panel transcript codex agent_output">
           <div className="session-row">
-            <span className="badge agent">codex</span>
+            <span className="badge agent">{agentLabel}</span>
             <span className="muted">{formatTime(event.ts)}</span>
           </div>
           <pre>{event.text}</pre>

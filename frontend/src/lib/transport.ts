@@ -1,11 +1,21 @@
 import { SessionTransport } from "@/lib/types";
 
 export function transportLabel(transport: SessionTransport): string {
-  return transport === "codex_app_server" ? "codex app server" : "tmux";
+  switch (transport) {
+    case "codex_app_server":
+      return "codex app server";
+    case "claude_cli":
+      return "claude cli";
+    default:
+      return "tmux";
+  }
 }
 
 export function fidelityFor(transport: SessionTransport): "structured" | "heuristic" {
-  return transport === "codex_app_server" ? "structured" : "heuristic";
+  if (transport === "codex_app_server" || transport === "claude_cli") {
+    return "structured";
+  }
+  return "heuristic";
 }
 
 export function supportsResume(transport: SessionTransport): boolean {
@@ -13,5 +23,5 @@ export function supportsResume(transport: SessionTransport): boolean {
 }
 
 export function supportsStructuredApproval(transport: SessionTransport): boolean {
-  return transport === "codex_app_server";
+  return transport === "codex_app_server" || transport === "claude_cli";
 }

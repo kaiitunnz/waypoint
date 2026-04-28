@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import asdict, dataclass, field, is_dataclass
 import json
+import logging
 from pathlib import Path
 import shutil
 import threading
@@ -13,6 +14,8 @@ from codex_app_server.generated.v2_all import AskForApprovalValue
 from codex_app_server.models import Notification, UnknownNotification
 
 from waypoint.schemas import EventKind, SessionStatus
+
+log = logging.getLogger("waypoint.codex")
 
 ApprovalDecisionHandler = Callable[[str, EventKind, str, dict[str, Any], SessionStatus], Awaitable[None]]
 ApprovalCallback = Callable[[str, dict[str, Any] | None], dict[str, Any]]
@@ -186,6 +189,10 @@ class CodexAppServerAdapter:
         except Exception as exc:  # noqa: BLE001
             state.active_turn_id = None
             state.stream_task = None
+            log.exception(
+                "codex stream failed",
+                extra={"session_id": state.session_id, "thread_id": state.thread_id},
+            )
             await self._emit_event(
                 state.session_id,
                 EventKind.SYSTEM_NOTE,

@@ -3,6 +3,7 @@ from collections import defaultdict
 from contextlib import suppress
 from datetime import UTC, datetime
 import json
+import logging
 from pathlib import Path
 import re
 import secrets
@@ -13,6 +14,8 @@ from fastapi import HTTPException, status
 from waypoint.config import Settings
 from waypoint.codex_app_server import CodexAppServerAdapter
 from waypoint.normalizer import TerminalNormalizer
+
+log = logging.getLogger("waypoint.runtime")
 from waypoint.schemas import (
     Backend,
     EventKind,
@@ -97,6 +100,10 @@ class SessionRuntime:
         try:
             await self.codex.restore_session(session.id, session.cwd, session.thread_id)
         except Exception as exc:  # noqa: BLE001
+            log.exception(
+                "codex restore failed",
+                extra={"session_id": session.id, "thread_id": session.thread_id, "cwd": session.cwd},
+            )
             self.storage.update_session(session.id, status=SessionStatus.ERROR)
             await self._record_system_event(
                 session.id,
@@ -403,6 +410,7 @@ class SessionRuntime:
         except asyncio.CancelledError:
             raise
         except Exception:
+            log.exception("tmux session monitor failed", extra={"session_id": session_id})
             await self._record_system_event(session_id, "Session monitor failed", status=SessionStatus.ERROR)
 
     async def _emit_adapter_event(
@@ -448,10 +456,19 @@ class SessionRuntime:
         target = session.tmux_pane or session.tmux_session or session.id
         try:
             target_info = await self.tmux.describe_target(target)
-        except TmuxError:
+        except TmuxError as exc:
+            if session.status != SessionStatus.EXITED:
+                log.warning(
+                    "tmux target lost; marking session exited",
+                    extra={"session_id": session.id, "target": target, "error": str(exc)},
+                )
             self.storage.update_session(session.id, status=SessionStatus.EXITED)
             return
         updates: dict[str, Any] = {"pid": target_info.pane_pid}
-        if target_info.pane_dead:
+        if target_info.pane_dead and session.status != SessionStatus.EXITED:
+            log.info(
+                "tmux pane reported dead",
+                extra={"session_id": session.id, "target": target},
+            )
             updates["status"] = SessionStatus.EXITED
         self.storage.update_session(session.id, **updates)

@@ -225,8 +225,11 @@ async def test_terminate_session_closes_client_and_drops_state() -> None:
     handled = await adapter.terminate_session("sess")
     assert handled is True
     assert "sess" not in adapter._sessions
-    assert ("turn_interrupt", ("thread-1", "turn-X")) in fake.calls
     assert fake.closed is True
+    # turn_interrupt must NOT be issued during termination — the in-flight
+    # next_notification holds the transport lock, so doing so deadlocks. The
+    # client.close() above is what unblocks the streaming task.
+    assert all(call[0] != "turn_interrupt" for call in fake.calls)
 
 
 @pytest.mark.asyncio

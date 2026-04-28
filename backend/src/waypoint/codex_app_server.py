@@ -193,24 +193,21 @@ class CodexAppServerAdapter:
         if state.pending_approval is not None:
             state.pending_approval.response = {"decision": "decline"}
             state.pending_approval.event.set()
-        if state.active_turn_id is not None:
-            try:
-                await self._call_client(
-                    state, state.client.turn_interrupt, state.thread_id, state.active_turn_id
-                )
-            except Exception:  # noqa: BLE001
-                log.exception(
-                    "codex turn_interrupt during terminate failed",
-                    extra={"session_id": session_id, "thread_id": state.thread_id},
-                )
-        if state.stream_task is not None:
-            state.stream_task.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await state.stream_task
+        # Close the client first. The streaming task is parked in an
+        # uncancellable `asyncio.to_thread(next_notification)` while holding
+        # `state.transport_lock`; sending turn_interrupt would deadlock waiting
+        # for the same lock, and `await stream_task` cannot proceed until the
+        # blocking thread returns. Closing the transport drops EOF on the
+        # codex stdio pipes, which unblocks `next_notification` and makes both
+        # the lock release and the cancel observable.
         try:
             await asyncio.to_thread(state.client.close)
         except Exception:  # noqa: BLE001
             log.exception("codex client close failed", extra={"session_id": session_id})
+        if state.stream_task is not None:
+            state.stream_task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await state.stream_task
         return True
 
     async def _stream_turn(self, state: CodexSessionState, turn_id: str) -> None:

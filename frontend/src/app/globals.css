@@ -1,0 +1,254 @@
+:root {
+  --bg: #08111f;
+  --bg-panel: rgba(12, 24, 43, 0.86);
+  --bg-panel-strong: rgba(17, 34, 57, 0.96);
+  --line: rgba(148, 163, 184, 0.2);
+  --text: #eef4ff;
+  --muted: #9fb3cf;
+  --accent: #5eead4;
+  --accent-strong: #14b8a6;
+  --danger: #fb7185;
+  --shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+  --radius: 22px;
+  --font-sans: "Avenir Next", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(20, 184, 166, 0.18), transparent 30%),
+    radial-gradient(circle at top right, rgba(251, 191, 36, 0.16), transparent 28%),
+    linear-gradient(180deg, #07101d 0%, #08111f 40%, #0c1524 100%);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+body {
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: 0;
+}
+
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  font-family: "SFMono-Regular", "Menlo", monospace;
+}
+
+.page-shell {
+  width: min(960px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 32px 0 48px;
+}
+
+.hero {
+  padding: 8px 2px 28px;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.76rem;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(2.2rem, 5vw, 4rem);
+  line-height: 0.95;
+  max-width: 10ch;
+}
+
+.lede {
+  max-width: 58ch;
+  color: var(--muted);
+  font-size: 1.05rem;
+}
+
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px;
+  backdrop-filter: blur(16px);
+}
+
+.stack {
+  display: grid;
+  gap: 16px;
+}
+
+.launch-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  margin-bottom: 20px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field span {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.field input,
+.field textarea,
+.field select {
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(6, 12, 23, 0.65);
+  color: var(--text);
+  padding: 14px 16px;
+}
+
+.primary,
+.secondary {
+  min-height: 46px;
+  border-radius: 999px;
+  padding: 0 18px;
+}
+
+.primary {
+  background: linear-gradient(135deg, var(--accent) 0%, #7dd3fc 100%);
+  color: #05111f;
+  font-weight: 700;
+}
+
+.secondary {
+  background: rgba(22, 37, 62, 0.92);
+  color: var(--text);
+}
+
+.session-card h3,
+.panel h2,
+.panel h3 {
+  margin: 0;
+}
+
+.muted,
+.meta {
+  color: var(--muted);
+}
+
+.meta {
+  font-size: 0.92rem;
+}
+
+.error {
+  color: var(--danger);
+}
+
+.session-row,
+.action-row,
+.view-toggle {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.badge,
+.status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.badge.codex {
+  background: rgba(125, 211, 252, 0.16);
+  color: #7dd3fc;
+}
+
+.badge.claude_code {
+  background: rgba(251, 191, 36, 0.14);
+  color: #fbbf24;
+}
+
+.badge.neutral {
+  background: rgba(148, 163, 184, 0.18);
+  color: #dbe4f5;
+}
+
+.status {
+  background: rgba(94, 234, 212, 0.14);
+  color: var(--accent);
+}
+
+.status.error,
+.status.interrupted {
+  background: rgba(251, 113, 133, 0.14);
+  color: var(--danger);
+}
+
+.status.exited {
+  background: rgba(148, 163, 184, 0.16);
+  color: #cbd5e1;
+}
+
+.transcript {
+  gap: 10px;
+}
+
+.transcript pre {
+  line-height: 1.5;
+}
+
+.terminal {
+  min-height: 320px;
+  background: var(--bg-panel-strong);
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 16px;
+  color: var(--accent);
+}
+
+@media (max-width: 640px) {
+  .page-shell {
+    width: calc(100vw - 24px);
+    padding-top: 24px;
+  }
+
+  .hero h1 {
+    max-width: none;
+  }
+
+  .panel {
+    padding: 16px;
+  }
+}

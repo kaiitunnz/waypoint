@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.waypoint.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>{{PYTHON}}</string>
+      <string>-m</string>
+      <string>waypoint.cli</string>
+      <string>serve</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>{{WORKDIR}}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>WAYPOINT_PASSWORD</key>
+      <string>{{WAYPOINT_PASSWORD}}</string>
+      <key>WAYPOINT_HOST</key>
+      <string>{{WAYPOINT_HOST}}</string>
+      <key>WAYPOINT_PORT</key>
+      <string>{{WAYPOINT_PORT}}</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{{LOG_DIR}}/waypoint.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{LOG_DIR}}/waypoint.stderr.log</string>
+  </dict>
+</plist>

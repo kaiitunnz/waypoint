@@ -1,0 +1,50 @@
+from datetime import UTC, datetime, timedelta
+import secrets
+from typing import Annotated
+
+from fastapi import Depends, Header, HTTPException, status
+
+from waypoint.config import Settings
+from waypoint.schemas import LoginResponse
+
+
+class TokenStore:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.tokens: dict[str, datetime] = {}
+
+    def issue(self) -> LoginResponse:
+        expires_at = datetime.now(UTC) + timedelta(seconds=self.settings.token_ttl_seconds)
+        token = secrets.token_urlsafe(32)
+        self.tokens[token] = expires_at
+        return LoginResponse(token=token, expires_at=expires_at)
+
+    def validate(self, token: str) -> bool:
+        expires_at = self.tokens.get(token)
+        if expires_at is None:
+            return False
+        if expires_at < datetime.now(UTC):
+            self.tokens.pop(token, None)
+            return False
+        return True
+
+
+def parse_bearer_token(value: str | None) -> str | None:
+    if not value:
+        return None
+    prefix = "Bearer "
+    if not value.startswith(prefix):
+        return None
+    return value[len(prefix) :]
+
+
+def require_token(
+    authorization: Annotated[str | None, Header()] = None,
+    token_store: TokenStore | None = None,
+) -> str:
+    if token_store is None:
+        raise RuntimeError("token store dependency not bound")
+    token = parse_bearer_token(authorization)
+    if token is None or not token_store.validate(token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token")
+    return token

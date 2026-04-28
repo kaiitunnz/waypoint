@@ -4,7 +4,7 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
-from waypoint.schemas import EventRecord, SessionRecord, SessionStatus
+from waypoint.schemas import EventRecord, SessionRecord, SessionStatus, SessionTransport
 
 
 class Storage:
@@ -22,6 +22,7 @@ class Storage:
                 id TEXT PRIMARY KEY,
                 backend TEXT NOT NULL,
                 source TEXT NOT NULL,
+                transport TEXT NOT NULL DEFAULT 'tmux',
                 title TEXT NOT NULL,
                 cwd TEXT NOT NULL,
                 repo_name TEXT,
@@ -33,6 +34,7 @@ class Storage:
                 tmux_session TEXT,
                 tmux_window TEXT,
                 tmux_pane TEXT,
+                thread_id TEXT,
                 raw_log_path TEXT NOT NULL,
                 structured_log_path TEXT NOT NULL,
                 pid INTEGER
@@ -50,6 +52,8 @@ class Storage:
             );
             """
         )
+        self._ensure_column("sessions", "transport", "TEXT NOT NULL DEFAULT 'tmux'")
+        self._ensure_column("sessions", "thread_id", "TEXT")
         self.connection.commit()
 
     def close(self) -> None:
@@ -59,15 +63,16 @@ class Storage:
         self.connection.execute(
             """
             INSERT INTO sessions (
-                id, backend, source, title, cwd, repo_name, branch, status,
+                id, backend, source, transport, title, cwd, repo_name, branch, status,
                 created_at, updated_at, last_event_at, tmux_session, tmux_window,
-                tmux_pane, raw_log_path, structured_log_path, pid
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                tmux_pane, thread_id, raw_log_path, structured_log_path, pid
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
                 session.backend,
                 session.source,
+                session.transport,
                 session.title,
                 session.cwd,
                 session.repo_name,
@@ -79,6 +84,7 @@ class Storage:
                 session.tmux_session,
                 session.tmux_window,
                 session.tmux_pane,
+                session.thread_id,
                 session.raw_log_path,
                 session.structured_log_path,
                 session.pid,
@@ -172,6 +178,7 @@ class Storage:
         for field_name in ("created_at", "updated_at", "last_event_at"):
             payload[field_name] = datetime.fromisoformat(payload[field_name])
         payload["status"] = SessionStatus(payload["status"])
+        payload["transport"] = SessionTransport(payload.get("transport", SessionTransport.TMUX))
         return SessionRecord.model_validate(payload)
 
     def _event_from_row(self, row: sqlite3.Row) -> EventRecord:
@@ -184,3 +191,9 @@ class Storage:
         if isinstance(value, datetime):
             return value.isoformat()
         return value
+
+    def _ensure_column(self, table: str, column: str, ddl: str) -> None:
+        rows = self.connection.execute(f"PRAGMA table_info({table})").fetchall()
+        if any(row["name"] == column for row in rows):
+            return
+        self.connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")

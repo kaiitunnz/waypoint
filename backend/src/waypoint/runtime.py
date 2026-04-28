@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import HTTPException, status
 
 from waypoint.config import Settings
+from waypoint.codex_app_server import CodexAppServerAdapter
 from waypoint.normalizer import TerminalNormalizer
 from waypoint.schemas import (
     Backend,
@@ -24,6 +25,7 @@ from waypoint.schemas import (
     SessionRecord,
     SessionSource,
     SessionStatus,
+    SessionTransport,
 )
 from waypoint.storage import Storage
 from waypoint.tmux import TmuxAdapter, TmuxError
@@ -70,11 +72,18 @@ class SessionRuntime:
         self.tmux = TmuxAdapter()
         self.normalizer = TerminalNormalizer()
         self.broadcast = BroadcastHub()
+        self.codex = CodexAppServerAdapter(self._emit_adapter_event)
         self.monitor_tasks: dict[str, asyncio.Task[None]] = {}
         self.file_offsets: dict[str, int] = {}
 
     async def start(self) -> None:
         for session in self.storage.list_sessions():
+            if session.transport == SessionTransport.CODEX_APP_SERVER and session.status not in {
+                SessionStatus.EXITED,
+                SessionStatus.ERROR,
+            }:
+                self.storage.update_session(session.id, status=SessionStatus.EXITED)
+                continue
             if session.status not in {SessionStatus.EXITED, SessionStatus.ERROR}:
                 self._ensure_monitor(session.id)
 
@@ -85,6 +94,7 @@ class SessionRuntime:
             with suppress(asyncio.CancelledError):
                 await task
         self.monitor_tasks.clear()
+        await self.codex.shutdown()
         self.storage.close()
 
     def list_sessions(self) -> list[SessionRecord]:
@@ -104,6 +114,33 @@ class SessionRuntime:
         session_dir = self._session_dir(session_id)
         raw_log = session_dir / "raw.log"
         structured_log = session_dir / "events.jsonl"
+        if request.backend == Backend.CODEX:
+            raw_log.touch(exist_ok=True)
+            session = SessionRecord(
+                id=session_id,
+                backend=request.backend,
+                source=SessionSource.MANAGED,
+                transport=SessionTransport.CODEX_APP_SERVER,
+                title=title,
+                cwd=request.cwd,
+                repo_name=Path(request.cwd).name or None,
+                branch=None,
+                status=SessionStatus.STARTING,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+                last_event_at=datetime.now(UTC),
+                raw_log_path=str(raw_log),
+                structured_log_path=str(structured_log),
+            )
+            self.storage.create_session(session)
+            try:
+                thread_id = await self.codex.start_session(session_id, request.cwd)
+            except Exception:
+                self.storage.update_session(session.id, status=SessionStatus.ERROR)
+                raise
+            self.storage.update_session(session.id, thread_id=thread_id, status=SessionStatus.IDLE)
+            await self._record_system_event(session.id, "Codex app-server session started", status=SessionStatus.IDLE)
+            return self.get_session(session.id)
         command = self._command_for_backend(request.backend, request.args)
         try:
             target = await self.tmux.start_managed_session(session_id, request.cwd, command)
@@ -114,6 +151,7 @@ class SessionRuntime:
             id=session_id,
             backend=request.backend,
             source=SessionSource.MANAGED,
+            transport=SessionTransport.TMUX,
             title=title,
             cwd=request.cwd,
             repo_name=Path(request.cwd).name or None,
@@ -152,6 +190,7 @@ class SessionRuntime:
             id=session_id,
             backend=backend,
             source=SessionSource.ATTACHED_TMUX,
+            transport=SessionTransport.TMUX,
             title=title,
             cwd=target.cwd,
             repo_name=Path(target.cwd).name or None,
@@ -176,6 +215,13 @@ class SessionRuntime:
 
     async def handle_input(self, session_id: str, request: SessionInputRequest) -> SessionRecord:
         session = self.get_session(session_id)
+        if session.transport == SessionTransport.CODEX_APP_SERVER:
+            try:
+                await self.codex.send_input(session.id, request.text)
+            except Exception as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            await self._record_user_event(session.id, request.text, submit=request.submit)
+            return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
         target = session.tmux_pane or session.tmux_session or session.id
         try:
             await self.tmux.send_input(target, request.text, request.submit)
@@ -186,6 +232,10 @@ class SessionRuntime:
 
     async def interrupt(self, session_id: str) -> SessionRecord:
         session = self.get_session(session_id)
+        if session.transport == SessionTransport.CODEX_APP_SERVER:
+            await self.codex.interrupt(session.id)
+            await self._record_system_event(session.id, "Sent interrupt", status=SessionStatus.INTERRUPTED)
+            return self.storage.update_session(session.id, status=SessionStatus.INTERRUPTED)
         target = session.tmux_pane or session.tmux_session or session.id
         await self.tmux.interrupt(target)
         await self._record_system_event(session.id, "Sent interrupt", status=SessionStatus.INTERRUPTED)
@@ -193,12 +243,21 @@ class SessionRuntime:
 
     async def resume(self, session_id: str) -> SessionRecord:
         session = self.get_session(session_id)
+        if session.transport == SessionTransport.CODEX_APP_SERVER:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="resume is not supported for Codex app-server sessions")
         target = session.tmux_pane or session.tmux_session or session.id
         await self.tmux.resume(target)
         await self._record_system_event(session.id, "Sent resume", status=SessionStatus.RUNNING)
         return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
 
     async def approve(self, session_id: str, request: SessionApprovalRequest) -> SessionRecord:
+        session = self.get_session(session_id)
+        if session.transport == SessionTransport.CODEX_APP_SERVER:
+            handled = await self.codex.respond_to_approval(session.id, request.decision)
+            if not handled:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="no pending approval request")
+            await self._record_system_event(session.id, f"Approval response sent: {request.decision}", status=SessionStatus.RUNNING)
+            return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
         decision = request.decision.strip().lower()
         mapped = "y" if decision in {"approve", "yes", "y"} else "n"
         text = request.text or mapped
@@ -212,10 +271,13 @@ class SessionRuntime:
 
     def terminal_snapshot(self, session_id: str) -> str:
         session = self.get_session(session_id)
+        if session.transport == SessionTransport.CODEX_APP_SERVER:
+            return self.codex.terminal_snapshot(session.id)
         raw_log_path = Path(session.raw_log_path)
         if not raw_log_path.exists():
             return ""
-        return raw_log_path.read_text(encoding="utf-8", errors="ignore")
+        snapshot = raw_log_path.read_text(encoding="utf-8", errors="ignore")
+        return self.normalizer.clean(snapshot)
 
     async def _record_user_event(self, session_id: str, text: str, submit: bool) -> None:
         event = EventRecord(
@@ -303,6 +365,9 @@ class SessionRuntime:
     def _ensure_monitor(self, session_id: str) -> None:
         if session_id in self.monitor_tasks:
             return
+        session = self.get_session(session_id)
+        if session.transport != SessionTransport.TMUX:
+            return
         self.monitor_tasks[session_id] = asyncio.create_task(self._monitor_session(session_id))
 
     async def _monitor_session(self, session_id: str) -> None:
@@ -315,6 +380,26 @@ class SessionRuntime:
             raise
         except Exception:
             await self._record_system_event(session_id, "Session monitor failed", status=SessionStatus.ERROR)
+
+    async def _emit_adapter_event(
+        self,
+        session_id: str,
+        kind: EventKind,
+        text: str,
+        metadata: dict[str, Any],
+        status: SessionStatus,
+    ) -> None:
+        event = EventRecord(
+            session_id=session_id,
+            ts=datetime.now(UTC),
+            kind=kind,
+            text=text,
+            metadata={**metadata, "status": status},
+            sequence=self.storage.next_sequence(session_id),
+        )
+        persisted = self.storage.append_event(event)
+        self._append_structured_log(session_id, persisted)
+        await self._publish_event(persisted)
 
     async def _ingest_raw_output(self, session_id: str) -> None:
         session = self.get_session(session_id)

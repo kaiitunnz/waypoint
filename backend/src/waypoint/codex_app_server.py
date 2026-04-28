@@ -1,0 +1,291 @@
+from __future__ import annotations
+
+import asyncio
+from dataclasses import asdict, dataclass, field, is_dataclass
+import json
+from pathlib import Path
+import shutil
+import threading
+from typing import Any, Awaitable, Callable
+
+from codex_app_server.client import AppServerClient, AppServerConfig
+from codex_app_server.generated.v2_all import AskForApprovalValue
+from codex_app_server.models import Notification, UnknownNotification
+
+from waypoint.schemas import EventKind, SessionStatus
+
+ApprovalDecisionHandler = Callable[[str, EventKind, str, dict[str, Any], SessionStatus], Awaitable[None]]
+
+
+@dataclass
+class PendingApproval:
+    method: str
+    params: dict[str, Any]
+    event: threading.Event = field(default_factory=threading.Event)
+    response: dict[str, Any] | None = None
+
+
+@dataclass
+class CodexSessionState:
+    session_id: str
+    cwd: str
+    client: AppServerClient
+    transport_lock: asyncio.Lock
+    thread_id: str
+    active_turn_id: str | None = None
+    stream_task: asyncio.Task[None] | None = None
+    pending_approval: PendingApproval | None = None
+    terminal_fragments: list[str] = field(default_factory=list)
+
+
+class CodexAppServerAdapter:
+    def __init__(self, emit_event: ApprovalDecisionHandler) -> None:
+        self._emit_event = emit_event
+        self._sessions: dict[str, CodexSessionState] = {}
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    async def start_session(self, session_id: str, cwd: str) -> str:
+        self._loop = asyncio.get_running_loop()
+        codex_bin = shutil.which("codex")
+        if codex_bin is None:
+            raise RuntimeError("codex binary not found on PATH")
+
+        holder: dict[str, CodexSessionState] = {}
+
+        def approval_handler(method: str, params: dict[str, Any] | None) -> dict[str, Any]:
+            state = holder["state"]
+            payload = params or {}
+            pending = PendingApproval(method=method, params=payload)
+            state.pending_approval = pending
+            if self._loop is not None:
+                asyncio.run_coroutine_threadsafe(
+                    self._emit_event(
+                        state.session_id,
+                        EventKind.APPROVAL_REQUEST,
+                        self._format_approval_text(method, payload),
+                        {
+                            "method": method,
+                            "request": payload,
+                            "status": SessionStatus.WAITING_INPUT,
+                        },
+                        SessionStatus.WAITING_INPUT,
+                    ),
+                    self._loop,
+                )
+            pending.event.wait()
+            state.pending_approval = None
+            return pending.response or {"decision": "decline"}
+
+        client = AppServerClient(
+            config=AppServerConfig(
+                codex_bin=codex_bin,
+                cwd=cwd,
+                client_name="waypoint",
+                client_title="Waypoint",
+            ),
+            approval_handler=approval_handler,
+        )
+        await asyncio.to_thread(client.start)
+        await asyncio.to_thread(client.initialize)
+        started = await asyncio.to_thread(client.thread_start, {"cwd": cwd})
+        state = CodexSessionState(
+            session_id=session_id,
+            cwd=cwd,
+            client=client,
+            transport_lock=asyncio.Lock(),
+            thread_id=started.thread.id,
+        )
+        holder["state"] = state
+        self._sessions[session_id] = state
+        return state.thread_id
+
+    async def send_input(self, session_id: str, text: str) -> None:
+        state = self._require_session(session_id)
+        if state.active_turn_id is None:
+            started = await self._call_client(state, state.client.turn_start, state.thread_id, text)
+            state.active_turn_id = started.turn.id
+            state.stream_task = asyncio.create_task(self._stream_turn(state, started.turn.id))
+            return
+        await self._call_client(state, state.client.turn_steer, state.thread_id, state.active_turn_id, text)
+
+    async def interrupt(self, session_id: str) -> None:
+        state = self._require_session(session_id)
+        if state.active_turn_id is None:
+            return
+        await self._call_client(state, state.client.turn_interrupt, state.thread_id, state.active_turn_id)
+
+    async def respond_to_approval(self, session_id: str, decision: str) -> bool:
+        state = self._require_session(session_id)
+        pending = state.pending_approval
+        if pending is None:
+            return False
+        pending.response = {"decision": self._map_decision(decision)}
+        pending.event.set()
+        return True
+
+    def terminal_snapshot(self, session_id: str) -> str:
+        state = self._require_session(session_id)
+        return "".join(state.terminal_fragments)
+
+    async def shutdown(self) -> None:
+        for state in list(self._sessions.values()):
+            if state.pending_approval is not None:
+                state.pending_approval.response = {"decision": "decline"}
+                state.pending_approval.event.set()
+            if state.stream_task is not None:
+                state.stream_task.cancel()
+            await asyncio.to_thread(state.client.close)
+        self._sessions.clear()
+
+    async def _stream_turn(self, state: CodexSessionState, turn_id: str) -> None:
+        try:
+            while True:
+                notification = await self._call_client(state, state.client.next_notification)
+                payload = self._payload_to_dict(notification.payload)
+                kind, text, status = self._map_notification(notification.method, payload)
+                if kind is not None and text:
+                    if notification.method == "item/commandExecution/outputDelta":
+                        state.terminal_fragments.append(text)
+                    await self._emit_event(
+                        state.session_id,
+                        kind,
+                        text,
+                        {"method": notification.method, "payload": payload, "status": status},
+                        status,
+                    )
+                if notification.method == "turn/completed":
+                    state.active_turn_id = None
+                    state.stream_task = None
+                    break
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            state.active_turn_id = None
+            state.stream_task = None
+            await self._emit_event(
+                state.session_id,
+                EventKind.SYSTEM_NOTE,
+                f"Codex app-server stream failed: {exc}",
+                {"status": SessionStatus.ERROR},
+                SessionStatus.ERROR,
+            )
+
+    async def _call_client(self, state: CodexSessionState, func: Callable[..., Any], *args: Any) -> Any:
+        async with state.transport_lock:
+            return await asyncio.to_thread(func, *args)
+
+    def _require_session(self, session_id: str) -> CodexSessionState:
+        try:
+            return self._sessions[session_id]
+        except KeyError as exc:
+            raise RuntimeError(f"codex session not active: {session_id}") from exc
+
+    def _map_notification(
+        self,
+        method: str,
+        payload: dict[str, Any],
+    ) -> tuple[EventKind | None, str, SessionStatus]:
+        if method == "item/agentMessage/delta":
+            return EventKind.AGENT_OUTPUT, str(payload.get("delta", "")), SessionStatus.RUNNING
+        if method == "item/commandExecution/outputDelta":
+            return EventKind.TOOL_RESULT, str(payload.get("delta", "")), SessionStatus.RUNNING
+        if method == "item/fileChange/outputDelta":
+            return EventKind.TOOL_RESULT, str(payload.get("delta", "")), SessionStatus.RUNNING
+        if method == "turn/started":
+            turn = payload.get("turn", {})
+            return EventKind.SYSTEM_NOTE, f"Turn started: {turn.get('id', '')}".strip(), SessionStatus.RUNNING
+        if method == "turn/completed":
+            turn = payload.get("turn", {})
+            status = self._map_turn_status(turn.get("status"))
+            return EventKind.SYSTEM_NOTE, f"Turn {turn.get('status', 'completed')}", status
+        if method == "item/started":
+            item = self._extract_item(payload)
+            return self._format_item_started(item)
+        if method == "item/completed":
+            item = self._extract_item(payload)
+            return self._format_item_completed(item)
+        if method == "turn/plan/updated":
+            plan = payload.get("plan", [])
+            text = "\n".join(f"- {entry.get('step', '')} [{entry.get('status', '')}]" for entry in plan)
+            return EventKind.SYSTEM_NOTE, text, SessionStatus.RUNNING
+        if method == "error":
+            error = payload.get("error", {})
+            return EventKind.SYSTEM_NOTE, str(error.get("message", "Codex error")), SessionStatus.ERROR
+        return None, "", SessionStatus.RUNNING
+
+    def _format_item_started(self, item: dict[str, Any]) -> tuple[EventKind, str, SessionStatus]:
+        item_type = item.get("type")
+        if item_type == "commandExecution":
+            return EventKind.TOOL_CALL, f"$ {item.get('command', '')}", SessionStatus.RUNNING
+        if item_type == "fileChange":
+            paths = ", ".join(change.get("path", "") for change in item.get("changes", []))
+            return EventKind.TOOL_CALL, f"Preparing file changes: {paths}", SessionStatus.RUNNING
+        if item_type == "mcpToolCall":
+            return EventKind.TOOL_CALL, f"MCP {item.get('server', '')}:{item.get('tool', '')}", SessionStatus.RUNNING
+        if item_type == "plan":
+            return EventKind.SYSTEM_NOTE, item.get("text", ""), SessionStatus.RUNNING
+        if item_type == "agentMessage":
+            return EventKind.AGENT_OUTPUT, item.get("text", ""), SessionStatus.RUNNING
+        return EventKind.SYSTEM_NOTE, f"Started {item_type or 'item'}", SessionStatus.RUNNING
+
+    def _format_item_completed(self, item: dict[str, Any]) -> tuple[EventKind, str, SessionStatus]:
+        item_type = item.get("type")
+        if item_type == "commandExecution":
+            output = item.get("aggregatedOutput") or ""
+            suffix = f"\n{output}" if output else ""
+            status = SessionStatus.IDLE if item.get("status") == "completed" else SessionStatus.RUNNING
+            return EventKind.TOOL_RESULT, f"$ {item.get('command', '')}{suffix}", status
+        if item_type == "fileChange":
+            paths = ", ".join(change.get("path", "") for change in item.get("changes", []))
+            status = SessionStatus.IDLE if item.get("status") == "completed" else SessionStatus.RUNNING
+            return EventKind.TOOL_RESULT, f"File changes completed: {paths}", status
+        if item_type == "agentMessage":
+            return EventKind.AGENT_OUTPUT, item.get("text", ""), SessionStatus.RUNNING
+        return EventKind.SYSTEM_NOTE, f"Completed {item_type or 'item'}", SessionStatus.RUNNING
+
+    def _extract_item(self, payload: dict[str, Any]) -> dict[str, Any]:
+        item = payload.get("item", {})
+        if isinstance(item, dict) and len(item) == 1 and "root" in item:
+            root = item["root"]
+            if isinstance(root, dict):
+                return root
+        return item if isinstance(item, dict) else {}
+
+    def _payload_to_dict(self, payload: Any) -> dict[str, Any]:
+        if hasattr(payload, "model_dump"):
+            dumped = payload.model_dump(mode="json", by_alias=True)
+            return dumped if isinstance(dumped, dict) else {"value": dumped}
+        if is_dataclass(payload):
+            dumped = asdict(payload)
+            return dumped if isinstance(dumped, dict) else {"value": dumped}
+        if isinstance(payload, UnknownNotification):
+            return payload.params
+        if isinstance(payload, dict):
+            return payload
+        return {"value": str(payload)}
+
+    def _map_turn_status(self, value: Any) -> SessionStatus:
+        if value == "completed":
+            return SessionStatus.IDLE
+        if value == "interrupted":
+            return SessionStatus.INTERRUPTED
+        if value == "failed":
+            return SessionStatus.ERROR
+        return SessionStatus.RUNNING
+
+    def _format_approval_text(self, method: str, params: dict[str, Any]) -> str:
+        if method == "item/commandExecution/requestApproval":
+            return f"Approve command: {params.get('command', '')}"
+        if method == "item/fileChange/requestApproval":
+            return "Approve file changes"
+        return f"Approve request: {method}"
+
+    def _map_decision(self, decision: str) -> str:
+        lowered = decision.strip()
+        if lowered in {"approve", "accept", "yes", "y"}:
+            return "accept"
+        if lowered in {"approve_session", "acceptForSession"}:
+            return "acceptForSession"
+        if lowered in {"cancel"}:
+            return "cancel"
+        return "decline"

@@ -16,6 +16,11 @@ class SessionSource(StrEnum):
     ATTACHED_TMUX = "attached_tmux"
 
 
+class SessionTransport(StrEnum):
+    TMUX = "tmux"
+    CODEX_APP_SERVER = "codex_app_server"
+
+
 class SessionStatus(StrEnum):
     STARTING = "starting"
     IDLE = "idle"
@@ -41,6 +46,7 @@ class SessionRecord(BaseModel):
     id: str
     backend: Backend
     source: SessionSource
+    transport: SessionTransport = SessionTransport.TMUX
     title: str
     cwd: str
     repo_name: str | None = None
@@ -52,6 +58,7 @@ class SessionRecord(BaseModel):
     tmux_session: str | None = None
     tmux_window: str | None = None
     tmux_pane: str | None = None
+    thread_id: str | None = None
     raw_log_path: str
     structured_log_path: str
     pid: int | None = None
@@ -113,4 +120,3 @@ class TerminalSnapshot(BaseModel):
 class SessionEnvelope(BaseModel):
     type: str
     payload: Mapping[str, Any]
-

@@ -78,14 +78,38 @@ class SessionRuntime:
 
     async def start(self) -> None:
         for session in self.storage.list_sessions():
-            if session.transport == SessionTransport.CODEX_APP_SERVER and session.status not in {
-                SessionStatus.EXITED,
-                SessionStatus.ERROR,
-            }:
-                self.storage.update_session(session.id, status=SessionStatus.EXITED)
+            if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
                 continue
-            if session.status not in {SessionStatus.EXITED, SessionStatus.ERROR}:
-                self._ensure_monitor(session.id)
+            if session.transport == SessionTransport.CODEX_APP_SERVER:
+                await self._restore_codex_session(session)
+                continue
+            self._ensure_monitor(session.id)
+
+    async def _restore_codex_session(self, session: SessionRecord) -> None:
+        if not session.thread_id:
+            self.storage.update_session(session.id, status=SessionStatus.EXITED)
+            await self._record_system_event(
+                session.id,
+                "Codex session has no thread id; marking exited",
+                status=SessionStatus.EXITED,
+            )
+            return
+        try:
+            await self.codex.restore_session(session.id, session.cwd, session.thread_id)
+        except Exception as exc:  # noqa: BLE001
+            self.storage.update_session(session.id, status=SessionStatus.ERROR)
+            await self._record_system_event(
+                session.id,
+                f"Codex session restore failed: {exc}",
+                status=SessionStatus.ERROR,
+            )
+            return
+        self.storage.update_session(session.id, status=SessionStatus.IDLE)
+        await self._record_system_event(
+            session.id,
+            "Codex session restored from previous backend process",
+            status=SessionStatus.IDLE,
+        )
 
     async def stop(self) -> None:
         for task in self.monitor_tasks.values():

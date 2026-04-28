@@ -15,6 +15,23 @@ from codex_app_server.models import Notification, UnknownNotification
 from waypoint.schemas import EventKind, SessionStatus
 
 ApprovalDecisionHandler = Callable[[str, EventKind, str, dict[str, Any], SessionStatus], Awaitable[None]]
+ApprovalCallback = Callable[[str, dict[str, Any] | None], dict[str, Any]]
+ClientFactory = Callable[[str, ApprovalCallback], AppServerClient]
+
+
+def _default_client_factory(cwd: str, approval_handler: ApprovalCallback) -> AppServerClient:
+    codex_bin = shutil.which("codex")
+    if codex_bin is None:
+        raise RuntimeError("codex binary not found on PATH")
+    return AppServerClient(
+        config=AppServerConfig(
+            codex_bin=codex_bin,
+            cwd=cwd,
+            client_name="waypoint",
+            client_title="Waypoint",
+        ),
+        approval_handler=approval_handler,
+    )
 
 
 @dataclass
@@ -39,17 +56,33 @@ class CodexSessionState:
 
 
 class CodexAppServerAdapter:
-    def __init__(self, emit_event: ApprovalDecisionHandler) -> None:
+    def __init__(
+        self,
+        emit_event: ApprovalDecisionHandler,
+        client_factory: ClientFactory | None = None,
+    ) -> None:
         self._emit_event = emit_event
+        self._client_factory = client_factory or _default_client_factory
         self._sessions: dict[str, CodexSessionState] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
 
     async def start_session(self, session_id: str, cwd: str) -> str:
-        self._loop = asyncio.get_running_loop()
-        codex_bin = shutil.which("codex")
-        if codex_bin is None:
-            raise RuntimeError("codex binary not found on PATH")
+        state = await self._spawn_session(session_id, cwd)
+        started = await self._call_client(state, state.client.thread_start, {"cwd": cwd})
+        state.thread_id = started.thread.id
+        return state.thread_id
 
+    async def restore_session(self, session_id: str, cwd: str, thread_id: str) -> None:
+        state = await self._spawn_session(session_id, cwd, thread_id=thread_id)
+        await self._call_client(state, state.client.thread_resume, thread_id)
+
+    async def _spawn_session(
+        self,
+        session_id: str,
+        cwd: str,
+        thread_id: str = "",
+    ) -> CodexSessionState:
+        self._loop = asyncio.get_running_loop()
         holder: dict[str, CodexSessionState] = {}
 
         def approval_handler(method: str, params: dict[str, Any] | None) -> dict[str, Any]:
@@ -76,28 +109,19 @@ class CodexAppServerAdapter:
             state.pending_approval = None
             return pending.response or {"decision": "decline"}
 
-        client = AppServerClient(
-            config=AppServerConfig(
-                codex_bin=codex_bin,
-                cwd=cwd,
-                client_name="waypoint",
-                client_title="Waypoint",
-            ),
-            approval_handler=approval_handler,
-        )
+        client = self._client_factory(cwd, approval_handler)
         await asyncio.to_thread(client.start)
         await asyncio.to_thread(client.initialize)
-        started = await asyncio.to_thread(client.thread_start, {"cwd": cwd})
         state = CodexSessionState(
             session_id=session_id,
             cwd=cwd,
             client=client,
             transport_lock=asyncio.Lock(),
-            thread_id=started.thread.id,
+            thread_id=thread_id,
         )
         holder["state"] = state
         self._sessions[session_id] = state
-        return state.thread_id
+        return state
 
     async def send_input(self, session_id: str, text: str) -> None:
         state = self._require_session(session_id)

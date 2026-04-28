@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { BackendSwitcher } from "@/components/BackendSwitcher";
@@ -14,6 +15,7 @@ import {
   fetchSessions,
   isAuthError,
   login,
+  postAction,
 } from "@/lib/api";
 import { clearToken, readHost, readToken, writeHost, writeToken } from "@/lib/store";
 import { Backend, SessionEnvelope, SessionRecord } from "@/lib/types";
@@ -24,6 +26,7 @@ const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 
 export default function HomePage() {
+  const router = useRouter();
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
@@ -108,7 +111,6 @@ export default function HomePage() {
       }
       socket?.close();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [host, token]);
 
   async function handleLogin(nextHost: string, password: string) {
@@ -130,6 +132,7 @@ export default function HomePage() {
         args: [],
       });
       setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)]);
+      router.push(`/session/${session.id}`);
     } catch (createError) {
       if (isAuthError(createError)) {
         resetAuthState("Session expired. Log in again.");
@@ -146,6 +149,7 @@ export default function HomePage() {
         backend_hint: backendHint,
       });
       setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)]);
+      router.push(`/session/${session.id}`);
     } catch (attachError) {
       if (isAuthError(attachError)) {
         resetAuthState("Session expired. Log in again.");
@@ -172,6 +176,18 @@ export default function HomePage() {
         return;
       }
       setError(deleteError instanceof Error ? deleteError.message : "failed to delete session");
+    }
+  }
+
+  async function handleTerminate(sessionId: string) {
+    try {
+      await postAction(host, token, sessionId, "terminate");
+    } catch (terminateError) {
+      if (isAuthError(terminateError)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      setError(terminateError instanceof Error ? terminateError.message : "failed to terminate");
     }
   }
 
@@ -210,7 +226,7 @@ export default function HomePage() {
           {connection === "connecting" ? "Connecting…" : "Reconnecting…"}
         </p>
       ) : null}
-      {token ? <SessionList sessions={sessions} onDelete={handleDelete} /> : null}
+      {token ? <SessionList sessions={sessions} onDelete={handleDelete} onTerminate={handleTerminate} /> : null}
     </main>
   );
 }

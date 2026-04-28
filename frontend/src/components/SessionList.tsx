@@ -9,9 +9,10 @@ import { fidelityFor, transportLabel } from "@/lib/transport";
 interface SessionListProps {
   sessions: SessionRecord[];
   onDelete?: (sessionId: string) => void | Promise<void>;
+  onTerminate?: (sessionId: string) => void | Promise<void>;
 }
 
-export function SessionList({ sessions, onDelete }: SessionListProps) {
+export function SessionList({ sessions, onDelete, onTerminate }: SessionListProps) {
   if (!sessions.length) {
     return (
       <section className="panel">
@@ -33,6 +34,18 @@ export function SessionList({ sessions, onDelete }: SessionListProps) {
     void onDelete(sessionId);
   }
 
+  function handleTerminate(event: MouseEvent<HTMLButtonElement>, sessionId: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!onTerminate) {
+      return;
+    }
+    if (!window.confirm("Terminate this session? Any running command will be stopped.")) {
+      return;
+    }
+    void onTerminate(sessionId);
+  }
+
   return (
     <section className="stack">
       {sessions.map((session) => (
@@ -49,6 +62,15 @@ export function SessionList({ sessions, onDelete }: SessionListProps) {
             {session.source === "managed" ? "Managed" : "Attached"} · last activity{" "}
             {new Date(session.last_event_at).toLocaleString()}
           </p>
+          {onTerminate && session.status !== "exited" ? (
+            <button
+              className="link-button danger-link"
+              type="button"
+              onClick={(event) => handleTerminate(event, session.id)}
+            >
+              Terminate
+            </button>
+          ) : null}
           {onDelete && session.status === "exited" ? (
             <button
               className="link-button danger-link"

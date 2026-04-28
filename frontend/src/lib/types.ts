@@ -54,6 +54,8 @@ export interface EventRecord {
 
 export interface MeResponse {
   authenticated: boolean;
+  default_backend: Backend;
+  default_cwd: string;
   remote_codex_enabled: boolean;
   default_remote_cwd?: string | null;
 }

@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 import yaml
 
+from waypoint.schemas import Backend
 from waypoint.server_config import RemoteCodexSshConfig
 
 
@@ -47,6 +48,8 @@ class Settings(BaseModel):
     port: int = 8787
     password: str = "change-me"
     config_path: Path | None = None
+    default_backend: Backend = Backend.CODEX
+    default_cwd: str = "~/"
     data_dir: Path = Field(default_factory=default_data_dir)
     sessions_dir_name: str = "sessions"
     database_name: str = "waypoint.db"

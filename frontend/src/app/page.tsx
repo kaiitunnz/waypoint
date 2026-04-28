@@ -33,6 +33,8 @@ export default function HomePage() {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [error, setError] = useState("");
   const [connection, setConnection] = useState<ConnectionState>("idle");
+  const [defaultBackend, setDefaultBackend] = useState<Backend>("codex");
+  const [defaultCwd, setDefaultCwd] = useState("~/");
   const [remoteCodexEnabled, setRemoteCodexEnabled] = useState(false);
   const [defaultRemoteCwd, setDefaultRemoteCwd] = useState("~");
 
@@ -55,6 +57,8 @@ export default function HomePage() {
           return;
         }
         setSessions(items);
+        setDefaultBackend(me.default_backend);
+        setDefaultCwd(me.default_cwd || "~/");
         setRemoteCodexEnabled(me.remote_codex_enabled);
         setDefaultRemoteCwd(me.default_remote_cwd || "~");
       })
@@ -170,6 +174,8 @@ export default function HomePage() {
     clearToken();
     setToken("");
     setSessions([]);
+    setDefaultBackend("codex");
+    setDefaultCwd("~/");
     setRemoteCodexEnabled(false);
     setDefaultRemoteCwd("~");
     setError(message);
@@ -230,6 +236,8 @@ export default function HomePage() {
       ) : null}
       {token ? (
         <LaunchPanel
+          defaultBackend={defaultBackend}
+          defaultCwd={defaultCwd}
           defaultRemoteCwd={defaultRemoteCwd}
           remoteCodexEnabled={remoteCodexEnabled}
           onAttach={handleAttach}

@@ -86,6 +86,8 @@ class LoginResponse(BaseModel):
 
 class MeResponse(BaseModel):
     authenticated: bool = True
+    default_backend: Backend = Backend.CODEX
+    default_cwd: str = "~/"
     remote_codex_enabled: bool = False
     default_remote_cwd: str | None = None
 

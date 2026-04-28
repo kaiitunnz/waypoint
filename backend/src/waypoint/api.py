@@ -73,6 +73,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def me(_: Annotated[str, Depends(token_dependency())]) -> MeResponse:
         remote_codex = context.settings.codex_remote
         return MeResponse(
+            default_backend=context.settings.default_backend,
+            default_cwd=context.settings.default_cwd,
             remote_codex_enabled=bool(remote_codex and remote_codex.enabled),
             default_remote_cwd=remote_codex.default_remote_cwd if remote_codex and remote_codex.enabled else None,
         )

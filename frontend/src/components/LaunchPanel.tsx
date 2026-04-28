@@ -5,19 +5,36 @@ import { FormEvent, useEffect, useState } from "react";
 import { Backend } from "@/lib/types";
 
 interface LaunchPanelProps {
+  defaultBackend: Backend;
+  defaultCwd: string;
   defaultRemoteCwd: string;
   remoteCodexEnabled: boolean;
   onCreate: (backend: Backend, cwd: string, title: string, remoteCwd?: string) => Promise<void>;
   onAttach: (target: string, backendHint: Backend) => Promise<void>;
 }
 
-export function LaunchPanel({ defaultRemoteCwd, remoteCodexEnabled, onCreate, onAttach }: LaunchPanelProps) {
-  const [backend, setBackend] = useState<Backend>("codex");
-  const [cwd, setCwd] = useState("~/");
+export function LaunchPanel({
+  defaultBackend,
+  defaultCwd,
+  defaultRemoteCwd,
+  remoteCodexEnabled,
+  onCreate,
+  onAttach,
+}: LaunchPanelProps) {
+  const [backend, setBackend] = useState<Backend>(defaultBackend);
+  const [cwd, setCwd] = useState(defaultCwd);
   const [remoteCwd, setRemoteCwd] = useState(defaultRemoteCwd);
   const [title, setTitle] = useState("");
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setBackend(defaultBackend);
+  }, [defaultBackend]);
+
+  useEffect(() => {
+    setCwd(defaultCwd);
+  }, [defaultCwd]);
 
   useEffect(() => {
     setRemoteCwd(defaultRemoteCwd);

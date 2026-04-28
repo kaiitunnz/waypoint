@@ -33,6 +33,7 @@ Waypoint can route managed `codex` sessions through SSH instead of starting a lo
 
 The current config shape supports one optional `codex_remote` profile with:
 
+- `default_backend` and `default_cwd`, which seed the frontend launch form
 - top-level backend defaults such as `host`, `port`, `password`, and `data_dir`
 - `ssh_destination` and optional `ssh_args`
 - `codex_bin` on the remote host

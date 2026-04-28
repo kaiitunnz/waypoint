@@ -32,6 +32,7 @@ interface SessionDetailProps {
 }
 
 type ViewMode = "chat" | "terminal";
+type FilterMode = "important" | "all";
 type ConnectionState = "connecting" | "open" | "reconnecting";
 
 const RECONNECT_BASE_MS = 1000;
@@ -45,6 +46,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [draft, setDraft] = useState("");
   const [view, setView] = useState<ViewMode>("chat");
+  const [filterMode, setFilterMode] = useState<FilterMode>("important");
   const [error, setError] = useState("");
   const [connection, setConnection] = useState<ConnectionState>("connecting");
 
@@ -237,6 +239,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     session && supportsStructuredApproval(session.transport) && session.status === "waiting_input"
       ? findPendingApproval(events)
       : null;
+  const visibleEvents = filterMode === "all" ? events : events.filter(isImportantEvent);
+  const hiddenEventCount = events.length - visibleEvents.length;
 
   return (
     <section className="stack">
@@ -279,8 +283,29 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       </div>
       {view === "chat" ? (
         <section className="stack">
+          <div className="action-row">
+            <button
+              className={filterMode === "important" ? "primary" : "secondary"}
+              onClick={() => setFilterMode("important")}
+              type="button"
+            >
+              Important
+            </button>
+            <button
+              className={filterMode === "all" ? "primary" : "secondary"}
+              onClick={() => setFilterMode("all")}
+              type="button"
+            >
+              All events
+            </button>
+            {filterMode === "important" && hiddenEventCount > 0 ? (
+              <span className="muted">
+                Hiding {hiddenEventCount} low-signal event{hiddenEventCount === 1 ? "" : "s"}
+              </span>
+            ) : null}
+          </div>
           {session
-            ? events.map((event) => (
+            ? visibleEvents.map((event) => (
                 <TranscriptCard
                   event={event}
                   transport={session.transport}
@@ -401,6 +426,24 @@ function findPendingApproval(events: EventRecord[]): EventRecord | null {
     }
   }
   return null;
+}
+
+function isImportantEvent(event: EventRecord): boolean {
+  switch (event.kind) {
+    case "user_input":
+    case "agent_output":
+    case "tool_call":
+    case "tool_result":
+    case "approval_request":
+      return true;
+    case "system_note":
+    case "status_update":
+      return /(approval response|attached|started|terminated|interrupt|resume|failed|error|exited)/i.test(event.text);
+    case "raw_terminal_chunk":
+      return false;
+    default:
+      return false;
+  }
 }
 
 interface ApprovalCardProps {

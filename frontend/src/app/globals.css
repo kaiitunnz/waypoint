@@ -176,6 +176,43 @@ pre {
   border-radius: 999px;
 }
 
+.field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.link-button {
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.82rem;
+  padding: 0;
+  letter-spacing: 0.04em;
+}
+
+.link-button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.probe {
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.probe.checking {
+  color: var(--muted);
+}
+
+.probe.reachable {
+  color: var(--accent);
+}
+
+.probe.unreachable {
+  color: var(--danger);
+}
+
 .session-row,
 .action-row,
 .view-toggle {

@@ -9,6 +9,15 @@ export class AuthError extends Error {
   }
 }
 
+export async function probeBackend(host: string, signal?: AbortSignal): Promise<boolean> {
+  try {
+    const response = await fetch(`${host}/health`, { cache: "no-store", signal });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function login(host: string, password: string): Promise<string> {
   const response = await fetch(`${host}/api/auth/login`, {
     method: "POST",

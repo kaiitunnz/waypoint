@@ -111,6 +111,24 @@ export async function postAction(
   await ensureOk(response, `failed to ${action}`);
 }
 
+export async function approveSession(
+  host: string,
+  token: string,
+  sessionId: string,
+  decision: string,
+  text?: string,
+): Promise<void> {
+  const response = await fetch(`${host}/api/sessions/${sessionId}/approve`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ decision, text }),
+  });
+  await ensureOk(response, "failed to send approval");
+}
+
 export async function sendInput(
   host: string,
   token: string,

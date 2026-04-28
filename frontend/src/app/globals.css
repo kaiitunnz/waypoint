@@ -203,6 +203,26 @@ pre {
   color: #dbe4f5;
 }
 
+.badge.transport.tmux {
+  background: rgba(148, 163, 184, 0.16);
+  color: #cbd5e1;
+}
+
+.badge.transport.codex_app_server {
+  background: rgba(94, 234, 212, 0.16);
+  color: var(--accent);
+}
+
+.badge.fidelity.structured {
+  background: rgba(94, 234, 212, 0.18);
+  color: var(--accent);
+}
+
+.badge.fidelity.heuristic {
+  background: rgba(251, 191, 36, 0.16);
+  color: #fbbf24;
+}
+
 .status {
   background: rgba(94, 234, 212, 0.14);
   color: var(--accent);
@@ -221,6 +241,13 @@ pre {
 
 .transcript {
   gap: 10px;
+}
+
+.approval {
+  border-color: rgba(94, 234, 212, 0.5);
+  box-shadow: 0 0 0 1px rgba(94, 234, 212, 0.18), var(--shadow);
+  display: grid;
+  gap: 12px;
 }
 
 .transcript pre {

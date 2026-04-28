@@ -1,5 +1,6 @@
 export type Backend = "claude_code" | "codex";
 export type SessionSource = "managed" | "attached_tmux";
+export type SessionTransport = "tmux" | "codex_app_server";
 export type SessionStatus =
   | "starting"
   | "idle"
@@ -22,6 +23,7 @@ export interface SessionRecord {
   id: string;
   backend: Backend;
   source: SessionSource;
+  transport: SessionTransport;
   title: string;
   cwd: string;
   repo_name?: string | null;
@@ -33,6 +35,7 @@ export interface SessionRecord {
   tmux_session?: string | null;
   tmux_window?: string | null;
   tmux_pane?: string | null;
+  thread_id?: string | null;
   raw_log_path: string;
   structured_log_path: string;
   pid?: number | null;

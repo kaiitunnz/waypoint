@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import {
+  approveSession,
   connectSessionSocket,
   fetchEvents,
   fetchSession,
@@ -13,6 +14,12 @@ import {
   sendInput,
 } from "@/lib/api";
 import { clearToken } from "@/lib/store";
+import {
+  fidelityFor,
+  supportsResume,
+  supportsStructuredApproval,
+  transportLabel,
+} from "@/lib/transport";
 import { EventRecord, SessionEnvelope, SessionRecord } from "@/lib/types";
 
 interface SessionDetailProps {
@@ -116,11 +123,28 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }
 
+  async function submitApproval(decision: string) {
+    try {
+      await approveSession(host, token, sessionId, decision);
+    } catch (approvalError) {
+      if (isAuthError(approvalError)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(approvalError instanceof Error ? approvalError.message : "failed to send approval");
+    }
+  }
+
   function handleAuthFailure() {
     clearToken();
     onAuthFailure?.();
     router.replace("/");
   }
+
+  const pendingApproval =
+    session && supportsStructuredApproval(session.transport) && session.status === "waiting_input"
+      ? findPendingApproval(events)
+      : null;
 
   return (
     <section className="stack">
@@ -128,16 +152,22 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         <header className="panel">
           <div className="session-row">
             <span className={`badge ${session.backend}`}>{session.backend === "codex" ? "Codex" : "Claude"}</span>
+            <span className={`badge transport ${session.transport}`}>{transportLabel(session.transport)}</span>
+            <span className={`badge fidelity ${fidelityFor(session.transport)}`}>{fidelityFor(session.transport)}</span>
             <span className={`status ${session.status}`}>{session.status.replace("_", " ")}</span>
           </div>
           <h2>{session.title}</h2>
           <p className="muted">{session.cwd}</p>
           <p className="meta">
-            {session.source === "managed" ? "Structured wrapper path" : "Heuristic tmux attachment"}
+            {session.source === "managed" ? "Managed" : "Attached"}
+            {session.thread_id ? ` · thread ${session.thread_id}` : null}
           </p>
         </header>
       ) : null}
       {error ? <p className="error">{error}</p> : null}
+      {pendingApproval ? (
+        <ApprovalCard event={pendingApproval} onDecide={submitApproval} />
+      ) : null}
       <div className="view-toggle">
         <button className={view === "chat" ? "primary" : "secondary"} onClick={() => setView("chat")} type="button">
           Chat
@@ -179,9 +209,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           <button className="secondary" onClick={() => void runAction("interrupt")} type="button">
             Interrupt
           </button>
-          <button className="secondary" onClick={() => void runAction("resume")} type="button">
-            Resume
-          </button>
+          {session && supportsResume(session.transport) ? (
+            <button className="secondary" onClick={() => void runAction("resume")} type="button">
+              Resume
+            </button>
+          ) : null}
         </div>
       </section>
     </section>
@@ -194,6 +226,51 @@ function mergeEvents(current: EventRecord[], incoming: EventRecord): EventRecord
     return current;
   }
   return [...current, incoming];
+}
+
+function findPendingApproval(events: EventRecord[]): EventRecord | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.kind === "approval_request") {
+      return event;
+    }
+    if (event.kind === "system_note" && /Approval response sent/i.test(event.text)) {
+      return null;
+    }
+  }
+  return null;
+}
+
+interface ApprovalCardProps {
+  event: EventRecord;
+  onDecide: (decision: string) => void | Promise<void>;
+}
+
+function ApprovalCard({ event, onDecide }: ApprovalCardProps) {
+  const method = typeof event.metadata.method === "string" ? event.metadata.method : null;
+  return (
+    <section className="panel approval">
+      <div className="session-row">
+        <span className="badge fidelity structured">approval</span>
+        {method ? <span className="muted">{method}</span> : null}
+      </div>
+      <pre>{event.text}</pre>
+      <div className="action-row">
+        <button className="primary" onClick={() => void onDecide("accept")} type="button">
+          Approve
+        </button>
+        <button className="secondary" onClick={() => void onDecide("acceptForSession")} type="button">
+          Approve for session
+        </button>
+        <button className="secondary" onClick={() => void onDecide("decline")} type="button">
+          Decline
+        </button>
+        <button className="secondary" onClick={() => void onDecide("cancel")} type="button">
+          Cancel
+        </button>
+      </div>
+    </section>
+  );
 }
 
 function sanitizeEvent(event: EventRecord): EventRecord {

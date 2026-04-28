@@ -3,13 +3,25 @@ import { memo } from "react";
 import { EventRecord, SessionTransport } from "@/lib/types";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 
+export interface ToolPair {
+  call: EventRecord | null;
+  result: EventRecord | null;
+  itemId: string;
+  ts: string;
+  sequence: number;
+}
+
 interface TranscriptCardProps {
   event: EventRecord;
   transport: SessionTransport;
+  pair?: ToolPair;
 }
 
-export const TranscriptCard = memo(function TranscriptCard({ event, transport }: TranscriptCardProps) {
+export const TranscriptCard = memo(function TranscriptCard({ event, transport, pair }: TranscriptCardProps) {
   if (transport === "codex_app_server" || transport === "claude_cli") {
+    if (pair) {
+      return <ToolPairCard pair={pair} />;
+    }
     return <StructuredCard event={event} transport={transport} />;
   }
   return <HeuristicCard event={event} />;
@@ -90,6 +102,44 @@ function ToolDisclosure({
         {preview ? <p className="transcript-preview muted">{preview}</p> : null}
       </summary>
       <pre className={bodyClassName}>{event.text}</pre>
+    </details>
+  );
+}
+
+function ToolPairCard({ pair }: { pair: ToolPair }) {
+  const { call, result } = pair;
+  const callPreview = call ? summarizeToolText(call.text) : null;
+  const resultPreview = result ? summarizeToolText(result.text) : null;
+  const status = result ? "complete" : "pending";
+  const summary = callPreview || resultPreview || "tool call";
+  return (
+    <details className="panel transcript codex tool_pair tool-disclosure">
+      <summary className="transcript-summary">
+        <div className="session-row">
+          <span className="badge tool">tool</span>
+          <span className={`badge tool-status ${status}`}>{status}</span>
+          <span className="muted">{formatTime(pair.ts)}</span>
+        </div>
+        {summary ? <p className="transcript-preview muted">{summary}</p> : null}
+      </summary>
+      <div className="tool-pair-body">
+        {call ? (
+          <div className="tool-pair-section">
+            <p className="tool-pair-label">call</p>
+            <pre className="shell">{call.text}</pre>
+          </div>
+        ) : null}
+        {result ? (
+          <div className="tool-pair-section">
+            <p className="tool-pair-label">result</p>
+            <pre className="output">{result.text}</pre>
+          </div>
+        ) : (
+          <div className="tool-pair-section">
+            <p className="tool-pair-label muted">awaiting result…</p>
+          </div>
+        )}
+      </div>
     </details>
   );
 }

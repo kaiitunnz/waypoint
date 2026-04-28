@@ -30,7 +30,7 @@ import {
   supportsStructuredApproval,
   transportLabel,
 } from "@/lib/transport";
-import { TranscriptCard } from "@/components/TranscriptCard";
+import { TranscriptCard, ToolPair } from "@/components/TranscriptCard";
 import { EventRecord, SessionEnvelope, SessionRecord } from "@/lib/types";
 
 interface SessionDetailProps {
@@ -321,6 +321,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       : null;
   const visibleEvents = filterMode === "all" ? renderedEvents : renderedEvents.filter(isImportantEvent);
   const hiddenEventCount = renderedEvents.length - visibleEvents.length;
+  const transcriptItems = buildTranscriptItems(visibleEvents);
   const usageSummary = extractUsageSummary(events);
   const composerDisabled = session?.status === "exited";
   const canResume = Boolean(session && supportsResume(session.transport));
@@ -401,13 +402,22 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
             ) : null}
           </div>
           {session
-            ? visibleEvents.map((event) => (
-                <TranscriptCard
-                  event={event}
-                  transport={session.transport}
-                  key={`${event.sequence}-${event.id ?? "local"}`}
-                />
-              ))
+            ? transcriptItems.map((item) =>
+                item.kind === "pair" ? (
+                  <TranscriptCard
+                    event={item.pair.call ?? item.pair.result ?? item.event}
+                    pair={item.pair}
+                    transport={session.transport}
+                    key={`pair-${item.pair.itemId}`}
+                  />
+                ) : (
+                  <TranscriptCard
+                    event={item.event}
+                    transport={session.transport}
+                    key={`${item.event.sequence}-${item.event.id ?? "local"}`}
+                  />
+                ),
+              )
             : null}
           <div ref={transcriptEndRef} />
         </section>
@@ -585,6 +595,51 @@ function mergeEventText(existing: EventRecord, incoming: EventRecord): string {
   }
   const separator = existing.text.endsWith("\n") || incoming.text.startsWith("\n") ? "" : "\n";
   return `${existing.text}${separator}${incoming.text}`;
+}
+
+type TranscriptItem =
+  | { kind: "single"; event: EventRecord }
+  | { kind: "pair"; event: EventRecord; pair: ToolPair };
+
+function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
+  const result: TranscriptItem[] = [];
+  const pairIndex = new Map<string, number>();
+  for (const event of events) {
+    if (event.kind !== "tool_call" && event.kind !== "tool_result") {
+      result.push({ kind: "single", event });
+      continue;
+    }
+    const itemId = readItemId(event);
+    if (!itemId) {
+      result.push({ kind: "single", event });
+      continue;
+    }
+    const existingIdx = pairIndex.get(itemId);
+    if (existingIdx === undefined) {
+      const pair: ToolPair = {
+        itemId,
+        call: event.kind === "tool_call" ? event : null,
+        result: event.kind === "tool_result" ? event : null,
+        ts: event.ts,
+        sequence: event.sequence,
+      };
+      pairIndex.set(itemId, result.length);
+      result.push({ kind: "pair", event, pair });
+      continue;
+    }
+    const item = result[existingIdx];
+    if (item.kind !== "pair") {
+      continue;
+    }
+    if (event.kind === "tool_call") {
+      item.pair.call = event;
+    } else {
+      item.pair.result = event;
+    }
+    item.pair.ts = event.ts;
+    item.pair.sequence = Math.max(item.pair.sequence, event.sequence);
+  }
+  return result;
 }
 
 function isToolResultDelta(event: EventRecord): boolean {

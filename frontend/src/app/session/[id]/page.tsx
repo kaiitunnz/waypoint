@@ -22,9 +22,20 @@ export default function SessionPage() {
 
   return (
     <main className="page-shell">
-      <Link className="back-link" href="/">
-        Back to sessions
-      </Link>
+      <header className="app-bar">
+        <div className="app-bar-brand">
+          <Link className="app-bar-mark" href="/" aria-label="Waypoint home">
+            W
+          </Link>
+          <div className="app-bar-titles">
+            <p className="app-bar-eyebrow">Waypoint · session</p>
+            <h1 className="app-bar-title">Live transcript</h1>
+          </div>
+        </div>
+        <Link className="back-link" href="/">
+          ← all sessions
+        </Link>
+      </header>
       {host && token && sessionId ? (
         <SessionDetail
           host={host}

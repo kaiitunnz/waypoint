@@ -156,11 +156,11 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws/sessions")
     async def ws_sessions(websocket: WebSocket) -> None:
+        await websocket.accept()
         token = websocket.query_params.get("token", "")
         if not context.tokens.validate(token):
             await websocket.close(code=4401)
             return
-        await websocket.accept()
         queue = context.runtime.broadcast.subscribe_global()
         try:
             initial = SessionEnvelope(
@@ -178,11 +178,11 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws/sessions/{session_id}")
     async def ws_session(websocket: WebSocket, session_id: str) -> None:
+        await websocket.accept()
         token = websocket.query_params.get("token", "")
         if not context.tokens.validate(token):
             await websocket.close(code=4401)
             return
-        await websocket.accept()
         queue = context.runtime.broadcast.subscribe_session(session_id)
         try:
             session = context.runtime.get_session(session_id)

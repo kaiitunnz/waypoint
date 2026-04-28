@@ -256,6 +256,49 @@ async def test_terminal_snapshot_returns_command_fragments() -> None:
     assert adapter.terminal_snapshot("sess") == "one\ntwo\n"
 
 
+@pytest.mark.asyncio
+async def test_streamed_tool_result_suppresses_duplicate_completed_event() -> None:
+    emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+
+    fake.notifications.put_nowait(
+        FakeNotification(
+            "item/commandExecution/outputDelta",
+            {"itemId": "cmd-1", "delta": "line one\n"},
+        )
+    )
+    fake.notifications.put_nowait(
+        FakeNotification(
+            "item/completed",
+            {
+                "item": {
+                    "id": "cmd-1",
+                    "type": "commandExecution",
+                    "command": "pytest",
+                    "aggregatedOutput": "line one\n",
+                    "status": "completed",
+                }
+            },
+        )
+    )
+    fake.notifications.put_nowait(
+        FakeNotification(
+            "turn/completed",
+            {"turn": {"id": "turn-1", "status": "completed"}},
+        )
+    )
+
+    await adapter.send_input("sess", "run pytest")
+    state = adapter._sessions["sess"]
+    if state.stream_task is not None:
+        await state.stream_task
+
+    tool_results = [entry for entry in emitted if entry[1] == EventKind.TOOL_RESULT]
+    assert len(tool_results) == 1
+    assert tool_results[0][2] == "line one\n"
+
+
 def test_map_notification_agent_message_delta() -> None:
     adapter = CodexAppServerAdapter(lambda *_: None, client_factory=lambda *_: None)  # type: ignore[arg-type]
     kind, text, status = adapter._map_notification(

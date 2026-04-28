@@ -389,16 +389,17 @@ function mergeEvents(current: EventRecord[], incoming: EventRecord): EventRecord
     return current;
   }
   const incomingItemId = readItemId(incoming);
-  if (incoming.kind === "agent_output" && incomingItemId) {
+  if ((incoming.kind === "agent_output" || incoming.kind === "tool_result") && incomingItemId) {
     const index = current.findIndex(
-      (event) => event.kind === "agent_output" && readItemId(event) === incomingItemId,
+      (event) => event.kind === incoming.kind && readItemId(event) === incomingItemId,
     );
     if (index !== -1) {
       const next = current.slice();
       const existing = next[index];
       next[index] = {
         ...existing,
-        text: `${existing.text}${incoming.text}`,
+        text: mergeEventText(existing, incoming),
+        metadata: { ...existing.metadata, ...incoming.metadata },
         ts: incoming.ts,
         sequence: incoming.sequence,
       };
@@ -414,6 +415,37 @@ function readItemId(event: EventRecord): string | null {
     return meta.item_id;
   }
   return null;
+}
+
+function mergeEventText(existing: EventRecord, incoming: EventRecord): string {
+  if (incoming.kind === "agent_output") {
+    return `${existing.text}${incoming.text}`;
+  }
+  if (incoming.kind !== "tool_result") {
+    return incoming.text;
+  }
+  if (isToolResultDelta(incoming)) {
+    return `${existing.text}${incoming.text}`;
+  }
+  if (isToolResultDelta(existing)) {
+    return existing.text || incoming.text;
+  }
+  if (!existing.text) {
+    return incoming.text;
+  }
+  if (!incoming.text || existing.text === incoming.text) {
+    return existing.text;
+  }
+  const separator = existing.text.endsWith("\n") || incoming.text.startsWith("\n") ? "" : "\n";
+  return `${existing.text}${separator}${incoming.text}`;
+}
+
+function isToolResultDelta(event: EventRecord): boolean {
+  if (event.kind !== "tool_result") {
+    return false;
+  }
+  const method = event.metadata?.method;
+  return method === "item/commandExecution/outputDelta" || method === "item/fileChange/outputDelta";
 }
 
 function findPendingApproval(events: EventRecord[]): EventRecord | null {

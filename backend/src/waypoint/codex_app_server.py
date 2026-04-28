@@ -60,6 +60,7 @@ class CodexSessionState:
     stream_task: asyncio.Task[None] | None = None
     pending_approval: PendingApproval | None = None
     terminal_fragments: list[str] = field(default_factory=list)
+    streamed_tool_result_ids: set[str] = field(default_factory=set)
 
 
 class CodexAppServerAdapter:
@@ -246,6 +247,22 @@ class CodexAppServerAdapter:
                     item_id = self._extract_item_id(payload)
                     if item_id is not None:
                         metadata["item_id"] = item_id
+                    if (
+                        kind == EventKind.TOOL_RESULT
+                        and notification.method
+                        in {
+                            "item/commandExecution/outputDelta",
+                            "item/fileChange/outputDelta",
+                        }
+                        and item_id
+                    ):
+                        state.streamed_tool_result_ids.add(item_id)
+                    if (
+                        kind == EventKind.TOOL_RESULT
+                        and notification.method == "item/completed"
+                        and item_id in state.streamed_tool_result_ids
+                    ):
+                        continue
                     await self._emit_event(
                         state.session_id,
                         kind,
@@ -256,12 +273,14 @@ class CodexAppServerAdapter:
                 if notification.method == "turn/completed":
                     state.active_turn_id = None
                     state.stream_task = None
+                    state.streamed_tool_result_ids.clear()
                     break
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
             state.active_turn_id = None
             state.stream_task = None
+            state.streamed_tool_result_ids.clear()
             log.exception(
                 "codex stream failed",
                 extra={"session_id": state.session_id, "thread_id": state.thread_id},

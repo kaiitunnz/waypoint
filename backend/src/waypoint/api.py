@@ -27,7 +27,7 @@ class AppContext:
         self.settings.ensure_dirs()
         self.storage = Storage(self.settings.database_path)
         self.runtime = SessionRuntime(self.settings, self.storage)
-        self.tokens = TokenStore(self.settings)
+        self.tokens = TokenStore(self.settings, self.storage)
 
 
 def create_app() -> FastAPI:

@@ -2,29 +2,31 @@ from datetime import UTC, datetime, timedelta
 import secrets
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Header, HTTPException, status
 
 from waypoint.config import Settings
 from waypoint.schemas import LoginResponse
+from waypoint.storage import Storage
 
 
 class TokenStore:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, storage: Storage) -> None:
         self.settings = settings
-        self.tokens: dict[str, datetime] = {}
+        self.storage = storage
+        self.storage.purge_expired_tokens(datetime.now(UTC))
 
     def issue(self) -> LoginResponse:
         expires_at = datetime.now(UTC) + timedelta(seconds=self.settings.token_ttl_seconds)
         token = secrets.token_urlsafe(32)
-        self.tokens[token] = expires_at
+        self.storage.insert_token(token, expires_at)
         return LoginResponse(token=token, expires_at=expires_at)
 
     def validate(self, token: str) -> bool:
-        expires_at = self.tokens.get(token)
+        expires_at = self.storage.get_token_expiry(token)
         if expires_at is None:
             return False
         if expires_at < datetime.now(UTC):
-            self.tokens.pop(token, None)
+            self.storage.delete_token(token)
             return False
         return True
 

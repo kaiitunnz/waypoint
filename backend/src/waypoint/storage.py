@@ -50,6 +50,12 @@ class Storage:
                 sequence INTEGER NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
+
+            CREATE TABLE IF NOT EXISTS auth_tokens (
+                token TEXT PRIMARY KEY,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
             """
         )
         self._ensure_column("sessions", "transport", "TEXT NOT NULL DEFAULT 'tmux'")
@@ -165,6 +171,35 @@ class Storage:
         query += " ORDER BY sequence ASC, id ASC"
         rows = self.connection.execute(query, params).fetchall()
         return [self._event_from_row(row) for row in rows]
+
+    def insert_token(self, token: str, expires_at: datetime) -> None:
+        now = datetime.now(UTC)
+        self.connection.execute(
+            "INSERT OR REPLACE INTO auth_tokens (token, expires_at, created_at) VALUES (?, ?, ?)",
+            (token, expires_at.isoformat(), now.isoformat()),
+        )
+        self.connection.commit()
+
+    def get_token_expiry(self, token: str) -> datetime | None:
+        row = self.connection.execute(
+            "SELECT expires_at FROM auth_tokens WHERE token = ?",
+            (token,),
+        ).fetchone()
+        if row is None:
+            return None
+        return datetime.fromisoformat(row["expires_at"])
+
+    def delete_token(self, token: str) -> None:
+        self.connection.execute("DELETE FROM auth_tokens WHERE token = ?", (token,))
+        self.connection.commit()
+
+    def purge_expired_tokens(self, now: datetime) -> int:
+        cursor = self.connection.execute(
+            "DELETE FROM auth_tokens WHERE expires_at < ?",
+            (now.isoformat(),),
+        )
+        self.connection.commit()
+        return cursor.rowcount or 0
 
     def next_sequence(self, session_id: str) -> int:
         row = self.connection.execute(

@@ -16,9 +16,11 @@ def default_data_dir() -> Path:
     return Path.home() / "Library" / "Application Support" / "Waypoint"
 
 
-DEFAULT_CORS_ORIGINS = (
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
+DEFAULT_CORS_ORIGINS: tuple[str, ...] = ()
+DEFAULT_CORS_ORIGIN_REGEX = (
+    r"^https?://(localhost|127\.0\.0\.1|"
+    r"100\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"\[fd7a:115c:a1e0(:[0-9a-fA-F]{0,4}){0,7}\])(:\d+)?$"
 )
 
 
@@ -27,7 +29,14 @@ def parse_cors_origins() -> list[str]:
     if raw is None:
         return list(DEFAULT_CORS_ORIGINS)
     parts = [item.strip() for item in raw.split(",") if item.strip()]
-    return parts or list(DEFAULT_CORS_ORIGINS)
+    return parts
+
+
+def parse_cors_origin_regex() -> str | None:
+    raw = os.environ.get("WAYPOINT_CORS_ORIGIN_REGEX")
+    if raw is None:
+        return DEFAULT_CORS_ORIGIN_REGEX
+    return raw or None
 
 
 class Settings(BaseModel):
@@ -41,9 +50,7 @@ class Settings(BaseModel):
     stream_poll_interval: float = 1.0
     tail_snapshot_lines: int = 200
     cors_origins: list[str] = Field(default_factory=parse_cors_origins)
-    cors_allow_origin_regex: str | None = Field(
-        default_factory=lambda: os.environ.get("WAYPOINT_CORS_ORIGIN_REGEX")
-    )
+    cors_allow_origin_regex: str | None = Field(default_factory=parse_cors_origin_regex)
 
     @property
     def database_path(self) -> Path:

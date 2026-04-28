@@ -1,14 +1,9 @@
-from pathlib import Path
 import shlex
 import shutil
+from pathlib import Path
 
 from codex_app_server.client import AppServerClient, AppServerConfig
 from pydantic import BaseModel, Field
-
-
-class CwdMapping(BaseModel):
-    local_prefix: str
-    remote_prefix: str
 
 
 class RemoteCodexSshConfig(BaseModel):
@@ -17,30 +12,12 @@ class RemoteCodexSshConfig(BaseModel):
     ssh_bin: str = "ssh"
     ssh_args: list[str] = Field(default_factory=list)
     codex_bin: str = "codex"
+    default_remote_cwd: str = "~"
     config_overrides: list[str] = Field(default_factory=list)
     remote_env: dict[str, str] = Field(default_factory=dict)
-    cwd_mappings: list[CwdMapping] = Field(default_factory=list)
 
-    def resolve_remote_cwd(self, cwd: str) -> str:
-        normalized = _normalize_user_path(cwd)
-        match: tuple[str, str] | None = None
-        for mapping in self.cwd_mappings:
-            local_prefix = _normalize_user_path(mapping.local_prefix)
-            if not _is_path_prefix(local_prefix, normalized):
-                continue
-            remote_prefix = _normalize_user_path(mapping.remote_prefix)
-            if match is None or len(local_prefix) > len(match[0]):
-                match = (local_prefix, remote_prefix)
-        if match is None:
-            return normalized
-        suffix = normalized[len(match[0]) :].lstrip("/")
-        if not suffix:
-            return match[1]
-        return f"{match[1].rstrip('/')}/{suffix}"
-
-    def build_launch_args(self, cwd: str) -> tuple[str, ...]:
+    def build_launch_args(self, remote_cwd: str) -> tuple[str, ...]:
         ssh_bin = _resolve_local_binary(self.ssh_bin)
-        remote_cwd = self.resolve_remote_cwd(cwd)
         codex_args = [self.codex_bin]
         for override in self.config_overrides:
             codex_args.extend(["--config", override])
@@ -57,10 +34,11 @@ class RemoteCodexSshConfig(BaseModel):
 
 
 def build_remote_codex_client_factory(remote: RemoteCodexSshConfig):
-    def factory(cwd: str, approval_handler):
+    def factory(cwd: str, remote_cwd: str | None, approval_handler):
+        launch_cwd = remote_cwd or remote.default_remote_cwd
         return AppServerClient(
             config=AppServerConfig(
-                launch_args_override=remote.build_launch_args(cwd),
+                launch_args_override=remote.build_launch_args(launch_cwd),
                 client_name="waypoint",
                 client_title="Waypoint",
             ),
@@ -80,18 +58,3 @@ def _resolve_local_binary(binary: str) -> str:
     if resolved is None:
         raise FileNotFoundError(f"binary not found on PATH: {binary}")
     return resolved
-
-
-def _normalize_user_path(raw: str) -> str:
-    value = Path(raw).expanduser().as_posix()
-    if value != "/":
-        value = value.rstrip("/")
-    return value or "/"
-
-
-def _is_path_prefix(prefix: str, value: str) -> bool:
-    if prefix == value:
-        return True
-    if prefix == "/":
-        return value.startswith("/")
-    return value.startswith(f"{prefix}/")

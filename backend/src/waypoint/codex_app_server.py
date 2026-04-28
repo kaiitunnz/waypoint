@@ -20,17 +20,17 @@ log = logging.getLogger("waypoint.codex")
 
 ApprovalDecisionHandler = Callable[[str, EventKind, str, dict[str, Any], SessionStatus], Awaitable[None]]
 ApprovalCallback = Callable[[str, dict[str, Any] | None], dict[str, Any]]
-ClientFactory = Callable[[str, ApprovalCallback], AppServerClient]
+ClientFactory = Callable[[str, str | None, ApprovalCallback], AppServerClient]
 
 
-def _default_client_factory(cwd: str, approval_handler: ApprovalCallback) -> AppServerClient:
+def _default_client_factory(cwd: str, remote_cwd: str | None, approval_handler: ApprovalCallback) -> AppServerClient:
     codex_bin = shutil.which("codex")
     if codex_bin is None:
         raise RuntimeError("codex binary not found on PATH")
     return AppServerClient(
         config=AppServerConfig(
             codex_bin=codex_bin,
-            cwd=cwd,
+            cwd=remote_cwd or cwd,
             client_name="waypoint",
             client_title="Waypoint",
         ),
@@ -70,14 +70,20 @@ class CodexAppServerAdapter:
         self._sessions: dict[str, CodexSessionState] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
 
-    async def start_session(self, session_id: str, cwd: str) -> str:
-        state = await self._spawn_session(session_id, cwd)
-        started = await self._call_client(state, state.client.thread_start, {"cwd": cwd})
+    async def start_session(self, session_id: str, cwd: str, remote_cwd: str | None = None) -> str:
+        state = await self._spawn_session(session_id, cwd, remote_cwd=remote_cwd)
+        started = await self._call_client(state, state.client.thread_start, {"cwd": remote_cwd or cwd})
         state.thread_id = started.thread.id
         return state.thread_id
 
-    async def restore_session(self, session_id: str, cwd: str, thread_id: str) -> None:
-        state = await self._spawn_session(session_id, cwd, thread_id=thread_id)
+    async def restore_session(
+        self,
+        session_id: str,
+        cwd: str,
+        thread_id: str,
+        remote_cwd: str | None = None,
+    ) -> None:
+        state = await self._spawn_session(session_id, cwd, thread_id=thread_id, remote_cwd=remote_cwd)
         await self._call_client(state, state.client.thread_resume, thread_id)
 
     async def _spawn_session(
@@ -85,6 +91,7 @@ class CodexAppServerAdapter:
         session_id: str,
         cwd: str,
         thread_id: str = "",
+        remote_cwd: str | None = None,
     ) -> CodexSessionState:
         self._loop = asyncio.get_running_loop()
         holder: dict[str, CodexSessionState] = {}
@@ -113,7 +120,7 @@ class CodexAppServerAdapter:
             state.pending_approval = None
             return pending.response or {"decision": "decline"}
 
-        client = self._client_factory(cwd, approval_handler)
+        client = self._client_factory(cwd, remote_cwd, approval_handler)
         await asyncio.to_thread(client.start)
         await asyncio.to_thread(client.initialize)
         state = CodexSessionState(

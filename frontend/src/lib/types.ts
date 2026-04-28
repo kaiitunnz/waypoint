@@ -26,6 +26,7 @@ export interface SessionRecord {
   transport: SessionTransport;
   title: string;
   cwd: string;
+  remote_cwd?: string | null;
   repo_name?: string | null;
   branch?: string | null;
   status: SessionStatus;
@@ -49,6 +50,12 @@ export interface EventRecord {
   text: string;
   metadata: Record<string, unknown>;
   sequence: number;
+}
+
+export interface MeResponse {
+  authenticated: boolean;
+  remote_codex_enabled: boolean;
+  default_remote_cwd?: string | null;
 }
 
 export interface SessionEnvelope {

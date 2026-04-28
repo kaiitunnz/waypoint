@@ -25,6 +25,7 @@ class Storage:
                 transport TEXT NOT NULL DEFAULT 'tmux',
                 title TEXT NOT NULL,
                 cwd TEXT NOT NULL,
+                remote_cwd TEXT,
                 repo_name TEXT,
                 branch TEXT,
                 status TEXT NOT NULL,
@@ -60,6 +61,7 @@ class Storage:
         )
         self._ensure_column("sessions", "transport", "TEXT NOT NULL DEFAULT 'tmux'")
         self._ensure_column("sessions", "thread_id", "TEXT")
+        self._ensure_column("sessions", "remote_cwd", "TEXT")
         self.connection.commit()
 
     def close(self) -> None:
@@ -69,10 +71,10 @@ class Storage:
         self.connection.execute(
             """
             INSERT INTO sessions (
-                id, backend, source, transport, title, cwd, repo_name, branch, status,
+                id, backend, source, transport, title, cwd, remote_cwd, repo_name, branch, status,
                 created_at, updated_at, last_event_at, tmux_session, tmux_window,
                 tmux_pane, thread_id, raw_log_path, structured_log_path, pid
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -81,6 +83,7 @@ class Storage:
                 session.transport,
                 session.title,
                 session.cwd,
+                session.remote_cwd,
                 session.repo_name,
                 session.branch,
                 session.status,

@@ -1,26 +1,33 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 import { Backend } from "@/lib/types";
 
 interface LaunchPanelProps {
-  onCreate: (backend: Backend, cwd: string, title: string) => Promise<void>;
+  defaultRemoteCwd: string;
+  remoteCodexEnabled: boolean;
+  onCreate: (backend: Backend, cwd: string, title: string, remoteCwd?: string) => Promise<void>;
   onAttach: (target: string, backendHint: Backend) => Promise<void>;
 }
 
-export function LaunchPanel({ onCreate, onAttach }: LaunchPanelProps) {
+export function LaunchPanel({ defaultRemoteCwd, remoteCodexEnabled, onCreate, onAttach }: LaunchPanelProps) {
   const [backend, setBackend] = useState<Backend>("codex");
   const [cwd, setCwd] = useState("~/");
+  const [remoteCwd, setRemoteCwd] = useState(defaultRemoteCwd);
   const [title, setTitle] = useState("");
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setRemoteCwd(defaultRemoteCwd);
+  }, [defaultRemoteCwd]);
 
   async function submitCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     try {
-      await onCreate(backend, cwd, title);
+      await onCreate(backend, cwd, title, backend === "codex" && remoteCodexEnabled ? remoteCwd : undefined);
       setTitle("");
     } finally {
       setBusy(false);
@@ -56,6 +63,12 @@ export function LaunchPanel({ onCreate, onAttach }: LaunchPanelProps) {
           <span>Working directory</span>
           <input value={cwd} onChange={(event) => setCwd(event.target.value)} />
         </label>
+        {backend === "codex" && remoteCodexEnabled ? (
+          <label className="field">
+            <span>Remote working directory</span>
+            <input value={remoteCwd} onChange={(event) => setRemoteCwd(event.target.value)} />
+          </label>
+        ) : null}
         <label className="field">
           <span>Title</span>
           <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Optional" />

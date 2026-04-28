@@ -36,5 +36,7 @@ The current config shape supports one optional `codex_remote` profile with:
 - top-level backend defaults such as `host`, `port`, `password`, and `data_dir`
 - `ssh_destination` and optional `ssh_args`
 - `codex_bin` on the remote host
+- `default_remote_cwd`, which seeds the frontend launch form and defaults to `~`
 - `remote_env` for secrets such as `OPENAI_API_KEY`
-- `cwd_mappings` to translate local launch paths into remote workspace paths
+
+Managed Codex launches always keep a local `cwd` for repo metadata and UI display. The frontend also submits an explicit `remote_cwd` for the remote host; if it omits one, Waypoint uses `default_remote_cwd`.

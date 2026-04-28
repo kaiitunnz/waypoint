@@ -1,6 +1,6 @@
 "use client";
 
-import { EventRecord, SessionEnvelope, SessionRecord } from "@/lib/types";
+import { EventRecord, MeResponse, SessionEnvelope, SessionRecord } from "@/lib/types";
 
 export class AuthError extends Error {
   constructor(message = "session expired") {
@@ -39,6 +39,15 @@ export async function fetchSessions(host: string, token: string): Promise<Sessio
   await ensureOk(response, "failed to fetch sessions");
   const payload = await response.json();
   return payload.sessions as SessionRecord[];
+}
+
+export async function fetchMe(host: string, token: string): Promise<MeResponse> {
+  const response = await fetch(`${host}/api/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch backend settings");
+  return (await response.json()) as MeResponse;
 }
 
 export async function fetchSession(host: string, token: string, sessionId: string): Promise<SessionRecord> {

@@ -49,6 +49,7 @@ class SessionRecord(BaseModel):
     transport: SessionTransport = SessionTransport.TMUX
     title: str
     cwd: str
+    remote_cwd: str | None = None
     repo_name: str | None = None
     branch: str | None = None
     status: SessionStatus
@@ -85,11 +86,14 @@ class LoginResponse(BaseModel):
 
 class MeResponse(BaseModel):
     authenticated: bool = True
+    remote_codex_enabled: bool = False
+    default_remote_cwd: str | None = None
 
 
 class SessionCreateRequest(BaseModel):
     backend: Backend
     cwd: str
+    remote_cwd: str | None = None
     title: str | None = None
     args: list[str] = Field(default_factory=list)
     source_mode: SessionSource = SessionSource.MANAGED

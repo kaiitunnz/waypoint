@@ -86,8 +86,9 @@ def make_adapter(emitted: list[tuple[str, EventKind, str, dict[str, Any], Sessio
 
     fake = FakeAppServerClient()
 
-    def factory(cwd, approval_handler):
+    def factory(cwd, remote_cwd, approval_handler):
         fake.approval_handler = approval_handler
+        fake.calls.append(("factory", (cwd, remote_cwd)))
         return fake
 
     adapter = CodexAppServerAdapter(emit, client_factory=factory)
@@ -101,7 +102,19 @@ async def test_start_session_creates_thread() -> None:
     thread_id = await adapter.start_session("sess", "/tmp/work")
     assert thread_id == "thread-1"
     assert fake.started and fake.initialized
-    assert fake.calls[0][0] == "thread_start"
+    assert fake.calls[0] == ("factory", ("/tmp/work", None))
+    assert fake.calls[1][0] == "thread_start"
+
+
+@pytest.mark.asyncio
+async def test_start_session_uses_explicit_remote_cwd() -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    thread_id = await adapter.start_session("sess", "/tmp/work", "~/remote-work")
+
+    assert thread_id == "thread-1"
+    assert fake.calls[0] == ("factory", ("/tmp/work", "~/remote-work"))
+    assert fake.calls[1] == ("thread_start", ({"cwd": "~/remote-work"},))
 
 
 @pytest.mark.asyncio

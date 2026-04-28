@@ -12,6 +12,7 @@ import {
   connectSessionsSocket,
   createSession,
   deleteSession as deleteSessionRequest,
+  fetchMe,
   fetchSessions,
   isAuthError,
   login,
@@ -32,6 +33,8 @@ export default function HomePage() {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [error, setError] = useState("");
   const [connection, setConnection] = useState<ConnectionState>("idle");
+  const [remoteCodexEnabled, setRemoteCodexEnabled] = useState(false);
+  const [defaultRemoteCwd, setDefaultRemoteCwd] = useState("~");
 
   useEffect(() => {
     const currentHost = readHost();
@@ -46,11 +49,14 @@ export default function HomePage() {
       return;
     }
     let active = true;
-    fetchSessions(host, token)
-      .then((items) => {
-        if (active) {
-          setSessions(items);
+    Promise.all([fetchSessions(host, token), fetchMe(host, token)])
+      .then(([items, me]) => {
+        if (!active) {
+          return;
         }
+        setSessions(items);
+        setRemoteCodexEnabled(me.remote_codex_enabled);
+        setDefaultRemoteCwd(me.default_remote_cwd || "~");
       })
       .catch((fetchError) => {
         if (active) {
@@ -122,11 +128,12 @@ export default function HomePage() {
     setError("");
   }
 
-  async function handleCreate(backend: Backend, cwd: string, title: string) {
+  async function handleCreate(backend: Backend, cwd: string, title: string, remoteCwd?: string) {
     try {
       const session = await createSession(host, token, {
         backend,
         cwd,
+        remote_cwd: remoteCwd || null,
         title: title || null,
         source_mode: "managed",
         args: [],
@@ -163,6 +170,8 @@ export default function HomePage() {
     clearToken();
     setToken("");
     setSessions([]);
+    setRemoteCodexEnabled(false);
+    setDefaultRemoteCwd("~");
     setError(message);
   }
 
@@ -219,7 +228,14 @@ export default function HomePage() {
           onAuthFailure={() => resetAuthState("Session expired. Log in again.")}
         />
       ) : null}
-      {token ? <LaunchPanel onAttach={handleAttach} onCreate={handleCreate} /> : null}
+      {token ? (
+        <LaunchPanel
+          defaultRemoteCwd={defaultRemoteCwd}
+          remoteCodexEnabled={remoteCodexEnabled}
+          onAttach={handleAttach}
+          onCreate={handleCreate}
+        />
+      ) : null}
       {error ? <p className="error">{error}</p> : null}
       {token && connection !== "open" && connection !== "idle" ? (
         <p className="connection-banner muted">

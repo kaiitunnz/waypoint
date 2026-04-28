@@ -23,13 +23,11 @@ def test_load_settings_parses_yaml_defaults_and_remote_codex(monkeypatch, tmp_pa
                 "    - -p",
                 "    - '2222'",
                 "  codex_bin: /opt/codex/bin/codex",
+                "  default_remote_cwd: ~/workspace",
                 "  config_overrides:",
                 "    - model_reasoning_effort=\"high\"",
                 "  remote_env:",
                 "    OPENAI_API_KEY: sk-test",
-                "  cwd_mappings:",
-                "    - local_prefix: /Users/alice/work",
-                "      remote_prefix: /srv/work",
             ]
         ),
         encoding="utf-8",
@@ -44,8 +42,8 @@ def test_load_settings_parses_yaml_defaults_and_remote_codex(monkeypatch, tmp_pa
     assert loaded.codex_remote.enabled is True
     assert loaded.codex_remote.ssh_destination == "dev@example.com"
     assert loaded.codex_remote.ssh_args == ["-p", "2222"]
+    assert loaded.codex_remote.default_remote_cwd == "~/workspace"
     assert loaded.codex_remote.remote_env["OPENAI_API_KEY"] == "sk-test"
-    assert loaded.codex_remote.cwd_mappings[0].remote_prefix == "/srv/work"
 
 
 def test_load_settings_env_overrides_yaml(monkeypatch, tmp_path: Path) -> None:
@@ -71,19 +69,18 @@ def test_load_settings_env_overrides_yaml(monkeypatch, tmp_path: Path) -> None:
     assert loaded.password == "from-env"
 
 
-def test_resolve_remote_cwd_prefers_longest_mapping() -> None:
+def test_remote_client_factory_uses_default_remote_cwd_when_not_provided(monkeypatch) -> None:
     config = RemoteCodexSshConfig(
         enabled=True,
         ssh_destination="dev@example.com",
-        cwd_mappings=[
-            {"local_prefix": "/Users/alice", "remote_prefix": "/home/alice"},
-            {"local_prefix": "/Users/alice/work", "remote_prefix": "/srv/work"},
-        ],
+        default_remote_cwd="~/workspace",
     )
 
-    remote_cwd = config.resolve_remote_cwd("/Users/alice/work/project-a")
+    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    client = build_remote_codex_client_factory(config)("/Users/alice/work/project-a", None, lambda *_: {})
 
-    assert remote_cwd == "/srv/work/project-a"
+    assert client.config.launch_args_override is not None
+    assert "cd '~/workspace'" in client.config.launch_args_override[2]
 
 
 def test_remote_client_factory_uses_ssh_launch_args(monkeypatch) -> None:
@@ -94,10 +91,9 @@ def test_remote_client_factory_uses_ssh_launch_args(monkeypatch) -> None:
         ssh_args=["-p", "2222"],
         remote_env={"OPENAI_API_KEY": "sk-test"},
         config_overrides=["model=\"gpt-5\""],
-        cwd_mappings=[{"local_prefix": "/Users/alice/work", "remote_prefix": "/srv/work"}],
     )
 
-    client = build_remote_codex_client_factory(config)("/Users/alice/work/project-a", lambda *_: {})
+    client = build_remote_codex_client_factory(config)("/Users/alice/work/project-a", "/srv/work/project-a", lambda *_: {})
 
     assert client.config.launch_args_override is not None
     assert client.config.cwd is None

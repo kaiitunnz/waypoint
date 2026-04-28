@@ -254,6 +254,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           </div>
           <h2>{session.title}</h2>
           <p className="muted">{session.cwd}</p>
+          {session.remote_cwd ? <p className="muted">Remote: {session.remote_cwd}</p> : null}
           <p className="meta">
             {session.source === "managed" ? "Managed" : "Attached"}
             {session.thread_id ? ` · thread ${session.thread_id}` : null}

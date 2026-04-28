@@ -104,7 +104,7 @@ class SessionRuntime:
             )
             return
         try:
-            await self.codex.restore_session(session.id, session.cwd, session.thread_id)
+            await self.codex.restore_session(session.id, session.cwd, session.thread_id, session.remote_cwd)
         except Exception as exc:  # noqa: BLE001
             log.exception(
                 "codex restore failed",
@@ -153,6 +153,7 @@ class SessionRuntime:
         structured_log = session_dir / "events.jsonl"
         git_meta = await resolve_git_meta(request.cwd)
         if request.backend == Backend.CODEX:
+            remote_cwd = self._resolve_remote_cwd(request)
             raw_log.touch(exist_ok=True)
             session = SessionRecord(
                 id=session_id,
@@ -161,6 +162,7 @@ class SessionRuntime:
                 transport=SessionTransport.CODEX_APP_SERVER,
                 title=title,
                 cwd=request.cwd,
+                remote_cwd=remote_cwd,
                 repo_name=git_meta.repo_name,
                 branch=git_meta.branch,
                 status=SessionStatus.STARTING,
@@ -172,14 +174,14 @@ class SessionRuntime:
             )
             self.storage.create_session(session)
             try:
-                thread_id = await self.codex.start_session(session_id, request.cwd)
+                thread_id = await self.codex.start_session(session_id, request.cwd, remote_cwd)
             except Exception:
                 self.storage.update_session(session.id, status=SessionStatus.ERROR)
                 raise
             self.storage.update_session(session.id, thread_id=thread_id, status=SessionStatus.IDLE)
             await self._record_system_event(
                 session.id,
-                self._codex_start_message(request.cwd),
+                self._codex_start_message(remote_cwd),
                 status=SessionStatus.IDLE,
             )
             return self.get_session(session.id)
@@ -358,16 +360,20 @@ class SessionRuntime:
     def _codex_start_message(self, cwd: str) -> str:
         remote_codex = self.settings.codex_remote
         if remote_codex is not None and remote_codex.enabled:
-            remote_cwd = remote_codex.resolve_remote_cwd(cwd)
-            return f"Codex app-server session started via SSH on {remote_codex.ssh_destination} ({remote_cwd})"
+            return f"Codex app-server session started via SSH on {remote_codex.ssh_destination} ({cwd})"
         return "Codex app-server session started"
 
-    def _codex_restore_message(self, cwd: str) -> str:
+    def _codex_restore_message(self, cwd: str | None) -> str:
         remote_codex = self.settings.codex_remote
         if remote_codex is not None and remote_codex.enabled:
-            remote_cwd = remote_codex.resolve_remote_cwd(cwd)
-            return f"Codex session restored via SSH on {remote_codex.ssh_destination} ({remote_cwd})"
+            return f"Codex session restored via SSH on {remote_codex.ssh_destination} ({cwd or remote_codex.default_remote_cwd})"
         return "Codex session restored from previous backend process"
+
+    def _resolve_remote_cwd(self, request: SessionCreateRequest) -> str | None:
+        remote_codex = self.settings.codex_remote
+        if request.backend != Backend.CODEX or remote_codex is None or not remote_codex.enabled:
+            return None
+        return request.remote_cwd or remote_codex.default_remote_cwd
 
     async def _record_user_event(self, session_id: str, text: str, submit: bool) -> None:
         event = EventRecord(

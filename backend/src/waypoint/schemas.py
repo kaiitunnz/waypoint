@@ -19,6 +19,7 @@ class SessionSource(StrEnum):
 class SessionTransport(StrEnum):
     TMUX = "tmux"
     CODEX_APP_SERVER = "codex_app_server"
+    CLAUDE_CLI = "claude_cli"
 
 
 class SessionStatus(StrEnum):

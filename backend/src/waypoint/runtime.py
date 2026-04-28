@@ -13,6 +13,8 @@ from fastapi import HTTPException, status
 
 from waypoint.config import Settings
 from waypoint.codex_app_server import CodexAppServerAdapter
+from waypoint.claude_cli import ClaudeCliAdapter, ClaudeCliError
+from waypoint.claude_runtime import ClaudeHookBundle
 from waypoint.git_meta import resolve_git_meta
 from waypoint.normalizer import TerminalNormalizer
 from waypoint.server_config import SshLaunchTargetConfig, build_remote_codex_client_factory
@@ -71,7 +73,12 @@ class BroadcastHub:
 
 
 class SessionRuntime:
-    def __init__(self, settings: Settings, storage: Storage) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        storage: Storage,
+        claude_hook: "ClaudeHookBundle | None" = None,
+    ) -> None:
         self.settings = settings
         self.storage = storage
         self.tmux = TmuxAdapter()
@@ -79,8 +86,21 @@ class SessionRuntime:
         self.broadcast = BroadcastHub()
         self.ssh_targets = {target.id: target for target in self.settings.ssh_targets if target.enabled}
         self.codex = CodexAppServerAdapter(self._emit_adapter_event)
+        self.claude_hook = claude_hook
+        self.claude = self._build_claude_adapter()
         self.monitor_tasks: dict[str, asyncio.Task[None]] = {}
         self.file_offsets: dict[str, int] = {}
+
+    def _build_claude_adapter(self) -> ClaudeCliAdapter | None:
+        if self.claude_hook is None:
+            return None
+        hook_url = f"http://127.0.0.1:{self.settings.port}"
+        return ClaudeCliAdapter(
+            self._emit_adapter_event,
+            hook_settings_path=self.claude_hook.settings_path,
+            hook_secret=self.claude_hook.secret,
+            hook_url=hook_url,
+        )
 
     async def start(self) -> None:
         for session in self.storage.list_sessions():
@@ -89,7 +109,48 @@ class SessionRuntime:
             if session.transport == SessionTransport.CODEX_APP_SERVER:
                 await self._restore_codex_session(session)
                 continue
+            if session.transport == SessionTransport.CLAUDE_CLI:
+                await self._restore_claude_session(session)
+                continue
             self._ensure_monitor(session.id)
+
+    async def _restore_claude_session(self, session: SessionRecord) -> None:
+        if self.claude is None:
+            self.storage.update_session(session.id, status=SessionStatus.ERROR)
+            await self._record_system_event(
+                session.id,
+                "Claude adapter unavailable; cannot restore",
+                status=SessionStatus.ERROR,
+            )
+            return
+        if not session.thread_id:
+            self.storage.update_session(session.id, status=SessionStatus.EXITED)
+            await self._record_system_event(
+                session.id,
+                "Claude session has no claude_session_id; marking exited",
+                status=SessionStatus.EXITED,
+            )
+            return
+        try:
+            await self.claude.restore_session(session.id, session.cwd, session.thread_id)
+        except Exception as exc:  # noqa: BLE001
+            log.exception(
+                "claude restore failed",
+                extra={"session_id": session.id, "claude_session_id": session.thread_id},
+            )
+            self.storage.update_session(session.id, status=SessionStatus.ERROR)
+            await self._record_system_event(
+                session.id,
+                f"Claude session restore failed: {exc}",
+                status=SessionStatus.ERROR,
+            )
+            return
+        self.storage.update_session(session.id, status=SessionStatus.IDLE)
+        await self._record_system_event(
+            session.id,
+            "Claude session restored from previous backend process",
+            status=SessionStatus.IDLE,
+        )
 
     async def _restore_codex_session(self, session: SessionRecord) -> None:
         if not session.thread_id:
@@ -143,6 +204,8 @@ class SessionRuntime:
                 await task
         self.monitor_tasks.clear()
         await self.codex.shutdown()
+        if self.claude is not None:
+            await self.claude.shutdown()
         self.storage.close()
 
     def list_sessions(self) -> list[SessionRecord]:
@@ -205,6 +268,41 @@ class SessionRuntime:
             await self._record_system_event(
                 session.id,
                 self._codex_start_message(remote_cwd, launch_target),
+                status=SessionStatus.IDLE,
+            )
+            return self.get_session(session.id)
+        if request.backend == Backend.CLAUDE_CODE and launch_target is None and self.claude is not None:
+            raw_log.touch(exist_ok=True)
+            claude_session_id = self._generate_claude_session_id()
+            session = SessionRecord(
+                id=session_id,
+                backend=request.backend,
+                source=SessionSource.MANAGED,
+                transport=SessionTransport.CLAUDE_CLI,
+                title=title,
+                cwd=request.cwd,
+                remote_cwd=remote_cwd,
+                launch_target_id=None,
+                repo_name=git_meta.repo_name,
+                branch=git_meta.branch,
+                status=SessionStatus.STARTING,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+                last_event_at=datetime.now(UTC),
+                thread_id=claude_session_id,
+                raw_log_path=str(raw_log),
+                structured_log_path=str(structured_log),
+            )
+            self.storage.create_session(session)
+            try:
+                await self.claude.start_session(session_id, request.cwd, claude_session_id)
+            except (ClaudeCliError, FileNotFoundError, OSError) as exc:
+                self.storage.update_session(session.id, status=SessionStatus.ERROR)
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            self.storage.update_session(session.id, status=SessionStatus.IDLE)
+            await self._record_system_event(
+                session.id,
+                f"Claude session started ({claude_session_id})",
                 status=SessionStatus.IDLE,
             )
             return self.get_session(session.id)
@@ -292,6 +390,13 @@ class SessionRuntime:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
             await self._record_user_event(session.id, request.text, submit=request.submit)
             return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
+        if session.transport == SessionTransport.CLAUDE_CLI and self.claude is not None:
+            try:
+                await self.claude.send_input(session.id, request.text)
+            except ClaudeCliError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            await self._record_user_event(session.id, request.text, submit=request.submit)
+            return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
         target = session.tmux_pane or session.tmux_session or session.id
         try:
             await self.tmux.send_input(target, request.text, request.submit)
@@ -306,6 +411,10 @@ class SessionRuntime:
             await self.codex.interrupt(session.id)
             await self._record_system_event(session.id, "Sent interrupt", status=SessionStatus.INTERRUPTED)
             return self.storage.update_session(session.id, status=SessionStatus.INTERRUPTED)
+        if session.transport == SessionTransport.CLAUDE_CLI and self.claude is not None:
+            await self.claude.interrupt(session.id)
+            await self._record_system_event(session.id, "Sent interrupt", status=SessionStatus.INTERRUPTED)
+            return self.storage.update_session(session.id, status=SessionStatus.INTERRUPTED)
         target = session.tmux_pane or session.tmux_session or session.id
         await self.tmux.interrupt(target)
         await self._record_system_event(session.id, "Sent interrupt", status=SessionStatus.INTERRUPTED)
@@ -313,8 +422,8 @@ class SessionRuntime:
 
     async def resume(self, session_id: str) -> SessionRecord:
         session = self.get_session(session_id)
-        if session.transport == SessionTransport.CODEX_APP_SERVER:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="resume is not supported for Codex app-server sessions")
+        if session.transport in {SessionTransport.CODEX_APP_SERVER, SessionTransport.CLAUDE_CLI}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"resume is not supported for {session.transport.value} sessions")
         target = session.tmux_pane or session.tmux_session or session.id
         await self.tmux.resume(target)
         await self._record_system_event(session.id, "Sent resume", status=SessionStatus.RUNNING)
@@ -326,6 +435,8 @@ class SessionRuntime:
             return session
         if session.transport == SessionTransport.CODEX_APP_SERVER:
             await self.codex.terminate_session(session.id)
+        elif session.transport == SessionTransport.CLAUDE_CLI and self.claude is not None:
+            await self.claude.terminate_session(session.id)
         else:
             target = session.tmux_pane or session.tmux_session or session.id
             with suppress(TmuxError):
@@ -361,6 +472,12 @@ class SessionRuntime:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="no pending approval request")
             await self._record_system_event(session.id, f"Approval response sent: {request.decision}", status=SessionStatus.RUNNING)
             return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
+        if session.transport == SessionTransport.CLAUDE_CLI and self.claude is not None:
+            handled = await self.claude.respond_to_approval(session.id, request.decision)
+            if not handled:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="no pending approval request")
+            await self._record_system_event(session.id, f"Approval response sent: {request.decision}", status=SessionStatus.RUNNING)
+            return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
         decision = request.decision.strip().lower()
         mapped = "y" if decision in {"approve", "yes", "y"} else "n"
         text = request.text or mapped
@@ -376,6 +493,8 @@ class SessionRuntime:
         session = self.get_session(session_id)
         if session.transport == SessionTransport.CODEX_APP_SERVER:
             return self.codex.terminal_snapshot(session.id)
+        if session.transport == SessionTransport.CLAUDE_CLI and self.claude is not None:
+            return self.claude.terminal_snapshot(session.id)
         raw_log_path = Path(session.raw_log_path)
         if not raw_log_path.exists():
             return ""
@@ -530,6 +649,11 @@ class SessionRuntime:
         token = secrets.token_hex(4)
         prefix = SAFE_NAME.sub("-", backend.value)
         return f"{prefix}-{token}"
+
+    def _generate_claude_session_id(self) -> str:
+        import uuid
+
+        return str(uuid.uuid4())
 
     def _session_dir(self, session_id: str) -> Path:
         path = self.settings.sessions_dir / session_id

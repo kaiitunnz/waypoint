@@ -2,10 +2,11 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from waypoint.auth import TokenStore, require_token
+from waypoint.claude_runtime import ensure_claude_hook_bundle
 from waypoint.config import Settings, load_settings
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
@@ -26,8 +27,9 @@ class AppContext:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or load_settings()
         self.settings.ensure_dirs()
+        self.claude_hook = ensure_claude_hook_bundle(self.settings.data_dir)
         self.storage = Storage(self.settings.database_path)
-        self.runtime = SessionRuntime(self.settings, self.storage)
+        self.runtime = SessionRuntime(self.settings, self.storage, claude_hook=self.claude_hook)
         self.tokens = TokenStore(self.settings, self.storage)
 
 
@@ -76,6 +78,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             default_cwd=context.settings.default_cwd,
             launch_targets=context.runtime.launch_target_summaries(),
         )
+
+    @app.post("/api/internal/hooks/claude/approval")
+    async def claude_hook_approval(request: Request) -> Any:
+        secret = request.headers.get("x-waypoint-hook-secret", "")
+        if not context.claude_hook.secret or secret != context.claude_hook.secret:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid hook secret")
+        try:
+            payload = await request.json()
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid json") from exc
+        decision = await context.runtime.claude.await_approval(payload)
+        return decision
 
     @app.get("/api/tailnet/peers")
     async def tailnet_peers(_: Annotated[str, Depends(token_dependency())]) -> Any:

@@ -19,6 +19,7 @@ from waypoint.schemas import (
     TerminalSnapshot,
 )
 from waypoint.storage import Storage
+from waypoint.tailnet import fetch_snapshot
 
 
 class AppContext:
@@ -71,6 +72,11 @@ def create_app() -> FastAPI:
     @app.get("/api/me", response_model=MeResponse)
     async def me(_: Annotated[str, Depends(token_dependency())]) -> MeResponse:
         return MeResponse()
+
+    @app.get("/api/tailnet/peers")
+    async def tailnet_peers(_: Annotated[str, Depends(token_dependency())]) -> Any:
+        snapshot = await fetch_snapshot()
+        return snapshot.model_dump(mode="json")
 
     @app.get("/api/sessions")
     async def list_sessions(_: Annotated[str, Depends(token_dependency())]) -> Any:

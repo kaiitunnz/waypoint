@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   approveSession,
@@ -48,6 +48,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [error, setError] = useState("");
   const [connection, setConnection] = useState<ConnectionState>("connecting");
 
+  const handleAuthFailure = useCallback(() => {
+    clearToken();
+    onAuthFailure?.();
+    router.replace("/");
+  }, [onAuthFailure, router]);
+
   const refreshSnapshot = useCallback(async () => {
     setSnapshotLoading(true);
     try {
@@ -62,9 +68,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     } finally {
       setSnapshotLoading(false);
     }
-    // handleAuthFailure is stable for our purposes; depending on host/token/sessionId.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [host, token, sessionId]);
+  }, [handleAuthFailure, host, token, sessionId]);
 
   useEffect(() => {
     let active = true;
@@ -150,8 +154,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       }
       socket?.close();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [host, token, sessionId]);
+  }, [handleAuthFailure, host, token, sessionId]);
 
   useEffect(() => {
     if (view === "terminal") {
@@ -228,12 +231,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       }
       setError(approvalError instanceof Error ? approvalError.message : "failed to send approval");
     }
-  }
-
-  function handleAuthFailure() {
-    clearToken();
-    onAuthFailure?.();
-    router.replace("/");
   }
 
   const pendingApproval =

@@ -20,6 +20,7 @@ import {
   supportsStructuredApproval,
   transportLabel,
 } from "@/lib/transport";
+import { TranscriptCard } from "@/components/TranscriptCard";
 import { EventRecord, SessionEnvelope, SessionRecord } from "@/lib/types";
 
 interface SessionDetailProps {
@@ -182,15 +183,15 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       </div>
       {view === "chat" ? (
         <section className="stack">
-          {events.map((event) => (
-            <article className={`panel transcript ${event.kind}`} key={`${event.sequence}-${event.id ?? "local"}`}>
-              <div className="session-row">
-                <span className="badge neutral">{event.kind.replaceAll("_", " ")}</span>
-                <span className="muted">{new Date(event.ts).toLocaleTimeString()}</span>
-              </div>
-              <pre>{event.text}</pre>
-            </article>
-          ))}
+          {session
+            ? events.map((event) => (
+                <TranscriptCard
+                  event={event}
+                  transport={session.transport}
+                  key={`${event.sequence}-${event.id ?? "local"}`}
+                />
+              ))
+            : null}
         </section>
       ) : (
         <section className="panel terminal">

@@ -243,6 +243,51 @@ pre {
   gap: 10px;
 }
 
+.transcript.codex.user_input {
+  margin-left: 24px;
+  border-color: rgba(125, 211, 252, 0.35);
+}
+
+.transcript.codex.agent_output {
+  margin-right: 24px;
+}
+
+.transcript.codex.tool_call pre.shell {
+  background: rgba(6, 12, 23, 0.72);
+  border-radius: 14px;
+  padding: 12px 14px;
+  color: #e2e8f0;
+}
+
+.transcript.codex.tool_result pre.output {
+  background: rgba(6, 12, 23, 0.72);
+  border-radius: 14px;
+  padding: 12px 14px;
+  max-height: 240px;
+  overflow: auto;
+  color: #cbd5e1;
+}
+
+.transcript.codex.system {
+  padding: 6px 12px;
+  font-size: 0.85rem;
+}
+
+.badge.user {
+  background: rgba(125, 211, 252, 0.18);
+  color: #7dd3fc;
+}
+
+.badge.agent {
+  background: rgba(94, 234, 212, 0.18);
+  color: var(--accent);
+}
+
+.badge.tool {
+  background: rgba(251, 191, 36, 0.16);
+  color: #fbbf24;
+}
+
 .approval {
   border-color: rgba(94, 234, 212, 0.5);
   box-shadow: 0 0 0 1px rgba(94, 234, 212, 0.18), var(--shadow);

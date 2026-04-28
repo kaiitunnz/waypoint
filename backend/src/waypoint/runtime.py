@@ -447,6 +447,13 @@ class SessionRuntime:
         self, session_id: str, request: SessionInputRequest
     ) -> SessionRecord:
         session = self.get_session(session_id)
+        if session.transport in {
+            SessionTransport.CODEX_APP_SERVER,
+            SessionTransport.CLAUDE_CLI,
+        }:
+            handled = await self._handle_builtin_command(session, request)
+            if handled is not None:
+                return handled
         if session.transport == SessionTransport.CODEX_APP_SERVER:
             try:
                 await self.codex.send_input(session.id, request.text)
@@ -603,6 +610,47 @@ class SessionRuntime:
         await self._record_system_event(session_id, f"Approval response sent: {mapped}")
         return self.get_session(session_id)
 
+    async def _handle_builtin_command(
+        self, session: SessionRecord, request: SessionInputRequest
+    ) -> SessionRecord | None:
+        command = request.text.strip()
+        if not command.startswith("/"):
+            return None
+        name = command.split(None, 1)[0].lower()
+        await self._record_user_event(
+            session.id,
+            request.text,
+            submit=request.submit,
+            status=session.status,
+        )
+        if name == "/status":
+            await self._record_system_event(
+                session.id,
+                self._format_builtin_status(session),
+                status=session.status,
+            )
+            return self.get_session(session.id)
+        if name == "/permissions":
+            await self._record_system_event(
+                session.id,
+                self._format_builtin_permissions(session),
+                status=session.status,
+            )
+            return self.get_session(session.id)
+        if name == "/help":
+            await self._record_system_event(
+                session.id,
+                "Supported built-in commands: /help, /status, /permissions",
+                status=session.status,
+            )
+            return self.get_session(session.id)
+        await self._record_system_event(
+            session.id,
+            f"Unsupported built-in command: {name}. Supported commands: /help, /status, /permissions",
+            status=session.status,
+        )
+        return self.get_session(session.id)
+
     def session_events(
         self, session_id: str, cursor: int | None = None
     ) -> list[EventRecord]:
@@ -715,15 +763,49 @@ class SessionRuntime:
             f"on {launch_target.ssh_destination} ({remote_cwd or launch_target.default_remote_cwd})"
         )
 
+    def _format_builtin_status(self, session: SessionRecord) -> str:
+        parts = [
+            f"Status: {session.status}",
+            f"Backend: {session.backend}",
+            f"Transport: {session.transport}",
+            f"CWD: {session.cwd}",
+        ]
+        if session.remote_cwd:
+            parts.append(f"Remote cwd: {session.remote_cwd}")
+        if session.thread_id:
+            parts.append(f"Thread: {session.thread_id}")
+        if session.repo_name:
+            branch = f" ({session.branch})" if session.branch else ""
+            parts.append(f"Repo: {session.repo_name}{branch}")
+        return "\n".join(parts)
+
+    def _format_builtin_permissions(self, session: SessionRecord) -> str:
+        pending = False
+        if session.transport == SessionTransport.CODEX_APP_SERVER:
+            pending = self.codex.has_pending_approval(session.id)
+        elif session.transport == SessionTransport.CLAUDE_CLI and self.claude is not None:
+            pending = self.claude.has_pending_approval(session.id)
+        return "\n".join(
+            [
+                "Waypoint handles approvals with the in-app approval card.",
+                f"Pending approval: {'yes' if pending else 'no'}",
+                "Available actions: Approve, Approve for session, Decline, Cancel",
+            ]
+        )
+
     async def _record_user_event(
-        self, session_id: str, text: str, submit: bool
+        self,
+        session_id: str,
+        text: str,
+        submit: bool,
+        status: SessionStatus = SessionStatus.RUNNING,
     ) -> None:
         event = EventRecord(
             session_id=session_id,
             ts=datetime.now(UTC),
             kind=EventKind.USER_INPUT,
             text=text,
-            metadata={"submit": submit, "status": SessionStatus.RUNNING},
+            metadata={"submit": submit, "status": status},
             sequence=self.storage.next_sequence(session_id),
         )
         persisted = self.storage.append_event(event)

@@ -1,4 +1,5 @@
 import { EventRecord, SessionTransport } from "@/lib/types";
+import { MarkdownMessage } from "@/components/MarkdownMessage";
 
 interface TranscriptCardProps {
   event: EventRecord;
@@ -26,7 +27,7 @@ function CodexCard({ event, agentLabel = "codex" }: { event: EventRecord; agentL
             <span className="badge user">you</span>
             <span className="muted">{formatTime(event.ts)}</span>
           </div>
-          <pre>{event.text}</pre>
+          <MarkdownMessage text={event.text} />
         </article>
       );
     case "agent_output":
@@ -36,29 +37,13 @@ function CodexCard({ event, agentLabel = "codex" }: { event: EventRecord; agentL
             <span className="badge agent">{agentLabel}</span>
             <span className="muted">{formatTime(event.ts)}</span>
           </div>
-          <pre>{event.text}</pre>
+          <MarkdownMessage text={event.text} />
         </article>
       );
     case "tool_call":
-      return (
-        <article className="panel transcript codex tool_call">
-          <div className="session-row">
-            <span className="badge tool">tool call</span>
-            <span className="muted">{formatTime(event.ts)}</span>
-          </div>
-          <pre className="shell">{event.text}</pre>
-        </article>
-      );
+      return <ToolDisclosure event={event} label="tool call" bodyClassName="shell" />;
     case "tool_result":
-      return (
-        <article className="panel transcript codex tool_result">
-          <div className="session-row">
-            <span className="badge tool">tool result</span>
-            <span className="muted">{formatTime(event.ts)}</span>
-          </div>
-          <pre className="output">{event.text}</pre>
-        </article>
-      );
+      return <ToolDisclosure event={event} label="tool result" bodyClassName="output" />;
     case "approval_request":
       return (
         <article className="panel transcript codex approval_request">
@@ -81,6 +66,50 @@ function CodexCard({ event, agentLabel = "codex" }: { event: EventRecord; agentL
     default:
       return <HeuristicCard event={event} />;
   }
+}
+
+function ToolDisclosure({
+  event,
+  label,
+  bodyClassName,
+}: {
+  event: EventRecord;
+  label: string;
+  bodyClassName: string;
+}) {
+  const preview = summarizeToolText(event.text);
+  return (
+    <details className={`panel transcript codex ${event.kind} tool-disclosure`}>
+      <summary className="transcript-summary">
+        <div className="session-row">
+          <span className="badge tool">{label}</span>
+          <span className="muted">{formatTime(event.ts)}</span>
+        </div>
+        {preview ? <p className="transcript-preview muted">{preview}</p> : null}
+      </summary>
+      <pre className={bodyClassName}>{event.text}</pre>
+    </details>
+  );
+}
+
+function summarizeToolText(text: string): string {
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    return "No output";
+  }
+  const first = lines[0];
+  const suffix = lines.length > 1 ? ` · ${lines.length} lines` : "";
+  return `${truncate(first, 120)}${suffix}`;
+}
+
+function truncate(value: string, max: number): string {
+  if (value.length <= max) {
+    return value;
+  }
+  return `${value.slice(0, max - 1)}…`;
 }
 
 function HeuristicCard({ event }: { event: EventRecord }) {

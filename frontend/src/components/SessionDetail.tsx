@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   approveSession,
@@ -49,6 +49,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [filterMode, setFilterMode] = useState<FilterMode>("important");
   const [error, setError] = useState("");
   const [connection, setConnection] = useState<ConnectionState>("connecting");
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const nearBottomRef = useRef(true);
 
   const handleAuthFailure = useCallback(() => {
     clearToken();
@@ -71,6 +74,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       setSnapshotLoading(false);
     }
   }, [handleAuthFailure, host, token, sessionId]);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    transcriptEndRef.current?.scrollIntoView({ behavior, block: "end" });
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -164,6 +171,33 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }, [view, refreshSnapshot]);
 
+  useEffect(() => {
+    if (view !== "chat") {
+      setShowScrollToBottom(false);
+      return;
+    }
+    function updateScrollState() {
+      const root = document.documentElement;
+      const remaining = root.scrollHeight - window.innerHeight - window.scrollY;
+      const nearBottom = remaining < 160;
+      nearBottomRef.current = nearBottom;
+      setShowScrollToBottom(!nearBottom);
+    }
+    updateScrollState();
+    window.addEventListener("scroll", updateScrollState, { passive: true });
+    window.addEventListener("resize", updateScrollState);
+    return () => {
+      window.removeEventListener("scroll", updateScrollState);
+      window.removeEventListener("resize", updateScrollState);
+    };
+  }, [view]);
+
+  useEffect(() => {
+    if (view === "chat" && nearBottomRef.current) {
+      scrollToBottom("auto");
+    }
+  }, [events.length, view, scrollToBottom]);
+
   async function submitInput() {
     if (!draft.trim()) {
       return;
@@ -241,6 +275,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       : null;
   const visibleEvents = filterMode === "all" ? events : events.filter(isImportantEvent);
   const hiddenEventCount = events.length - visibleEvents.length;
+  const usageSummary = extractUsageSummary(events);
 
   return (
     <section className="stack">
@@ -267,6 +302,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           {connection === "connecting" ? "Connecting…" : "Reconnecting…"}
         </p>
       ) : null}
+      {usageSummary ? <UsageCard summary={usageSummary} /> : null}
       {pendingApproval ? (
         <ApprovalCard event={pendingApproval} onDecide={submitApproval} />
       ) : null}
@@ -304,6 +340,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                 Hiding {hiddenEventCount} low-signal event{hiddenEventCount === 1 ? "" : "s"}
               </span>
             ) : null}
+            {showScrollToBottom ? (
+              <button className="secondary scroll-bottom" onClick={() => scrollToBottom()} type="button">
+                Latest
+              </button>
+            ) : null}
           </div>
           {session
             ? visibleEvents.map((event) => (
@@ -314,6 +355,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                 />
               ))
             : null}
+          <div ref={transcriptEndRef} />
         </section>
       ) : (
         <section className="panel terminal stack">
@@ -484,6 +526,60 @@ interface ApprovalCardProps {
   onDecide: (decision: string) => void | Promise<void>;
 }
 
+interface UsageSummary {
+  lastTurn: {
+    outputTokens: number | null;
+    totalCostUsd: number | null;
+    permissionDenials: number;
+    ts: string;
+  } | null;
+  rateLimit: {
+    status: string | null;
+    type: string | null;
+    ts: string;
+  } | null;
+}
+
+function UsageCard({ summary }: { summary: UsageSummary }) {
+  return (
+    <section className="panel usage-card">
+      <div className="session-row">
+        <span className="badge fidelity structured">usage</span>
+        <span className="muted">Latest structured telemetry</span>
+      </div>
+      <div className="usage-grid">
+        <div>
+          <p className="meta">Last turn</p>
+          {summary.lastTurn ? (
+            <p className="muted">
+              {summary.lastTurn.totalCostUsd !== null ? `Cost ${formatUsd(summary.lastTurn.totalCostUsd)} · ` : ""}
+              {summary.lastTurn.outputTokens !== null
+                ? `${summary.lastTurn.outputTokens.toLocaleString()} output tokens`
+                : "No token count"}
+              {summary.lastTurn.permissionDenials > 0
+                ? ` · ${summary.lastTurn.permissionDenials} denial${summary.lastTurn.permissionDenials === 1 ? "" : "s"}`
+                : ""}
+            </p>
+          ) : (
+            <p className="muted">No turn usage yet.</p>
+          )}
+        </div>
+        <div>
+          <p className="meta">Rate limits</p>
+          {summary.rateLimit ? (
+            <p className="muted">
+              {summary.rateLimit.status ?? "unknown"}
+              {summary.rateLimit.type ? ` · ${summary.rateLimit.type}` : ""}
+            </p>
+          ) : (
+            <p className="muted">No rate-limit event yet.</p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ApprovalCard({ event, onDecide }: ApprovalCardProps) {
   const method = typeof event.metadata.method === "string" ? event.metadata.method : null;
   return (
@@ -516,6 +612,53 @@ function sanitizeEvent(event: EventRecord): EventRecord {
     ...event,
     text: stripAnsi(event.text),
   };
+}
+
+function extractUsageSummary(events: EventRecord[]): UsageSummary | null {
+  let lastTurn: UsageSummary["lastTurn"] = null;
+  let rateLimit: UsageSummary["rateLimit"] = null;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    const metadata = asRecord(event.metadata);
+    if (!lastTurn && metadata?.method === "result") {
+      const payload = asRecord(metadata.payload);
+      const usage = asRecord(payload?.usage);
+      const permissionDenials = Array.isArray(payload?.permission_denials) ? payload.permission_denials.length : 0;
+      lastTurn = {
+        outputTokens: typeof usage?.output_tokens === "number" ? usage.output_tokens : null,
+        totalCostUsd: typeof payload?.total_cost_usd === "number" ? payload.total_cost_usd : null,
+        permissionDenials,
+        ts: event.ts,
+      };
+    }
+    if (!rateLimit && metadata?.method === "rate_limit_event") {
+      const payload = asRecord(metadata.payload);
+      const info = asRecord(payload?.rate_limit_info);
+      rateLimit = {
+        status: typeof info?.status === "string" ? info.status : null,
+        type: typeof info?.rate_limit_type === "string" ? info.rate_limit_type : null,
+        ts: event.ts,
+      };
+    }
+    if (lastTurn && rateLimit) {
+      break;
+    }
+  }
+  if (!lastTurn && !rateLimit) {
+    return null;
+  }
+  return { lastTurn, rateLimit };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function formatUsd(value: number): string {
+  return `$${value.toFixed(4)}`;
 }
 
 function stripAnsi(text: string): string {

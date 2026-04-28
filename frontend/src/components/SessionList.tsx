@@ -9,10 +9,11 @@ import { fidelityFor, transportLabel } from "@/lib/transport";
 interface SessionListProps {
   sessions: SessionRecord[];
   onDelete?: (sessionId: string) => void | Promise<void>;
+  onDeleteExited?: () => void | Promise<void>;
   onTerminate?: (sessionId: string) => void | Promise<void>;
 }
 
-export function SessionList({ sessions, onDelete, onTerminate }: SessionListProps) {
+export function SessionList({ sessions, onDelete, onDeleteExited, onTerminate }: SessionListProps) {
   if (!sessions.length) {
     return (
       <section className="panel">
@@ -46,8 +47,27 @@ export function SessionList({ sessions, onDelete, onTerminate }: SessionListProp
     void onTerminate(sessionId);
   }
 
+  function handleDeleteExited() {
+    if (!onDeleteExited) {
+      return;
+    }
+    if (!window.confirm("Delete all exited sessions and their transcripts? This cannot be undone.")) {
+      return;
+    }
+    void onDeleteExited();
+  }
+
+  const exitedCount = sessions.filter((session) => session.status === "exited").length;
+
   return (
     <section className="stack">
+      {onDeleteExited && exitedCount > 0 ? (
+        <div className="action-row list-actions">
+          <button className="secondary" type="button" onClick={handleDeleteExited}>
+            Delete exited sessions ({exitedCount})
+          </button>
+        </div>
+      ) : null}
       {sessions.map((session) => (
         <Link className="panel session-card" href={`/session/${session.id}`} key={session.id}>
           <div className="session-row">

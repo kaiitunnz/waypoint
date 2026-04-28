@@ -212,6 +212,22 @@ export default function HomePage() {
     }
   }
 
+  async function handleDeleteExited() {
+    const exitedIds = sessions.filter((session) => session.status === "exited").map((session) => session.id);
+    try {
+      for (const sessionId of exitedIds) {
+        await deleteSessionRequest(host, token, sessionId);
+      }
+      setSessions((current) => current.filter((session) => session.status !== "exited"));
+    } catch (deleteError) {
+      if (isAuthError(deleteError)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      setError(deleteError instanceof Error ? deleteError.message : "failed to delete exited sessions");
+    }
+  }
+
   function handleSwitchBackend(nextHost: string, nextTargetId: string) {
     if (nextHost === host) {
       writeLaunchTarget(host, nextTargetId);
@@ -285,7 +301,14 @@ export default function HomePage() {
           {connection === "connecting" ? "Connecting…" : "Reconnecting…"}
         </p>
       ) : null}
-      {token ? <SessionList sessions={sessions} onDelete={handleDelete} onTerminate={handleTerminate} /> : null}
+      {token ? (
+        <SessionList
+          sessions={sessions}
+          onDelete={handleDelete}
+          onDeleteExited={handleDeleteExited}
+          onTerminate={handleTerminate}
+        />
+      ) : null}
     </main>
   );
 }

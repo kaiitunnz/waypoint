@@ -332,6 +332,20 @@ pre {
   gap: 10px;
 }
 
+.transcript-summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.transcript-summary::-webkit-details-marker {
+  display: none;
+}
+
+.transcript-preview {
+  margin: 8px 0 0;
+  font-size: 0.9rem;
+}
+
 .transcript.codex.user_input {
   margin-left: 24px;
   border-color: rgba(125, 211, 252, 0.35);
@@ -346,6 +360,7 @@ pre {
   border-radius: 14px;
   padding: 12px 14px;
   color: #e2e8f0;
+  margin-top: 12px;
 }
 
 .transcript.codex.tool_result pre.output {
@@ -355,6 +370,7 @@ pre {
   max-height: 240px;
   overflow: auto;
   color: #cbd5e1;
+  margin-top: 12px;
 }
 
 .transcript.codex.system {
@@ -386,6 +402,74 @@ pre {
 
 .transcript pre {
   line-height: 1.5;
+}
+
+.markdown-message {
+  display: grid;
+  gap: 12px;
+  line-height: 1.6;
+}
+
+.markdown-message > :first-child {
+  margin-top: 0;
+}
+
+.markdown-message > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-message p,
+.markdown-message ul,
+.markdown-message ol,
+.markdown-message blockquote {
+  margin: 0;
+}
+
+.markdown-message ul,
+.markdown-message ol {
+  padding-left: 1.2rem;
+}
+
+.markdown-message a {
+  color: #7dd3fc;
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+}
+
+.inline-code {
+  padding: 0.12rem 0.35rem;
+  border-radius: 8px;
+  background: rgba(6, 12, 23, 0.72);
+  color: #dbeafe;
+}
+
+.markdown-pre {
+  background: rgba(6, 12, 23, 0.72);
+  border-radius: 14px;
+  padding: 12px 14px;
+  overflow: auto;
+}
+
+.usage-card {
+  display: grid;
+  gap: 12px;
+}
+
+.usage-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.scroll-bottom {
+  margin-left: auto;
+  position: sticky;
+  bottom: 12px;
+  z-index: 1;
+}
+
+.list-actions {
+  justify-content: flex-end;
 }
 
 .terminal {

@@ -194,6 +194,10 @@ class CodexAppServerAdapter:
         pending.event.set()
         return True
 
+    def has_pending_approval(self, session_id: str) -> bool:
+        state = self._sessions.get(session_id)
+        return bool(state and state.pending_approval is not None)
+
     def terminal_snapshot(self, session_id: str) -> str:
         state = self._require_session(session_id)
         return "".join(state.terminal_fragments)

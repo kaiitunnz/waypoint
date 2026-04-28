@@ -39,10 +39,18 @@ def parse_cors_origin_regex() -> str | None:
     return raw or None
 
 
+def parse_config_path() -> Path | None:
+    raw = os.environ.get("WAYPOINT_CONFIG_PATH")
+    if not raw:
+        return None
+    return Path(os.path.expandvars(raw)).expanduser()
+
+
 class Settings(BaseModel):
     host: str = Field(default_factory=lambda: os.environ.get("WAYPOINT_HOST", "127.0.0.1"))
     port: int = Field(default_factory=lambda: int(os.environ.get("WAYPOINT_PORT", "8787")))
     password: str = Field(default_factory=lambda: os.environ.get("WAYPOINT_PASSWORD", "change-me"))
+    config_path: Path | None = Field(default_factory=parse_config_path)
     data_dir: Path = Field(default_factory=default_data_dir)
     sessions_dir_name: str = "sessions"
     database_name: str = "waypoint.db"

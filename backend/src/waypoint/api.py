@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from waypoint.auth import TokenStore, require_token
 from waypoint.config import Settings
 from waypoint.runtime import SessionRuntime
+from waypoint.server_config import load_server_config
 from waypoint.schemas import (
     LoginRequest,
     MeResponse,
@@ -23,16 +24,17 @@ from waypoint.tailnet import fetch_snapshot
 
 
 class AppContext:
-    def __init__(self) -> None:
-        self.settings = Settings()
+    def __init__(self, settings: Settings | None = None) -> None:
+        self.settings = settings or Settings()
         self.settings.ensure_dirs()
+        self.server_config = load_server_config(self.settings.config_path)
         self.storage = Storage(self.settings.database_path)
-        self.runtime = SessionRuntime(self.settings, self.storage)
+        self.runtime = SessionRuntime(self.settings, self.storage, self.server_config)
         self.tokens = TokenStore(self.settings, self.storage)
 
 
-def create_app() -> FastAPI:
-    context = AppContext()
+def create_app(settings: Settings | None = None) -> FastAPI:
+    context = AppContext(settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

@@ -1,12 +1,14 @@
 import argparse
 import asyncio
 import json
+from pathlib import Path
 import shutil
 from typing import Any
 
 import uvicorn
 
 from waypoint.api import AppContext, create_app
+from waypoint.config import Settings
 from waypoint.schemas import Backend, SessionAttachRequest, SessionCreateRequest
 
 
@@ -17,10 +19,13 @@ def build_parser() -> argparse.ArgumentParser:
     serve = subparsers.add_parser("serve")
     serve.add_argument("--host", default=None)
     serve.add_argument("--port", type=int, default=None)
+    serve.add_argument("--config", default=None)
 
     doctor = subparsers.add_parser("doctor")
+    doctor.add_argument("--config", default=None)
 
     session = subparsers.add_parser("session")
+    session.add_argument("--config", default=None)
     session_subparsers = session.add_subparsers(dest="session_command", required=True)
 
     start = session_subparsers.add_parser("start")
@@ -41,13 +46,13 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     if args.command == "serve":
-        app = create_app()
+        app = create_app(_settings_from_arg(args.config))
         host = args.host or app.state.context.settings.host
         port = args.port or app.state.context.settings.port
         uvicorn.run(app, host=host, port=port)
         return
     if args.command == "doctor":
-        run_doctor()
+        run_doctor(_settings_from_arg(args.config))
         return
     if args.command == "session":
         asyncio.run(run_session_command(args))
@@ -55,18 +60,21 @@ def main() -> None:
     parser.error("unknown command")
 
 
-def run_doctor() -> None:
+def run_doctor(settings: Settings | None = None) -> None:
+    settings = settings or Settings()
     checks = {
         "tmux": shutil.which("tmux"),
         "codex": shutil.which("codex"),
         "claude": shutil.which("claude"),
+        "ssh": shutil.which("ssh"),
         "tailscale": shutil.which("tailscale"),
+        "config_path": str(settings.config_path) if settings.config_path else None,
     }
     print(json.dumps(checks, indent=2))
 
 
 async def run_session_command(args: argparse.Namespace) -> None:
-    context = AppContext()
+    context = AppContext(_settings_from_arg(args.config))
     context.settings.ensure_dirs()
     try:
         if args.session_command == "start":
@@ -87,3 +95,9 @@ async def run_session_command(args: argparse.Namespace) -> None:
             print(json.dumps({"session": session.model_dump(mode="json")}, indent=2))
     finally:
         await context.runtime.stop()
+
+
+def _settings_from_arg(raw: str | None) -> Settings:
+    if not raw:
+        return Settings()
+    return Settings(config_path=Path(raw).expanduser())

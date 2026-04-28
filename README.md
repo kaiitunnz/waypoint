@@ -47,6 +47,12 @@ Backend `.env`:
 - `WAYPOINT_HOST` — bind host; use `0.0.0.0` for phone/Tailscale access
 - `WAYPOINT_PORT` — bind port, defaults to `8787`
 - `WAYPOINT_DATA_DIR` — app data directory
+- `WAYPOINT_CONFIG_PATH` — optional YAML startup config, including remote Codex-over-SSH settings
+
+Remote Codex mode:
+
+- Copy `backend/waypoint.example.yaml` to a local YAML file and set `WAYPOINT_CONFIG_PATH`, or run `uv run waypoint serve --config ./waypoint.yaml`.
+- When `codex_remote.enabled` is true, managed Codex sessions launch through SSH on the configured host while Claude/tmux sessions stay local.
 
 ### Frontend
 

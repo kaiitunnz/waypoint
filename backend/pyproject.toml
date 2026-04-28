@@ -12,6 +12,7 @@ dependencies = [
   "fastapi>=0.116.0",
   "openai-codex-app-server-sdk",
   "pydantic>=2.11.0",
+  "PyYAML>=6.0.0",
   "python-dotenv>=1.1.0",
   "uvicorn>=0.35.0",
   "websockets>=15.0.0",

@@ -1,0 +1,14 @@
+codex_remote:
+  enabled: true
+  ssh_destination: dev@example.com
+  ssh_args:
+    - -p
+    - "2222"
+  codex_bin: codex
+  config_overrides:
+    - model_reasoning_effort="high"
+  remote_env:
+    OPENAI_API_KEY: sk-your-key
+  cwd_mappings:
+    - local_prefix: /Users/Shared/D/MySandbox
+      remote_prefix: /srv/waypoint

@@ -1,7 +1,7 @@
 import asyncio
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
-import shlex
 
 
 class TmuxError(RuntimeError):
@@ -40,7 +40,9 @@ class TmuxAdapter:
     async def describe_target(self, target: str) -> TmuxTarget:
         template = "#{session_name}|#{window_index}|#{pane_id}|#{pane_current_path}|#{pane_dead}|#{pane_pid}"
         output = await self._run("display-message", "-p", "-t", target, template)
-        session_name, window_index, pane_id, cwd, pane_dead, pane_pid = output.strip().split("|")
+        session_name, window_index, pane_id, cwd, pane_dead, pane_pid = (
+            output.strip().split("|")
+        )
         return TmuxTarget(
             session=session_name,
             window=window_index,
@@ -73,7 +75,9 @@ class TmuxAdapter:
         await self._run("kill-session", "-t", name)
 
     async def capture_snapshot(self, target: str, start_line: int = -200) -> str:
-        return await self._run("capture-pane", "-p", "-J", "-e", "-t", target, "-S", str(start_line))
+        return await self._run(
+            "capture-pane", "-p", "-J", "-e", "-t", target, "-S", str(start_line)
+        )
 
     async def list_sessions(self) -> list[str]:
         output = await self._run("list-sessions", "-F", "#{session_name}")
@@ -95,7 +99,9 @@ class TmuxAdapter:
         )
         stdout, stderr = await process.communicate()
         if process.returncode != 0:
-            raise TmuxError(stderr.decode().strip() or f"tmux command failed: {' '.join(args)}")
+            raise TmuxError(
+                stderr.decode().strip() or f"tmux command failed: {' '.join(args)}"
+            )
         return stdout.decode()
 
     async def _send_literal_text(self, target: str, text: str) -> None:

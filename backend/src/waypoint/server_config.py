@@ -22,7 +22,9 @@ class SshLaunchTargetConfig(BaseModel):
     codex_bin: str = "codex"
     claude_bin: str = "claude"
     default_remote_cwd: str = "~"
-    supported_backends: list[Backend] = Field(default_factory=_default_supported_backends)
+    supported_backends: list[Backend] = Field(
+        default_factory=_default_supported_backends
+    )
     config_overrides: list[str] = Field(default_factory=list)
     remote_env: dict[str, str] = Field(default_factory=dict)
 
@@ -52,7 +54,9 @@ class SshLaunchTargetConfig(BaseModel):
         codex_args.extend(["app-server", "--listen", "stdio://"])
         return self.build_remote_exec_args(codex_args, remote_cwd)
 
-    def build_remote_exec_args(self, command: list[str], remote_cwd: str) -> tuple[str, ...]:
+    def build_remote_exec_args(
+        self, command: list[str], remote_cwd: str
+    ) -> tuple[str, ...]:
         ssh_bin = _resolve_local_binary(self.ssh_bin)
         remote_parts = [f"cd {_quote_remote_path(remote_cwd)}", "&&", "exec"]
         if self.remote_env:
@@ -63,8 +67,12 @@ class SshLaunchTargetConfig(BaseModel):
         remote_command = " ".join(remote_parts)
         return (ssh_bin, *self.ssh_args, self.ssh_destination, remote_command)
 
-    def remote_command_for_backend(self, backend: Backend, args: list[str], remote_cwd: str) -> tuple[str, ...]:
-        executable = self.claude_bin if backend == Backend.CLAUDE_CODE else self.codex_bin
+    def remote_command_for_backend(
+        self, backend: Backend, args: list[str], remote_cwd: str
+    ) -> tuple[str, ...]:
+        executable = (
+            self.claude_bin if backend == Backend.CLAUDE_CODE else self.codex_bin
+        )
         return self.build_remote_exec_args([executable, *args], remote_cwd)
 
 

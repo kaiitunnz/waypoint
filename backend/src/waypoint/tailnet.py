@@ -41,7 +41,9 @@ def _resolve_binary() -> str | None:
 async def fetch_snapshot() -> TailnetSnapshot:
     binary = _resolve_binary()
     if binary is None:
-        return TailnetSnapshot(available=False, error="tailscale binary not found on PATH")
+        return TailnetSnapshot(
+            available=False, error="tailscale binary not found on PATH"
+        )
     try:
         process = await asyncio.create_subprocess_exec(
             binary,
@@ -52,22 +54,30 @@ async def fetch_snapshot() -> TailnetSnapshot:
         )
         stdout, stderr = await process.communicate()
     except FileNotFoundError as exc:
-        return TailnetSnapshot(available=False, error=f"failed to spawn tailscale: {exc}")
+        return TailnetSnapshot(
+            available=False, error=f"failed to spawn tailscale: {exc}"
+        )
     if process.returncode != 0:
-        message = stderr.decode().strip() or f"tailscale exited with {process.returncode}"
+        message = (
+            stderr.decode().strip() or f"tailscale exited with {process.returncode}"
+        )
         log.warning("tailscale status failed: %s", message)
         return TailnetSnapshot(available=False, error=message)
     try:
         payload = json.loads(stdout.decode() or "{}")
     except json.JSONDecodeError as exc:
-        return TailnetSnapshot(available=False, error=f"could not parse tailscale output: {exc}")
+        return TailnetSnapshot(
+            available=False, error=f"could not parse tailscale output: {exc}"
+        )
     return _parse_snapshot(payload)
 
 
 def _parse_snapshot(payload: dict[str, Any]) -> TailnetSnapshot:
     backend_state = payload.get("BackendState")
     if backend_state and backend_state != "Running":
-        return TailnetSnapshot(available=False, error=f"tailscale state: {backend_state}")
+        return TailnetSnapshot(
+            available=False, error=f"tailscale state: {backend_state}"
+        )
     peers: list[TailnetPeer] = []
     self_peer = _peer_from_node(payload.get("Self"), is_self=True)
     if self_peer is not None:
@@ -80,7 +90,9 @@ def _parse_snapshot(payload: dict[str, Any]) -> TailnetSnapshot:
     return TailnetSnapshot(available=True, peers=peers)
 
 
-def _peer_from_node(node: dict[str, Any] | None, *, is_self: bool) -> TailnetPeer | None:
+def _peer_from_node(
+    node: dict[str, Any] | None, *, is_self: bool
+) -> TailnetPeer | None:
     if not node:
         return None
     ip = _first_ipv4(node.get("TailscaleIPs"))

@@ -1,5 +1,5 @@
-from datetime import UTC, datetime, timedelta
 import secrets
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import Header, HTTPException, status
@@ -16,7 +16,9 @@ class TokenStore:
         self.storage.purge_expired_tokens(datetime.now(UTC))
 
     def issue(self) -> LoginResponse:
-        expires_at = datetime.now(UTC) + timedelta(seconds=self.settings.token_ttl_seconds)
+        expires_at = datetime.now(UTC) + timedelta(
+            seconds=self.settings.token_ttl_seconds
+        )
         token = secrets.token_urlsafe(32)
         self.storage.insert_token(token, expires_at)
         return LoginResponse(token=token, expires_at=expires_at)
@@ -48,5 +50,7 @@ def require_token(
         raise RuntimeError("token store dependency not bound")
     token = parse_bearer_token(authorization)
     if token is None or not token_store.validate(token):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token"
+        )
     return token

@@ -3,7 +3,17 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 
 from waypoint.auth import TokenStore, require_token
@@ -30,7 +40,9 @@ class AppContext:
         self.settings.ensure_dirs()
         self.claude_hook = ensure_claude_hook_bundle(self.settings.data_dir)
         self.storage = Storage(self.settings.database_path)
-        self.runtime = SessionRuntime(self.settings, self.storage, claude_hook=self.claude_hook)
+        self.runtime = SessionRuntime(
+            self.settings, self.storage, claude_hook=self.claude_hook
+        )
         self.tokens = TokenStore(self.settings, self.storage)
 
 
@@ -69,7 +81,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/auth/login")
     async def login(request: LoginRequest) -> Any:
         if request.password != context.settings.password:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid password")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid password"
+            )
         return context.tokens.issue()
 
     @app.get("/api/me", response_model=MeResponse)
@@ -84,11 +98,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def claude_hook_approval(request: Request) -> Any:
         secret = request.headers.get("x-waypoint-hook-secret", "")
         if not context.claude_hook.secret or secret != context.claude_hook.secret:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid hook secret")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="invalid hook secret"
+            )
+        if context.runtime.claude is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="claude adapter is not initialized",
+            )
         try:
             payload = await request.json()
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid json") from exc
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="invalid json"
+            ) from exc
         decision = await context.runtime.claude.await_approval(payload)
         return decision
 
@@ -99,7 +122,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/sessions")
     async def list_sessions(_: Annotated[str, Depends(token_dependency())]) -> Any:
-        sessions = [session.model_dump(mode="json") for session in context.runtime.list_sessions()]
+        sessions = [
+            session.model_dump(mode="json")
+            for session in context.runtime.list_sessions()
+        ]
         return {"sessions": sessions}
 
     @app.post("/api/sessions")
@@ -111,7 +137,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"session": session.model_dump(mode="json")}
 
     @app.get("/api/sessions/{session_id}")
-    async def get_session(session_id: str, _: Annotated[str, Depends(token_dependency())]) -> Any:
+    async def get_session(
+        session_id: str, _: Annotated[str, Depends(token_dependency())]
+    ) -> Any:
         session = context.runtime.get_session(session_id)
         return {"session": session.model_dump(mode="json")}
 
@@ -179,15 +207,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
         cursor: Annotated[int | None, Query()] = None,
     ) -> Any:
-        events = [event.model_dump(mode="json") for event in context.runtime.session_events(session_id, cursor)]
+        events = [
+            event.model_dump(mode="json")
+            for event in context.runtime.session_events(session_id, cursor)
+        ]
         return {"events": events}
 
-    @app.get("/api/sessions/{session_id}/terminal-snapshot", response_model=TerminalSnapshot)
+    @app.get(
+        "/api/sessions/{session_id}/terminal-snapshot", response_model=TerminalSnapshot
+    )
     async def terminal_snapshot(
         session_id: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> TerminalSnapshot:
-        return TerminalSnapshot(session_id=session_id, text=context.runtime.terminal_snapshot(session_id))
+        return TerminalSnapshot(
+            session_id=session_id, text=context.runtime.terminal_snapshot(session_id)
+        )
 
     @app.websocket("/ws/sessions")
     async def ws_sessions(websocket: WebSocket) -> None:
@@ -200,7 +235,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             initial = SessionEnvelope(
                 type="session_list_update",
-                payload={"sessions": [item.model_dump(mode="json") for item in context.runtime.list_sessions()]},
+                payload={
+                    "sessions": [
+                        item.model_dump(mode="json")
+                        for item in context.runtime.list_sessions()
+                    ]
+                },
             )
             await websocket.send_json(initial.model_dump(mode="json"))
             while True:

@@ -1,13 +1,12 @@
-from pathlib import Path
 import os
+from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
 import yaml
+from pydantic import BaseModel, Field
 
 from waypoint.schemas import Backend
 from waypoint.server_config import SshLaunchTargetConfig
-
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -74,7 +73,9 @@ class Settings(BaseModel):
 
 
 def load_settings(config_path_override: Path | None = None) -> Settings:
-    explicit = config_path_override or parse_config_path(os.environ.get("WAYPOINT_CONFIG_PATH"))
+    explicit = config_path_override or parse_config_path(
+        os.environ.get("WAYPOINT_CONFIG_PATH")
+    )
     if explicit is not None:
         config_path: Path | None = explicit
         require_exists = True
@@ -83,13 +84,17 @@ def load_settings(config_path_override: Path | None = None) -> Settings:
         require_exists = False
     payload = _load_config_payload(config_path, require_exists=require_exists)
     expanded = config_path.expanduser() if config_path is not None else None
-    payload["config_path"] = expanded if expanded is not None and expanded.exists() else None
+    payload["config_path"] = (
+        expanded if expanded is not None and expanded.exists() else None
+    )
     payload.update(_env_overrides())
     payload = _normalize_payload(payload)
     return Settings.model_validate(payload)
 
 
-def _load_config_payload(config_path: Path | None, require_exists: bool = True) -> dict[str, Any]:
+def _load_config_payload(
+    config_path: Path | None, require_exists: bool = True
+) -> dict[str, Any]:
     if config_path is None:
         return {}
     expanded = config_path.expanduser()
@@ -112,11 +117,17 @@ def _env_overrides() -> dict[str, Any]:
     if "WAYPOINT_PASSWORD" in os.environ:
         overrides["password"] = os.environ["WAYPOINT_PASSWORD"]
     if "WAYPOINT_DATA_DIR" in os.environ:
-        overrides["data_dir"] = Path(os.path.expandvars(os.environ["WAYPOINT_DATA_DIR"])).expanduser()
+        overrides["data_dir"] = Path(
+            os.path.expandvars(os.environ["WAYPOINT_DATA_DIR"])
+        ).expanduser()
     if "WAYPOINT_CORS_ORIGINS" in os.environ:
-        overrides["cors_origins"] = parse_cors_origins(os.environ["WAYPOINT_CORS_ORIGINS"])
+        overrides["cors_origins"] = parse_cors_origins(
+            os.environ["WAYPOINT_CORS_ORIGINS"]
+        )
     if "WAYPOINT_CORS_ORIGIN_REGEX" in os.environ:
-        overrides["cors_allow_origin_regex"] = parse_cors_origin_regex(os.environ["WAYPOINT_CORS_ORIGIN_REGEX"])
+        overrides["cors_allow_origin_regex"] = parse_cors_origin_regex(
+            os.environ["WAYPOINT_CORS_ORIGIN_REGEX"]
+        )
     return overrides
 
 
@@ -140,6 +151,9 @@ def _normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
         normalized["data_dir"] = Path(normalized["data_dir"]).expanduser()
     if "cors_origins" in normalized and normalized["cors_origins"] is None:
         normalized["cors_origins"] = list(DEFAULT_CORS_ORIGINS)
-    if "cors_allow_origin_regex" in normalized and normalized["cors_allow_origin_regex"] is None:
+    if (
+        "cors_allow_origin_regex" in normalized
+        and normalized["cors_allow_origin_regex"] is None
+    ):
         normalized["cors_allow_origin_regex"] = None
     return normalized

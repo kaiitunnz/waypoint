@@ -1,3 +1,5 @@
+from typing import Any
+
 from waypoint.tailnet import _parse_snapshot
 
 
@@ -42,7 +44,7 @@ def test_parse_snapshot_orders_self_then_online_then_offline() -> None:
 
 
 def test_parse_snapshot_returns_unavailable_when_backend_stopped() -> None:
-    payload = {"BackendState": "Stopped", "Self": None, "Peer": {}}
+    payload: dict[str, Any] = {"BackendState": "Stopped", "Self": None, "Peer": {}}
     snapshot = _parse_snapshot(payload)
     assert snapshot.available is False
     assert "Stopped" in (snapshot.error or "")

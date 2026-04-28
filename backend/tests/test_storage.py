@@ -1,6 +1,13 @@
 from datetime import UTC, datetime
 
-from waypoint.schemas import Backend, EventKind, EventRecord, SessionRecord, SessionSource, SessionStatus
+from waypoint.schemas import (
+    Backend,
+    EventKind,
+    EventRecord,
+    SessionRecord,
+    SessionSource,
+    SessionStatus,
+)
 from waypoint.storage import Storage
 
 

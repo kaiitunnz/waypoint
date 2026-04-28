@@ -1,8 +1,8 @@
 import argparse
 import asyncio
 import json
-from pathlib import Path
 import shutil
+from pathlib import Path
 from typing import Any
 
 import uvicorn
@@ -29,7 +29,9 @@ def build_parser() -> argparse.ArgumentParser:
     session_subparsers = session.add_subparsers(dest="session_command", required=True)
 
     start = session_subparsers.add_parser("start")
-    start.add_argument("--backend", choices=[backend.value for backend in Backend], required=True)
+    start.add_argument(
+        "--backend", choices=[backend.value for backend in Backend], required=True
+    )
     start.add_argument("--cwd", required=True)
     start.add_argument("--remote-cwd")
     start.add_argument("--launch-target-id")
@@ -38,7 +40,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     attach = session_subparsers.add_parser("attach")
     attach.add_argument("--tmux", required=True)
-    attach.add_argument("--backend-hint", choices=[backend.value for backend in Backend])
+    attach.add_argument(
+        "--backend-hint", choices=[backend.value for backend in Backend]
+    )
     attach.add_argument("--title")
 
     return parser
@@ -99,7 +103,9 @@ async def run_session_command(args: argparse.Namespace) -> None:
             payload: dict[str, Any] = {"tmux_target": args.tmux, "title": args.title}
             if args.backend_hint:
                 payload["backend_hint"] = Backend(args.backend_hint)
-            session = await context.runtime.attach_tmux(SessionAttachRequest.model_validate(payload))
+            session = await context.runtime.attach_tmux(
+                SessionAttachRequest.model_validate(payload)
+            )
             print(json.dumps({"session": session.model_dump(mode="json")}, indent=2))
     finally:
         await context.runtime.stop()

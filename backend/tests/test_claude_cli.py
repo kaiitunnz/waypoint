@@ -6,9 +6,9 @@ from typing import Any
 import pytest
 
 from waypoint.claude_cli import (
+    DEFAULT_TIMEOUT_SECONDS,
     ClaudeCliAdapter,
     ClaudeSessionState,
-    DEFAULT_TIMEOUT_SECONDS,
 )
 from waypoint.schemas import EventKind, SessionStatus
 
@@ -62,7 +62,9 @@ class FakeProcess:
         return self.returncode if self.returncode is not None else 0
 
 
-def _make_adapter(emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]]) -> ClaudeCliAdapter:
+def _make_adapter(
+    emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]],
+) -> ClaudeCliAdapter:
     async def emit(session_id, kind, text, metadata, status):
         emitted.append((session_id, kind, text, metadata, status))
 
@@ -74,7 +76,9 @@ def _make_adapter(emitted: list[tuple[str, EventKind, str, dict[str, Any], Sessi
     )
 
 
-def _attach_state(adapter: ClaudeCliAdapter, session_id: str = "sess") -> tuple[ClaudeSessionState, FakeProcess]:
+def _attach_state(
+    adapter: ClaudeCliAdapter, session_id: str = "sess"
+) -> tuple[ClaudeSessionState, FakeProcess]:
     process = FakeProcess()
     state = ClaudeSessionState(
         session_id=session_id,
@@ -94,8 +98,12 @@ async def test_send_input_writes_user_message_envelope() -> None:
     adapter = _make_adapter(emitted)
     state, process = _attach_state(adapter)
     await adapter.send_input("sess", "hello world")
-    payloads = [json.loads(line.decode("utf-8").strip()) for line in process.stdin.writes]
-    assert payloads == [{"type": "user", "message": {"role": "user", "content": "hello world"}}]
+    payloads = [
+        json.loads(line.decode("utf-8").strip()) for line in process.stdin.writes
+    ]
+    assert payloads == [
+        {"type": "user", "message": {"role": "user", "content": "hello world"}}
+    ]
 
 
 @pytest.mark.asyncio
@@ -109,7 +117,12 @@ async def test_dispatch_assistant_emits_text_and_tool_use_events() -> None:
             "id": "msg_1",
             "content": [
                 {"type": "text", "text": "Working on it"},
-                {"type": "tool_use", "id": "toolu_xyz", "name": "Bash", "input": {"command": "ls"}},
+                {
+                    "type": "tool_use",
+                    "id": "toolu_xyz",
+                    "name": "Bash",
+                    "input": {"command": "ls"},
+                },
             ],
         },
     }

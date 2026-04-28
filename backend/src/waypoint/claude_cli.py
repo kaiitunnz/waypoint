@@ -1,20 +1,24 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
-from dataclasses import dataclass, field
 import json
 import logging
 import os
-from pathlib import Path
 import shutil
-from typing import Any, Awaitable, Callable
+from collections.abc import Callable, Coroutine
+from contextlib import suppress
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 from waypoint.schemas import EventKind, SessionStatus
 
 log = logging.getLogger("waypoint.claude_cli")
 
-EmitEvent = Callable[[str, EventKind, str, dict[str, Any], SessionStatus], Awaitable[None]]
+EmitEvent = Callable[
+    [str, EventKind, str, dict[str, Any], SessionStatus],
+    Coroutine[Any, Any, None],
+]
 
 # Tools we surface to the user for approval. Other tools (Read, Grep, Glob, ...)
 # are left to Claude's own permission policy.
@@ -77,11 +81,15 @@ class ClaudeCliAdapter:
         self._sessions: dict[str, ClaudeSessionState] = {}
         self._approval_lock = asyncio.Lock()
 
-    async def start_session(self, session_id: str, cwd: str, claude_session_id: str) -> str:
+    async def start_session(
+        self, session_id: str, cwd: str, claude_session_id: str
+    ) -> str:
         state = await self._spawn(session_id, cwd, claude_session_id, resume=False)
         return state.claude_session_id
 
-    async def restore_session(self, session_id: str, cwd: str, claude_session_id: str) -> None:
+    async def restore_session(
+        self, session_id: str, cwd: str, claude_session_id: str
+    ) -> None:
         await self._spawn(session_id, cwd, claude_session_id, resume=True)
 
     async def send_input(self, session_id: str, text: str) -> None:
@@ -117,9 +125,11 @@ class ClaudeCliAdapter:
             pending.future.set_result(
                 {
                     "permissionDecision": mapped,
-                    "permissionDecisionReason": "approved by Waypoint user"
-                    if mapped == "allow"
-                    else "denied by Waypoint user",
+                    "permissionDecisionReason": (
+                        "approved by Waypoint user"
+                        if mapped == "allow"
+                        else "denied by Waypoint user"
+                    ),
                 }
             )
         state.pending.pop(tool_use_id, None)
@@ -129,17 +139,27 @@ class ClaudeCliAdapter:
         waypoint_session_id = str(payload.get("waypoint_session_id") or "")
         tool_use_id = str(payload.get("tool_use_id") or "")
         if not waypoint_session_id or not tool_use_id:
-            return {"permissionDecision": "ask", "permissionDecisionReason": "missing identifiers"}
+            return {
+                "permissionDecision": "ask",
+                "permissionDecisionReason": "missing identifiers",
+            }
         async with self._approval_lock:
             state = self._sessions.get(waypoint_session_id)
             if state is None:
-                return {"permissionDecision": "ask", "permissionDecisionReason": "session not active"}
+                return {
+                    "permissionDecision": "ask",
+                    "permissionDecisionReason": "session not active",
+                }
             if tool_use_id in state.pending:
                 # Hook was retried for the same tool call. Reuse the existing future.
                 pending = state.pending[tool_use_id]
             else:
-                future: asyncio.Future[dict[str, str]] = asyncio.get_running_loop().create_future()
-                pending = ClaudePendingApproval(tool_use_id=tool_use_id, payload=payload, future=future)
+                future: asyncio.Future[dict[str, str]] = (
+                    asyncio.get_running_loop().create_future()
+                )
+                pending = ClaudePendingApproval(
+                    tool_use_id=tool_use_id, payload=payload, future=future
+                )
                 state.pending[tool_use_id] = pending
                 await self._emit_event(
                     waypoint_session_id,
@@ -155,8 +175,10 @@ class ClaudeCliAdapter:
                     SessionStatus.WAITING_INPUT,
                 )
         try:
-            decision = await asyncio.wait_for(pending.future, timeout=DEFAULT_TIMEOUT_SECONDS)
-        except asyncio.TimeoutError:
+            decision = await asyncio.wait_for(
+                pending.future, timeout=DEFAULT_TIMEOUT_SECONDS
+            )
+        except TimeoutError:
             decision = {
                 "permissionDecision": "deny",
                 "permissionDecisionReason": "Waypoint approval timed out",
@@ -177,7 +199,10 @@ class ClaudeCliAdapter:
         for pending in list(state.pending.values()):
             if not pending.future.done():
                 pending.future.set_result(
-                    {"permissionDecision": "deny", "permissionDecisionReason": "session terminated"}
+                    {
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": "session terminated",
+                    }
                 )
         state.pending.clear()
         if state.process.stdin is not None and not state.process.stdin.is_closing():
@@ -188,7 +213,7 @@ class ClaudeCliAdapter:
                 state.process.terminate()
             try:
                 await asyncio.wait_for(state.process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 with suppress(ProcessLookupError):
                     state.process.kill()
                 with suppress(Exception):
@@ -278,14 +303,19 @@ class ClaudeCliAdapter:
                 except json.JSONDecodeError:
                     log.warning(
                         "claude stdout line not JSON",
-                        extra={"session_id": state.session_id, "raw": stripped[:200].decode(errors="replace")},
+                        extra={
+                            "session_id": state.session_id,
+                            "raw": stripped[:200].decode(errors="replace"),
+                        },
                     )
                     continue
                 await self._dispatch(state, event)
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.exception("claude stdout reader failed", extra={"session_id": state.session_id})
+            log.exception(
+                "claude stdout reader failed", extra={"session_id": state.session_id}
+            )
             if not state.closing:
                 await self._emit_event(
                     state.session_id,
@@ -304,11 +334,16 @@ class ClaudeCliAdapter:
                     break
                 text = line.decode("utf-8", errors="replace").rstrip()
                 if text:
-                    log.debug("claude stderr", extra={"session_id": state.session_id, "line": text})
+                    log.debug(
+                        "claude stderr",
+                        extra={"session_id": state.session_id, "line": text},
+                    )
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.exception("claude stderr reader failed", extra={"session_id": state.session_id})
+            log.exception(
+                "claude stderr reader failed", extra={"session_id": state.session_id}
+            )
 
     async def _dispatch(self, state: ClaudeSessionState, event: dict[str, Any]) -> None:
         event_type = event.get("type")
@@ -329,7 +364,11 @@ class ClaudeCliAdapter:
                 state.session_id,
                 EventKind.SYSTEM_NOTE,
                 self._format_rate_limit(event.get("rate_limit_info", {})),
-                {"method": "rate_limit_event", "payload": event, "status": SessionStatus.RUNNING},
+                {
+                    "method": "rate_limit_event",
+                    "payload": event,
+                    "status": SessionStatus.RUNNING,
+                },
                 SessionStatus.RUNNING,
             )
             return
@@ -338,18 +377,28 @@ class ClaudeCliAdapter:
             state.session_id,
             EventKind.SYSTEM_NOTE,
             f"Unhandled claude event: {event_type}",
-            {"method": event_type or "unknown", "payload": event, "status": SessionStatus.RUNNING},
+            {
+                "method": event_type or "unknown",
+                "payload": event,
+                "status": SessionStatus.RUNNING,
+            },
             SessionStatus.RUNNING,
         )
 
-    async def _handle_system(self, state: ClaudeSessionState, event: dict[str, Any]) -> None:
+    async def _handle_system(
+        self, state: ClaudeSessionState, event: dict[str, Any]
+    ) -> None:
         subtype = event.get("subtype")
         if subtype == "init":
             await self._emit_event(
                 state.session_id,
                 EventKind.SYSTEM_NOTE,
                 f"Claude session ready (model {event.get('model', 'unknown')})",
-                {"method": "system.init", "payload": event, "status": SessionStatus.IDLE},
+                {
+                    "method": "system.init",
+                    "payload": event,
+                    "status": SessionStatus.IDLE,
+                },
                 SessionStatus.IDLE,
             )
             return
@@ -366,11 +415,17 @@ class ClaudeCliAdapter:
             state.session_id,
             EventKind.SYSTEM_NOTE,
             f"system/{subtype}",
-            {"method": f"system.{subtype}", "payload": event, "status": SessionStatus.RUNNING},
+            {
+                "method": f"system.{subtype}",
+                "payload": event,
+                "status": SessionStatus.RUNNING,
+            },
             SessionStatus.RUNNING,
         )
 
-    async def _handle_assistant(self, state: ClaudeSessionState, event: dict[str, Any]) -> None:
+    async def _handle_assistant(
+        self, state: ClaudeSessionState, event: dict[str, Any]
+    ) -> None:
         message = event.get("message") or {}
         message_id = str(message.get("id") or "")
         for block in message.get("content") or []:
@@ -413,7 +468,9 @@ class ClaudeCliAdapter:
                 # Optional surface; hide behind an opt-in later if too noisy.
                 continue
 
-    async def _handle_user(self, state: ClaudeSessionState, event: dict[str, Any]) -> None:
+    async def _handle_user(
+        self, state: ClaudeSessionState, event: dict[str, Any]
+    ) -> None:
         message = event.get("message") or {}
         for block in message.get("content") or []:
             if block.get("type") != "tool_result":
@@ -436,7 +493,9 @@ class ClaudeCliAdapter:
                 state.terminal_fragments.append(text + "\n")
             await self._emit_event(state.session_id, kind, text, metadata, status)
 
-    async def _handle_result(self, state: ClaudeSessionState, event: dict[str, Any]) -> None:
+    async def _handle_result(
+        self, state: ClaudeSessionState, event: dict[str, Any]
+    ) -> None:
         subtype = event.get("subtype", "")
         is_error = bool(event.get("is_error"))
         usage = event.get("usage") or {}
@@ -487,7 +546,9 @@ class ClaudeCliAdapter:
             parts: list[str] = []
             for entry in content:
                 if isinstance(entry, dict):
-                    if entry.get("type") == "text" and isinstance(entry.get("text"), str):
+                    if entry.get("type") == "text" and isinstance(
+                        entry.get("text"), str
+                    ):
                         parts.append(entry["text"])
                     elif "text" in entry:
                         parts.append(str(entry["text"]))

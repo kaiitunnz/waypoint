@@ -1,29 +1,32 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
-from dataclasses import asdict, dataclass, field, is_dataclass
-import json
 import logging
-from pathlib import Path
 import shutil
 import threading
-from typing import Any, Awaitable, Callable
+from collections.abc import Callable, Coroutine
+from contextlib import suppress
+from dataclasses import asdict, dataclass, field, is_dataclass
+from typing import Any
 
 from codex_app_server.client import AppServerClient, AppServerConfig
-from codex_app_server.generated.v2_all import AskForApprovalValue
-from codex_app_server.models import Notification, UnknownNotification
+from codex_app_server.models import UnknownNotification
 
 from waypoint.schemas import EventKind, SessionStatus
 
 log = logging.getLogger("waypoint.codex")
 
-ApprovalDecisionHandler = Callable[[str, EventKind, str, dict[str, Any], SessionStatus], Awaitable[None]]
+ApprovalDecisionHandler = Callable[
+    [str, EventKind, str, dict[str, Any], SessionStatus],
+    Coroutine[Any, Any, None],
+]
 ApprovalCallback = Callable[[str, dict[str, Any] | None], dict[str, Any]]
 ClientFactory = Callable[[str, str | None, ApprovalCallback], AppServerClient]
 
 
-def _default_client_factory(cwd: str, remote_cwd: str | None, approval_handler: ApprovalCallback) -> AppServerClient:
+def _default_client_factory(
+    cwd: str, remote_cwd: str | None, approval_handler: ApprovalCallback
+) -> AppServerClient:
     codex_bin = shutil.which("codex")
     if codex_bin is None:
         raise RuntimeError("codex binary not found on PATH")
@@ -83,7 +86,9 @@ class CodexAppServerAdapter:
             remote_cwd=remote_cwd,
             client_factory_override=client_factory_override,
         )
-        started = await self._call_client(state, state.client.thread_start, {"cwd": remote_cwd or cwd})
+        started = await self._call_client(
+            state, state.client.thread_start, {"cwd": remote_cwd or cwd}
+        )
         state.thread_id = started.thread.id
         return state.thread_id
 
@@ -115,7 +120,9 @@ class CodexAppServerAdapter:
         self._loop = asyncio.get_running_loop()
         holder: dict[str, CodexSessionState] = {}
 
-        def approval_handler(method: str, params: dict[str, Any] | None) -> dict[str, Any]:
+        def approval_handler(
+            method: str, params: dict[str, Any] | None
+        ) -> dict[str, Any]:
             state = holder["state"]
             payload = params or {}
             pending = PendingApproval(method=method, params=payload)
@@ -157,17 +164,25 @@ class CodexAppServerAdapter:
     async def send_input(self, session_id: str, text: str) -> None:
         state = self._require_session(session_id)
         if state.active_turn_id is None:
-            started = await self._call_client(state, state.client.turn_start, state.thread_id, text)
+            started = await self._call_client(
+                state, state.client.turn_start, state.thread_id, text
+            )
             state.active_turn_id = started.turn.id
-            state.stream_task = asyncio.create_task(self._stream_turn(state, started.turn.id))
+            state.stream_task = asyncio.create_task(
+                self._stream_turn(state, started.turn.id)
+            )
             return
-        await self._call_client(state, state.client.turn_steer, state.thread_id, state.active_turn_id, text)
+        await self._call_client(
+            state, state.client.turn_steer, state.thread_id, state.active_turn_id, text
+        )
 
     async def interrupt(self, session_id: str) -> None:
         state = self._require_session(session_id)
         if state.active_turn_id is None:
             return
-        await self._call_client(state, state.client.turn_interrupt, state.thread_id, state.active_turn_id)
+        await self._call_client(
+            state, state.client.turn_interrupt, state.thread_id, state.active_turn_id
+        )
 
     async def respond_to_approval(self, session_id: str, decision: str) -> bool:
         state = self._require_session(session_id)
@@ -213,9 +228,13 @@ class CodexAppServerAdapter:
     async def _stream_turn(self, state: CodexSessionState, turn_id: str) -> None:
         try:
             while True:
-                notification = await self._call_client(state, state.client.next_notification)
+                notification = await self._call_client(
+                    state, state.client.next_notification
+                )
                 payload = self._payload_to_dict(notification.payload)
-                kind, text, status = self._map_notification(notification.method, payload)
+                kind, text, status = self._map_notification(
+                    notification.method, payload
+                )
                 if kind is not None and text:
                     if notification.method == "item/commandExecution/outputDelta":
                         state.terminal_fragments.append(text)
@@ -255,7 +274,9 @@ class CodexAppServerAdapter:
                 SessionStatus.ERROR,
             )
 
-    async def _call_client(self, state: CodexSessionState, func: Callable[..., Any], *args: Any) -> Any:
+    async def _call_client(
+        self, state: CodexSessionState, func: Callable[..., Any], *args: Any
+    ) -> Any:
         async with state.transport_lock:
             return await asyncio.to_thread(func, *args)
 
@@ -271,18 +292,38 @@ class CodexAppServerAdapter:
         payload: dict[str, Any],
     ) -> tuple[EventKind | None, str, SessionStatus]:
         if method == "item/agentMessage/delta":
-            return EventKind.AGENT_OUTPUT, str(payload.get("delta", "")), SessionStatus.RUNNING
+            return (
+                EventKind.AGENT_OUTPUT,
+                str(payload.get("delta", "")),
+                SessionStatus.RUNNING,
+            )
         if method == "item/commandExecution/outputDelta":
-            return EventKind.TOOL_RESULT, str(payload.get("delta", "")), SessionStatus.RUNNING
+            return (
+                EventKind.TOOL_RESULT,
+                str(payload.get("delta", "")),
+                SessionStatus.RUNNING,
+            )
         if method == "item/fileChange/outputDelta":
-            return EventKind.TOOL_RESULT, str(payload.get("delta", "")), SessionStatus.RUNNING
+            return (
+                EventKind.TOOL_RESULT,
+                str(payload.get("delta", "")),
+                SessionStatus.RUNNING,
+            )
         if method == "turn/started":
             turn = payload.get("turn", {})
-            return EventKind.SYSTEM_NOTE, f"Turn started: {turn.get('id', '')}".strip(), SessionStatus.RUNNING
+            return (
+                EventKind.SYSTEM_NOTE,
+                f"Turn started: {turn.get('id', '')}".strip(),
+                SessionStatus.RUNNING,
+            )
         if method == "turn/completed":
             turn = payload.get("turn", {})
             status = self._map_turn_status(turn.get("status"))
-            return EventKind.SYSTEM_NOTE, f"Turn {turn.get('status', 'completed')}", status
+            return (
+                EventKind.SYSTEM_NOTE,
+                f"Turn {turn.get('status', 'completed')}",
+                status,
+            )
         if method == "item/started":
             item = self._extract_item(payload)
             return self._format_item_started(item)
@@ -291,42 +332,85 @@ class CodexAppServerAdapter:
             return self._format_item_completed(item)
         if method == "turn/plan/updated":
             plan = payload.get("plan", [])
-            text = "\n".join(f"- {entry.get('step', '')} [{entry.get('status', '')}]" for entry in plan)
+            text = "\n".join(
+                f"- {entry.get('step', '')} [{entry.get('status', '')}]"
+                for entry in plan
+            )
             return EventKind.SYSTEM_NOTE, text, SessionStatus.RUNNING
         if method == "error":
             error = payload.get("error", {})
-            return EventKind.SYSTEM_NOTE, str(error.get("message", "Codex error")), SessionStatus.ERROR
+            return (
+                EventKind.SYSTEM_NOTE,
+                str(error.get("message", "Codex error")),
+                SessionStatus.ERROR,
+            )
         return None, "", SessionStatus.RUNNING
 
-    def _format_item_started(self, item: dict[str, Any]) -> tuple[EventKind, str, SessionStatus]:
+    def _format_item_started(
+        self, item: dict[str, Any]
+    ) -> tuple[EventKind, str, SessionStatus]:
         item_type = item.get("type")
         if item_type == "commandExecution":
-            return EventKind.TOOL_CALL, f"$ {item.get('command', '')}", SessionStatus.RUNNING
+            return (
+                EventKind.TOOL_CALL,
+                f"$ {item.get('command', '')}",
+                SessionStatus.RUNNING,
+            )
         if item_type == "fileChange":
-            paths = ", ".join(change.get("path", "") for change in item.get("changes", []))
-            return EventKind.TOOL_CALL, f"Preparing file changes: {paths}", SessionStatus.RUNNING
+            paths = ", ".join(
+                change.get("path", "") for change in item.get("changes", [])
+            )
+            return (
+                EventKind.TOOL_CALL,
+                f"Preparing file changes: {paths}",
+                SessionStatus.RUNNING,
+            )
         if item_type == "mcpToolCall":
-            return EventKind.TOOL_CALL, f"MCP {item.get('server', '')}:{item.get('tool', '')}", SessionStatus.RUNNING
+            return (
+                EventKind.TOOL_CALL,
+                f"MCP {item.get('server', '')}:{item.get('tool', '')}",
+                SessionStatus.RUNNING,
+            )
         if item_type == "plan":
             return EventKind.SYSTEM_NOTE, item.get("text", ""), SessionStatus.RUNNING
         if item_type == "agentMessage":
             return EventKind.AGENT_OUTPUT, item.get("text", ""), SessionStatus.RUNNING
-        return EventKind.SYSTEM_NOTE, f"Started {item_type or 'item'}", SessionStatus.RUNNING
+        return (
+            EventKind.SYSTEM_NOTE,
+            f"Started {item_type or 'item'}",
+            SessionStatus.RUNNING,
+        )
 
-    def _format_item_completed(self, item: dict[str, Any]) -> tuple[EventKind | None, str, SessionStatus]:
+    def _format_item_completed(
+        self, item: dict[str, Any]
+    ) -> tuple[EventKind | None, str, SessionStatus]:
         item_type = item.get("type")
         if item_type == "agentMessage":
             return None, "", SessionStatus.RUNNING
         if item_type == "commandExecution":
             output = item.get("aggregatedOutput") or ""
             suffix = f"\n{output}" if output else ""
-            status = SessionStatus.IDLE if item.get("status") == "completed" else SessionStatus.RUNNING
+            status = (
+                SessionStatus.IDLE
+                if item.get("status") == "completed"
+                else SessionStatus.RUNNING
+            )
             return EventKind.TOOL_RESULT, f"$ {item.get('command', '')}{suffix}", status
         if item_type == "fileChange":
-            paths = ", ".join(change.get("path", "") for change in item.get("changes", []))
-            status = SessionStatus.IDLE if item.get("status") == "completed" else SessionStatus.RUNNING
+            paths = ", ".join(
+                change.get("path", "") for change in item.get("changes", [])
+            )
+            status = (
+                SessionStatus.IDLE
+                if item.get("status") == "completed"
+                else SessionStatus.RUNNING
+            )
             return EventKind.TOOL_RESULT, f"File changes completed: {paths}", status
-        return EventKind.SYSTEM_NOTE, f"Completed {item_type or 'item'}", SessionStatus.RUNNING
+        return (
+            EventKind.SYSTEM_NOTE,
+            f"Completed {item_type or 'item'}",
+            SessionStatus.RUNNING,
+        )
 
     def _extract_item_id(self, payload: dict[str, Any]) -> str | None:
         candidate = payload.get("itemId")
@@ -351,7 +435,7 @@ class CodexAppServerAdapter:
         if hasattr(payload, "model_dump"):
             dumped = payload.model_dump(mode="json", by_alias=True)
             return dumped if isinstance(dumped, dict) else {"value": dumped}
-        if is_dataclass(payload):
+        if is_dataclass(payload) and not isinstance(payload, type):
             dumped = asdict(payload)
             return dumped if isinstance(dumped, dict) else {"value": dumped}
         if isinstance(payload, UnknownNotification):

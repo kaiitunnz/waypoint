@@ -20,7 +20,9 @@ def test_quote_remote_path_preserves_leading_tilde() -> None:
     assert _quote_remote_path("/srv/My Work") == "'/srv/My Work'"
 
 
-def test_load_settings_parses_yaml_defaults_and_ssh_targets(monkeypatch, tmp_path: Path) -> None:
+def test_load_settings_parses_yaml_defaults_and_ssh_targets(
+    monkeypatch, tmp_path: Path
+) -> None:
     for name in list(os.environ):
         if name.startswith("WAYPOINT_"):
             monkeypatch.delenv(name, raising=False)
@@ -43,7 +45,7 @@ def test_load_settings_parses_yaml_defaults_and_ssh_targets(monkeypatch, tmp_pat
                 "    supported_backends:",
                 "      - codex",
                 "    config_overrides:",
-                "      - model_reasoning_effort=\"high\"",
+                '      - model_reasoning_effort="high"',
                 "    remote_env:",
                 "      OPENAI_API_KEY: sk-test",
             ]
@@ -89,7 +91,9 @@ def test_load_settings_env_overrides_yaml(monkeypatch, tmp_path: Path) -> None:
     assert loaded.password == "from-env"
 
 
-def test_remote_client_factory_uses_default_remote_cwd_when_not_provided(monkeypatch) -> None:
+def test_remote_client_factory_uses_default_remote_cwd_when_not_provided(
+    monkeypatch,
+) -> None:
     config = SshLaunchTargetConfig(
         id="devbox",
         name="Devbox",
@@ -98,7 +102,9 @@ def test_remote_client_factory_uses_default_remote_cwd_when_not_provided(monkeyp
     )
 
     monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
-    client = build_remote_codex_client_factory(config)("/Users/alice/work/project-a", None, lambda *_: {})
+    client = build_remote_codex_client_factory(config)(
+        "/Users/alice/work/project-a", None, lambda *_: {}
+    )
 
     assert client.config.launch_args_override is not None
     # `~` must reach the remote shell unquoted so it can be expanded.
@@ -113,10 +119,12 @@ def test_remote_client_factory_uses_ssh_launch_args(monkeypatch) -> None:
         ssh_destination="dev@example.com",
         ssh_args=["-p", "2222"],
         remote_env={"OPENAI_API_KEY": "sk-test"},
-        config_overrides=["model=\"gpt-5\""],
+        config_overrides=['model="gpt-5"'],
     )
 
-    client = build_remote_codex_client_factory(config)("/Users/alice/work/project-a", "/srv/work/project-a", lambda *_: {})
+    client = build_remote_codex_client_factory(config)(
+        "/Users/alice/work/project-a", "/srv/work/project-a", lambda *_: {}
+    )
 
     assert client.config.launch_args_override is not None
     assert client.config.cwd is None
@@ -141,7 +149,9 @@ def test_ssh_target_remote_command_supports_claude(monkeypatch) -> None:
         claude_bin="/opt/claude/bin/claude",
     )
 
-    command = config.remote_command_for_backend(Backend.CLAUDE_CODE, ["--resume"], "~/workspace")
+    command = config.remote_command_for_backend(
+        Backend.CLAUDE_CODE, ["--resume"], "~/workspace"
+    )
 
     assert command[:2] == ("/usr/bin/ssh", "dev@example.com")
     assert "cd ~/workspace" in command[2]

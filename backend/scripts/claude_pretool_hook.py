@@ -6,6 +6,7 @@ until the backend returns an approval decision, and emits the appropriate
 hookSpecificOutput envelope on stdout. Stdlib-only so the script works in any
 Python the user happens to have on PATH.
 """
+
 from __future__ import annotations
 
 import json
@@ -73,7 +74,12 @@ def main() -> int:
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             decision = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+    except (
+        urllib.error.URLError,
+        urllib.error.HTTPError,
+        TimeoutError,
+        json.JSONDecodeError,
+    ) as exc:
         emit("ask", f"Waypoint hook error: {exc}")
         return 0
 

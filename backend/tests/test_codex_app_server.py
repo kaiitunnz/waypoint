@@ -80,7 +80,9 @@ class FakeNotification:
     payload: dict[str, Any]
 
 
-def make_adapter(emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]]):
+def make_adapter(
+    emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]],
+):
     async def emit(session_id, kind, text, metadata, status):
         emitted.append((session_id, kind, text, metadata, status))
 
@@ -129,7 +131,9 @@ async def test_start_session_uses_factory_override() -> None:
         override.calls.append(("override_factory", (cwd, remote_cwd)))
         return override
 
-    thread_id = await adapter.start_session("sess", "/tmp/work", "~/remote-work", override_factory)
+    thread_id = await adapter.start_session(
+        "sess", "/tmp/work", "~/remote-work", override_factory
+    )
 
     assert thread_id == "thread-1"
     assert fake.calls == []
@@ -189,7 +193,9 @@ async def test_respond_to_approval_resolves_pending() -> None:
     state = adapter._sessions["sess"]
     from waypoint.codex_app_server import PendingApproval
 
-    pending = PendingApproval(method="item/commandExecution/requestApproval", params={"command": "ls"})
+    pending = PendingApproval(
+        method="item/commandExecution/requestApproval", params={"command": "ls"}
+    )
     state.pending_approval = pending
     handled = await adapter.respond_to_approval("sess", "approve")
     assert handled is True
@@ -273,7 +279,9 @@ def test_map_notification_command_execution_started() -> None:
 
 def test_format_item_completed_drops_agent_message_duplicate() -> None:
     adapter = CodexAppServerAdapter(lambda *_: None, client_factory=lambda *_: None)  # type: ignore[arg-type]
-    kind, text, status = adapter._format_item_completed({"type": "agentMessage", "text": "hello"})
+    kind, text, status = adapter._format_item_completed(
+        {"type": "agentMessage", "text": "hello"}
+    )
     assert kind is None
     assert text == ""
     assert status == SessionStatus.RUNNING
@@ -282,7 +290,10 @@ def test_format_item_completed_drops_agent_message_duplicate() -> None:
 def test_extract_item_id_pulls_top_level_and_nested_ids() -> None:
     adapter = CodexAppServerAdapter(lambda *_: None, client_factory=lambda *_: None)  # type: ignore[arg-type]
     assert adapter._extract_item_id({"itemId": "abc", "delta": "x"}) == "abc"
-    assert adapter._extract_item_id({"item": {"id": "xyz", "type": "agentMessage"}}) == "xyz"
+    assert (
+        adapter._extract_item_id({"item": {"id": "xyz", "type": "agentMessage"}})
+        == "xyz"
+    )
     assert adapter._extract_item_id({}) is None
 
 

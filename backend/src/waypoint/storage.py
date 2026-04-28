@@ -1,7 +1,7 @@
-from datetime import UTC, datetime
 import json
-from pathlib import Path
 import sqlite3
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from waypoint.schemas import EventRecord, SessionRecord, SessionStatus, SessionTransport
@@ -16,8 +16,7 @@ class Storage:
         self._init_db()
 
     def _init_db(self) -> None:
-        self.connection.executescript(
-            """
+        self.connection.executescript("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
                 backend TEXT NOT NULL,
@@ -58,8 +57,7 @@ class Storage:
                 expires_at TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
-            """
-        )
+            """)
         self._ensure_column("sessions", "transport", "TEXT NOT NULL DEFAULT 'tmux'")
         self._ensure_column("sessions", "thread_id", "TEXT")
         self._ensure_column("sessions", "remote_cwd", "TEXT")
@@ -180,9 +178,14 @@ class Storage:
             ),
         )
         self.connection.commit()
-        return event.model_copy(update={"id": int(cursor.lastrowid)})
+        last_id = cursor.lastrowid
+        if last_id is None:
+            raise RuntimeError("sqlite did not assign a row id for the inserted event")
+        return event.model_copy(update={"id": int(last_id)})
 
-    def list_events(self, session_id: str, cursor: int | None = None) -> list[EventRecord]:
+    def list_events(
+        self, session_id: str, cursor: int | None = None
+    ) -> list[EventRecord]:
         query = "SELECT * FROM events WHERE session_id = ?"
         params: list[Any] = [session_id]
         if cursor is not None:
@@ -233,7 +236,9 @@ class Storage:
         for field_name in ("created_at", "updated_at", "last_event_at"):
             payload[field_name] = datetime.fromisoformat(payload[field_name])
         payload["status"] = SessionStatus(payload["status"])
-        payload["transport"] = SessionTransport(payload.get("transport", SessionTransport.TMUX))
+        payload["transport"] = SessionTransport(
+            payload.get("transport", SessionTransport.TMUX)
+        )
         return SessionRecord.model_validate(payload)
 
     def _event_from_row(self, row: sqlite3.Row) -> EventRecord:

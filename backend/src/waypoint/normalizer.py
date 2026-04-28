@@ -1,6 +1,6 @@
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import re
 
 from waypoint.schemas import EventKind, EventRecord, SessionStatus
 
@@ -42,7 +42,9 @@ class TerminalNormalizer:
         text = ANSI_SINGLE_PATTERN.sub("", text)
         return text.replace("\r\n", "\n").replace("\r", "\n")
 
-    def normalize(self, session_id: str, text: str, start_sequence: int) -> NormalizedChunk:
+    def normalize(
+        self, session_id: str, text: str, start_sequence: int
+    ) -> NormalizedChunk:
         cleaned = self.clean(text)
         events: list[EventRecord] = []
         status = SessionStatus.RUNNING

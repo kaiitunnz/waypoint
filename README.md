@@ -19,6 +19,8 @@ Waypoint is a personal remote-control companion for Claude Code and Codex sessio
 
 ```bash
 cd backend
+cp .env.example .env
+# edit .env and set a real WAYPOINT_PASSWORD
 uv sync --group dev
 uv run waypoint serve
 ```
@@ -30,12 +32,12 @@ cd backend
 ./scripts/install_launchd.sh
 ```
 
-Environment variables:
+Backend `.env`:
 
 - `WAYPOINT_PASSWORD` — login password, defaults to `change-me`
-- `WAYPOINT_HOST` — bind host, defaults to `127.0.0.1`
+- `WAYPOINT_HOST` — bind host; use `0.0.0.0` for phone/Tailscale access
 - `WAYPOINT_PORT` — bind port, defaults to `8787`
-- `WAYPOINT_DATA_DIR` — override app data directory
+- `WAYPOINT_DATA_DIR` — app data directory
 
 ### Frontend
 
@@ -45,4 +47,16 @@ npm install
 npm run dev
 ```
 
+Frontend dev notes:
+
+- `npm run dev` binds to `0.0.0.0` so the phone can reach the dev server over Tailscale.
+- The dev config auto-allows the machine's non-internal IPv4 addresses, including typical Tailscale `100.x.x.x` addresses, and emits both bare hosts and full `http://host:3000` origins.
+- If you still need extra origins, create `frontend/.env.local` from `frontend/.env.example` and set `NEXT_ALLOWED_DEV_ORIGINS` as a comma-separated list.
+- For the most reliable phone check-in flow, prefer `npm run build && npm run start` over `npm run dev`.
+
 The frontend stores the backend base URL and bearer token in local storage.
+
+When the frontend is opened from a phone, it now infers the backend URL from the current page host and port `8787`. Example:
+
+- frontend: `http://100.x.y.z:3000`
+- inferred backend: `http://100.x.y.z:8787`

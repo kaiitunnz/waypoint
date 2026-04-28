@@ -91,7 +91,7 @@ export default function HomePage() {
           when the transcript gets fuzzy.
         </p>
       </section>
-      {!token ? <LoginForm defaultHost={host || "http://127.0.0.1:8787"} onSubmit={handleLogin} /> : null}
+      {!token ? <LoginForm defaultHost={host} onSubmit={handleLogin} /> : null}
       {token ? <LaunchPanel onAttach={handleAttach} onCreate={handleCreate} /> : null}
       {error ? <p className="error">{error}</p> : null}
       {token ? <SessionList sessions={sessions} /> : null}

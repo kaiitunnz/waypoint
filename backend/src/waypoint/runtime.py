@@ -158,12 +158,17 @@ class SessionRuntime:
         if request.source_mode != SessionSource.MANAGED:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="use attach endpoint for tmux targets")
         session_id = self._generate_session_id(request.backend)
+        launch_target = self._resolve_launch_target(request.launch_target_id, request.backend)
+        # Local cwd is fed to subprocess.Popen / tmux new-session, neither of
+        # which expand `~`. Resolve it before storing/launching. The remote
+        # cwd is left verbatim so the remote shell can do its own expansion.
+        local_cwd = request.cwd if launch_target is not None else str(Path(request.cwd).expanduser())
+        request = request.model_copy(update={"cwd": local_cwd})
         title = request.title or f"{request.backend} {Path(request.cwd).name or request.backend}"
         session_dir = self._session_dir(session_id)
         raw_log = session_dir / "raw.log"
         structured_log = session_dir / "events.jsonl"
         git_meta = await resolve_git_meta(request.cwd)
-        launch_target = self._resolve_launch_target(request.launch_target_id, request.backend)
         remote_cwd = self._resolve_remote_cwd(request, launch_target)
         if request.backend == Backend.CODEX:
             raw_log.touch(exist_ok=True)

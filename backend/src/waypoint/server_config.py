@@ -54,7 +54,7 @@ class SshLaunchTargetConfig(BaseModel):
 
     def build_remote_exec_args(self, command: list[str], remote_cwd: str) -> tuple[str, ...]:
         ssh_bin = _resolve_local_binary(self.ssh_bin)
-        remote_parts = [f"cd {shlex.quote(remote_cwd)}", "&&", "exec"]
+        remote_parts = [f"cd {_quote_remote_path(remote_cwd)}", "&&", "exec"]
         if self.remote_env:
             remote_parts.append("env")
             for key, value in sorted(self.remote_env.items()):
@@ -81,6 +81,24 @@ def build_remote_codex_client_factory(target: SshLaunchTargetConfig):
         )
 
     return factory
+
+
+def _quote_remote_path(path: str) -> str:
+    """Quote a path for the remote shell while preserving tilde expansion.
+
+    `shlex.quote` wraps the whole string in single quotes, which suppresses
+    the remote shell's tilde substitution. For paths starting with `~` (e.g.
+    `~`, `~/foo`, or `~user/bar`) leave the tilde-prefix unquoted so the
+    remote shell can expand it, and quote only the suffix.
+    """
+    if not path or not path.startswith("~"):
+        return shlex.quote(path)
+    head, sep, rest = path.partition("/")
+    if not sep:
+        return head
+    if not rest:
+        return f"{head}/"
+    return f"{head}/{shlex.quote(rest)}"
 
 
 def _resolve_local_binary(binary: str) -> str:

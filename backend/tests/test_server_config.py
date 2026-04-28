@@ -3,7 +3,21 @@ from pathlib import Path
 
 from waypoint.config import load_settings
 from waypoint.schemas import Backend
-from waypoint.server_config import SshLaunchTargetConfig, build_remote_codex_client_factory
+from waypoint.server_config import (
+    SshLaunchTargetConfig,
+    _quote_remote_path,
+    build_remote_codex_client_factory,
+)
+
+
+def test_quote_remote_path_preserves_leading_tilde() -> None:
+    assert _quote_remote_path("~") == "~"
+    assert _quote_remote_path("~/") == "~/"
+    assert _quote_remote_path("~/workspace") == "~/workspace"
+    assert _quote_remote_path("~/My Projects") == "~/'My Projects'"
+    assert _quote_remote_path("~user/work") == "~user/work"
+    assert _quote_remote_path("/srv/work") == "/srv/work"
+    assert _quote_remote_path("/srv/My Work") == "'/srv/My Work'"
 
 
 def test_load_settings_parses_yaml_defaults_and_ssh_targets(monkeypatch, tmp_path: Path) -> None:
@@ -87,7 +101,8 @@ def test_remote_client_factory_uses_default_remote_cwd_when_not_provided(monkeyp
     client = build_remote_codex_client_factory(config)("/Users/alice/work/project-a", None, lambda *_: {})
 
     assert client.config.launch_args_override is not None
-    assert "cd '~/workspace'" in client.config.launch_args_override[2]
+    # `~` must reach the remote shell unquoted so it can be expanded.
+    assert "cd ~/workspace" in client.config.launch_args_override[2]
 
 
 def test_remote_client_factory_uses_ssh_launch_args(monkeypatch) -> None:
@@ -129,5 +144,5 @@ def test_ssh_target_remote_command_supports_claude(monkeypatch) -> None:
     command = config.remote_command_for_backend(Backend.CLAUDE_CODE, ["--resume"], "~/workspace")
 
     assert command[:2] == ("/usr/bin/ssh", "dev@example.com")
-    assert "cd '~/workspace'" in command[2]
+    assert "cd ~/workspace" in command[2]
     assert "/opt/claude/bin/claude --resume" in command[2]

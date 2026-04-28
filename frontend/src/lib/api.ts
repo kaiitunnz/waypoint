@@ -111,13 +111,21 @@ export async function postAction(
   host: string,
   token: string,
   sessionId: string,
-  action: "interrupt" | "resume",
+  action: "interrupt" | "resume" | "terminate",
 ): Promise<void> {
   const response = await fetch(`${host}/api/sessions/${sessionId}/${action}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
   });
   await ensureOk(response, `failed to ${action}`);
+}
+
+export async function deleteSession(host: string, token: string, sessionId: string): Promise<void> {
+  const response = await fetch(`${host}/api/sessions/${sessionId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, "failed to delete session");
 }
 
 export async function approveSession(

@@ -6,7 +6,15 @@ import { BackendSwitcher } from "@/components/BackendSwitcher";
 import { LaunchPanel } from "@/components/LaunchPanel";
 import { LoginForm } from "@/components/LoginForm";
 import { SessionList } from "@/components/SessionList";
-import { attachTmux, connectSessionsSocket, createSession, fetchSessions, isAuthError, login } from "@/lib/api";
+import {
+  attachTmux,
+  connectSessionsSocket,
+  createSession,
+  deleteSession as deleteSessionRequest,
+  fetchSessions,
+  isAuthError,
+  login,
+} from "@/lib/api";
 import { clearToken, readHost, readToken, writeHost, writeToken } from "@/lib/store";
 import { Backend, SessionEnvelope, SessionRecord } from "@/lib/types";
 
@@ -154,6 +162,19 @@ export default function HomePage() {
     setError(message);
   }
 
+  async function handleDelete(sessionId: string) {
+    try {
+      await deleteSessionRequest(host, token, sessionId);
+      setSessions((current) => current.filter((session) => session.id !== sessionId));
+    } catch (deleteError) {
+      if (isAuthError(deleteError)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      setError(deleteError instanceof Error ? deleteError.message : "failed to delete session");
+    }
+  }
+
   function handleSwitchBackend(nextHost: string) {
     writeHost(nextHost);
     clearToken();
@@ -189,7 +210,7 @@ export default function HomePage() {
           {connection === "connecting" ? "Connecting…" : "Reconnecting…"}
         </p>
       ) : null}
-      {token ? <SessionList sessions={sessions} /> : null}
+      {token ? <SessionList sessions={sessions} onDelete={handleDelete} /> : null}
     </main>
   );
 }

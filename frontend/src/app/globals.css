@@ -148,6 +148,21 @@ pre {
   color: var(--text);
 }
 
+.danger {
+  min-height: 46px;
+  border-radius: 999px;
+  padding: 0 18px;
+  background: rgba(251, 113, 133, 0.18);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.danger:disabled {
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--muted);
+  cursor: default;
+}
+
 .session-card h3,
 .panel h2,
 .panel h3 {
@@ -204,6 +219,12 @@ pre {
 .link-button:disabled {
   color: var(--muted);
   cursor: default;
+}
+
+.link-button.danger-link {
+  color: var(--danger);
+  align-self: flex-start;
+  margin-top: 4px;
 }
 
 .probe {

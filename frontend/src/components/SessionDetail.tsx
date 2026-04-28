@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   approveSession,
   connectSessionSocket,
+  deleteSession as deleteSessionRequest,
   fetchEvents,
   fetchSession,
   fetchTerminalSnapshot,
@@ -186,6 +187,37 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }
 
+  async function terminate() {
+    if (!window.confirm("Terminate this session? Any running command will be stopped.")) {
+      return;
+    }
+    try {
+      await postAction(host, token, sessionId, "terminate");
+    } catch (terminateError) {
+      if (isAuthError(terminateError)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(terminateError instanceof Error ? terminateError.message : "failed to terminate");
+    }
+  }
+
+  async function removeFromList() {
+    if (!window.confirm("Delete this session and its transcript? This cannot be undone.")) {
+      return;
+    }
+    try {
+      await deleteSessionRequest(host, token, sessionId);
+      router.replace("/");
+    } catch (deleteError) {
+      if (isAuthError(deleteError)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(deleteError instanceof Error ? deleteError.message : "failed to delete");
+    }
+  }
+
   async function submitApproval(decision: string) {
     try {
       await approveSession(host, token, sessionId, decision);
@@ -278,18 +310,48 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       <section className="panel stack">
         <label className="field">
           <span>Reply</span>
-          <textarea rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} />
+          <textarea
+            rows={4}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            disabled={session?.status === "exited"}
+          />
         </label>
         <div className="action-row">
-          <button className="primary" onClick={() => void submitInput()} type="button">
+          <button
+            className="primary"
+            onClick={() => void submitInput()}
+            type="button"
+            disabled={session?.status === "exited"}
+          >
             Send
           </button>
-          <button className="secondary" onClick={() => void runAction("interrupt")} type="button">
+          <button
+            className="secondary"
+            onClick={() => void runAction("interrupt")}
+            type="button"
+            disabled={session?.status === "exited"}
+          >
             Interrupt
           </button>
           {session && supportsResume(session.transport) ? (
-            <button className="secondary" onClick={() => void runAction("resume")} type="button">
+            <button
+              className="secondary"
+              onClick={() => void runAction("resume")}
+              type="button"
+              disabled={session.status === "exited"}
+            >
               Resume
+            </button>
+          ) : null}
+          {session && session.status !== "exited" ? (
+            <button className="danger" onClick={() => void terminate()} type="button">
+              Terminate
+            </button>
+          ) : null}
+          {session && session.status === "exited" ? (
+            <button className="danger" onClick={() => void removeFromList()} type="button">
+              Delete
             </button>
           ) : null}
         </div>

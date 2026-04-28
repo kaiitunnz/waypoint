@@ -50,6 +50,7 @@ class SessionRecord(BaseModel):
     title: str
     cwd: str
     remote_cwd: str | None = None
+    launch_target_id: str | None = None
     repo_name: str | None = None
     branch: str | None = None
     status: SessionStatus
@@ -84,18 +85,27 @@ class LoginResponse(BaseModel):
     expires_at: datetime
 
 
+class LaunchTargetSummary(BaseModel):
+    id: str
+    name: str
+    kind: str = "ssh"
+    supported_backends: list[Backend] = Field(default_factory=list)
+    default_backend: Backend = Backend.CODEX
+    default_remote_cwd: str | None = None
+
+
 class MeResponse(BaseModel):
     authenticated: bool = True
     default_backend: Backend = Backend.CODEX
     default_cwd: str = "~/"
-    remote_codex_enabled: bool = False
-    default_remote_cwd: str | None = None
+    launch_targets: list[LaunchTargetSummary] = Field(default_factory=list)
 
 
 class SessionCreateRequest(BaseModel):
     backend: Backend
     cwd: str
     remote_cwd: str | None = None
+    launch_target_id: str | None = None
     title: str | None = None
     args: list[str] = Field(default_factory=list)
     source_mode: SessionSource = SessionSource.MANAGED

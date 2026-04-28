@@ -7,15 +7,20 @@ data_dir: ~/Library/Application Support/Waypoint
 cors_origins: []
 # cors_allow_origin_regex: ^https?://(localhost|127\.0\.0\.1|100\.\d{1,3}\.\d{1,3}\.\d{1,3})(:\d+)?$
 
-codex_remote:
-  enabled: true
-  ssh_destination: dev@example.com
-  ssh_args:
-    - -p
-    - "2222"
-  codex_bin: codex
-  default_remote_cwd: "~"
-  config_overrides:
-    - model_reasoning_effort="high"
-  remote_env:
-    OPENAI_API_KEY: sk-your-key
+ssh_targets:
+  - id: devbox
+    name: SSH coding backend
+    ssh_destination: dev@example.com
+    ssh_args:
+      - -p
+      - "2222"
+    codex_bin: codex
+    claude_bin: claude
+    default_remote_cwd: "~"
+    supported_backends:
+      - codex
+      - claude_code
+    config_overrides:
+      - model_reasoning_effort="high"
+    remote_env:
+      OPENAI_API_KEY: sk-your-key

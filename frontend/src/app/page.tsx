@@ -18,13 +18,14 @@ import {
   login,
   postAction,
 } from "@/lib/api";
-import { clearToken, readHost, readToken, writeHost, writeToken } from "@/lib/store";
-import { Backend, SessionEnvelope, SessionRecord } from "@/lib/types";
+import { clearToken, readHost, readLaunchTarget, readToken, writeHost, writeLaunchTarget, writeToken } from "@/lib/store";
+import { Backend, LaunchTargetSummary, SessionEnvelope, SessionRecord } from "@/lib/types";
 
 type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
+const ALL_BACKENDS: Backend[] = ["codex", "claude_code"];
 
 export default function HomePage() {
   const router = useRouter();
@@ -35,14 +36,15 @@ export default function HomePage() {
   const [connection, setConnection] = useState<ConnectionState>("idle");
   const [defaultBackend, setDefaultBackend] = useState<Backend>("codex");
   const [defaultCwd, setDefaultCwd] = useState("~/");
-  const [remoteCodexEnabled, setRemoteCodexEnabled] = useState(false);
-  const [defaultRemoteCwd, setDefaultRemoteCwd] = useState("~");
+  const [launchTargets, setLaunchTargets] = useState<LaunchTargetSummary[]>([]);
+  const [activeLaunchTargetId, setActiveLaunchTargetId] = useState("");
 
   useEffect(() => {
     const currentHost = readHost();
     const currentToken = readToken();
     setHost(currentHost);
     setToken(currentToken);
+    setActiveLaunchTargetId(readLaunchTarget(currentHost));
   }, []);
 
   useEffect(() => {
@@ -59,8 +61,10 @@ export default function HomePage() {
         setSessions(items);
         setDefaultBackend(me.default_backend);
         setDefaultCwd(me.default_cwd || "~/");
-        setRemoteCodexEnabled(me.remote_codex_enabled);
-        setDefaultRemoteCwd(me.default_remote_cwd || "~");
+        setLaunchTargets(me.launch_targets);
+        const storedTargetId = readLaunchTarget(host);
+        const nextTargetId = me.launch_targets.some((target) => target.id === storedTargetId) ? storedTargetId : "";
+        setActiveLaunchTargetId(nextTargetId);
       })
       .catch((fetchError) => {
         if (active) {
@@ -138,6 +142,7 @@ export default function HomePage() {
         backend,
         cwd,
         remote_cwd: remoteCwd || null,
+        launch_target_id: activeLaunchTargetId || null,
         title: title || null,
         source_mode: "managed",
         args: [],
@@ -176,8 +181,8 @@ export default function HomePage() {
     setSessions([]);
     setDefaultBackend("codex");
     setDefaultCwd("~/");
-    setRemoteCodexEnabled(false);
-    setDefaultRemoteCwd("~");
+    setLaunchTargets([]);
+    setActiveLaunchTargetId("");
     setError(message);
   }
 
@@ -206,14 +211,31 @@ export default function HomePage() {
     }
   }
 
-  function handleSwitchBackend(nextHost: string) {
+  function handleSwitchBackend(nextHost: string, nextTargetId: string) {
+    if (nextHost === host) {
+      writeLaunchTarget(host, nextTargetId);
+      setActiveLaunchTargetId(nextTargetId);
+      setError("");
+      return;
+    }
     writeHost(nextHost);
     clearToken();
     setHost(nextHost);
     setToken("");
     setSessions([]);
+    setLaunchTargets([]);
+    setActiveLaunchTargetId(readLaunchTarget(nextHost));
     setError("Switched backend. Log in to continue.");
   }
+
+  const activeLaunchTarget = launchTargets.find((target) => target.id === activeLaunchTargetId) ?? null;
+  const supportedBackends = activeLaunchTarget?.supported_backends.length
+    ? activeLaunchTarget.supported_backends
+    : ALL_BACKENDS;
+  const effectiveDefaultBackend = supportedBackends.includes(activeLaunchTarget?.default_backend ?? defaultBackend)
+    ? (activeLaunchTarget?.default_backend ?? defaultBackend)
+    : supportedBackends[0];
+  const effectiveRemoteCwd = activeLaunchTarget?.default_remote_cwd ?? null;
 
   return (
     <main className="page-shell">
@@ -230,16 +252,19 @@ export default function HomePage() {
         <BackendSwitcher
           host={host}
           token={token}
+          launchTargets={launchTargets}
+          targetId={activeLaunchTargetId}
           onSwitch={handleSwitchBackend}
           onAuthFailure={() => resetAuthState("Session expired. Log in again.")}
         />
       ) : null}
       {token ? (
         <LaunchPanel
-          defaultBackend={defaultBackend}
+          defaultBackend={effectiveDefaultBackend}
           defaultCwd={defaultCwd}
-          defaultRemoteCwd={defaultRemoteCwd}
-          remoteCodexEnabled={remoteCodexEnabled}
+          defaultRemoteCwd={effectiveRemoteCwd}
+          targetLabel={activeLaunchTarget?.name ?? null}
+          supportedBackends={supportedBackends}
           onAttach={handleAttach}
           onCreate={handleCreate}
         />

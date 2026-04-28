@@ -27,6 +27,7 @@ export interface SessionRecord {
   title: string;
   cwd: string;
   remote_cwd?: string | null;
+  launch_target_id?: string | null;
   repo_name?: string | null;
   branch?: string | null;
   status: SessionStatus;
@@ -56,7 +57,15 @@ export interface MeResponse {
   authenticated: boolean;
   default_backend: Backend;
   default_cwd: string;
-  remote_codex_enabled: boolean;
+  launch_targets: LaunchTargetSummary[];
+}
+
+export interface LaunchTargetSummary {
+  id: string;
+  name: string;
+  kind: "ssh";
+  supported_backends: Backend[];
+  default_backend: Backend;
   default_remote_cwd?: string | null;
 }
 

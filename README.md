@@ -48,11 +48,11 @@ Backend config precedence:
 - values from `backend/waypoint.yaml`
 - built-in defaults
 
-The YAML file is the canonical place for settings; env vars are an escape hatch for machine-specific overrides. See `backend/waypoint.example.yaml` for the full schema, including the optional `codex_remote` block that routes managed Codex sessions through SSH.
+The YAML file is the canonical place for settings; env vars are an escape hatch for machine-specific overrides. See `backend/waypoint.example.yaml` for the full schema, including optional named `ssh_targets` that add remote coding backends to the frontend picker.
 
-The frontend launch form also reads `default_backend` and `default_cwd` from backend config through `/api/me`, so switching to a different Waypoint backend updates those defaults automatically.
+The frontend launch form also reads `default_backend` and `default_cwd` from backend config through `/api/me`, so switching to a different Waypoint backend updates those defaults automatically. If the selected Waypoint host exposes SSH targets, those appear in the same picker and only affect new managed launches on that host.
 
-When remote Codex is enabled, the frontend launch form uses `codex_remote.default_remote_cwd` as the default remote path and lets you override it per launch. The session still keeps the local `cwd` separately for repo metadata and UI display.
+When an SSH target is selected, the launch form uses that target's `default_remote_cwd` as the default remote path and lets you override it per launch. The session still keeps the local `cwd` separately for repo metadata and UI display.
 
 ### Frontend
 

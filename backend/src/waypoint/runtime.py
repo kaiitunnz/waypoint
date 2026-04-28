@@ -15,7 +15,7 @@ from waypoint.config import Settings
 from waypoint.codex_app_server import CodexAppServerAdapter
 from waypoint.git_meta import resolve_git_meta
 from waypoint.normalizer import TerminalNormalizer
-from waypoint.server_config import build_remote_codex_client_factory
+from waypoint.server_config import SshLaunchTargetConfig, build_remote_codex_client_factory
 
 log = logging.getLogger("waypoint.runtime")
 from waypoint.schemas import (
@@ -77,11 +77,8 @@ class SessionRuntime:
         self.tmux = TmuxAdapter()
         self.normalizer = TerminalNormalizer()
         self.broadcast = BroadcastHub()
-        remote_codex = self.settings.codex_remote
-        client_factory = None
-        if remote_codex is not None and remote_codex.enabled:
-            client_factory = build_remote_codex_client_factory(remote_codex)
-        self.codex = CodexAppServerAdapter(self._emit_adapter_event, client_factory=client_factory)
+        self.ssh_targets = {target.id: target for target in self.settings.ssh_targets if target.enabled}
+        self.codex = CodexAppServerAdapter(self._emit_adapter_event)
         self.monitor_tasks: dict[str, asyncio.Task[None]] = {}
         self.file_offsets: dict[str, int] = {}
 
@@ -103,8 +100,22 @@ class SessionRuntime:
                 status=SessionStatus.EXITED,
             )
             return
+        if session.launch_target_id and self._find_launch_target(session.launch_target_id) is None:
+            self.storage.update_session(session.id, status=SessionStatus.ERROR)
+            await self._record_system_event(
+                session.id,
+                f"Codex session launch target {session.launch_target_id} is no longer configured",
+                status=SessionStatus.ERROR,
+            )
+            return
         try:
-            await self.codex.restore_session(session.id, session.cwd, session.thread_id, session.remote_cwd)
+            await self.codex.restore_session(
+                session.id,
+                session.cwd,
+                session.thread_id,
+                session.remote_cwd,
+                self._codex_client_factory(session.launch_target_id),
+            )
         except Exception as exc:  # noqa: BLE001
             log.exception(
                 "codex restore failed",
@@ -120,7 +131,7 @@ class SessionRuntime:
         self.storage.update_session(session.id, status=SessionStatus.IDLE)
         await self._record_system_event(
             session.id,
-            self._codex_restore_message(session.cwd),
+            self._codex_restore_message(session.remote_cwd, session.launch_target_id),
             status=SessionStatus.IDLE,
         )
 
@@ -152,8 +163,9 @@ class SessionRuntime:
         raw_log = session_dir / "raw.log"
         structured_log = session_dir / "events.jsonl"
         git_meta = await resolve_git_meta(request.cwd)
+        launch_target = self._resolve_launch_target(request.launch_target_id, request.backend)
+        remote_cwd = self._resolve_remote_cwd(request, launch_target)
         if request.backend == Backend.CODEX:
-            remote_cwd = self._resolve_remote_cwd(request)
             raw_log.touch(exist_ok=True)
             session = SessionRecord(
                 id=session_id,
@@ -163,6 +175,7 @@ class SessionRuntime:
                 title=title,
                 cwd=request.cwd,
                 remote_cwd=remote_cwd,
+                launch_target_id=launch_target.id if launch_target else None,
                 repo_name=git_meta.repo_name,
                 branch=git_meta.branch,
                 status=SessionStatus.STARTING,
@@ -174,18 +187,23 @@ class SessionRuntime:
             )
             self.storage.create_session(session)
             try:
-                thread_id = await self.codex.start_session(session_id, request.cwd, remote_cwd)
+                thread_id = await self.codex.start_session(
+                    session_id,
+                    request.cwd,
+                    remote_cwd,
+                    self._codex_client_factory(session.launch_target_id),
+                )
             except Exception:
                 self.storage.update_session(session.id, status=SessionStatus.ERROR)
                 raise
             self.storage.update_session(session.id, thread_id=thread_id, status=SessionStatus.IDLE)
             await self._record_system_event(
                 session.id,
-                self._codex_start_message(remote_cwd),
+                self._codex_start_message(remote_cwd, launch_target),
                 status=SessionStatus.IDLE,
             )
             return self.get_session(session.id)
-        command = self._command_for_backend(request.backend, request.args)
+        command = self._command_for_backend(request.backend, request.args, launch_target, remote_cwd)
         try:
             target = await self.tmux.start_managed_session(session_id, request.cwd, command)
             await self.tmux.pipe_output(target.pane, raw_log)
@@ -198,6 +216,8 @@ class SessionRuntime:
             transport=SessionTransport.TMUX,
             title=title,
             cwd=request.cwd,
+            remote_cwd=remote_cwd,
+            launch_target_id=launch_target.id if launch_target else None,
             repo_name=git_meta.repo_name,
             branch=git_meta.branch,
             status=SessionStatus.STARTING,
@@ -212,7 +232,7 @@ class SessionRuntime:
             pid=target.pane_pid,
         )
         self.storage.create_session(session)
-        await self._record_system_event(session.id, f"Managed session started for {request.backend}")
+        await self._record_system_event(session.id, self._managed_start_message(request.backend, launch_target, remote_cwd))
         self._ensure_monitor(session.id)
         return self.get_session(session.id)
 
@@ -357,23 +377,86 @@ class SessionRuntime:
         snapshot = raw_log_path.read_text(encoding="utf-8", errors="ignore")
         return self.normalizer.clean(snapshot)
 
-    def _codex_start_message(self, cwd: str) -> str:
-        remote_codex = self.settings.codex_remote
-        if remote_codex is not None and remote_codex.enabled:
-            return f"Codex app-server session started via SSH on {remote_codex.ssh_destination} ({cwd})"
+    def _codex_start_message(self, cwd: str | None, launch_target: SshLaunchTargetConfig | None) -> str:
+        if launch_target is not None:
+            remote_cwd = cwd or launch_target.default_remote_cwd
+            return (
+                f"Codex app-server session started via SSH target {launch_target.name} "
+                f"on {launch_target.ssh_destination} ({remote_cwd})"
+            )
         return "Codex app-server session started"
 
-    def _codex_restore_message(self, cwd: str | None) -> str:
-        remote_codex = self.settings.codex_remote
-        if remote_codex is not None and remote_codex.enabled:
-            return f"Codex session restored via SSH on {remote_codex.ssh_destination} ({cwd or remote_codex.default_remote_cwd})"
+    def _codex_restore_message(self, cwd: str | None, launch_target_id: str | None = None) -> str:
+        launch_target = self._find_launch_target(launch_target_id)
+        if launch_target is not None:
+            remote_cwd = cwd or launch_target.default_remote_cwd
+            return (
+                f"Codex session restored via SSH target {launch_target.name} "
+                f"on {launch_target.ssh_destination} ({remote_cwd})"
+            )
         return "Codex session restored from previous backend process"
 
-    def _resolve_remote_cwd(self, request: SessionCreateRequest) -> str | None:
-        remote_codex = self.settings.codex_remote
-        if request.backend != Backend.CODEX or remote_codex is None or not remote_codex.enabled:
+    def _resolve_remote_cwd(
+        self,
+        request: SessionCreateRequest,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> str | None:
+        if launch_target is None:
             return None
-        return request.remote_cwd or remote_codex.default_remote_cwd
+        return request.remote_cwd or launch_target.default_remote_cwd
+
+    def launch_target_summaries(self) -> list[dict[str, Any]]:
+        summaries: list[dict[str, Any]] = []
+        for target in self.ssh_targets.values():
+            summaries.append(
+                {
+                    "id": target.id,
+                    "name": target.name,
+                    "kind": "ssh",
+                    "supported_backends": target.supported_backends,
+                    "default_backend": target.resolve_default_backend(self.settings.default_backend),
+                    "default_remote_cwd": target.default_remote_cwd,
+                }
+            )
+        return summaries
+
+    def _resolve_launch_target(
+        self,
+        launch_target_id: str | None,
+        backend: Backend,
+    ) -> SshLaunchTargetConfig | None:
+        if not launch_target_id:
+            return None
+        launch_target = self.ssh_targets.get(launch_target_id)
+        if launch_target is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="unknown launch target")
+        if not launch_target.supports(backend):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="launch target does not support backend")
+        return launch_target
+
+    def _find_launch_target(self, launch_target_id: str | None) -> SshLaunchTargetConfig | None:
+        if not launch_target_id:
+            return None
+        return self.ssh_targets.get(launch_target_id)
+
+    def _codex_client_factory(self, launch_target_id: str | None):
+        launch_target = self._find_launch_target(launch_target_id)
+        if launch_target is None:
+            return None
+        return build_remote_codex_client_factory(launch_target)
+
+    def _managed_start_message(
+        self,
+        backend: Backend,
+        launch_target: SshLaunchTargetConfig | None,
+        remote_cwd: str | None,
+    ) -> str:
+        if launch_target is None:
+            return f"Managed session started for {backend}"
+        return (
+            f"Managed session started for {backend} via SSH target {launch_target.name} "
+            f"on {launch_target.ssh_destination} ({remote_cwd or launch_target.default_remote_cwd})"
+        )
 
     async def _record_user_event(self, session_id: str, text: str, submit: bool) -> None:
         event = EventRecord(
@@ -448,9 +531,17 @@ class SessionRuntime:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    def _command_for_backend(self, backend: Backend, args: list[str]) -> list[str]:
-        executable = "claude" if backend == Backend.CLAUDE_CODE else "codex"
-        return [executable, *args]
+    def _command_for_backend(
+        self,
+        backend: Backend,
+        args: list[str],
+        launch_target: SshLaunchTargetConfig | None = None,
+        remote_cwd: str | None = None,
+    ) -> list[str]:
+        if launch_target is None:
+            executable = "claude" if backend == Backend.CLAUDE_CODE else "codex"
+            return [executable, *args]
+        return list(launch_target.remote_command_for_backend(backend, args, remote_cwd or launch_target.default_remote_cwd))
 
     def _infer_backend(self, target: str) -> Backend:
         lowered = target.lower()

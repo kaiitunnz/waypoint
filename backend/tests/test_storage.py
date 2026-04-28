@@ -14,6 +14,7 @@ def test_storage_round_trip(tmp_path) -> None:
         title="Codex session",
         cwd="/tmp",
         remote_cwd="~/workspace",
+        launch_target_id="devbox",
         status=SessionStatus.STARTING,
         created_at=now,
         updated_at=now,
@@ -35,6 +36,7 @@ def test_storage_round_trip(tmp_path) -> None:
     loaded = storage.get_session("session-1")
     assert loaded is not None
     assert loaded.remote_cwd == "~/workspace"
+    assert loaded.launch_target_id == "devbox"
     assert loaded.status == SessionStatus.RUNNING
     events = storage.list_events("session-1")
     assert len(events) == 1

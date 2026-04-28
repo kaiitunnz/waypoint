@@ -7,8 +7,9 @@ import { Backend } from "@/lib/types";
 interface LaunchPanelProps {
   defaultBackend: Backend;
   defaultCwd: string;
-  defaultRemoteCwd: string;
-  remoteCodexEnabled: boolean;
+  defaultRemoteCwd: string | null;
+  targetLabel: string | null;
+  supportedBackends: Backend[];
   onCreate: (backend: Backend, cwd: string, title: string, remoteCwd?: string) => Promise<void>;
   onAttach: (target: string, backendHint: Backend) => Promise<void>;
 }
@@ -17,13 +18,14 @@ export function LaunchPanel({
   defaultBackend,
   defaultCwd,
   defaultRemoteCwd,
-  remoteCodexEnabled,
+  targetLabel,
+  supportedBackends,
   onCreate,
   onAttach,
 }: LaunchPanelProps) {
   const [backend, setBackend] = useState<Backend>(defaultBackend);
   const [cwd, setCwd] = useState(defaultCwd);
-  const [remoteCwd, setRemoteCwd] = useState(defaultRemoteCwd);
+  const [remoteCwd, setRemoteCwd] = useState(defaultRemoteCwd ?? "~");
   const [title, setTitle] = useState("");
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [busy, setBusy] = useState(false);
@@ -37,14 +39,14 @@ export function LaunchPanel({
   }, [defaultCwd]);
 
   useEffect(() => {
-    setRemoteCwd(defaultRemoteCwd);
+    setRemoteCwd(defaultRemoteCwd ?? "~");
   }, [defaultRemoteCwd]);
 
   async function submitCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     try {
-      await onCreate(backend, cwd, title, backend === "codex" && remoteCodexEnabled ? remoteCwd : undefined);
+      await onCreate(backend, cwd, title, targetLabel ? remoteCwd : undefined);
       setTitle("");
     } finally {
       setBusy(false);
@@ -72,17 +74,17 @@ export function LaunchPanel({
         <label className="field">
           <span>Backend</span>
           <select value={backend} onChange={(event) => setBackend(event.target.value as Backend)}>
-            <option value="codex">Codex</option>
-            <option value="claude_code">Claude Code</option>
+            {supportedBackends.includes("codex") ? <option value="codex">Codex</option> : null}
+            {supportedBackends.includes("claude_code") ? <option value="claude_code">Claude Code</option> : null}
           </select>
         </label>
         <label className="field">
           <span>Working directory</span>
           <input value={cwd} onChange={(event) => setCwd(event.target.value)} />
         </label>
-        {backend === "codex" && remoteCodexEnabled ? (
+        {targetLabel ? (
           <label className="field">
-            <span>Remote working directory</span>
+            <span>{targetLabel} working directory</span>
             <input value={remoteCwd} onChange={(event) => setRemoteCwd(event.target.value)} />
           </label>
         ) : null}

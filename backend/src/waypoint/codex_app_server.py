@@ -70,8 +70,19 @@ class CodexAppServerAdapter:
         self._sessions: dict[str, CodexSessionState] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
 
-    async def start_session(self, session_id: str, cwd: str, remote_cwd: str | None = None) -> str:
-        state = await self._spawn_session(session_id, cwd, remote_cwd=remote_cwd)
+    async def start_session(
+        self,
+        session_id: str,
+        cwd: str,
+        remote_cwd: str | None = None,
+        client_factory_override: ClientFactory | None = None,
+    ) -> str:
+        state = await self._spawn_session(
+            session_id,
+            cwd,
+            remote_cwd=remote_cwd,
+            client_factory_override=client_factory_override,
+        )
         started = await self._call_client(state, state.client.thread_start, {"cwd": remote_cwd or cwd})
         state.thread_id = started.thread.id
         return state.thread_id
@@ -82,8 +93,15 @@ class CodexAppServerAdapter:
         cwd: str,
         thread_id: str,
         remote_cwd: str | None = None,
+        client_factory_override: ClientFactory | None = None,
     ) -> None:
-        state = await self._spawn_session(session_id, cwd, thread_id=thread_id, remote_cwd=remote_cwd)
+        state = await self._spawn_session(
+            session_id,
+            cwd,
+            thread_id=thread_id,
+            remote_cwd=remote_cwd,
+            client_factory_override=client_factory_override,
+        )
         await self._call_client(state, state.client.thread_resume, thread_id)
 
     async def _spawn_session(
@@ -92,6 +110,7 @@ class CodexAppServerAdapter:
         cwd: str,
         thread_id: str = "",
         remote_cwd: str | None = None,
+        client_factory_override: ClientFactory | None = None,
     ) -> CodexSessionState:
         self._loop = asyncio.get_running_loop()
         holder: dict[str, CodexSessionState] = {}
@@ -120,7 +139,8 @@ class CodexAppServerAdapter:
             state.pending_approval = None
             return pending.response or {"decision": "decline"}
 
-        client = self._client_factory(cwd, remote_cwd, approval_handler)
+        factory = client_factory_override or self._client_factory
+        client = factory(cwd, remote_cwd, approval_handler)
         await asyncio.to_thread(client.start)
         await asyncio.to_thread(client.initialize)
         state = CodexSessionState(

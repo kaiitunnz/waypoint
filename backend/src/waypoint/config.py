@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 import yaml
 
 from waypoint.schemas import Backend
-from waypoint.server_config import RemoteCodexSshConfig
+from waypoint.server_config import SshLaunchTargetConfig
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -58,7 +58,7 @@ class Settings(BaseModel):
     tail_snapshot_lines: int = 200
     cors_origins: list[str] = Field(default_factory=lambda: list(DEFAULT_CORS_ORIGINS))
     cors_allow_origin_regex: str | None = DEFAULT_CORS_ORIGIN_REGEX
-    codex_remote: RemoteCodexSshConfig | None = None
+    ssh_targets: list[SshLaunchTargetConfig] = Field(default_factory=list)
 
     @property
     def database_path(self) -> Path:
@@ -122,6 +122,18 @@ def _env_overrides() -> dict[str, Any]:
 
 def _normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(payload)
+    legacy_remote = normalized.pop("codex_remote", None)
+    if legacy_remote and "ssh_targets" not in normalized:
+        legacy_target = dict(legacy_remote)
+        if legacy_target.pop("enabled", False):
+            normalized["ssh_targets"] = [
+                {
+                    "id": "ssh-default",
+                    "name": "SSH coding backend",
+                    "supported_backends": [Backend.CODEX.value],
+                    **legacy_target,
+                }
+            ]
     if "config_path" in normalized and normalized["config_path"] is not None:
         normalized["config_path"] = Path(normalized["config_path"]).expanduser()
     if "data_dir" in normalized and normalized["data_dir"] is not None:

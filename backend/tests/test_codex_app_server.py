@@ -118,6 +118,26 @@ async def test_start_session_uses_explicit_remote_cwd() -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_session_uses_factory_override() -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+
+    override = FakeAppServerClient()
+
+    def override_factory(cwd, remote_cwd, approval_handler):
+        override.approval_handler = approval_handler
+        override.calls.append(("override_factory", (cwd, remote_cwd)))
+        return override
+
+    thread_id = await adapter.start_session("sess", "/tmp/work", "~/remote-work", override_factory)
+
+    assert thread_id == "thread-1"
+    assert fake.calls == []
+    assert override.calls[0] == ("override_factory", ("/tmp/work", "~/remote-work"))
+    assert override.calls[1] == ("thread_start", ({"cwd": "~/remote-work"},))
+
+
+@pytest.mark.asyncio
 async def test_send_input_starts_then_steers_turn() -> None:
     emitted: list = []
     adapter, fake = make_adapter(emitted)

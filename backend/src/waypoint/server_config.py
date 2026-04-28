@@ -3,42 +3,77 @@ import shutil
 from pathlib import Path
 
 from codex_app_server.client import AppServerClient, AppServerConfig
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from waypoint.schemas import Backend
 
 
-class RemoteCodexSshConfig(BaseModel):
-    enabled: bool = False
+def _default_supported_backends() -> list[Backend]:
+    return [Backend.CODEX, Backend.CLAUDE_CODE]
+
+
+class SshLaunchTargetConfig(BaseModel):
+    id: str
+    name: str
+    enabled: bool = True
     ssh_destination: str
     ssh_bin: str = "ssh"
     ssh_args: list[str] = Field(default_factory=list)
     codex_bin: str = "codex"
+    claude_bin: str = "claude"
     default_remote_cwd: str = "~"
+    supported_backends: list[Backend] = Field(default_factory=_default_supported_backends)
     config_overrides: list[str] = Field(default_factory=list)
     remote_env: dict[str, str] = Field(default_factory=dict)
 
-    def build_launch_args(self, remote_cwd: str) -> tuple[str, ...]:
-        ssh_bin = _resolve_local_binary(self.ssh_bin)
+    @field_validator("supported_backends")
+    @classmethod
+    def validate_supported_backends(cls, value: list[Backend]) -> list[Backend]:
+        if not value:
+            return _default_supported_backends()
+        deduped: list[Backend] = []
+        for backend in value:
+            if backend not in deduped:
+                deduped.append(backend)
+        return deduped
+
+    def supports(self, backend: Backend) -> bool:
+        return backend in self.supported_backends
+
+    def resolve_default_backend(self, fallback: Backend) -> Backend:
+        if fallback in self.supported_backends:
+            return fallback
+        return self.supported_backends[0]
+
+    def build_codex_launch_args(self, remote_cwd: str) -> tuple[str, ...]:
         codex_args = [self.codex_bin]
         for override in self.config_overrides:
             codex_args.extend(["--config", override])
         codex_args.extend(["app-server", "--listen", "stdio://"])
+        return self.build_remote_exec_args(codex_args, remote_cwd)
 
+    def build_remote_exec_args(self, command: list[str], remote_cwd: str) -> tuple[str, ...]:
+        ssh_bin = _resolve_local_binary(self.ssh_bin)
         remote_parts = [f"cd {shlex.quote(remote_cwd)}", "&&", "exec"]
         if self.remote_env:
             remote_parts.append("env")
             for key, value in sorted(self.remote_env.items()):
                 remote_parts.append(shlex.quote(f"{key}={value}"))
-        remote_parts.append(shlex.join(codex_args))
+        remote_parts.append(shlex.join(command))
         remote_command = " ".join(remote_parts)
         return (ssh_bin, *self.ssh_args, self.ssh_destination, remote_command)
 
+    def remote_command_for_backend(self, backend: Backend, args: list[str], remote_cwd: str) -> tuple[str, ...]:
+        executable = self.claude_bin if backend == Backend.CLAUDE_CODE else self.codex_bin
+        return self.build_remote_exec_args([executable, *args], remote_cwd)
 
-def build_remote_codex_client_factory(remote: RemoteCodexSshConfig):
+
+def build_remote_codex_client_factory(target: SshLaunchTargetConfig):
     def factory(cwd: str, remote_cwd: str | None, approval_handler):
-        launch_cwd = remote_cwd or remote.default_remote_cwd
+        launch_cwd = remote_cwd or target.default_remote_cwd
         return AppServerClient(
             config=AppServerConfig(
-                launch_args_override=remote.build_launch_args(launch_cwd),
+                launch_args_override=target.build_codex_launch_args(launch_cwd),
                 client_name="waypoint",
                 client_title="Waypoint",
             ),

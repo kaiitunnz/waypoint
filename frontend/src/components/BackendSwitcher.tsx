@@ -3,24 +3,29 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { isAuthError, probeBackend } from "@/lib/api";
-import {
-  BackendOption,
-  buildBackendOptions,
-  fetchBackendTailnetSnapshot,
-  TailnetSnapshot,
-} from "@/lib/tailnet";
+import { LaunchTargetSummary } from "@/lib/types";
+import { BackendOption, buildBackendOptions, fetchBackendTailnetSnapshot, TailnetSnapshot } from "@/lib/tailnet";
 
 interface BackendSwitcherProps {
   host: string;
   token: string;
-  onSwitch: (nextHost: string) => void;
+  launchTargets: LaunchTargetSummary[];
+  targetId: string;
+  onSwitch: (nextHost: string, nextTargetId: string) => void;
   onAuthFailure?: () => void;
 }
 
 const CUSTOM_VALUE = "__custom__";
+const TARGET_PREFIX = "__target__:";
 type ProbeStatus = "idle" | "checking" | "reachable" | "unreachable";
 
-export function BackendSwitcher({ host, token, onSwitch, onAuthFailure }: BackendSwitcherProps) {
+interface PickerOption {
+  value: string;
+  label: string;
+  hint: string | null;
+}
+
+export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch, onAuthFailure }: BackendSwitcherProps) {
   const [open, setOpen] = useState(false);
   const [snapshot, setSnapshot] = useState<TailnetSnapshot | null>(null);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
@@ -31,12 +36,26 @@ export function BackendSwitcher({ host, token, onSwitch, onAuthFailure }: Backen
 
   const pageHost = typeof window === "undefined" ? "localhost" : window.location.hostname || "localhost";
 
-  const options = useMemo<BackendOption[]>(
+  const hostOptions = useMemo<BackendOption[]>(
     () => buildBackendOptions(pageHost, snapshot),
     [pageHost, snapshot],
   );
 
-  const currentLabel = options.find((option) => option.url === host)?.label ?? host;
+  const pickerOptions = useMemo<PickerOption[]>(
+    () => [
+      ...hostOptions.map((option) => ({ value: option.url, label: option.label, hint: option.hint })),
+      ...launchTargets.map((target) => ({
+        value: `${TARGET_PREFIX}${target.id}`,
+        label: `SSH: ${target.name}`,
+        hint: target.supported_backends.join(", "),
+      })),
+    ],
+    [hostOptions, launchTargets],
+  );
+
+  const hostLabel = hostOptions.find((option) => option.url === host)?.label ?? host;
+  const activeTarget = launchTargets.find((target) => target.id === targetId) ?? null;
+  const currentLabel = activeTarget ? `${hostLabel} / SSH: ${activeTarget.name}` : hostLabel;
 
   useEffect(() => {
     if (!open) {
@@ -61,17 +80,22 @@ export function BackendSwitcher({ host, token, onSwitch, onAuthFailure }: Backen
     if (!open) {
       return;
     }
-    const matched = options.find((option) => option.url === host);
+    if (targetId && launchTargets.some((target) => target.id === targetId)) {
+      setSelection(`${TARGET_PREFIX}${targetId}`);
+      return;
+    }
+    const matched = hostOptions.find((option) => option.url === host);
     if (matched) {
       setSelection(matched.url);
-    } else {
-      setSelection(CUSTOM_VALUE);
-      setCustomHost(host);
+      return;
     }
-  }, [open, options, host]);
+    setSelection(CUSTOM_VALUE);
+    setCustomHost(host);
+  }, [open, hostOptions, host, targetId, launchTargets]);
 
-  const activeHost = selection === CUSTOM_VALUE ? customHost.trim() : selection;
-  const dirty = Boolean(activeHost) && activeHost !== host;
+  const selectedTargetId = selection.startsWith(TARGET_PREFIX) ? selection.slice(TARGET_PREFIX.length) : "";
+  const activeHost = selection === CUSTOM_VALUE || selection.startsWith(TARGET_PREFIX) ? customOrCurrentHost(selection, customHost, host) : selection;
+  const dirty = activeHost !== host || selectedTargetId !== targetId;
 
   useEffect(() => {
     probeAbortRef.current?.abort();
@@ -119,14 +143,14 @@ export function BackendSwitcher({ host, token, onSwitch, onAuthFailure }: Backen
         {snapshotLoading
           ? "Loading peers…"
           : snapshot?.available
-            ? "Pick a different Tailscale peer or enter a custom URL. Switching forces a re-login."
-            : "Tailscale not detected on the backend host. Use Custom URL…"}
+            ? "Pick a different Tailscale peer, switch to an SSH coding target, or enter a custom URL. Changing host forces a re-login."
+            : "Tailscale not detected on the backend host. You can still switch to an SSH coding target or use Custom URL…"}
       </p>
       <label className="field">
         <span>Backend</span>
         <select value={selection} onChange={(event) => setSelection(event.target.value)}>
-          {options.map((option) => (
-            <option key={option.url} value={option.url}>
+          {pickerOptions.map((option) => (
+            <option key={option.value} value={option.value}>
               {option.label}
               {option.hint ? ` — ${option.hint}` : ""}
             </option>
@@ -150,9 +174,9 @@ export function BackendSwitcher({ host, token, onSwitch, onAuthFailure }: Backen
           type="button"
           className="primary"
           disabled={!dirty}
-          onClick={() => onSwitch(activeHost)}
+          onClick={() => onSwitch(activeHost, selectedTargetId)}
         >
-          Switch
+          Apply
         </button>
       </div>
     </section>
@@ -170,4 +194,11 @@ function ProbeIndicator({ status, url }: { status: ProbeStatus; url: string }) {
         ? `Reachable at ${url}`
         : `${url} unreachable`;
   return <p className={`probe ${status}`}>{text}</p>;
+}
+
+function customOrCurrentHost(selection: string, customHost: string, host: string): string {
+  if (selection === CUSTOM_VALUE) {
+    return customHost.trim();
+  }
+  return host;
 }

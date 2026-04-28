@@ -2,10 +2,11 @@ import os
 from pathlib import Path
 
 from waypoint.config import load_settings
-from waypoint.server_config import RemoteCodexSshConfig, build_remote_codex_client_factory
+from waypoint.schemas import Backend
+from waypoint.server_config import SshLaunchTargetConfig, build_remote_codex_client_factory
 
 
-def test_load_settings_parses_yaml_defaults_and_remote_codex(monkeypatch, tmp_path: Path) -> None:
+def test_load_settings_parses_yaml_defaults_and_ssh_targets(monkeypatch, tmp_path: Path) -> None:
     for name in list(os.environ):
         if name.startswith("WAYPOINT_"):
             monkeypatch.delenv(name, raising=False)
@@ -16,18 +17,21 @@ def test_load_settings_parses_yaml_defaults_and_remote_codex(monkeypatch, tmp_pa
                 "host: 0.0.0.0",
                 "port: 9999",
                 "password: from-yaml",
-                "codex_remote:",
-                "  enabled: true",
-                "  ssh_destination: dev@example.com",
-                "  ssh_args:",
-                "    - -p",
-                "    - '2222'",
-                "  codex_bin: /opt/codex/bin/codex",
-                "  default_remote_cwd: ~/workspace",
-                "  config_overrides:",
-                "    - model_reasoning_effort=\"high\"",
-                "  remote_env:",
-                "    OPENAI_API_KEY: sk-test",
+                "ssh_targets:",
+                "  - id: devbox",
+                "    name: Devbox",
+                "    ssh_destination: dev@example.com",
+                "    ssh_args:",
+                "      - -p",
+                "      - '2222'",
+                "    codex_bin: /opt/codex/bin/codex",
+                "    default_remote_cwd: ~/workspace",
+                "    supported_backends:",
+                "      - codex",
+                "    config_overrides:",
+                "      - model_reasoning_effort=\"high\"",
+                "    remote_env:",
+                "      OPENAI_API_KEY: sk-test",
             ]
         ),
         encoding="utf-8",
@@ -38,12 +42,14 @@ def test_load_settings_parses_yaml_defaults_and_remote_codex(monkeypatch, tmp_pa
     assert loaded.host == "0.0.0.0"
     assert loaded.port == 9999
     assert loaded.password == "from-yaml"
-    assert loaded.codex_remote is not None
-    assert loaded.codex_remote.enabled is True
-    assert loaded.codex_remote.ssh_destination == "dev@example.com"
-    assert loaded.codex_remote.ssh_args == ["-p", "2222"]
-    assert loaded.codex_remote.default_remote_cwd == "~/workspace"
-    assert loaded.codex_remote.remote_env["OPENAI_API_KEY"] == "sk-test"
+    assert len(loaded.ssh_targets) == 1
+    assert loaded.ssh_targets[0].id == "devbox"
+    assert loaded.ssh_targets[0].name == "Devbox"
+    assert loaded.ssh_targets[0].ssh_destination == "dev@example.com"
+    assert loaded.ssh_targets[0].ssh_args == ["-p", "2222"]
+    assert loaded.ssh_targets[0].default_remote_cwd == "~/workspace"
+    assert loaded.ssh_targets[0].remote_env["OPENAI_API_KEY"] == "sk-test"
+    assert loaded.ssh_targets[0].supported_backends == [Backend.CODEX]
 
 
 def test_load_settings_env_overrides_yaml(monkeypatch, tmp_path: Path) -> None:
@@ -70,8 +76,9 @@ def test_load_settings_env_overrides_yaml(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_remote_client_factory_uses_default_remote_cwd_when_not_provided(monkeypatch) -> None:
-    config = RemoteCodexSshConfig(
-        enabled=True,
+    config = SshLaunchTargetConfig(
+        id="devbox",
+        name="Devbox",
         ssh_destination="dev@example.com",
         default_remote_cwd="~/workspace",
     )
@@ -85,8 +92,9 @@ def test_remote_client_factory_uses_default_remote_cwd_when_not_provided(monkeyp
 
 def test_remote_client_factory_uses_ssh_launch_args(monkeypatch) -> None:
     monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
-    config = RemoteCodexSshConfig(
-        enabled=True,
+    config = SshLaunchTargetConfig(
+        id="devbox",
+        name="Devbox",
         ssh_destination="dev@example.com",
         ssh_args=["-p", "2222"],
         remote_env={"OPENAI_API_KEY": "sk-test"},
@@ -107,3 +115,19 @@ def test_remote_client_factory_uses_ssh_launch_args(monkeypatch) -> None:
     assert "cd /srv/work/project-a" in remote_command
     assert "app-server --listen stdio://" in remote_command
     assert "OPENAI_API_KEY=sk-test" in remote_command
+
+
+def test_ssh_target_remote_command_supports_claude(monkeypatch) -> None:
+    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    config = SshLaunchTargetConfig(
+        id="devbox",
+        name="Devbox",
+        ssh_destination="dev@example.com",
+        claude_bin="/opt/claude/bin/claude",
+    )
+
+    command = config.remote_command_for_backend(Backend.CLAUDE_CODE, ["--resume"], "~/workspace")
+
+    assert command[:2] == ("/usr/bin/ssh", "dev@example.com")
+    assert "cd '~/workspace'" in command[2]
+    assert "/opt/claude/bin/claude --resume" in command[2]

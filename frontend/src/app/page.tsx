@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -240,7 +241,16 @@ export default function HomePage() {
   return (
     <main className="page-shell">
       <section className="hero">
-        <p className="eyebrow">Waypoint</p>
+        <div className="brand">
+          <Image
+            src="/icons/icon-192.png"
+            alt="Waypoint"
+            width={48}
+            height={48}
+            priority
+          />
+          <p className="eyebrow">Waypoint</p>
+        </div>
         <h1>Remote control for live AI coding sessions.</h1>
         <p className="lede">
           Check in on Claude Code and Codex from your phone, respond when they need input, and drop to raw terminal

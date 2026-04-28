@@ -68,11 +68,23 @@ pre {
 }
 
 .eyebrow {
-  margin: 0 0 10px;
+  margin: 0;
   color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.18em;
   font-size: 0.76rem;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 10px;
+}
+
+.brand img {
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(20, 184, 166, 0.2);
 }
 
 .hero h1 {

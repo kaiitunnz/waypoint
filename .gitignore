@@ -1,5 +1,7 @@
 .env*
 !.env*.example
+backend/waypoint.yaml
+backend/*.local.yaml
 .DS_Store
 *.pyc
 __pycache__/

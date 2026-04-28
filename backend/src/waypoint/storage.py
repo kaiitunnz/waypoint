@@ -131,6 +131,20 @@ class Storage:
         assert updated is not None
         return updated
 
+    def delete_session(self, session_id: str) -> bool:
+        cursor = self.connection.execute(
+            "DELETE FROM events WHERE session_id = ?",
+            (session_id,),
+        )
+        events_deleted = cursor.rowcount or 0
+        cursor = self.connection.execute(
+            "DELETE FROM sessions WHERE id = ?",
+            (session_id,),
+        )
+        sessions_deleted = cursor.rowcount or 0
+        self.connection.commit()
+        return sessions_deleted > 0 or events_deleted > 0
+
     def append_event(self, event: EventRecord) -> EventRecord:
         cursor = self.connection.execute(
             """

@@ -66,6 +66,12 @@ class TmuxAdapter:
         command = f"cat >> {shlex.quote(str(path))}"
         await self._run("pipe-pane", "-o", "-t", target, command)
 
+    async def stop_pipe(self, target: str) -> None:
+        await self._run("pipe-pane", "-t", target)
+
+    async def kill_session(self, name: str) -> None:
+        await self._run("kill-session", "-t", name)
+
     async def capture_snapshot(self, target: str, start_line: int = -200) -> str:
         return await self._run("capture-pane", "-p", "-J", "-e", "-t", target, "-S", str(start_line))
 

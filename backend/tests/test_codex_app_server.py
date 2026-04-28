@@ -183,6 +183,28 @@ async def test_restore_session_calls_thread_resume() -> None:
 
 
 @pytest.mark.asyncio
+async def test_terminate_session_closes_client_and_drops_state() -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    state = adapter._sessions["sess"]
+    state.active_turn_id = "turn-X"
+    handled = await adapter.terminate_session("sess")
+    assert handled is True
+    assert "sess" not in adapter._sessions
+    assert ("turn_interrupt", ("thread-1", "turn-X")) in fake.calls
+    assert fake.closed is True
+
+
+@pytest.mark.asyncio
+async def test_terminate_session_returns_false_for_unknown_id() -> None:
+    emitted: list = []
+    adapter, _ = make_adapter(emitted)
+    handled = await adapter.terminate_session("missing")
+    assert handled is False
+
+
+@pytest.mark.asyncio
 async def test_terminal_snapshot_returns_command_fragments() -> None:
     emitted: list = []
     adapter, _ = make_adapter(emitted)

@@ -130,6 +130,22 @@ def create_app() -> FastAPI:
         session = await context.runtime.resume(session_id)
         return {"session": session.model_dump(mode="json")}
 
+    @app.post("/api/sessions/{session_id}/terminate")
+    async def session_terminate(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.terminate(session_id)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.delete("/api/sessions/{session_id}")
+    async def session_delete(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        await context.runtime.delete(session_id)
+        return {"deleted": session_id}
+
     @app.post("/api/sessions/attach-tmux")
     async def attach_tmux(
         request: SessionAttachRequest,

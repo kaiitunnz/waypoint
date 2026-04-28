@@ -284,6 +284,39 @@ class SessionRuntime:
         await self._record_system_event(session.id, "Sent resume", status=SessionStatus.RUNNING)
         return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
 
+    async def terminate(self, session_id: str) -> SessionRecord:
+        session = self.get_session(session_id)
+        if session.status == SessionStatus.EXITED:
+            return session
+        if session.transport == SessionTransport.CODEX_APP_SERVER:
+            await self.codex.terminate_session(session.id)
+        else:
+            target = session.tmux_pane or session.tmux_session or session.id
+            with suppress(TmuxError):
+                await self.tmux.stop_pipe(target)
+            if session.source == SessionSource.MANAGED and session.tmux_session:
+                with suppress(TmuxError):
+                    await self.tmux.kill_session(session.tmux_session)
+            monitor = self.monitor_tasks.pop(session.id, None)
+            if monitor is not None:
+                monitor.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await monitor
+        await self._record_system_event(session.id, "Session terminated", status=SessionStatus.EXITED)
+        return self.storage.update_session(session.id, status=SessionStatus.EXITED)
+
+    async def delete(self, session_id: str) -> None:
+        session = self.get_session(session_id)
+        if session.status != SessionStatus.EXITED:
+            await self.terminate(session_id)
+        self.storage.delete_session(session_id)
+        await self.broadcast.publish(
+            SessionEnvelope(
+                type="session_list_update",
+                payload={"sessions": [item.model_dump(mode="json") for item in self.list_sessions()]},
+            )
+        )
+
     async def approve(self, session_id: str, request: SessionApprovalRequest) -> SessionRecord:
         session = self.get_session(session_id)
         if session.transport == SessionTransport.CODEX_APP_SERVER:

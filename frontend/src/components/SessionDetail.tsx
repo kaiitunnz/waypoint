@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   approveSession,
@@ -31,15 +31,39 @@ interface SessionDetailProps {
 }
 
 type ViewMode = "chat" | "terminal";
+type ConnectionState = "connecting" | "open" | "reconnecting";
+
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 15000;
 
 export function SessionDetail({ host, token, sessionId, onAuthFailure }: SessionDetailProps) {
   const router = useRouter();
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [snapshot, setSnapshot] = useState("");
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [draft, setDraft] = useState("");
   const [view, setView] = useState<ViewMode>("chat");
   const [error, setError] = useState("");
+  const [connection, setConnection] = useState<ConnectionState>("connecting");
+
+  const refreshSnapshot = useCallback(async () => {
+    setSnapshotLoading(true);
+    try {
+      const text = await fetchTerminalSnapshot(host, token, sessionId);
+      setSnapshot(stripAnsi(text));
+    } catch (snapshotError) {
+      if (isAuthError(snapshotError)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(snapshotError instanceof Error ? snapshotError.message : "failed to fetch terminal snapshot");
+    } finally {
+      setSnapshotLoading(false);
+    }
+    // handleAuthFailure is stable for our purposes; depending on host/token/sessionId.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [host, token, sessionId]);
 
   useEffect(() => {
     let active = true;
@@ -67,34 +91,69 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       }
     }
     load();
-    const socket = connectSessionSocket(
-      host,
-      token,
-      sessionId,
-      (message: SessionEnvelope) => {
-        if (message.type === "event") {
-          const event = sanitizeEvent(message.payload.event as EventRecord);
-          setEvents((current) => mergeEvents(current, event));
-          setSnapshot((current) => `${current}${current ? "\n\n" : ""}${stripAnsi(event.text)}`);
-        }
-        if (message.type === "session_state") {
-          setSession(message.payload.session as SessionRecord);
-        }
-        if (message.type === "auth_revoked") {
-          handleAuthFailure();
-        }
-      },
-      () => {
-        if (active) {
-          handleAuthFailure();
-        }
-      },
-    );
+
+    let socket: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+
+    function connect() {
+      setConnection(attempt === 0 ? "connecting" : "reconnecting");
+      socket = connectSessionSocket(
+        host,
+        token,
+        sessionId,
+        (message: SessionEnvelope) => {
+          if (message.type === "event") {
+            const event = sanitizeEvent(message.payload.event as EventRecord);
+            setEvents((current) => mergeEvents(current, event));
+          }
+          if (message.type === "session_state") {
+            setSession(message.payload.session as SessionRecord);
+          }
+          if (message.type === "auth_revoked") {
+            handleAuthFailure();
+          }
+        },
+        () => {
+          if (active) {
+            handleAuthFailure();
+          }
+        },
+        {
+          onOpen: () => {
+            attempt = 0;
+            setConnection("open");
+          },
+          onClose: () => {
+            if (!active) {
+              return;
+            }
+            const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempt);
+            attempt += 1;
+            setConnection("reconnecting");
+            reconnectTimer = setTimeout(connect, delay);
+          },
+        },
+      );
+    }
+
+    connect();
+
     return () => {
       active = false;
-      socket.close();
+      if (reconnectTimer !== null) {
+        clearTimeout(reconnectTimer);
+      }
+      socket?.close();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [host, token, sessionId]);
+
+  useEffect(() => {
+    if (view === "terminal") {
+      void refreshSnapshot();
+    }
+  }, [view, refreshSnapshot]);
 
   async function submitInput() {
     if (!draft.trim()) {
@@ -166,6 +225,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         </header>
       ) : null}
       {error ? <p className="error">{error}</p> : null}
+      {connection !== "open" ? (
+        <p className="connection-banner muted">
+          {connection === "connecting" ? "Connecting…" : "Reconnecting…"}
+        </p>
+      ) : null}
       {pendingApproval ? (
         <ApprovalCard event={pendingApproval} onDecide={submitApproval} />
       ) : null}
@@ -194,8 +258,18 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
             : null}
         </section>
       ) : (
-        <section className="panel terminal">
-          <pre>{snapshot || "No terminal output yet."}</pre>
+        <section className="panel terminal stack">
+          <div className="action-row">
+            <button
+              className="secondary"
+              onClick={() => void refreshSnapshot()}
+              type="button"
+              disabled={snapshotLoading}
+            >
+              {snapshotLoading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+          <pre>{snapshot || (snapshotLoading ? "Loading…" : "No terminal output yet.")}</pre>
         </section>
       )}
       <section className="panel stack">

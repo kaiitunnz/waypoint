@@ -167,6 +167,15 @@ pre {
   color: var(--danger);
 }
 
+.connection-banner {
+  text-align: center;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  padding: 6px 12px;
+  border: 1px dashed rgba(148, 163, 184, 0.3);
+  border-radius: 999px;
+}
+
 .session-row,
 .action-row,
 .view-toggle {

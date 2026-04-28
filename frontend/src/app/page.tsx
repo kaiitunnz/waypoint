@@ -9,11 +9,17 @@ import { attachTmux, connectSessionsSocket, createSession, fetchSessions, isAuth
 import { clearToken, readHost, readToken, writeHost, writeToken } from "@/lib/store";
 import { Backend, SessionEnvelope, SessionRecord } from "@/lib/types";
 
+type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
+
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 15000;
+
 export default function HomePage() {
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [error, setError] = useState("");
+  const [connection, setConnection] = useState<ConnectionState>("idle");
 
   useEffect(() => {
     const currentHost = readHost();
@@ -24,6 +30,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!host || !token) {
+      setConnection("idle");
       return;
     }
     let active = true;
@@ -42,27 +49,57 @@ export default function HomePage() {
           setError(fetchError instanceof Error ? fetchError.message : "failed to fetch sessions");
         }
       });
-    const socket = connectSessionsSocket(
-      host,
-      token,
-      (message: SessionEnvelope) => {
-        if (message.type === "session_list_update") {
-          setSessions(message.payload.sessions as SessionRecord[]);
-        }
-        if (message.type === "auth_revoked") {
-          resetAuthState("Session expired. Log in again.");
-        }
-      },
-      () => {
-        if (active) {
-          resetAuthState("Session expired. Log in again.");
-        }
-      },
-    );
+
+    let socket: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+
+    function connect() {
+      setConnection(attempt === 0 ? "connecting" : "reconnecting");
+      socket = connectSessionsSocket(
+        host,
+        token,
+        (message: SessionEnvelope) => {
+          if (message.type === "session_list_update") {
+            setSessions(message.payload.sessions as SessionRecord[]);
+          }
+          if (message.type === "auth_revoked") {
+            resetAuthState("Session expired. Log in again.");
+          }
+        },
+        () => {
+          if (active) {
+            resetAuthState("Session expired. Log in again.");
+          }
+        },
+        {
+          onOpen: () => {
+            attempt = 0;
+            setConnection("open");
+          },
+          onClose: () => {
+            if (!active) {
+              return;
+            }
+            const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempt);
+            attempt += 1;
+            setConnection("reconnecting");
+            reconnectTimer = setTimeout(connect, delay);
+          },
+        },
+      );
+    }
+
+    connect();
+
     return () => {
       active = false;
-      socket.close();
+      if (reconnectTimer !== null) {
+        clearTimeout(reconnectTimer);
+      }
+      socket?.close();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [host, token]);
 
   async function handleLogin(nextHost: string, password: string) {
@@ -129,6 +166,11 @@ export default function HomePage() {
       {!token ? <LoginForm defaultHost={host} onSubmit={handleLogin} /> : null}
       {token ? <LaunchPanel onAttach={handleAttach} onCreate={handleCreate} /> : null}
       {error ? <p className="error">{error}</p> : null}
+      {token && connection !== "open" && connection !== "idle" ? (
+        <p className="connection-banner muted">
+          {connection === "connecting" ? "Connecting…" : "Reconnecting…"}
+        </p>
+      ) : null}
       {token ? <SessionList sessions={sessions} /> : null}
     </main>
   );

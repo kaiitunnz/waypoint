@@ -146,23 +146,39 @@ export async function sendInput(
   await ensureOk(response, "failed to send input");
 }
 
+interface SocketHandlers {
+  onMessage: (message: SessionEnvelope) => void;
+  onAuthFailure?: () => void;
+  onOpen?: () => void;
+  onClose?: (event: CloseEvent) => void;
+}
+
+function attachHandlers(socket: WebSocket, handlers: SocketHandlers): WebSocket {
+  socket.onmessage = (event) => {
+    handlers.onMessage(JSON.parse(event.data) as SessionEnvelope);
+  };
+  socket.onopen = () => {
+    handlers.onOpen?.();
+  };
+  socket.onclose = (event) => {
+    if (event.code === 4401) {
+      handlers.onAuthFailure?.();
+      return;
+    }
+    handlers.onClose?.(event);
+  };
+  return socket;
+}
+
 export function connectSessionsSocket(
   host: string,
   token: string,
   onMessage: (message: SessionEnvelope) => void,
   onAuthFailure?: () => void,
+  extra: { onOpen?: () => void; onClose?: (event: CloseEvent) => void } = {},
 ): WebSocket {
   const url = `${host.replace(/^http/, "ws")}/ws/sessions?token=${encodeURIComponent(token)}`;
-  const socket = new WebSocket(url);
-  socket.onmessage = (event) => {
-    onMessage(JSON.parse(event.data) as SessionEnvelope);
-  };
-  socket.onclose = (event) => {
-    if (event.code === 4401) {
-      onAuthFailure?.();
-    }
-  };
-  return socket;
+  return attachHandlers(new WebSocket(url), { onMessage, onAuthFailure, ...extra });
 }
 
 export function connectSessionSocket(
@@ -171,18 +187,10 @@ export function connectSessionSocket(
   sessionId: string,
   onMessage: (message: SessionEnvelope) => void,
   onAuthFailure?: () => void,
+  extra: { onOpen?: () => void; onClose?: (event: CloseEvent) => void } = {},
 ): WebSocket {
   const url = `${host.replace(/^http/, "ws")}/ws/sessions/${sessionId}?token=${encodeURIComponent(token)}`;
-  const socket = new WebSocket(url);
-  socket.onmessage = (event) => {
-    onMessage(JSON.parse(event.data) as SessionEnvelope);
-  };
-  socket.onclose = (event) => {
-    if (event.code === 4401) {
-      onAuthFailure?.();
-    }
-  };
-  return socket;
+  return attachHandlers(new WebSocket(url), { onMessage, onAuthFailure, ...extra });
 }
 
 export function isAuthError(error: unknown): error is AuthError {

@@ -52,7 +52,7 @@ class TmuxAdapter:
 
     async def send_input(self, target: str, text: str, submit: bool = True) -> None:
         if text:
-            await self._run("send-keys", "-t", target, text)
+            await self._send_literal_text(target, text)
         if submit:
             await self._run("send-keys", "-t", target, "Enter")
 
@@ -91,3 +91,12 @@ class TmuxAdapter:
         if process.returncode != 0:
             raise TmuxError(stderr.decode().strip() or f"tmux command failed: {' '.join(args)}")
         return stdout.decode()
+
+    async def _send_literal_text(self, target: str, text: str) -> None:
+        normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+        lines = normalized.split("\n")
+        for index, line in enumerate(lines):
+            if line:
+                await self._run("send-keys", "-t", target, "-l", "--", line)
+            if index < len(lines) - 1:
+                await self._run("send-keys", "-t", target, "Enter")

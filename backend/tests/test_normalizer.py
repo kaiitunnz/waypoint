@@ -17,3 +17,9 @@ def test_normalizer_strips_ansi_sequences() -> None:
     normalizer = TerminalNormalizer()
     cleaned = normalizer.clean("\x1b[31mhello\x1b[0m")
     assert cleaned == "hello"
+
+
+def test_normalizer_strips_osc_sequences() -> None:
+    normalizer = TerminalNormalizer()
+    cleaned = normalizer.clean("\x1b]0;session title\x07hello")
+    assert cleaned == "hello"

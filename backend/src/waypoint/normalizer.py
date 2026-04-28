@@ -4,7 +4,9 @@ import re
 
 from waypoint.schemas import EventKind, EventRecord, SessionStatus
 
-ANSI_PATTERN = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+ANSI_CSI_PATTERN = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+ANSI_OSC_PATTERN = re.compile(r"\x1b\].*?(?:\x07|\x1b\\)", re.DOTALL)
+ANSI_SINGLE_PATTERN = re.compile(r"\x1b[@-_]")
 APPROVAL_PATTERNS = (
     re.compile(r"\bapprove\b", re.IGNORECASE),
     re.compile(r"\ballow\b", re.IGNORECASE),
@@ -35,7 +37,9 @@ class NormalizedChunk:
 
 class TerminalNormalizer:
     def clean(self, text: str) -> str:
-        text = ANSI_PATTERN.sub("", text)
+        text = ANSI_OSC_PATTERN.sub("", text)
+        text = ANSI_CSI_PATTERN.sub("", text)
+        text = ANSI_SINGLE_PATTERN.sub("", text)
         return text.replace("\r\n", "\n").replace("\r", "\n")
 
     def normalize(self, session_id: str, text: str, start_sequence: int) -> NormalizedChunk:

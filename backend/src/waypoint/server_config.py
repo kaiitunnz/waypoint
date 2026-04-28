@@ -1,4 +1,5 @@
 import json
+import re
 import secrets
 import shlex
 import shutil
@@ -9,6 +10,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from waypoint.claude_cli import ClaudeLaunchSpec
 from waypoint.schemas import Backend
+
+SAFE_TILDE_HEAD = re.compile(r"~[A-Za-z0-9._-]*$")
 
 
 def _default_supported_backends() -> list[Backend]:
@@ -181,6 +184,8 @@ def _quote_remote_path(path: str) -> str:
     if not path or not path.startswith("~"):
         return shlex.quote(path)
     head, sep, rest = path.partition("/")
+    if not SAFE_TILDE_HEAD.fullmatch(head):
+        return shlex.quote(path)
     if not sep:
         return head
     if not rest:

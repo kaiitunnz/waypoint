@@ -19,6 +19,9 @@ def test_quote_remote_path_preserves_leading_tilde() -> None:
     assert _quote_remote_path("~user/work") == "~user/work"
     assert _quote_remote_path("/srv/work") == "/srv/work"
     assert _quote_remote_path("/srv/My Work") == "'/srv/My Work'"
+    assert _quote_remote_path("~;touch /tmp/pwned") == "'~;touch /tmp/pwned'"
+    assert _quote_remote_path("~$(id)/work") == "'~$(id)/work'"
+    assert _quote_remote_path("~user;uname -a/work") == "'~user;uname -a/work'"
 
 
 def test_load_settings_parses_yaml_defaults_and_ssh_targets(

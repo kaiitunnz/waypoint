@@ -13,15 +13,6 @@
     </array>
     <key>WorkingDirectory</key>
     <string>{{WORKDIR}}</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-      <key>WAYPOINT_PASSWORD</key>
-      <string>{{WAYPOINT_PASSWORD}}</string>
-      <key>WAYPOINT_HOST</key>
-      <string>{{WAYPOINT_HOST}}</string>
-      <key>WAYPOINT_PORT</key>
-      <string>{{WAYPOINT_PORT}}</string>
-    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>

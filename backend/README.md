@@ -5,6 +5,8 @@ FastAPI daemon for managing and observing Claude Code and Codex sessions through
 ## Development
 
 ```bash
+cp .env.example .env
+# edit .env
 uv sync --group dev
 uv run waypoint serve
 ```

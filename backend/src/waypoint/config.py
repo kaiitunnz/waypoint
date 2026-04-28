@@ -2,12 +2,17 @@ from pathlib import Path
 import os
 
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(BACKEND_ROOT / ".env")
 
 
 def default_data_dir() -> Path:
     override = os.environ.get("WAYPOINT_DATA_DIR")
     if override:
-        return Path(override).expanduser()
+        return Path(os.path.expandvars(override)).expanduser()
     return Path.home() / "Library" / "Application Support" / "Waypoint"
 
 

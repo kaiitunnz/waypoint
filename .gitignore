@@ -1,8 +1,11 @@
+.env*
+!.env*.example
 .DS_Store
 *.pyc
 __pycache__/
 .pytest_cache/
 .venv/
+*.egg-info/
 .next/
 node_modules/
 dist/

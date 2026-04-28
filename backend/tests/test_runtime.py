@@ -80,7 +80,9 @@ def make_session(settings: Settings, **overrides) -> SessionRecord:
 
 
 @pytest.mark.asyncio
-async def test_handle_input_builtin_status_intercepts_structured_session(tmp_path) -> None:
+async def test_handle_input_builtin_status_intercepts_structured_session(
+    tmp_path,
+) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
     fake = FakeStructuredAdapter()
     runtime.codex = cast(Any, fake)
@@ -92,7 +94,10 @@ async def test_handle_input_builtin_status_intercepts_structured_session(tmp_pat
     assert fake.inputs == []
     assert updated.status == SessionStatus.IDLE
     events = storage.list_events("sess")
-    assert [event.kind for event in events] == [EventKind.USER_INPUT, EventKind.SYSTEM_NOTE]
+    assert [event.kind for event in events] == [
+        EventKind.USER_INPUT,
+        EventKind.SYSTEM_NOTE,
+    ]
     assert events[0].text == "/status"
     assert "Transport: codex_app_server" in events[1].text
     assert "Thread: thread-1" in events[1].text
@@ -100,7 +105,9 @@ async def test_handle_input_builtin_status_intercepts_structured_session(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_handle_input_builtin_permissions_reports_pending_approval(tmp_path) -> None:
+async def test_handle_input_builtin_permissions_reports_pending_approval(
+    tmp_path,
+) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
     fake = FakeStructuredAdapter(pending=True)
     runtime.claude = cast(Any, fake)

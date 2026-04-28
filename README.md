@@ -29,10 +29,18 @@ cd backend
 cp waypoint.example.yaml waypoint.yaml
 # edit waypoint.yaml and set a real password
 uv sync --group dev
+uv run pre-commit install
 uv run waypoint serve
 ```
 
 Waypoint uses the Python SDK from `../3rdparty/codex/sdk/python` for managed Codex app-server sessions.
+
+For a full backend quality pass before committing, run:
+
+```bash
+cd backend
+uv run pre-commit run --all-files
+```
 
 To install the backend as a macOS LaunchAgent:
 

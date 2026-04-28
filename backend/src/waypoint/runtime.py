@@ -13,6 +13,7 @@ from fastapi import HTTPException, status
 
 from waypoint.config import Settings
 from waypoint.codex_app_server import CodexAppServerAdapter
+from waypoint.git_meta import resolve_git_meta
 from waypoint.normalizer import TerminalNormalizer
 
 log = logging.getLogger("waypoint.runtime")
@@ -145,6 +146,7 @@ class SessionRuntime:
         session_dir = self._session_dir(session_id)
         raw_log = session_dir / "raw.log"
         structured_log = session_dir / "events.jsonl"
+        git_meta = await resolve_git_meta(request.cwd)
         if request.backend == Backend.CODEX:
             raw_log.touch(exist_ok=True)
             session = SessionRecord(
@@ -154,8 +156,8 @@ class SessionRuntime:
                 transport=SessionTransport.CODEX_APP_SERVER,
                 title=title,
                 cwd=request.cwd,
-                repo_name=Path(request.cwd).name or None,
-                branch=None,
+                repo_name=git_meta.repo_name,
+                branch=git_meta.branch,
                 status=SessionStatus.STARTING,
                 created_at=datetime.now(UTC),
                 updated_at=datetime.now(UTC),
@@ -185,8 +187,8 @@ class SessionRuntime:
             transport=SessionTransport.TMUX,
             title=title,
             cwd=request.cwd,
-            repo_name=Path(request.cwd).name or None,
-            branch=None,
+            repo_name=git_meta.repo_name,
+            branch=git_meta.branch,
             status=SessionStatus.STARTING,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
@@ -217,6 +219,7 @@ class SessionRuntime:
         snapshot = await self.tmux.capture_snapshot(target.pane, -self.settings.tail_snapshot_lines)
         raw_log.write_text(snapshot, encoding="utf-8")
         await self.tmux.pipe_output(target.pane, raw_log)
+        git_meta = await resolve_git_meta(target.cwd)
         session = SessionRecord(
             id=session_id,
             backend=backend,
@@ -224,8 +227,8 @@ class SessionRuntime:
             transport=SessionTransport.TMUX,
             title=title,
             cwd=target.cwd,
-            repo_name=Path(target.cwd).name or None,
-            branch=None,
+            repo_name=git_meta.repo_name,
+            branch=git_meta.branch,
             status=SessionStatus.IDLE,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),

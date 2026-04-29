@@ -17,12 +17,14 @@ import {
   approveSession,
   connectSessionSocket,
   deleteSession as deleteSessionRequest,
+  fetchBackendModels,
   fetchEvents,
   fetchSession,
   fetchTerminalSnapshot,
   isAuthError,
   postAction,
   sendInput,
+  setSessionModel,
   setSessionPermissionMode,
 } from "@/lib/api";
 import { clearToken } from "@/lib/store";
@@ -36,6 +38,7 @@ import {
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { AskAnswerEntry, TranscriptCard, ToolPair } from "@/components/TranscriptCard";
 import {
+  BackendModelOption,
   EventRecord,
   SessionEnvelope,
   SessionRecord,
@@ -85,6 +88,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
   const [modeBusy, setModeBusy] = useState(false);
+  const [modelOptions, setModelOptions] = useState<BackendModelOption[]>([]);
+  const [modelBusy, setModelBusy] = useState(false);
   const sectionRef = useRef<HTMLElement | null>(null);
   const nearBottomRef = useRef(true);
   const pendingEventsRef = useRef<EventRecord[]>([]);
@@ -146,6 +151,66 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         );
       } finally {
         setModeBusy(false);
+      }
+    },
+    [host, token, session, handleAuthFailure],
+  );
+
+  // Refresh the model picker whenever the active backend or launch target
+  // changes. Codex's list is auth/account scoped so it can shift between
+  // remote SSH targets; for Claude this just reads the curated config list.
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+    let cancelled = false;
+    fetchBackendModels(host, token, session.backend, {
+      launchTargetId: session.launch_target_id,
+    })
+      .then((response) => {
+        if (cancelled) return;
+        setModelOptions(response.models);
+      })
+      .catch((modelsError) => {
+        if (cancelled) return;
+        if (isAuthError(modelsError)) {
+          handleAuthFailure();
+          return;
+        }
+        // Discovery failure is non-fatal: the picker just falls back to
+        // showing whatever model the session already has.
+        setModelOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [host, token, session?.backend, session?.launch_target_id, handleAuthFailure, session]);
+
+  const handleModelChange = useCallback(
+    async (nextModel: string) => {
+      if (!session) {
+        return;
+      }
+      const cleaned = nextModel.trim() || null;
+      const current = session.model ?? null;
+      if (cleaned === current) {
+        return;
+      }
+      setModelBusy(true);
+      setError("");
+      try {
+        const updated = await setSessionModel(host, token, session.id, cleaned);
+        setSession(updated);
+      } catch (modelError) {
+        if (isAuthError(modelError)) {
+          handleAuthFailure();
+          return;
+        }
+        setError(
+          modelError instanceof Error ? modelError.message : "failed to update model",
+        );
+      } finally {
+        setModelBusy(false);
       }
     },
     [host, token, session, handleAuthFailure],
@@ -608,11 +673,15 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         canTerminate={Boolean(session && session.status !== "exited")}
         disabled={composerDisabled}
         modeBusy={modeBusy}
+        modelBusy={modelBusy}
+        modelOptions={modelOptions}
+        currentModel={session?.model ?? null}
         permissionMode={session?.permission_mode ?? null}
         transport={session?.transport ?? null}
         onDelete={removeFromList}
         onInterrupt={interruptSession}
         onModeChange={handlePermissionModeChange}
+        onModelChange={handleModelChange}
         onResume={resumeSession}
         onSend={submitInput}
         onTerminate={terminate}
@@ -629,11 +698,15 @@ interface ReplyComposerProps {
   canTerminate: boolean;
   disabled: boolean;
   modeBusy: boolean;
+  modelBusy: boolean;
+  modelOptions: BackendModelOption[];
+  currentModel: string | null;
   permissionMode: string | null;
   transport: SessionTransport | null;
   onDelete: () => void | Promise<void>;
   onInterrupt: () => void | Promise<void>;
   onModeChange: (mode: string) => void | Promise<void>;
+  onModelChange: (model: string) => void | Promise<void>;
   onResume: () => void | Promise<void>;
   onSend: (text: string) => Promise<boolean>;
   onTerminate: () => void | Promise<void>;
@@ -646,11 +719,15 @@ const ReplyComposer = memo(function ReplyComposer({
   canTerminate,
   disabled,
   modeBusy,
+  modelBusy,
+  modelOptions,
+  currentModel,
   permissionMode,
   transport,
   onDelete,
   onInterrupt,
   onModeChange,
+  onModelChange,
   onResume,
   onSend,
   onTerminate,
@@ -807,6 +884,21 @@ const ReplyComposer = memo(function ReplyComposer({
   const modeOptions = backend ? modesForBackend(backend) : [];
   const hasOverflow = canTerminate || canDelete;
   const shortcutKey = SHORTCUT_IS_MAC ? "⌘" : "Ctrl";
+  const hasModelPicker = modelOptions.length > 0 || currentModel !== null;
+  // Surface a custom-named model the user already has even if it's not in the
+  // curated list, so the dropdown reflects the truth instead of silently
+  // showing "Default".
+  const modelEntries: BackendModelOption[] =
+    currentModel && !modelOptions.some((opt) => opt.id === currentModel)
+      ? [
+          {
+            id: currentModel,
+            label: `Custom · ${currentModel}`,
+            description: null,
+          },
+          ...modelOptions,
+        ]
+      : modelOptions;
 
   return (
     <section className="composer" ref={composerRef}>
@@ -830,6 +922,24 @@ const ReplyComposer = memo(function ReplyComposer({
         ) : (
           <span />
         )}
+        {hasModelPicker ? (
+          <label className="composer-model">
+            <span>model</span>
+            <select
+              value={currentModel ?? ""}
+              onChange={(event) => void onModelChange(event.target.value)}
+              disabled={modelBusy || disabled}
+              aria-label="Model"
+            >
+              <option value="">Default</option>
+              {modelEntries.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <span className="composer-shortcut" aria-hidden>
           <kbd>{shortcutKey}</kbd>
           <span>+</span>
@@ -1171,6 +1281,11 @@ function SessionHeader({
         <span className={`badge fidelity ${fidelityFor(session.transport)}`}>
           {fidelityFor(session.transport)}
         </span>
+        {session.model ? (
+          <span className="badge model" title={`Model: ${session.model}`}>
+            {session.model}
+          </span>
+        ) : null}
         <span className="session-header-meta">
           {sourceLabel}
           {session.thread_id ? ` · ${session.thread_id}` : null}

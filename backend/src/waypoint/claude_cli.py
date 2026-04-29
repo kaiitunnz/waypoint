@@ -295,19 +295,56 @@ class ClaudeCliAdapter:
         # Resolve oldest pending first.
         tool_use_id, pending = next(iter(state.pending.items()))
         mapped = self._map_decision(decision)
+        tool_name = pending.payload.get("tool_name")
+        # ExitPlanMode is special: in `-p` mode the binary's tool echoes the
+        # dialog title ("Exit plan mode?") as the result, which Claude reads as
+        # "dismissed" even when the user accepted. Block the tool with deny and
+        # carry the verdict in the reason so Claude proceeds correctly. On
+        # accept we also flip the binary out of plan mode via control_request,
+        # mirroring what the TUI does after the dialog returns.
+        if tool_name == "ExitPlanMode":
+            response = await self._exit_plan_mode_response(state, mapped)
+        else:
+            response = {
+                "permissionDecision": mapped,
+                "permissionDecisionReason": (
+                    "approved by Waypoint user"
+                    if mapped == "allow"
+                    else "denied by Waypoint user"
+                ),
+            }
         if not pending.future.done():
-            pending.future.set_result(
-                {
-                    "permissionDecision": mapped,
-                    "permissionDecisionReason": (
-                        "approved by Waypoint user"
-                        if mapped == "allow"
-                        else "denied by Waypoint user"
-                    ),
-                }
-            )
+            pending.future.set_result(response)
         state.pending.pop(tool_use_id, None)
         return True
+
+    async def _exit_plan_mode_response(
+        self, state: ClaudeSessionState, mapped: str
+    ) -> dict[str, str]:
+        if mapped == "allow":
+            try:
+                await self.set_permission_mode(state.session_id, "default")
+            except (ClaudeCliError, TimeoutError) as exc:
+                log.warning(
+                    "claude set_permission_mode after plan approval failed: %s",
+                    exc,
+                    extra={"session_id": state.session_id},
+                )
+            return {
+                "permissionDecision": "deny",
+                "permissionDecisionReason": (
+                    "User has approved your plan via Waypoint. Plan mode is "
+                    "exited; proceed with implementation. Start with updating "
+                    "your todo list if applicable."
+                ),
+            }
+        return {
+            "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                "User declined the plan via Waypoint. Stay in plan mode and "
+                "revise the plan, or wait for further direction."
+            ),
+        }
 
     async def await_approval(self, payload: dict[str, Any]) -> dict[str, str]:
         waypoint_session_id = str(payload.get("waypoint_session_id") or "")

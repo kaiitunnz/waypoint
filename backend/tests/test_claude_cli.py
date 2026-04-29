@@ -449,6 +449,71 @@ def test_claude_cli_mode_for_maps_waypoint_to_cli_values() -> None:
     assert claude_cli_mode_for("garbage") == "default"
 
 
+@pytest.mark.asyncio
+async def test_exit_plan_mode_approval_blocks_tool_and_switches_mode(
+    monkeypatch,
+) -> None:
+    """When the user approves an ExitPlanMode plan, the hook must deny the
+    tool (so Claude doesn't read the binary's "Exit plan mode?" echo as a
+    dismissal) and the adapter must flip the binary out of plan mode."""
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    state.permission_mode = "plan"
+
+    mode_calls: list[str] = []
+
+    async def fake_set_mode(session_id: str, mode: str) -> None:
+        mode_calls.append(mode)
+        state.permission_mode = mode
+
+    monkeypatch.setattr(adapter, "set_permission_mode", fake_set_mode)
+
+    payload = {
+        "waypoint_session_id": "sess",
+        "tool_use_id": "toolu_plan",
+        "tool_name": "ExitPlanMode",
+        "tool_input": {"plan": "## Plan\n- step"},
+    }
+    decision_task = asyncio.create_task(adapter.await_approval(payload))
+    for _ in range(50):
+        if adapter.has_pending_approval("sess"):
+            break
+        await asyncio.sleep(0.01)
+    await adapter.respond_to_approval("sess", "approve")
+    decision = await decision_task
+
+    assert decision["permissionDecision"] == "deny"
+    assert "approved your plan" in decision["permissionDecisionReason"]
+    assert mode_calls == ["default"]
+
+
+@pytest.mark.asyncio
+async def test_exit_plan_mode_decline_keeps_plan_mode() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    state.permission_mode = "plan"
+
+    payload = {
+        "waypoint_session_id": "sess",
+        "tool_use_id": "toolu_plan",
+        "tool_name": "ExitPlanMode",
+        "tool_input": {"plan": "## Plan\n- step"},
+    }
+    decision_task = asyncio.create_task(adapter.await_approval(payload))
+    for _ in range(50):
+        if adapter.has_pending_approval("sess"):
+            break
+        await asyncio.sleep(0.01)
+    await adapter.respond_to_approval("sess", "decline")
+    decision = await decision_task
+
+    assert decision["permissionDecision"] == "deny"
+    assert "declined the plan" in decision["permissionDecisionReason"]
+    assert state.permission_mode == "plan"
+
+
 def test_build_local_launch_spec_uses_session_cli_mode(monkeypatch) -> None:
     monkeypatch.setattr("waypoint.claude_cli.shutil.which", lambda _: "/usr/bin/claude")
     adapter = _make_adapter([])

@@ -93,7 +93,9 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
 class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
     def __init__(self) -> None:
         super().__init__()
-        self.restore_calls: list[tuple[str, str, str, Any]] = []
+        self.restore_calls: list[tuple[str, str, str, Any, str | None]] = []
+        self.model_calls: list[tuple[str, str | None]] = []
+        self.models: dict[str, str | None] = {}
 
     async def restore_session(
         self,
@@ -101,8 +103,20 @@ class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
         cwd: str,
         thread_id: str,
         client_factory_override: Any = None,
+        model: str | None = None,
     ) -> None:
-        self.restore_calls.append((session_id, cwd, thread_id, client_factory_override))
+        self.restore_calls.append(
+            (session_id, cwd, thread_id, client_factory_override, model)
+        )
+        if model is not None:
+            self.models[session_id] = model
+
+    async def set_model(self, session_id: str, model: str | None) -> None:
+        self.model_calls.append((session_id, model))
+        self.models[session_id] = model
+
+    def session_model(self, session_id: str) -> str | None:
+        return self.models.get(session_id)
 
 
 def make_runtime(tmp_path) -> tuple[SessionRuntime, Storage, Settings]:

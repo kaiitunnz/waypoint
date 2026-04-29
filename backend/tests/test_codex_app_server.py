@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -54,9 +55,21 @@ class FakeAppServerClient:
         self.calls.append(("thread_resume", (thread_id,)))
         return {"thread_id": thread_id}
 
-    def turn_start(self, thread_id: str, text: str) -> FakeTurnStartResponse:
-        self.calls.append(("turn_start", (thread_id, text)))
+    def turn_start(
+        self,
+        thread_id: str,
+        text: str,
+        params: dict[str, Any] | None = None,
+    ) -> FakeTurnStartResponse:
+        if params is None:
+            self.calls.append(("turn_start", (thread_id, text)))
+        else:
+            self.calls.append(("turn_start", (thread_id, text, params)))
         return FakeTurnStartResponse(FakeTurn(id="turn-1"))
+
+    def model_list(self, include_hidden: bool = False) -> Any:
+        self.calls.append(("model_list", (include_hidden,)))
+        return SimpleNamespace(data=[], next_cursor=None)
 
     def turn_steer(self, thread_id: str, turn_id: str, text: str) -> None:
         self.calls.append(("turn_steer", (thread_id, turn_id, text)))
@@ -137,6 +150,87 @@ async def test_start_session_uses_factory_override() -> None:
     assert fake.calls == []
     assert override.calls[0] == ("override_factory", ("~/remote-work",))
     assert override.calls[1] == ("thread_start", ({"cwd": "~/remote-work"},))
+
+
+@pytest.mark.asyncio
+async def test_start_session_passes_model_to_thread_start() -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+
+    thread_id = await adapter.start_session("sess", "/tmp/work", model="gpt-5")
+
+    assert thread_id == "thread-1"
+    assert fake.calls[1] == ("thread_start", ({"cwd": "/tmp/work", "model": "gpt-5"},))
+    assert adapter.session_model("sess") == "gpt-5"
+
+
+@pytest.mark.asyncio
+async def test_set_model_persists_and_re_emits_on_turn_start() -> None:
+    """Codex model is a per-turn override that the SDK persists; waypoint must
+    still re-emit it on every turn_start so a restart can't drop it."""
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    state = adapter._sessions["sess"]
+    assert adapter.session_model("sess") is None
+
+    await adapter.set_model("sess", "gpt-5")
+    assert adapter.session_model("sess") == "gpt-5"
+
+    await adapter.send_input("sess", "hello")
+    turn_calls = [call for call in fake.calls if call[0] == "turn_start"]
+    assert turn_calls == [
+        ("turn_start", (state.thread_id, "hello", {"model": "gpt-5"})),
+    ]
+    if state.stream_task:
+        state.stream_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await state.stream_task
+
+
+@pytest.mark.asyncio
+async def test_send_input_per_turn_params_override_session_model() -> None:
+    """Caller-supplied turn_params win over the sticky session model."""
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work", model="gpt-5")
+    state = adapter._sessions["sess"]
+
+    await adapter.send_input("sess", "hi", {"model": "gpt-5-fast"})
+    turn_calls = [call for call in fake.calls if call[0] == "turn_start"]
+    assert turn_calls[-1] == (
+        "turn_start",
+        (state.thread_id, "hi", {"model": "gpt-5-fast"}),
+    )
+    if state.stream_task:
+        state.stream_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await state.stream_task
+
+
+@pytest.mark.asyncio
+async def test_list_models_uses_transient_client() -> None:
+    """Discovery spawns a fresh client and closes it after the model_list
+    round-trip."""
+    emitted: list = []
+    adapter, _ = make_adapter(emitted)
+
+    transient = FakeAppServerClient()
+
+    def transient_factory(cwd, approval_handler):
+        transient.approval_handler = approval_handler
+        transient.calls.append(("transient_factory", (cwd,)))
+        return transient
+
+    response = await adapter.list_models(
+        cwd="~/proj",
+        client_factory_override=transient_factory,
+        include_hidden=True,
+    )
+
+    assert transient.started and transient.initialized and transient.closed
+    assert ("model_list", (True,)) in transient.calls
+    assert response.data == []
 
 
 @pytest.mark.asyncio

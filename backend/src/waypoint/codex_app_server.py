@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any
 
 from codex_app_server.client import AppServerClient, AppServerConfig
+from codex_app_server.generated.v2_all import ModelListResponse
 from codex_app_server.models import UnknownNotification
 
 from waypoint.schemas import EventKind, SessionStatus
@@ -24,7 +25,9 @@ ApprovalCallback = Callable[[str, dict[str, Any] | None], dict[str, Any]]
 ClientFactory = Callable[[str, ApprovalCallback], AppServerClient]
 
 
-def default_client_factory(cwd: str, approval_handler: ApprovalCallback) -> AppServerClient:
+def default_client_factory(
+    cwd: str, approval_handler: ApprovalCallback
+) -> AppServerClient:
     codex_bin = shutil.which("codex")
     if codex_bin is None:
         raise RuntimeError("codex binary not found on PATH")
@@ -59,6 +62,11 @@ class CodexSessionState:
     pending_approval: PendingApproval | None = None
     terminal_fragments: list[str] = field(default_factory=list)
     streamed_tool_result_ids: set[str] = field(default_factory=set)
+    # Most recent model selection. Codex's protocol exposes model as a per-turn
+    # override that persists, so we apply it on every turn_start to keep the
+    # waypoint contract — "set once, apply going forward" — even across
+    # restarts.
+    model: str | None = None
 
 
 class CodexAppServerAdapter:
@@ -77,13 +85,20 @@ class CodexAppServerAdapter:
         session_id: str,
         cwd: str,
         client_factory_override: ClientFactory | None = None,
+        model: str | None = None,
     ) -> str:
         state = await self._spawn_session(
             session_id,
             cwd,
             client_factory_override=client_factory_override,
+            model=model,
         )
-        started = await self._call_client(state, state.client.thread_start, {"cwd": cwd})
+        thread_params: dict[str, Any] = {"cwd": cwd}
+        if model:
+            thread_params["model"] = model
+        started = await self._call_client(
+            state, state.client.thread_start, thread_params
+        )
         state.thread_id = started.thread.id
         return state.thread_id
 
@@ -93,12 +108,14 @@ class CodexAppServerAdapter:
         cwd: str,
         thread_id: str,
         client_factory_override: ClientFactory | None = None,
+        model: str | None = None,
     ) -> None:
         state = await self._spawn_session(
             session_id,
             cwd,
             thread_id=thread_id,
             client_factory_override=client_factory_override,
+            model=model,
         )
         await self._call_client(state, state.client.thread_resume, thread_id)
 
@@ -108,6 +125,7 @@ class CodexAppServerAdapter:
         cwd: str,
         thread_id: str = "",
         client_factory_override: ClientFactory | None = None,
+        model: str | None = None,
     ) -> CodexSessionState:
         self._loop = asyncio.get_running_loop()
         holder: dict[str, CodexSessionState] = {}
@@ -148,6 +166,7 @@ class CodexAppServerAdapter:
             client=client,
             transport_lock=asyncio.Lock(),
             thread_id=thread_id,
+            model=model,
         )
         holder["state"] = state
         self._sessions[session_id] = state
@@ -162,15 +181,19 @@ class CodexAppServerAdapter:
         state = self._require_session(session_id)
         if state.active_turn_id is None:
             # turn_steer doesn't accept params in the current Codex SDK;
-            # policy / reviewer overrides only land via turn_start. Override
-            # values persist to subsequent turns per SDK semantics.
-            if turn_params:
+            # policy / reviewer / model overrides only land via turn_start.
+            # Override values persist to subsequent turns per SDK semantics,
+            # so we re-emit the session's model on every turn_start to keep
+            # waypoint's "set once, apply going forward" contract intact even
+            # after a restore.
+            merged = self._build_turn_params(state, turn_params)
+            if merged:
                 started = await self._call_client(
                     state,
                     state.client.turn_start,
                     state.thread_id,
                     text,
-                    turn_params,
+                    merged,
                 )
             else:
                 started = await self._call_client(
@@ -184,6 +207,20 @@ class CodexAppServerAdapter:
         await self._call_client(
             state, state.client.turn_steer, state.thread_id, state.active_turn_id, text
         )
+
+    def _build_turn_params(
+        self,
+        state: CodexSessionState,
+        caller_params: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        merged: dict[str, Any] = {}
+        if state.model:
+            merged["model"] = state.model
+        if caller_params:
+            # Caller-supplied entries always win — a per-turn override beats the
+            # session's sticky default.
+            merged.update(caller_params)
+        return merged
 
     async def interrupt(self, session_id: str) -> None:
         state = self._require_session(session_id)
@@ -208,6 +245,44 @@ class CodexAppServerAdapter:
             )
         await self._call_client(state, state.client.thread_compact, state.thread_id)
         state.stream_task = asyncio.create_task(self._stream_compact(state))
+
+    async def set_model(self, session_id: str, model: str | None) -> None:
+        """Update the session's sticky model.
+
+        Codex's protocol exposes model as a per-turn override that persists
+        once set, so the actual swap lands on the next turn_start. Stored on
+        the session state so subsequent turns and restores both pick it up.
+        """
+        state = self._require_session(session_id)
+        state.model = model or None
+
+    def session_model(self, session_id: str) -> str | None:
+        state = self._sessions.get(session_id)
+        return state.model if state is not None else None
+
+    async def list_models(
+        self,
+        cwd: str = "~",
+        client_factory_override: ClientFactory | None = None,
+        include_hidden: bool = False,
+    ) -> ModelListResponse:
+        """Spawn a transient client to enumerate models for this backend.
+
+        Codex's model_list is auth/account-scoped, so we ask the live backend
+        instead of mirroring a static table. The transient client is closed
+        immediately after — discovery is rare enough that the spawn cost
+        (~200-500ms) is acceptable, and reusing a long-lived client risks
+        racing with active sessions on the same transport.
+        """
+        factory = client_factory_override or self._client_factory
+        client = factory(cwd, lambda method, params: {"decision": "decline"})
+        try:
+            await asyncio.to_thread(client.start)
+            await asyncio.to_thread(client.initialize)
+            return await asyncio.to_thread(client.model_list, include_hidden)
+        finally:
+            with suppress(Exception):
+                await asyncio.to_thread(client.close)
 
     async def respond_to_approval(self, session_id: str, decision: str) -> bool:
         state = self._require_session(session_id)

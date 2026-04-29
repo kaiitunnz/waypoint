@@ -46,7 +46,9 @@ export function LaunchPanel({
     event.preventDefault();
     setBusy(true);
     try {
-      await onCreate(backend, cwd, title, targetLabel ? remoteCwd : undefined);
+      // Remote launches only use the remote path; let the backend fill cwd
+      // from it for the UI label.
+      await onCreate(backend, targetLabel ? "" : cwd, title, targetLabel ? remoteCwd : undefined);
       setTitle("");
     } finally {
       setBusy(false);
@@ -78,16 +80,21 @@ export function LaunchPanel({
             {supportedBackends.includes("claude_code") ? <option value="claude_code">Claude Code</option> : null}
           </select>
         </label>
-        <label className="field">
-          <span>Working directory</span>
-          <input value={cwd} onChange={(event) => setCwd(event.target.value)} />
-        </label>
         {targetLabel ? (
           <label className="field">
-            <span>{targetLabel} working directory</span>
-            <input value={remoteCwd} onChange={(event) => setRemoteCwd(event.target.value)} />
+            <span>Working directory on {targetLabel}</span>
+            <input
+              value={remoteCwd}
+              onChange={(event) => setRemoteCwd(event.target.value)}
+              placeholder="~"
+            />
           </label>
-        ) : null}
+        ) : (
+          <label className="field">
+            <span>Working directory</span>
+            <input value={cwd} onChange={(event) => setCwd(event.target.value)} />
+          </label>
+        )}
         <label className="field">
           <span>Title</span>
           <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Optional" />

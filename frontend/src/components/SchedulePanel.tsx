@@ -47,7 +47,7 @@ export function SchedulePanel({
     setError("");
     const payload: ScheduleCreateRequest = {
       backend,
-      cwd,
+      cwd: targetLabel ? "" : cwd,
       remote_cwd: targetLabel ? remoteCwd : null,
       title: title.trim() || null,
       initial_prompt: prompt.trim() || null,
@@ -102,16 +102,21 @@ export function SchedulePanel({
               ) : null}
             </select>
           </label>
-          <label className="field">
-            <span>Working directory</span>
-            <input value={cwd} onChange={(event) => setCwd(event.target.value)} />
-          </label>
           {targetLabel ? (
             <label className="field">
-              <span>{targetLabel} working directory</span>
-              <input value={remoteCwd} onChange={(event) => setRemoteCwd(event.target.value)} />
+              <span>Working directory on {targetLabel}</span>
+              <input
+                value={remoteCwd}
+                onChange={(event) => setRemoteCwd(event.target.value)}
+                placeholder="~"
+              />
             </label>
-          ) : null}
+          ) : (
+            <label className="field">
+              <span>Working directory</span>
+              <input value={cwd} onChange={(event) => setCwd(event.target.value)} />
+            </label>
+          )}
           <label className="field">
             <span>Title</span>
             <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Optional" />

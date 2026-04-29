@@ -24,6 +24,17 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = subparsers.add_parser("doctor")
     doctor.add_argument("--config", default=None)
 
+    reset = subparsers.add_parser(
+        "reset",
+        help="Wipe runtime data (sessions, events, tokens, schedules, logs). Config is untouched.",
+    )
+    reset.add_argument("--config", default=None)
+    reset.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm destruction. Without this flag the command is a dry run.",
+    )
+
     session = subparsers.add_parser("session")
     session.add_argument("--config", default=None)
     session_subparsers = session.add_subparsers(dest="session_command", required=True)
@@ -64,10 +75,48 @@ def main() -> None:
     if args.command == "doctor":
         run_doctor(_settings_from_arg(args.config))
         return
+    if args.command == "reset":
+        run_reset(_settings_from_arg(args.config), confirmed=args.yes)
+        return
     if args.command == "session":
         asyncio.run(run_session_command(args))
         return
     parser.error("unknown command")
+
+
+def run_reset(settings: Settings | None = None, *, confirmed: bool) -> None:
+    settings = settings or load_settings()
+    db_path = settings.database_path
+    sessions_dir = settings.sessions_dir
+    # SQLite write-ahead log siblings live next to the main file; nuke them too
+    # so a re-init starts with a clean slate.
+    db_siblings = [
+        db_path.with_suffix(db_path.suffix + suffix) for suffix in ("-wal", "-shm")
+    ]
+    targets: list[Path] = [db_path, *db_siblings, sessions_dir]
+    existing = [target for target in targets if target.exists()]
+
+    if not existing:
+        print(f"Nothing to reset under {settings.data_dir}.")
+        return
+
+    if not confirmed:
+        print(f"Would remove (data_dir: {settings.data_dir}):")
+        for target in existing:
+            print(f"  - {target}")
+        print()
+        print("Stop the backend before running, then re-run with --yes to confirm.")
+        print("Config is untouched in either case.")
+        return
+
+    for target in existing:
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+        print(f"removed {target}")
+    settings.ensure_dirs()
+    print(f"recreated {settings.data_dir}")
 
 
 def run_doctor(settings: Settings | None = None) -> None:

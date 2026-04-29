@@ -1,7 +1,11 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
+import {
+  modesForBackend,
+  permissionModeLabel,
+} from "@/lib/permissionModes";
 import { Backend, ScheduleCreateRequest, ScheduledSession } from "@/lib/types";
 
 interface SchedulePanelProps {
@@ -34,15 +38,23 @@ export function SchedulePanel({
   const [remoteCwd, setRemoteCwd] = useState(defaultRemoteCwd ?? "~");
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [permissionMode, setPermissionMode] = useState<string>("default");
   const [mode, setMode] = useState<Mode>("delay");
   const [delayMinutes, setDelayMinutes] = useState("15");
   const [scheduledAt, setScheduledAt] = useState(defaultScheduledAt());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  const permissionOptions = useMemo(() => modesForBackend(backend), [backend]);
+
   useEffect(() => setBackend(defaultBackend), [defaultBackend]);
   useEffect(() => setCwd(defaultCwd), [defaultCwd]);
   useEffect(() => setRemoteCwd(defaultRemoteCwd ?? "~"), [defaultRemoteCwd]);
+  useEffect(() => {
+    if (!permissionOptions.some((option) => option.value === permissionMode)) {
+      setPermissionMode(permissionOptions[0]?.value ?? "default");
+    }
+  }, [permissionOptions, permissionMode]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -53,6 +65,7 @@ export function SchedulePanel({
       remote_cwd: targetLabel ? remoteCwd : null,
       title: title.trim() || null,
       initial_prompt: prompt.trim() || null,
+      permission_mode: permissionMode || null,
       args: [],
     };
     if (mode === "delay") {
@@ -139,6 +152,21 @@ export function SchedulePanel({
             <span>Title</span>
             <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Optional" />
           </label>
+          {permissionOptions.length > 0 ? (
+            <label className="field">
+              <span>Starting permission mode</span>
+              <select
+                value={permissionMode}
+                onChange={(event) => setPermissionMode(event.target.value)}
+              >
+                {permissionOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>
         <label className="field">
           <span>Initial prompt</span>
@@ -231,6 +259,7 @@ function ScheduleRow({
   const when = new Date(schedule.scheduled_at);
   const formatted = when.toLocaleString();
   const relative = formatRelative(when);
+  const modeLabel = permissionModeLabel(schedule.backend, schedule.permission_mode);
   return (
     <article className={`schedule-row schedule-${schedule.status}`}>
       <div className="session-row">
@@ -238,6 +267,9 @@ function ScheduleRow({
           {schedule.backend === "codex" ? "Codex" : "Claude"}
         </span>
         <span className={`badge schedule-status ${schedule.status}`}>{schedule.status}</span>
+        {modeLabel ? (
+          <span className="badge schedule-mode">{modeLabel}</span>
+        ) : null}
         <span className="muted">{formatted}</span>
         {schedule.status === "pending" ? <span className="muted">· {relative}</span> : null}
       </div>

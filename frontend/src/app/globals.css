@@ -1587,6 +1587,14 @@ pre {
   border-color: rgba(226, 108, 112, 0.28);
 }
 
+.badge.schedule-mode {
+  background: rgba(143, 179, 214, 0.08);
+  color: var(--accent-cool);
+  border-color: rgba(143, 179, 214, 0.18);
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
 @media (max-width: 720px) {
   .page-shell {
     padding: calc(20px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right))

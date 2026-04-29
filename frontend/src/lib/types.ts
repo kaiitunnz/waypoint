@@ -93,6 +93,7 @@ export interface ScheduledSession {
   title?: string | null;
   args: string[];
   initial_prompt?: string | null;
+  permission_mode?: string | null;
   scheduled_at: string;
   created_at: string;
   status: ScheduleStatus;
@@ -108,6 +109,7 @@ export interface ScheduleCreateRequest {
   title?: string | null;
   args?: string[];
   initial_prompt?: string | null;
+  permission_mode?: string | null;
   delay_seconds?: number | null;
   scheduled_at?: string | null;
 }

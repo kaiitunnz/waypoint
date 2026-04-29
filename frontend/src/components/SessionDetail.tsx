@@ -26,6 +26,7 @@ import {
   setSessionPermissionMode,
 } from "@/lib/api";
 import { clearToken } from "@/lib/store";
+import { modesForBackend } from "@/lib/permissionModes";
 import {
   fidelityFor,
   supportsResume,
@@ -47,32 +48,6 @@ const SLASH_COMMANDS: ReadonlyArray<{ command: string; description: string }> = 
   { command: "/permissions", description: "Forward to the agent's permissions" },
   { command: "/compact", description: "Compact context to reclaim tokens" },
 ];
-
-interface PermissionModeOption {
-  value: string;
-  label: string;
-}
-
-const CLAUDE_PERMISSION_MODES: ReadonlyArray<PermissionModeOption> = [
-  { value: "default", label: "Default" },
-  { value: "plan", label: "Plan" },
-  { value: "acceptEdits", label: "Accept Edits" },
-  { value: "auto", label: "Auto" },
-  { value: "bypassPermissions", label: "Bypass Permissions" },
-  { value: "dontAsk", label: "Don't Ask" },
-];
-
-const CODEX_PERMISSION_MODES: ReadonlyArray<PermissionModeOption> = [
-  { value: "default", label: "Default" },
-  { value: "auto_review", label: "Auto-review" },
-  { value: "full_access", label: "Full Access" },
-];
-
-function modesForBackend(backend: string): ReadonlyArray<PermissionModeOption> {
-  if (backend === "claude_code") return CLAUDE_PERMISSION_MODES;
-  if (backend === "codex") return CODEX_PERMISSION_MODES;
-  return [];
-}
 
 interface SessionDetailProps {
   host: string;

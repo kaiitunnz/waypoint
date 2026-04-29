@@ -466,65 +466,67 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         </div>
       ) : null}
       {session ? (
-        <header className="panel">
-          <div className="session-row">
-            <span className={`badge ${session.backend}`}>{session.backend === "codex" ? "Codex" : "Claude"}</span>
-            <span className={`badge transport ${session.transport}`}>{transportLabel(session.transport)}</span>
-            <span className={`badge fidelity ${fidelityFor(session.transport)}`}>{fidelityFor(session.transport)}</span>
-            <span className={`status ${session.status}`}>{session.status.replace("_", " ")}</span>
-          </div>
-          <h2>{session.title}</h2>
-          <p className="muted">
-            {session.cwd}
-            {session.launch_target_id ? ` · ${session.launch_target_id}` : null}
-          </p>
-          <p className="meta">
-            {session.source === "managed" ? "Managed" : "Attached"}
-            {session.thread_id ? ` · thread ${session.thread_id}` : null}
-          </p>
-        </header>
-      ) : null}
-      {connection !== "open" ? (
-        <p className="connection-banner muted">
-          {connection === "connecting" ? "Connecting…" : "Reconnecting…"}
-        </p>
+        <SessionHeader session={session} connection={connection} />
       ) : null}
       {usageSummary ? <UsageCard summary={usageSummary} /> : null}
-      <div className="view-toggle">
-        <button className={view === "chat" ? "primary" : "secondary"} onClick={() => setView("chat")} type="button">
-          Chat
-        </button>
-        <button
-          className={view === "terminal" ? "primary" : "secondary"}
-          onClick={() => setView("terminal")}
-          type="button"
-        >
-          Terminal
-        </button>
-      </div>
-      {view === "chat" ? (
-        <section className="stack">
-          <div className="action-row">
+      <div className="session-toolbar">
+        <div className="segmented" role="tablist" aria-label="View">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "chat"}
+            className={`segmented-item ${view === "chat" ? "active" : ""}`}
+            onClick={() => setView("chat")}
+          >
+            Chat
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "terminal"}
+            className={`segmented-item ${view === "terminal" ? "active" : ""}`}
+            onClick={() => setView("terminal")}
+          >
+            Terminal
+          </button>
+        </div>
+        {view === "chat" ? (
+          <div className="segmented segmented-quiet" role="radiogroup" aria-label="Event filter">
             <button
-              className={filterMode === "important" ? "primary" : "secondary"}
-              onClick={() => setFilterMode("important")}
               type="button"
+              role="radio"
+              aria-checked={filterMode === "important"}
+              className={`segmented-item ${filterMode === "important" ? "active" : ""}`}
+              onClick={() => setFilterMode("important")}
             >
               Important
             </button>
             <button
-              className={filterMode === "all" ? "primary" : "secondary"}
-              onClick={() => setFilterMode("all")}
               type="button"
+              role="radio"
+              aria-checked={filterMode === "all"}
+              className={`segmented-item ${filterMode === "all" ? "active" : ""}`}
+              onClick={() => setFilterMode("all")}
             >
               All events
             </button>
-            {filterMode === "important" && hiddenEventCount > 0 ? (
-              <span className="muted">
-                Hiding {hiddenEventCount} low-signal event{hiddenEventCount === 1 ? "" : "s"}
-              </span>
-            ) : null}
           </div>
+        ) : null}
+      </div>
+      {view === "chat" ? (
+        <section className="stack transcript-stack">
+          {filterMode === "important" && hiddenEventCount > 0 ? (
+            <p className="filter-hint">
+              Hiding {hiddenEventCount} low-signal event{hiddenEventCount === 1 ? "" : "s"} ·{" "}
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => setFilterMode("all")}
+              >
+                show all
+              </button>
+            </p>
+          ) : null}
           {session && transcriptItems.length > 0
             ? transcriptItems.map((item) =>
                 item.kind === "pair" ? (
@@ -1122,6 +1124,118 @@ interface UsageSummary {
     type: string | null;
     ts: string;
   } | null;
+}
+
+function SessionHeader({
+  session,
+  connection,
+}: {
+  session: SessionRecord;
+  connection: ConnectionState;
+}) {
+  const cwdSegments = formatCwdSegments(session.cwd);
+  const target = session.launch_target_id ?? null;
+  const sourceLabel = session.source === "managed" ? "Managed" : "Attached";
+  return (
+    <header className="session-header">
+      <div className="session-header-top">
+        <h2 className="session-header-title">{session.title}</h2>
+        <span
+          className={`session-pulse ${connectionVariant(connection, session.status)}`}
+          title={connectionTitle(connection, session.status)}
+        >
+          <span className="session-pulse-dot" aria-hidden />
+          <span className="session-pulse-label">
+            {connectionLabel(connection, session.status)}
+          </span>
+        </span>
+      </div>
+      <p className="session-header-cwd" title={session.cwd}>
+        {cwdSegments.map((segment, index) => (
+          <span key={index}>
+            {index > 0 ? <span className="cwd-sep" aria-hidden>/</span> : null}
+            <span className={index === cwdSegments.length - 1 ? "cwd-leaf" : "cwd-segment"}>
+              {segment}
+            </span>
+          </span>
+        ))}
+        {target ? <span className="session-header-target"> · {target}</span> : null}
+      </p>
+      <div className="session-header-tags">
+        <span className={`badge ${session.backend}`}>
+          {session.backend === "codex" ? "Codex" : "Claude"}
+        </span>
+        <span className={`badge transport ${session.transport}`}>
+          {transportLabel(session.transport)}
+        </span>
+        <span className={`badge fidelity ${fidelityFor(session.transport)}`}>
+          {fidelityFor(session.transport)}
+        </span>
+        <span className="session-header-meta">
+          {sourceLabel}
+          {session.thread_id ? ` · ${session.thread_id}` : null}
+        </span>
+      </div>
+    </header>
+  );
+}
+
+function formatCwdSegments(cwd: string): string[] {
+  if (!cwd) return [""];
+  // Render the path as breadcrumb-style segments, but keep the leading slash
+  // (or `~`) attached to the first segment so root paths still read correctly.
+  const trimmed = cwd.replace(/\/+$/, "");
+  const segments = trimmed.split("/").filter(Boolean);
+  if (trimmed.startsWith("/")) {
+    return segments.length ? [`/${segments[0]}`, ...segments.slice(1)] : ["/"];
+  }
+  return segments.length ? segments : [trimmed];
+}
+
+function connectionVariant(
+  connection: ConnectionState,
+  status: SessionRecord["status"],
+): string {
+  if (connection !== "open") return connection;
+  if (status === "running" || status === "waiting_input") return "open running";
+  if (status === "error" || status === "interrupted") return "open warn";
+  if (status === "exited") return "open dim";
+  return "open";
+}
+
+function connectionLabel(
+  connection: ConnectionState,
+  status: SessionRecord["status"],
+): string {
+  if (connection === "connecting") return "Connecting";
+  if (connection === "reconnecting") return "Reconnecting";
+  switch (status) {
+    case "running":
+      return "Running";
+    case "waiting_input":
+      return "Waiting on you";
+    case "interrupted":
+      return "Interrupted";
+    case "error":
+      return "Error";
+    case "exited":
+      return "Exited";
+    case "starting":
+      return "Starting";
+    case "idle":
+    default:
+      return "Live";
+  }
+}
+
+function connectionTitle(
+  connection: ConnectionState,
+  status: SessionRecord["status"],
+): string {
+  if (connection !== "open") {
+    return `Socket ${connection}`;
+  }
+  return `Socket open · session ${status.replace("_", " ")}`;
 }
 
 function TranscriptEmpty({

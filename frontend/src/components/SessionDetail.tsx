@@ -581,8 +581,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
               className="secondary scroll-bottom"
               onClick={() => scrollToBottom()}
               type="button"
+              aria-label="Scroll to latest"
             >
-              Latest
+              ↓ Latest
             </button>
           ) : null}
         </div>

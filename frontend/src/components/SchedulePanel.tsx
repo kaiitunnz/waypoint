@@ -213,7 +213,12 @@ function ScheduleRow({
         <span className="muted">{formatted}</span>
         {schedule.status === "pending" ? <span className="muted">· {relative}</span> : null}
       </div>
-      <p className="schedule-title">{schedule.title || schedule.cwd}</p>
+      <p className="schedule-title">
+        {schedule.title || schedule.remote_cwd || schedule.cwd}
+        {schedule.launch_target_id ? (
+          <span className="muted"> · {schedule.launch_target_id}</span>
+        ) : null}
+      </p>
       {schedule.initial_prompt ? (
         <p className="muted schedule-prompt">“{schedule.initial_prompt}”</p>
       ) : null}

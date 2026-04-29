@@ -77,8 +77,10 @@ export function SessionList({ sessions, onDelete, onDeleteExited, onTerminate }:
             <span className={`status ${session.status}`}>{session.status.replace("_", " ")}</span>
           </div>
           <h3>{session.title}</h3>
-          <p className="muted">{session.cwd}</p>
-          {session.remote_cwd ? <p className="muted">Remote: {session.remote_cwd}</p> : null}
+          <p className="muted">
+            {session.remote_cwd ?? session.cwd}
+            {session.launch_target_id ? ` · ${session.launch_target_id}` : null}
+          </p>
           <p className="meta">
             {session.source === "managed" ? "Managed" : "Attached"} · last activity{" "}
             {new Date(session.last_event_at).toLocaleString()}

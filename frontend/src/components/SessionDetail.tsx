@@ -343,8 +343,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
             <span className={`status ${session.status}`}>{session.status.replace("_", " ")}</span>
           </div>
           <h2>{session.title}</h2>
-          <p className="muted">{session.cwd}</p>
-          {session.remote_cwd ? <p className="muted">Remote: {session.remote_cwd}</p> : null}
+          <p className="muted">
+            {session.remote_cwd ?? session.cwd}
+            {session.launch_target_id ? ` · ${session.launch_target_id}` : null}
+          </p>
           <p className="meta">
             {session.source === "managed" ? "Managed" : "Attached"}
             {session.thread_id ? ` · thread ${session.thread_id}` : null}

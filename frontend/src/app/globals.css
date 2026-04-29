@@ -266,6 +266,7 @@ pre {
   display: grid;
   gap: 16px;
   grid-template-columns: minmax(0, 1fr);
+  align-items: start;
 }
 
 @media (min-width: 720px) {

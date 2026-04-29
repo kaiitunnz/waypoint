@@ -216,6 +216,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await context.runtime.delete(session_id)
         return {"deleted": session_id}
 
+    @app.post("/api/sessions/{session_id}/pin")
+    async def session_pin(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.set_pinned(session_id, pinned=True)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.delete("/api/sessions/{session_id}/pin")
+    async def session_unpin(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.set_pinned(session_id, pinned=False)
+        return {"session": session.model_dump(mode="json")}
+
     @app.post("/api/sessions/attach-tmux")
     async def attach_tmux(
         request: SessionAttachRequest,

@@ -65,6 +65,7 @@ class SessionRecord(BaseModel):
     raw_log_path: str
     structured_log_path: str
     pid: int | None = None
+    pinned_at: datetime | None = None
 
 
 class EventRecord(BaseModel):

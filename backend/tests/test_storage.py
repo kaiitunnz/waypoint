@@ -50,6 +50,35 @@ def test_storage_round_trip(tmp_path) -> None:
     assert len(events) == 1
 
 
+def test_storage_round_trips_pinned_at(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="session-pin",
+        backend=Backend.CODEX,
+        source=SessionSource.MANAGED,
+        title="Codex session",
+        cwd="/tmp",
+        status=SessionStatus.RUNNING,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="/tmp/raw.log",
+        structured_log_path="/tmp/events.jsonl",
+    )
+    storage.create_session(session)
+
+    loaded = storage.get_session("session-pin")
+    assert loaded is not None
+    assert loaded.pinned_at is None
+
+    pinned = storage.update_session("session-pin", pinned_at=now)
+    assert pinned.pinned_at == now
+
+    unpinned = storage.update_session("session-pin", pinned_at=None)
+    assert unpinned.pinned_at is None
+
+
 def test_storage_serializes_concurrent_threads(tmp_path) -> None:
     # Regression: FastAPI dispatches sync deps onto a threadpool, so the auth
     # path could call ``get_token_expiry`` on the shared connection from many

@@ -108,6 +108,7 @@ class Storage:
         self._ensure_column("sessions", "thread_id", "TEXT")
         self._ensure_column("sessions", "remote_cwd", "TEXT")
         self._ensure_column("sessions", "launch_target_id", "TEXT")
+        self._ensure_column("sessions", "pinned_at", "TEXT")
         self.connection.commit()
 
     @_synchronized
@@ -397,6 +398,10 @@ class Storage:
         payload = dict(row)
         for field_name in ("created_at", "updated_at", "last_event_at"):
             payload[field_name] = datetime.fromisoformat(payload[field_name])
+        raw_pinned_at = payload.get("pinned_at")
+        payload["pinned_at"] = (
+            datetime.fromisoformat(raw_pinned_at) if raw_pinned_at else None
+        )
         payload["status"] = SessionStatus(payload["status"])
         payload["transport"] = SessionTransport(
             payload.get("transport", SessionTransport.TMUX)

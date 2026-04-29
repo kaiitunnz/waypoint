@@ -66,6 +66,11 @@ GATED_TOOLS = (
     "Task",
     "WebFetch",
     "WebSearch",
+    # ExitPlanMode is the tool Claude calls to present a plan in plan mode —
+    # the user must approve it before plan mode actually exits. Must mirror
+    # claude_runtime.GATED_TOOLS_REGEX (the regex written into the hook
+    # settings file at session start).
+    "ExitPlanMode",
 )
 GATED_TOOLS_REGEX = "^(?:" + "|".join(GATED_TOOLS) + ")$"
 
@@ -834,6 +839,9 @@ class ClaudeCliAdapter:
         if tool_name in {"Edit", "Write", "MultiEdit"}:
             path = tool_input.get("file_path") or tool_input.get("path") or ""
             return f"Approve {tool_name} on {path}"
+        if tool_name == "ExitPlanMode":
+            plan = tool_input.get("plan") or ""
+            return f"Approve plan and exit plan mode:\n\n{plan}"
         return f"Approve {tool_name}: {json.dumps(tool_input)[:240]}"
 
     def _stringify_tool_result(self, content: Any) -> str:

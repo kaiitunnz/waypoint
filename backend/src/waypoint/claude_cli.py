@@ -1049,6 +1049,25 @@ class ClaudeCliAdapter:
             # Plan text is already rendered as a markdown agent_output above
             # this card — keep this prompt compact to avoid duplication.
             return "Approve plan and exit plan mode"
+        if tool_name in {"Task", "Agent"}:
+            # The prompt body can be many kilobytes; the frontend renders it
+            # as markdown from metadata.tool_input.prompt instead of dumping
+            # JSON here.
+            description = str(tool_input.get("description") or "").strip()
+            subagent = str(tool_input.get("subagent_type") or "").strip()
+            label = description or "subagent task"
+            if subagent:
+                label = f"{label} (via {subagent})"
+            return f"Approve subagent task: {label}"
+        if tool_name == "WebFetch":
+            url = str(tool_input.get("url") or "").strip()
+            return f"Approve WebFetch: {url}" if url else "Approve WebFetch"
+        if tool_name == "WebSearch":
+            query = str(tool_input.get("query") or "").strip()
+            return f"Approve WebSearch: {query}" if query else "Approve WebSearch"
+        if tool_name == "NotebookEdit":
+            path = str(tool_input.get("notebook_path") or "").strip()
+            return f"Approve NotebookEdit on {path}" if path else "Approve NotebookEdit"
         return f"Approve {tool_name}: {json.dumps(tool_input)[:240]}"
 
     def _stringify_tool_result(self, content: Any) -> str:

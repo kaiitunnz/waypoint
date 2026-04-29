@@ -1025,25 +1025,16 @@ function ApprovalCard({ event, onDecide }: ApprovalCardProps) {
     event.metadata.tool_input && typeof event.metadata.tool_input === "object"
       ? (event.metadata.tool_input as Record<string, unknown>)
       : null;
-  const planBody =
-    toolName === "ExitPlanMode" && typeof toolInput?.plan === "string"
-      ? (toolInput.plan as string)
-      : null;
   return (
     <section className="panel approval">
       <div className="session-row">
         <span className="badge fidelity structured">approval</span>
       </div>
-      {planBody ? (
-        <>
-          <p className="approval-prompt">Approve plan and exit plan mode</p>
-          <div className="approval-plan">
-            <MarkdownMessage text={planBody} />
-          </div>
-        </>
-      ) : (
-        <pre>{event.text}</pre>
-      )}
+      <ApprovalCardBody
+        eventText={event.text}
+        toolName={toolName}
+        toolInput={toolInput}
+      />
       <div className="action-row">
         <button className="primary" onClick={() => void onDecide("accept")} type="button">
           Approve
@@ -1060,6 +1051,66 @@ function ApprovalCard({ event, onDecide }: ApprovalCardProps) {
       </div>
     </section>
   );
+}
+
+function ApprovalCardBody({
+  eventText,
+  toolName,
+  toolInput,
+}: {
+  eventText: string;
+  toolName: string | null;
+  toolInput: Record<string, unknown> | null;
+}) {
+  if (toolName === "ExitPlanMode" && typeof toolInput?.plan === "string") {
+    return (
+      <>
+        <p className="approval-prompt">Approve plan and exit plan mode</p>
+        <div className="approval-plan">
+          <MarkdownMessage text={toolInput.plan as string} />
+        </div>
+      </>
+    );
+  }
+  if (
+    (toolName === "Task" || toolName === "Agent") &&
+    toolInput &&
+    typeof toolInput.prompt === "string"
+  ) {
+    const description =
+      typeof toolInput.description === "string" ? (toolInput.description as string) : "";
+    const subagent =
+      typeof toolInput.subagent_type === "string"
+        ? (toolInput.subagent_type as string)
+        : "";
+    return (
+      <>
+        <p className="approval-prompt">
+          Approve subagent task
+          {description ? `: ${description}` : ""}
+          {subagent ? ` (via ${subagent})` : ""}
+        </p>
+        <div className="approval-plan">
+          <MarkdownMessage text={toolInput.prompt as string} />
+        </div>
+      </>
+    );
+  }
+  if (toolName === "Bash" && typeof toolInput?.command === "string") {
+    const desc =
+      typeof toolInput.description === "string"
+        ? (toolInput.description as string)
+        : "";
+    return (
+      <>
+        <p className="approval-prompt">
+          Approve Bash command{desc ? `: ${desc}` : ""}
+        </p>
+        <pre className="approval-shell">{toolInput.command as string}</pre>
+      </>
+    );
+  }
+  return <pre>{eventText}</pre>;
 }
 
 function sanitizeEvent(event: EventRecord): EventRecord {

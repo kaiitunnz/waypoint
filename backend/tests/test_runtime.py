@@ -315,7 +315,7 @@ async def test_list_importable_codex_threads_filters_existing_session(
         id="thread-2",
         name=None,
         preview="Investigate remote import support",
-        cwd="/tmp/other-project",
+        cwd=SimpleNamespace(root="/tmp/other-project"),
         git_info=SimpleNamespace(
             branch="feature/import", origin_url="git@github.com:acme/other-project.git"
         ),
@@ -358,7 +358,7 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
     thread = make_thread(
         id="thread-9",
         name="Existing remote thread",
-        cwd="/srv/worktree/project",
+        cwd=SimpleNamespace(root="/srv/worktree/project"),
         git_info=SimpleNamespace(
             branch="main", origin_url="ssh://git.example.com/team/project.git"
         ),

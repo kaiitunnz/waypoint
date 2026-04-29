@@ -344,8 +344,8 @@ class SessionRuntime:
         raw_log = session_dir / "raw.log"
         structured_log = session_dir / "events.jsonl"
         raw_log.touch(exist_ok=True)
-        cwd = thread.cwd
-        remote_cwd = thread.cwd if launch_target is not None else None
+        cwd = self._codex_thread_cwd(thread)
+        remote_cwd = cwd if launch_target is not None else None
         now = datetime.now(UTC)
         session = SessionRecord(
             id=session_id,
@@ -397,7 +397,7 @@ class SessionRuntime:
         self.storage.update_session(session.id, status=SessionStatus.IDLE)
         await self._record_system_event(
             session.id,
-            self._codex_import_message(thread.cwd, launch_target),
+            self._codex_import_message(cwd, launch_target),
             status=SessionStatus.IDLE,
             metadata={"imported_thread_id": thread.id},
         )
@@ -963,10 +963,11 @@ class SessionRuntime:
         return {"decision": "decline"}
 
     def _codex_thread_summary(self, thread: Any) -> CodexThreadSummary:
+        cwd = self._codex_thread_cwd(thread)
         return CodexThreadSummary(
             id=thread.id,
             title=self._codex_thread_title(thread),
-            cwd=thread.cwd,
+            cwd=cwd,
             repo_name=self._codex_thread_repo_name(thread),
             branch=self._codex_thread_branch(thread),
             preview=(thread.preview or "").strip() or None,
@@ -980,7 +981,7 @@ class SessionRuntime:
         preview = (thread.preview or "").strip()
         if preview:
             return preview.splitlines()[0][:80]
-        return f"Codex {Path(thread.cwd).name or thread.id}"
+        return f"Codex {Path(self._codex_thread_cwd(thread)).name or thread.id}"
 
     def _codex_thread_branch(self, thread: Any) -> str | None:
         git_info = getattr(thread, "git_info", None)
@@ -993,7 +994,11 @@ class SessionRuntime:
             name = normalized.rsplit("/", 1)[-1]
             if name:
                 return name
-        return Path(thread.cwd).name or None
+        return Path(self._codex_thread_cwd(thread)).name or None
+
+    def _codex_thread_cwd(self, thread: Any) -> str:
+        cwd = getattr(thread, "cwd", "")
+        return getattr(cwd, "root", cwd)
 
     def _claude_launch_factory(self, launch_target_id: str | None):
         launch_target = self._find_launch_target(launch_target_id)

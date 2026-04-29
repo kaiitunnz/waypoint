@@ -36,7 +36,8 @@ export function LaunchPanel({
   const [remoteCwd, setRemoteCwd] = useState(defaultRemoteCwd ?? "~");
   const [title, setTitle] = useState("");
   const [tmuxTarget, setTmuxTarget] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [formBusy, setFormBusy] = useState(false);
+  const [importingThreadId, setImportingThreadId] = useState<string | null>(null);
   const [showCodexThreads, setShowCodexThreads] = useState(false);
   const [threadPage, setThreadPage] = useState(1);
 
@@ -59,34 +60,34 @@ export function LaunchPanel({
 
   async function submitCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setBusy(true);
+    setFormBusy(true);
     try {
       // Remote launches only use the remote path; let the backend fill cwd
       // from it for the UI label.
       await onCreate(backend, targetLabel ? "" : cwd, title, targetLabel ? remoteCwd : undefined);
       setTitle("");
     } finally {
-      setBusy(false);
+      setFormBusy(false);
     }
   }
 
   async function submitAttach(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setBusy(true);
+    setFormBusy(true);
     try {
       await onAttach(tmuxTarget, backend);
       setTmuxTarget("");
     } finally {
-      setBusy(false);
+      setFormBusy(false);
     }
   }
 
   async function handleImport(threadId: string) {
-    setBusy(true);
+    setImportingThreadId(threadId);
     try {
       await onImportCodexThread(threadId);
     } finally {
-      setBusy(false);
+      setImportingThreadId(null);
     }
   }
 
@@ -101,6 +102,9 @@ export function LaunchPanel({
   );
   const showingFrom = threadPageStart + 1;
   const showingTo = Math.min(codexThreads.length, threadPageStart + THREADS_PAGE_SIZE);
+  const importSummary = codexThreads.length
+    ? `${codexThreads.length} stored threads${targetLabel ? ` on ${targetLabel}` : ""}`
+    : `No stored threads${targetLabel ? ` on ${targetLabel}` : ""}`;
 
   return (
     <section className="launch-grid">
@@ -135,7 +139,7 @@ export function LaunchPanel({
           <span>Title</span>
           <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Optional" />
         </label>
-        <button className="primary" disabled={busy} type="submit">
+        <button className="primary" disabled={formBusy} type="submit">
           Launch
         </button>
       </form>
@@ -155,18 +159,16 @@ export function LaunchPanel({
             <option value="claude_code">Claude Code</option>
           </select>
         </label>
-        <button className="secondary" disabled={busy} type="submit">
+        <button className="secondary" disabled={formBusy} type="submit">
           Attach
         </button>
       </form>
       {supportedBackends.includes("codex") ? (
         <section className="panel stack">
-          <div className="field-row">
-            <div className="session-list-summary">
+          <div className="field-row import-thread-header">
+            <div className="import-thread-summary">
               <h3>Import Codex thread</h3>
-              <p className="muted">
-                Resume a stored Codex thread{targetLabel ? ` on ${targetLabel}` : ""}.
-              </p>
+              <p className="meta">{importSummary}</p>
             </div>
             <button
               className="secondary"
@@ -174,9 +176,7 @@ export function LaunchPanel({
               type="button"
               onClick={() => setShowCodexThreads((current) => !current)}
             >
-              {showCodexThreads
-                ? "Hide threads"
-                : `Show threads (${codexThreads.length})`}
+              {showCodexThreads ? "Hide" : "Browse"}
             </button>
           </div>
           {codexThreadsLoading ? <p className="muted">Loading stored threads…</p> : null}
@@ -184,17 +184,48 @@ export function LaunchPanel({
             <p className="muted">No importable Codex threads found.</p>
           ) : null}
           {!codexThreadsLoading && codexThreads.length && !showCodexThreads ? (
-            <p className="muted">
-              Collapsed by default to keep the launch area compact.
+            <p className="meta">
+              Hidden by default. Open only when you want to adopt an existing thread.
             </p>
           ) : null}
           {showCodexThreads ? (
             <>
-              <div className="action-row list-actions">
-                <span className="meta">
-                  Showing {showingFrom}-{showingTo} of {codexThreads.length}
-                </span>
-                {threadTotalPages > 1 ? (
+              <div className="import-thread-list">
+                {visibleThreads.map((thread) => (
+                  <article className="import-thread-row" key={thread.id}>
+                    <div className="import-thread-main">
+                      <div className="import-thread-topline">
+                        <h4>{thread.title}</h4>
+                        {thread.branch ? (
+                          <span className="badge neutral">{thread.branch}</span>
+                        ) : null}
+                      </div>
+                      <p className="import-thread-cwd">{thread.cwd}</p>
+                    </div>
+                    <div className="import-thread-meta">
+                      <p className="meta">{thread.repo_name ?? "No repo"}</p>
+                      <p className="meta">
+                        Updated {formatRelativeTime(thread.updated_at)}
+                      </p>
+                    </div>
+                    <div className="import-thread-cta">
+                      <button
+                        className="secondary"
+                        disabled={importingThreadId !== null}
+                        type="button"
+                        onClick={() => void handleImport(thread.id)}
+                      >
+                        {importingThreadId === thread.id ? "Importing…" : "Import"}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              {threadTotalPages > 1 ? (
+                <div className="action-row import-thread-footer">
+                  <span className="meta">
+                    Showing {showingFrom}-{showingTo} of {codexThreads.length}
+                  </span>
                   <div className="action-row pagination-controls">
                     <button
                       className="secondary"
@@ -222,41 +253,33 @@ export function LaunchPanel({
                       Next
                     </button>
                   </div>
-                ) : null}
-              </div>
-              {visibleThreads.map((thread) => (
-                <article className="import-thread-card" key={thread.id}>
-                  <div className="session-row">
-                    <span className="badge neutral">Codex</span>
-                    {thread.branch ? (
-                      <span className="badge neutral">{thread.branch}</span>
-                    ) : null}
-                  </div>
-                  <h3 className="session-card-title">{thread.title}</h3>
-                  <p className="muted session-card-path">{thread.cwd}</p>
-                  {thread.preview ? (
-                    <p className="meta import-thread-preview">{thread.preview}</p>
-                  ) : null}
-                  <div className="action-row import-thread-actions">
-                    <span className="meta">
-                      {thread.repo_name ?? "No repo"} · updated{" "}
-                      {new Date(thread.updated_at).toLocaleString()}
-                    </span>
-                    <button
-                      className="secondary"
-                      disabled={busy}
-                      type="button"
-                      onClick={() => void handleImport(thread.id)}
-                    >
-                      Import
-                    </button>
-                  </div>
-                </article>
-              ))}
+                </div>
+              ) : null}
             </>
           ) : null}
         </section>
       ) : null}
     </section>
   );
+}
+
+function formatRelativeTime(value: string): string {
+  const then = new Date(value).getTime()
+  const now = Date.now()
+  const deltaSeconds = Math.round((then - now) / 1000)
+  const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+    ["day", 60 * 60 * 24],
+    ["hour", 60 * 60],
+    ["minute", 60],
+  ]
+  for (const [unit, seconds] of units) {
+    if (Math.abs(deltaSeconds) >= seconds || unit === "minute") {
+      const amount = Math.round(deltaSeconds / seconds)
+      return new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(
+        amount,
+        unit,
+      )
+    }
+  }
+  return "just now"
 }

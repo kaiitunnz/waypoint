@@ -257,28 +257,86 @@ pre {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
-.import-thread-card {
+.import-thread-header {
+  align-items: start;
+}
+
+.import-thread-summary {
+  min-width: 0;
+}
+
+.import-thread-summary h3,
+.import-thread-summary p {
+  margin: 0;
+}
+
+.import-thread-list {
   display: grid;
-  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: rgba(15, 19, 27, 0.54);
+}
+
+.import-thread-row {
+  display: grid;
+  gap: 12px;
+  align-items: center;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.7fr) auto;
+  padding: 14px;
+}
+
+.import-thread-row + .import-thread-row {
+  border-top: 1px solid var(--line);
+}
+
+.import-thread-main,
+.import-thread-meta {
+  min-width: 0;
+}
+
+.import-thread-topline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.import-thread-topline h4 {
+  margin: 0;
   min-width: 0;
   overflow: hidden;
-  padding: 14px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
-  background: var(--bg-card-soft);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 600;
 }
 
-.import-thread-actions {
-  justify-content: space-between;
+.import-thread-cwd {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
 }
 
-.import-thread-preview {
+.import-thread-meta {
+  display: grid;
+  gap: 4px;
+}
+
+.import-thread-meta .meta {
   margin: 0;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+}
+
+.import-thread-cta {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.import-thread-footer {
+  justify-content: space-between;
 }
 
 .field {
@@ -933,5 +991,17 @@ pre {
   .app-bar-meta {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .import-thread-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .import-thread-cta {
+    justify-content: flex-start;
+  }
+
+  .import-thread-footer {
+    align-items: flex-start;
   }
 }

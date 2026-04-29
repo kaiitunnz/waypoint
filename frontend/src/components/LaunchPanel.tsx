@@ -183,11 +183,6 @@ export function LaunchPanel({
           {!codexThreadsLoading && !codexThreads.length ? (
             <p className="muted">No importable Codex threads found.</p>
           ) : null}
-          {!codexThreadsLoading && codexThreads.length && !showCodexThreads ? (
-            <p className="meta">
-              Hidden by default. Open only when you want to adopt an existing thread.
-            </p>
-          ) : null}
           {showCodexThreads ? (
             <div className="import-thread-list">
               {visibleThreads.map((thread, index) => {

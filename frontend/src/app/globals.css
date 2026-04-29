@@ -36,6 +36,8 @@ html {
    * other layout / scroll properties off the html element so the browser
    * uses it as the natural scroll root and trackpad wheel events reach it. */
   background-color: var(--bg-deep);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -1156,8 +1158,16 @@ pre {
 
   .import-thread-headline {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
     gap: 4px;
+  }
+
+  .import-thread-headline h4 {
+    width: 100%;
+  }
+
+  .import-thread-time {
+    align-self: flex-start;
   }
 
   .import-thread-bottomline {

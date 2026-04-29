@@ -58,7 +58,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [error, setError] = useState("");
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const sectionRef = useRef<HTMLElement | null>(null);
   const nearBottomRef = useRef(true);
   const pendingEventsRef = useRef<EventRecord[]>([]);
   const flushFrameRef = useRef<number | null>(null);
@@ -87,7 +87,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   }, [handleAuthFailure, host, token, sessionId]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    transcriptEndRef.current?.scrollIntoView({ behavior, block: "end" });
+    // Scroll the actual document to its full height — using the document
+    // scrollingElement avoids ambiguity between html/body as scroll root and
+    // guarantees we reach the page bottom (composer included) instead of
+    // stopping at a sentinel that sits above following layout.
+    const target = document.documentElement.scrollHeight;
+    window.scrollTo({ top: target, behavior });
   }, []);
 
   const flushPendingEvents = useCallback(() => {
@@ -234,14 +239,33 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   }, [view]);
 
   useEffect(() => {
-    if (view !== "chat" || !nearBottomRef.current) {
+    if (view !== "chat") {
       return;
     }
-    const frame = window.requestAnimationFrame(() => {
-      scrollToBottom("auto");
+    const node = sectionRef.current;
+    if (!node) {
+      return;
+    }
+    // Re-anchor to the bottom whenever content reflows (markdown layout,
+    // streamed deltas, image loads, approval card appearing, ...). Using a
+    // ResizeObserver on the page section catches all of these without
+    // depending on event-array reference equality.
+    let pending = false;
+    const observer = new ResizeObserver(() => {
+      if (!nearBottomRef.current || pending) {
+        return;
+      }
+      pending = true;
+      window.requestAnimationFrame(() => {
+        pending = false;
+        if (nearBottomRef.current) {
+          scrollToBottom("auto");
+        }
+      });
     });
-    return () => window.cancelAnimationFrame(frame);
-  }, [renderedEvents, view, scrollToBottom]);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [view, scrollToBottom]);
 
   const submitInput = useCallback(async (text: string) => {
     if (!text.trim()) {
@@ -333,7 +357,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   }, [runAction]);
 
   return (
-    <section className="stack">
+    <section className="stack" ref={sectionRef}>
       {session ? (
         <header className="panel">
           <div className="session-row">
@@ -360,9 +384,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         </p>
       ) : null}
       {usageSummary ? <UsageCard summary={usageSummary} /> : null}
-      {pendingApproval ? (
-        <ApprovalCard event={pendingApproval} onDecide={submitApproval} />
-      ) : null}
       <div className="view-toggle">
         <button className={view === "chat" ? "primary" : "secondary"} onClick={() => setView("chat")} type="button">
           Chat
@@ -421,7 +442,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                 ),
               )
             : null}
-          <div ref={transcriptEndRef} />
         </section>
       ) : (
         <section className="panel terminal stack">
@@ -438,6 +458,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           <pre>{snapshot || (snapshotLoading ? "Loading…" : "No terminal output yet.")}</pre>
         </section>
       )}
+      {pendingApproval ? (
+        <ApprovalCard event={pendingApproval} onDecide={submitApproval} />
+      ) : null}
       <ReplyComposer
         canDelete={Boolean(session?.status === "exited")}
         canResume={canResume}

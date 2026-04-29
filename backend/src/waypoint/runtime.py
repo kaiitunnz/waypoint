@@ -614,7 +614,7 @@ class SessionRuntime:
         session = self.get_session(session_id)
         transport = self.transport_for(session)
         if transport.is_structured:
-            handled = await self._handle_builtin_command(session, request)
+            handled = await self._route_codex_compact(session, request)
             if handled is not None:
                 return handled
         await transport.send_input(session, request.text)
@@ -704,83 +704,38 @@ class SessionRuntime:
         await transport.respond_to_approval(session, request.decision, request.text)
         return self.get_session(session_id)
 
-    async def _handle_builtin_command(
+    async def _route_codex_compact(
         self, session: SessionRecord, request: SessionInputRequest
     ) -> SessionRecord | None:
-        command = request.text.strip()
-        if not command.startswith("/"):
+        # Codex's app-server doesn't parse user text as control commands —
+        # `/compact` only takes effect via the thread/compact/start RPC. Every
+        # other slash command (including `/help`, `/status`, `/permissions`,
+        # and Codex- or Claude-specific extras) is forwarded as user input so
+        # the underlying CLI / SDK can surface its own response.
+        if session.backend != Backend.CODEX:
             return None
-        name = command.split(None, 1)[0].lower()
-        if name == "/status":
-            await self._record_user_event(
-                session.id,
-                request.text,
-                submit=request.submit,
-                status=session.status,
-            )
-            await self._record_system_event(
-                session.id,
-                self._format_builtin_status(session),
-                status=session.status,
-                metadata={"builtin_command": name},
-            )
-            return self.get_session(session.id)
-        if name == "/permissions":
-            await self._record_user_event(
-                session.id,
-                request.text,
-                submit=request.submit,
-                status=session.status,
-            )
-            await self._record_system_event(
-                session.id,
-                self._format_builtin_permissions(session),
-                status=session.status,
-                metadata={"builtin_command": name},
-            )
-            return self.get_session(session.id)
-        if name == "/compact":
-            # Codex exposes thread/compact/start over the app-server SDK;
-            # route through it instead of forwarding the literal text. Claude's
-            # CLI handles `/compact` itself in stream-json mode, so let it fall
-            # through to send_input below.
-            if session.backend == Backend.CODEX:
-                try:
-                    await self.codex.compact_thread(session.id)
-                except Exception as exc:  # noqa: BLE001
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-                    ) from exc
-                await self._record_user_event(
-                    session.id,
-                    request.text,
-                    submit=request.submit,
-                    status=session.status,
-                )
-                await self._record_system_event(
-                    session.id,
-                    "Compacting codex thread…",
-                    status=SessionStatus.RUNNING,
-                    metadata={"builtin_command": name},
-                )
-                return self.storage.update_session(
-                    session.id, status=SessionStatus.RUNNING
-                )
-        if name == "/help":
-            await self._record_user_event(
-                session.id,
-                request.text,
-                submit=request.submit,
-                status=session.status,
-            )
-            await self._record_system_event(
-                session.id,
-                "Supported built-in commands: /help, /status, /permissions, /compact",
-                status=session.status,
-                metadata={"builtin_command": name},
-            )
-            return self.get_session(session.id)
-        return None
+        command = request.text.strip()
+        if command.split(None, 1)[0].lower() != "/compact":
+            return None
+        try:
+            await self.codex.compact_thread(session.id)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        await self._record_user_event(
+            session.id,
+            request.text,
+            submit=request.submit,
+            status=session.status,
+        )
+        await self._record_system_event(
+            session.id,
+            "Compacting codex thread…",
+            status=SessionStatus.RUNNING,
+            metadata={"builtin_command": "/compact"},
+        )
+        return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
 
     def session_events(
         self, session_id: str, cursor: int | None = None
@@ -1039,32 +994,6 @@ class SessionRuntime:
         return (
             f"Managed session started for {backend} via SSH target {launch_target.name} "
             f"on {launch_target.ssh_destination} ({remote_cwd or launch_target.default_remote_cwd})"
-        )
-
-    def _format_builtin_status(self, session: SessionRecord) -> str:
-        parts = [
-            f"Status: {session.status}",
-            f"Backend: {session.backend}",
-            f"Transport: {session.transport}",
-            f"CWD: {session.cwd}",
-        ]
-        if session.remote_cwd:
-            parts.append(f"Remote cwd: {session.remote_cwd}")
-        if session.thread_id:
-            parts.append(f"Thread: {session.thread_id}")
-        if session.repo_name:
-            branch = f" ({session.branch})" if session.branch else ""
-            parts.append(f"Repo: {session.repo_name}{branch}")
-        return "\n".join(parts)
-
-    def _format_builtin_permissions(self, session: SessionRecord) -> str:
-        pending = self.transport_for(session).has_pending_approval(session)
-        return "\n".join(
-            [
-                "Waypoint handles approvals with the in-app approval card.",
-                f"Pending approval: {'yes' if pending else 'no'}",
-                "Available actions: Approve, Approve for session, Decline, Cancel",
-            ]
         )
 
     async def _record_user_event(

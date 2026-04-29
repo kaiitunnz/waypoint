@@ -114,34 +114,25 @@ def make_thread(**overrides: Any) -> Any:
 
 
 @pytest.mark.asyncio
-async def test_handle_input_builtin_status_intercepts_structured_session(
-    tmp_path,
-) -> None:
+async def test_handle_input_status_forwards_to_codex(tmp_path) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
     fake = FakeStructuredAdapter()
     runtime.codex = cast(Any, fake)
     session = make_session(settings)
     storage.create_session(session)
 
-    updated = await runtime.handle_input("sess", SessionInputRequest(text="/status"))
+    await runtime.handle_input("sess", SessionInputRequest(text="/status"))
 
-    assert fake.inputs == []
-    assert updated.status == SessionStatus.IDLE
+    # Codex's app-server has no Waypoint-side renderer — `/status` flows to
+    # the agent so the underlying backend can decide how to respond.
+    assert fake.inputs == [("sess", "/status")]
     events = storage.list_events("sess")
-    assert [event.kind for event in events] == [
-        EventKind.USER_INPUT,
-        EventKind.SYSTEM_NOTE,
-    ]
+    assert [event.kind for event in events] == [EventKind.USER_INPUT]
     assert events[0].text == "/status"
-    assert "Transport: codex_app_server" in events[1].text
-    assert "Thread: thread-1" in events[1].text
-    assert events[1].metadata["builtin_command"] == "/status"
 
 
 @pytest.mark.asyncio
-async def test_handle_input_builtin_permissions_reports_pending_approval(
-    tmp_path,
-) -> None:
+async def test_handle_input_permissions_forwards_to_claude_cli(tmp_path) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
     fake = FakeStructuredAdapter(pending=True)
     runtime.claude = cast(Any, fake)
@@ -154,17 +145,30 @@ async def test_handle_input_builtin_permissions_reports_pending_approval(
     )
     storage.create_session(session)
 
-    updated = await runtime.handle_input(
-        "claude-sess", SessionInputRequest(text="/permissions")
-    )
+    await runtime.handle_input("claude-sess", SessionInputRequest(text="/permissions"))
 
-    assert fake.inputs == []
-    assert updated.status == SessionStatus.IDLE
-    events = storage.list_events("claude-sess")
-    assert events[-1].kind == EventKind.SYSTEM_NOTE
-    assert "Pending approval: yes" in events[-1].text
-    assert "Approve for session" in events[-1].text
-    assert events[-1].metadata["builtin_command"] == "/permissions"
+    # Claude CLI's stream-json mode parses slash commands itself; forwarding
+    # `/permissions` lets the CLI emit its own system/status response instead
+    # of Waypoint synthesising one.
+    assert fake.inputs == [("claude-sess", "/permissions")]
+
+
+@pytest.mark.asyncio
+async def test_handle_input_help_forwards_to_backend(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeStructuredAdapter()
+    runtime.claude = cast(Any, fake)
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend=Backend.CLAUDE_CODE,
+        transport=SessionTransport.CLAUDE_CLI,
+    )
+    storage.create_session(session)
+
+    await runtime.handle_input("claude-sess", SessionInputRequest(text="/help"))
+
+    assert fake.inputs == [("claude-sess", "/help")]
 
 
 @pytest.mark.asyncio

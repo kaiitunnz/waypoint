@@ -39,9 +39,9 @@ import {
 } from "@/lib/types";
 
 const SLASH_COMMANDS: ReadonlyArray<{ command: string; description: string }> = [
-  { command: "/help", description: "List available built-in commands" },
-  { command: "/status", description: "Show current session status" },
-  { command: "/permissions", description: "Show permission settings" },
+  { command: "/help", description: "Forward to the agent's built-in help" },
+  { command: "/status", description: "Forward to the agent's status" },
+  { command: "/permissions", description: "Forward to the agent's permissions" },
   { command: "/compact", description: "Compact context to reclaim tokens" },
 ];
 

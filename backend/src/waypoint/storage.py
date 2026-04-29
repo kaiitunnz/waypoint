@@ -236,6 +236,13 @@ class Storage:
             return None
         return datetime.fromisoformat(row["expires_at"])
 
+    def refresh_token_expiry(self, token: str, expires_at: datetime) -> None:
+        self.connection.execute(
+            "UPDATE auth_tokens SET expires_at = ? WHERE token = ?",
+            (expires_at.isoformat(), token),
+        )
+        self.connection.commit()
+
     def delete_token(self, token: str) -> None:
         self.connection.execute("DELETE FROM auth_tokens WHERE token = ?", (token,))
         self.connection.commit()

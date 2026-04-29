@@ -27,9 +27,16 @@ class TokenStore:
         expires_at = self.storage.get_token_expiry(token)
         if expires_at is None:
             return False
-        if expires_at < datetime.now(UTC):
+        now = datetime.now(UTC)
+        if expires_at < now:
             self.storage.delete_token(token)
             return False
+        # Sliding refresh: extend the expiry once more than half the TTL has
+        # been consumed so an actively-used token never silently lapses while
+        # the user is away long enough for iOS to evict localStorage.
+        ttl = timedelta(seconds=self.settings.token_ttl_seconds)
+        if expires_at - now < ttl / 2:
+            self.storage.refresh_token_expiry(token, now + ttl)
         return True
 
 

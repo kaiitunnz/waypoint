@@ -52,7 +52,7 @@ class Settings(BaseModel):
     data_dir: Path = Field(default_factory=default_data_dir)
     sessions_dir_name: str = "sessions"
     database_name: str = "waypoint.db"
-    token_ttl_seconds: int = 60 * 60 * 24 * 7
+    token_ttl_seconds: int = 60 * 60 * 24 * 30
     stream_poll_interval: float = 1.0
     tail_snapshot_lines: int = 200
     cors_origins: list[str] = Field(default_factory=lambda: list(DEFAULT_CORS_ORIGINS))

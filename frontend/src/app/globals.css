@@ -938,8 +938,6 @@ pre {
   padding: 6px 12px;
   background: rgba(15, 19, 27, 0.4);
   border-radius: var(--radius-sm);
-  max-height: 360px;
-  overflow-y: auto;
 }
 
 .transcript pre {
@@ -1138,6 +1136,46 @@ pre {
 .ask-question-note-toggle {
   margin-top: 6px;
   font-size: 0.85rem;
+}
+
+.ask-question-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.ask-question-pager-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.ask-question-pager-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line);
+  display: inline-block;
+}
+
+.ask-question-pager-dot.filled {
+  background: rgba(200, 169, 106, 0.6);
+}
+
+.ask-question-pager-dot.current {
+  background: rgba(200, 169, 106, 0.95);
+  box-shadow: 0 0 0 2px rgba(200, 169, 106, 0.18);
+}
+
+.ask-question-nav {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-top: 12px;
 }
 
 .ask-question-note {

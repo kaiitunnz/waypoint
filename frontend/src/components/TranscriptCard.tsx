@@ -286,6 +286,12 @@ function AskUserQuestionCard({
   const [picked, setPicked] = useState<Record<number, Set<string>>>({});
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [notesOpen, setNotesOpen] = useState<Record<number, boolean>>({});
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  const total = questions.length;
+  const safeIndex = Math.min(activeIndex, Math.max(0, total - 1));
+  const currentEntry = questions[safeIndex];
+  const paginated = total > 1;
 
   function toggleOption(questionIndex: number, label: string, multiSelect: boolean) {
     setPicked((current) => {
@@ -349,6 +355,7 @@ function AskUserQuestionCard({
       setPicked({});
       setNotes({});
       setNotesOpen({});
+      setActiveIndex(0);
     } finally {
       setSubmitting(false);
     }
@@ -372,10 +379,32 @@ function AskUserQuestionCard({
         )}
         <span className="muted">{formatTime(event.ts)}</span>
       </div>
-      {questions.map((entry, index) => {
+      {currentEntry ? (() => {
+        const index = safeIndex;
+        const entry = currentEntry;
         const selections = picked[index] ?? new Set<string>();
+        const filledForQuestion = (i: number) =>
+          (picked[i] && picked[i].size > 0) || Boolean((notes[i] ?? "").trim());
         return (
           <div className="ask-question" key={index}>
+            {paginated ? (
+              <div className="ask-question-pager">
+                <span className="muted">
+                  Question {index + 1} of {total}
+                  {filledForQuestion(index) ? " · answered" : ""}
+                </span>
+                <div className="ask-question-pager-dots" aria-hidden>
+                  {questions.map((_, dotIndex) => (
+                    <span
+                      key={dotIndex}
+                      className={`ask-question-pager-dot${
+                        dotIndex === index ? " current" : ""
+                      }${filledForQuestion(dotIndex) ? " filled" : ""}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="ask-question-head">
               {entry.header ? (
                 <span className="badge neutral ask-question-chip">
@@ -447,9 +476,29 @@ function AskUserQuestionCard({
                 </button>
               )
             ) : null}
+            {paginated && interactive ? (
+              <div className="ask-question-nav">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={submitting || index === 0}
+                  onClick={() => setActiveIndex((i) => Math.max(0, i - 1))}
+                >
+                  ← Previous
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={submitting || index === total - 1}
+                  onClick={() => setActiveIndex((i) => Math.min(total - 1, i + 1))}
+                >
+                  Next →
+                </button>
+              </div>
+            ) : null}
           </div>
         );
-      })}
+      })() : null}
       {interactive ? (
         <div className="action-row">
           <button

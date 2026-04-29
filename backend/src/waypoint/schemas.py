@@ -150,9 +150,16 @@ class SessionPermissionModeRequest(BaseModel):
     mode: str
 
 
+class AskQuestionAnswer(BaseModel):
+    question: str
+    answer: str | None = None
+    notes: str | None = None
+
+
 class SessionAnswerQuestionRequest(BaseModel):
     answer: str
     tool_use_id: str | None = None
+    answers: list[AskQuestionAnswer] | None = None
 
 
 class TerminalSnapshot(BaseModel):

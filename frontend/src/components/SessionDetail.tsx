@@ -33,7 +33,7 @@ import {
   transportLabel,
 } from "@/lib/transport";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
-import { TranscriptCard, ToolPair } from "@/components/TranscriptCard";
+import { AskAnswerEntry, TranscriptCard, ToolPair } from "@/components/TranscriptCard";
 import {
   EventRecord,
   SessionEnvelope,
@@ -359,12 +359,23 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   }, [handleAuthFailure, host, token, sessionId]);
 
   const submitAskAnswer = useCallback(
-    async (answer: string, toolUseId?: string) => {
+    async (
+      answer: string,
+      toolUseId?: string,
+      answers?: AskAnswerEntry[],
+    ) => {
       if (!answer.trim()) {
         return false;
       }
       try {
-        await answerAskQuestion(host, token, sessionId, answer, toolUseId);
+        await answerAskQuestion(
+          host,
+          token,
+          sessionId,
+          answer,
+          toolUseId,
+          answers,
+        );
         return true;
       } catch (sendError) {
         if (isAuthError(sendError)) {

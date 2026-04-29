@@ -745,6 +745,7 @@ class SessionRuntime:
         session_id: str,
         answer: str,
         tool_use_id: str | None = None,
+        answers: list[dict[str, Any]] | None = None,
     ) -> SessionRecord:
         session = self.get_session(session_id)
         if session.transport != SessionTransport.CLAUDE_CLI or self.claude is None:
@@ -765,7 +766,18 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="no pending question for this session",
             )
-        await self._record_user_event(session.id, answer, submit=True)
+        # Stash the structured per-question answers + notes so the frontend
+        # can render this user_input as a styled "answers" card instead of
+        # the raw `"<question>"="<answer>" user notes: …` payload Claude
+        # was tuned around.
+        extra: dict[str, Any] = {"kind": "ask_user_question_answer"}
+        if answers:
+            extra["answers"] = answers
+        if tool_use_id:
+            extra["tool_use_id"] = tool_use_id
+        await self._record_user_event(
+            session.id, answer, submit=True, extra_metadata=extra
+        )
         return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
 
     async def approve(
@@ -1115,13 +1127,17 @@ class SessionRuntime:
         text: str,
         submit: bool,
         status: SessionStatus = SessionStatus.RUNNING,
+        extra_metadata: dict[str, Any] | None = None,
     ) -> None:
+        metadata: dict[str, Any] = {"submit": submit, "status": status}
+        if extra_metadata:
+            metadata.update(extra_metadata)
         event = EventRecord(
             session_id=session_id,
             ts=datetime.now(UTC),
             kind=EventKind.USER_INPUT,
             text=text,
-            metadata={"submit": submit, "status": status},
+            metadata=metadata,
             sequence=self.storage.next_sequence(session_id),
         )
         persisted = self.storage.append_event(event)

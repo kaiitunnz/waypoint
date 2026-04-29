@@ -200,8 +200,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: SessionAnswerQuestionRequest,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
+        answers = (
+            [item.model_dump(mode="json") for item in request.answers]
+            if request.answers
+            else None
+        )
         session = await context.runtime.answer_question(
-            session_id, request.answer, request.tool_use_id
+            session_id, request.answer, request.tool_use_id, answers
         )
         return {"session": session.model_dump(mode="json")}
 

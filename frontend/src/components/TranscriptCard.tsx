@@ -23,6 +23,12 @@ interface AskUserQuestion {
   multiSelect?: boolean;
 }
 
+export interface AskAnswerEntry {
+  question: string;
+  answer: string | null;
+  notes?: string;
+}
+
 interface TranscriptCardProps {
   event: EventRecord;
   transport: SessionTransport;
@@ -30,6 +36,7 @@ interface TranscriptCardProps {
   onAnswerAskQuestion?: (
     text: string,
     toolUseId?: string,
+    answers?: AskAnswerEntry[],
   ) => Promise<boolean> | void;
 }
 
@@ -91,7 +98,10 @@ function CodexCard({
   ) => Promise<boolean> | void;
 }) {
   switch (event.kind) {
-    case "user_input":
+    case "user_input": {
+      if (event.metadata?.kind === "ask_user_question_answer") {
+        return <AskAnswerSummaryCard event={event} />;
+      }
       return (
         <article className="panel transcript codex user_input">
           <div className="session-row">
@@ -101,6 +111,7 @@ function CodexCard({
           <MarkdownMessage text={event.text} />
         </article>
       );
+    }
     case "agent_output":
       return (
         <article className="panel transcript codex agent_output">
@@ -279,6 +290,7 @@ function AskUserQuestionCard({
   onAnswer?: (
     text: string,
     toolUseId?: string,
+    answers?: AskAnswerEntry[],
   ) => Promise<boolean> | void;
   answered: boolean;
 }) {
@@ -327,15 +339,17 @@ function AskUserQuestionCard({
     // `"<question>"="<answer>" user notes: <notes>`, joined by `, ` across
     // questions. Questions with neither an answer nor notes are skipped.
     const segments: string[] = [];
+    const structured: AskAnswerEntry[] = [];
     questions.forEach((entry, index) => {
       const selections = picked[index];
       const note = (notes[index] ?? "").trim();
       const hasSelections = Boolean(selections && selections.size > 0);
       if (!hasSelections && !note) return;
       const parts: string[] = [];
+      let answerValue: string | null = null;
       if (hasSelections) {
-        const value = Array.from(selections!).join(", ");
-        parts.push(`"${entry.question}"="${value}"`);
+        answerValue = Array.from(selections!).join(", ");
+        parts.push(`"${entry.question}"="${answerValue}"`);
       } else {
         parts.push(`"${entry.question}"=(no option selected)`);
       }
@@ -343,6 +357,11 @@ function AskUserQuestionCard({
         parts.push(`user notes: ${note}`);
       }
       segments.push(parts.join(" "));
+      structured.push({
+        question: entry.question,
+        answer: answerValue,
+        notes: note || undefined,
+      });
     });
     if (!segments.length) return;
     setSubmitting(true);
@@ -351,7 +370,7 @@ function AskUserQuestionCard({
         ? (event.metadata.tool_use_id as string)
         : undefined;
     try {
-      await onAnswer(segments.join(", "), toolUseId);
+      await onAnswer(segments.join(", "), toolUseId, structured);
       setPicked({});
       setNotes({});
       setNotesOpen({});
@@ -524,6 +543,56 @@ function AskUserQuestionCard({
           ) : null}
         </div>
       ) : null}
+    </article>
+  );
+}
+
+function AskAnswerSummaryCard({ event }: { event: EventRecord }) {
+  const meta = event.metadata as Record<string, unknown> | undefined;
+  const rawAnswers = Array.isArray(meta?.answers) ? meta!.answers : [];
+  const answers = rawAnswers
+    .filter(
+      (item): item is Record<string, unknown> =>
+        Boolean(item) && typeof item === "object",
+    )
+    .map((item) => ({
+      question: typeof item.question === "string" ? item.question : "",
+      answer: typeof item.answer === "string" ? item.answer : null,
+      notes: typeof item.notes === "string" ? item.notes : undefined,
+    }))
+    .filter((item) => item.question);
+
+  return (
+    <article className="panel transcript codex user_input ask-answer-summary">
+      <div className="session-row">
+        <span className="badge user">you</span>
+        <span className="badge neutral ask-answer-chip">answered</span>
+        <span className="muted">{formatTime(event.ts)}</span>
+      </div>
+      {answers.length > 0 ? (
+        <ul className="ask-answer-list">
+          {answers.map((entry, index) => (
+            <li key={index} className="ask-answer-item">
+              <p className="ask-answer-question">{entry.question}</p>
+              {entry.answer ? (
+                <p className="ask-answer-value">{entry.answer}</p>
+              ) : (
+                <p className="ask-answer-value muted">No option selected</p>
+              )}
+              {entry.notes ? (
+                <p className="ask-answer-note">
+                  <span className="ask-answer-note-label">Note</span>
+                  {entry.notes}
+                </p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        // Older events that pre-date the structured payload — fall back to
+        // rendering the raw `"Q"="A"` string Claude received.
+        <pre className="ask-answer-fallback">{event.text}</pre>
+      )}
     </article>
   );
 }

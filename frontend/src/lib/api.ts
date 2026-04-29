@@ -280,12 +280,19 @@ export async function approveSession(
   await ensureOk(response, "failed to send approval");
 }
 
+export interface AskAnswerPayload {
+  question: string;
+  answer: string | null;
+  notes?: string;
+}
+
 export async function answerAskQuestion(
   host: string,
   token: string,
   sessionId: string,
   answer: string,
   toolUseId?: string,
+  answers?: AskAnswerPayload[],
 ): Promise<void> {
   const response = await fetch(
     `${host}/api/sessions/${sessionId}/answer-question`,
@@ -295,7 +302,11 @@ export async function answerAskQuestion(
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ answer, tool_use_id: toolUseId }),
+      body: JSON.stringify({
+        answer,
+        tool_use_id: toolUseId,
+        answers,
+      }),
     },
   );
   await ensureOk(response, "failed to send answer");

@@ -288,11 +288,15 @@ class SessionRuntime:
         # Local cwd is fed to subprocess.Popen / tmux new-session, neither of
         # which expand `~`. Resolve it before storing/launching. The remote
         # cwd is left verbatim so the remote shell can do its own expansion.
-        local_cwd = (
-            request.cwd
-            if launch_target is not None
-            else str(Path(request.cwd).expanduser())
-        )
+        if launch_target is not None:
+            # Remote sessions only use the remote path; the local cwd is just
+            # a label for the UI / git-meta heuristic. Fall back to the remote
+            # path when the client didn't supply one.
+            local_cwd = (
+                request.cwd or request.remote_cwd or launch_target.default_remote_cwd
+            )
+        else:
+            local_cwd = str(Path(request.cwd).expanduser())
         request = request.model_copy(update={"cwd": local_cwd})
         title = (
             request.title

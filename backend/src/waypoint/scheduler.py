@@ -52,20 +52,24 @@ class Scheduler:
     def list_schedules(self) -> list[ScheduledSessionRecord]:
         return self._runtime.storage.list_schedules()
 
-    def create_schedule(
-        self, request: ScheduleCreateRequest
-    ) -> ScheduledSessionRecord:
+    def create_schedule(self, request: ScheduleCreateRequest) -> ScheduledSessionRecord:
         scheduled_at = self._resolve_scheduled_at(request)
         # Validate launch target up-front so the user gets immediate feedback.
+        launch_target = None
         if request.launch_target_id:
-            self._runtime._resolve_launch_target(
+            launch_target = self._runtime._resolve_launch_target(
                 request.launch_target_id, request.backend
             )
+        # Remote schedules: keep the remote path as the displayed cwd so the
+        # row shows something meaningful when the user didn't supply one.
+        cwd = request.cwd
+        if launch_target is not None and not cwd:
+            cwd = request.remote_cwd or launch_target.default_remote_cwd
         now = datetime.now(UTC)
         record = ScheduledSessionRecord(
             id=self._generate_id(),
             backend=request.backend,
-            cwd=request.cwd,
+            cwd=cwd,
             remote_cwd=request.remote_cwd,
             launch_target_id=request.launch_target_id,
             title=request.title,
@@ -174,8 +178,7 @@ class Scheduler:
                 type="schedule_list_update",
                 payload={
                     "schedules": [
-                        item.model_dump(mode="json")
-                        for item in self.list_schedules()
+                        item.model_dump(mode="json") for item in self.list_schedules()
                     ]
                 },
             )

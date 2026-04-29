@@ -1715,10 +1715,14 @@ details.tool-disclosure[open] .tool-glyph.todo {
 .composer-toprow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 10px;
   flex-wrap: wrap;
   min-width: 0;
+}
+
+.composer-toprow .composer-shortcut {
+  margin-left: auto;
 }
 
 .composer-mode,
@@ -2069,14 +2073,6 @@ details.tool-disclosure[open] .tool-glyph.todo {
   background: rgba(200, 169, 106, 0.18);
   color: var(--accent-strong);
   font-size: 0.9rem;
-}
-
-/* Reserve space at the end of the transcript so the last message can scroll
- * past the sticky composer. The variable is updated from JS via a
- * ResizeObserver on the composer. */
-.transcript-end-spacer {
-  height: var(--composer-height, 220px);
-  pointer-events: none;
 }
 
 /* Legacy mode-control kept as a fallback for non-composer surfaces. */
@@ -2702,5 +2698,62 @@ details.tool-disclosure[open] .tool-glyph.todo {
   .import-thread-footer {
     padding: 10px 16px;
     align-items: flex-start;
+  }
+
+  .composer {
+    gap: 8px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .composer-toprow {
+    gap: 6px;
+  }
+
+  .composer-mode,
+  .composer-model {
+    padding: 3px 6px 3px 10px;
+    gap: 6px;
+  }
+
+  .composer-mode > span,
+  .composer-model > span {
+    font-size: 0.6rem;
+    letter-spacing: 0.14em;
+  }
+
+  .composer-mode select,
+  .composer-model select {
+    font-size: 0.74rem;
+    padding: 1px 2px;
+  }
+
+  .composer-shortcut {
+    display: none;
+  }
+
+  .composer-textarea {
+    min-height: 56px;
+    padding: 10px 12px;
+    line-height: 1.45;
+  }
+
+  .composer-actions {
+    gap: 6px;
+  }
+
+  .composer-actions .send {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .composer-actions .ghost {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 0.7rem;
+  }
+
+  .composer-overflow-trigger {
+    width: 32px;
+    height: 32px;
   }
 }

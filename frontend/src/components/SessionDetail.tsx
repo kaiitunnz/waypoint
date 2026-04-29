@@ -63,10 +63,9 @@ type ViewMode = "chat" | "terminal";
 type FilterMode = "important" | "all";
 type ConnectionState = "connecting" | "open" | "reconnecting";
 
-// We pin the reply composer to the viewport bottom; the transcript reserves
-// `--composer-height` worth of bottom space so the last message can scroll
-// clear of the composer instead of disappearing underneath it. The fallback
-// keeps things sensible for the very first paint before the observer fires.
+// The composer sticks to the viewport bottom; floating scroll affordances
+// read `--composer-height` to sit just above it. The fallback keeps things
+// sensible for the very first paint before the observer fires.
 const COMPOSER_HEIGHT_FALLBACK = 220;
 const SHORTCUT_IS_MAC =
   typeof navigator !== "undefined" &&
@@ -686,7 +685,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         onSend={submitInput}
         onTerminate={terminate}
       />
-      <div aria-hidden className="transcript-end-spacer" />
     </section>
   );
 }
@@ -919,9 +917,7 @@ const ReplyComposer = memo(function ReplyComposer({
               ))}
             </select>
           </label>
-        ) : (
-          <span />
-        )}
+        ) : null}
         {hasModelPicker ? (
           <label className="composer-model">
             <span>model</span>

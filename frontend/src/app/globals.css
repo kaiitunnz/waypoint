@@ -971,6 +971,63 @@ pre {
   margin-left: 8px;
 }
 
+.reply-textarea-wrap {
+  position: relative;
+}
+
+.slash-suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(15, 19, 27, 0.96);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(10px);
+  z-index: 20;
+  display: grid;
+  gap: 2px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.slash-suggestion {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  color: var(--text);
+  transition: background-color 120ms ease;
+}
+
+.slash-suggestion.active {
+  background: rgba(143, 179, 214, 0.12);
+}
+
+.slash-name {
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  letter-spacing: 0.02em;
+  color: var(--accent-cool);
+}
+
+.slash-desc {
+  font-size: 0.8rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .list-actions {
   justify-content: space-between;
 }

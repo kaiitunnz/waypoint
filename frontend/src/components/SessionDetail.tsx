@@ -31,7 +31,19 @@ import {
   transportLabel,
 } from "@/lib/transport";
 import { TranscriptCard, ToolPair } from "@/components/TranscriptCard";
-import { EventRecord, SessionEnvelope, SessionRecord } from "@/lib/types";
+import {
+  EventRecord,
+  SessionEnvelope,
+  SessionRecord,
+  SessionTransport,
+} from "@/lib/types";
+
+const SLASH_COMMANDS: ReadonlyArray<{ command: string; description: string }> = [
+  { command: "/help", description: "List available built-in commands" },
+  { command: "/status", description: "Show current session status" },
+  { command: "/permissions", description: "Show permission settings" },
+  { command: "/compact", description: "Compact context to reclaim tokens" },
+];
 
 interface SessionDetailProps {
   host: string;
@@ -483,6 +495,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         canResume={canResume}
         canTerminate={Boolean(session && session.status !== "exited")}
         disabled={composerDisabled}
+        transport={session?.transport ?? null}
         onDelete={removeFromList}
         onInterrupt={interruptSession}
         onResume={resumeSession}
@@ -498,6 +511,7 @@ interface ReplyComposerProps {
   canResume: boolean;
   canTerminate: boolean;
   disabled: boolean;
+  transport: SessionTransport | null;
   onDelete: () => void | Promise<void>;
   onInterrupt: () => void | Promise<void>;
   onResume: () => void | Promise<void>;
@@ -510,6 +524,7 @@ const ReplyComposer = memo(function ReplyComposer({
   canResume,
   canTerminate,
   disabled,
+  transport,
   onDelete,
   onInterrupt,
   onResume,
@@ -518,6 +533,43 @@ const ReplyComposer = memo(function ReplyComposer({
 }: ReplyComposerProps) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [suggestionIndex, setSuggestionIndex] = useState(0);
+  const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Built-in slash commands are intercepted on the backend only for structured
+  // transports (see runtime._handle_builtin_command); skip suggestions on tmux.
+  const supportsSlash =
+    transport === "codex_app_server" || transport === "claude_cli";
+
+  const suggestions = supportsSlash && !suggestionsDismissed
+    ? SLASH_COMMANDS.filter((entry) => {
+        const head = draft.split(/\s/, 1)[0];
+        return head.startsWith("/") && entry.command.startsWith(head);
+      })
+    : [];
+  const suggestionsOpen = suggestions.length > 0 && /^\S+$/.test(draft);
+  const activeIndex = Math.min(suggestionIndex, Math.max(0, suggestions.length - 1));
+
+  useEffect(() => {
+    setSuggestionIndex(0);
+  }, [draft]);
+
+  useEffect(() => {
+    if (!draft.startsWith("/")) {
+      setSuggestionsDismissed(false);
+    }
+  }, [draft]);
+
+  function applySuggestion(index: number) {
+    const chosen = suggestions[index];
+    if (!chosen) {
+      return;
+    }
+    setDraft(chosen.command + " ");
+    setSuggestionsDismissed(true);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }
 
   async function handleSend() {
     if (!draft.trim()) {
@@ -528,6 +580,7 @@ const ReplyComposer = memo(function ReplyComposer({
       const sent = await onSend(draft);
       if (sent) {
         setDraft("");
+        setSuggestionsDismissed(false);
       }
     } finally {
       setSending(false);
@@ -535,7 +588,32 @@ const ReplyComposer = memo(function ReplyComposer({
   }
 
   function handleDraftKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.nativeEvent.isComposing || event.key !== "Enter" || !event.metaKey || event.shiftKey) {
+    if (event.nativeEvent.isComposing) {
+      return;
+    }
+    if (suggestionsOpen) {
+      if (event.key === "Tab" || (event.key === "Enter" && !event.metaKey && !event.shiftKey)) {
+        event.preventDefault();
+        applySuggestion(activeIndex);
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setSuggestionIndex((index) => Math.min(suggestions.length - 1, index + 1));
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setSuggestionIndex((index) => Math.max(0, index - 1));
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setSuggestionsDismissed(true);
+        return;
+      }
+    }
+    if (event.key !== "Enter" || !event.metaKey || event.shiftKey) {
       return;
     }
     event.preventDefault();
@@ -546,13 +624,38 @@ const ReplyComposer = memo(function ReplyComposer({
     <section className="panel stack">
       <label className="field">
         <span>Reply</span>
-        <textarea
-          rows={4}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={handleDraftKeyDown}
-          disabled={disabled}
-        />
+        <div className="reply-textarea-wrap">
+          <textarea
+            ref={textareaRef}
+            rows={4}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={handleDraftKeyDown}
+            disabled={disabled}
+          />
+          {suggestionsOpen ? (
+            <ul className="slash-suggestions" role="listbox">
+              {suggestions.map((entry, index) => (
+                <li key={entry.command}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={index === activeIndex}
+                    className={`slash-suggestion ${index === activeIndex ? "active" : ""}`}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      applySuggestion(index);
+                    }}
+                    onMouseEnter={() => setSuggestionIndex(index)}
+                  >
+                    <span className="slash-name">{entry.command}</span>
+                    <span className="slash-desc">{entry.description}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       </label>
       <p className="muted">Press Cmd+Enter to send.</p>
       <div className="action-row">

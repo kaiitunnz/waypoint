@@ -26,6 +26,25 @@ CLAUDE_PERMISSION_MODES = (
     "bypassPermissions",
     "dontAsk",
 )
+# Modes that bypass Waypoint's PreToolUse approval card entirely.
+CLAUDE_AUTO_APPROVE_MODES = frozenset({"auto", "bypassPermissions", "dontAsk"})
+# Tools acceptEdits auto-approves; everything else still surfaces the card.
+CLAUDE_ACCEPT_EDITS_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
+
+
+def _auto_approve_for_mode(mode: str, tool_name: object) -> dict[str, str] | None:
+    if mode in CLAUDE_AUTO_APPROVE_MODES:
+        return {
+            "permissionDecision": "allow",
+            "permissionDecisionReason": f"auto-approved by Waypoint mode={mode}",
+        }
+    if mode == "acceptEdits" and tool_name in CLAUDE_ACCEPT_EDITS_TOOLS:
+        return {
+            "permissionDecision": "allow",
+            "permissionDecisionReason": "auto-approved by Waypoint mode=acceptEdits",
+        }
+    return None
+
 
 EmitEvent = Callable[
     [str, EventKind, str, dict[str, Any], SessionStatus],
@@ -87,6 +106,7 @@ class ClaudeSessionState:
     pending_controls: dict[str, asyncio.Future[dict[str, Any]]] = field(
         default_factory=dict
     )
+    permission_mode: str = "default"
     closing: bool = False
 
 
@@ -121,6 +141,7 @@ class ClaudeCliAdapter:
         cwd: str,
         claude_session_id: str,
         launch_factory_override: LaunchFactory | None = None,
+        permission_mode: str | None = None,
     ) -> str:
         state = await self._spawn(
             session_id,
@@ -128,6 +149,7 @@ class ClaudeCliAdapter:
             claude_session_id,
             resume=False,
             launch_factory_override=launch_factory_override,
+            permission_mode=permission_mode,
         )
         return state.claude_session_id
 
@@ -137,6 +159,7 @@ class ClaudeCliAdapter:
         cwd: str,
         claude_session_id: str,
         launch_factory_override: LaunchFactory | None = None,
+        permission_mode: str | None = None,
     ) -> None:
         await self._spawn(
             session_id,
@@ -144,6 +167,7 @@ class ClaudeCliAdapter:
             claude_session_id,
             resume=True,
             launch_factory_override=launch_factory_override,
+            permission_mode=permission_mode,
         )
 
     async def set_permission_mode(self, session_id: str, mode: str) -> None:
@@ -159,6 +183,11 @@ class ClaudeCliAdapter:
             request_id,
             {"subtype": "set_permission_mode", "mode": mode},
         )
+        # Mirror the new mode locally so await_approval can short-circuit
+        # without consulting the database on every PreToolUse hit.
+        state = self._sessions.get(session_id)
+        if state is not None:
+            state.permission_mode = mode
 
     async def _send_control_request(
         self, session_id: str, request_id: str, request: dict[str, Any]
@@ -273,6 +302,7 @@ class ClaudeCliAdapter:
                 "permissionDecision": "ask",
                 "permissionDecisionReason": "missing identifiers",
             }
+        tool_name = payload.get("tool_name")
         async with self._approval_lock:
             state = self._sessions.get(waypoint_session_id)
             if state is None:
@@ -280,6 +310,13 @@ class ClaudeCliAdapter:
                     "permissionDecision": "ask",
                     "permissionDecisionReason": "session not active",
                 }
+            # Honor the session's permission_mode at the hook layer. Claude's
+            # permission_mode is an internal hint that only kicks in when no
+            # hook is wired; with Waypoint's PreToolUse hook always installed,
+            # the mode never gets consulted unless we do it here.
+            auto = _auto_approve_for_mode(state.permission_mode, tool_name)
+            if auto is not None:
+                return auto
             if tool_use_id in state.pending:
                 # Hook was retried for the same tool call. Reuse the existing future.
                 pending = state.pending[tool_use_id]
@@ -377,6 +414,7 @@ class ClaudeCliAdapter:
         claude_session_id: str,
         resume: bool,
         launch_factory_override: LaunchFactory | None = None,
+        permission_mode: str | None = None,
     ) -> ClaudeSessionState:
         launch_factory = launch_factory_override or self._launch_factory
         if launch_factory is None:
@@ -401,6 +439,11 @@ class ClaudeCliAdapter:
             stdout_task=asyncio.create_task(asyncio.sleep(0)),  # placeholder
             stderr_task=asyncio.create_task(asyncio.sleep(0)),
             wait_task=asyncio.create_task(asyncio.sleep(0)),
+            permission_mode=(
+                permission_mode
+                if permission_mode in CLAUDE_PERMISSION_MODES
+                else "default"
+            ),
         )
         state.stdout_task = asyncio.create_task(self._read_stdout(state))
         state.stderr_task = asyncio.create_task(self._read_stderr(state))

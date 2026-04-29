@@ -49,6 +49,7 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         cwd: str,
         claude_session_id: str,
         launch_factory_override: Any = None,
+        permission_mode: str | None = None,
     ) -> str:
         self.start_calls.append(
             (session_id, cwd, claude_session_id, launch_factory_override)

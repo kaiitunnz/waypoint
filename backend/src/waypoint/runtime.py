@@ -185,6 +185,7 @@ class SessionRuntime:
                 session.remote_cwd or session.cwd,
                 session.thread_id,
                 self._claude_launch_factory(session.launch_target_id),
+                permission_mode=session.permission_mode,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(
@@ -503,6 +504,7 @@ class SessionRuntime:
                     remote_cwd or request.cwd,
                     claude_session_id,
                     self._claude_launch_factory(session.launch_target_id),
+                    permission_mode=session.permission_mode,
                 )
             except (ClaudeCliError, FileNotFoundError, OSError) as exc:
                 self.storage.update_session(session.id, status=SessionStatus.ERROR)

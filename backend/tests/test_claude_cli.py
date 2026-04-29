@@ -330,3 +330,65 @@ async def test_watch_process_emits_error_event_with_stderr_tail() -> None:
         and "env: claude" in item[2]
         for item in emitted
     )
+
+
+@pytest.mark.asyncio
+async def test_await_approval_auto_allows_in_auto_mode() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    state.permission_mode = "auto"
+
+    decision = await adapter.await_approval(
+        {
+            "waypoint_session_id": "sess",
+            "tool_use_id": "tu-1",
+            "tool_name": "Bash",
+            "tool_input": {"command": "rm -rf /"},
+        }
+    )
+
+    assert decision == {
+        "permissionDecision": "allow",
+        "permissionDecisionReason": "auto-approved by Waypoint mode=auto",
+    }
+    # Auto-approved hooks should never surface an approval card.
+    assert not any(item[1] == EventKind.APPROVAL_REQUEST for item in emitted)
+    assert not state.pending
+
+
+@pytest.mark.asyncio
+async def test_await_approval_accept_edits_only_auto_allows_edit_tools() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    state.permission_mode = "acceptEdits"
+
+    edit_decision = await adapter.await_approval(
+        {
+            "waypoint_session_id": "sess",
+            "tool_use_id": "tu-edit",
+            "tool_name": "Edit",
+            "tool_input": {"file_path": "/tmp/x.py"},
+        }
+    )
+    assert edit_decision["permissionDecision"] == "allow"
+
+    # Bash still surfaces the approval card so the user can intervene.
+    bash_task = asyncio.create_task(
+        adapter.await_approval(
+            {
+                "waypoint_session_id": "sess",
+                "tool_use_id": "tu-bash",
+                "tool_name": "Bash",
+                "tool_input": {"command": "rm -rf /"},
+            }
+        )
+    )
+    await asyncio.sleep(0)
+    assert "tu-bash" in state.pending
+    state.pending["tu-bash"].future.set_result(
+        {"permissionDecision": "deny", "permissionDecisionReason": "user said no"}
+    )
+    bash_decision = await bash_task
+    assert bash_decision["permissionDecision"] == "deny"

@@ -1,5 +1,8 @@
+import functools
 import json
 import sqlite3
+import threading
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -15,10 +18,29 @@ from waypoint.schemas import (
 )
 
 
+def _synchronized[**P, R](method: Callable[P, R]) -> Callable[P, R]:
+    """Serialize access to ``self.connection`` across threads.
+
+    sqlite3 connections opened with ``check_same_thread=False`` may be shared,
+    but writes / interleaved cursor operations must still be serialized by the
+    user — otherwise concurrent threadpool requests trip
+    ``sqlite3.InterfaceError: bad parameter or other API misuse``.
+    """
+
+    @functools.wraps(method)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        self = args[0]
+        with self._lock:  # type: ignore[attr-defined]
+            return method(*args, **kwargs)
+
+    return wrapper
+
+
 class Storage:
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
         self.connection = sqlite3.connect(self.database_path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
         self._init_db()
@@ -88,9 +110,11 @@ class Storage:
         self._ensure_column("sessions", "launch_target_id", "TEXT")
         self.connection.commit()
 
+    @_synchronized
     def close(self) -> None:
         self.connection.close()
 
+    @_synchronized
     def create_session(self, session: SessionRecord) -> SessionRecord:
         self.connection.execute(
             """
@@ -127,12 +151,14 @@ class Storage:
         self.connection.commit()
         return session
 
+    @_synchronized
     def list_sessions(self) -> list[SessionRecord]:
         rows = self.connection.execute(
             "SELECT * FROM sessions ORDER BY last_event_at DESC, created_at DESC"
         ).fetchall()
         return [self._session_from_row(row) for row in rows]
 
+    @_synchronized
     def get_session(self, session_id: str) -> SessionRecord | None:
         row = self.connection.execute(
             "SELECT * FROM sessions WHERE id = ?",
@@ -142,6 +168,7 @@ class Storage:
             return None
         return self._session_from_row(row)
 
+    @_synchronized
     def update_session(self, session_id: str, **fields: Any) -> SessionRecord:
         current = self.get_session(session_id)
         if current is None:
@@ -159,6 +186,7 @@ class Storage:
         assert updated is not None
         return updated
 
+    @_synchronized
     def delete_session(self, session_id: str) -> bool:
         cursor = self.connection.execute(
             "DELETE FROM events WHERE session_id = ?",
@@ -173,6 +201,7 @@ class Storage:
         self.connection.commit()
         return sessions_deleted > 0 or events_deleted > 0
 
+    @_synchronized
     def append_event(self, event: EventRecord) -> EventRecord:
         cursor = self.connection.execute(
             """
@@ -207,6 +236,7 @@ class Storage:
             raise RuntimeError("sqlite did not assign a row id for the inserted event")
         return event.model_copy(update={"id": int(last_id)})
 
+    @_synchronized
     def list_events(
         self, session_id: str, cursor: int | None = None
     ) -> list[EventRecord]:
@@ -219,6 +249,7 @@ class Storage:
         rows = self.connection.execute(query, params).fetchall()
         return [self._event_from_row(row) for row in rows]
 
+    @_synchronized
     def insert_token(self, token: str, expires_at: datetime) -> None:
         now = datetime.now(UTC)
         self.connection.execute(
@@ -227,6 +258,7 @@ class Storage:
         )
         self.connection.commit()
 
+    @_synchronized
     def get_token_expiry(self, token: str) -> datetime | None:
         row = self.connection.execute(
             "SELECT expires_at FROM auth_tokens WHERE token = ?",
@@ -236,6 +268,7 @@ class Storage:
             return None
         return datetime.fromisoformat(row["expires_at"])
 
+    @_synchronized
     def refresh_token_expiry(self, token: str, expires_at: datetime) -> None:
         self.connection.execute(
             "UPDATE auth_tokens SET expires_at = ? WHERE token = ?",
@@ -243,10 +276,12 @@ class Storage:
         )
         self.connection.commit()
 
+    @_synchronized
     def delete_token(self, token: str) -> None:
         self.connection.execute("DELETE FROM auth_tokens WHERE token = ?", (token,))
         self.connection.commit()
 
+    @_synchronized
     def purge_expired_tokens(self, now: datetime) -> int:
         cursor = self.connection.execute(
             "DELETE FROM auth_tokens WHERE expires_at < ?",
@@ -255,6 +290,7 @@ class Storage:
         self.connection.commit()
         return cursor.rowcount or 0
 
+    @_synchronized
     def create_schedule(
         self, schedule: ScheduledSessionRecord
     ) -> ScheduledSessionRecord:
@@ -285,6 +321,7 @@ class Storage:
         self.connection.commit()
         return schedule
 
+    @_synchronized
     def list_schedules(
         self, statuses: list[ScheduleStatus] | None = None
     ) -> list[ScheduledSessionRecord]:
@@ -298,6 +335,7 @@ class Storage:
         rows = self.connection.execute(query, params).fetchall()
         return [self._schedule_from_row(row) for row in rows]
 
+    @_synchronized
     def get_schedule(self, schedule_id: str) -> ScheduledSessionRecord | None:
         row = self.connection.execute(
             "SELECT * FROM scheduled_sessions WHERE id = ?", (schedule_id,)
@@ -306,6 +344,7 @@ class Storage:
             return None
         return self._schedule_from_row(row)
 
+    @_synchronized
     def update_schedule(
         self, schedule_id: str, **fields: Any
     ) -> ScheduledSessionRecord:
@@ -326,6 +365,7 @@ class Storage:
             raise KeyError(schedule_id)
         return updated
 
+    @_synchronized
     def delete_schedule(self, schedule_id: str) -> bool:
         cursor = self.connection.execute(
             "DELETE FROM scheduled_sessions WHERE id = ?", (schedule_id,)
@@ -333,6 +373,7 @@ class Storage:
         self.connection.commit()
         return (cursor.rowcount or 0) > 0
 
+    @_synchronized
     def delete_schedules_by_status(self, statuses: list[ScheduleStatus]) -> int:
         if not statuses:
             return 0
@@ -344,6 +385,7 @@ class Storage:
         self.connection.commit()
         return cursor.rowcount or 0
 
+    @_synchronized
     def next_sequence(self, session_id: str) -> int:
         row = self.connection.execute(
             "SELECT COALESCE(MAX(sequence), 0) AS max_sequence FROM events WHERE session_id = ?",

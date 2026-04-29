@@ -1,4 +1,5 @@
-from datetime import UTC, datetime
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 
 from waypoint.schemas import (
     Backend,
@@ -47,3 +48,27 @@ def test_storage_round_trip(tmp_path) -> None:
     assert loaded.status == SessionStatus.RUNNING
     events = storage.list_events("session-1")
     assert len(events) == 1
+
+
+def test_storage_serializes_concurrent_threads(tmp_path) -> None:
+    # Regression: FastAPI dispatches sync deps onto a threadpool, so the auth
+    # path could call ``get_token_expiry`` on the shared connection from many
+    # threads simultaneously and trip
+    # ``sqlite3.InterfaceError: bad parameter or other API misuse``.
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+    expires = now + timedelta(days=30)
+    tokens = [f"tok-{i:03d}" for i in range(32)]
+    for token in tokens:
+        storage.insert_token(token, expires)
+
+    def hammer(token: str) -> datetime | None:
+        for _ in range(64):
+            storage.get_token_expiry(token)
+            storage.refresh_token_expiry(token, expires)
+        return storage.get_token_expiry(token)
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        results = list(pool.map(hammer, tokens))
+
+    assert all(result is not None for result in results)

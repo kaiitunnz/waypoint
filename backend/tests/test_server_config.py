@@ -245,3 +245,36 @@ def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
     assert "/opt/claude/bin/claude -p" in remote_command
     assert "--resume claude-uuid" in remote_command
     assert "--permission-mode plan" in remote_command
+    # Without an explicit model the remote command must not carry --model.
+    assert "--model" not in remote_command
+
+
+def test_remote_claude_launch_factory_appends_model_flag(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    monkeypatch.setattr("waypoint.server_config.secrets.randbelow", lambda _: 1234)
+    config = SshLaunchTargetConfig(
+        id="devbox",
+        name="Devbox",
+        ssh_destination="dev@example.com",
+        claude_bin="/opt/claude/bin/claude",
+    )
+    hook_script = tmp_path / "hook.py"
+    hook_script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+    factory = build_remote_claude_launch_factory(
+        config,
+        hook_script_path=hook_script,
+        hook_secret="secret-123",
+        local_backend_port=8787,
+    )
+    launch = factory(
+        "claude-sess",
+        "~/workspace",
+        "claude-uuid",
+        resume=False,
+        cli_mode="default",
+        model="opus",
+    )
+    assert "--model opus" in launch.args[6]

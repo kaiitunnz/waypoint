@@ -107,7 +107,7 @@ EmitEvent = Callable[
     Coroutine[Any, Any, None],
 ]
 LaunchFactory = Callable[
-    [str, str, str, bool, str],
+    [str, str, str, bool, str, str | None],
     "ClaudeLaunchSpec",
 ]
 
@@ -180,6 +180,7 @@ class ClaudeSessionState:
     pre_plan_mode: str | None = None
     last_plan_path: str | None = None
     closing: bool = False
+    model: str | None = None
 
 
 class ClaudeCliError(RuntimeError):
@@ -212,6 +213,7 @@ class ClaudeCliAdapter:
         claude_session_id: str,
         launch_factory_override: LaunchFactory | None = None,
         permission_mode: str | None = None,
+        model: str | None = None,
     ) -> str:
         state = await self._spawn(
             session_id,
@@ -220,6 +222,7 @@ class ClaudeCliAdapter:
             resume=False,
             launch_factory_override=launch_factory_override,
             permission_mode=permission_mode,
+            model=model,
         )
         return state.claude_session_id
 
@@ -230,6 +233,7 @@ class ClaudeCliAdapter:
         claude_session_id: str,
         launch_factory_override: LaunchFactory | None = None,
         permission_mode: str | None = None,
+        model: str | None = None,
     ) -> None:
         await self._spawn(
             session_id,
@@ -238,6 +242,7 @@ class ClaudeCliAdapter:
             resume=True,
             launch_factory_override=launch_factory_override,
             permission_mode=permission_mode,
+            model=model,
         )
 
     async def set_permission_mode(self, session_id: str, mode: str) -> None:
@@ -263,6 +268,27 @@ class ClaudeCliAdapter:
             if mode == "plan" and state.permission_mode != "plan":
                 state.pre_plan_mode = state.permission_mode
             state.permission_mode = mode
+
+    async def set_model(self, session_id: str, model: str | None) -> None:
+        """Send a control_request set_model envelope to the CLI.
+
+        Wire format documented in tmp/docs/BACKEND_CONTROL_PROTOCOLS.md. Pass
+        ``model=None`` to revert to the session default. The CLI accepts both
+        shortened aliases (``opus``, ``sonnet``, ``haiku``) and full first-party
+        IDs (``claude-opus-4-7``); append ``[1m]`` for 1M-context variants.
+        """
+        request_id = f"set-model-{uuid.uuid4()}"
+        payload: dict[str, Any] = {"subtype": "set_model"}
+        if model:
+            payload["model"] = model
+        await self._send_control_request(session_id, request_id, payload)
+        state = self._sessions.get(session_id)
+        if state is not None:
+            state.model = model or None
+
+    def session_model(self, session_id: str) -> str | None:
+        state = self._sessions.get(session_id)
+        return state.model if state is not None else None
 
     async def _send_control_request(
         self, session_id: str, request_id: str, request: dict[str, Any]
@@ -659,6 +685,7 @@ class ClaudeCliAdapter:
         resume: bool,
         launch_factory_override: LaunchFactory | None = None,
         permission_mode: str | None = None,
+        model: str | None = None,
     ) -> ClaudeSessionState:
         resolved_mode = (
             permission_mode if permission_mode in CLAUDE_PERMISSION_MODES else "default"
@@ -667,10 +694,12 @@ class ClaudeCliAdapter:
         launch_factory = launch_factory_override or self._launch_factory
         if launch_factory is None:
             spec = self._build_local_launch_spec(
-                session_id, cwd, claude_session_id, resume, cli_mode
+                session_id, cwd, claude_session_id, resume, cli_mode, model
             )
         else:
-            spec = launch_factory(session_id, cwd, claude_session_id, resume, cli_mode)
+            spec = launch_factory(
+                session_id, cwd, claude_session_id, resume, cli_mode, model
+            )
         process = await asyncio.create_subprocess_exec(
             *spec.args,
             cwd=spec.cwd,
@@ -689,6 +718,7 @@ class ClaudeCliAdapter:
             stderr_task=asyncio.create_task(asyncio.sleep(0)),
             wait_task=asyncio.create_task(asyncio.sleep(0)),
             permission_mode=resolved_mode,
+            model=model,
         )
         state.stdout_task = asyncio.create_task(self._read_stdout(state))
         state.stderr_task = asyncio.create_task(self._read_stderr(state))
@@ -703,6 +733,7 @@ class ClaudeCliAdapter:
         claude_session_id: str,
         resume: bool,
         cli_mode: str,
+        model: str | None = None,
     ) -> ClaudeLaunchSpec:
         binary = self._binary or shutil.which("claude")
         if binary is None:
@@ -720,6 +751,8 @@ class ClaudeCliAdapter:
             "--permission-mode",
             cli_mode,
         ]
+        if model:
+            args.extend(["--model", model])
         if resume:
             args.extend(["--resume", claude_session_id])
         else:

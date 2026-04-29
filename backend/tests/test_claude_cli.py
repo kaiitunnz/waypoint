@@ -708,6 +708,33 @@ async def test_set_permission_mode_records_pre_plan_mode() -> None:
 
 
 @pytest.mark.asyncio
+async def test_set_model_sends_control_request_and_mirrors_state() -> None:
+    """set_model must round-trip a control_request and update state.model."""
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+
+    captured: list[dict] = []
+
+    async def fake_send(session_id: str, request_id: str, request: dict) -> dict:
+        captured.append(request)
+        return {"subtype": "ack"}
+
+    object.__setattr__(adapter, "_send_control_request", fake_send)
+
+    await adapter.set_model("sess", "opus")
+    assert captured[-1] == {"subtype": "set_model", "model": "opus"}
+    assert state.model == "opus"
+
+    # Reverting to default omits the model field, mirroring how the CLI's
+    # /model command issues `model: undefined` to drop back to the session
+    # default.
+    await adapter.set_model("sess", None)
+    assert captured[-1] == {"subtype": "set_model"}
+    assert state.model is None
+
+
+@pytest.mark.asyncio
 async def test_exit_plan_mode_decline_keeps_plan_mode() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)
@@ -747,3 +774,20 @@ def test_build_local_launch_spec_uses_session_cli_mode(monkeypatch) -> None:
     assert "--permission-mode" in args
     idx = args.index("--permission-mode")
     assert args[idx + 1] == "plan"
+    assert "--model" not in args
+
+
+def test_build_local_launch_spec_emits_model_flag(monkeypatch) -> None:
+    monkeypatch.setattr("waypoint.claude_cli.shutil.which", lambda _: "/usr/bin/claude")
+    adapter = _make_adapter([])
+    spec = adapter._build_local_launch_spec(
+        "sess",
+        "/tmp",
+        "claude-uuid",
+        resume=False,
+        cli_mode="default",
+        model="opus",
+    )
+    args = spec.args
+    assert "--model" in args
+    assert args[args.index("--model") + 1] == "opus"

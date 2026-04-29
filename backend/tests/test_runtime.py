@@ -46,9 +46,11 @@ class FakeStructuredAdapter:
 class FakeClaudeAdapter(FakeStructuredAdapter):
     def __init__(self) -> None:
         super().__init__()
-        self.start_calls: list[tuple[str, str, str, Any]] = []
+        self.start_calls: list[tuple[str, str, str, Any, str | None, str | None]] = []
         self.permission_mode_calls: list[tuple[str, str]] = []
+        self.model_calls: list[tuple[str, str | None]] = []
         self.modes: dict[str, str] = {}
+        self.models: dict[str, str | None] = {}
 
     async def start_session(
         self,
@@ -57,18 +59,35 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         claude_session_id: str,
         launch_factory_override: Any = None,
         permission_mode: str | None = None,
+        model: str | None = None,
     ) -> str:
         self.start_calls.append(
-            (session_id, cwd, claude_session_id, launch_factory_override)
+            (
+                session_id,
+                cwd,
+                claude_session_id,
+                launch_factory_override,
+                permission_mode,
+                model,
+            )
         )
+        if model is not None:
+            self.models[session_id] = model
         return claude_session_id
 
     async def set_permission_mode(self, session_id: str, mode: str) -> None:
         self.permission_mode_calls.append((session_id, mode))
         self.modes[session_id] = mode
 
+    async def set_model(self, session_id: str, model: str | None) -> None:
+        self.model_calls.append((session_id, model))
+        self.models[session_id] = model
+
     def session_permission_mode(self, session_id: str) -> str | None:
         return self.modes.get(session_id)
+
+    def session_model(self, session_id: str) -> str | None:
+        return self.models.get(session_id)
 
 
 class FakeCodexRuntimeAdapter(FakeStructuredAdapter):

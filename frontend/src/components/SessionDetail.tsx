@@ -449,7 +449,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           </p>
         </header>
       ) : null}
-      {error ? <p className="error">{error}</p> : null}
       {connection !== "open" ? (
         <p className="connection-banner muted">
           {connection === "connecting" ? "Connecting…" : "Reconnecting…"}
@@ -544,6 +543,19 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       )}
       {pendingApproval ? (
         <ApprovalCard event={pendingApproval} onDecide={submitApproval} />
+      ) : null}
+      {error ? (
+        <div className="session-error-toast" role="alert">
+          <span>{error}</span>
+          <button
+            type="button"
+            className="session-error-toast-dismiss"
+            onClick={() => setError("")}
+            aria-label="Dismiss error"
+          >
+            ×
+          </button>
+        </div>
       ) : null}
       <ReplyComposer
         backend={session?.backend ?? null}

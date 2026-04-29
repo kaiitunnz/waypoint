@@ -616,6 +616,47 @@ pre {
   font-size: 0.9rem;
 }
 
+.session-error-toast {
+  position: sticky;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--danger) 18%, var(--bg-card));
+  color: var(--danger);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  overflow-wrap: anywhere;
+}
+
+.session-error-toast > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.session-error-toast-dismiss {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.session-error-toast-dismiss:hover {
+  opacity: 1;
+}
+
 .connection-banner {
   text-align: center;
   font-size: 0.82rem;

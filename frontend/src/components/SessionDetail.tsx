@@ -32,6 +32,7 @@ import {
   supportsStructuredApproval,
   transportLabel,
 } from "@/lib/transport";
+import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { TranscriptCard, ToolPair } from "@/components/TranscriptCard";
 import {
   EventRecord,
@@ -1016,14 +1017,33 @@ function UsageCard({ summary }: { summary: UsageSummary }) {
 }
 
 function ApprovalCard({ event, onDecide }: ApprovalCardProps) {
-  const method = typeof event.metadata.method === "string" ? event.metadata.method : null;
+  const toolName =
+    typeof event.metadata.tool_name === "string"
+      ? (event.metadata.tool_name as string)
+      : null;
+  const toolInput =
+    event.metadata.tool_input && typeof event.metadata.tool_input === "object"
+      ? (event.metadata.tool_input as Record<string, unknown>)
+      : null;
+  const planBody =
+    toolName === "ExitPlanMode" && typeof toolInput?.plan === "string"
+      ? (toolInput.plan as string)
+      : null;
   return (
     <section className="panel approval">
       <div className="session-row">
         <span className="badge fidelity structured">approval</span>
-        {method ? <span className="muted">{method}</span> : null}
       </div>
-      <pre>{event.text}</pre>
+      {planBody ? (
+        <>
+          <p className="approval-prompt">Approve plan and exit plan mode</p>
+          <div className="approval-plan">
+            <MarkdownMessage text={planBody} />
+          </div>
+        </>
+      ) : (
+        <pre>{event.text}</pre>
+      )}
       <div className="action-row">
         <button className="primary" onClick={() => void onDecide("accept")} type="button">
           Approve

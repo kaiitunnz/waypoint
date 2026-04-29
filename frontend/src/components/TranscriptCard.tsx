@@ -128,15 +128,11 @@ function CodexCard({
     case "tool_result":
       return <ToolDisclosure event={event} label="tool result" bodyClassName="output" />;
     case "approval_request":
-      return (
-        <article className="panel transcript codex approval_request">
-          <div className="session-row">
-            <span className="badge fidelity structured">approval</span>
-            <span className="muted">{formatTime(event.ts)}</span>
-          </div>
-          <pre>{event.text}</pre>
-        </article>
-      );
+      // The interactive ApprovalCard sits above the composer with the same
+      // text and Approve/Decline buttons; rendering the event here too would
+      // duplicate the prompt. The chronological record lives in the
+      // post-resolution "Approval response sent: …" system note.
+      return null;
     case "system_note":
     case "status_update":
       return (
@@ -288,6 +284,8 @@ function AskUserQuestionCard({
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [picked, setPicked] = useState<Record<number, Set<string>>>({});
+  const [notes, setNotes] = useState<Record<number, string>>({});
+  const [notesOpen, setNotesOpen] = useState<Record<number, boolean>>({});
 
   function toggleOption(questionIndex: number, label: string, multiSelect: boolean) {
     setPicked((current) => {
@@ -309,24 +307,48 @@ function AskUserQuestionCard({
     });
   }
 
+  function toggleNote(questionIndex: number) {
+    setNotesOpen((current) => ({
+      ...current,
+      [questionIndex]: !current[questionIndex],
+    }));
+  }
+
   async function submit() {
     if (!onAnswer || answered || submitting) return;
-    const lines: string[] = [];
+    // Match the Claude binary's mapToolResultToToolResultBlockParam shape so
+    // the model parses the answer the same way native Claude Code does:
+    // `"<question>"="<answer>" user notes: <notes>`, joined by `, ` across
+    // questions. Questions with neither an answer nor notes are skipped.
+    const segments: string[] = [];
     questions.forEach((entry, index) => {
       const selections = picked[index];
-      if (!selections || selections.size === 0) return;
-      const value = Array.from(selections).join(", ");
-      lines.push(`**${entry.header ?? entry.question}**: ${value}`);
+      const note = (notes[index] ?? "").trim();
+      const hasSelections = Boolean(selections && selections.size > 0);
+      if (!hasSelections && !note) return;
+      const parts: string[] = [];
+      if (hasSelections) {
+        const value = Array.from(selections!).join(", ");
+        parts.push(`"${entry.question}"="${value}"`);
+      } else {
+        parts.push(`"${entry.question}"=(no option selected)`);
+      }
+      if (note) {
+        parts.push(`user notes: ${note}`);
+      }
+      segments.push(parts.join(" "));
     });
-    if (!lines.length) return;
+    if (!segments.length) return;
     setSubmitting(true);
     const toolUseId =
       typeof event.metadata?.tool_use_id === "string"
         ? (event.metadata.tool_use_id as string)
         : undefined;
     try {
-      await onAnswer(lines.join("\n"), toolUseId);
+      await onAnswer(segments.join(", "), toolUseId);
       setPicked({});
+      setNotes({});
+      setNotesOpen({});
     } finally {
       setSubmitting(false);
     }
@@ -336,6 +358,7 @@ function AskUserQuestionCard({
     (acc, set) => acc + set.size,
     0,
   );
+  const totalNotes = Object.values(notes).filter((value) => value.trim()).length;
   const interactive = Boolean(onAnswer) && !answered;
 
   return (
@@ -388,6 +411,42 @@ function AskUserQuestionCard({
                 );
               })}
             </ul>
+            {interactive ? (
+              notesOpen[index] ? (
+                <div className="ask-question-note">
+                  <textarea
+                    className="ask-question-note-input"
+                    value={notes[index] ?? ""}
+                    onChange={(e) =>
+                      setNotes((current) => ({
+                        ...current,
+                        [index]: e.target.value,
+                      }))
+                    }
+                    placeholder="Add a note for this question (optional)…"
+                    rows={2}
+                    disabled={submitting}
+                  />
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => toggleNote(index)}
+                    disabled={submitting}
+                  >
+                    Hide note
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="link-button ask-question-note-toggle"
+                  onClick={() => toggleNote(index)}
+                  disabled={submitting}
+                >
+                  + Add note
+                </button>
+              )
+            ) : null}
           </div>
         );
       })}
@@ -396,17 +455,20 @@ function AskUserQuestionCard({
           <button
             type="button"
             className="primary"
-            disabled={submitting || totalPicked === 0}
+            disabled={submitting || (totalPicked === 0 && totalNotes === 0)}
             onClick={() => void submit()}
           >
             {submitting ? "Sending…" : "Send answers"}
           </button>
-          {totalPicked > 0 ? (
+          {totalPicked + totalNotes > 0 ? (
             <button
               type="button"
               className="secondary"
               disabled={submitting}
-              onClick={() => setPicked({})}
+              onClick={() => {
+                setPicked({});
+                setNotes({});
+              }}
             >
               Clear
             </button>

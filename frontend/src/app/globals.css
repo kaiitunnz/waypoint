@@ -928,6 +928,20 @@ pre {
   gap: 12px;
 }
 
+.approval-prompt {
+  font-weight: 600;
+  margin: 0;
+}
+
+.approval-plan {
+  border-left: 2px solid rgba(200, 169, 106, 0.4);
+  padding: 6px 12px;
+  background: rgba(15, 19, 27, 0.4);
+  border-radius: var(--radius-sm);
+  max-height: 360px;
+  overflow-y: auto;
+}
+
 .transcript pre {
   line-height: 1.55;
   overflow-wrap: anywhere;
@@ -1119,6 +1133,34 @@ pre {
 .ask-option:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+.ask-question-note-toggle {
+  margin-top: 6px;
+  font-size: 0.85rem;
+}
+
+.ask-question-note {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.ask-question-note-input {
+  width: 100%;
+  resize: vertical;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: rgba(15, 19, 27, 0.55);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.4;
+}
+
+.ask-question-note-input:focus {
+  outline: none;
+  border-color: rgba(200, 169, 106, 0.55);
 }
 
 .ask-option-label {

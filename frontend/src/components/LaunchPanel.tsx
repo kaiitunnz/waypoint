@@ -189,44 +189,70 @@ export function LaunchPanel({
             </p>
           ) : null}
           {showCodexThreads ? (
-            <>
-              <div className="import-thread-list">
-                {visibleThreads.map((thread) => (
+            <div className="import-thread-list">
+              {visibleThreads.map((thread, index) => {
+                const ordinal = String(threadPageStart + index + 1).padStart(2, "0");
+                const isImporting = importingThreadId === thread.id;
+                return (
                   <article className="import-thread-row" key={thread.id}>
-                    <div className="import-thread-main">
-                      <div className="import-thread-topline">
-                        <h4>{thread.title}</h4>
-                        {thread.branch ? (
-                          <span className="badge neutral">{thread.branch}</span>
-                        ) : null}
+                    <span className="import-thread-index" aria-hidden="true">
+                      {ordinal}
+                    </span>
+                    <div className="import-thread-body">
+                      <div className="import-thread-headline">
+                        <h4 title={thread.title}>{thread.title}</h4>
+                        <time
+                          className="import-thread-time"
+                          dateTime={thread.updated_at}
+                        >
+                          {formatRelativeTime(thread.updated_at)}
+                        </time>
                       </div>
-                      <p className="import-thread-cwd">{thread.cwd}</p>
-                    </div>
-                    <div className="import-thread-meta">
-                      <p className="meta">{thread.repo_name ?? "No repo"}</p>
-                      <p className="meta">
-                        Updated {formatRelativeTime(thread.updated_at)}
-                      </p>
-                    </div>
-                    <div className="import-thread-cta">
-                      <button
-                        className="secondary"
-                        disabled={importingThreadId !== null}
-                        type="button"
-                        onClick={() => void handleImport(thread.id)}
-                      >
-                        {importingThreadId === thread.id ? "Importing…" : "Import"}
-                      </button>
+                      {thread.preview ? (
+                        <p className="import-thread-preview" title={thread.preview}>
+                          {thread.preview}
+                        </p>
+                      ) : null}
+                      <div className="import-thread-bottomline">
+                        <div className="import-thread-tags">
+                          {thread.branch ? (
+                            <span className="import-thread-chip">
+                              {thread.branch}
+                            </span>
+                          ) : null}
+                          {thread.repo_name ? (
+                            <span className="import-thread-repo">
+                              {thread.repo_name}
+                            </span>
+                          ) : null}
+                          <span
+                            className="import-thread-cwd"
+                            title={thread.cwd}
+                          >
+                            {thread.cwd}
+                          </span>
+                        </div>
+                        <div className="import-thread-cta">
+                          <button
+                            className="secondary"
+                            disabled={importingThreadId !== null}
+                            type="button"
+                            onClick={() => void handleImport(thread.id)}
+                          >
+                            {isImporting ? "Importing…" : "Import →"}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </article>
-                ))}
-              </div>
+                );
+              })}
               {threadTotalPages > 1 ? (
-                <div className="action-row import-thread-footer">
-                  <span className="meta">
-                    Showing {showingFrom}-{showingTo} of {codexThreads.length}
+                <div className="import-thread-footer">
+                  <span>
+                    {showingFrom}–{showingTo} of {codexThreads.length}
                   </span>
-                  <div className="action-row pagination-controls">
+                  <div className="import-thread-pager">
                     <button
                       className="secondary"
                       type="button"
@@ -235,10 +261,10 @@ export function LaunchPanel({
                       }
                       disabled={threadPage === 1}
                     >
-                      Previous
+                      ← Prev
                     </button>
-                    <span className="meta">
-                      Page {threadPage} of {threadTotalPages}
+                    <span className="import-thread-page-indicator">
+                      {threadPage} / {threadTotalPages}
                     </span>
                     <button
                       className="secondary"
@@ -250,12 +276,12 @@ export function LaunchPanel({
                       }
                       disabled={threadPage === threadTotalPages}
                     >
-                      Next
+                      Next →
                     </button>
                   </div>
                 </div>
               ) : null}
-            </>
+            </div>
           ) : null}
         </section>
       ) : null}

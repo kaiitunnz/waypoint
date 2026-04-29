@@ -109,6 +109,7 @@ class Storage:
         self._ensure_column("sessions", "remote_cwd", "TEXT")
         self._ensure_column("sessions", "launch_target_id", "TEXT")
         self._ensure_column("sessions", "pinned_at", "TEXT")
+        self._ensure_column("sessions", "permission_mode", "TEXT")
         self.connection.commit()
 
     @_synchronized

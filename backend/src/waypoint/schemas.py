@@ -66,6 +66,7 @@ class SessionRecord(BaseModel):
     structured_log_path: str
     pid: int | None = None
     pinned_at: datetime | None = None
+    permission_mode: str | None = None
 
 
 class EventRecord(BaseModel):
@@ -143,6 +144,10 @@ class SessionInputRequest(BaseModel):
 class SessionApprovalRequest(BaseModel):
     decision: str
     text: str | None = None
+
+
+class SessionPermissionModeRequest(BaseModel):
+    mode: str
 
 
 class TerminalSnapshot(BaseModel):

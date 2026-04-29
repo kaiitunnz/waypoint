@@ -30,6 +30,7 @@ from waypoint.schemas import (
     SessionCreateRequest,
     SessionEnvelope,
     SessionInputRequest,
+    SessionPermissionModeRequest,
     TerminalSnapshot,
 )
 from waypoint.storage import Storage
@@ -215,6 +216,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         await context.runtime.delete(session_id)
         return {"deleted": session_id}
+
+    @app.post("/api/sessions/{session_id}/mode")
+    async def session_set_mode(
+        session_id: str,
+        body: SessionPermissionModeRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.set_permission_mode(session_id, body.mode)
+        return {"session": session.model_dump(mode="json")}
 
     @app.post("/api/sessions/{session_id}/pin")
     async def session_pin(

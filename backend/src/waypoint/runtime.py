@@ -663,6 +663,60 @@ class SessionRuntime:
             )
         )
 
+    async def set_permission_mode(self, session_id: str, mode: str) -> SessionRecord:
+        session = self.get_session(session_id)
+        if session.backend == Backend.CLAUDE_CODE:
+            from waypoint.claude_cli import CLAUDE_PERMISSION_MODES
+
+            if self.claude is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="claude adapter is not configured on this backend",
+                )
+            if mode not in CLAUDE_PERMISSION_MODES:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"unsupported claude permission mode: {mode}; "
+                        f"expected one of {', '.join(CLAUDE_PERMISSION_MODES)}"
+                    ),
+                )
+            try:
+                await self.claude.set_permission_mode(session_id, mode)
+            except Exception as exc:  # noqa: BLE001 — surface adapter errors as 400
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+                ) from exc
+        elif session.backend == Backend.CODEX:
+            from waypoint.transports.codex import CODEX_PERMISSION_PRESETS
+
+            if mode not in CODEX_PERMISSION_PRESETS:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"unsupported codex permission mode: {mode}; "
+                        f"expected one of {', '.join(CODEX_PERMISSION_PRESETS)}"
+                    ),
+                )
+            # Codex applies on next turn_start — no protocol round-trip here.
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"permission mode is not supported for {session.backend}",
+            )
+        updated = self.storage.update_session(session_id, permission_mode=mode)
+        await self.broadcast.publish(
+            SessionEnvelope(
+                type="session_list_update",
+                payload={
+                    "sessions": [
+                        item.model_dump(mode="json") for item in self.list_sessions()
+                    ]
+                },
+            )
+        )
+        return updated
+
     async def set_pinned(self, session_id: str, pinned: bool) -> SessionRecord:
         session = self.get_session(session_id)
         pinned_at = datetime.now(UTC) if pinned else None

@@ -162,12 +162,29 @@ class CodexAppServerAdapter:
         self._sessions[session_id] = state
         return state
 
-    async def send_input(self, session_id: str, text: str) -> None:
+    async def send_input(
+        self,
+        session_id: str,
+        text: str,
+        turn_params: dict[str, Any] | None = None,
+    ) -> None:
         state = self._require_session(session_id)
         if state.active_turn_id is None:
-            started = await self._call_client(
-                state, state.client.turn_start, state.thread_id, text
-            )
+            # turn_steer doesn't accept params in the current Codex SDK;
+            # policy / reviewer overrides only land via turn_start. Override
+            # values persist to subsequent turns per SDK semantics.
+            if turn_params:
+                started = await self._call_client(
+                    state,
+                    state.client.turn_start,
+                    state.thread_id,
+                    text,
+                    turn_params,
+                )
+            else:
+                started = await self._call_client(
+                    state, state.client.turn_start, state.thread_id, text
+                )
             state.active_turn_id = started.turn.id
             state.stream_task = asyncio.create_task(
                 self._stream_turn(state, started.turn.id)

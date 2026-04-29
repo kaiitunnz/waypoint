@@ -25,9 +25,13 @@ class FakeStructuredAdapter:
     def __init__(self, pending: bool = False) -> None:
         self.pending = pending
         self.inputs: list[tuple[str, str]] = []
+        self.turn_params_calls: list[tuple[str, dict[str, Any] | None]] = []
 
-    async def send_input(self, session_id: str, text: str) -> None:
+    async def send_input(
+        self, session_id: str, text: str, turn_params: dict[str, Any] | None = None
+    ) -> None:
         self.inputs.append((session_id, text))
+        self.turn_params_calls.append((session_id, turn_params))
 
     def has_pending_approval(self, session_id: str) -> bool:
         return self.pending
@@ -37,6 +41,7 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
     def __init__(self) -> None:
         super().__init__()
         self.start_calls: list[tuple[str, str, str, Any]] = []
+        self.permission_mode_calls: list[tuple[str, str]] = []
 
     async def start_session(
         self,
@@ -49,6 +54,9 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
             (session_id, cwd, claude_session_id, launch_factory_override)
         )
         return claude_session_id
+
+    async def set_permission_mode(self, session_id: str, mode: str) -> None:
+        self.permission_mode_calls.append((session_id, mode))
 
 
 class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
@@ -400,3 +408,80 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
     events = storage.list_events(session.id)
     assert events[-1].kind == EventKind.SYSTEM_NOTE
     assert "Imported stored Codex thread via SSH target Devbox" in events[-1].text
+
+
+@pytest.mark.asyncio
+async def test_set_permission_mode_codex_persists_and_threads_to_next_turn(
+    tmp_path,
+) -> None:
+    from waypoint.transports.codex import CODEX_PERMISSION_PRESETS
+
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeStructuredAdapter()
+    runtime.codex = cast(Any, fake)
+    session = make_session(settings)
+    storage.create_session(session)
+
+    updated = await runtime.set_permission_mode("sess", "auto_review")
+
+    # Codex applies the preset on the next turn — no protocol round-trip yet,
+    # just persisted on the session record.
+    assert updated.permission_mode == "auto_review"
+    assert fake.inputs == []
+
+    await runtime.handle_input("sess", SessionInputRequest(text="hello"))
+    assert fake.inputs == [("sess", "hello")]
+    [(_, params)] = fake.turn_params_calls
+    assert params == CODEX_PERMISSION_PRESETS["auto_review"]
+
+
+@pytest.mark.asyncio
+async def test_set_permission_mode_codex_rejects_unknown_mode(tmp_path) -> None:
+    from fastapi import HTTPException
+
+    runtime, storage, settings = make_runtime(tmp_path)
+    runtime.codex = cast(Any, FakeStructuredAdapter())
+    session = make_session(settings)
+    storage.create_session(session)
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.set_permission_mode("sess", "unknown_mode")
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_set_permission_mode_claude_calls_adapter(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    runtime.claude = cast(Any, fake)
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend=Backend.CLAUDE_CODE,
+        transport=SessionTransport.CLAUDE_CLI,
+    )
+    storage.create_session(session)
+
+    updated = await runtime.set_permission_mode("claude-sess", "plan")
+
+    assert fake.permission_mode_calls == [("claude-sess", "plan")]
+    assert updated.permission_mode == "plan"
+
+
+@pytest.mark.asyncio
+async def test_set_permission_mode_claude_rejects_unknown_mode(tmp_path) -> None:
+    from fastapi import HTTPException
+
+    runtime, storage, settings = make_runtime(tmp_path)
+    runtime.claude = cast(Any, FakeClaudeAdapter())
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend=Backend.CLAUDE_CODE,
+        transport=SessionTransport.CLAUDE_CLI,
+    )
+    storage.create_session(session)
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.set_permission_mode("claude-sess", "ultraplan")
+    assert exc.value.status_code == 400

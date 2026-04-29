@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shutil
+import uuid
 from collections import deque
 from collections.abc import Callable, Coroutine
 from contextlib import suppress
@@ -15,6 +16,16 @@ from typing import Any
 from waypoint.schemas import EventKind, SessionStatus
 
 log = logging.getLogger("waypoint.claude_cli")
+
+CONTROL_REQUEST_TIMEOUT_SECONDS = 10.0
+CLAUDE_PERMISSION_MODES = (
+    "default",
+    "plan",
+    "acceptEdits",
+    "auto",
+    "bypassPermissions",
+    "dontAsk",
+)
 
 EmitEvent = Callable[
     [str, EventKind, str, dict[str, Any], SessionStatus],
@@ -72,6 +83,9 @@ class ClaudeSessionState:
     terminal_fragments: list[str] = field(default_factory=list)
     stderr_tail: deque[str] = field(
         default_factory=lambda: deque(maxlen=STDERR_TAIL_LINES)
+    )
+    pending_controls: dict[str, asyncio.Future[dict[str, Any]]] = field(
+        default_factory=dict
     )
     closing: bool = False
 
@@ -131,6 +145,76 @@ class ClaudeCliAdapter:
             resume=True,
             launch_factory_override=launch_factory_override,
         )
+
+    async def set_permission_mode(self, session_id: str, mode: str) -> None:
+        """Send a control_request set_permission_mode envelope to the CLI.
+
+        Wire format documented in tmp/docs/BACKEND_CONTROL_PROTOCOLS.md.
+        """
+        if mode not in CLAUDE_PERMISSION_MODES:
+            raise ClaudeCliError(f"unsupported permission mode: {mode}")
+        request_id = f"set-mode-{uuid.uuid4()}"
+        await self._send_control_request(
+            session_id,
+            request_id,
+            {"subtype": "set_permission_mode", "mode": mode},
+        )
+
+    async def _send_control_request(
+        self, session_id: str, request_id: str, request: dict[str, Any]
+    ) -> dict[str, Any]:
+        state = self._require_session(session_id)
+        if state.process.returncode is not None:
+            raise ClaudeCliError(
+                self._format_dead_process_error(state, state.process.returncode)
+            )
+        if state.process.stdin is None or state.process.stdin.is_closing():
+            raise ClaudeCliError(
+                self._format_dead_process_error(state, state.process.returncode)
+            )
+        future: asyncio.Future[dict[str, Any]] = (
+            asyncio.get_event_loop().create_future()
+        )
+        state.pending_controls[request_id] = future
+        envelope = {
+            "type": "control_request",
+            "request_id": request_id,
+            "request": request,
+        }
+        line = (json.dumps(envelope) + "\n").encode("utf-8")
+        state.process.stdin.write(line)
+        try:
+            await state.process.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError) as exc:
+            state.pending_controls.pop(request_id, None)
+            future.cancel()
+            raise ClaudeCliError(f"claude stdin write failed: {exc}") from exc
+        try:
+            response = await asyncio.wait_for(
+                future, timeout=CONTROL_REQUEST_TIMEOUT_SECONDS
+            )
+        except TimeoutError as exc:
+            state.pending_controls.pop(request_id, None)
+            raise ClaudeCliError(
+                f"claude control_request timed out: {request.get('subtype')}"
+            ) from exc
+        if response.get("subtype") == "error":
+            raise ClaudeCliError(
+                response.get("error") or "claude control_request rejected"
+            )
+        return response
+
+    def _handle_control_response(
+        self, state: ClaudeSessionState, event: dict[str, Any]
+    ) -> None:
+        response = event.get("response") or {}
+        request_id = response.get("request_id")
+        if not isinstance(request_id, str):
+            return
+        future = state.pending_controls.pop(request_id, None)
+        if future is None or future.done():
+            return
+        future.set_result(response)
 
     async def send_input(self, session_id: str, text: str) -> None:
         state = self._require_session(session_id)
@@ -251,6 +335,12 @@ class ClaudeCliAdapter:
                     }
                 )
         state.pending.clear()
+        # Cancel any in-flight control_request awaiters so set_permission_mode
+        # callers don't hang past session shutdown.
+        for control_future in list(state.pending_controls.values()):
+            if not control_future.done():
+                control_future.cancel()
+        state.pending_controls.clear()
         if state.process.stdin is not None and not state.process.stdin.is_closing():
             with suppress(Exception):
                 state.process.stdin.close()
@@ -452,6 +542,9 @@ class ClaudeCliAdapter:
 
     async def _dispatch(self, state: ClaudeSessionState, event: dict[str, Any]) -> None:
         event_type = event.get("type")
+        if event_type == "control_response":
+            self._handle_control_response(state, event)
+            return
         if event_type == "system":
             await self._handle_system(state, event)
             return

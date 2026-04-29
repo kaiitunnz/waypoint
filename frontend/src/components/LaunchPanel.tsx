@@ -7,12 +7,11 @@ import { Backend, CodexThreadSummary } from "@/lib/types";
 interface LaunchPanelProps {
   defaultBackend: Backend;
   defaultCwd: string;
-  defaultRemoteCwd: string | null;
   targetLabel: string | null;
   supportedBackends: Backend[];
   codexThreads: CodexThreadSummary[];
   codexThreadsLoading: boolean;
-  onCreate: (backend: Backend, cwd: string, title: string, remoteCwd?: string) => Promise<void>;
+  onCreate: (backend: Backend, cwd: string, title: string) => Promise<void>;
   onAttach: (target: string, backendHint: Backend) => Promise<void>;
   onImportCodexThread: (threadId: string) => Promise<void>;
 }
@@ -22,7 +21,6 @@ const THREADS_PAGE_SIZE = 6;
 export function LaunchPanel({
   defaultBackend,
   defaultCwd,
-  defaultRemoteCwd,
   targetLabel,
   supportedBackends,
   codexThreads,
@@ -33,7 +31,6 @@ export function LaunchPanel({
 }: LaunchPanelProps) {
   const [backend, setBackend] = useState<Backend>(defaultBackend);
   const [cwd, setCwd] = useState(defaultCwd);
-  const [remoteCwd, setRemoteCwd] = useState(defaultRemoteCwd ?? "~");
   const [title, setTitle] = useState("");
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [formBusy, setFormBusy] = useState(false);
@@ -50,10 +47,6 @@ export function LaunchPanel({
   }, [defaultCwd]);
 
   useEffect(() => {
-    setRemoteCwd(defaultRemoteCwd ?? "~");
-  }, [defaultRemoteCwd]);
-
-  useEffect(() => {
     const totalPages = Math.max(1, Math.ceil(codexThreads.length / THREADS_PAGE_SIZE));
     setThreadPage((current) => Math.min(current, totalPages));
   }, [codexThreads.length]);
@@ -62,9 +55,7 @@ export function LaunchPanel({
     event.preventDefault();
     setFormBusy(true);
     try {
-      // Remote launches only use the remote path; let the backend fill cwd
-      // from it for the UI label.
-      await onCreate(backend, targetLabel ? "" : cwd, title, targetLabel ? remoteCwd : undefined);
+      await onCreate(backend, cwd, title);
       setTitle("");
     } finally {
       setFormBusy(false);
@@ -123,11 +114,7 @@ export function LaunchPanel({
         {targetLabel ? (
           <label className="field">
             <span>Working directory on {targetLabel}</span>
-            <input
-              value={remoteCwd}
-              onChange={(event) => setRemoteCwd(event.target.value)}
-              placeholder="~"
-            />
+            <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="~" />
           </label>
         ) : (
           <label className="field">

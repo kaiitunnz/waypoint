@@ -11,7 +11,6 @@ import { Backend, ScheduleCreateRequest, ScheduledSession } from "@/lib/types";
 interface SchedulePanelProps {
   defaultBackend: Backend;
   defaultCwd: string;
-  defaultRemoteCwd: string | null;
   targetLabel: string | null;
   supportedBackends: Backend[];
   schedules: ScheduledSession[];
@@ -25,7 +24,6 @@ type Mode = "delay" | "datetime";
 export function SchedulePanel({
   defaultBackend,
   defaultCwd,
-  defaultRemoteCwd,
   targetLabel,
   supportedBackends,
   schedules,
@@ -35,7 +33,6 @@ export function SchedulePanel({
 }: SchedulePanelProps) {
   const [backend, setBackend] = useState<Backend>(defaultBackend);
   const [cwd, setCwd] = useState(defaultCwd);
-  const [remoteCwd, setRemoteCwd] = useState(defaultRemoteCwd ?? "~");
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [permissionMode, setPermissionMode] = useState<string>("default");
@@ -49,7 +46,6 @@ export function SchedulePanel({
 
   useEffect(() => setBackend(defaultBackend), [defaultBackend]);
   useEffect(() => setCwd(defaultCwd), [defaultCwd]);
-  useEffect(() => setRemoteCwd(defaultRemoteCwd ?? "~"), [defaultRemoteCwd]);
   useEffect(() => {
     if (!permissionOptions.some((option) => option.value === permissionMode)) {
       setPermissionMode(permissionOptions[0]?.value ?? "default");
@@ -61,8 +57,7 @@ export function SchedulePanel({
     setError("");
     const payload: ScheduleCreateRequest = {
       backend,
-      cwd: targetLabel ? "" : cwd,
-      remote_cwd: targetLabel ? remoteCwd : null,
+      cwd,
       title: title.trim() || null,
       initial_prompt: prompt.trim() || null,
       permission_mode: permissionMode || null,
@@ -136,11 +131,7 @@ export function SchedulePanel({
           {targetLabel ? (
             <label className="field">
               <span>Working directory on {targetLabel}</span>
-              <input
-                value={remoteCwd}
-                onChange={(event) => setRemoteCwd(event.target.value)}
-                placeholder="~"
-              />
+              <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="~" />
             </label>
           ) : (
             <label className="field">
@@ -274,7 +265,7 @@ function ScheduleRow({
         {schedule.status === "pending" ? <span className="muted">· {relative}</span> : null}
       </div>
       <p className="schedule-title">
-        {schedule.title || schedule.remote_cwd || schedule.cwd}
+        {schedule.title || schedule.cwd}
         {schedule.launch_target_id ? (
           <span className="muted"> · {schedule.launch_target_id}</span>
         ) : null}

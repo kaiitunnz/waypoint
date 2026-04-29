@@ -26,7 +26,6 @@ export interface SessionRecord {
   transport: SessionTransport;
   title: string;
   cwd: string;
-  remote_cwd?: string | null;
   launch_target_id?: string | null;
   repo_name?: string | null;
   branch?: string | null;
@@ -79,7 +78,7 @@ export interface LaunchTargetSummary {
   kind: "ssh";
   supported_backends: Backend[];
   default_backend: Backend;
-  default_remote_cwd?: string | null;
+  default_cwd?: string | null;
 }
 
 export type ScheduleStatus = "pending" | "launched" | "cancelled" | "failed";
@@ -88,7 +87,6 @@ export interface ScheduledSession {
   id: string;
   backend: Backend;
   cwd: string;
-  remote_cwd?: string | null;
   launch_target_id?: string | null;
   title?: string | null;
   args: string[];
@@ -104,7 +102,6 @@ export interface ScheduledSession {
 export interface ScheduleCreateRequest {
   backend: Backend;
   cwd: string;
-  remote_cwd?: string | null;
   launch_target_id?: string | null;
   title?: string | null;
   args?: string[];

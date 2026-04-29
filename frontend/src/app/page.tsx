@@ -75,7 +75,7 @@ export default function HomePage() {
   const effectiveDefaultBackend = supportedBackends.includes(activeLaunchTarget?.default_backend ?? defaultBackend)
     ? (activeLaunchTarget?.default_backend ?? defaultBackend)
     : supportedBackends[0];
-  const effectiveRemoteCwd = activeLaunchTarget?.default_remote_cwd ?? null;
+  const effectiveDefaultCwd = activeLaunchTarget?.default_cwd ?? defaultCwd;
 
   useEffect(() => {
     const currentHost = readHost();
@@ -238,12 +238,11 @@ export default function HomePage() {
     setError("");
   }
 
-  async function handleCreate(backend: Backend, cwd: string, title: string, remoteCwd?: string) {
+  async function handleCreate(backend: Backend, cwd: string, title: string) {
     try {
       const session = await createSession(host, token, {
         backend,
         cwd,
-        remote_cwd: remoteCwd || null,
         launch_target_id: activeLaunchTargetId || null,
         title: title || null,
         source_mode: "managed",
@@ -515,8 +514,7 @@ export default function HomePage() {
       {token ? (
         <LaunchPanel
           defaultBackend={effectiveDefaultBackend}
-          defaultCwd={defaultCwd}
-          defaultRemoteCwd={effectiveRemoteCwd}
+          defaultCwd={effectiveDefaultCwd}
           targetLabel={activeLaunchTarget?.name ?? null}
           supportedBackends={supportedBackends}
           codexThreads={codexThreads}
@@ -529,8 +527,7 @@ export default function HomePage() {
       {token ? (
         <SchedulePanel
           defaultBackend={effectiveDefaultBackend}
-          defaultCwd={defaultCwd}
-          defaultRemoteCwd={effectiveRemoteCwd}
+          defaultCwd={effectiveDefaultCwd}
           targetLabel={activeLaunchTarget?.name ?? null}
           supportedBackends={supportedBackends}
           schedules={schedules}

@@ -450,7 +450,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           </div>
           <h2>{session.title}</h2>
           <p className="muted">
-            {session.remote_cwd ?? session.cwd}
+            {session.cwd}
             {session.launch_target_id ? ` · ${session.launch_target_id}` : null}
           </p>
           <p className="meta">

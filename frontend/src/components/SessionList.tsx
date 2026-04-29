@@ -118,7 +118,7 @@ export function SessionList({
         </div>
         <h3 className="session-card-title">{session.title}</h3>
         <p className="muted session-card-path">
-          {session.remote_cwd ?? session.cwd}
+          {session.cwd}
         </p>
         <div className="session-card-meta">
           <p className="meta">

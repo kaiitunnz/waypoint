@@ -210,6 +210,16 @@ export async function cancelSchedule(host: string, token: string, scheduleId: st
   await ensureOk(response, "failed to cancel schedule");
 }
 
+export async function clearScheduleHistory(host: string, token: string): Promise<number> {
+  const response = await fetch(`${host}/api/schedules/clear-history`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, "failed to clear schedule history");
+  const payload = (await response.json()) as { removed?: number };
+  return payload.removed ?? 0;
+}
+
 export async function deleteSession(host: string, token: string, sessionId: string): Promise<void> {
   const response = await fetch(`${host}/api/sessions/${sessionId}`, {
     method: "DELETE",

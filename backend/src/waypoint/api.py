@@ -248,6 +248,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         schedule = context.runtime.scheduler.cancel_schedule(schedule_id)
         return {"schedule": schedule.model_dump(mode="json")}
 
+    @app.post("/api/schedules/clear-history")
+    async def clear_schedule_history(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        removed = context.runtime.scheduler.clear_history()
+        return {"removed": removed}
+
     @app.get("/api/sessions/{session_id}/events")
     async def list_events(
         session_id: str,

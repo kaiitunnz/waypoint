@@ -84,8 +84,42 @@ async def test_cancel_schedule_marks_cancelled(tmp_path) -> None:
     )
     cancelled = runtime.scheduler.cancel_schedule(schedule.id)
     assert cancelled.status == ScheduleStatus.CANCELLED
+    # Second call on a non-pending schedule should hard-delete the row so
+    # the user can clear it from the list.
+    runtime.scheduler.cancel_schedule(schedule.id)
+    assert runtime.storage.get_schedule(schedule.id) is None
+    # Third call has nothing to act on.
     with pytest.raises(HTTPException):
         runtime.scheduler.cancel_schedule(schedule.id)
+
+
+@pytest.mark.asyncio
+async def test_clear_history_removes_terminal_schedules(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    pending = runtime.scheduler.create_schedule(
+        ScheduleCreateRequest(
+            backend=Backend.CODEX, cwd="/tmp/project", delay_seconds=600
+        )
+    )
+    cancelled = runtime.scheduler.create_schedule(
+        ScheduleCreateRequest(
+            backend=Backend.CODEX, cwd="/tmp/project", delay_seconds=600
+        )
+    )
+    runtime.scheduler.cancel_schedule(cancelled.id)
+    runtime.storage.update_schedule(
+        runtime.scheduler.create_schedule(
+            ScheduleCreateRequest(
+                backend=Backend.CODEX, cwd="/tmp/project", delay_seconds=600
+            )
+        ).id,
+        status=ScheduleStatus.LAUNCHED,
+    )
+
+    removed = runtime.scheduler.clear_history()
+    assert removed == 2
+    remaining = [item.id for item in runtime.storage.list_schedules()]
+    assert remaining == [pending.id]
 
 
 @pytest.mark.asyncio

@@ -326,6 +326,17 @@ class Storage:
         self.connection.commit()
         return (cursor.rowcount or 0) > 0
 
+    def delete_schedules_by_status(self, statuses: list[ScheduleStatus]) -> int:
+        if not statuses:
+            return 0
+        placeholders = ",".join(["?"] * len(statuses))
+        cursor = self.connection.execute(
+            f"DELETE FROM scheduled_sessions WHERE status IN ({placeholders})",
+            [item.value for item in statuses],
+        )
+        self.connection.commit()
+        return cursor.rowcount or 0
+
     def next_sequence(self, session_id: str) -> int:
         row = self.connection.execute(
             "SELECT COALESCE(MAX(sequence), 0) AS max_sequence FROM events WHERE session_id = ?",

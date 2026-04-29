@@ -12,6 +12,7 @@ import { SessionList } from "@/components/SessionList";
 import {
   attachTmux,
   cancelSchedule as cancelScheduleRequest,
+  clearScheduleHistory as clearScheduleHistoryRequest,
   connectSessionsSocket,
   createSchedule as createScheduleRequest,
   createSession,
@@ -348,19 +349,36 @@ export default function HomePage() {
   }
 
   async function handleCancelSchedule(scheduleId: string) {
+    const previous = schedules.find((schedule) => schedule.id === scheduleId);
     try {
       await cancelScheduleRequest(host, token, scheduleId);
-      setSchedules((current) =>
-        current.map((schedule) =>
-          schedule.id === scheduleId ? { ...schedule, status: "cancelled" } : schedule,
-        ),
-      );
+      setSchedules((current) => {
+        if (!previous || previous.status === "pending") {
+          return current.map((schedule) =>
+            schedule.id === scheduleId ? { ...schedule, status: "cancelled" } : schedule,
+          );
+        }
+        return current.filter((schedule) => schedule.id !== scheduleId);
+      });
     } catch (cancelError) {
       if (isAuthError(cancelError)) {
         resetAuthState("Session expired. Log in again.");
         return;
       }
       setError(cancelError instanceof Error ? cancelError.message : "failed to cancel");
+    }
+  }
+
+  async function handleClearScheduleHistory() {
+    try {
+      await clearScheduleHistoryRequest(host, token);
+      setSchedules((current) => current.filter((schedule) => schedule.status === "pending"));
+    } catch (clearError) {
+      if (isAuthError(clearError)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      setError(clearError instanceof Error ? clearError.message : "failed to clear schedules");
     }
   }
 
@@ -500,6 +518,7 @@ export default function HomePage() {
           schedules={schedules}
           onCreate={handleCreateSchedule}
           onCancel={handleCancelSchedule}
+          onClearHistory={handleClearScheduleHistory}
         />
       ) : null}
       {error ? <p className="error">{error}</p> : null}

@@ -90,16 +90,29 @@ class Scheduler:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="schedule not found"
             )
-        if existing.status != ScheduleStatus.PENDING:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"cannot cancel schedule in {existing.status} state",
+        if existing.status == ScheduleStatus.PENDING:
+            updated = self._runtime.storage.update_schedule(
+                schedule_id, status=ScheduleStatus.CANCELLED
             )
-        updated = self._runtime.storage.update_schedule(
-            schedule_id, status=ScheduleStatus.CANCELLED
-        )
+            asyncio.create_task(self._publish_update())
+            return updated
+        # Already terminal — drop the row so the user can clear it from the
+        # list. Returning the pre-delete record keeps the API symmetric.
+        self._runtime.storage.delete_schedule(schedule_id)
         asyncio.create_task(self._publish_update())
-        return updated
+        return existing
+
+    def clear_history(self) -> int:
+        removed = self._runtime.storage.delete_schedules_by_status(
+            [
+                ScheduleStatus.LAUNCHED,
+                ScheduleStatus.CANCELLED,
+                ScheduleStatus.FAILED,
+            ]
+        )
+        if removed:
+            asyncio.create_task(self._publish_update())
+        return removed
 
     async def _loop(self) -> None:
         try:

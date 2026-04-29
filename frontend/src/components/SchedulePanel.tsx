@@ -13,6 +13,7 @@ interface SchedulePanelProps {
   schedules: ScheduledSession[];
   onCreate: (payload: ScheduleCreateRequest) => Promise<void>;
   onCancel: (scheduleId: string) => Promise<void>;
+  onClearHistory: () => Promise<void>;
 }
 
 type Mode = "delay" | "datetime";
@@ -26,6 +27,7 @@ export function SchedulePanel({
   schedules,
   onCreate,
   onCancel,
+  onClearHistory,
 }: SchedulePanelProps) {
   const [backend, setBackend] = useState<Backend>(defaultBackend);
   const [cwd, setCwd] = useState(defaultCwd);
@@ -82,6 +84,22 @@ export function SchedulePanel({
 
   const upcoming = schedules.filter((schedule) => schedule.status === "pending");
   const recent = schedules.filter((schedule) => schedule.status !== "pending").slice(0, 4);
+  const [clearing, setClearing] = useState(false);
+
+  async function handleClearHistory() {
+    if (clearing) {
+      return;
+    }
+    if (!window.confirm(`Clear ${recent.length} non-pending schedule${recent.length === 1 ? "" : "s"}?`)) {
+      return;
+    }
+    setClearing(true);
+    try {
+      await onClearHistory();
+    } finally {
+      setClearing(false);
+    }
+  }
 
   return (
     <section className="panel stack schedule-panel">
@@ -183,7 +201,17 @@ export function SchedulePanel({
       ) : null}
       {recent.length ? (
         <div className="stack">
-          <h4 className="schedule-heading">Recent</h4>
+          <div className="field-row">
+            <h4 className="schedule-heading">Recent</h4>
+            <button
+              type="button"
+              className="link-button danger-link"
+              onClick={() => void handleClearHistory()}
+              disabled={clearing}
+            >
+              {clearing ? "Clearing…" : "Clear history"}
+            </button>
+          </div>
           {recent.map((schedule) => (
             <ScheduleRow key={schedule.id} schedule={schedule} onCancel={onCancel} />
           ))}
@@ -231,15 +259,13 @@ function ScheduleRow({
             Open session →
           </a>
         ) : null}
-        {schedule.status === "pending" ? (
-          <button
-            type="button"
-            className="link-button danger-link"
-            onClick={() => void onCancel(schedule.id)}
-          >
-            Cancel
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className="link-button danger-link"
+          onClick={() => void onCancel(schedule.id)}
+        >
+          {schedule.status === "pending" ? "Cancel" : "Dismiss"}
+        </button>
       </div>
     </article>
   );

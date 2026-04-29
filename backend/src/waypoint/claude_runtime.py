@@ -10,7 +10,8 @@ HOOK_SCRIPT_NAME = "claude_pretool_hook.py"
 HOOK_SETTINGS_NAME = "claude_settings.json"
 HOOK_SECRET_NAME = "claude_hook_secret"
 GATED_TOOLS_REGEX = (
-    "^(?:Bash|Edit|Write|MultiEdit|NotebookEdit|Task|WebFetch|WebSearch|ExitPlanMode)$"
+    "^(?:Bash|Edit|Write|MultiEdit|NotebookEdit|Task|WebFetch|WebSearch"
+    "|ExitPlanMode|AskUserQuestion)$"
 )
 
 

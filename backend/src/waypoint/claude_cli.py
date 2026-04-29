@@ -107,6 +107,12 @@ GATED_TOOLS = (
     # claude_runtime.GATED_TOOLS_REGEX (the regex written into the hook
     # settings file at session start).
     "ExitPlanMode",
+    # AskUserQuestion has shouldDefer:true + requiresUserInteraction:true.
+    # In `-p` mode without a hook to block it, the binary auto-rejects the
+    # tool with "User declined to answer questions" before Waypoint can
+    # surface the question to the user. Routing it through PreToolUse keeps
+    # the binary parked until respond_to_ask_question resolves the future.
+    "AskUserQuestion",
 )
 GATED_TOOLS_REGEX = "^(?:" + "|".join(GATED_TOOLS) + ")$"
 
@@ -149,11 +155,6 @@ class ClaudeSessionState:
     )
     permission_mode: str = "default"
     last_plan_path: str | None = None
-    # Open AskUserQuestion tool_use_ids waiting for the user's answer. Each
-    # one needs a `tool_result` block sent back, NOT a new user message,
-    # otherwise the conversation is left with an unresolved tool_use and the
-    # next turn errors with `error_during_execution`.
-    pending_ask: dict[str, dict[str, Any]] = field(default_factory=dict)
     closing: bool = False
 
 
@@ -341,48 +342,51 @@ class ClaudeCliAdapter:
         answer_text: str,
         tool_use_id: str | None = None,
     ) -> bool:
+        """Resolve a PreToolUse hook waiting on AskUserQuestion.
+
+        AskUserQuestion is gated through the same hook flow as approvals so
+        the binary doesn't auto-decline. Once the user answers, we return
+        `permissionDecision: deny` with the answer payload as the reason —
+        that string becomes the tool_result Claude reads, matching the
+        binary's own `User has answered your questions: …` shape.
+        """
         state = self._sessions.get(session_id)
-        if state is None or not state.pending_ask:
+        if state is None or not state.pending:
             return False
-        if tool_use_id is None or tool_use_id not in state.pending_ask:
-            tool_use_id = next(iter(state.pending_ask))
-        state.pending_ask.pop(tool_use_id, None)
-        if state.process.returncode is not None:
-            raise ClaudeCliError(
-                self._format_dead_process_error(state, state.process.returncode)
+        pending: ClaudePendingApproval | None = None
+        if tool_use_id and tool_use_id in state.pending:
+            candidate = state.pending[tool_use_id]
+            if candidate.payload.get("tool_name") == "AskUserQuestion":
+                pending = candidate
+        if pending is None:
+            for tid, candidate in state.pending.items():
+                if candidate.payload.get("tool_name") == "AskUserQuestion":
+                    tool_use_id = tid
+                    pending = candidate
+                    break
+        if pending is None or tool_use_id is None:
+            return False
+        if not pending.future.done():
+            pending.future.set_result(
+                {
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        f"User has answered your questions: {answer_text}. "
+                        "You can now continue with the user's answers in mind."
+                    ),
+                }
             )
-        if state.process.stdin is None or state.process.stdin.is_closing():
-            raise ClaudeCliError(
-                self._format_dead_process_error(state, state.process.returncode)
-            )
-        envelope = {
-            "type": "user",
-            "message": {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tool_use_id,
-                        "content": (
-                            "User has answered your questions: "
-                            f"{answer_text}. You can now continue with the "
-                            "user's answers in mind."
-                        ),
-                    }
-                ],
-            },
-        }
-        line = (json.dumps(envelope) + "\n").encode("utf-8")
-        state.process.stdin.write(line)
-        try:
-            await state.process.stdin.drain()
-        except (BrokenPipeError, ConnectionResetError) as exc:
-            raise ClaudeCliError(f"claude stdin write failed: {exc}") from exc
+        state.pending.pop(tool_use_id, None)
         return True
 
     def has_pending_ask_question(self, session_id: str) -> bool:
         state = self._sessions.get(session_id)
-        return bool(state and state.pending_ask)
+        if state is None:
+            return False
+        return any(
+            entry.payload.get("tool_name") == "AskUserQuestion"
+            for entry in state.pending.values()
+        )
 
     async def respond_to_approval(self, session_id: str, decision: str) -> bool:
         state = self._sessions.get(session_id)
@@ -486,9 +490,15 @@ class ClaudeCliAdapter:
             # the mode never gets consulted unless we do it here.
             tool_input = payload.get("tool_input")
             tool_input_dict = tool_input if isinstance(tool_input, dict) else None
-            auto = _auto_approve_for_mode(
-                state.permission_mode, tool_name, tool_input_dict
-            )
+            # AskUserQuestion always surfaces to the user — auto-approving any
+            # mode would let the binary's defer path auto-decline before the
+            # answer arrives.
+            if tool_name == "AskUserQuestion":
+                auto = None
+            else:
+                auto = _auto_approve_for_mode(
+                    state.permission_mode, tool_name, tool_input_dict
+                )
             if auto is not None:
                 # Stash the plan-file path so ExitPlanMode can echo it back
                 # to Claude in the same shape the binary's TUI uses.
@@ -512,19 +522,25 @@ class ClaudeCliAdapter:
                     tool_use_id=tool_use_id, payload=payload, future=future
                 )
                 state.pending[tool_use_id] = pending
-                await self._emit_event(
-                    waypoint_session_id,
-                    EventKind.APPROVAL_REQUEST,
-                    self._format_approval_text(payload),
-                    {
-                        "tool_name": payload.get("tool_name"),
-                        "tool_input": payload.get("tool_input"),
-                        "tool_use_id": tool_use_id,
-                        "method": "PreToolUse",
-                        "status": SessionStatus.WAITING_INPUT,
-                    },
-                    SessionStatus.WAITING_INPUT,
-                )
+                # AskUserQuestion's tool_call event already renders the
+                # question UI in the transcript via parseAskUserQuestion;
+                # emitting a separate APPROVAL_REQUEST card would show the
+                # same prompt twice. Only register the future so
+                # respond_to_ask_question can resolve it.
+                if tool_name != "AskUserQuestion":
+                    await self._emit_event(
+                        waypoint_session_id,
+                        EventKind.APPROVAL_REQUEST,
+                        self._format_approval_text(payload),
+                        {
+                            "tool_name": payload.get("tool_name"),
+                            "tool_input": payload.get("tool_input"),
+                            "tool_use_id": tool_use_id,
+                            "method": "PreToolUse",
+                            "status": SessionStatus.WAITING_INPUT,
+                        },
+                        SessionStatus.WAITING_INPUT,
+                    )
         try:
             decision = await asyncio.wait_for(
                 pending.future, timeout=DEFAULT_TIMEOUT_SECONDS
@@ -915,10 +931,6 @@ class ClaudeCliAdapter:
                     # an extra tool_call disclosure with the JSON payload is
                     # noise.
                     continue
-                if tool_name == "AskUserQuestion" and tool_use_id:
-                    # Track so the user's answer routes back as a tool_result
-                    # for this exact tool_use_id, not as a fresh user message.
-                    state.pending_ask[tool_use_id] = block.get("input") or {}
                 input_text = json.dumps(block.get("input") or {}, indent=2)
                 await self._emit_event(
                     state.session_id,
@@ -946,10 +958,6 @@ class ClaudeCliAdapter:
             if block.get("type") != "tool_result":
                 continue
             tool_use_id = str(block.get("tool_use_id") or "")
-            # Once a tool_result arrives for an open AskUserQuestion the
-            # binary considers it resolved; drop our local tracker so a
-            # late "Send answers" click can't double-respond.
-            state.pending_ask.pop(tool_use_id, None)
             content = block.get("content")
             text = self._stringify_tool_result(content)
             is_error = bool(block.get("is_error"))

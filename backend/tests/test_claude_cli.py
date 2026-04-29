@@ -450,50 +450,36 @@ def test_claude_cli_mode_for_maps_waypoint_to_cli_values() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handle_assistant_registers_ask_user_question_tool_use() -> None:
+async def test_await_approval_for_ask_user_question_skips_approval_card() -> None:
+    """AskUserQuestion goes through the PreToolUse hook so the binary blocks
+    waiting for our verdict, but the question UI is already rendered via
+    the tool_call event — emitting an APPROVAL_REQUEST too would surface
+    the same prompt twice."""
     emitted: list = []
     adapter = _make_adapter(emitted)
-    state, _ = _attach_state(adapter)
-    event = {
-        "type": "assistant",
-        "message": {
-            "id": "msg_ask",
-            "content": [
-                {
-                    "type": "tool_use",
-                    "id": "toolu_ask",
-                    "name": "AskUserQuestion",
-                    "input": {"questions": [{"question": "ok?", "options": []}]},
-                }
-            ],
-        },
+    _attach_state(adapter)
+
+    payload = {
+        "waypoint_session_id": "sess",
+        "tool_use_id": "toolu_ask",
+        "tool_name": "AskUserQuestion",
+        "tool_input": {"questions": [{"question": "ok?", "options": []}]},
     }
-    await adapter._dispatch(state, event)
-    assert "toolu_ask" in state.pending_ask
+    decision_task = asyncio.create_task(adapter.await_approval(payload))
+    for _ in range(50):
+        if adapter.has_pending_ask_question("sess"):
+            break
+        await asyncio.sleep(0.01)
     assert adapter.has_pending_ask_question("sess")
-
-
-@pytest.mark.asyncio
-async def test_respond_to_ask_question_writes_tool_result_envelope() -> None:
-    emitted: list = []
-    adapter = _make_adapter(emitted)
-    state, process = _attach_state(adapter)
-    state.pending_ask["toolu_ask"] = {"questions": []}
-
+    assert not any(item[1] == EventKind.APPROVAL_REQUEST for item in emitted)
     handled = await adapter.respond_to_ask_question(
         "sess", "**Plan target**: Trivial wrapper-test plan", "toolu_ask"
     )
-
     assert handled is True
-    assert "toolu_ask" not in state.pending_ask
-    assert process.stdin.writes, "no envelope written to stdin"
-    payload = json.loads(process.stdin.writes[-1])
-    assert payload["type"] == "user"
-    block = payload["message"]["content"][0]
-    assert block == {
-        "type": "tool_result",
-        "tool_use_id": "toolu_ask",
-        "content": (
+    decision = await decision_task
+    assert decision == {
+        "permissionDecision": "deny",
+        "permissionDecisionReason": (
             "User has answered your questions: "
             "**Plan target**: Trivial wrapper-test plan. "
             "You can now continue with the user's answers in mind."
@@ -502,27 +488,37 @@ async def test_respond_to_ask_question_writes_tool_result_envelope() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handle_user_clears_pending_ask_on_tool_result() -> None:
+async def test_respond_to_ask_question_returns_false_without_pending() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    _attach_state(adapter)
+    handled = await adapter.respond_to_ask_question("sess", "anything")
+    assert handled is False
+
+
+@pytest.mark.asyncio
+async def test_ask_user_question_never_auto_approves_in_auto_mode() -> None:
+    """Even auto/bypassPermissions modes must surface AskUserQuestion to
+    the user — auto-approving lets the binary's defer path auto-decline."""
     emitted: list = []
     adapter = _make_adapter(emitted)
     state, _ = _attach_state(adapter)
-    state.pending_ask["toolu_ask"] = {"questions": []}
-    await adapter._dispatch(
-        state,
-        {
-            "type": "user",
-            "message": {
-                "content": [
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": "toolu_ask",
-                        "content": "User has answered ...",
-                    }
-                ]
-            },
-        },
-    )
-    assert "toolu_ask" not in state.pending_ask
+    state.permission_mode = "auto"
+
+    payload = {
+        "waypoint_session_id": "sess",
+        "tool_use_id": "toolu_ask",
+        "tool_name": "AskUserQuestion",
+        "tool_input": {"questions": []},
+    }
+    task = asyncio.create_task(adapter.await_approval(payload))
+    for _ in range(50):
+        if adapter.has_pending_ask_question("sess"):
+            break
+        await asyncio.sleep(0.01)
+    assert adapter.has_pending_ask_question("sess")
+    await adapter.respond_to_ask_question("sess", "answer", "toolu_ask")
+    await task
 
 
 @pytest.mark.asyncio

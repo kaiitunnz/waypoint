@@ -9,6 +9,7 @@ from codex_app_server.client import AppServerClient, AppServerConfig
 from pydantic import BaseModel, Field, field_validator
 
 from waypoint.claude_cli import ClaudeLaunchSpec
+from waypoint.claude_runtime import GATED_TOOLS_REGEX
 from waypoint.schemas import Backend
 
 SAFE_TILDE_HEAD = re.compile(r"~[A-Za-z0-9._-]*$")
@@ -141,7 +142,7 @@ def build_remote_claude_launch_factory(
             "hooks": {
                 "PreToolUse": [
                     {
-                        "matcher": "^(?:Bash|Edit|Write|MultiEdit|NotebookEdit|Task|WebFetch|WebSearch)$",
+                        "matcher": GATED_TOOLS_REGEX,
                         "hooks": [
                             {
                                 "type": "command",

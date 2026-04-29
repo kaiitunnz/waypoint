@@ -447,22 +447,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
             {session.source === "managed" ? "Managed" : "Attached"}
             {session.thread_id ? ` · thread ${session.thread_id}` : null}
           </p>
-          {modesForBackend(session.backend).length > 0 ? (
-            <label className="session-mode-control">
-              <span>Mode</span>
-              <select
-                value={session.permission_mode ?? "default"}
-                onChange={(event) => void handlePermissionModeChange(event.target.value)}
-                disabled={modeBusy}
-              >
-                {modesForBackend(session.backend).map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
         </header>
       ) : null}
       {error ? <p className="error">{error}</p> : null}
@@ -560,13 +544,17 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         <ApprovalCard event={pendingApproval} onDecide={submitApproval} />
       ) : null}
       <ReplyComposer
+        backend={session?.backend ?? null}
         canDelete={Boolean(session?.status === "exited")}
         canResume={canResume}
         canTerminate={Boolean(session && session.status !== "exited")}
         disabled={composerDisabled}
+        modeBusy={modeBusy}
+        permissionMode={session?.permission_mode ?? null}
         transport={session?.transport ?? null}
         onDelete={removeFromList}
         onInterrupt={interruptSession}
+        onModeChange={handlePermissionModeChange}
         onResume={resumeSession}
         onSend={submitInput}
         onTerminate={terminate}
@@ -576,26 +564,34 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
 }
 
 interface ReplyComposerProps {
+  backend: SessionRecord["backend"] | null;
   canDelete: boolean;
   canResume: boolean;
   canTerminate: boolean;
   disabled: boolean;
+  modeBusy: boolean;
+  permissionMode: string | null;
   transport: SessionTransport | null;
   onDelete: () => void | Promise<void>;
   onInterrupt: () => void | Promise<void>;
+  onModeChange: (mode: string) => void | Promise<void>;
   onResume: () => void | Promise<void>;
   onSend: (text: string) => Promise<boolean>;
   onTerminate: () => void | Promise<void>;
 }
 
 const ReplyComposer = memo(function ReplyComposer({
+  backend,
   canDelete,
   canResume,
   canTerminate,
   disabled,
+  modeBusy,
+  permissionMode,
   transport,
   onDelete,
   onInterrupt,
+  onModeChange,
   onResume,
   onSend,
   onTerminate,
@@ -689,8 +685,25 @@ const ReplyComposer = memo(function ReplyComposer({
     void handleSend();
   }
 
+  const modeOptions = backend ? modesForBackend(backend) : [];
   return (
     <section className="panel stack">
+      {modeOptions.length > 0 ? (
+        <label className="session-mode-control">
+          <span>Mode</span>
+          <select
+            value={permissionMode ?? "default"}
+            onChange={(event) => void onModeChange(event.target.value)}
+            disabled={modeBusy || disabled}
+          >
+            {modeOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <label className="field">
         <span>Reply</span>
         <div className="reply-textarea-wrap">

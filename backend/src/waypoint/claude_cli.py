@@ -321,6 +321,8 @@ class ClaudeCliAdapter:
     async def _exit_plan_mode_response(
         self, state: ClaudeSessionState, mapped: str
     ) -> dict[str, str]:
+        # Phrasing mirrors the Claude binary's own ExitPlanMode tool_result so
+        # the model sees the same approval/decline shape it was tuned for.
         if mapped == "allow":
             try:
                 await self.set_permission_mode(state.session_id, "default")
@@ -333,16 +335,15 @@ class ClaudeCliAdapter:
             return {
                 "permissionDecision": "deny",
                 "permissionDecisionReason": (
-                    "User has approved your plan via Waypoint. Plan mode is "
-                    "exited; proceed with implementation. Start with updating "
-                    "your todo list if applicable."
+                    "User has approved your plan. You can now start coding. "
+                    "Start with updating your todo list if applicable."
                 ),
             }
         return {
             "permissionDecision": "deny",
             "permissionDecisionReason": (
-                "User declined the plan via Waypoint. Stay in plan mode and "
-                "revise the plan, or wait for further direction."
+                "User declined your plan. Revise the plan based on any "
+                "feedback or wait for further direction."
             ),
         }
 

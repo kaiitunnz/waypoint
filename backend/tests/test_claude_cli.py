@@ -485,6 +485,7 @@ async def test_exit_plan_mode_approval_blocks_tool_and_switches_mode(
 
     assert decision["permissionDecision"] == "deny"
     assert "approved your plan" in decision["permissionDecisionReason"]
+    assert "start coding" in decision["permissionDecisionReason"]
     assert mode_calls == ["default"]
 
 
@@ -510,7 +511,7 @@ async def test_exit_plan_mode_decline_keeps_plan_mode() -> None:
     decision = await decision_task
 
     assert decision["permissionDecision"] == "deny"
-    assert "declined the plan" in decision["permissionDecisionReason"]
+    assert "declined your plan" in decision["permissionDecisionReason"]
     assert state.permission_mode == "plan"
 
 

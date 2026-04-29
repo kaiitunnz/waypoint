@@ -26,7 +26,7 @@ export default function SessionPage() {
       <header className="app-bar">
         <div className="app-bar-brand">
           <Link className="app-bar-mark" href="/" aria-label="Waypoint home">
-            <Image src="/icons/icon-192.png" alt="" width={38} height={38} priority />
+            <Image src="/waypoint.svg" alt="" width={38} height={38} priority />
           </Link>
           <div className="app-bar-titles">
             <p className="app-bar-eyebrow">Waypoint · session</p>

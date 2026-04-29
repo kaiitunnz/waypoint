@@ -1,0 +1,80 @@
+{
+  "fill" : {
+    "automatic-gradient" : "extended-gray:0.00000,1.00000",
+    "orientation" : {
+      "start" : {
+        "x" : 0.5,
+        "y" : 0
+      },
+      "stop" : {
+        "x" : 0.5,
+        "y" : 0.7
+      }
+    }
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "waypoint_ping.svg",
+          "name" : "waypoint_ping",
+          "position" : {
+            "scale" : 0.2,
+            "translation-in-points" : [
+              0.042498078514086046,
+              0.08619674832618784
+            ]
+          }
+        },
+        {
+          "image-name" : "waypoint_terminal.svg",
+          "name" : "waypoint_terminal",
+          "position" : {
+            "scale" : 0.2,
+            "translation-in-points" : [
+              0.001724977749631762,
+              -109.29016010882287
+            ]
+          }
+        },
+        {
+          "image-name" : "waypoint_back.svg",
+          "name" : "waypoint_back",
+          "position" : {
+            "scale" : 0.2,
+            "translation-in-points" : [
+              0.042498078514086046,
+              -40.513803251673835
+            ]
+          }
+        },
+        {
+          "image-name" : "waypoint_base.svg",
+          "name" : "waypoint_base",
+          "position" : {
+            "scale" : 0.2,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "name" : "Group",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}

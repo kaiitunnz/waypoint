@@ -254,7 +254,17 @@ pre {
 .launch-grid {
   display: grid;
   gap: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 720px) {
+  .launch-grid {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  }
+
+  .launch-grid > .import-thread-panel {
+    grid-column: 1 / -1;
+  }
 }
 
 .import-thread-header {

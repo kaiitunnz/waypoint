@@ -164,7 +164,7 @@ export function LaunchPanel({
         </button>
       </form>
       {supportedBackends.includes("codex") ? (
-        <section className="panel stack">
+        <section className="panel stack import-thread-panel">
           <div className="field-row import-thread-header">
             <div className="import-thread-summary">
               <h3>Import Codex thread</h3>

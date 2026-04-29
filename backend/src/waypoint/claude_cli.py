@@ -725,6 +725,12 @@ class ClaudeCliAdapter:
             elif block_type == "tool_use":
                 tool_use_id = str(block.get("id") or "")
                 tool_name = block.get("name") or "tool"
+                if tool_name == "ExitPlanMode":
+                    # The plan is rendered as a markdown agent_output text
+                    # block above and the approval card represents the gate —
+                    # an extra tool_call disclosure with the JSON payload is
+                    # noise.
+                    continue
                 input_text = json.dumps(block.get("input") or {}, indent=2)
                 await self._emit_event(
                     state.session_id,
@@ -840,8 +846,9 @@ class ClaudeCliAdapter:
             path = tool_input.get("file_path") or tool_input.get("path") or ""
             return f"Approve {tool_name} on {path}"
         if tool_name == "ExitPlanMode":
-            plan = tool_input.get("plan") or ""
-            return f"Approve plan and exit plan mode:\n\n{plan}"
+            # Plan text is already rendered as a markdown agent_output above
+            # this card — keep this prompt compact to avoid duplication.
+            return "Approve plan and exit plan mode"
         return f"Approve {tool_name}: {json.dumps(tool_input)[:240]}"
 
     def _stringify_tool_result(self, content: Any) -> str:

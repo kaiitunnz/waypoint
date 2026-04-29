@@ -392,3 +392,45 @@ async def test_await_approval_accept_edits_only_auto_allows_edit_tools() -> None
     )
     bash_decision = await bash_task
     assert bash_decision["permissionDecision"] == "deny"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_assistant_skips_exit_plan_mode_tool_call() -> None:
+    """Plan text already renders as agent_output; ExitPlanMode tool_call would
+    duplicate it and the approval card represents the gate."""
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    plan_text = "## Plan\n\n1. Read files\n2. Apply edits"
+    event = {
+        "type": "assistant",
+        "message": {
+            "id": "msg_plan",
+            "content": [
+                {"type": "text", "text": plan_text},
+                {
+                    "type": "tool_use",
+                    "id": "toolu_plan",
+                    "name": "ExitPlanMode",
+                    "input": {"plan": plan_text},
+                },
+            ],
+        },
+    }
+    await adapter._dispatch(state, event)
+    kinds = [item[1] for item in emitted]
+    assert kinds == [EventKind.AGENT_OUTPUT]
+    assert emitted[0][2] == plan_text
+
+
+def test_format_approval_text_omits_plan_body() -> None:
+    """Approval card stays compact; the plan is rendered above as agent_output."""
+    adapter = _make_adapter([])
+    text = adapter._format_approval_text(
+        {
+            "tool_name": "ExitPlanMode",
+            "tool_input": {"plan": "## Plan\n\n1. Step one"},
+        }
+    )
+    assert text == "Approve plan and exit plan mode"
+    assert "Step one" not in text

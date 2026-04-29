@@ -1968,7 +1968,7 @@ details.tool-disclosure[open] .tool-glyph.todo {
   z-index: 5;
   display: flex;
   justify-content: flex-end;
-  padding-right: 4px;
+  padding-right: 12px;
   pointer-events: none;
   margin-bottom: -38px;
 }

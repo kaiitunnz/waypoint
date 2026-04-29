@@ -213,6 +213,47 @@ async def test_respond_to_approval_returns_false_when_idle() -> None:
 
 
 @pytest.mark.asyncio
+async def test_compact_thread_invokes_sdk_and_drains_until_compacted() -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    fake.calls.clear()
+
+    def thread_compact(thread_id: str):
+        fake.calls.append(("thread_compact", (thread_id,)))
+        return {}
+
+    fake.thread_compact = thread_compact
+
+    await adapter.compact_thread("sess")
+    state = adapter._sessions["sess"]
+    assert ("thread_compact", ("thread-1",)) in fake.calls
+    assert state.stream_task is not None
+
+    await fake.notifications.put(
+        FakeNotification(method="thread/compacted", payload={})
+    )
+    await state.stream_task
+    assert state.stream_task is None
+    kinds = [item[1] for item in emitted]
+    assert EventKind.SYSTEM_NOTE in kinds
+    assert any("compacted" in item[2].lower() for item in emitted)
+
+
+@pytest.mark.asyncio
+async def test_compact_thread_rejects_when_turn_active() -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    adapter._sessions["sess"].active_turn_id = "turn-9"
+
+    with pytest.raises(
+        RuntimeError, match="cannot compact while a codex turn is active"
+    ):
+        await adapter.compact_thread("sess")
+
+
+@pytest.mark.asyncio
 async def test_restore_session_calls_thread_resume() -> None:
     emitted: list = []
     adapter, fake = make_adapter(emitted)

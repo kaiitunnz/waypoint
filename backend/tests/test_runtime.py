@@ -134,6 +134,55 @@ async def test_handle_input_builtin_permissions_reports_pending_approval(
 
 
 @pytest.mark.asyncio
+async def test_handle_input_builtin_compact_forwards_to_claude_cli(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeStructuredAdapter()
+    runtime.claude = cast(Any, fake)
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend=Backend.CLAUDE_CODE,
+        transport=SessionTransport.CLAUDE_CLI,
+    )
+    storage.create_session(session)
+
+    await runtime.handle_input("claude-sess", SessionInputRequest(text="/compact"))
+
+    # Claude's CLI handles /compact itself in stream-json mode, so the runtime
+    # forwards the text to the adapter as-is rather than intercepting.
+    assert fake.inputs == [("claude-sess", "/compact")]
+
+
+@pytest.mark.asyncio
+async def test_handle_input_builtin_compact_invokes_codex_thread_compact(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+
+    class CodexFake(FakeStructuredAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.compact_calls: list[str] = []
+
+        async def compact_thread(self, session_id: str) -> None:
+            self.compact_calls.append(session_id)
+
+    fake = CodexFake()
+    runtime.codex = cast(Any, fake)
+    session = make_session(settings)
+    storage.create_session(session)
+
+    updated = await runtime.handle_input("sess", SessionInputRequest(text="/compact"))
+
+    assert fake.compact_calls == ["sess"]
+    assert fake.inputs == []
+    assert updated.status == SessionStatus.RUNNING
+    events = storage.list_events("sess")
+    assert events[-1].metadata["builtin_command"] == "/compact"
+    assert "Compacting codex thread" in events[-1].text
+
+
+@pytest.mark.asyncio
 async def test_handle_input_unknown_slash_command_forwards_to_structured_session(
     tmp_path,
 ) -> None:

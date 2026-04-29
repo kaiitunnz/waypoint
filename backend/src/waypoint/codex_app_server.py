@@ -185,6 +185,22 @@ class CodexAppServerAdapter:
             state, state.client.turn_interrupt, state.thread_id, state.active_turn_id
         )
 
+    async def compact_thread(self, session_id: str) -> None:
+        """Issue thread/compact/start and stream resulting notifications.
+
+        Compaction is rejected by the codex app-server while a turn is in
+        flight, so callers must interrupt first. Drains notifications until
+        a `thread/compacted` (or `turn/completed`) arrives so progress events
+        and the final marker show up in the transcript.
+        """
+        state = self._require_session(session_id)
+        if state.active_turn_id is not None:
+            raise RuntimeError(
+                "cannot compact while a codex turn is active; interrupt first"
+            )
+        await self._call_client(state, state.client.thread_compact, state.thread_id)
+        state.stream_task = asyncio.create_task(self._stream_compact(state))
+
     async def respond_to_approval(self, session_id: str, decision: str) -> bool:
         state = self._require_session(session_id)
         pending = state.pending_approval
@@ -297,6 +313,47 @@ class CodexAppServerAdapter:
                 SessionStatus.ERROR,
             )
 
+    async def _stream_compact(self, state: CodexSessionState) -> None:
+        try:
+            while True:
+                notification = await self._call_client(
+                    state, state.client.next_notification
+                )
+                payload = self._payload_to_dict(notification.payload)
+                kind, text, status = self._map_notification(
+                    notification.method, payload
+                )
+                if kind is not None and text:
+                    metadata: dict[str, Any] = {
+                        "method": notification.method,
+                        "payload": payload,
+                        "status": status,
+                    }
+                    item_id = self._extract_item_id(payload)
+                    if item_id is not None:
+                        metadata["item_id"] = item_id
+                    await self._emit_event(
+                        state.session_id, kind, text, metadata, status
+                    )
+                if notification.method in {"thread/compacted", "turn/completed"}:
+                    state.stream_task = None
+                    break
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            state.stream_task = None
+            log.exception(
+                "codex compact stream failed",
+                extra={"session_id": state.session_id, "thread_id": state.thread_id},
+            )
+            await self._emit_event(
+                state.session_id,
+                EventKind.SYSTEM_NOTE,
+                f"Codex compact stream failed: {exc}",
+                {"status": SessionStatus.ERROR},
+                SessionStatus.ERROR,
+            )
+
     async def _call_client(
         self, state: CodexSessionState, func: Callable[..., Any], *args: Any
     ) -> Any:
@@ -346,6 +403,12 @@ class CodexAppServerAdapter:
                 EventKind.SYSTEM_NOTE,
                 f"Turn {turn.get('status', 'completed')}",
                 status,
+            )
+        if method == "thread/compacted":
+            return (
+                EventKind.SYSTEM_NOTE,
+                "Codex thread compacted",
+                SessionStatus.IDLE,
             )
         if method == "item/started":
             item = self._extract_item(payload)

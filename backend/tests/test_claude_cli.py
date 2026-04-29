@@ -252,6 +252,71 @@ async def test_send_input_reports_dead_process_with_stderr_tail() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dispatch_system_status_compacting_emits_running_note() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    await adapter._dispatch(
+        state,
+        {
+            "type": "system",
+            "subtype": "status",
+            "status": "compacting",
+            "session_id": "claude-uuid",
+        },
+    )
+    assert emitted, "expected an event"
+    item = emitted[-1]
+    assert item[1] == EventKind.SYSTEM_NOTE
+    assert "Compacting" in item[2]
+    assert item[4] == SessionStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_dispatch_system_status_compact_result_emits_idle_note() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    await adapter._dispatch(
+        state,
+        {
+            "type": "system",
+            "subtype": "status",
+            "status": None,
+            "compact_result": "success",
+            "session_id": "claude-uuid",
+        },
+    )
+    assert emitted[-1][1] == EventKind.SYSTEM_NOTE
+    assert "compaction success" in emitted[-1][2].lower()
+    assert emitted[-1][4] == SessionStatus.IDLE
+
+
+@pytest.mark.asyncio
+async def test_dispatch_compact_boundary_renders_token_summary() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    await adapter._dispatch(
+        state,
+        {
+            "type": "system",
+            "subtype": "compact_boundary",
+            "session_id": "claude-uuid",
+            "compact_metadata": {
+                "trigger": "manual",
+                "pre_tokens": 27000,
+                "post_tokens": 1200,
+                "duration_ms": 23000,
+            },
+        },
+    )
+    assert emitted[-1][1] == EventKind.SYSTEM_NOTE
+    assert "27000 → 1200" in emitted[-1][2]
+    assert "manual" in emitted[-1][2]
+
+
+@pytest.mark.asyncio
 async def test_watch_process_emits_error_event_with_stderr_tail() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)

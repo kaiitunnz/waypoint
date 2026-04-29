@@ -515,6 +515,36 @@ class ClaudeCliAdapter:
                     return
                 # Decision flowed through; do not emit anything extra.
             return
+        if subtype == "status":
+            # /compact and similar CLI commands surface their lifecycle here.
+            text, status = self._format_status_event(event)
+            if text:
+                await self._emit_event(
+                    state.session_id,
+                    EventKind.SYSTEM_NOTE,
+                    text,
+                    {
+                        "method": "system.status",
+                        "payload": event,
+                        "status": status,
+                    },
+                    status,
+                )
+            return
+        if subtype == "compact_boundary":
+            metadata = event.get("compact_metadata") or {}
+            await self._emit_event(
+                state.session_id,
+                EventKind.SYSTEM_NOTE,
+                self._format_compact_boundary(metadata),
+                {
+                    "method": "system.compact_boundary",
+                    "payload": event,
+                    "status": SessionStatus.IDLE,
+                },
+                SessionStatus.IDLE,
+            )
+            return
         # Anything else — stash as system note.
         await self._emit_event(
             state.session_id,
@@ -625,6 +655,34 @@ class ClaudeCliAdapter:
             },
             SessionStatus.ERROR if is_error else SessionStatus.IDLE,
         )
+
+    def _format_status_event(self, event: dict[str, Any]) -> tuple[str, SessionStatus]:
+        status_label = event.get("status")
+        compact_result = event.get("compact_result")
+        if status_label == "compacting":
+            return "Compacting context…", SessionStatus.RUNNING
+        if compact_result is not None:
+            return (
+                f"Context compaction {compact_result}",
+                (
+                    SessionStatus.IDLE
+                    if compact_result == "success"
+                    else SessionStatus.ERROR
+                ),
+            )
+        return "", SessionStatus.RUNNING
+
+    def _format_compact_boundary(self, metadata: dict[str, Any]) -> str:
+        pre = metadata.get("pre_tokens")
+        post = metadata.get("post_tokens")
+        duration_ms = metadata.get("duration_ms")
+        trigger = metadata.get("trigger") or "manual"
+        parts = [f"Context compacted ({trigger})"]
+        if pre is not None and post is not None:
+            parts.append(f"{pre} → {post} tokens")
+        if duration_ms is not None:
+            parts.append(f"{duration_ms} ms")
+        return " · ".join(parts)
 
     def _format_rate_limit(self, info: dict[str, Any]) -> str:
         status = info.get("status", "unknown")

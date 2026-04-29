@@ -594,6 +594,33 @@ class SessionRuntime:
                 metadata={"builtin_command": name},
             )
             return self.get_session(session.id)
+        if name == "/compact":
+            # Codex exposes thread/compact/start over the app-server SDK;
+            # route through it instead of forwarding the literal text. Claude's
+            # CLI handles `/compact` itself in stream-json mode, so let it fall
+            # through to send_input below.
+            if session.backend == Backend.CODEX:
+                try:
+                    await self.codex.compact_thread(session.id)
+                except Exception as exc:  # noqa: BLE001
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+                    ) from exc
+                await self._record_user_event(
+                    session.id,
+                    request.text,
+                    submit=request.submit,
+                    status=session.status,
+                )
+                await self._record_system_event(
+                    session.id,
+                    "Compacting codex thread…",
+                    status=SessionStatus.RUNNING,
+                    metadata={"builtin_command": name},
+                )
+                return self.storage.update_session(
+                    session.id, status=SessionStatus.RUNNING
+                )
         if name == "/help":
             await self._record_user_event(
                 session.id,
@@ -603,7 +630,7 @@ class SessionRuntime:
             )
             await self._record_system_event(
                 session.id,
-                "Supported built-in commands: /help, /status, /permissions",
+                "Supported built-in commands: /help, /status, /permissions, /compact",
                 status=session.status,
                 metadata={"builtin_command": name},
             )

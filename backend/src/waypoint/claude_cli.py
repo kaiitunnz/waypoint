@@ -154,6 +154,10 @@ class ClaudeSessionState:
         default_factory=dict
     )
     permission_mode: str = "default"
+    # Mode the session was in immediately before transitioning into "plan".
+    # ExitPlanMode approval restores this so users who were in (e.g.)
+    # acceptEdits before opening a plan don't get bumped down to default.
+    pre_plan_mode: str | None = None
     last_plan_path: str | None = None
     closing: bool = False
 
@@ -230,9 +234,14 @@ class ClaudeCliAdapter:
             {"subtype": "set_permission_mode", "mode": mode},
         )
         # Mirror the new mode locally so await_approval can short-circuit
-        # without consulting the database on every PreToolUse hit.
+        # without consulting the database on every PreToolUse hit. When
+        # transitioning into plan from any other mode, also record the
+        # outgoing mode so ExitPlanMode approval can restore it instead of
+        # always dropping to default.
         state = self._sessions.get(session_id)
         if state is not None:
+            if mode == "plan" and state.permission_mode != "plan":
+                state.pre_plan_mode = state.permission_mode
             state.permission_mode = mode
 
     async def _send_control_request(
@@ -431,8 +440,12 @@ class ClaudeCliAdapter:
         # including the saved-plan path and the approved plan body, since
         # plan mode was tuned around that exact context.
         if mapped == "allow":
+            target_mode = state.pre_plan_mode or "default"
+            if target_mode == "plan":
+                target_mode = "default"
+            state.pre_plan_mode = None
             try:
-                await self.set_permission_mode(state.session_id, "default")
+                await self.set_permission_mode(state.session_id, target_mode)
             except (ClaudeCliError, TimeoutError) as exc:
                 log.warning(
                     "claude set_permission_mode after plan approval failed: %s",

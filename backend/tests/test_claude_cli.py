@@ -643,6 +643,71 @@ async def test_exit_plan_mode_approval_blocks_tool_and_switches_mode(
 
 
 @pytest.mark.asyncio
+async def test_exit_plan_mode_restores_pre_plan_mode(monkeypatch) -> None:
+    """If the user was in (e.g.) acceptEdits before toggling plan mode,
+    approving the plan should drop them back into acceptEdits — not the
+    fallback default."""
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    state.permission_mode = "plan"
+    state.pre_plan_mode = "acceptEdits"
+
+    mode_calls: list[str] = []
+
+    async def fake_set_mode(session_id: str, mode: str) -> None:
+        mode_calls.append(mode)
+        state.permission_mode = mode
+
+    monkeypatch.setattr(adapter, "set_permission_mode", fake_set_mode)
+
+    payload = {
+        "waypoint_session_id": "sess",
+        "tool_use_id": "toolu_plan",
+        "tool_name": "ExitPlanMode",
+        "tool_input": {"plan": "## Plan"},
+    }
+    task = asyncio.create_task(adapter.await_approval(payload))
+    for _ in range(50):
+        if adapter.has_pending_approval("sess"):
+            break
+        await asyncio.sleep(0.01)
+    await adapter.respond_to_approval("sess", "approve")
+    await task
+
+    assert mode_calls == ["acceptEdits"]
+    # pre_plan_mode is consumed; subsequent plan toggles will record fresh.
+    assert state.pre_plan_mode is None
+
+
+@pytest.mark.asyncio
+async def test_set_permission_mode_records_pre_plan_mode() -> None:
+    """Switching from non-plan to plan must capture the outgoing mode so
+    ExitPlanMode approval can restore it."""
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    state.permission_mode = "acceptEdits"
+
+    captured: list[dict] = []
+
+    async def fake_send(session_id: str, request_id: str, request: dict) -> dict:
+        captured.append(request)
+        return {"subtype": "ack"}
+
+    # Bypass the real control_request round-trip.
+    object.__setattr__(adapter, "_send_control_request", fake_send)
+
+    await adapter.set_permission_mode("sess", "plan")
+    assert state.pre_plan_mode == "acceptEdits"
+    assert state.permission_mode == "plan"
+
+    # Toggling plan -> plan must not overwrite the recorded prior mode.
+    await adapter.set_permission_mode("sess", "plan")
+    assert state.pre_plan_mode == "acceptEdits"
+
+
+@pytest.mark.asyncio
 async def test_exit_plan_mode_decline_keeps_plan_mode() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)

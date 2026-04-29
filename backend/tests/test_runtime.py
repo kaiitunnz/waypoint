@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -7,6 +8,7 @@ from waypoint.config import Settings
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     Backend,
+    CodexThreadImportRequest,
     EventKind,
     SessionCreateRequest,
     SessionInputRequest,
@@ -49,6 +51,24 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         return claude_session_id
 
 
+class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.restore_calls: list[tuple[str, str, str, str | None, Any]] = []
+
+    async def restore_session(
+        self,
+        session_id: str,
+        cwd: str,
+        thread_id: str,
+        remote_cwd: str | None = None,
+        client_factory_override: Any = None,
+    ) -> None:
+        self.restore_calls.append(
+            (session_id, cwd, thread_id, remote_cwd, client_factory_override)
+        )
+
+
 def make_runtime(tmp_path) -> tuple[SessionRuntime, Storage, Settings]:
     settings = Settings(data_dir=tmp_path / "data")
     settings.ensure_dirs()
@@ -76,6 +96,20 @@ def make_session(settings: Settings, **overrides) -> SessionRecord:
         thread_id=overrides.get("thread_id", "thread-1"),
         raw_log_path=str(session_dir / "raw.log"),
         structured_log_path=str(session_dir / "events.jsonl"),
+    )
+
+
+def make_thread(**overrides: Any) -> Any:
+    git_info = overrides.pop("git_info", None)
+    return SimpleNamespace(
+        id=overrides.pop("id", "thread-1"),
+        name=overrides.pop("name", None),
+        preview=overrides.pop("preview", "Fix flaky test"),
+        cwd=overrides.pop("cwd", "/tmp/project"),
+        created_at=overrides.pop("created_at", 1_700_000_000),
+        updated_at=overrides.pop("updated_at", 1_700_000_300),
+        ephemeral=overrides.pop("ephemeral", False),
+        git_info=git_info,
     )
 
 
@@ -268,3 +302,95 @@ async def test_create_session_uses_structured_claude_for_ssh_target(
             "remote-launch-factory",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_list_importable_codex_threads_filters_existing_session(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    storage.create_session(make_session(settings, thread_id="thread-1"))
+    thread_one = make_thread(id="thread-1", name="Existing")
+    thread_two = make_thread(
+        id="thread-2",
+        name=None,
+        preview="Investigate remote import support",
+        cwd="/tmp/other-project",
+        git_info=SimpleNamespace(
+            branch="feature/import", origin_url="git@github.com:acme/other-project.git"
+        ),
+    )
+
+    async def fake_run(launch_target_id, operation, **kwargs):
+        return [thread_one, thread_two]
+
+    monkeypatch.setattr(runtime, "_run_codex_client_operation", fake_run)
+
+    threads = await runtime.list_importable_codex_threads()
+
+    assert [thread.id for thread in threads] == ["thread-2"]
+    assert threads[0].title == "Investigate remote import support"
+    assert threads[0].repo_name == "other-project"
+    assert threads[0].branch == "feature/import"
+
+
+@pytest.mark.asyncio
+async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
+    monkeypatch, tmp_path
+) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        ssh_targets=[
+            SshLaunchTargetConfig(
+                id="devbox",
+                name="Devbox",
+                ssh_destination="dev@example.com",
+                supported_backends=[Backend.CODEX],
+                default_remote_cwd="~/workspace",
+            )
+        ],
+    )
+    settings.ensure_dirs()
+    storage = Storage(settings.database_path)
+    runtime = SessionRuntime(settings, storage)
+    fake = FakeCodexRuntimeAdapter()
+    runtime.codex = cast(Any, fake)
+    thread = make_thread(
+        id="thread-9",
+        name="Existing remote thread",
+        cwd="/srv/worktree/project",
+        git_info=SimpleNamespace(
+            branch="main", origin_url="ssh://git.example.com/team/project.git"
+        ),
+    )
+
+    async def fake_read(thread_id: str, launch_target_id: str | None) -> Any:
+        assert thread_id == "thread-9"
+        assert launch_target_id == "devbox"
+        return thread
+
+    monkeypatch.setattr(runtime, "_read_codex_thread", fake_read)
+    monkeypatch.setattr(runtime, "_codex_client_factory", lambda launch_target_id: "remote-factory")
+
+    session = await runtime.import_codex_thread(
+        CodexThreadImportRequest(thread_id="thread-9", launch_target_id="devbox")
+    )
+
+    assert session.transport == SessionTransport.CODEX_APP_SERVER
+    assert session.cwd == "/srv/worktree/project"
+    assert session.remote_cwd == "/srv/worktree/project"
+    assert session.launch_target_id == "devbox"
+    assert session.repo_name == "project"
+    assert session.branch == "main"
+    assert fake.restore_calls == [
+        (
+            session.id,
+            "/srv/worktree/project",
+            "thread-9",
+            "/srv/worktree/project",
+            "remote-factory",
+        )
+    ]
+    events = storage.list_events(session.id)
+    assert events[-1].kind == EventKind.SYSTEM_NOTE
+    assert "Imported stored Codex thread via SSH target Devbox" in events[-1].text

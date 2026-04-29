@@ -24,7 +24,7 @@ ApprovalCallback = Callable[[str, dict[str, Any] | None], dict[str, Any]]
 ClientFactory = Callable[[str, str | None, ApprovalCallback], AppServerClient]
 
 
-def _default_client_factory(
+def default_client_factory(
     cwd: str, remote_cwd: str | None, approval_handler: ApprovalCallback
 ) -> AppServerClient:
     codex_bin = shutil.which("codex")
@@ -70,7 +70,7 @@ class CodexAppServerAdapter:
         client_factory: ClientFactory | None = None,
     ) -> None:
         self._emit_event = emit_event
-        self._client_factory = client_factory or _default_client_factory
+        self._client_factory = client_factory or default_client_factory
         self._sessions: dict[str, CodexSessionState] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
 

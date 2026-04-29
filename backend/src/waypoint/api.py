@@ -21,6 +21,7 @@ from waypoint.claude_runtime import ensure_claude_hook_bundle
 from waypoint.config import Settings, load_settings
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
+    CodexThreadImportRequest,
     LoginRequest,
     MeResponse,
     ScheduleCreateRequest,
@@ -129,12 +130,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ]
         return {"sessions": sessions}
 
+    @app.get("/api/codex/threads")
+    async def list_codex_threads(
+        _: Annotated[str, Depends(token_dependency())],
+        launch_target_id: Annotated[str | None, Query()] = None,
+    ) -> Any:
+        threads = [
+            thread.model_dump(mode="json")
+            for thread in await context.runtime.list_importable_codex_threads(
+                launch_target_id
+            )
+        ]
+        return {"threads": threads}
+
     @app.post("/api/sessions")
     async def create_session(
         request: SessionCreateRequest,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         session = await context.runtime.create_session(request)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.post("/api/sessions/import-codex")
+    async def import_codex_thread(
+        request: CodexThreadImportRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.import_codex_thread(request)
         return {"session": session.model_dump(mode="json")}
 
     @app.get("/api/sessions/{session_id}")

@@ -14,6 +14,24 @@ Waypoint is a personal remote-control companion for Claude Code and Codex sessio
 - `frontend/` — Next.js PWA client
 - `3rdparty/codex/` — pinned Codex submodule used for the local app-server SDK
 
+## Supported agent versions
+
+Waypoint speaks to Claude Code and Codex through wire formats that change between releases (stream-json envelopes, codex app-server RPCs, hook-event shapes). Bumps outside the tested range are likely to work but are not guaranteed.
+
+| Agent       | Tested versions   | Wire entry point                                                     | Notes                                                                                       |
+| ----------- | ----------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Claude Code | `2.1.123`         | `claude -p --input-format=stream-json --output-format=stream-json`   | Relies on `--include-hook-events`, the `system/status`/`compact_boundary` events, and `--session-id`/`--resume`. |
+| Codex CLI   | `0.125.0`         | `codex app-server --listen stdio://`                                 | Driven via the vendored Python SDK in `3rdparty/codex/sdk/python` (`thread_*` / `turn_*` RPCs). |
+| Codex SDK   | `0.116.0a1`       | `3rdparty/codex/` submodule pin                                      | Bumped together with Codex CLI; track via `git submodule update --remote 3rdparty/codex`.   |
+
+To extend this matrix:
+
+1. Update the row above with the new tested version.
+2. Re-run the integration paths that touch the wire format:
+   - Claude: `backend/src/waypoint/claude_cli.py` event dispatch (`_handle_system`, `_handle_assistant`, `_handle_user`, `_handle_result`) and the hook bootstrap in `backend/src/waypoint/server_config.py::_build_remote_claude_command`.
+   - Codex: `backend/src/waypoint/codex_app_server.py::_map_notification` and the SDK calls in `CodexAppServerAdapter`.
+3. If a bump breaks an event shape, prefer adding a branch in `_map_notification` / `_handle_*` over hard-pinning — the goal is for the matrix to grow, not to fork on version.
+
 ## Quick start
 
 Initialize the Codex submodule before syncing backend dependencies:

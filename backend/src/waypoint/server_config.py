@@ -122,12 +122,15 @@ def build_remote_claude_launch_factory(
     hook_script_path: Path,
     hook_secret: str,
     local_backend_port: int,
-    permission_mode: str = "default",
 ):
     hook_script = hook_script_path.read_text(encoding="utf-8")
 
     def factory(
-        session_id: str, cwd: str, claude_session_id: str, resume: bool
+        session_id: str,
+        cwd: str,
+        claude_session_id: str,
+        resume: bool,
+        cli_mode: str,
     ) -> ClaudeLaunchSpec:
         remote_cwd = cwd or target.default_remote_cwd
         reverse_port = _random_reverse_tunnel_port()
@@ -157,7 +160,7 @@ def build_remote_claude_launch_factory(
             "--include-hook-events",
             "--verbose",
             "--permission-mode",
-            permission_mode,
+            cli_mode,
         ]
         if resume:
             claude_args.extend(["--resume", claude_session_id])

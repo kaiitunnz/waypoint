@@ -365,6 +365,7 @@ class SessionRuntime:
             thread_id=thread.id,
             raw_log_path=str(raw_log),
             structured_log_path=str(structured_log),
+            permission_mode="default",
         )
         self.storage.create_session(session)
         try:
@@ -454,6 +455,7 @@ class SessionRuntime:
                 last_event_at=datetime.now(UTC),
                 raw_log_path=str(raw_log),
                 structured_log_path=str(structured_log),
+                permission_mode="default",
             )
             self.storage.create_session(session)
             try:
@@ -496,6 +498,7 @@ class SessionRuntime:
                 thread_id=claude_session_id,
                 raw_log_path=str(raw_log),
                 structured_log_path=str(structured_log),
+                permission_mode="default",
             )
             self.storage.create_session(session)
             try:

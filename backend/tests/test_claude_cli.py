@@ -9,6 +9,7 @@ from waypoint.claude_cli import (
     DEFAULT_TIMEOUT_SECONDS,
     ClaudeCliAdapter,
     ClaudeSessionState,
+    claude_cli_mode_for,
 )
 from waypoint.schemas import EventKind, SessionStatus
 
@@ -434,3 +435,31 @@ def test_format_approval_text_omits_plan_body() -> None:
     )
     assert text == "Approve plan and exit plan mode"
     assert "Step one" not in text
+
+
+def test_claude_cli_mode_for_maps_waypoint_to_cli_values() -> None:
+    """Native Claude modes pass through; auto/dontAsk are Waypoint-only and
+    fall back to default so the binary launches in a recognizable state."""
+    assert claude_cli_mode_for("default") == "default"
+    assert claude_cli_mode_for("plan") == "plan"
+    assert claude_cli_mode_for("acceptEdits") == "acceptEdits"
+    assert claude_cli_mode_for("bypassPermissions") == "bypassPermissions"
+    assert claude_cli_mode_for("auto") == "default"
+    assert claude_cli_mode_for("dontAsk") == "default"
+    assert claude_cli_mode_for("garbage") == "default"
+
+
+def test_build_local_launch_spec_uses_session_cli_mode(monkeypatch) -> None:
+    monkeypatch.setattr("waypoint.claude_cli.shutil.which", lambda _: "/usr/bin/claude")
+    adapter = _make_adapter([])
+    spec = adapter._build_local_launch_spec(
+        "sess",
+        "/tmp",
+        "claude-uuid",
+        resume=False,
+        cli_mode="plan",
+    )
+    args = spec.args
+    assert "--permission-mode" in args
+    idx = args.index("--permission-mode")
+    assert args[idx + 1] == "plan"

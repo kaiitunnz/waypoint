@@ -213,7 +213,9 @@ def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
         hook_secret="secret-123",
         local_backend_port=8787,
     )
-    launch = factory("claude-sess", "~/workspace", "claude-uuid", resume=True)
+    launch = factory(
+        "claude-sess", "~/workspace", "claude-uuid", resume=True, cli_mode="plan"
+    )
 
     assert launch.cwd is None
     assert launch.env is None
@@ -244,3 +246,4 @@ def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
     assert "OPENAI_API_KEY=sk-test" in remote_command
     assert "/opt/claude/bin/claude -p" in remote_command
     assert "--resume claude-uuid" in remote_command
+    assert "--permission-mode plan" in remote_command

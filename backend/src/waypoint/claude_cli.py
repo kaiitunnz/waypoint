@@ -46,12 +46,24 @@ def _auto_approve_for_mode(mode: str, tool_name: object) -> dict[str, str] | Non
     return None
 
 
+# Maps a Waypoint per-session mode to the value the Claude CLI accepts on
+# `--permission-mode`. `auto` and `dontAsk` are Waypoint-side hook
+# short-circuits with no Claude equivalent — we launch Claude in `default`
+# and let the hook auto-allow gated tools.
+def claude_cli_mode_for(mode: str) -> str:
+    if mode in {"auto", "dontAsk"}:
+        return "default"
+    if mode in CLAUDE_PERMISSION_MODES:
+        return mode
+    return "default"
+
+
 EmitEvent = Callable[
     [str, EventKind, str, dict[str, Any], SessionStatus],
     Coroutine[Any, Any, None],
 ]
 LaunchFactory = Callable[
-    [str, str, str, bool],
+    [str, str, str, bool, str],
     "ClaudeLaunchSpec",
 ]
 
@@ -127,7 +139,6 @@ class ClaudeCliAdapter:
         hook_secret: str,
         hook_url: str,
         binary: str | None = None,
-        permission_mode: str = "default",
         launch_factory: LaunchFactory | None = None,
     ) -> None:
         self._emit_event = emit_event
@@ -135,7 +146,6 @@ class ClaudeCliAdapter:
         self._hook_secret = hook_secret
         self._hook_url = hook_url
         self._binary = binary
-        self._permission_mode = permission_mode
         self._launch_factory = launch_factory
         self._sessions: dict[str, ClaudeSessionState] = {}
         self._approval_lock = asyncio.Lock()
@@ -421,13 +431,17 @@ class ClaudeCliAdapter:
         launch_factory_override: LaunchFactory | None = None,
         permission_mode: str | None = None,
     ) -> ClaudeSessionState:
+        resolved_mode = (
+            permission_mode if permission_mode in CLAUDE_PERMISSION_MODES else "default"
+        )
+        cli_mode = claude_cli_mode_for(resolved_mode)
         launch_factory = launch_factory_override or self._launch_factory
         if launch_factory is None:
             spec = self._build_local_launch_spec(
-                session_id, cwd, claude_session_id, resume
+                session_id, cwd, claude_session_id, resume, cli_mode
             )
         else:
-            spec = launch_factory(session_id, cwd, claude_session_id, resume)
+            spec = launch_factory(session_id, cwd, claude_session_id, resume, cli_mode)
         process = await asyncio.create_subprocess_exec(
             *spec.args,
             cwd=spec.cwd,
@@ -444,11 +458,7 @@ class ClaudeCliAdapter:
             stdout_task=asyncio.create_task(asyncio.sleep(0)),  # placeholder
             stderr_task=asyncio.create_task(asyncio.sleep(0)),
             wait_task=asyncio.create_task(asyncio.sleep(0)),
-            permission_mode=(
-                permission_mode
-                if permission_mode in CLAUDE_PERMISSION_MODES
-                else "default"
-            ),
+            permission_mode=resolved_mode,
         )
         state.stdout_task = asyncio.create_task(self._read_stdout(state))
         state.stderr_task = asyncio.create_task(self._read_stderr(state))
@@ -457,7 +467,12 @@ class ClaudeCliAdapter:
         return state
 
     def _build_local_launch_spec(
-        self, session_id: str, cwd: str, claude_session_id: str, resume: bool
+        self,
+        session_id: str,
+        cwd: str,
+        claude_session_id: str,
+        resume: bool,
+        cli_mode: str,
     ) -> ClaudeLaunchSpec:
         binary = self._binary or shutil.which("claude")
         if binary is None:
@@ -473,7 +488,7 @@ class ClaudeCliAdapter:
             "--settings",
             str(self._hook_settings_path),
             "--permission-mode",
-            self._permission_mode,
+            cli_mode,
         ]
         if resume:
             args.extend(["--resume", claude_session_id])

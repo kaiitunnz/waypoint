@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -324,7 +325,9 @@ export default function HomePage() {
     <main className="page-shell">
       <header className="app-bar">
         <div className="app-bar-brand">
-          <div className="app-bar-mark" aria-hidden="true">W</div>
+          <div className="app-bar-mark" aria-hidden="true">
+            <Image src="/icons/icon-192.png" alt="" width={38} height={38} priority />
+          </div>
           <div className="app-bar-titles">
             <p className="app-bar-eyebrow">Waypoint</p>
             <h1 className="app-bar-title">Coding session control deck</h1>

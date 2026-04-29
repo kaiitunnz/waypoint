@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -25,7 +26,7 @@ export default function SessionPage() {
       <header className="app-bar">
         <div className="app-bar-brand">
           <Link className="app-bar-mark" href="/" aria-label="Waypoint home">
-            W
+            <Image src="/icons/icon-192.png" alt="" width={38} height={38} priority />
           </Link>
           <div className="app-bar-titles">
             <p className="app-bar-eyebrow">Waypoint · session</p>

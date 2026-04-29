@@ -30,14 +30,26 @@
   box-sizing: border-box;
 }
 
-html,
+html {
+  /* Painted under the page so iOS Safari's rubber-band area renders the
+   * dark slate instead of revealing a white default background. Keep all
+   * other layout / scroll properties off the html element so the browser
+   * uses it as the natural scroll root and trackpad wheel events reach it. */
+  background-color: var(--bg-deep);
+}
+
 body {
   margin: 0;
-  min-height: 100%;
+  min-height: 100vh;
   width: 100%;
   overflow-x: hidden;
+  /* Prevent overscroll from chaining into the browser chrome (also fixes
+   * the white flash at the top/bottom on macOS rubber-band). */
+  overscroll-behavior-y: none;
+  position: relative;
   background:
     linear-gradient(180deg, #0b0f15 0%, #0a0d12 60%, #08090d 100%);
+  background-color: var(--bg-deep);
   background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-sans);
@@ -54,11 +66,6 @@ body::before {
     radial-gradient(900px 480px at 12% -8%, rgba(200, 169, 106, 0.07), transparent 60%),
     radial-gradient(820px 540px at 110% 8%, rgba(143, 179, 214, 0.06), transparent 65%);
   z-index: 0;
-}
-
-body {
-  min-height: 100vh;
-  position: relative;
 }
 
 a {

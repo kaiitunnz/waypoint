@@ -1102,39 +1102,178 @@ pre {
 .transcript-summary::after {
   content: "+";
   position: absolute;
-  top: 14px;
-  right: 16px;
-  width: 22px;
-  height: 22px;
+  top: 10px;
+  right: 12px;
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  border: 1px solid var(--line);
   color: var(--muted-soft);
   font-family: var(--font-mono);
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 600;
-  background: rgba(8, 11, 16, 0.55);
-  transition: transform 160ms ease, color 160ms ease, border-color 160ms ease;
+  transition: color 160ms ease, transform 160ms ease;
 }
 
 details[open] > .transcript-summary::after {
   content: "−";
   color: var(--accent);
-  border-color: rgba(200, 169, 106, 0.42);
-  transform: rotate(180deg);
 }
 
 .transcript-preview {
-  margin: 6px 36px 0 0;
-  font-size: 0.84rem;
+  margin: 4px 30px 0 0;
+  font-size: 0.8rem;
   font-family: var(--font-mono);
   letter-spacing: 0.005em;
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+ * Tool calls / results / pairs — these are *supporting* context, not
+ * conversation peers. Strip the full panel chrome (gradient, blur, drop
+ * shadow), inset them slightly, and quiet the typography so they read as
+ * sidenotes that the eye can skip when scanning.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+.transcript.codex.tool_call:not(.ask-user-question),
+.transcript.codex.tool_result,
+.transcript.codex.tool_pair {
+  padding: 9px 12px;
+  border: 1px solid rgba(120, 138, 168, 0.12);
+  border-radius: var(--radius-sm);
+  background: rgba(8, 11, 16, 0.32);
+  box-shadow: none;
+  backdrop-filter: none;
+  margin: 0 24px;
+  max-width: calc(100% - 48px);
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.transcript.codex.tool_call:not(.ask-user-question):hover,
+.transcript.codex.tool_result:hover,
+.transcript.codex.tool_pair:hover {
+  border-color: var(--line);
+  background: rgba(12, 16, 22, 0.5);
+}
+
+details.tool-disclosure[open] {
+  border-color: var(--line);
+  background: rgba(10, 13, 18, 0.6);
+}
+
+.transcript.codex.tool_call:not(.ask-user-question) .transcript-role,
+.transcript.codex.tool_result .transcript-role,
+.transcript.codex.tool_pair .transcript-role {
+  margin-bottom: 0;
+}
+
+.transcript.codex.tool_call:not(.ask-user-question) .transcript-role .role-time,
+.transcript.codex.tool_result .transcript-role .role-time,
+.transcript.codex.tool_pair .transcript-role .role-time {
+  margin-left: auto;
+  padding-right: 22px;
+}
+
+/* Quieter glyph + label inside the recessed card. Saturated colours are
+ * reserved for conversation messages; tools should read as side-channel. */
+.transcript.codex.tool_call:not(.ask-user-question) .tool-glyph,
+.transcript.codex.tool_result .tool-glyph,
+.transcript.codex.tool_pair .tool-glyph {
+  width: 20px;
+  height: 20px;
+  font-size: 0.72rem;
+  background: transparent;
+  border-color: rgba(120, 138, 168, 0.22);
+  color: var(--muted);
+}
+
+.transcript.codex.tool_call:not(.ask-user-question) .tool-name,
+.transcript.codex.tool_result .tool-name,
+.transcript.codex.tool_pair .tool-name {
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--text);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* On hover or open, allow the family colour to bloom back in so the user can
+ * tell at a glance which tool family they've focused on. */
+.transcript.codex.tool_call:hover .tool-glyph.bash,
+.transcript.codex.tool_pair:hover .tool-glyph.bash,
+details.tool-disclosure[open] .tool-glyph.bash {
+  background: rgba(94, 210, 156, 0.12);
+  color: #6cc99a;
+  border-color: rgba(94, 210, 156, 0.28);
+}
+
+.transcript.codex.tool_call:hover .tool-glyph.read,
+.transcript.codex.tool_call:hover .tool-glyph.glob,
+.transcript.codex.tool_call:hover .tool-glyph.grep,
+.transcript.codex.tool_call:hover .tool-glyph.web,
+.transcript.codex.tool_pair:hover .tool-glyph.read,
+.transcript.codex.tool_pair:hover .tool-glyph.glob,
+.transcript.codex.tool_pair:hover .tool-glyph.grep,
+.transcript.codex.tool_pair:hover .tool-glyph.web,
+details.tool-disclosure[open] .tool-glyph.read,
+details.tool-disclosure[open] .tool-glyph.glob,
+details.tool-disclosure[open] .tool-glyph.grep,
+details.tool-disclosure[open] .tool-glyph.web {
+  background: rgba(143, 179, 214, 0.12);
+  color: var(--accent-cool);
+  border-color: rgba(143, 179, 214, 0.28);
+}
+
+.transcript.codex.tool_call:hover .tool-glyph.edit,
+.transcript.codex.tool_call:hover .tool-glyph.write,
+.transcript.codex.tool_pair:hover .tool-glyph.edit,
+.transcript.codex.tool_pair:hover .tool-glyph.write,
+details.tool-disclosure[open] .tool-glyph.edit,
+details.tool-disclosure[open] .tool-glyph.write {
+  background: rgba(200, 169, 106, 0.14);
+  color: var(--accent);
+  border-color: rgba(200, 169, 106, 0.32);
+}
+
+.transcript.codex.tool_call:hover .tool-glyph.task,
+.transcript.codex.tool_call:hover .tool-glyph.todo,
+.transcript.codex.tool_pair:hover .tool-glyph.task,
+.transcript.codex.tool_pair:hover .tool-glyph.todo,
+details.tool-disclosure[open] .tool-glyph.task,
+details.tool-disclosure[open] .tool-glyph.todo {
+  background: rgba(180, 150, 220, 0.12);
+  color: #c8a3eb;
+  border-color: rgba(180, 150, 220, 0.28);
+}
+
+/* Status pill is loud against the recessed card; trim it to a fine label. */
+.transcript.codex.tool_call:not(.ask-user-question) .badge.tool-status,
+.transcript.codex.tool_result .badge.tool-status,
+.transcript.codex.tool_pair .badge.tool-status {
+  background: transparent;
+  border-color: transparent;
+  padding: 0 4px;
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
+  color: var(--muted-soft);
+}
+
+.transcript.codex.tool_pair .badge.tool-status.complete {
+  color: #6cc99a;
+}
+
+@media (max-width: 540px) {
+  .transcript.codex.tool_call:not(.ask-user-question),
+  .transcript.codex.tool_result,
+  .transcript.codex.tool_pair {
+    margin: 0 8px;
+    max-width: calc(100% - 16px);
+  }
 }
 
 /* ────────────────────────────────────────────────────────────────────────

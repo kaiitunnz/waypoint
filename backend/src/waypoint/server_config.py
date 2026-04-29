@@ -28,6 +28,15 @@ class SshLaunchTargetConfig(BaseModel):
     codex_bin: str = "codex"
     claude_bin: str = "claude"
     default_remote_cwd: str = "~"
+    # Remote login shell wrapper used to run codex/claude commands so user
+    # rcfiles (PATH, env vars, helpers) get sourced. `-i` (interactive) is
+    # needed so that `.bashrc` runs past the standard `case $- in *i*) ;; *)
+    # return;; esac` guard most distros ship — `-l` alone (login) only sources
+    # `.bash_profile`, and `BASH_ENV` is also blocked by that guard. Set to an
+    # empty string to skip wrapping and run the command via sshd's default
+    # shell. NB: any `.bashrc` line that writes to stdout would corrupt
+    # codex/claude's stream protocols, so keep rcfile output on stderr only.
+    remote_shell: str = "bash -ilc"
     supported_backends: list[Backend] = Field(
         default_factory=_default_supported_backends
     )
@@ -70,8 +79,15 @@ class SshLaunchTargetConfig(BaseModel):
             for key, value in sorted(self.remote_env.items()):
                 remote_parts.append(shlex.quote(f"{key}={value}"))
         remote_parts.append(shlex.join(command))
-        remote_command = " ".join(remote_parts)
+        remote_command = self.wrap_remote_command(" ".join(remote_parts))
         return (ssh_bin, *self.ssh_args, self.ssh_destination, remote_command)
+
+    def wrap_remote_command(self, command: str) -> str:
+        """Wrap a remote command in the configured login-shell so rcfiles run."""
+        shell = self.remote_shell.strip()
+        if not shell:
+            return command
+        return f"{shell} {shlex.quote(command)}"
 
     def remote_command_for_backend(
         self, backend: Backend, args: list[str], remote_cwd: str
@@ -241,7 +257,7 @@ def _build_remote_claude_command(
         _render_remote_file_write(settings_path, settings_payload),
         " ".join(launch_line),
     ]
-    return "\n".join(remote_parts)
+    return target.wrap_remote_command("\n".join(remote_parts))
 
 
 def _render_remote_file_write(path: str, content: str) -> str:

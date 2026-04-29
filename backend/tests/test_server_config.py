@@ -144,6 +144,36 @@ def test_remote_client_factory_uses_ssh_launch_args(monkeypatch) -> None:
     assert "OPENAI_API_KEY=sk-test" in remote_command
 
 
+def test_remote_command_wraps_with_login_shell_by_default(monkeypatch) -> None:
+    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    config = SshLaunchTargetConfig(
+        id="devbox", name="Devbox", ssh_destination="dev@example.com"
+    )
+
+    command = config.remote_command_for_backend(
+        Backend.CLAUDE_CODE, ["--resume"], "~/workspace"
+    )
+
+    assert command[2].startswith("bash -ilc ")
+    # Inner command still contains the cd/exec line.
+    assert "cd ~/workspace" in command[2]
+    assert "claude --resume" in command[2]
+
+
+def test_remote_command_skips_wrapping_when_shell_blank(monkeypatch) -> None:
+    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    config = SshLaunchTargetConfig(
+        id="devbox",
+        name="Devbox",
+        ssh_destination="dev@example.com",
+        remote_shell="",
+    )
+
+    command = config.remote_command_for_backend(Backend.CODEX, [], "~/workspace")
+
+    assert command[2].startswith("cd ~/workspace")
+
+
 def test_ssh_target_remote_command_supports_claude(monkeypatch) -> None:
     monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
     config = SshLaunchTargetConfig(

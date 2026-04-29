@@ -100,8 +100,12 @@ pre {
 
 .page-shell {
   width: 100%;
-  max-width: 1024px;
+  max-width: min(1024px, 100vw);
   margin: 0 auto;
+  /* Belt-and-braces against iOS Safari widening the layout viewport when a
+   * descendant has wide intrinsic content: explicitly cap to viewport width
+   * so the grid track inside us can never grow past the screen. */
+  min-width: 0;
   /* viewportFit: "cover" + black-translucent status bar means the screen
    * extends edge-to-edge under the notch / home-indicator on iOS PWAs.
    * Add safe-area insets so headers and buttons sit clear of the cut-out.
@@ -260,6 +264,7 @@ pre {
 .stack {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
 .launch-grid {
@@ -1520,11 +1525,13 @@ details.tool-disclosure[open] .tool-glyph.todo {
   margin-top: 12px;
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .tool-pair-section {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 .tool-pair-label {
@@ -1599,12 +1606,22 @@ details.tool-disclosure[open] .tool-glyph.todo {
 .transcript pre {
   line-height: 1.55;
   overflow-wrap: anywhere;
+  /* iOS Safari widens the layout viewport when any descendant has an
+   * intrinsic width greater than `device-width` — long unbreakable terminal
+   * output, hashes, or URLs in transcript pres are the usual culprits.
+   * Forcing `min-width: 0` + `word-break: break-word` keeps min-content size
+   * narrow so the page renders at true mobile width. */
+  min-width: 0;
+  max-width: 100%;
+  word-break: break-word;
 }
 
 .markdown-message {
   display: grid;
   gap: 10px;
   line-height: 1.6;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .markdown-message > :first-child {
@@ -1649,6 +1666,9 @@ details.tool-disclosure[open] .tool-glyph.todo {
   border-radius: var(--radius-sm);
   padding: 12px 14px;
   overflow: auto;
+  min-width: 0;
+  max-width: 100%;
+  word-break: break-word;
 }
 
 .usage-card {
@@ -2408,6 +2428,14 @@ details.tool-disclosure[open] .tool-glyph.todo {
 .terminal {
   min-height: 320px;
   background: rgba(8, 10, 14, 0.92);
+  min-width: 0;
+}
+
+.terminal pre {
+  min-width: 0;
+  max-width: 100%;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .back-link {

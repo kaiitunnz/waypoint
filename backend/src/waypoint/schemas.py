@@ -112,6 +112,7 @@ class SessionCreateRequest(BaseModel):
     title: str | None = None
     args: list[str] = Field(default_factory=list)
     source_mode: SessionSource = SessionSource.MANAGED
+    permission_mode: str | None = None
 
 
 class SessionAttachRequest(BaseModel):
@@ -184,6 +185,7 @@ class ScheduledSessionRecord(BaseModel):
     title: str | None = None
     args: list[str] = Field(default_factory=list)
     initial_prompt: str | None = None
+    permission_mode: str | None = None
     scheduled_at: datetime
     created_at: datetime
     status: ScheduleStatus = ScheduleStatus.PENDING
@@ -199,6 +201,7 @@ class ScheduleCreateRequest(BaseModel):
     title: str | None = None
     args: list[str] = Field(default_factory=list)
     initial_prompt: str | None = None
+    permission_mode: str | None = None
     delay_seconds: int | None = None
     scheduled_at: datetime | None = None
 

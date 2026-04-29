@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
 
+from waypoint.claude_cli import CLAUDE_PERMISSION_MODES
 from waypoint.schemas import (
+    Backend,
     ScheduleCreateRequest,
     ScheduledSessionRecord,
     ScheduleStatus,
@@ -17,6 +19,7 @@ from waypoint.schemas import (
     SessionInputRequest,
     SessionSource,
 )
+from waypoint.transports.codex import CODEX_PERMISSION_PRESETS
 
 if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
@@ -24,6 +27,35 @@ if TYPE_CHECKING:
 log = logging.getLogger("waypoint.scheduler")
 
 POLL_INTERVAL_SECONDS = 5.0
+
+
+def validate_permission_mode_for_backend(
+    backend: Backend, mode: str | None
+) -> str | None:
+    """Resolve a user-supplied starting mode for a given backend.
+
+    Returns the canonical mode string when accepted, ``None`` when the caller
+    didn't pick one (so the runtime can pick its own default), and raises a
+    400 HTTPException for unknown modes.
+    """
+    if mode is None or mode == "":
+        return None
+    allowed: tuple[str, ...]
+    if backend == Backend.CLAUDE_CODE:
+        allowed = CLAUDE_PERMISSION_MODES
+    elif backend == Backend.CODEX:
+        allowed = tuple(CODEX_PERMISSION_PRESETS)
+    else:
+        return None
+    if mode not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"unsupported {backend.value} permission mode: {mode}; "
+                f"expected one of {', '.join(allowed)}"
+            ),
+        )
+    return mode
 
 
 class Scheduler:
@@ -54,6 +86,7 @@ class Scheduler:
 
     def create_schedule(self, request: ScheduleCreateRequest) -> ScheduledSessionRecord:
         scheduled_at = self._resolve_scheduled_at(request)
+        permission_mode = self._resolve_permission_mode(request)
         # Validate launch target up-front so the user gets immediate feedback.
         launch_target = None
         if request.launch_target_id:
@@ -75,6 +108,7 @@ class Scheduler:
             title=request.title,
             args=list(request.args),
             initial_prompt=request.initial_prompt,
+            permission_mode=permission_mode,
             scheduled_at=scheduled_at,
             created_at=now,
             status=ScheduleStatus.PENDING,
@@ -158,6 +192,7 @@ class Scheduler:
                     title=schedule.title,
                     args=schedule.args,
                     source_mode=SessionSource.MANAGED,
+                    permission_mode=schedule.permission_mode,
                 )
             )
             self._runtime.storage.update_schedule(
@@ -195,6 +230,12 @@ class Scheduler:
                     ]
                 },
             )
+        )
+
+    @staticmethod
+    def _resolve_permission_mode(request: ScheduleCreateRequest) -> str | None:
+        return validate_permission_mode_for_backend(
+            request.backend, request.permission_mode
         )
 
     @staticmethod

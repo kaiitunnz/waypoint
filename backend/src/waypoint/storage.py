@@ -97,6 +97,7 @@ class Storage:
                 title TEXT,
                 args TEXT NOT NULL DEFAULT '[]',
                 initial_prompt TEXT,
+                permission_mode TEXT,
                 scheduled_at TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending',
@@ -110,6 +111,7 @@ class Storage:
         self._ensure_column("sessions", "launch_target_id", "TEXT")
         self._ensure_column("sessions", "pinned_at", "TEXT")
         self._ensure_column("sessions", "permission_mode", "TEXT")
+        self._ensure_column("scheduled_sessions", "permission_mode", "TEXT")
         self.connection.commit()
 
     @_synchronized
@@ -303,9 +305,9 @@ class Storage:
             """
             INSERT INTO scheduled_sessions (
                 id, backend, cwd, remote_cwd, launch_target_id, title, args,
-                initial_prompt, scheduled_at, created_at, status, session_id,
-                failure_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                initial_prompt, permission_mode, scheduled_at, created_at, status,
+                session_id, failure_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 schedule.id,
@@ -316,6 +318,7 @@ class Storage:
                 schedule.title,
                 json.dumps(list(schedule.args)),
                 schedule.initial_prompt,
+                schedule.permission_mode,
                 schedule.scheduled_at.isoformat(),
                 schedule.created_at.isoformat(),
                 schedule.status,

@@ -199,3 +199,66 @@ async def test_scheduled_at_input_normalised_to_utc(tmp_path) -> None:
     )
     assert schedule.scheduled_at.tzinfo is not None
     assert schedule.scheduled_at.utcoffset() == timedelta(0)
+
+
+@pytest.mark.asyncio
+async def test_create_schedule_persists_permission_mode(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    schedule = runtime.scheduler.create_schedule(
+        ScheduleCreateRequest(
+            backend=Backend.CLAUDE_CODE,
+            cwd="/tmp/project",
+            permission_mode="plan",
+            delay_seconds=60,
+        )
+    )
+    assert schedule.permission_mode == "plan"
+    stored = runtime.storage.get_schedule(schedule.id)
+    assert stored is not None
+    assert stored.permission_mode == "plan"
+
+
+@pytest.mark.asyncio
+async def test_create_schedule_rejects_unknown_permission_mode(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    with pytest.raises(HTTPException) as exc:
+        runtime.scheduler.create_schedule(
+            ScheduleCreateRequest(
+                backend=Backend.CODEX,
+                cwd="/tmp/project",
+                permission_mode="not-a-mode",
+                delay_seconds=60,
+            )
+        )
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_fire_passes_permission_mode_to_create_session(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    schedule = runtime.scheduler.create_schedule(
+        ScheduleCreateRequest(
+            backend=Backend.CLAUDE_CODE,
+            cwd="/tmp/project",
+            permission_mode="acceptEdits",
+            delay_seconds=0,
+        )
+    )
+    runtime.storage.update_schedule(
+        schedule.id, scheduled_at=datetime.now(UTC) - timedelta(seconds=1)
+    )
+    created_session = make_session(runtime.settings, "claude-aaaaaaaa")
+    runtime.storage.create_session(created_session)
+    captured: list[str | None] = []
+
+    async def fake_create_session(request) -> SessionRecord:
+        captured.append(request.permission_mode)
+        return created_session
+
+    monkeypatch.setattr(runtime, "create_session", fake_create_session)
+
+    await runtime.scheduler._fire_due_schedules()
+
+    assert captured == ["acceptEdits"]

@@ -23,7 +23,7 @@ from waypoint.codex_app_server import (
 from waypoint.config import Settings
 from waypoint.git_meta import resolve_git_meta
 from waypoint.normalizer import TerminalNormalizer
-from waypoint.scheduler import Scheduler
+from waypoint.scheduler import Scheduler, validate_permission_mode_for_backend
 from waypoint.schemas import (
     Backend,
     CodexThreadImportRequest,
@@ -436,6 +436,12 @@ class SessionRuntime:
         structured_log = session_dir / "events.jsonl"
         git_meta = await resolve_git_meta(request.cwd)
         remote_cwd = self._resolve_remote_cwd(request, launch_target)
+        permission_mode = (
+            validate_permission_mode_for_backend(
+                request.backend, request.permission_mode
+            )
+            or "default"
+        )
         if request.backend == Backend.CODEX:
             raw_log.touch(exist_ok=True)
             session = SessionRecord(
@@ -455,7 +461,7 @@ class SessionRuntime:
                 last_event_at=datetime.now(UTC),
                 raw_log_path=str(raw_log),
                 structured_log_path=str(structured_log),
-                permission_mode="default",
+                permission_mode=permission_mode,
             )
             self.storage.create_session(session)
             try:
@@ -498,7 +504,7 @@ class SessionRuntime:
                 thread_id=claude_session_id,
                 raw_log_path=str(raw_log),
                 structured_log_path=str(structured_log),
-                permission_mode="default",
+                permission_mode=permission_mode,
             )
             self.storage.create_session(session)
             try:

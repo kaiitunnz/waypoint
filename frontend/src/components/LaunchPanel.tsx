@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 
-import { Backend } from "@/lib/types";
+import { Backend, CodexThreadSummary } from "@/lib/types";
 
 interface LaunchPanelProps {
   defaultBackend: Backend;
@@ -10,8 +10,11 @@ interface LaunchPanelProps {
   defaultRemoteCwd: string | null;
   targetLabel: string | null;
   supportedBackends: Backend[];
+  codexThreads: CodexThreadSummary[];
+  codexThreadsLoading: boolean;
   onCreate: (backend: Backend, cwd: string, title: string, remoteCwd?: string) => Promise<void>;
   onAttach: (target: string, backendHint: Backend) => Promise<void>;
+  onImportCodexThread: (threadId: string) => Promise<void>;
 }
 
 export function LaunchPanel({
@@ -20,8 +23,11 @@ export function LaunchPanel({
   defaultRemoteCwd,
   targetLabel,
   supportedBackends,
+  codexThreads,
+  codexThreadsLoading,
   onCreate,
   onAttach,
+  onImportCodexThread,
 }: LaunchPanelProps) {
   const [backend, setBackend] = useState<Backend>(defaultBackend);
   const [cwd, setCwd] = useState(defaultCwd);
@@ -61,6 +67,15 @@ export function LaunchPanel({
     try {
       await onAttach(tmuxTarget, backend);
       setTmuxTarget("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleImport(threadId: string) {
+    setBusy(true);
+    try {
+      await onImportCodexThread(threadId);
     } finally {
       setBusy(false);
     }
@@ -123,6 +138,45 @@ export function LaunchPanel({
           Attach
         </button>
       </form>
+      {supportedBackends.includes("codex") ? (
+        <section className="panel stack">
+          <div>
+            <h3>Import Codex thread</h3>
+            <p className="muted">
+              Resume a stored Codex thread{targetLabel ? ` on ${targetLabel}` : ""}.
+            </p>
+          </div>
+          {codexThreadsLoading ? <p className="muted">Loading stored threads…</p> : null}
+          {!codexThreadsLoading && !codexThreads.length ? (
+            <p className="muted">No importable Codex threads found.</p>
+          ) : null}
+          {codexThreads.map((thread) => (
+            <article className="import-thread-card" key={thread.id}>
+              <div className="session-row">
+                <span className="badge neutral">Codex</span>
+                {thread.branch ? <span className="badge neutral">{thread.branch}</span> : null}
+              </div>
+              <h3>{thread.title}</h3>
+              <p className="muted">{thread.cwd}</p>
+              {thread.preview ? <p className="meta">{thread.preview}</p> : null}
+              <div className="action-row import-thread-actions">
+                <span className="meta">
+                  {thread.repo_name ?? "No repo"} · updated{" "}
+                  {new Date(thread.updated_at).toLocaleString()}
+                </span>
+                <button
+                  className="secondary"
+                  disabled={busy}
+                  type="button"
+                  onClick={() => void handleImport(thread.id)}
+                >
+                  Import
+                </button>
+              </div>
+            </article>
+          ))}
+        </section>
+      ) : null}
     </section>
   );
 }

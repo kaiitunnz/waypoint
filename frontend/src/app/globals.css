@@ -253,6 +253,19 @@ pre {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
+.import-thread-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-card-soft);
+}
+
+.import-thread-actions {
+  justify-content: space-between;
+}
+
 .field {
   display: grid;
   gap: 6px;

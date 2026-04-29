@@ -43,6 +43,17 @@ export interface SessionRecord {
   pid?: number | null;
 }
 
+export interface CodexThreadSummary {
+  id: string;
+  title: string;
+  cwd: string;
+  repo_name?: string | null;
+  branch?: string | null;
+  preview?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface EventRecord {
   id?: number;
   session_id: string;

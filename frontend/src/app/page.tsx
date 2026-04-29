@@ -16,16 +16,27 @@ import {
   createSchedule as createScheduleRequest,
   createSession,
   deleteSession as deleteSessionRequest,
+  fetchCodexThreads,
   fetchMe,
   fetchSchedules,
   fetchSessions,
+  importCodexThread as importCodexThreadRequest,
   isAuthError,
   login,
   postAction,
 } from "@/lib/api";
-import { clearToken, readHost, readLaunchTarget, readToken, writeHost, writeLaunchTarget, writeToken } from "@/lib/store";
+import {
+  clearToken,
+  readHost,
+  readLaunchTarget,
+  readToken,
+  writeHost,
+  writeLaunchTarget,
+  writeToken,
+} from "@/lib/store";
 import {
   Backend,
+  CodexThreadSummary,
   LaunchTargetSummary,
   ScheduleCreateRequest,
   ScheduledSession,
@@ -51,6 +62,18 @@ export default function HomePage() {
   const [launchTargets, setLaunchTargets] = useState<LaunchTargetSummary[]>([]);
   const [activeLaunchTargetId, setActiveLaunchTargetId] = useState("");
   const [schedules, setSchedules] = useState<ScheduledSession[]>([]);
+  const [codexThreads, setCodexThreads] = useState<CodexThreadSummary[]>([]);
+  const [codexThreadsLoading, setCodexThreadsLoading] = useState(false);
+
+  const activeLaunchTarget =
+    launchTargets.find((target) => target.id === activeLaunchTargetId) ?? null;
+  const supportedBackends = activeLaunchTarget?.supported_backends.length
+    ? activeLaunchTarget.supported_backends
+    : ALL_BACKENDS;
+  const effectiveDefaultBackend = supportedBackends.includes(activeLaunchTarget?.default_backend ?? defaultBackend)
+    ? (activeLaunchTarget?.default_backend ?? defaultBackend)
+    : supportedBackends[0];
+  const effectiveRemoteCwd = activeLaunchTarget?.default_remote_cwd ?? null;
 
   useEffect(() => {
     const currentHost = readHost();
@@ -63,6 +86,8 @@ export default function HomePage() {
   useEffect(() => {
     if (!host || !token) {
       setConnection("idle");
+      setCodexThreads([]);
+      setCodexThreadsLoading(false);
       return;
     }
     let active = true;
@@ -81,7 +106,11 @@ export default function HomePage() {
         setLaunchTargets(me.launch_targets);
         setSchedules(scheduleItems);
         const storedTargetId = readLaunchTarget(host);
-        const nextTargetId = me.launch_targets.some((target) => target.id === storedTargetId) ? storedTargetId : "";
+        const nextTargetId = me.launch_targets.some(
+          (target) => target.id === storedTargetId,
+        )
+          ? storedTargetId
+          : "";
         setActiveLaunchTargetId(nextTargetId);
       })
       .catch((fetchError) => {
@@ -148,6 +177,56 @@ export default function HomePage() {
     };
   }, [host, token]);
 
+  useEffect(() => {
+    if (!host || !token) {
+      setCodexThreads([]);
+      setCodexThreadsLoading(false);
+      return;
+    }
+    if (
+      activeLaunchTargetId &&
+      !launchTargets.some((target) => target.id === activeLaunchTargetId)
+    ) {
+      return;
+    }
+    if (!supportedBackends.includes("codex")) {
+      setCodexThreads([]);
+      setCodexThreadsLoading(false);
+      return;
+    }
+    let active = true;
+    setCodexThreadsLoading(true);
+    fetchCodexThreads(host, token, activeLaunchTargetId || undefined)
+      .then((threads) => {
+        if (!active) {
+          return;
+        }
+        setCodexThreads(threads);
+      })
+      .catch((fetchError) => {
+        if (!active) {
+          return;
+        }
+        if (isAuthError(fetchError)) {
+          resetAuthState("Session expired. Log in again.");
+          return;
+        }
+        setError(
+          fetchError instanceof Error
+            ? fetchError.message
+            : "failed to fetch codex threads",
+        );
+      })
+      .finally(() => {
+        if (active) {
+          setCodexThreadsLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeLaunchTargetId, host, launchTargets, supportedBackends, token]);
+
   async function handleLogin(nextHost: string, password: string) {
     const nextToken = await login(nextHost, password);
     writeHost(nextHost);
@@ -168,14 +247,21 @@ export default function HomePage() {
         source_mode: "managed",
         args: [],
       });
-      setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)]);
+      setSessions((current) => [
+        session,
+        ...current.filter((item) => item.id !== session.id),
+      ]);
       router.push(`/session/${session.id}`);
     } catch (createError) {
       if (isAuthError(createError)) {
         resetAuthState("Session expired. Log in again.");
         return;
       }
-      setError(createError instanceof Error ? createError.message : "failed to create session");
+      setError(
+        createError instanceof Error
+          ? createError.message
+          : "failed to create session",
+      );
     }
   }
 
@@ -185,14 +271,46 @@ export default function HomePage() {
         tmux_target: target,
         backend_hint: backendHint,
       });
-      setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)]);
+      setSessions((current) => [
+        session,
+        ...current.filter((item) => item.id !== session.id),
+      ]);
       router.push(`/session/${session.id}`);
     } catch (attachError) {
       if (isAuthError(attachError)) {
         resetAuthState("Session expired. Log in again.");
         return;
       }
-      setError(attachError instanceof Error ? attachError.message : "failed to attach session");
+      setError(
+        attachError instanceof Error
+          ? attachError.message
+          : "failed to attach session",
+      );
+    }
+  }
+
+  async function handleImportCodexThread(threadId: string) {
+    try {
+      const session = await importCodexThreadRequest(host, token, {
+        thread_id: threadId,
+        launch_target_id: activeLaunchTargetId || null,
+      });
+      setSessions((current) => [
+        session,
+        ...current.filter((item) => item.id !== session.id),
+      ]);
+      setCodexThreads((current) => current.filter((thread) => thread.id !== threadId));
+      router.push(`/session/${session.id}`);
+    } catch (importError) {
+      if (isAuthError(importError)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      setError(
+        importError instanceof Error
+          ? importError.message
+          : "failed to import codex thread",
+      );
     }
   }
 
@@ -205,6 +323,8 @@ export default function HomePage() {
     setLaunchTargets([]);
     setActiveLaunchTargetId("");
     setSchedules([]);
+    setCodexThreads([]);
+    setCodexThreadsLoading(false);
     setError(message);
   }
 
@@ -253,7 +373,11 @@ export default function HomePage() {
         resetAuthState("Session expired. Log in again.");
         return;
       }
-      setError(deleteError instanceof Error ? deleteError.message : "failed to delete session");
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "failed to delete session",
+      );
     }
   }
 
@@ -265,12 +389,18 @@ export default function HomePage() {
         resetAuthState("Session expired. Log in again.");
         return;
       }
-      setError(terminateError instanceof Error ? terminateError.message : "failed to terminate");
+      setError(
+        terminateError instanceof Error
+          ? terminateError.message
+          : "failed to terminate",
+      );
     }
   }
 
   async function handleDeleteExited() {
-    const exitedIds = sessions.filter((session) => session.status === "exited").map((session) => session.id);
+    const exitedIds = sessions
+      .filter((session) => session.status === "exited")
+      .map((session) => session.id);
     try {
       for (const sessionId of exitedIds) {
         await deleteSessionRequest(host, token, sessionId);
@@ -281,7 +411,11 @@ export default function HomePage() {
         resetAuthState("Session expired. Log in again.");
         return;
       }
-      setError(deleteError instanceof Error ? deleteError.message : "failed to delete exited sessions");
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "failed to delete exited sessions",
+      );
     }
   }
 
@@ -299,17 +433,10 @@ export default function HomePage() {
     setSessions([]);
     setLaunchTargets([]);
     setActiveLaunchTargetId(readLaunchTarget(nextHost));
+    setCodexThreads([]);
+    setCodexThreadsLoading(false);
     setError("Switched backend. Log in to continue.");
   }
-
-  const activeLaunchTarget = launchTargets.find((target) => target.id === activeLaunchTargetId) ?? null;
-  const supportedBackends = activeLaunchTarget?.supported_backends.length
-    ? activeLaunchTarget.supported_backends
-    : ALL_BACKENDS;
-  const effectiveDefaultBackend = supportedBackends.includes(activeLaunchTarget?.default_backend ?? defaultBackend)
-    ? (activeLaunchTarget?.default_backend ?? defaultBackend)
-    : supportedBackends[0];
-  const effectiveRemoteCwd = activeLaunchTarget?.default_remote_cwd ?? null;
 
   const connectionLabel = token
     ? connection === "open"
@@ -356,8 +483,11 @@ export default function HomePage() {
           defaultRemoteCwd={effectiveRemoteCwd}
           targetLabel={activeLaunchTarget?.name ?? null}
           supportedBackends={supportedBackends}
+          codexThreads={codexThreads}
+          codexThreadsLoading={codexThreadsLoading}
           onAttach={handleAttach}
           onCreate={handleCreate}
+          onImportCodexThread={handleImportCodexThread}
         />
       ) : null}
       {token ? (

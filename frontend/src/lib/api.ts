@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  CodexThreadSummary,
   EventRecord,
   MeResponse,
   ScheduleCreateRequest,
@@ -46,6 +47,25 @@ export async function fetchSessions(host: string, token: string): Promise<Sessio
   await ensureOk(response, "failed to fetch sessions");
   const payload = await response.json();
   return payload.sessions as SessionRecord[];
+}
+
+export async function fetchCodexThreads(
+  host: string,
+  token: string,
+  launchTargetId?: string,
+): Promise<CodexThreadSummary[]> {
+  const params = new URLSearchParams();
+  if (launchTargetId) {
+    params.set("launch_target_id", launchTargetId);
+  }
+  const suffix = params.size ? `?${params.toString()}` : "";
+  const response = await fetch(`${host}/api/codex/threads${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch codex threads");
+  const payload = await response.json();
+  return payload.threads as CodexThreadSummary[];
 }
 
 export async function fetchMe(host: string, token: string): Promise<MeResponse> {
@@ -119,6 +139,24 @@ export async function attachTmux(
     body: JSON.stringify(payload),
   });
   await ensureOk(response, "failed to attach session");
+  const body = await response.json();
+  return body.session as SessionRecord;
+}
+
+export async function importCodexThread(
+  host: string,
+  token: string,
+  payload: Record<string, unknown>,
+): Promise<SessionRecord> {
+  const response = await fetch(`${host}/api/sessions/import-codex`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  await ensureOk(response, "failed to import codex thread");
   const body = await response.json();
   return body.session as SessionRecord;
 }

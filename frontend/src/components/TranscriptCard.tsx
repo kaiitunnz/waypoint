@@ -104,9 +104,9 @@ function CodexCard({
       }
       return (
         <article className="panel transcript codex user_input">
-          <div className="session-row">
+          <div className="transcript-role">
             <span className="badge user">you</span>
-            <span className="muted">{formatTime(event.ts)}</span>
+            <span className="role-time">{formatTime(event.ts)}</span>
           </div>
           <MarkdownMessage text={event.text} />
         </article>
@@ -115,9 +115,9 @@ function CodexCard({
     case "agent_output":
       return (
         <article className="panel transcript codex agent_output">
-          <div className="session-row">
+          <div className="transcript-role">
             <span className="badge agent">{agentLabel}</span>
-            <span className="muted">{formatTime(event.ts)}</span>
+            <span className="role-time">{formatTime(event.ts)}</span>
           </div>
           <MarkdownMessage text={event.text} />
         </article>
@@ -134,10 +134,10 @@ function CodexCard({
           />
         );
       }
-      return <ToolDisclosure event={event} label="tool call" bodyClassName="shell" />;
+      return <ToolDisclosure event={event} bodyClassName="shell" />;
     }
     case "tool_result":
-      return <ToolDisclosure event={event} label="tool result" bodyClassName="output" />;
+      return <ToolDisclosure event={event} bodyClassName="output" />;
     case "approval_request":
       // The interactive ApprovalCard sits above the composer with the same
       // text and Approve/Decline buttons; rendering the event here too would
@@ -146,36 +146,98 @@ function CodexCard({
       return null;
     case "system_note":
     case "status_update":
-      return (
-        <article className="transcript codex system">
-          <span className="muted">
-            {formatTime(event.ts)} · {event.text}
-          </span>
-        </article>
-      );
+      return <SystemRule event={event} />;
     default:
       return <HeuristicCard event={event} />;
   }
 }
 
+function SystemRule({ event }: { event: EventRecord }) {
+  return (
+    <div className="system-rule" role="note">
+      <span className="system-rule-body">
+        <span className="system-rule-time">{formatTime(event.ts)}</span>
+        <span className="system-rule-text" title={event.text}>
+          {event.text}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+interface ToolBadge {
+  glyph: string;
+  variant: string;
+  label: string;
+}
+
+function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
+  // Visually distinct glyphs help the user scan a long transcript and tell
+  // a shell command apart from a file edit at a glance. The variant maps to
+  // a CSS-only colour theme so we don't ship icon assets.
+  switch (toolName) {
+    case "Bash":
+      return { glyph: "›_", variant: "bash", label: "Bash" };
+    case "Read":
+      return { glyph: "▤", variant: "read", label: toolName };
+    case "Edit":
+    case "MultiEdit":
+      return { glyph: "✎", variant: "edit", label: toolName };
+    case "Write":
+      return { glyph: "✚", variant: "write", label: toolName };
+    case "Grep":
+      return { glyph: "⌕", variant: "grep", label: toolName };
+    case "Glob":
+      return { glyph: "✱", variant: "glob", label: toolName };
+    case "WebFetch":
+    case "WebSearch":
+      return { glyph: "⌖", variant: "web", label: toolName };
+    case "Task":
+    case "Agent":
+      return { glyph: "◇", variant: "task", label: toolName };
+    case "TodoWrite":
+      return { glyph: "☑", variant: "todo", label: "Todo" };
+    case "AskUserQuestion":
+      return { glyph: "?", variant: "task", label: "Ask" };
+    default:
+      if (toolName) {
+        return { glyph: "✦", variant: "default", label: toolName };
+      }
+      return { glyph: "→", variant: "default", label: "tool" };
+  }
+}
+
+function readToolName(event: EventRecord): string | null {
+  const meta = event.metadata as Record<string, unknown> | undefined;
+  if (!meta) return null;
+  if (typeof meta.tool_name === "string" && meta.tool_name) {
+    return meta.tool_name;
+  }
+  return null;
+}
+
 function ToolDisclosure({
   event,
-  label,
   bodyClassName,
 }: {
   event: EventRecord;
-  label: string;
   bodyClassName: string;
 }) {
-  const preview = summarizeToolText(event.text);
+  const tool = toolBadgeFor(readToolName(event));
+  const preview = previewForToolEvent(event, tool.label);
+  const kindLabel = event.kind === "tool_call" ? "call" : "result";
   return (
     <details className={`panel transcript codex ${event.kind} tool-disclosure`}>
       <summary className="transcript-summary">
-        <div className="session-row">
-          <span className="badge tool">{label}</span>
-          <span className="muted">{formatTime(event.ts)}</span>
+        <div className="transcript-role">
+          <span className={`tool-glyph ${tool.variant}`} aria-hidden>
+            {tool.glyph}
+          </span>
+          <span className="tool-name">{tool.label}</span>
+          <span className="badge tool-status pending">{kindLabel}</span>
+          <span className="role-time">{formatTime(event.ts)}</span>
         </div>
-        {preview ? <p className="transcript-preview muted">{preview}</p> : null}
+        {preview ? <p className="transcript-preview">{preview}</p> : null}
       </summary>
       <pre className={bodyClassName}>{event.text}</pre>
     </details>
@@ -206,19 +268,24 @@ function ToolPairCard({
       );
     }
   }
-  const callPreview = call ? summarizeToolText(call.text) : null;
-  const resultPreview = result ? summarizeToolText(result.text) : null;
   const status = result ? "complete" : "pending";
-  const summary = callPreview || resultPreview || "tool call";
+  const tool = toolBadgeFor(readToolName(call ?? result ?? ({} as EventRecord)));
+  const summary =
+    (call ? previewForToolEvent(call, tool.label) : null) ||
+    (result ? previewForToolEvent(result, tool.label) : null) ||
+    "tool call";
   return (
     <details className="panel transcript codex tool_pair tool-disclosure">
       <summary className="transcript-summary">
-        <div className="session-row">
-          <span className="badge tool">tool</span>
+        <div className="transcript-role">
+          <span className={`tool-glyph ${tool.variant}`} aria-hidden>
+            {tool.glyph}
+          </span>
+          <span className="tool-name">{tool.label}</span>
           <span className={`badge tool-status ${status}`}>{status}</span>
-          <span className="muted">{formatTime(pair.ts)}</span>
+          <span className="role-time">{formatTime(pair.ts)}</span>
         </div>
-        {summary ? <p className="transcript-preview muted">{summary}</p> : null}
+        {summary ? <p className="transcript-preview">{summary}</p> : null}
       </summary>
       <div className="tool-pair-body">
         {call ? (
@@ -389,14 +456,15 @@ function AskUserQuestionCard({
 
   return (
     <article className="panel transcript codex tool_call ask-user-question">
-      <div className="session-row">
-        <span className="badge tool">ask</span>
+      <div className="transcript-role">
+        <span className="tool-glyph task" aria-hidden>?</span>
+        <span className="tool-name">Ask you</span>
         {answered ? (
           <span className="badge tool-status complete">answered</span>
         ) : (
           <span className="badge tool-status pending">awaiting answer</span>
         )}
-        <span className="muted">{formatTime(event.ts)}</span>
+        <span className="role-time">{formatTime(event.ts)}</span>
       </div>
       {currentEntry ? (() => {
         const index = safeIndex;
@@ -564,10 +632,10 @@ function AskAnswerSummaryCard({ event }: { event: EventRecord }) {
 
   return (
     <article className="panel transcript codex user_input ask-answer-summary">
-      <div className="session-row">
+      <div className="transcript-role">
         <span className="badge user">you</span>
         <span className="badge neutral ask-answer-chip">answered</span>
-        <span className="muted">{formatTime(event.ts)}</span>
+        <span className="role-time">{formatTime(event.ts)}</span>
       </div>
       {answers.length > 0 ? (
         <ul className="ask-answer-list">
@@ -597,17 +665,88 @@ function AskAnswerSummaryCard({ event }: { event: EventRecord }) {
   );
 }
 
-function summarizeToolText(text: string): string {
-  const lines = text
+function previewForToolEvent(event: EventRecord, toolLabel: string): string {
+  // Prefer extracting a meaningful field from the structured tool input —
+  // event.text for Claude tool_call events is `"ToolName\n{json input}"`,
+  // which is verbose and redundant with the tool-name chip we already render
+  // in the role row.
+  const meta = event.metadata as Record<string, unknown> | undefined;
+  const toolName = readToolName(event);
+  const payload = (meta?.payload ?? null) as Record<string, unknown> | null;
+  const input =
+    (payload && typeof payload.input === "object" && payload.input !== null
+      ? (payload.input as Record<string, unknown>)
+      : null) ??
+    (typeof meta?.tool_input === "object" && meta?.tool_input !== null
+      ? (meta.tool_input as Record<string, unknown>)
+      : null);
+
+  if (event.kind === "tool_call" && input) {
+    if (toolName === "Bash" && typeof input.command === "string") {
+      return truncate(collapseWhitespace(input.command), 240);
+    }
+    if (
+      (toolName === "Edit" || toolName === "MultiEdit" || toolName === "Write") &&
+      (typeof input.file_path === "string" || typeof input.path === "string")
+    ) {
+      return String(input.file_path ?? input.path);
+    }
+    if (toolName === "Read" && typeof input.file_path === "string") {
+      const range =
+        typeof input.offset === "number" || typeof input.limit === "number"
+          ? ` · ${typeof input.offset === "number" ? input.offset : 1}..${
+              typeof input.limit === "number"
+                ? (typeof input.offset === "number" ? input.offset : 0) + input.limit
+                : "end"
+            }`
+          : "";
+      return `${input.file_path}${range}`;
+    }
+    if (toolName === "Grep" && typeof input.pattern === "string") {
+      const path = typeof input.path === "string" ? input.path : "";
+      return path ? `${input.pattern}  ·  ${path}` : input.pattern;
+    }
+    if (toolName === "Glob" && typeof input.pattern === "string") {
+      return input.pattern;
+    }
+    if ((toolName === "WebFetch" || toolName === "WebSearch") && typeof input.url === "string") {
+      return input.url;
+    }
+    if (toolName === "WebSearch" && typeof input.query === "string") {
+      return input.query;
+    }
+    if ((toolName === "Task" || toolName === "Agent") && typeof input.description === "string") {
+      return input.description;
+    }
+    if (toolName === "TodoWrite" && Array.isArray(input.todos)) {
+      return `${input.todos.length} todo${input.todos.length === 1 ? "" : "s"}`;
+    }
+  }
+
+  // Fall back to summarising the raw event text. Strip a leading tool-name
+  // line (Claude's "Bash\n{json}" shape) so the preview doesn't redundantly
+  // repeat what the role-row chip already shows.
+  return summarizeToolText(event.text, toolLabel);
+}
+
+function summarizeToolText(text: string, toolLabel?: string): string {
+  let lines = text
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+  if (toolLabel && lines.length > 0 && lines[0].toLowerCase() === toolLabel.toLowerCase()) {
+    lines = lines.slice(1);
+  }
   if (!lines.length) {
     return "No output";
   }
   const first = lines[0];
   const suffix = lines.length > 1 ? ` · ${lines.length} lines` : "";
-  return `${truncate(first, 120)}${suffix}`;
+  return `${truncate(first, 160)}${suffix}`;
+}
+
+function collapseWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }
 
 function truncate(value: string, max: number): string {
@@ -620,9 +759,9 @@ function truncate(value: string, max: number): string {
 function HeuristicCard({ event }: { event: EventRecord }) {
   return (
     <article className={`panel transcript ${event.kind}`}>
-      <div className="session-row">
+      <div className="transcript-role">
         <span className="badge neutral">{event.kind.replaceAll("_", " ")}</span>
-        <span className="muted">{formatTime(event.ts)}</span>
+        <span className="role-time">{formatTime(event.ts)}</span>
       </div>
       <pre>{event.text}</pre>
     </article>
@@ -630,5 +769,9 @@ function HeuristicCard({ event }: { event: EventRecord }) {
 }
 
 function formatTime(ts: string): string {
-  return new Date(ts).toLocaleTimeString();
+  return new Date(ts).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }

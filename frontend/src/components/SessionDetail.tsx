@@ -285,7 +285,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       const nearBottom = remaining < 160;
       nearBottomRef.current = nearBottom;
       setShowScrollToBottom(!nearBottom);
-      setShowScrollToTop(window.scrollY > 320);
+      // The "back to top" affordance only earns its place once the user has
+      // scrolled meaningfully past the header — otherwise it competes with
+      // the page chrome it would scroll back to.
+      setShowScrollToTop(window.scrollY > 480);
     }
     updateScrollState();
     window.addEventListener("scroll", updateScrollState, { passive: true });
@@ -449,6 +452,19 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
 
   return (
     <section className="stack" ref={sectionRef}>
+      {view === "chat" && showScrollToTop ? (
+        <div className="scroll-top-floater" aria-hidden={false}>
+          <button
+            type="button"
+            className="scroll-top-pill"
+            onClick={() => scrollToTop()}
+            aria-label="Back to top"
+            title="Back to top"
+          >
+            ↑
+          </button>
+        </div>
+      ) : null}
       {session ? (
         <header className="panel">
           <div className="session-row">
@@ -509,7 +525,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
               </span>
             ) : null}
           </div>
-          {session
+          {session && transcriptItems.length > 0
             ? transcriptItems.map((item) =>
                 item.kind === "pair" ? (
                   <TranscriptCard
@@ -528,7 +544,16 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                   />
                 ),
               )
-            : null}
+            : session
+              ? (
+                <TranscriptEmpty
+                  status={session.status}
+                  filterMode={filterMode}
+                  hiddenEventCount={hiddenEventCount}
+                  onShowAll={() => setFilterMode("all")}
+                />
+              )
+              : null}
         </section>
       ) : (
         <section className="panel terminal stack">
@@ -548,34 +573,18 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       {pendingApproval ? (
         <ApprovalCard event={pendingApproval} onDecide={submitApproval} />
       ) : null}
-      {view === "chat" ? (
-        <>
-          {showScrollToTop ? (
-            <div className="scroll-controls" aria-hidden={false}>
-              <button
-                className="secondary scroll-top"
-                onClick={() => scrollToTop()}
-                type="button"
-                aria-label="Scroll to top"
-              >
-                ↑ Top
-              </button>
-            </div>
-          ) : null}
-          {showScrollToBottom ? (
-            <div className="scroll-latest-floater" aria-hidden={false}>
-              <button
-                type="button"
-                className="scroll-latest-pill"
-                onClick={() => scrollToBottom()}
-                aria-label="Scroll to latest"
-              >
-                <span className="arrow">↓</span>
-                <span>Jump to latest</span>
-              </button>
-            </div>
-          ) : null}
-        </>
+      {view === "chat" && showScrollToBottom ? (
+        <div className="scroll-latest-floater" aria-hidden={false}>
+          <button
+            type="button"
+            className="scroll-latest-pill"
+            onClick={() => scrollToBottom()}
+            aria-label="Scroll to latest"
+          >
+            <span className="arrow">↓</span>
+            <span>Jump to latest</span>
+          </button>
+        </div>
       ) : null}
       {error ? (
         <div className="session-error-toast" role="alert">
@@ -1113,6 +1122,50 @@ interface UsageSummary {
     type: string | null;
     ts: string;
   } | null;
+}
+
+function TranscriptEmpty({
+  status,
+  filterMode,
+  hiddenEventCount,
+  onShowAll,
+}: {
+  status: SessionRecord["status"];
+  filterMode: FilterMode;
+  hiddenEventCount: number;
+  onShowAll: () => void;
+}) {
+  if (filterMode === "important" && hiddenEventCount > 0) {
+    return (
+      <div className="transcript-empty">
+        <p className="transcript-empty-title">Nothing important yet</p>
+        <p className="transcript-empty-sub">
+          {hiddenEventCount} low-signal event{hiddenEventCount === 1 ? "" : "s"} hidden by the
+          Important filter.
+        </p>
+        <button type="button" className="link-button" onClick={onShowAll}>
+          Show all events →
+        </button>
+      </div>
+    );
+  }
+  if (status === "exited") {
+    return (
+      <div className="transcript-empty">
+        <p className="transcript-empty-title">Session exited</p>
+        <p className="transcript-empty-sub">No transcript was captured before this session ended.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="transcript-empty">
+      <span className="transcript-empty-pulse" aria-hidden />
+      <p className="transcript-empty-title">Waiting for the agent…</p>
+      <p className="transcript-empty-sub">
+        Streamed events from the runtime will appear here as soon as they arrive.
+      </p>
+    </div>
+  );
 }
 
 function UsageCard({ summary }: { summary: UsageSummary }) {

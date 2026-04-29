@@ -826,6 +826,8 @@ pre {
 
 .transcript {
   gap: 8px;
+  position: relative;
+  min-width: 0;
 }
 
 .transcript-summary {
@@ -837,18 +839,243 @@ pre {
   display: none;
 }
 
-.transcript-preview {
-  margin: 6px 0 0;
-  font-size: 0.86rem;
+.transcript-summary::after {
+  content: "+";
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  color: var(--muted-soft);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: rgba(8, 11, 16, 0.55);
+  transition: transform 160ms ease, color 160ms ease, border-color 160ms ease;
 }
 
+details[open] > .transcript-summary::after {
+  content: "−";
+  color: var(--accent);
+  border-color: rgba(200, 169, 106, 0.42);
+  transform: rotate(180deg);
+}
+
+.transcript-preview {
+  margin: 6px 36px 0 0;
+  font-size: 0.84rem;
+  font-family: var(--font-mono);
+  letter-spacing: 0.005em;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+ * Role asymmetry — user sits on the right, agent on the left, tool calls
+ * span the full width. Reading the transcript should feel closer to a
+ * conversation than a uniform stream of identical panels.
+ * ──────────────────────────────────────────────────────────────────────── */
+
 .transcript.codex.user_input {
-  border-color: rgba(143, 179, 214, 0.28);
-  background: linear-gradient(180deg, rgba(28, 35, 48, 0.74), rgba(20, 24, 32, 0.74));
+  justify-self: end;
+  width: fit-content;
+  max-width: min(86%, 720px);
+  border-color: rgba(143, 179, 214, 0.32);
+  background: linear-gradient(180deg, rgba(34, 44, 62, 0.78), rgba(22, 28, 40, 0.78));
+  box-shadow: var(--shadow-soft), inset -2px 0 0 rgba(143, 179, 214, 0.32);
+}
+
+.transcript.codex.user_input.ask-answer-summary {
+  width: 100%;
+  max-width: min(92%, 760px);
 }
 
 .transcript.codex.agent_output {
-  border-color: rgba(200, 169, 106, 0.18);
+  justify-self: start;
+  width: fit-content;
+  max-width: min(94%, 820px);
+  border-color: rgba(200, 169, 106, 0.22);
+  box-shadow: var(--shadow-soft), inset 2px 0 0 rgba(200, 169, 106, 0.32);
+}
+
+@media (max-width: 540px) {
+  .transcript.codex.user_input,
+  .transcript.codex.agent_output {
+    max-width: 100%;
+  }
+}
+
+/* Compact role header that floats above the message body. */
+.transcript-role {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  min-width: 0;
+}
+
+.transcript-role .badge {
+  flex-shrink: 0;
+}
+
+.transcript-role .role-time {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--muted-soft);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tool-call cards get a glyph chip + name, replacing the uniform "tool" pill. */
+.tool-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: rgba(217, 154, 74, 0.14);
+  color: var(--warn);
+  border: 1px solid rgba(217, 154, 74, 0.28);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  flex-shrink: 0;
+  letter-spacing: 0;
+}
+
+.tool-glyph.bash {
+  background: rgba(94, 210, 156, 0.12);
+  color: #6cc99a;
+  border-color: rgba(94, 210, 156, 0.28);
+}
+
+.tool-glyph.read,
+.tool-glyph.glob,
+.tool-glyph.grep,
+.tool-glyph.web {
+  background: rgba(143, 179, 214, 0.12);
+  color: var(--accent-cool);
+  border-color: rgba(143, 179, 214, 0.28);
+}
+
+.tool-glyph.edit,
+.tool-glyph.write {
+  background: rgba(200, 169, 106, 0.14);
+  color: var(--accent);
+  border-color: rgba(200, 169, 106, 0.32);
+}
+
+.tool-glyph.task,
+.tool-glyph.todo {
+  background: rgba(180, 150, 220, 0.12);
+  color: #c8a3eb;
+  border-color: rgba(180, 150, 220, 0.28);
+}
+
+.tool-name {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  color: var(--text-strong);
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* System / status rows render as thin horizontal rules so they read as
+ * side-channel events rather than competing with conversation cards. */
+.system-rule {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 0;
+  min-width: 0;
+}
+
+.system-rule::before,
+.system-rule::after {
+  content: "";
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line), transparent);
+}
+
+.system-rule-body {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: var(--muted-soft);
+  text-align: center;
+  min-width: 0;
+}
+
+.system-rule-time {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--muted-soft);
+}
+
+.system-rule-text {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: min(60vw, 480px);
+}
+
+/* Empty state shown before any events arrive. */
+.transcript-empty {
+  display: grid;
+  place-items: center;
+  gap: 14px;
+  padding: 56px 24px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: rgba(8, 11, 16, 0.32);
+  text-align: center;
+}
+
+.transcript-empty-pulse {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(200, 169, 106, 0.4);
+  box-shadow: 0 0 0 0 rgba(200, 169, 106, 0.45);
+  animation: transcript-pulse 1.6s ease-out infinite;
+}
+
+@keyframes transcript-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(200, 169, 106, 0.55); }
+  70% { box-shadow: 0 0 0 14px rgba(200, 169, 106, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(200, 169, 106, 0); }
+}
+
+.transcript-empty-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  letter-spacing: 0.01em;
+  color: var(--text-strong);
+}
+
+.transcript-empty-sub {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--muted);
+  max-width: 36ch;
 }
 
 .transcript.codex.tool_call pre.shell,
@@ -1311,6 +1538,43 @@ pre {
 .composer-overflow-item:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* "Back to top" mirror of the latest-pill — same floating-pill language but
+ * lighter and icon-only, since jumping to the top is a less-frequent need.
+ * Sticks to the top edge of the section so the user can hop back without
+ * having to find the scrollbar. */
+.scroll-top-floater {
+  position: sticky;
+  top: 12px;
+  z-index: 5;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+  margin-bottom: -36px;
+}
+
+.scroll-top-pill {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(20, 24, 33, 0.92);
+  border: 1px solid var(--line-strong);
+  color: var(--accent-cool);
+  font-size: 0.95rem;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(14px);
+  transition: transform 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.scroll-top-pill:hover {
+  border-color: rgba(143, 179, 214, 0.5);
+  color: var(--text-strong);
+  transform: translateY(-1px);
 }
 
 /* Floating "↓ Latest" pill that hovers over the top edge of the sticky

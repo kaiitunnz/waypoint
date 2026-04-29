@@ -963,7 +963,7 @@ pre {
 .scroll-top {
   margin-left: auto;
   position: sticky;
-  top: 12px;
+  bottom: 12px;
   z-index: 1;
 }
 

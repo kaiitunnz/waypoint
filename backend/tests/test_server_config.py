@@ -226,9 +226,18 @@ def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
         "dev@example.com",
     ]
     remote_command = launch.args[6]
-    assert "mkdir -p ~/.waypoint/claude/claude-sess" in remote_command
+    assert 'WAYPOINT_DIR="$HOME/.waypoint/claude/claude-sess"' in remote_command
+    assert 'mkdir -p "$WAYPOINT_DIR"' in remote_command
     assert "claude_pretool_hook.py" in remote_command
     assert "claude_settings.json" in remote_command
+    # The hook command path placeholder must be substituted via sed so claude
+    # gets an absolute path (it does not expand `~` itself).
+    assert "__WAYPOINT_HOOK_PATH__" in remote_command
+    assert (
+        'sed -i.bak "s|__WAYPOINT_HOOK_PATH__|$WAYPOINT_DIR/claude_pretool_hook.py|g"'
+        in remote_command
+    )
+    assert '--settings "$WAYPOINT_DIR/claude_settings.json"' in remote_command
     assert "WAYPOINT_HOOK_URL=http://127.0.0.1:21234" in remote_command
     assert "WAYPOINT_HOOK_SECRET=secret-123" in remote_command
     assert "WAYPOINT_SESSION_ID=claude-sess" in remote_command

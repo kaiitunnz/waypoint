@@ -13,6 +13,10 @@ from waypoint.schemas import Backend
 
 SAFE_TILDE_HEAD = re.compile(r"~[A-Za-z0-9._-]*$")
 
+# Placeholder that gets substituted (via sed) on the remote with the absolute
+# path of the hook script after `$HOME` is resolved.
+HOOK_PATH_PLACEHOLDER = "__WAYPOINT_HOOK_PATH__"
+
 
 def _default_supported_backends() -> list[Backend]:
     return [Backend.CODEX, Backend.CLAUDE_CODE]
@@ -127,9 +131,9 @@ def build_remote_claude_launch_factory(
     ) -> ClaudeLaunchSpec:
         remote_cwd = cwd or target.default_remote_cwd
         reverse_port = _random_reverse_tunnel_port()
-        remote_dir = f"~/.waypoint/claude/{session_id}"
-        hook_path = f"{remote_dir}/claude_pretool_hook.py"
-        settings_path = f"{remote_dir}/claude_settings.json"
+        # Claude reads `--settings` and the hook `command` field as literal
+        # filesystem paths (no tilde / shell expansion), so we build paths off
+        # `$HOME` via a shell variable that bash expands before running claude.
         settings_payload = {
             "hooks": {
                 "PreToolUse": [
@@ -138,7 +142,7 @@ def build_remote_claude_launch_factory(
                         "hooks": [
                             {
                                 "type": "command",
-                                "command": hook_path,
+                                "command": HOOK_PATH_PLACEHOLDER,
                             }
                         ],
                     }
@@ -152,8 +156,6 @@ def build_remote_claude_launch_factory(
             "--output-format=stream-json",
             "--include-hook-events",
             "--verbose",
-            "--settings",
-            settings_path,
             "--permission-mode",
             permission_mode,
         ]
@@ -164,9 +166,6 @@ def build_remote_claude_launch_factory(
         remote_command = _build_remote_claude_command(
             target=target,
             remote_cwd=remote_cwd,
-            remote_dir=remote_dir,
-            hook_path=hook_path,
-            settings_path=settings_path,
             hook_script=hook_script,
             settings_payload=json.dumps(settings_payload, indent=2),
             claude_args=claude_args,
@@ -225,9 +224,6 @@ def _build_remote_claude_command(
     *,
     target: SshLaunchTargetConfig,
     remote_cwd: str,
-    remote_dir: str,
-    hook_path: str,
-    settings_path: str,
     hook_script: str,
     settings_payload: str,
     claude_args: list[str],
@@ -249,24 +245,39 @@ def _build_remote_claude_command(
     }
     for key, value in sorted(combined_env.items()):
         launch_line.append(shlex.quote(f"{key}={value}"))
+    # Claude doesn't expand `~` in --settings, so pass an absolute path that
+    # bash interpolates from the WAYPOINT_DIR variable set earlier in the
+    # script.
     launch_line.append(shlex.join(claude_args))
+    launch_line.append('--settings "$WAYPOINT_DIR/claude_settings.json"')
+    waypoint_dir_assign = f'WAYPOINT_DIR="$HOME/.waypoint/claude/{session_id}"'
     remote_parts = [
-        f"mkdir -p {_quote_remote_path(remote_dir)}",
-        _render_remote_file_write(hook_path, hook_script),
-        f"chmod 755 {_quote_remote_path(hook_path)}",
-        _render_remote_file_write(settings_path, settings_payload),
+        waypoint_dir_assign,
+        'mkdir -p "$WAYPOINT_DIR"',
+        _render_remote_file_write(
+            '"$WAYPOINT_DIR/claude_pretool_hook.py"', hook_script
+        ),
+        'chmod 755 "$WAYPOINT_DIR/claude_pretool_hook.py"',
+        _render_remote_file_write(
+            '"$WAYPOINT_DIR/claude_settings.json"', settings_payload
+        ),
+        # Substitute the hook path placeholder with an absolute path now that
+        # the file is on disk and $HOME is known. `-i.bak` works on both BSD
+        # and GNU sed.
+        'sed -i.bak "s|'
+        + HOOK_PATH_PLACEHOLDER
+        + '|$WAYPOINT_DIR/claude_pretool_hook.py|g" '
+        '"$WAYPOINT_DIR/claude_settings.json"',
         " ".join(launch_line),
     ]
     return target.wrap_remote_command("\n".join(remote_parts))
 
 
-def _render_remote_file_write(path: str, content: str) -> str:
+def _render_remote_file_write(quoted_path: str, content: str) -> str:
+    """Emit a heredoc that writes `content` to `quoted_path` (already
+    shell-quoted) without any expansion."""
     delimiter = f"__WAYPOINT_{secrets.token_hex(8)}__"
-    return (
-        f"cat > {_quote_remote_path(path)} <<'{delimiter}'\n"
-        f"{content}\n"
-        f"{delimiter}"
-    )
+    return f"cat > {quoted_path} <<'{delimiter}'\n" f"{content}\n" f"{delimiter}"
 
 
 def _random_reverse_tunnel_port() -> int:

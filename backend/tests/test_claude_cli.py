@@ -450,6 +450,100 @@ def test_claude_cli_mode_for_maps_waypoint_to_cli_values() -> None:
 
 
 @pytest.mark.asyncio
+async def test_handle_assistant_registers_ask_user_question_tool_use() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    event = {
+        "type": "assistant",
+        "message": {
+            "id": "msg_ask",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_ask",
+                    "name": "AskUserQuestion",
+                    "input": {"questions": [{"question": "ok?", "options": []}]},
+                }
+            ],
+        },
+    }
+    await adapter._dispatch(state, event)
+    assert "toolu_ask" in state.pending_ask
+    assert adapter.has_pending_ask_question("sess")
+
+
+@pytest.mark.asyncio
+async def test_respond_to_ask_question_writes_tool_result_envelope() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, process = _attach_state(adapter)
+    state.pending_ask["toolu_ask"] = {"questions": []}
+
+    handled = await adapter.respond_to_ask_question(
+        "sess", "**Plan target**: Trivial wrapper-test plan", "toolu_ask"
+    )
+
+    assert handled is True
+    assert "toolu_ask" not in state.pending_ask
+    assert process.stdin.writes, "no envelope written to stdin"
+    payload = json.loads(process.stdin.writes[-1])
+    assert payload["type"] == "user"
+    block = payload["message"]["content"][0]
+    assert block == {
+        "type": "tool_result",
+        "tool_use_id": "toolu_ask",
+        "content": (
+            "User has answered your questions: "
+            "**Plan target**: Trivial wrapper-test plan. "
+            "You can now continue with the user's answers in mind."
+        ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_handle_user_clears_pending_ask_on_tool_result() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    state.pending_ask["toolu_ask"] = {"questions": []}
+    await adapter._dispatch(
+        state,
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_ask",
+                        "content": "User has answered ...",
+                    }
+                ]
+            },
+        },
+    )
+    assert "toolu_ask" not in state.pending_ask
+
+
+@pytest.mark.asyncio
+async def test_interrupt_uses_control_request_not_signal(monkeypatch) -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, process = _attach_state(adapter)
+
+    captured: list[dict] = []
+
+    async def fake_send(session_id, request_id, request):
+        captured.append(request)
+        return {"subtype": "ack"}
+
+    monkeypatch.setattr(adapter, "_send_control_request", fake_send)
+    await adapter.interrupt("sess")
+    assert captured == [{"subtype": "interrupt"}]
+    assert process.signals == []  # SIGINT not used when control_request succeeds
+
+
+@pytest.mark.asyncio
 async def test_plan_mode_auto_approves_plan_file_write_and_captures_path() -> None:
     """In plan mode the binary writes the plan to ~/.claude/plans/<slug>.md
     before calling ExitPlanMode. That meta-write must auto-approve, and the

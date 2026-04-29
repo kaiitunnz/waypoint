@@ -25,6 +25,7 @@ from waypoint.schemas import (
     LoginRequest,
     MeResponse,
     ScheduleCreateRequest,
+    SessionAnswerQuestionRequest,
     SessionApprovalRequest,
     SessionAttachRequest,
     SessionCreateRequest,
@@ -191,6 +192,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         session = await context.runtime.approve(session_id, request)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.post("/api/sessions/{session_id}/answer-question")
+    async def session_answer_question(
+        session_id: str,
+        request: SessionAnswerQuestionRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.answer_question(
+            session_id, request.answer, request.tool_use_id
+        )
         return {"session": session.model_dump(mode="json")}
 
     @app.post("/api/sessions/{session_id}/resume")

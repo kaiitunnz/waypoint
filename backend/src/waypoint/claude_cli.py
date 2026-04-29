@@ -149,6 +149,11 @@ class ClaudeSessionState:
     )
     permission_mode: str = "default"
     last_plan_path: str | None = None
+    # Open AskUserQuestion tool_use_ids waiting for the user's answer. Each
+    # one needs a `tool_result` block sent back, NOT a new user message,
+    # otherwise the conversation is left with an unresolved tool_use and the
+    # next turn errors with `error_during_execution`.
+    pending_ask: dict[str, dict[str, Any]] = field(default_factory=dict)
     closing: bool = False
 
 
@@ -310,8 +315,74 @@ class ClaudeCliAdapter:
         state = self._require_session(session_id)
         if state.process.returncode is not None:
             return
+        # The stream-json control_request `interrupt` cancels the in-flight
+        # turn while keeping the binary alive, mirroring the TUI Ctrl+C
+        # behaviour. Fall back to SIGINT only if the request fails — that
+        # ends the process (rc=0 in `-p` mode), so the session would have to
+        # be resumed.
+        request_id = f"interrupt-{uuid.uuid4()}"
+        try:
+            await self._send_control_request(
+                session_id, request_id, {"subtype": "interrupt"}
+            )
+            return
+        except (ClaudeCliError, TimeoutError) as exc:
+            log.warning(
+                "claude interrupt control_request failed; falling back to SIGINT: %s",
+                exc,
+                extra={"session_id": session_id},
+            )
         with suppress(ProcessLookupError):
             state.process.send_signal(2)  # SIGINT
+
+    async def respond_to_ask_question(
+        self,
+        session_id: str,
+        answer_text: str,
+        tool_use_id: str | None = None,
+    ) -> bool:
+        state = self._sessions.get(session_id)
+        if state is None or not state.pending_ask:
+            return False
+        if tool_use_id is None or tool_use_id not in state.pending_ask:
+            tool_use_id = next(iter(state.pending_ask))
+        state.pending_ask.pop(tool_use_id, None)
+        if state.process.returncode is not None:
+            raise ClaudeCliError(
+                self._format_dead_process_error(state, state.process.returncode)
+            )
+        if state.process.stdin is None or state.process.stdin.is_closing():
+            raise ClaudeCliError(
+                self._format_dead_process_error(state, state.process.returncode)
+            )
+        envelope = {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": (
+                            "User has answered your questions: "
+                            f"{answer_text}. You can now continue with the "
+                            "user's answers in mind."
+                        ),
+                    }
+                ],
+            },
+        }
+        line = (json.dumps(envelope) + "\n").encode("utf-8")
+        state.process.stdin.write(line)
+        try:
+            await state.process.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError) as exc:
+            raise ClaudeCliError(f"claude stdin write failed: {exc}") from exc
+        return True
+
+    def has_pending_ask_question(self, session_id: str) -> bool:
+        state = self._sessions.get(session_id)
+        return bool(state and state.pending_ask)
 
     async def respond_to_approval(self, session_id: str, decision: str) -> bool:
         state = self._sessions.get(session_id)
@@ -844,6 +915,10 @@ class ClaudeCliAdapter:
                     # an extra tool_call disclosure with the JSON payload is
                     # noise.
                     continue
+                if tool_name == "AskUserQuestion" and tool_use_id:
+                    # Track so the user's answer routes back as a tool_result
+                    # for this exact tool_use_id, not as a fresh user message.
+                    state.pending_ask[tool_use_id] = block.get("input") or {}
                 input_text = json.dumps(block.get("input") or {}, indent=2)
                 await self._emit_event(
                     state.session_id,
@@ -871,6 +946,10 @@ class ClaudeCliAdapter:
             if block.get("type") != "tool_result":
                 continue
             tool_use_id = str(block.get("tool_use_id") or "")
+            # Once a tool_result arrives for an open AskUserQuestion the
+            # binary considers it resolved; drop our local tracker so a
+            # late "Send answers" click can't double-respond.
+            state.pending_ask.pop(tool_use_id, None)
             content = block.get("content")
             text = self._stringify_tool_result(content)
             is_error = bool(block.get("is_error"))

@@ -740,6 +740,34 @@ class SessionRuntime:
         )
         return updated
 
+    async def answer_question(
+        self,
+        session_id: str,
+        answer: str,
+        tool_use_id: str | None = None,
+    ) -> SessionRecord:
+        session = self.get_session(session_id)
+        if session.transport != SessionTransport.CLAUDE_CLI or self.claude is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="answer-question is only supported for Claude sessions",
+            )
+        try:
+            handled = await self.claude.respond_to_ask_question(
+                session_id, answer, tool_use_id
+            )
+        except ClaudeCliError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        if not handled:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="no pending question for this session",
+            )
+        await self._record_user_event(session.id, answer, submit=True)
+        return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
+
     async def approve(
         self, session_id: str, request: SessionApprovalRequest
     ) -> SessionRecord:

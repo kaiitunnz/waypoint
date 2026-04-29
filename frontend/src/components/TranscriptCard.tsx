@@ -27,7 +27,10 @@ interface TranscriptCardProps {
   event: EventRecord;
   transport: SessionTransport;
   pair?: ToolPair;
-  onAnswerAskQuestion?: (text: string) => Promise<boolean> | void;
+  onAnswerAskQuestion?: (
+    text: string,
+    toolUseId?: string,
+  ) => Promise<boolean> | void;
 }
 
 export const TranscriptCard = memo(function TranscriptCard({
@@ -60,7 +63,10 @@ function StructuredCard({
 }: {
   event: EventRecord;
   transport: SessionTransport;
-  onAnswerAskQuestion?: (text: string) => Promise<boolean> | void;
+  onAnswerAskQuestion?: (
+    text: string,
+    toolUseId?: string,
+  ) => Promise<boolean> | void;
 }) {
   const agentLabel = transport === "claude_cli" ? "claude" : "codex";
   return (
@@ -79,7 +85,10 @@ function CodexCard({
 }: {
   event: EventRecord;
   agentLabel?: string;
-  onAnswerAskQuestion?: (text: string) => Promise<boolean> | void;
+  onAnswerAskQuestion?: (
+    text: string,
+    toolUseId?: string,
+  ) => Promise<boolean> | void;
 }) {
   switch (event.kind) {
     case "user_input":
@@ -171,7 +180,10 @@ function ToolPairCard({
   onAnswerAskQuestion,
 }: {
   pair: ToolPair;
-  onAnswerAskQuestion?: (text: string) => Promise<boolean> | void;
+  onAnswerAskQuestion?: (
+    text: string,
+    toolUseId?: string,
+  ) => Promise<boolean> | void;
 }) {
   const { call, result } = pair;
   if (call) {
@@ -268,7 +280,10 @@ function AskUserQuestionCard({
 }: {
   event: EventRecord;
   questions: AskUserQuestion[];
-  onAnswer?: (text: string) => Promise<boolean> | void;
+  onAnswer?: (
+    text: string,
+    toolUseId?: string,
+  ) => Promise<boolean> | void;
   answered: boolean;
 }) {
   const [submitting, setSubmitting] = useState(false);
@@ -305,8 +320,12 @@ function AskUserQuestionCard({
     });
     if (!lines.length) return;
     setSubmitting(true);
+    const toolUseId =
+      typeof event.metadata?.tool_use_id === "string"
+        ? (event.metadata.tool_use_id as string)
+        : undefined;
     try {
-      await onAnswer(lines.join("\n"));
+      await onAnswer(lines.join("\n"), toolUseId);
       setPicked({});
     } finally {
       setSubmitting(false);

@@ -13,6 +13,7 @@ import {
 } from "react";
 
 import {
+  answerAskQuestion,
   approveSession,
   connectSessionSocket,
   deleteSession as deleteSessionRequest,
@@ -356,6 +357,28 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }, [handleAuthFailure, host, token, sessionId]);
 
+  const submitAskAnswer = useCallback(
+    async (answer: string, toolUseId?: string) => {
+      if (!answer.trim()) {
+        return false;
+      }
+      try {
+        await answerAskQuestion(host, token, sessionId, answer, toolUseId);
+        return true;
+      } catch (sendError) {
+        if (isAuthError(sendError)) {
+          handleAuthFailure();
+          return false;
+        }
+        setError(
+          sendError instanceof Error ? sendError.message : "failed to send answer",
+        );
+        return false;
+      }
+    },
+    [handleAuthFailure, host, token, sessionId],
+  );
+
   const runAction = useCallback(async (action: "interrupt" | "resume") => {
     try {
       await postAction(host, token, sessionId, action);
@@ -497,14 +520,14 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                     event={item.pair.call ?? item.pair.result ?? item.event}
                     pair={item.pair}
                     transport={session.transport}
-                    onAnswerAskQuestion={submitInput}
+                    onAnswerAskQuestion={submitAskAnswer}
                     key={`pair-${item.pair.itemId}`}
                   />
                 ) : (
                   <TranscriptCard
                     event={item.event}
                     transport={session.transport}
-                    onAnswerAskQuestion={submitInput}
+                    onAnswerAskQuestion={submitAskAnswer}
                     key={`${item.event.sequence}-${item.event.id ?? "local"}`}
                   />
                 ),

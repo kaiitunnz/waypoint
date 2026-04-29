@@ -280,6 +280,27 @@ export async function approveSession(
   await ensureOk(response, "failed to send approval");
 }
 
+export async function answerAskQuestion(
+  host: string,
+  token: string,
+  sessionId: string,
+  answer: string,
+  toolUseId?: string,
+): Promise<void> {
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/answer-question`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ answer, tool_use_id: toolUseId }),
+    },
+  );
+  await ensureOk(response, "failed to send answer");
+}
+
 export async function sendInput(
   host: string,
   token: string,

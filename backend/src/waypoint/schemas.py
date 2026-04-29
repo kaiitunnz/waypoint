@@ -150,6 +150,11 @@ class SessionPermissionModeRequest(BaseModel):
     mode: str
 
 
+class SessionAnswerQuestionRequest(BaseModel):
+    answer: str
+    tool_use_id: str | None = None
+
+
 class TerminalSnapshot(BaseModel):
     session_id: str
     text: str

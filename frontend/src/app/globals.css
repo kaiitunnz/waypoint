@@ -736,7 +736,7 @@ pre {
 }
 
 .list-actions {
-  justify-content: flex-end;
+  justify-content: space-between;
 }
 
 .terminal {
@@ -762,6 +762,9 @@ pre {
 .session-card {
   display: grid;
   gap: 8px;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
   transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
 }
 
@@ -773,6 +776,42 @@ pre {
 
 .session-card h3 {
   font-size: 1.04rem;
+}
+
+.session-list-shell {
+  overflow: hidden;
+}
+
+.session-list-summary {
+  min-width: 0;
+}
+
+.pagination-controls {
+  margin-left: auto;
+}
+
+.session-card-title,
+.session-card-path,
+.session-card-meta .meta {
+  margin: 0;
+}
+
+.session-card-title,
+.session-card-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-card-path {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+.session-card-meta {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
 }
 
 .schedule-panel {

@@ -32,7 +32,11 @@ CLAUDE_AUTO_APPROVE_MODES = frozenset({"auto", "bypassPermissions", "dontAsk"})
 CLAUDE_ACCEPT_EDITS_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
 
 
-def _auto_approve_for_mode(mode: str, tool_name: object) -> dict[str, str] | None:
+def _auto_approve_for_mode(
+    mode: str,
+    tool_name: object,
+    tool_input: dict[str, Any] | None = None,
+) -> dict[str, str] | None:
     if mode in CLAUDE_AUTO_APPROVE_MODES:
         return {
             "permissionDecision": "allow",
@@ -43,7 +47,27 @@ def _auto_approve_for_mode(mode: str, tool_name: object) -> dict[str, str] | Non
             "permissionDecision": "allow",
             "permissionDecisionReason": "auto-approved by Waypoint mode=acceptEdits",
         }
+    if mode == "plan" and tool_name == "Write" and tool_input is not None:
+        path = str(tool_input.get("file_path") or "")
+        if _is_plan_file_path(path):
+            return {
+                "permissionDecision": "allow",
+                "permissionDecisionReason": (
+                    "Plan-file write auto-approved by Waypoint plan mode"
+                ),
+            }
     return None
+
+
+# Claude in plan mode writes its plan to ~/.claude/plans/<slug>.md before
+# calling ExitPlanMode. That write is a meta-operation the binary itself
+# does — surfacing an approval card for it duplicates the ExitPlanMode card
+# the user already sees. Detect the canonical location (with /private/var
+# realpath quirks on macOS) so we can pass it through silently.
+def _is_plan_file_path(path: str) -> bool:
+    if not path:
+        return False
+    return "/.claude/plans/" in path
 
 
 # Maps a Waypoint per-session mode to the value the Claude CLI accepts on
@@ -124,6 +148,7 @@ class ClaudeSessionState:
         default_factory=dict
     )
     permission_mode: str = "default"
+    last_plan_path: str | None = None
     closing: bool = False
 
 
@@ -303,7 +328,9 @@ class ClaudeCliAdapter:
         # accept we also flip the binary out of plan mode via control_request,
         # mirroring what the TUI does after the dialog returns.
         if tool_name == "ExitPlanMode":
-            response = await self._exit_plan_mode_response(state, mapped)
+            response = await self._exit_plan_mode_response(
+                state, mapped, pending.payload
+            )
         else:
             response = {
                 "permissionDecision": mapped,
@@ -319,10 +346,15 @@ class ClaudeCliAdapter:
         return True
 
     async def _exit_plan_mode_response(
-        self, state: ClaudeSessionState, mapped: str
+        self,
+        state: ClaudeSessionState,
+        mapped: str,
+        payload: dict[str, Any],
     ) -> dict[str, str]:
         # Phrasing mirrors the Claude binary's own ExitPlanMode tool_result so
-        # the model sees the same approval/decline shape it was tuned for.
+        # the model sees the same approval/decline shape it was tuned for —
+        # including the saved-plan path and the approved plan body, since
+        # plan mode was tuned around that exact context.
         if mapped == "allow":
             try:
                 await self.set_permission_mode(state.session_id, "default")
@@ -332,12 +364,26 @@ class ClaudeCliAdapter:
                     exc,
                     extra={"session_id": state.session_id},
                 )
+            tool_input = payload.get("tool_input")
+            plan = ""
+            if isinstance(tool_input, dict):
+                plan = str(tool_input.get("plan") or "")
+            lines = [
+                "User has approved your plan. You can now start coding. "
+                "Start with updating your todo list if applicable.",
+            ]
+            if state.last_plan_path:
+                lines.append(f"Your plan has been saved to: {state.last_plan_path}")
+                lines.append(
+                    "You can refer back to it if needed during implementation."
+                )
+            if plan.strip():
+                lines.append("## Approved Plan:")
+                lines.append(plan)
+            state.last_plan_path = None
             return {
                 "permissionDecision": "deny",
-                "permissionDecisionReason": (
-                    "User has approved your plan. You can now start coding. "
-                    "Start with updating your todo list if applicable."
-                ),
+                "permissionDecisionReason": "\n".join(lines),
             }
         return {
             "permissionDecision": "deny",
@@ -367,8 +413,22 @@ class ClaudeCliAdapter:
             # permission_mode is an internal hint that only kicks in when no
             # hook is wired; with Waypoint's PreToolUse hook always installed,
             # the mode never gets consulted unless we do it here.
-            auto = _auto_approve_for_mode(state.permission_mode, tool_name)
+            tool_input = payload.get("tool_input")
+            tool_input_dict = tool_input if isinstance(tool_input, dict) else None
+            auto = _auto_approve_for_mode(
+                state.permission_mode, tool_name, tool_input_dict
+            )
             if auto is not None:
+                # Stash the plan-file path so ExitPlanMode can echo it back
+                # to Claude in the same shape the binary's TUI uses.
+                if (
+                    state.permission_mode == "plan"
+                    and tool_name == "Write"
+                    and tool_input_dict is not None
+                ):
+                    path = str(tool_input_dict.get("file_path") or "")
+                    if _is_plan_file_path(path):
+                        state.last_plan_path = path
                 return auto
             if tool_use_id in state.pending:
                 # Hook was retried for the same tool call. Reuse the existing future.

@@ -450,16 +450,72 @@ def test_claude_cli_mode_for_maps_waypoint_to_cli_values() -> None:
 
 
 @pytest.mark.asyncio
+async def test_plan_mode_auto_approves_plan_file_write_and_captures_path() -> None:
+    """In plan mode the binary writes the plan to ~/.claude/plans/<slug>.md
+    before calling ExitPlanMode. That meta-write must auto-approve, and the
+    path must be captured so ExitPlanMode can echo it back."""
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    state.permission_mode = "plan"
+
+    decision = await adapter.await_approval(
+        {
+            "waypoint_session_id": "sess",
+            "tool_use_id": "toolu_write",
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/Users/me/.claude/plans/my-plan.md",
+                "content": "# plan",
+            },
+        }
+    )
+    assert decision["permissionDecision"] == "allow"
+    assert state.last_plan_path == "/Users/me/.claude/plans/my-plan.md"
+    # Approval card must NOT have been emitted for the meta-write.
+    assert not any(item[1] == EventKind.APPROVAL_REQUEST for item in emitted)
+
+
+@pytest.mark.asyncio
+async def test_plan_mode_does_not_auto_approve_non_plan_writes() -> None:
+    """Writes outside the ~/.claude/plans/ tree should still surface the
+    approval card; only the binary's own plan-file path is implicit."""
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    state.permission_mode = "plan"
+
+    payload = {
+        "waypoint_session_id": "sess",
+        "tool_use_id": "toolu_write_src",
+        "tool_name": "Write",
+        "tool_input": {"file_path": "/repo/src/main.py", "content": "x"},
+    }
+    task = asyncio.create_task(adapter.await_approval(payload))
+    for _ in range(50):
+        if adapter.has_pending_approval("sess"):
+            break
+        await asyncio.sleep(0.01)
+    assert adapter.has_pending_approval("sess")
+    assert state.last_plan_path is None
+    await adapter.respond_to_approval("sess", "decline")
+    await task
+
+
+@pytest.mark.asyncio
 async def test_exit_plan_mode_approval_blocks_tool_and_switches_mode(
     monkeypatch,
 ) -> None:
     """When the user approves an ExitPlanMode plan, the hook must deny the
     tool (so Claude doesn't read the binary's "Exit plan mode?" echo as a
-    dismissal) and the adapter must flip the binary out of plan mode."""
+    dismissal), the adapter must flip the binary out of plan mode, and the
+    deny reason must echo the saved-plan path and the plan body so the
+    model sees the same context the native tool_result would carry."""
     emitted: list = []
     adapter = _make_adapter(emitted)
     state, _ = _attach_state(adapter)
     state.permission_mode = "plan"
+    state.last_plan_path = "/Users/me/.claude/plans/my-plan.md"
 
     mode_calls: list[str] = []
 
@@ -469,11 +525,12 @@ async def test_exit_plan_mode_approval_blocks_tool_and_switches_mode(
 
     monkeypatch.setattr(adapter, "set_permission_mode", fake_set_mode)
 
+    plan_body = "## Plan\n1. Read files\n2. Apply edits"
     payload = {
         "waypoint_session_id": "sess",
         "tool_use_id": "toolu_plan",
         "tool_name": "ExitPlanMode",
-        "tool_input": {"plan": "## Plan\n- step"},
+        "tool_input": {"plan": plan_body},
     }
     decision_task = asyncio.create_task(adapter.await_approval(payload))
     for _ in range(50):
@@ -483,10 +540,16 @@ async def test_exit_plan_mode_approval_blocks_tool_and_switches_mode(
     await adapter.respond_to_approval("sess", "approve")
     decision = await decision_task
 
+    reason = decision["permissionDecisionReason"]
     assert decision["permissionDecision"] == "deny"
-    assert "approved your plan" in decision["permissionDecisionReason"]
-    assert "start coding" in decision["permissionDecisionReason"]
+    assert "approved your plan" in reason
+    assert "start coding" in reason
+    assert "/Users/me/.claude/plans/my-plan.md" in reason
+    assert "## Approved Plan:" in reason
+    assert plan_body in reason
     assert mode_calls == ["default"]
+    # last_plan_path is consumed once approval lands.
+    assert state.last_plan_path is None
 
 
 @pytest.mark.asyncio

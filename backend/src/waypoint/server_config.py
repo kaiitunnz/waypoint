@@ -32,7 +32,7 @@ class SshLaunchTargetConfig(BaseModel):
     ssh_args: list[str] = Field(default_factory=list)
     codex_bin: str = "codex"
     claude_bin: str = "claude"
-    default_remote_cwd: str = "~"
+    default_cwd: str = "~"
     # Remote login shell wrapper used to run codex/claude commands so user
     # rcfiles (PATH, env vars, helpers) get sourced. `-i` (interactive) is
     # needed so that `.bashrc` runs past the standard `case $- in *i*) ;; *)
@@ -67,18 +67,16 @@ class SshLaunchTargetConfig(BaseModel):
             return fallback
         return self.supported_backends[0]
 
-    def build_codex_launch_args(self, remote_cwd: str) -> tuple[str, ...]:
+    def build_codex_launch_args(self, cwd: str) -> tuple[str, ...]:
         codex_args = [self.codex_bin]
         for override in self.config_overrides:
             codex_args.extend(["--config", override])
         codex_args.extend(["app-server", "--listen", "stdio://"])
-        return self.build_remote_exec_args(codex_args, remote_cwd)
+        return self.build_remote_exec_args(codex_args, cwd)
 
-    def build_remote_exec_args(
-        self, command: list[str], remote_cwd: str
-    ) -> tuple[str, ...]:
+    def build_remote_exec_args(self, command: list[str], cwd: str) -> tuple[str, ...]:
         ssh_bin = _resolve_local_binary(self.ssh_bin)
-        remote_parts = [f"cd {_quote_remote_path(remote_cwd)}", "&&", "exec"]
+        remote_parts = [f"cd {_quote_remote_path(cwd)}", "&&", "exec"]
         if self.remote_env:
             remote_parts.append("env")
             for key, value in sorted(self.remote_env.items()):
@@ -95,17 +93,17 @@ class SshLaunchTargetConfig(BaseModel):
         return f"{shell} {shlex.quote(command)}"
 
     def remote_command_for_backend(
-        self, backend: Backend, args: list[str], remote_cwd: str
+        self, backend: Backend, args: list[str], cwd: str
     ) -> tuple[str, ...]:
         executable = (
             self.claude_bin if backend == Backend.CLAUDE_CODE else self.codex_bin
         )
-        return self.build_remote_exec_args([executable, *args], remote_cwd)
+        return self.build_remote_exec_args([executable, *args], cwd)
 
 
 def build_remote_codex_client_factory(target: SshLaunchTargetConfig):
-    def factory(cwd: str, remote_cwd: str | None, approval_handler):
-        launch_cwd = remote_cwd or target.default_remote_cwd
+    def factory(cwd: str, approval_handler):
+        launch_cwd = cwd or target.default_cwd
         return AppServerClient(
             config=AppServerConfig(
                 launch_args_override=target.build_codex_launch_args(launch_cwd),
@@ -133,7 +131,7 @@ def build_remote_claude_launch_factory(
         resume: bool,
         cli_mode: str,
     ) -> ClaudeLaunchSpec:
-        remote_cwd = cwd or target.default_remote_cwd
+        cwd = cwd or target.default_cwd
         reverse_port = _random_reverse_tunnel_port()
         # Claude reads `--settings` and the hook `command` field as literal
         # filesystem paths (no tilde / shell expansion), so we build paths off
@@ -169,7 +167,7 @@ def build_remote_claude_launch_factory(
             claude_args.extend(["--session-id", claude_session_id])
         remote_command = _build_remote_claude_command(
             target=target,
-            remote_cwd=remote_cwd,
+            cwd=cwd,
             hook_script=hook_script,
             settings_payload=json.dumps(settings_payload, indent=2),
             claude_args=claude_args,
@@ -227,7 +225,7 @@ def _resolve_local_binary(binary: str) -> str:
 def _build_remote_claude_command(
     *,
     target: SshLaunchTargetConfig,
-    remote_cwd: str,
+    cwd: str,
     hook_script: str,
     settings_payload: str,
     claude_args: list[str],
@@ -236,7 +234,7 @@ def _build_remote_claude_command(
     session_id: str,
 ) -> str:
     launch_line = [
-        f"cd {_quote_remote_path(remote_cwd)}",
+        f"cd {_quote_remote_path(cwd)}",
         "&&",
         "exec",
         "env",

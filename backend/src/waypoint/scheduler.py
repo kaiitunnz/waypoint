@@ -93,17 +93,14 @@ class Scheduler:
             launch_target = self._runtime._resolve_launch_target(
                 request.launch_target_id, request.backend
             )
-        # Remote schedules: keep the remote path as the displayed cwd so the
-        # row shows something meaningful when the user didn't supply one.
         cwd = request.cwd
         if launch_target is not None and not cwd:
-            cwd = request.remote_cwd or launch_target.default_remote_cwd
+            cwd = launch_target.default_cwd
         now = datetime.now(UTC)
         record = ScheduledSessionRecord(
             id=self._generate_id(),
             backend=request.backend,
             cwd=cwd,
-            remote_cwd=request.remote_cwd,
             launch_target_id=request.launch_target_id,
             title=request.title,
             args=list(request.args),
@@ -187,7 +184,6 @@ class Scheduler:
                 SessionCreateRequest(
                     backend=schedule.backend,
                     cwd=schedule.cwd,
-                    remote_cwd=schedule.remote_cwd,
                     launch_target_id=schedule.launch_target_id,
                     title=schedule.title,
                     args=schedule.args,

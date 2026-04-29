@@ -182,7 +182,7 @@ class SessionRuntime:
         try:
             await self.claude.restore_session(
                 session.id,
-                session.remote_cwd or session.cwd,
+                session.cwd,
                 session.thread_id,
                 self._claude_launch_factory(session.launch_target_id),
                 permission_mode=session.permission_mode,
@@ -205,7 +205,7 @@ class SessionRuntime:
         self.storage.update_session(session.id, status=SessionStatus.IDLE)
         await self._record_system_event(
             session.id,
-            self._claude_restore_message(session.remote_cwd, session.launch_target_id),
+            self._claude_restore_message(session.cwd, session.launch_target_id),
             status=SessionStatus.IDLE,
         )
 
@@ -234,7 +234,6 @@ class SessionRuntime:
                 session.id,
                 session.cwd,
                 session.thread_id,
-                session.remote_cwd,
                 self._codex_client_factory(session.launch_target_id),
             )
         except Exception as exc:  # noqa: BLE001
@@ -256,7 +255,7 @@ class SessionRuntime:
         self.storage.update_session(session.id, status=SessionStatus.IDLE)
         await self._record_system_event(
             session.id,
-            self._codex_restore_message(session.remote_cwd, session.launch_target_id),
+            self._codex_restore_message(session.cwd, session.launch_target_id),
             status=SessionStatus.IDLE,
         )
 
@@ -345,7 +344,6 @@ class SessionRuntime:
         structured_log = session_dir / "events.jsonl"
         raw_log.touch(exist_ok=True)
         cwd = self._codex_thread_cwd(thread)
-        remote_cwd = cwd if launch_target is not None else None
         now = datetime.now(UTC)
         session = SessionRecord(
             id=session_id,
@@ -354,7 +352,6 @@ class SessionRuntime:
             transport=SessionTransport.CODEX_APP_SERVER,
             title=self._codex_thread_title(thread),
             cwd=cwd,
-            remote_cwd=remote_cwd,
             launch_target_id=launch_target.id if launch_target else None,
             repo_name=self._codex_thread_repo_name(thread),
             branch=self._codex_thread_branch(thread),
@@ -373,7 +370,6 @@ class SessionRuntime:
                 session.id,
                 session.cwd,
                 thread.id,
-                session.remote_cwd,
                 self._codex_client_factory(session.launch_target_id),
             )
         except Exception as exc:  # noqa: BLE001
@@ -418,12 +414,7 @@ class SessionRuntime:
         # which expand `~`. Resolve it before storing/launching. The remote
         # cwd is left verbatim so the remote shell can do its own expansion.
         if launch_target is not None:
-            # Remote sessions only use the remote path; the local cwd is just
-            # a label for the UI / git-meta heuristic. Fall back to the remote
-            # path when the client didn't supply one.
-            local_cwd = (
-                request.cwd or request.remote_cwd or launch_target.default_remote_cwd
-            )
+            local_cwd = request.cwd or launch_target.default_cwd
         else:
             local_cwd = str(Path(request.cwd).expanduser())
         request = request.model_copy(update={"cwd": local_cwd})
@@ -435,7 +426,6 @@ class SessionRuntime:
         raw_log = session_dir / "raw.log"
         structured_log = session_dir / "events.jsonl"
         git_meta = await resolve_git_meta(request.cwd)
-        remote_cwd = self._resolve_remote_cwd(request, launch_target)
         permission_mode = (
             validate_permission_mode_for_backend(
                 request.backend, request.permission_mode
@@ -451,7 +441,6 @@ class SessionRuntime:
                 transport=SessionTransport.CODEX_APP_SERVER,
                 title=title,
                 cwd=request.cwd,
-                remote_cwd=remote_cwd,
                 launch_target_id=launch_target.id if launch_target else None,
                 repo_name=git_meta.repo_name,
                 branch=git_meta.branch,
@@ -468,7 +457,6 @@ class SessionRuntime:
                 thread_id = await self.codex.start_session(
                     session_id,
                     request.cwd,
-                    remote_cwd,
                     self._codex_client_factory(session.launch_target_id),
                 )
             except Exception:
@@ -479,7 +467,7 @@ class SessionRuntime:
             )
             await self._record_system_event(
                 session.id,
-                self._codex_start_message(remote_cwd, launch_target),
+                self._codex_start_message(request.cwd, launch_target),
                 status=SessionStatus.IDLE,
             )
             return self.get_session(session.id)
@@ -493,7 +481,6 @@ class SessionRuntime:
                 transport=SessionTransport.CLAUDE_CLI,
                 title=title,
                 cwd=request.cwd,
-                remote_cwd=remote_cwd,
                 launch_target_id=launch_target.id if launch_target else None,
                 repo_name=git_meta.repo_name,
                 branch=git_meta.branch,
@@ -510,7 +497,7 @@ class SessionRuntime:
             try:
                 await self.claude.start_session(
                     session_id,
-                    remote_cwd or request.cwd,
+                    request.cwd,
                     claude_session_id,
                     self._claude_launch_factory(session.launch_target_id),
                     permission_mode=session.permission_mode,
@@ -523,15 +510,11 @@ class SessionRuntime:
             self.storage.update_session(session.id, status=SessionStatus.IDLE)
             await self._record_system_event(
                 session.id,
-                self._claude_start_message(
-                    claude_session_id, remote_cwd, launch_target
-                ),
+                self._claude_start_message(claude_session_id, request.cwd, launch_target),
                 status=SessionStatus.IDLE,
             )
             return self.get_session(session.id)
-        command = self._command_for_backend(
-            request.backend, request.args, launch_target, remote_cwd
-        )
+        command = self._command_for_backend(request.backend, request.args, launch_target, request.cwd)
         try:
             target = await self.tmux.start_managed_session(
                 session_id, request.cwd, command
@@ -548,7 +531,6 @@ class SessionRuntime:
             transport=SessionTransport.TMUX,
             title=title,
             cwd=request.cwd,
-            remote_cwd=remote_cwd,
             launch_target_id=launch_target.id if launch_target else None,
             repo_name=git_meta.repo_name,
             branch=git_meta.branch,
@@ -566,7 +548,7 @@ class SessionRuntime:
         self.storage.create_session(session)
         await self._record_system_event(
             session.id,
-            self._managed_start_message(request.backend, launch_target, remote_cwd),
+            self._managed_start_message(request.backend, launch_target, request.cwd),
         )
         self._ensure_monitor(session.id)
         return self.get_session(session.id)
@@ -882,10 +864,9 @@ class SessionRuntime:
         self, cwd: str | None, launch_target: SshLaunchTargetConfig | None
     ) -> str:
         if launch_target is not None:
-            remote_cwd = cwd or launch_target.default_remote_cwd
             return (
                 f"Codex app-server session started via SSH target {launch_target.name} "
-                f"on {launch_target.ssh_destination} ({remote_cwd})"
+                f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd})"
             )
         return "Codex app-server session started"
 
@@ -894,10 +875,9 @@ class SessionRuntime:
     ) -> str:
         launch_target = self._find_launch_target(launch_target_id)
         if launch_target is not None:
-            remote_cwd = cwd or launch_target.default_remote_cwd
             return (
                 f"Codex session restored via SSH target {launch_target.name} "
-                f"on {launch_target.ssh_destination} ({remote_cwd})"
+                f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd})"
             )
         return "Codex session restored from previous backend process"
 
@@ -918,10 +898,9 @@ class SessionRuntime:
         launch_target: SshLaunchTargetConfig | None,
     ) -> str:
         if launch_target is not None:
-            remote_cwd = cwd or launch_target.default_remote_cwd
             return (
                 f"Claude session started via SSH target {launch_target.name} "
-                f"on {launch_target.ssh_destination} ({remote_cwd}) ({claude_session_id})"
+                f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd}) ({claude_session_id})"
             )
         return f"Claude session started ({claude_session_id})"
 
@@ -930,21 +909,11 @@ class SessionRuntime:
     ) -> str:
         launch_target = self._find_launch_target(launch_target_id)
         if launch_target is not None:
-            remote_cwd = cwd or launch_target.default_remote_cwd
             return (
                 f"Claude session restored via SSH target {launch_target.name} "
-                f"on {launch_target.ssh_destination} ({remote_cwd})"
+                f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd})"
             )
         return "Claude session restored from previous backend process"
-
-    def _resolve_remote_cwd(
-        self,
-        request: SessionCreateRequest,
-        launch_target: SshLaunchTargetConfig | None,
-    ) -> str | None:
-        if launch_target is None:
-            return None
-        return request.remote_cwd or launch_target.default_remote_cwd
 
     def launch_target_summaries(self) -> list[dict[str, Any]]:
         summaries: list[dict[str, Any]] = []
@@ -958,7 +927,7 @@ class SessionRuntime:
                     "default_backend": target.resolve_default_backend(
                         self.settings.default_backend
                     ),
-                    "default_remote_cwd": target.default_remote_cwd,
+                    "default_cwd": target.default_cwd,
                 }
             )
         return summaries
@@ -995,13 +964,11 @@ class SessionRuntime:
             return None
         return build_remote_codex_client_factory(launch_target)
 
-    def _codex_client_cwds(
-        self, launch_target_id: str | None
-    ) -> tuple[str, str | None]:
+    def _codex_client_cwd(self, launch_target_id: str | None) -> str:
         launch_target = self._find_launch_target(launch_target_id)
         if launch_target is not None:
-            return launch_target.default_remote_cwd, launch_target.default_remote_cwd
-        return str(Path(self.settings.default_cwd).expanduser()), None
+            return launch_target.default_cwd
+        return str(Path(self.settings.default_cwd).expanduser())
 
     async def _run_codex_client_operation(
         self,
@@ -1009,15 +976,13 @@ class SessionRuntime:
         operation: Callable[[AppServerClient], Awaitable[Any]],
         *,
         cwd: str | None = None,
-        remote_cwd: str | None = None,
     ) -> Any:
-        default_cwd, default_remote_cwd = self._codex_client_cwds(launch_target_id)
+        default_cwd = self._codex_client_cwd(launch_target_id)
         client_factory: ClientFactory = (
             self._codex_client_factory(launch_target_id) or default_client_factory
         )
         client = client_factory(
             cwd or default_cwd,
-            remote_cwd if remote_cwd is not None else default_remote_cwd,
             self._deny_codex_approval,
         )
         try:
@@ -1118,13 +1083,13 @@ class SessionRuntime:
         self,
         backend: Backend,
         launch_target: SshLaunchTargetConfig | None,
-        remote_cwd: str | None,
+        cwd: str | None,
     ) -> str:
         if launch_target is None:
             return f"Managed session started for {backend}"
         return (
             f"Managed session started for {backend} via SSH target {launch_target.name} "
-            f"on {launch_target.ssh_destination} ({remote_cwd or launch_target.default_remote_cwd})"
+            f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd})"
         )
 
     async def _record_user_event(
@@ -1225,15 +1190,13 @@ class SessionRuntime:
         backend: Backend,
         args: list[str],
         launch_target: SshLaunchTargetConfig | None = None,
-        remote_cwd: str | None = None,
+        cwd: str | None = None,
     ) -> list[str]:
         if launch_target is None:
             executable = "claude" if backend == Backend.CLAUDE_CODE else "codex"
             return [executable, *args]
         return list(
-            launch_target.remote_command_for_backend(
-                backend, args, remote_cwd or launch_target.default_remote_cwd
-            )
+            launch_target.remote_command_for_backend(backend, args, cwd or launch_target.default_cwd)
         )
 
     def _infer_backend(self, target: str) -> Backend:

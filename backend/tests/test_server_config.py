@@ -45,7 +45,7 @@ def test_load_settings_parses_yaml_defaults_and_ssh_targets(
                 "      - -p",
                 "      - '2222'",
                 "    codex_bin: /opt/codex/bin/codex",
-                "    default_remote_cwd: ~/workspace",
+                "    default_cwd: ~/workspace",
                 "    supported_backends:",
                 "      - codex",
                 "    config_overrides:",
@@ -67,7 +67,7 @@ def test_load_settings_parses_yaml_defaults_and_ssh_targets(
     assert loaded.ssh_targets[0].name == "Devbox"
     assert loaded.ssh_targets[0].ssh_destination == "dev@example.com"
     assert loaded.ssh_targets[0].ssh_args == ["-p", "2222"]
-    assert loaded.ssh_targets[0].default_remote_cwd == "~/workspace"
+    assert loaded.ssh_targets[0].default_cwd == "~/workspace"
     assert loaded.ssh_targets[0].remote_env["OPENAI_API_KEY"] == "sk-test"
     assert loaded.ssh_targets[0].supported_backends == [Backend.CODEX]
 
@@ -95,20 +95,18 @@ def test_load_settings_env_overrides_yaml(monkeypatch, tmp_path: Path) -> None:
     assert loaded.password == "from-env"
 
 
-def test_remote_client_factory_uses_default_remote_cwd_when_not_provided(
+def test_remote_client_factory_uses_default_cwd_when_not_provided(
     monkeypatch,
 ) -> None:
     config = SshLaunchTargetConfig(
         id="devbox",
         name="Devbox",
         ssh_destination="dev@example.com",
-        default_remote_cwd="~/workspace",
+        default_cwd="~/workspace",
     )
 
     monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
-    client = build_remote_codex_client_factory(config)(
-        "/Users/alice/work/project-a", None, lambda *_: {}
-    )
+    client = build_remote_codex_client_factory(config)("~/workspace", lambda *_: {})
 
     assert client.config.launch_args_override is not None
     # `~` must reach the remote shell unquoted so it can be expanded.
@@ -127,7 +125,7 @@ def test_remote_client_factory_uses_ssh_launch_args(monkeypatch) -> None:
     )
 
     client = build_remote_codex_client_factory(config)(
-        "/Users/alice/work/project-a", "/srv/work/project-a", lambda *_: {}
+        "/srv/work/project-a", lambda *_: {}
     )
 
     assert client.config.launch_args_override is not None

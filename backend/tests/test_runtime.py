@@ -74,19 +74,16 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
 class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
     def __init__(self) -> None:
         super().__init__()
-        self.restore_calls: list[tuple[str, str, str, str | None, Any]] = []
+        self.restore_calls: list[tuple[str, str, str, Any]] = []
 
     async def restore_session(
         self,
         session_id: str,
         cwd: str,
         thread_id: str,
-        remote_cwd: str | None = None,
         client_factory_override: Any = None,
     ) -> None:
-        self.restore_calls.append(
-            (session_id, cwd, thread_id, remote_cwd, client_factory_override)
-        )
+        self.restore_calls.append((session_id, cwd, thread_id, client_factory_override))
 
 
 def make_runtime(tmp_path) -> tuple[SessionRuntime, Storage, Settings]:
@@ -108,7 +105,6 @@ def make_session(settings: Settings, **overrides) -> SessionRecord:
         transport=overrides.get("transport", SessionTransport.CODEX_APP_SERVER),
         title="Session",
         cwd="/tmp/project",
-        remote_cwd=overrides.get("remote_cwd"),
         status=overrides.get("status", SessionStatus.IDLE),
         created_at=now,
         updated_at=now,
@@ -275,7 +271,7 @@ async def test_create_session_uses_structured_claude_for_ssh_target(
                 name="Devbox",
                 ssh_destination="dev@example.com",
                 supported_backends=[Backend.CLAUDE_CODE],
-                default_remote_cwd="~/workspace",
+                default_cwd="~/workspace",
             )
         ],
     )
@@ -307,8 +303,7 @@ async def test_create_session_uses_structured_claude_for_ssh_target(
     session = await runtime.create_session(
         SessionCreateRequest(
             backend=Backend.CLAUDE_CODE,
-            cwd="/tmp/project",
-            remote_cwd="~/workspace",
+            cwd="~/workspace",
             launch_target_id="devbox",
             title=None,
             args=[],
@@ -318,7 +313,7 @@ async def test_create_session_uses_structured_claude_for_ssh_target(
 
     assert session.transport == SessionTransport.CLAUDE_CLI
     assert session.launch_target_id == "devbox"
-    assert session.remote_cwd == "~/workspace"
+    assert session.cwd == "~/workspace"
     assert fake.start_calls == [
         (
             session.id,
@@ -371,7 +366,7 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
                 name="Devbox",
                 ssh_destination="dev@example.com",
                 supported_backends=[Backend.CODEX],
-                default_remote_cwd="~/workspace",
+                default_cwd="~/workspace",
             )
         ],
     )
@@ -405,7 +400,6 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
 
     assert session.transport == SessionTransport.CODEX_APP_SERVER
     assert session.cwd == "/srv/worktree/project"
-    assert session.remote_cwd == "/srv/worktree/project"
     assert session.launch_target_id == "devbox"
     assert session.repo_name == "project"
     assert session.branch == "main"
@@ -414,7 +408,6 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
             session.id,
             "/srv/worktree/project",
             "thread-9",
-            "/srv/worktree/project",
             "remote-factory",
         )
     ]

@@ -21,19 +21,17 @@ ApprovalDecisionHandler = Callable[
     Coroutine[Any, Any, None],
 ]
 ApprovalCallback = Callable[[str, dict[str, Any] | None], dict[str, Any]]
-ClientFactory = Callable[[str, str | None, ApprovalCallback], AppServerClient]
+ClientFactory = Callable[[str, ApprovalCallback], AppServerClient]
 
 
-def default_client_factory(
-    cwd: str, remote_cwd: str | None, approval_handler: ApprovalCallback
-) -> AppServerClient:
+def default_client_factory(cwd: str, approval_handler: ApprovalCallback) -> AppServerClient:
     codex_bin = shutil.which("codex")
     if codex_bin is None:
         raise RuntimeError("codex binary not found on PATH")
     return AppServerClient(
         config=AppServerConfig(
             codex_bin=codex_bin,
-            cwd=remote_cwd or cwd,
+            cwd=cwd,
             client_name="waypoint",
             client_title="Waypoint",
         ),
@@ -78,18 +76,14 @@ class CodexAppServerAdapter:
         self,
         session_id: str,
         cwd: str,
-        remote_cwd: str | None = None,
         client_factory_override: ClientFactory | None = None,
     ) -> str:
         state = await self._spawn_session(
             session_id,
             cwd,
-            remote_cwd=remote_cwd,
             client_factory_override=client_factory_override,
         )
-        started = await self._call_client(
-            state, state.client.thread_start, {"cwd": remote_cwd or cwd}
-        )
+        started = await self._call_client(state, state.client.thread_start, {"cwd": cwd})
         state.thread_id = started.thread.id
         return state.thread_id
 
@@ -98,14 +92,12 @@ class CodexAppServerAdapter:
         session_id: str,
         cwd: str,
         thread_id: str,
-        remote_cwd: str | None = None,
         client_factory_override: ClientFactory | None = None,
     ) -> None:
         state = await self._spawn_session(
             session_id,
             cwd,
             thread_id=thread_id,
-            remote_cwd=remote_cwd,
             client_factory_override=client_factory_override,
         )
         await self._call_client(state, state.client.thread_resume, thread_id)
@@ -115,7 +107,6 @@ class CodexAppServerAdapter:
         session_id: str,
         cwd: str,
         thread_id: str = "",
-        remote_cwd: str | None = None,
         client_factory_override: ClientFactory | None = None,
     ) -> CodexSessionState:
         self._loop = asyncio.get_running_loop()
@@ -148,7 +139,7 @@ class CodexAppServerAdapter:
             return pending.response or {"decision": "decline"}
 
         factory = client_factory_override or self._client_factory
-        client = factory(cwd, remote_cwd, approval_handler)
+        client = factory(cwd, approval_handler)
         await asyncio.to_thread(client.start)
         await asyncio.to_thread(client.initialize)
         state = CodexSessionState(

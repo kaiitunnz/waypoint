@@ -54,7 +54,6 @@ class Storage:
                 transport TEXT NOT NULL DEFAULT 'tmux',
                 title TEXT NOT NULL,
                 cwd TEXT NOT NULL,
-                remote_cwd TEXT,
                 launch_target_id TEXT,
                 repo_name TEXT,
                 branch TEXT,
@@ -92,7 +91,6 @@ class Storage:
                 id TEXT PRIMARY KEY,
                 backend TEXT NOT NULL,
                 cwd TEXT NOT NULL,
-                remote_cwd TEXT,
                 launch_target_id TEXT,
                 title TEXT,
                 args TEXT NOT NULL DEFAULT '[]',
@@ -107,7 +105,6 @@ class Storage:
             """)
         self._ensure_column("sessions", "transport", "TEXT NOT NULL DEFAULT 'tmux'")
         self._ensure_column("sessions", "thread_id", "TEXT")
-        self._ensure_column("sessions", "remote_cwd", "TEXT")
         self._ensure_column("sessions", "launch_target_id", "TEXT")
         self._ensure_column("sessions", "pinned_at", "TEXT")
         self._ensure_column("sessions", "permission_mode", "TEXT")
@@ -123,11 +120,11 @@ class Storage:
         self.connection.execute(
             """
             INSERT INTO sessions (
-                id, backend, source, transport, title, cwd, remote_cwd, launch_target_id, repo_name, branch, status,
+                id, backend, source, transport, title, cwd, launch_target_id, repo_name, branch, status,
                 created_at, updated_at, last_event_at, tmux_session, tmux_window,
                 tmux_pane, thread_id, raw_log_path, structured_log_path, pid,
                 pinned_at, permission_mode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -136,7 +133,6 @@ class Storage:
                 session.transport,
                 session.title,
                 session.cwd,
-                session.remote_cwd,
                 session.launch_target_id,
                 session.repo_name,
                 session.branch,
@@ -304,16 +300,15 @@ class Storage:
         self.connection.execute(
             """
             INSERT INTO scheduled_sessions (
-                id, backend, cwd, remote_cwd, launch_target_id, title, args,
+                id, backend, cwd, launch_target_id, title, args,
                 initial_prompt, permission_mode, scheduled_at, created_at, status,
                 session_id, failure_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 schedule.id,
                 schedule.backend,
                 schedule.cwd,
-                schedule.remote_cwd,
                 schedule.launch_target_id,
                 schedule.title,
                 json.dumps(list(schedule.args)),

@@ -88,9 +88,9 @@ def make_adapter(
 
     fake = FakeAppServerClient()
 
-    def factory(cwd, remote_cwd, approval_handler):
+    def factory(cwd, approval_handler):
         fake.approval_handler = approval_handler
-        fake.calls.append(("factory", (cwd, remote_cwd)))
+        fake.calls.append(("factory", (cwd,)))
         return fake
 
     adapter = CodexAppServerAdapter(emit, client_factory=factory)
@@ -104,18 +104,18 @@ async def test_start_session_creates_thread() -> None:
     thread_id = await adapter.start_session("sess", "/tmp/work")
     assert thread_id == "thread-1"
     assert fake.started and fake.initialized
-    assert fake.calls[0] == ("factory", ("/tmp/work", None))
+    assert fake.calls[0] == ("factory", ("/tmp/work",))
     assert fake.calls[1][0] == "thread_start"
 
 
 @pytest.mark.asyncio
-async def test_start_session_uses_explicit_remote_cwd() -> None:
+async def test_start_session_uses_explicit_cwd() -> None:
     emitted: list = []
     adapter, fake = make_adapter(emitted)
-    thread_id = await adapter.start_session("sess", "/tmp/work", "~/remote-work")
+    thread_id = await adapter.start_session("sess", "~/remote-work")
 
     assert thread_id == "thread-1"
-    assert fake.calls[0] == ("factory", ("/tmp/work", "~/remote-work"))
+    assert fake.calls[0] == ("factory", ("~/remote-work",))
     assert fake.calls[1] == ("thread_start", ({"cwd": "~/remote-work"},))
 
 
@@ -126,18 +126,16 @@ async def test_start_session_uses_factory_override() -> None:
 
     override = FakeAppServerClient()
 
-    def override_factory(cwd, remote_cwd, approval_handler):
+    def override_factory(cwd, approval_handler):
         override.approval_handler = approval_handler
-        override.calls.append(("override_factory", (cwd, remote_cwd)))
+        override.calls.append(("override_factory", (cwd,)))
         return override
 
-    thread_id = await adapter.start_session(
-        "sess", "/tmp/work", "~/remote-work", override_factory
-    )
+    thread_id = await adapter.start_session("sess", "~/remote-work", override_factory)
 
     assert thread_id == "thread-1"
     assert fake.calls == []
-    assert override.calls[0] == ("override_factory", ("/tmp/work", "~/remote-work"))
+    assert override.calls[0] == ("override_factory", ("~/remote-work",))
     assert override.calls[1] == ("thread_start", ({"cwd": "~/remote-work"},))
 
 

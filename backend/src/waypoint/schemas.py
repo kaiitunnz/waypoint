@@ -50,7 +50,6 @@ class SessionRecord(BaseModel):
     transport: SessionTransport = SessionTransport.TMUX
     title: str
     cwd: str
-    remote_cwd: str | None = None
     launch_target_id: str | None = None
     repo_name: str | None = None
     branch: str | None = None
@@ -94,7 +93,7 @@ class LaunchTargetSummary(BaseModel):
     kind: str = "ssh"
     supported_backends: list[Backend] = Field(default_factory=list)
     default_backend: Backend = Backend.CODEX
-    default_remote_cwd: str | None = None
+    default_cwd: str | None = None
 
 
 class MeResponse(BaseModel):
@@ -107,7 +106,6 @@ class MeResponse(BaseModel):
 class SessionCreateRequest(BaseModel):
     backend: Backend
     cwd: str
-    remote_cwd: str | None = None
     launch_target_id: str | None = None
     title: str | None = None
     args: list[str] = Field(default_factory=list)
@@ -180,7 +178,6 @@ class ScheduledSessionRecord(BaseModel):
     id: str
     backend: Backend
     cwd: str
-    remote_cwd: str | None = None
     launch_target_id: str | None = None
     title: str | None = None
     args: list[str] = Field(default_factory=list)
@@ -196,7 +193,6 @@ class ScheduledSessionRecord(BaseModel):
 class ScheduleCreateRequest(BaseModel):
     backend: Backend
     cwd: str
-    remote_cwd: str | None = None
     launch_target_id: str | None = None
     title: str | None = None
     args: list[str] = Field(default_factory=list)

@@ -44,7 +44,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--backend", choices=[backend.value for backend in Backend], required=True
     )
     start.add_argument("--cwd", required=True)
-    start.add_argument("--remote-cwd")
     start.add_argument("--launch-target-id")
     start.add_argument("--title")
     start.add_argument("args", nargs="*")
@@ -141,7 +140,6 @@ async def run_session_command(args: argparse.Namespace) -> None:
                 SessionCreateRequest(
                     backend=Backend(args.backend),
                     cwd=args.cwd,
-                    remote_cwd=args.remote_cwd,
                     launch_target_id=args.launch_target_id,
                     title=args.title,
                     args=list(args.args),

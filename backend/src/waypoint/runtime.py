@@ -787,9 +787,35 @@ class SessionRuntime:
                 f"Approval response sent: {request.decision}",
                 status=SessionStatus.RUNNING,
             )
+            # Side-effect of an ExitPlanMode approval: the Claude adapter
+            # has already flipped the binary's permission mode to default
+            # via set_permission_mode. Sync storage + broadcast so the UI
+            # pill reflects the change instead of staying stuck on "plan".
+            await self._sync_claude_permission_mode(session)
             return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
         await transport.respond_to_approval(session, request.decision, request.text)
         return self.get_session(session_id)
+
+    async def _sync_claude_permission_mode(self, session: SessionRecord) -> None:
+        if session.transport != SessionTransport.CLAUDE_CLI or self.claude is None:
+            return
+        current = self.claude.session_permission_mode(session.id)
+        if current is None:
+            return
+        previous = session.permission_mode or "default"
+        if current == previous:
+            return
+        self.storage.update_session(session.id, permission_mode=current)
+        await self.broadcast.publish(
+            SessionEnvelope(
+                type="session_list_update",
+                payload={
+                    "sessions": [
+                        item.model_dump(mode="json") for item in self.list_sessions()
+                    ]
+                },
+            )
+        )
 
     async def _route_codex_compact(
         self, session: SessionRecord, request: SessionInputRequest

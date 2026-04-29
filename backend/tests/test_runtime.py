@@ -10,6 +10,7 @@ from waypoint.schemas import (
     Backend,
     CodexThreadImportRequest,
     EventKind,
+    SessionApprovalRequest,
     SessionCreateRequest,
     SessionInputRequest,
     SessionRecord,
@@ -26,6 +27,7 @@ class FakeStructuredAdapter:
         self.pending = pending
         self.inputs: list[tuple[str, str]] = []
         self.turn_params_calls: list[tuple[str, dict[str, Any] | None]] = []
+        self.approval_calls: list[tuple[str, str]] = []
 
     async def send_input(
         self, session_id: str, text: str, turn_params: dict[str, Any] | None = None
@@ -36,12 +38,17 @@ class FakeStructuredAdapter:
     def has_pending_approval(self, session_id: str) -> bool:
         return self.pending
 
+    async def respond_to_approval(self, session_id: str, decision: str) -> bool:
+        self.approval_calls.append((session_id, decision))
+        return True
+
 
 class FakeClaudeAdapter(FakeStructuredAdapter):
     def __init__(self) -> None:
         super().__init__()
         self.start_calls: list[tuple[str, str, str, Any]] = []
         self.permission_mode_calls: list[tuple[str, str]] = []
+        self.modes: dict[str, str] = {}
 
     async def start_session(
         self,
@@ -58,6 +65,10 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
 
     async def set_permission_mode(self, session_id: str, mode: str) -> None:
         self.permission_mode_calls.append((session_id, mode))
+        self.modes[session_id] = mode
+
+    def session_permission_mode(self, session_id: str) -> str | None:
+        return self.modes.get(session_id)
 
 
 class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
@@ -105,6 +116,7 @@ def make_session(settings: Settings, **overrides) -> SessionRecord:
         thread_id=overrides.get("thread_id", "thread-1"),
         raw_log_path=str(session_dir / "raw.log"),
         structured_log_path=str(session_dir / "events.jsonl"),
+        permission_mode=overrides.get("permission_mode"),
     )
 
 
@@ -467,6 +479,34 @@ async def test_set_permission_mode_claude_calls_adapter(tmp_path) -> None:
 
     assert fake.permission_mode_calls == [("claude-sess", "plan")]
     assert updated.permission_mode == "plan"
+
+
+@pytest.mark.asyncio
+async def test_approve_syncs_storage_when_adapter_flips_mode(tmp_path) -> None:
+    """When ExitPlanMode is approved the Claude adapter sends
+    set_permission_mode default to the binary; runtime.approve must mirror
+    that into storage so the UI pill updates."""
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    fake.modes["claude-sess"] = "default"  # pretend the adapter flipped already
+    runtime.claude = cast(Any, fake)
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend=Backend.CLAUDE_CODE,
+        transport=SessionTransport.CLAUDE_CLI,
+        permission_mode="plan",
+    )
+    storage.create_session(session)
+
+    await runtime.approve(
+        "claude-sess",
+        SessionApprovalRequest(decision="accept"),
+    )
+
+    refreshed = storage.get_session("claude-sess")
+    assert refreshed is not None
+    assert refreshed.permission_mode == "default"
 
 
 @pytest.mark.asyncio

@@ -557,6 +557,17 @@ class ClaudeCliAdapter:
         state = self._sessions.get(session_id)
         return bool(state and state.pending)
 
+    def session_permission_mode(self, session_id: str) -> str | None:
+        """Read the binary's currently-active permission mode for a session.
+
+        The adapter flips this internally after an ExitPlanMode approval
+        (via the set_permission_mode control_request), so callers that
+        persist the mode separately (storage, broadcast) can pick the
+        change up here.
+        """
+        state = self._sessions.get(session_id)
+        return state.permission_mode if state is not None else None
+
     async def terminate_session(self, session_id: str) -> bool:
         state = self._sessions.pop(session_id, None)
         if state is None:

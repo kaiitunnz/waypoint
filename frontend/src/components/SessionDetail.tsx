@@ -924,16 +924,25 @@ function isToolResultDelta(event: EventRecord): boolean {
 }
 
 function findPendingApproval(events: EventRecord[]): EventRecord | null {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
+  // Track approvals as a queue: every approval_request enqueues, every
+  // "Approval response sent" system note dequeues the oldest. The Claude
+  // adapter resolves pending futures in the same order (`next(iter(state.pending))`),
+  // so the UI must show the same head-of-queue entry. The previous
+  // walk-from-newest-and-bail-on-system-note logic hid the card whenever
+  // Claude fired multiple gated tools in parallel — the user accepted the
+  // first one and the rest stayed silently pending.
+  const queue: EventRecord[] = [];
+  for (const event of events) {
     if (event.kind === "approval_request") {
-      return event;
-    }
-    if (event.kind === "system_note" && /Approval response sent/i.test(event.text)) {
-      return null;
+      queue.push(event);
+    } else if (
+      event.kind === "system_note" &&
+      /Approval response sent/i.test(event.text)
+    ) {
+      queue.shift();
     }
   }
-  return null;
+  return queue[0] ?? null;
 }
 
 function isImportantEvent(event: EventRecord): boolean {

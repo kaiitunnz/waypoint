@@ -123,8 +123,9 @@ class Storage:
             INSERT INTO sessions (
                 id, backend, source, transport, title, cwd, remote_cwd, launch_target_id, repo_name, branch, status,
                 created_at, updated_at, last_event_at, tmux_session, tmux_window,
-                tmux_pane, thread_id, raw_log_path, structured_log_path, pid
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                tmux_pane, thread_id, raw_log_path, structured_log_path, pid,
+                pinned_at, permission_mode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -148,6 +149,8 @@ class Storage:
                 session.raw_log_path,
                 session.structured_log_path,
                 session.pid,
+                session.pinned_at.isoformat() if session.pinned_at else None,
+                session.permission_mode,
             ),
         )
         self.connection.commit()

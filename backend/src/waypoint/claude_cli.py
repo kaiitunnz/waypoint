@@ -976,7 +976,7 @@ class ClaudeCliAdapter:
     ) -> None:
         message = event.get("message") or {}
         message_id = str(message.get("id") or "")
-        for block in message.get("content") or []:
+        for block in self._iter_content_blocks(message.get("content")):
             block_type = block.get("type")
             if block_type == "text":
                 text = block.get("text") or ""
@@ -1026,7 +1026,7 @@ class ClaudeCliAdapter:
         self, state: ClaudeSessionState, event: dict[str, Any]
     ) -> None:
         message = event.get("message") or {}
-        for block in message.get("content") or []:
+        for block in self._iter_content_blocks(message.get("content")):
             if block.get("type") != "tool_result":
                 continue
             tool_use_id = str(block.get("tool_use_id") or "")
@@ -1141,6 +1141,26 @@ class ClaudeCliAdapter:
             path = str(tool_input.get("notebook_path") or "").strip()
             return f"Approve NotebookEdit on {path}" if path else "Approve NotebookEdit"
         return f"Approve {tool_name}: {json.dumps(tool_input)[:240]}"
+
+    @staticmethod
+    def _iter_content_blocks(content: Any) -> list[dict[str, Any]]:
+        # Claude Code normally streams message content as a list of typed
+        # blocks, but synthetic turns (notably the user echo after /compact)
+        # can arrive as a bare string or a list mixing strings and dicts.
+        # Coerce everything to a list of dicts so callers can rely on .get().
+        if not content:
+            return []
+        if isinstance(content, str):
+            return [{"type": "text", "text": content}]
+        if not isinstance(content, list):
+            return []
+        blocks: list[dict[str, Any]] = []
+        for entry in content:
+            if isinstance(entry, dict):
+                blocks.append(entry)
+            elif isinstance(entry, str):
+                blocks.append({"type": "text", "text": entry})
+        return blocks
 
     def _stringify_tool_result(self, content: Any) -> str:
         if content is None:

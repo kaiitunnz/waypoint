@@ -994,22 +994,20 @@ pre {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
-.scroll-bottom {
-  margin-left: auto;
+.scroll-controls {
   position: sticky;
   bottom: 12px;
-  z-index: 1;
+  z-index: 4;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: -8px;
+  pointer-events: none;
 }
 
-.scroll-top {
-  margin-left: auto;
-  position: sticky;
-  bottom: 12px;
-  z-index: 1;
-}
-
-.scroll-top + .scroll-bottom {
-  margin-left: 8px;
+.scroll-controls > button {
+  pointer-events: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
 }
 
 .session-mode-control {

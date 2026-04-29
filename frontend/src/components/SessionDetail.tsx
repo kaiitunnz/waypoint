@@ -489,21 +489,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                 Hiding {hiddenEventCount} low-signal event{hiddenEventCount === 1 ? "" : "s"}
               </span>
             ) : null}
-            {showScrollToTop ? (
-              <button
-                className="secondary scroll-top"
-                onClick={() => scrollToTop()}
-                type="button"
-                aria-label="Scroll to top"
-              >
-                ↑ Top
-              </button>
-            ) : null}
-            {showScrollToBottom ? (
-              <button className="secondary scroll-bottom" onClick={() => scrollToBottom()} type="button">
-                Latest
-              </button>
-            ) : null}
           </div>
           {session
             ? transcriptItems.map((item) =>
@@ -543,6 +528,29 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       )}
       {pendingApproval ? (
         <ApprovalCard event={pendingApproval} onDecide={submitApproval} />
+      ) : null}
+      {view === "chat" && (showScrollToTop || showScrollToBottom) ? (
+        <div className="scroll-controls" aria-hidden={false}>
+          {showScrollToTop ? (
+            <button
+              className="secondary scroll-top"
+              onClick={() => scrollToTop()}
+              type="button"
+              aria-label="Scroll to top"
+            >
+              ↑ Top
+            </button>
+          ) : null}
+          {showScrollToBottom ? (
+            <button
+              className="secondary scroll-bottom"
+              onClick={() => scrollToBottom()}
+              type="button"
+            >
+              Latest
+            </button>
+          ) : null}
+        </div>
       ) : null}
       {error ? (
         <div className="session-error-toast" role="alert">

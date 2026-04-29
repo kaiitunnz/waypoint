@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  Backend,
+  BackendModelListResponse,
   CodexThreadSummary,
   EventRecord,
   MeResponse,
@@ -191,6 +193,47 @@ export async function setSessionPermissionMode(
   await ensureOk(response, "failed to update permission mode");
   const body = await response.json();
   return body.session as SessionRecord;
+}
+
+export async function setSessionModel(
+  host: string,
+  token: string,
+  sessionId: string,
+  model: string | null,
+): Promise<SessionRecord> {
+  const response = await fetch(`${host}/api/sessions/${sessionId}/model`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ model }),
+  });
+  await ensureOk(response, "failed to update model");
+  const body = await response.json();
+  return body.session as SessionRecord;
+}
+
+export async function fetchBackendModels(
+  host: string,
+  token: string,
+  backend: Backend,
+  options: { launchTargetId?: string | null; includeHidden?: boolean } = {},
+): Promise<BackendModelListResponse> {
+  const params = new URLSearchParams();
+  if (options.launchTargetId) {
+    params.set("launch_target_id", options.launchTargetId);
+  }
+  if (options.includeHidden) {
+    params.set("include_hidden", "true");
+  }
+  const suffix = params.size ? `?${params.toString()}` : "";
+  const response = await fetch(`${host}/api/backends/${backend}/models${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch backend models");
+  return (await response.json()) as BackendModelListResponse;
 }
 
 export async function setSessionPinned(

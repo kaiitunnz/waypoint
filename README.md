@@ -8,6 +8,18 @@ Waypoint is a personal remote-control companion for Claude Code and Codex sessio
 - managed launches for new sessions
 - tmux attachment for existing sessions
 
+## Issue Tracking
+
+GitHub Issues are the source of truth for active bugs and feature requests.
+
+Use this convention when opening issues:
+
+- one leaf issue per actionable bug or feature request
+- lowercase title prefixes: `bug: ...`, `feature request: ...`, `tracking issue: ...`
+- label bug reports with `bug` and feature requests with `enhancement`
+- one thin tracking issue per area when you want a checklist view that links the leaf issues
+- pinned tracking issues: [`tracking issue: open bugs`](https://github.com/kaiitunnz/waypoint/issues/4) and [`tracking issue: open feature requests`](https://github.com/kaiitunnz/waypoint/issues/5)
+
 ## Layout
 
 - `backend/` — FastAPI daemon, tmux/session runtime, auth, persistence

@@ -32,5 +32,8 @@ Backend tests use `pytest` and `pytest-asyncio`; place new tests in `backend/tes
 ## Commit & Pull Request Guidelines
 Recent commits use short imperative subjects such as `Add terminate and delete endpoints for sessions`. Keep commits narrowly scoped and describe the behavior change, not the implementation mechanics. Agents may create commits automatically when that helps complete a task; split backend, frontend, and docs changes into separate logical commits instead of bundling unrelated work together. PRs should include a concise summary, the commands you ran, linked issues when applicable, and screenshots for frontend changes. Call out any `.env`, Tailscale, or session-runtime setup needed for reviewers.
 
+## Issue Tracking
+GitHub Issues are the source of truth for active bugs and feature requests. Create one leaf issue per actionable bug or feature request, and group related items with thin tracking issues that link them as checklists. Use lowercase issue-title prefixes: `bug: ...`, `feature request: ...`, and `tracking issue: ...`. Tag bug reports with the `bug` label and feature requests with the `enhancement` label. The pinned tracking issues are `tracking issue: open bugs` (<https://github.com/kaiitunnz/waypoint/issues/4>) and `tracking issue: open feature requests` (<https://github.com/kaiitunnz/waypoint/issues/5>).
+
 ## Security & Configuration Tips
 Start from `backend/.env.example` and `frontend/.env.example`; never commit real secrets. Set a real `WAYPOINT_PASSWORD` locally before exposing the service beyond localhost, and prefer configuration changes through documented env vars like `WAYPOINT_HOST`, `WAYPOINT_PORT`, and `NEXT_ALLOWED_DEV_ORIGINS`.

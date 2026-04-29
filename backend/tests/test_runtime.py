@@ -353,6 +353,8 @@ async def test_create_session_uses_structured_claude_for_ssh_target(
             "~/workspace",
             session.thread_id,
             "remote-launch-factory",
+            "default",
+            None,
         )
     ]
 
@@ -442,6 +444,7 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
             "/srv/worktree/project",
             "thread-9",
             "remote-factory",
+            None,
         )
     ]
     events = storage.list_events(session.id)
@@ -552,3 +555,64 @@ async def test_set_permission_mode_claude_rejects_unknown_mode(tmp_path) -> None
     with pytest.raises(HTTPException) as exc:
         await runtime.set_permission_mode("claude-sess", "ultraplan")
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_set_model_claude_calls_adapter_and_persists(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    runtime.claude = cast(Any, fake)
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend=Backend.CLAUDE_CODE,
+        transport=SessionTransport.CLAUDE_CLI,
+    )
+    storage.create_session(session)
+
+    updated = await runtime.set_model("claude-sess", "opus")
+
+    assert fake.model_calls == [("claude-sess", "opus")]
+    assert updated.model == "opus"
+
+    # Empty / whitespace strings revert to default — adapter sees None.
+    cleared = await runtime.set_model("claude-sess", "  ")
+    assert fake.model_calls[-1] == ("claude-sess", None)
+    assert cleared.model is None
+
+
+@pytest.mark.asyncio
+async def test_set_model_codex_calls_adapter_and_persists(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeCodexRuntimeAdapter()
+    runtime.codex = cast(Any, fake)
+    session = make_session(settings)
+    storage.create_session(session)
+
+    updated = await runtime.set_model("sess", "gpt-5")
+
+    assert fake.model_calls == [("sess", "gpt-5")]
+    assert updated.model == "gpt-5"
+
+
+@pytest.mark.asyncio
+async def test_list_backend_models_returns_curated_claude_list(tmp_path) -> None:
+    runtime, _, settings = make_runtime(tmp_path)
+    response = await runtime.list_backend_models(Backend.CLAUDE_CODE)
+
+    assert response["backend"] == Backend.CLAUDE_CODE.value
+    assert response["supports_free_text"] is True
+    ids = [entry["id"] for entry in response["models"]]
+    # Mirrors DEFAULT_CLAUDE_MODELS in config.py.
+    assert "opus" in ids and "sonnet" in ids and "haiku" in ids
+    # Default falls back to the entry flagged is_default in the curated list
+    # when no settings.default_models override is present.
+    assert response["default_model"] == "sonnet"
+
+
+@pytest.mark.asyncio
+async def test_list_backend_models_honours_default_models_override(tmp_path) -> None:
+    runtime, _, settings = make_runtime(tmp_path)
+    settings.default_models = {Backend.CLAUDE_CODE.value: "opus"}
+    response = await runtime.list_backend_models(Backend.CLAUDE_CODE)
+    assert response["default_model"] == "opus"

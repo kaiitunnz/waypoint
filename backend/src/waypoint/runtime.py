@@ -186,6 +186,7 @@ class SessionRuntime:
                 session.thread_id,
                 self._claude_launch_factory(session.launch_target_id),
                 permission_mode=session.permission_mode,
+                model=session.model,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(
@@ -235,6 +236,7 @@ class SessionRuntime:
                 session.cwd,
                 session.thread_id,
                 self._codex_client_factory(session.launch_target_id),
+                model=session.model,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(
@@ -432,6 +434,13 @@ class SessionRuntime:
             )
             or "default"
         )
+        # Per-request model wins; otherwise fall back to the per-backend default
+        # from settings. Missing key (or empty) means "let the backend pick" —
+        # we omit --model / params.model so the underlying CLI uses its own
+        # default instead of waypoint forcing one.
+        resolved_model = request.model or self.settings.default_models.get(
+            request.backend.value
+        )
         if request.backend == Backend.CODEX:
             raw_log.touch(exist_ok=True)
             session = SessionRecord(
@@ -451,6 +460,7 @@ class SessionRuntime:
                 raw_log_path=str(raw_log),
                 structured_log_path=str(structured_log),
                 permission_mode=permission_mode,
+                model=resolved_model,
             )
             self.storage.create_session(session)
             try:
@@ -458,6 +468,7 @@ class SessionRuntime:
                     session_id,
                     request.cwd,
                     self._codex_client_factory(session.launch_target_id),
+                    model=resolved_model,
                 )
             except Exception:
                 self.storage.update_session(session.id, status=SessionStatus.ERROR)
@@ -492,6 +503,7 @@ class SessionRuntime:
                 raw_log_path=str(raw_log),
                 structured_log_path=str(structured_log),
                 permission_mode=permission_mode,
+                model=resolved_model,
             )
             self.storage.create_session(session)
             try:
@@ -501,6 +513,7 @@ class SessionRuntime:
                     claude_session_id,
                     self._claude_launch_factory(session.launch_target_id),
                     permission_mode=session.permission_mode,
+                    model=session.model,
                 )
             except (ClaudeCliError, FileNotFoundError, OSError) as exc:
                 self.storage.update_session(session.id, status=SessionStatus.ERROR)
@@ -510,11 +523,15 @@ class SessionRuntime:
             self.storage.update_session(session.id, status=SessionStatus.IDLE)
             await self._record_system_event(
                 session.id,
-                self._claude_start_message(claude_session_id, request.cwd, launch_target),
+                self._claude_start_message(
+                    claude_session_id, request.cwd, launch_target
+                ),
                 status=SessionStatus.IDLE,
             )
             return self.get_session(session.id)
-        command = self._command_for_backend(request.backend, request.args, launch_target, request.cwd)
+        command = self._command_for_backend(
+            request.backend, request.args, launch_target, request.cwd
+        )
         try:
             target = await self.tmux.start_managed_session(
                 session_id, request.cwd, command
@@ -709,6 +726,110 @@ class SessionRuntime:
             )
         )
         return updated
+
+    async def set_model(self, session_id: str, model: str | None) -> SessionRecord:
+        session = self.get_session(session_id)
+        cleaned = model.strip() if isinstance(model, str) and model.strip() else None
+        if session.backend == Backend.CLAUDE_CODE:
+            if self.claude is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="claude adapter is not configured on this backend",
+                )
+            try:
+                await self.claude.set_model(session_id, cleaned)
+            except Exception as exc:  # noqa: BLE001 — surface adapter errors as 400
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+                ) from exc
+        elif session.backend == Backend.CODEX:
+            try:
+                await self.codex.set_model(session_id, cleaned)
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+                ) from exc
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"model selection is not supported for {session.backend}",
+            )
+        updated = self.storage.update_session(session_id, model=cleaned)
+        await self.broadcast.publish(
+            SessionEnvelope(
+                type="session_list_update",
+                payload={
+                    "sessions": [
+                        item.model_dump(mode="json") for item in self.list_sessions()
+                    ]
+                },
+            )
+        )
+        return updated
+
+    async def list_backend_models(
+        self,
+        backend: Backend,
+        launch_target_id: str | None = None,
+        include_hidden: bool = False,
+    ) -> dict[str, Any]:
+        default_model = self.settings.default_models.get(backend.value)
+        if backend == Backend.CLAUDE_CODE:
+            options = [
+                opt.model_dump(mode="json") for opt in self.settings.claude_models
+            ]
+            if default_model is None:
+                for opt in self.settings.claude_models:
+                    if opt.is_default:
+                        default_model = opt.id
+                        break
+            return {
+                "backend": backend.value,
+                "models": options,
+                "default_model": default_model,
+                "supports_free_text": True,
+            }
+        if backend == Backend.CODEX:
+            launch_target = self._find_launch_target(launch_target_id)
+            cwd = (launch_target.default_cwd if launch_target else None) or "~"
+            try:
+                response = await self.codex.list_models(
+                    cwd=cwd,
+                    client_factory_override=self._codex_client_factory(
+                        launch_target_id
+                    ),
+                    include_hidden=include_hidden,
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"codex model discovery failed: {exc}",
+                ) from exc
+            models: list[dict[str, Any]] = []
+            for entry in response.data:
+                if entry.hidden and not include_hidden:
+                    continue
+                models.append(
+                    {
+                        "id": entry.model,
+                        "label": entry.display_name or entry.model,
+                        "description": entry.description or None,
+                        "is_default": entry.is_default,
+                        "hidden": entry.hidden,
+                    }
+                )
+                if default_model is None and entry.is_default:
+                    default_model = entry.model
+            return {
+                "backend": backend.value,
+                "models": models,
+                "default_model": default_model,
+                "supports_free_text": True,
+            }
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"model discovery is not supported for {backend}",
+        )
 
     async def set_pinned(self, session_id: str, pinned: bool) -> SessionRecord:
         session = self.get_session(session_id)
@@ -1196,7 +1317,9 @@ class SessionRuntime:
             executable = "claude" if backend == Backend.CLAUDE_CODE else "codex"
             return [executable, *args]
         return list(
-            launch_target.remote_command_for_backend(backend, args, cwd or launch_target.default_cwd)
+            launch_target.remote_command_for_backend(
+                backend, args, cwd or launch_target.default_cwd
+            )
         )
 
     def _infer_backend(self, target: str) -> Backend:

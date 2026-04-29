@@ -1179,8 +1179,10 @@ details.tool-disclosure[open] {
   padding-right: 22px;
 }
 
-/* Quieter glyph + label inside the recessed card. Saturated colours are
- * reserved for conversation messages; tools should read as side-channel. */
+/* Slightly smaller glyph chip inside recessed cards. Family colour stays
+ * (so the user can spot a Bash among Reads at a glance), but the saturated
+ * background fill is dropped so the chip reads as a small marker rather
+ * than a competing badge. */
 .transcript.codex.tool_call:not(.ask-user-question) .tool-glyph,
 .transcript.codex.tool_result .tool-glyph,
 .transcript.codex.tool_pair .tool-glyph {
@@ -1188,8 +1190,6 @@ details.tool-disclosure[open] {
   height: 20px;
   font-size: 0.72rem;
   background: transparent;
-  border-color: rgba(120, 138, 168, 0.22);
-  color: var(--muted);
 }
 
 .transcript.codex.tool_call:not(.ask-user-question) .tool-name,
@@ -1945,12 +1945,13 @@ details.tool-disclosure[open] .tool-glyph.todo {
  * having to find the scrollbar. */
 .scroll-top-floater {
   position: sticky;
-  top: 12px;
+  top: 16px;
   z-index: 5;
   display: flex;
   justify-content: flex-end;
+  padding-right: 4px;
   pointer-events: none;
-  margin-bottom: -36px;
+  margin-bottom: -38px;
 }
 
 .scroll-top-pill {
@@ -1958,22 +1959,53 @@ details.tool-disclosure[open] .tool-glyph.todo {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
-  background: rgba(20, 24, 33, 0.92);
-  border: 1px solid var(--line-strong);
+  /* Subtle gradient fill so the button reads as raised, not flat. The
+   * inner highlight on top-left + darker base bottom-right gives the chip
+   * just enough dimension to separate from the page underneath. */
+  background:
+    radial-gradient(circle at 30% 25%, rgba(143, 179, 214, 0.22), transparent 60%),
+    linear-gradient(180deg, rgba(30, 36, 48, 0.96), rgba(14, 17, 24, 0.96));
+  border: 1px solid rgba(143, 179, 214, 0.42);
   color: var(--accent-cool);
-  font-size: 0.95rem;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38);
+  font-size: 1rem;
+  /* Stacked shadows: a deep drop shadow for separation, a soft outer glow
+   * tinted with the cool accent, and a hairline outline so the pill stays
+   * legible against any backdrop colour the page section might take on. */
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.55),
+    0 4px 10px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(143, 179, 214, 0.18),
+    0 0 24px rgba(143, 179, 214, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(14px);
-  transition: transform 160ms ease, border-color 160ms ease, color 160ms ease;
+  transition:
+    transform 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease,
+    box-shadow 200ms ease;
 }
 
 .scroll-top-pill:hover {
-  border-color: rgba(143, 179, 214, 0.5);
+  border-color: rgba(143, 179, 214, 0.7);
   color: var(--text-strong);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow:
+    0 18px 38px rgba(0, 0, 0, 0.6),
+    0 6px 14px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(143, 179, 214, 0.32),
+    0 0 32px rgba(143, 179, 214, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.scroll-top-pill:active {
+  transform: translateY(0);
+  box-shadow:
+    0 6px 16px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(143, 179, 214, 0.32),
+    0 0 18px rgba(143, 179, 214, 0.18);
 }
 
 /* Floating "↓ Latest" pill that hovers over the top edge of the sticky

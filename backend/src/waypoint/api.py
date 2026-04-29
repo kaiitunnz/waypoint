@@ -21,6 +21,7 @@ from waypoint.claude_runtime import ensure_claude_hook_bundle
 from waypoint.config import Settings, load_settings
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
+    Backend,
     CodexThreadImportRequest,
     LoginRequest,
     MeResponse,
@@ -31,6 +32,7 @@ from waypoint.schemas import (
     SessionCreateRequest,
     SessionEnvelope,
     SessionInputRequest,
+    SessionModelRequest,
     SessionPermissionModeRequest,
     TerminalSnapshot,
 )
@@ -242,6 +244,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         session = await context.runtime.set_permission_mode(session_id, body.mode)
         return {"session": session.model_dump(mode="json")}
+
+    @app.post("/api/sessions/{session_id}/model")
+    async def session_set_model(
+        session_id: str,
+        body: SessionModelRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.set_model(session_id, body.model)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.get("/api/backends/{backend}/models")
+    async def list_backend_models(
+        backend: Backend,
+        _: Annotated[str, Depends(token_dependency())],
+        launch_target_id: Annotated[str | None, Query()] = None,
+        include_hidden: Annotated[bool, Query()] = False,
+    ) -> Any:
+        return await context.runtime.list_backend_models(
+            backend,
+            launch_target_id=launch_target_id,
+            include_hidden=include_hidden,
+        )
 
     @app.post("/api/sessions/{session_id}/pin")
     async def session_pin(

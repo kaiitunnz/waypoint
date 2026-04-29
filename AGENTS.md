@@ -15,6 +15,14 @@
 - `cd frontend && npm run build && npm run start` runs a production-like frontend check.
 - `cd frontend && npm run lint` runs the frontend linter.
 
+## Local Stack Supervisor
+`./scripts/dev-stack.sh` (run from the repo root) is the canonical way to manage the running stack. Use it whenever the user asks to deploy, bring up, tear down, restart, or check on the app:
+- Deploy / bring up: `./scripts/dev-stack.sh start`.
+- Teardown: `./scripts/dev-stack.sh stop`.
+- Apply code changes: `./scripts/dev-stack.sh restart` — neither half runs with hot reload, so a manual restart is always required after backend or frontend edits, including type-check or lint changes that look invisible.
+- Check state during testing: `./scripts/dev-stack.sh status` for health, `./scripts/dev-stack.sh logs [backend|frontend]` for output. Restart before re-testing if you have changed code since the last `start`.
+Override ports or paths inline with `WAYPOINT_STACK_BACKEND_PORT`, `WAYPOINT_STACK_FRONTEND_PORT`, `WAYPOINT_STACK_CONFIG`, or `WAYPOINT_STACK_BACKEND_DATA_DIR` rather than editing the script.
+
 ## Coding Style & Naming Conventions
 Follow the existing style in each half of the repo. Python uses 4-space indentation, type hints, top-level imports, and `snake_case` for functions/modules; keep FastAPI handlers and Pydantic models explicit. TypeScript uses 2-space indentation, strict typing, `PascalCase` for components, and `camelCase` for helpers and state. Keep comments sparse and only explain non-obvious reasoning.
 

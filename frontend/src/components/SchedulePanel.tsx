@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
+import { ModelPicker } from "@/components/ModelPicker";
 import {
   modesForBackend,
   permissionModeLabel,
@@ -9,33 +10,42 @@ import {
 import { Backend, ScheduleCreateRequest, ScheduledSession } from "@/lib/types";
 
 interface SchedulePanelProps {
+  host: string;
+  token: string;
   defaultBackend: Backend;
   defaultCwd: string;
   targetLabel: string | null;
+  launchTargetId: string | null;
   supportedBackends: Backend[];
   schedules: ScheduledSession[];
   onCreate: (payload: ScheduleCreateRequest) => Promise<void>;
   onCancel: (scheduleId: string) => Promise<void>;
   onClearHistory: () => Promise<void>;
+  onAuthFailure?: () => void;
 }
 
 type Mode = "delay" | "datetime";
 
 export function SchedulePanel({
+  host,
+  token,
   defaultBackend,
   defaultCwd,
   targetLabel,
+  launchTargetId,
   supportedBackends,
   schedules,
   onCreate,
   onCancel,
   onClearHistory,
+  onAuthFailure,
 }: SchedulePanelProps) {
   const [backend, setBackend] = useState<Backend>(defaultBackend);
   const [cwd, setCwd] = useState(defaultCwd);
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [permissionMode, setPermissionMode] = useState<string>("default");
+  const [model, setModel] = useState("");
   const [mode, setMode] = useState<Mode>("delay");
   const [delayMinutes, setDelayMinutes] = useState("15");
   const [scheduledAt, setScheduledAt] = useState(defaultScheduledAt());
@@ -61,6 +71,7 @@ export function SchedulePanel({
       title: title.trim() || null,
       initial_prompt: prompt.trim() || null,
       permission_mode: permissionMode || null,
+      model: model.trim() || null,
       args: [],
     };
     if (mode === "delay") {
@@ -158,6 +169,17 @@ export function SchedulePanel({
               </select>
             </label>
           ) : null}
+          <ModelPicker
+            host={host}
+            token={token}
+            backend={backend}
+            launchTargetId={launchTargetId}
+            value={model}
+            onChange={setModel}
+            onAuthFailure={onAuthFailure}
+            disabled={busy}
+            label="Model"
+          />
         </div>
         <label className="field">
           <span>Initial prompt</span>
@@ -260,6 +282,11 @@ function ScheduleRow({
         <span className={`badge schedule-status ${schedule.status}`}>{schedule.status}</span>
         {modeLabel ? (
           <span className="badge schedule-mode">{modeLabel}</span>
+        ) : null}
+        {schedule.model ? (
+          <span className="badge model" title={`Model: ${schedule.model}`}>
+            {schedule.model}
+          </span>
         ) : null}
         <span className="muted">{formatted}</span>
         {schedule.status === "pending" ? <span className="muted">· {relative}</span> : null}

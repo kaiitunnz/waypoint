@@ -2,36 +2,51 @@
 
 import { FormEvent, useEffect, useState } from "react";
 
+import { ModelPicker } from "@/components/ModelPicker";
 import { Backend, CodexThreadSummary } from "@/lib/types";
 
 interface LaunchPanelProps {
+  host: string;
+  token: string;
   defaultBackend: Backend;
   defaultCwd: string;
   targetLabel: string | null;
+  launchTargetId: string | null;
   supportedBackends: Backend[];
   codexThreads: CodexThreadSummary[];
   codexThreadsLoading: boolean;
-  onCreate: (backend: Backend, cwd: string, title: string) => Promise<void>;
+  onCreate: (
+    backend: Backend,
+    cwd: string,
+    title: string,
+    model: string | null,
+  ) => Promise<void>;
   onAttach: (target: string, backendHint: Backend) => Promise<void>;
   onImportCodexThread: (threadId: string) => Promise<void>;
+  onAuthFailure?: () => void;
 }
 
 const THREADS_PAGE_SIZE = 6;
 
 export function LaunchPanel({
+  host,
+  token,
   defaultBackend,
   defaultCwd,
   targetLabel,
+  launchTargetId,
   supportedBackends,
   codexThreads,
   codexThreadsLoading,
   onCreate,
   onAttach,
   onImportCodexThread,
+  onAuthFailure,
 }: LaunchPanelProps) {
   const [backend, setBackend] = useState<Backend>(defaultBackend);
   const [cwd, setCwd] = useState(defaultCwd);
   const [title, setTitle] = useState("");
+  const [model, setModel] = useState("");
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [formBusy, setFormBusy] = useState(false);
   const [importingThreadId, setImportingThreadId] = useState<string | null>(null);
@@ -55,7 +70,7 @@ export function LaunchPanel({
     event.preventDefault();
     setFormBusy(true);
     try {
-      await onCreate(backend, cwd, title);
+      await onCreate(backend, cwd, title, model.trim() || null);
       setTitle("");
     } finally {
       setFormBusy(false);
@@ -126,6 +141,16 @@ export function LaunchPanel({
           <span>Title</span>
           <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Optional" />
         </label>
+        <ModelPicker
+          host={host}
+          token={token}
+          backend={backend}
+          launchTargetId={launchTargetId}
+          value={model}
+          onChange={setModel}
+          onAuthFailure={onAuthFailure}
+          disabled={formBusy}
+        />
         <button className="primary" disabled={formBusy} type="submit">
           Launch
         </button>

@@ -238,7 +238,12 @@ export default function HomePage() {
     setError("");
   }
 
-  async function handleCreate(backend: Backend, cwd: string, title: string) {
+  async function handleCreate(
+    backend: Backend,
+    cwd: string,
+    title: string,
+    model: string | null,
+  ) {
     try {
       const session = await createSession(host, token, {
         backend,
@@ -247,6 +252,7 @@ export default function HomePage() {
         title: title || null,
         source_mode: "managed",
         args: [],
+        model,
       });
       setSessions((current) => [
         session,
@@ -513,27 +519,35 @@ export default function HomePage() {
       ) : null}
       {token ? (
         <LaunchPanel
+          host={host}
+          token={token}
           defaultBackend={effectiveDefaultBackend}
           defaultCwd={effectiveDefaultCwd}
           targetLabel={activeLaunchTarget?.name ?? null}
+          launchTargetId={activeLaunchTargetId || null}
           supportedBackends={supportedBackends}
           codexThreads={codexThreads}
           codexThreadsLoading={codexThreadsLoading}
           onAttach={handleAttach}
           onCreate={handleCreate}
           onImportCodexThread={handleImportCodexThread}
+          onAuthFailure={() => resetAuthState("Session expired. Log in again.")}
         />
       ) : null}
       {token ? (
         <SchedulePanel
+          host={host}
+          token={token}
           defaultBackend={effectiveDefaultBackend}
           defaultCwd={effectiveDefaultCwd}
           targetLabel={activeLaunchTarget?.name ?? null}
+          launchTargetId={activeLaunchTargetId || null}
           supportedBackends={supportedBackends}
           schedules={schedules}
           onCreate={handleCreateSchedule}
           onCancel={handleCancelSchedule}
           onClearHistory={handleClearScheduleHistory}
+          onAuthFailure={() => resetAuthState("Session expired. Log in again.")}
         />
       ) : null}
       {error ? <p className="error">{error}</p> : null}

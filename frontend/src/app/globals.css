@@ -256,6 +256,8 @@ pre {
 .import-thread-card {
   display: grid;
   gap: 10px;
+  min-width: 0;
+  overflow: hidden;
   padding: 14px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
@@ -264,6 +266,15 @@ pre {
 
 .import-thread-actions {
   justify-content: space-between;
+}
+
+.import-thread-preview {
+  margin: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .field {

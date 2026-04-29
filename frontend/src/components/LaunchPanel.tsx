@@ -17,6 +17,8 @@ interface LaunchPanelProps {
   onImportCodexThread: (threadId: string) => Promise<void>;
 }
 
+const THREADS_PAGE_SIZE = 6;
+
 export function LaunchPanel({
   defaultBackend,
   defaultCwd,
@@ -35,6 +37,8 @@ export function LaunchPanel({
   const [title, setTitle] = useState("");
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showCodexThreads, setShowCodexThreads] = useState(false);
+  const [threadPage, setThreadPage] = useState(1);
 
   useEffect(() => {
     setBackend(defaultBackend);
@@ -47,6 +51,11 @@ export function LaunchPanel({
   useEffect(() => {
     setRemoteCwd(defaultRemoteCwd ?? "~");
   }, [defaultRemoteCwd]);
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(codexThreads.length / THREADS_PAGE_SIZE));
+    setThreadPage((current) => Math.min(current, totalPages));
+  }, [codexThreads.length]);
 
   async function submitCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -80,6 +89,18 @@ export function LaunchPanel({
       setBusy(false);
     }
   }
+
+  const threadTotalPages = Math.max(
+    1,
+    Math.ceil(codexThreads.length / THREADS_PAGE_SIZE),
+  );
+  const threadPageStart = (threadPage - 1) * THREADS_PAGE_SIZE;
+  const visibleThreads = codexThreads.slice(
+    threadPageStart,
+    threadPageStart + THREADS_PAGE_SIZE,
+  );
+  const showingFrom = threadPageStart + 1;
+  const showingTo = Math.min(codexThreads.length, threadPageStart + THREADS_PAGE_SIZE);
 
   return (
     <section className="launch-grid">
@@ -140,41 +161,100 @@ export function LaunchPanel({
       </form>
       {supportedBackends.includes("codex") ? (
         <section className="panel stack">
-          <div>
-            <h3>Import Codex thread</h3>
-            <p className="muted">
-              Resume a stored Codex thread{targetLabel ? ` on ${targetLabel}` : ""}.
-            </p>
+          <div className="field-row">
+            <div className="session-list-summary">
+              <h3>Import Codex thread</h3>
+              <p className="muted">
+                Resume a stored Codex thread{targetLabel ? ` on ${targetLabel}` : ""}.
+              </p>
+            </div>
+            <button
+              className="secondary"
+              disabled={codexThreadsLoading || !codexThreads.length}
+              type="button"
+              onClick={() => setShowCodexThreads((current) => !current)}
+            >
+              {showCodexThreads
+                ? "Hide threads"
+                : `Show threads (${codexThreads.length})`}
+            </button>
           </div>
           {codexThreadsLoading ? <p className="muted">Loading stored threads…</p> : null}
           {!codexThreadsLoading && !codexThreads.length ? (
             <p className="muted">No importable Codex threads found.</p>
           ) : null}
-          {codexThreads.map((thread) => (
-            <article className="import-thread-card" key={thread.id}>
-              <div className="session-row">
-                <span className="badge neutral">Codex</span>
-                {thread.branch ? <span className="badge neutral">{thread.branch}</span> : null}
-              </div>
-              <h3>{thread.title}</h3>
-              <p className="muted">{thread.cwd}</p>
-              {thread.preview ? <p className="meta">{thread.preview}</p> : null}
-              <div className="action-row import-thread-actions">
+          {!codexThreadsLoading && codexThreads.length && !showCodexThreads ? (
+            <p className="muted">
+              Collapsed by default to keep the launch area compact.
+            </p>
+          ) : null}
+          {showCodexThreads ? (
+            <>
+              <div className="action-row list-actions">
                 <span className="meta">
-                  {thread.repo_name ?? "No repo"} · updated{" "}
-                  {new Date(thread.updated_at).toLocaleString()}
+                  Showing {showingFrom}-{showingTo} of {codexThreads.length}
                 </span>
-                <button
-                  className="secondary"
-                  disabled={busy}
-                  type="button"
-                  onClick={() => void handleImport(thread.id)}
-                >
-                  Import
-                </button>
+                {threadTotalPages > 1 ? (
+                  <div className="action-row pagination-controls">
+                    <button
+                      className="secondary"
+                      type="button"
+                      onClick={() =>
+                        setThreadPage((current) => Math.max(1, current - 1))
+                      }
+                      disabled={threadPage === 1}
+                    >
+                      Previous
+                    </button>
+                    <span className="meta">
+                      Page {threadPage} of {threadTotalPages}
+                    </span>
+                    <button
+                      className="secondary"
+                      type="button"
+                      onClick={() =>
+                        setThreadPage((current) =>
+                          Math.min(threadTotalPages, current + 1),
+                        )
+                      }
+                      disabled={threadPage === threadTotalPages}
+                    >
+                      Next
+                    </button>
+                  </div>
+                ) : null}
               </div>
-            </article>
-          ))}
+              {visibleThreads.map((thread) => (
+                <article className="import-thread-card" key={thread.id}>
+                  <div className="session-row">
+                    <span className="badge neutral">Codex</span>
+                    {thread.branch ? (
+                      <span className="badge neutral">{thread.branch}</span>
+                    ) : null}
+                  </div>
+                  <h3 className="session-card-title">{thread.title}</h3>
+                  <p className="muted session-card-path">{thread.cwd}</p>
+                  {thread.preview ? (
+                    <p className="meta import-thread-preview">{thread.preview}</p>
+                  ) : null}
+                  <div className="action-row import-thread-actions">
+                    <span className="meta">
+                      {thread.repo_name ?? "No repo"} · updated{" "}
+                      {new Date(thread.updated_at).toLocaleString()}
+                    </span>
+                    <button
+                      className="secondary"
+                      disabled={busy}
+                      type="button"
+                      onClick={() => void handleImport(thread.id)}
+                    >
+                      Import
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </>
+          ) : null}
         </section>
       ) : null}
     </section>

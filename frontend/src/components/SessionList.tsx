@@ -16,7 +16,6 @@ interface SessionListProps {
 const PAGE_SIZE = 8;
 
 export function SessionList({ sessions, onDelete, onDeleteExited, onTerminate }: SessionListProps) {
-  const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(1);
 
   function handleDelete(event: MouseEvent<HTMLButtonElement>, sessionId: string) {
@@ -84,107 +83,92 @@ export function SessionList({ sessions, onDelete, onDeleteExited, onTerminate }:
             {sessions.length} total · {activeCount} active · {exitedCount} exited
           </p>
         </div>
-        <button
-          className="secondary"
-          type="button"
-          onClick={() => setExpanded((current) => !current)}
-        >
-          {expanded ? "Collapse" : `Show sessions (${sessions.length})`}
-        </button>
       </div>
-      {!expanded ? (
-        <p className="muted">Collapsed by default to keep the home screen compact.</p>
-      ) : (
-        <>
-          <div className="action-row list-actions">
+      <div className="action-row list-actions">
+        <span className="meta">
+          Showing {showingFrom}-{showingTo} of {sessions.length}
+        </span>
+        {totalPages > 1 ? (
+          <div className="action-row pagination-controls">
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              disabled={page === 1}
+            >
+              Previous
+            </button>
             <span className="meta">
-              Showing {showingFrom}-{showingTo} of {sessions.length}
+              Page {page} of {totalPages}
             </span>
-            {totalPages > 1 ? (
-              <div className="action-row pagination-controls">
-                <button
-                  className="secondary"
-                  type="button"
-                  onClick={() => setPage((current) => Math.max(1, current - 1))}
-                  disabled={page === 1}
-                >
-                  Previous
-                </button>
-                <span className="meta">
-                  Page {page} of {totalPages}
-                </span>
-                <button
-                  className="secondary"
-                  type="button"
-                  onClick={() =>
-                    setPage((current) => Math.min(totalPages, current + 1))
-                  }
-                  disabled={page === totalPages}
-                >
-                  Next
-                </button>
-              </div>
-            ) : null}
-            {onDeleteExited && exitedCount > 0 ? (
-              <button className="secondary" type="button" onClick={handleDeleteExited}>
-                Delete exited ({exitedCount})
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+              disabled={page === totalPages}
+            >
+              Next
+            </button>
+          </div>
+        ) : null}
+        {onDeleteExited && exitedCount > 0 ? (
+          <button className="secondary" type="button" onClick={handleDeleteExited}>
+            Delete exited ({exitedCount})
+          </button>
+        ) : null}
+      </div>
+      <div className="stack">
+        {visibleSessions.map((session) => (
+          <Link className="panel session-card" href={`/session/${session.id}`} key={session.id}>
+            <div className="session-row">
+              <span className={`badge ${session.backend}`}>
+                {session.backend === "codex" ? "Codex" : "Claude"}
+              </span>
+              <span className={`badge transport ${session.transport}`}>
+                {transportLabel(session.transport)}
+              </span>
+              {session.launch_target_id ? (
+                <span className="badge neutral">{session.launch_target_id}</span>
+              ) : null}
+              <span className={`status ${session.status}`}>
+                {session.status.replace("_", " ")}
+              </span>
+            </div>
+            <h3 className="session-card-title">{session.title}</h3>
+            <p className="muted session-card-path">
+              {session.remote_cwd ?? session.cwd}
+            </p>
+            <div className="session-card-meta">
+              <p className="meta">
+                {session.repo_name ?? "No repo"}
+                {session.branch ? ` · ${session.branch}` : null}
+                {session.source === "managed" ? " · managed" : " · attached"}
+              </p>
+              <p className="meta">
+                Last activity {new Date(session.last_event_at).toLocaleString()}
+              </p>
+            </div>
+            {onTerminate && session.status !== "exited" ? (
+              <button
+                className="link-button danger-link"
+                type="button"
+                onClick={(event) => handleTerminate(event, session.id)}
+              >
+                Terminate
               </button>
             ) : null}
-          </div>
-          <div className="stack">
-            {visibleSessions.map((session) => (
-              <Link className="panel session-card" href={`/session/${session.id}`} key={session.id}>
-                <div className="session-row">
-                  <span className={`badge ${session.backend}`}>
-                    {session.backend === "codex" ? "Codex" : "Claude"}
-                  </span>
-                  <span className={`badge transport ${session.transport}`}>
-                    {transportLabel(session.transport)}
-                  </span>
-                  {session.launch_target_id ? (
-                    <span className="badge neutral">{session.launch_target_id}</span>
-                  ) : null}
-                  <span className={`status ${session.status}`}>
-                    {session.status.replace("_", " ")}
-                  </span>
-                </div>
-                <h3 className="session-card-title">{session.title}</h3>
-                <p className="muted session-card-path">
-                  {session.remote_cwd ?? session.cwd}
-                </p>
-                <div className="session-card-meta">
-                  <p className="meta">
-                    {session.repo_name ?? "No repo"}
-                    {session.branch ? ` · ${session.branch}` : null}
-                    {session.source === "managed" ? " · managed" : " · attached"}
-                  </p>
-                  <p className="meta">
-                    Last activity {new Date(session.last_event_at).toLocaleString()}
-                  </p>
-                </div>
-                {onTerminate && session.status !== "exited" ? (
-                  <button
-                    className="link-button danger-link"
-                    type="button"
-                    onClick={(event) => handleTerminate(event, session.id)}
-                  >
-                    Terminate
-                  </button>
-                ) : null}
-                {onDelete && session.status === "exited" ? (
-                  <button
-                    className="link-button danger-link"
-                    type="button"
-                    onClick={(event) => handleDelete(event, session.id)}
-                  >
-                    Delete
-                  </button>
-                ) : null}
-              </Link>
-            ))}
-          </div>
-        </>
-      )}
+            {onDelete && session.status === "exited" ? (
+              <button
+                className="link-button danger-link"
+                type="button"
+                onClick={(event) => handleDelete(event, session.id)}
+              >
+                Delete
+              </button>
+            ) : null}
+          </Link>
+        ))}
+      </div>
     </section>
   );
 }

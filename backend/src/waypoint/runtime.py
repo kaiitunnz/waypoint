@@ -312,8 +312,7 @@ class SessionRuntime:
         summaries = [
             self._codex_thread_summary(thread)
             for thread in threads
-            if not thread.ephemeral
-            and (launch_target_id, thread.id) not in imported
+            if not thread.ephemeral and (launch_target_id, thread.id) not in imported
         ]
         return sorted(summaries, key=lambda thread: thread.updated_at, reverse=True)
 

@@ -370,7 +370,9 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
         return thread
 
     monkeypatch.setattr(runtime, "_read_codex_thread", fake_read)
-    monkeypatch.setattr(runtime, "_codex_client_factory", lambda launch_target_id: "remote-factory")
+    monkeypatch.setattr(
+        runtime, "_codex_client_factory", lambda launch_target_id: "remote-factory"
+    )
 
     session = await runtime.import_codex_thread(
         CodexThreadImportRequest(thread_id="thread-9", launch_target_id="devbox")

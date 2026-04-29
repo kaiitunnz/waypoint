@@ -60,6 +60,15 @@ type ViewMode = "chat" | "terminal";
 type FilterMode = "important" | "all";
 type ConnectionState = "connecting" | "open" | "reconnecting";
 
+// We pin the reply composer to the viewport bottom; the transcript reserves
+// `--composer-height` worth of bottom space so the last message can scroll
+// clear of the composer instead of disappearing underneath it. The fallback
+// keeps things sensible for the very first paint before the observer fires.
+const COMPOSER_HEIGHT_FALLBACK = 220;
+const SHORTCUT_IS_MAC =
+  typeof navigator !== "undefined" &&
+  /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
+
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 
@@ -539,29 +548,34 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       {pendingApproval ? (
         <ApprovalCard event={pendingApproval} onDecide={submitApproval} />
       ) : null}
-      {view === "chat" && (showScrollToTop || showScrollToBottom) ? (
-        <div className="scroll-controls" aria-hidden={false}>
+      {view === "chat" ? (
+        <>
           {showScrollToTop ? (
-            <button
-              className="secondary scroll-top"
-              onClick={() => scrollToTop()}
-              type="button"
-              aria-label="Scroll to top"
-            >
-              ↑ Top
-            </button>
+            <div className="scroll-controls" aria-hidden={false}>
+              <button
+                className="secondary scroll-top"
+                onClick={() => scrollToTop()}
+                type="button"
+                aria-label="Scroll to top"
+              >
+                ↑ Top
+              </button>
+            </div>
           ) : null}
           {showScrollToBottom ? (
-            <button
-              className="secondary scroll-bottom"
-              onClick={() => scrollToBottom()}
-              type="button"
-              aria-label="Scroll to latest"
-            >
-              ↓ Latest
-            </button>
+            <div className="scroll-latest-floater" aria-hidden={false}>
+              <button
+                type="button"
+                className="scroll-latest-pill"
+                onClick={() => scrollToBottom()}
+                aria-label="Scroll to latest"
+              >
+                <span className="arrow">↓</span>
+                <span>Jump to latest</span>
+              </button>
+            </div>
           ) : null}
-        </div>
+        </>
       ) : null}
       {error ? (
         <div className="session-error-toast" role="alert">
@@ -592,6 +606,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         onSend={submitInput}
         onTerminate={terminate}
       />
+      <div aria-hidden className="transcript-end-spacer" />
     </section>
   );
 }
@@ -633,7 +648,10 @@ const ReplyComposer = memo(function ReplyComposer({
   const [sending, setSending] = useState(false);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
+  const [overflowOpen, setOverflowOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerRef = useRef<HTMLElement | null>(null);
+  const overflowRef = useRef<HTMLDivElement | null>(null);
 
   // Built-in slash commands are intercepted on the backend only for structured
   // transports (see runtime._handle_builtin_command); skip suggestions on tmux.
@@ -658,6 +676,55 @@ const ReplyComposer = memo(function ReplyComposer({
       setSuggestionsDismissed(false);
     }
   }, [draft]);
+
+  // Publish the composer's actual height as a CSS custom property so the
+  // transcript end-spacer and floating "Jump to latest" pill can position
+  // themselves accurately. Falls back to a reasonable default before the
+  // observer fires.
+  useEffect(() => {
+    const node = composerRef.current;
+    if (!node) {
+      return;
+    }
+    const apply = () => {
+      const height = Math.round(node.getBoundingClientRect().height);
+      document.documentElement.style.setProperty(
+        "--composer-height",
+        `${height || COMPOSER_HEIGHT_FALLBACK}px`,
+      );
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty("--composer-height");
+    };
+  }, []);
+
+  // Close the overflow menu on outside click / Escape so destructive actions
+  // don't linger if the user changes their mind.
+  useEffect(() => {
+    if (!overflowOpen) {
+      return;
+    }
+    function onPointer(event: PointerEvent) {
+      if (!overflowRef.current) return;
+      if (overflowRef.current.contains(event.target as Node)) return;
+      setOverflowOpen(false);
+    }
+    function onKey(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOverflowOpen(false);
+      }
+    }
+    window.addEventListener("pointerdown", onPointer);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onPointer);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [overflowOpen]);
 
   function applySuggestion(index: number) {
     const chosen = suggestions[index];
@@ -690,7 +757,10 @@ const ReplyComposer = memo(function ReplyComposer({
       return;
     }
     if (suggestionsOpen) {
-      if (event.key === "Tab" || (event.key === "Enter" && !event.metaKey && !event.shiftKey)) {
+      if (
+        event.key === "Tab" ||
+        (event.key === "Enter" && !(event.metaKey || event.ctrlKey) && !event.shiftKey)
+      ) {
         event.preventDefault();
         applySuggestion(activeIndex);
         return;
@@ -711,7 +781,12 @@ const ReplyComposer = memo(function ReplyComposer({
         return;
       }
     }
-    if (event.key !== "Enter" || !event.metaKey || event.shiftKey) {
+    // Treat Cmd+Enter (mac) and Ctrl+Enter (windows/linux) as the send
+    // shortcut. Plain Enter inserts a newline as expected.
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
+    }
+    if (!event.metaKey && !event.ctrlKey) {
       return;
     }
     event.preventDefault();
@@ -719,81 +794,149 @@ const ReplyComposer = memo(function ReplyComposer({
   }
 
   const modeOptions = backend ? modesForBackend(backend) : [];
+  const hasOverflow = canTerminate || canDelete;
+  const shortcutKey = SHORTCUT_IS_MAC ? "⌘" : "Ctrl";
+
   return (
-    <section className="panel stack">
-      {modeOptions.length > 0 ? (
-        <label className="session-mode-control">
-          <span>Mode</span>
-          <select
-            value={permissionMode ?? "default"}
-            onChange={(event) => void onModeChange(event.target.value)}
-            disabled={modeBusy || disabled}
-          >
-            {modeOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-      <label className="field">
-        <span>Reply</span>
-        <div className="reply-textarea-wrap">
-          <textarea
-            ref={textareaRef}
-            rows={4}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={handleDraftKeyDown}
-            disabled={disabled}
-          />
-          {suggestionsOpen ? (
-            <ul className="slash-suggestions" role="listbox">
-              {suggestions.map((entry, index) => (
-                <li key={entry.command}>
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={index === activeIndex}
-                    className={`slash-suggestion ${index === activeIndex ? "active" : ""}`}
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      applySuggestion(index);
-                    }}
-                    onMouseEnter={() => setSuggestionIndex(index)}
-                  >
-                    <span className="slash-name">{entry.command}</span>
-                    <span className="slash-desc">{entry.description}</span>
-                  </button>
-                </li>
+    <section className="composer" ref={composerRef}>
+      <div className="composer-toprow">
+        {modeOptions.length > 0 ? (
+          <label className="composer-mode">
+            <span>mode</span>
+            <select
+              value={permissionMode ?? "default"}
+              onChange={(event) => void onModeChange(event.target.value)}
+              disabled={modeBusy || disabled}
+              aria-label="Permission mode"
+            >
+              {modeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
               ))}
-            </ul>
-          ) : null}
-        </div>
-      </label>
-      <p className="muted">Press Cmd+Enter to send.</p>
-      <div className="action-row">
-        <button className="primary" onClick={() => void handleSend()} type="button" disabled={disabled || sending}>
-          Send
+            </select>
+          </label>
+        ) : (
+          <span />
+        )}
+        <span className="composer-shortcut" aria-hidden>
+          <kbd>{shortcutKey}</kbd>
+          <span>+</span>
+          <kbd>↵</kbd>
+          <span>to send</span>
+        </span>
+      </div>
+      <div className="reply-textarea-wrap">
+        <textarea
+          ref={textareaRef}
+          className="composer-textarea"
+          rows={3}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={handleDraftKeyDown}
+          disabled={disabled}
+          placeholder={
+            disabled ? "Session has exited — composer disabled." : "Reply to the agent…"
+          }
+          aria-label="Reply"
+        />
+        {suggestionsOpen ? (
+          <ul className="slash-suggestions" role="listbox">
+            {suggestions.map((entry, index) => (
+              <li key={entry.command}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={index === activeIndex}
+                  className={`slash-suggestion ${index === activeIndex ? "active" : ""}`}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    applySuggestion(index);
+                  }}
+                  onMouseEnter={() => setSuggestionIndex(index)}
+                >
+                  <span className="slash-name">{entry.command}</span>
+                  <span className="slash-desc">{entry.description}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+      <div className="composer-actions">
+        <button
+          className="primary send"
+          onClick={() => void handleSend()}
+          type="button"
+          disabled={disabled || sending || !draft.trim()}
+        >
+          {sending ? "Sending…" : "Send"}
         </button>
-        <button className="secondary" onClick={() => void onInterrupt()} type="button" disabled={disabled}>
+        <button
+          className="ghost interrupt"
+          onClick={() => void onInterrupt()}
+          type="button"
+          disabled={disabled}
+          title="Interrupt the agent's current turn"
+        >
           Interrupt
         </button>
         {canResume ? (
-          <button className="secondary" onClick={() => void onResume()} type="button" disabled={disabled}>
+          <button
+            className="ghost"
+            onClick={() => void onResume()}
+            type="button"
+            disabled={disabled}
+            title="Resume the underlying tmux session"
+          >
             Resume
           </button>
         ) : null}
-        {canTerminate ? (
-          <button className="danger" onClick={() => void onTerminate()} type="button">
-            Terminate
-          </button>
-        ) : null}
-        {canDelete ? (
-          <button className="danger" onClick={() => void onDelete()} type="button">
-            Delete
-          </button>
+        {hasOverflow ? (
+          <div className="composer-overflow" ref={overflowRef}>
+            <button
+              type="button"
+              className={`composer-overflow-trigger ${overflowOpen ? "open" : ""}`}
+              aria-haspopup="menu"
+              aria-expanded={overflowOpen}
+              aria-label="More actions"
+              onClick={() => setOverflowOpen((open) => !open)}
+            >
+              ⋯
+            </button>
+            {overflowOpen ? (
+              <div className="composer-overflow-menu" role="menu">
+                {canTerminate ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="composer-overflow-item danger"
+                    onClick={() => {
+                      setOverflowOpen(false);
+                      void onTerminate();
+                    }}
+                  >
+                    <span className="glyph">⏻</span>
+                    Terminate session
+                  </button>
+                ) : null}
+                {canDelete ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="composer-overflow-item danger"
+                    onClick={() => {
+                      setOverflowOpen(false);
+                      void onDelete();
+                    }}
+                  >
+                    <span className="glyph">✕</span>
+                    Delete transcript
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </section>

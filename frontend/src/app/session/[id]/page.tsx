@@ -22,7 +22,7 @@ export default function SessionPage() {
   }, [params]);
 
   return (
-    <main className="page-shell">
+    <main className="page-shell has-composer">
       <header className="app-bar">
         <div className="app-bar-brand">
           <Link className="app-bar-mark" href="/" aria-label="Waypoint home">

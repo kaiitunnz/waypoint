@@ -104,13 +104,22 @@ pre {
   margin: 0 auto;
   /* viewportFit: "cover" + black-translucent status bar means the screen
    * extends edge-to-edge under the notch / home-indicator on iOS PWAs.
-   * Add safe-area insets so headers and buttons sit clear of the cut-out. */
+   * Add safe-area insets so headers and buttons sit clear of the cut-out.
+   * Bottom inset is handled by the sticky composer when present, but we keep
+   * a small floor so non-session pages still breathe. */
   padding: calc(28px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right))
-    calc(56px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
+    calc(40px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
   display: grid;
   gap: 28px;
   position: relative;
   z-index: 1;
+}
+
+/* When the page is hosting a session detail (sticky composer), pull the
+ * bottom padding down to zero — the composer + transcript-end-spacer manage
+ * that breathing room themselves. */
+.page-shell.has-composer {
+  padding-bottom: 0;
 }
 
 .app-bar {
@@ -618,7 +627,7 @@ pre {
 
 .session-error-toast {
   position: sticky;
-  bottom: 12px;
+  bottom: calc(var(--composer-height, 220px) + 12px);
   z-index: 5;
   display: flex;
   align-items: flex-start;
@@ -1019,8 +1028,8 @@ pre {
 
 .scroll-controls {
   position: sticky;
-  bottom: 12px;
-  z-index: 4;
+  bottom: calc(var(--composer-height, 220px) + 12px);
+  z-index: 5;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
@@ -1033,6 +1042,335 @@ pre {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
 }
 
+/* ────────────────────────────────────────────────────────────────────────
+ * Composer — sticky reply deck pinned to the viewport bottom so the user
+ * never has to scroll to find the input. The transcript section reserves
+ * `--composer-height` worth of bottom padding so the last message can scroll
+ * clear of the composer's overlay.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+.composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgba(20, 24, 33, 0.92), rgba(12, 15, 22, 0.96));
+  box-shadow:
+    0 -10px 30px rgba(0, 0, 0, 0.36),
+    0 0 0 1px rgba(200, 169, 106, 0.04) inset;
+  backdrop-filter: blur(22px) saturate(1.2);
+}
+
+.composer::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 28px;
+  background: linear-gradient(180deg, rgba(8, 11, 16, 0) 0%, rgba(8, 11, 16, 0.66) 100%);
+  pointer-events: none;
+}
+
+.composer-toprow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.composer-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: rgba(8, 11, 16, 0.5);
+}
+
+.composer-mode > span {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.composer-mode select {
+  border: 0;
+  background: transparent;
+  color: var(--accent-strong);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.composer-mode select:disabled {
+  color: var(--muted-soft);
+  cursor: progress;
+}
+
+.composer-mode select:focus-visible {
+  outline: 2px solid rgba(200, 169, 106, 0.45);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.composer-shortcut {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: var(--muted-soft);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.composer-shortcut kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: rgba(8, 11, 16, 0.65);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0;
+}
+
+.composer-textarea {
+  width: 100%;
+  min-height: 88px;
+  resize: vertical;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(6, 8, 13, 0.65);
+  color: var(--text);
+  line-height: 1.55;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.composer-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(200, 169, 106, 0.16);
+}
+
+.composer-textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.composer-actions .send {
+  flex: 0 1 auto;
+  min-width: 120px;
+}
+
+.composer-actions .ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  min-height: 36px;
+  padding: 0 12px;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: var(--radius-pill);
+}
+
+.composer-actions .ghost:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.composer-actions .ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.composer-actions .interrupt {
+  color: var(--warn);
+  border-color: rgba(217, 154, 74, 0.32);
+}
+
+.composer-actions .interrupt:hover:not(:disabled) {
+  border-color: rgba(217, 154, 74, 0.6);
+  color: var(--accent-strong);
+  background: rgba(217, 154, 74, 0.08);
+}
+
+.composer-overflow {
+  position: relative;
+  margin-left: auto;
+}
+
+.composer-overflow-trigger {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  background: transparent;
+  font-size: 1.05rem;
+  letter-spacing: 0.1em;
+  transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.composer-overflow-trigger:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text);
+  background: rgba(28, 33, 44, 0.6);
+}
+
+.composer-overflow-trigger.open {
+  border-color: var(--line-strong);
+  color: var(--text-strong);
+  background: rgba(28, 33, 44, 0.8);
+}
+
+.composer-overflow-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  min-width: 180px;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: rgba(14, 17, 24, 0.98);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(14px);
+  display: grid;
+  gap: 2px;
+  z-index: 30;
+}
+
+.composer-overflow-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.88rem;
+  text-align: left;
+  letter-spacing: 0.01em;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.composer-overflow-item:hover:not(:disabled) {
+  background: rgba(28, 33, 44, 0.7);
+}
+
+.composer-overflow-item.danger {
+  color: var(--danger);
+}
+
+.composer-overflow-item.danger:hover:not(:disabled) {
+  background: rgba(226, 108, 112, 0.12);
+}
+
+.composer-overflow-item .glyph {
+  width: 18px;
+  text-align: center;
+  font-family: var(--font-mono);
+  color: var(--muted-soft);
+}
+
+.composer-overflow-item.danger .glyph {
+  color: var(--danger);
+}
+
+.composer-overflow-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Floating "↓ Latest" pill that hovers over the top edge of the sticky
+ * composer, so the user can jump to live without the pill colliding with the
+ * composer chrome. */
+.scroll-latest-floater {
+  position: sticky;
+  bottom: calc(var(--composer-height, 220px) + 12px);
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  margin-bottom: -36px;
+}
+
+.scroll-latest-pill {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px 7px 12px;
+  border-radius: var(--radius-pill);
+  background: rgba(20, 24, 33, 0.94);
+  border: 1px solid var(--line-strong);
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(14px);
+  transition: transform 160ms ease, border-color 160ms ease;
+}
+
+.scroll-latest-pill:hover {
+  border-color: rgba(200, 169, 106, 0.5);
+  transform: translateY(-1px);
+}
+
+.scroll-latest-pill .arrow {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(200, 169, 106, 0.18);
+  color: var(--accent-strong);
+  font-size: 0.9rem;
+}
+
+/* Reserve space at the end of the transcript so the last message can scroll
+ * past the sticky composer. The variable is updated from JS via a
+ * ResizeObserver on the composer. */
+.transcript-end-spacer {
+  height: var(--composer-height, 220px);
+  pointer-events: none;
+}
+
+/* Legacy mode-control kept as a fallback for non-composer surfaces. */
 .session-mode-control {
   display: inline-flex;
   align-items: center;

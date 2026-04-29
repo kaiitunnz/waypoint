@@ -513,12 +513,14 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                     event={item.pair.call ?? item.pair.result ?? item.event}
                     pair={item.pair}
                     transport={session.transport}
+                    onAnswerAskQuestion={submitInput}
                     key={`pair-${item.pair.itemId}`}
                   />
                 ) : (
                   <TranscriptCard
                     event={item.event}
                     transport={session.transport}
+                    onAnswerAskQuestion={submitInput}
                     key={`${item.event.sequence}-${item.event.id ?? "local"}`}
                   />
                 ),

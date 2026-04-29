@@ -25,6 +25,7 @@ import {
   isAuthError,
   login,
   postAction,
+  setSessionPinned,
 } from "@/lib/api";
 import {
   clearToken,
@@ -415,6 +416,23 @@ export default function HomePage() {
     }
   }
 
+  async function handleSetPinned(sessionId: string, pinned: boolean) {
+    try {
+      const updated = await setSessionPinned(host, token, sessionId, pinned);
+      setSessions((current) =>
+        current.map((session) => (session.id === sessionId ? updated : session)),
+      );
+    } catch (pinError) {
+      if (isAuthError(pinError)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      setError(
+        pinError instanceof Error ? pinError.message : "failed to update pin",
+      );
+    }
+  }
+
   async function handleDeleteExited() {
     const exitedIds = sessions
       .filter((session) => session.status === "exited")
@@ -533,6 +551,7 @@ export default function HomePage() {
           onDelete={handleDelete}
           onDeleteExited={handleDeleteExited}
           onTerminate={handleTerminate}
+          onSetPinned={handleSetPinned}
         />
       ) : null}
     </main>

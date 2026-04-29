@@ -41,6 +41,7 @@ export interface SessionRecord {
   raw_log_path: string;
   structured_log_path: string;
   pid?: number | null;
+  pinned_at?: string | null;
 }
 
 export interface CodexThreadSummary {

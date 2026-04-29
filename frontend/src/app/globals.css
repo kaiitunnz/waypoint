@@ -1079,6 +1079,69 @@ pre {
   min-width: 0;
 }
 
+.session-section {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.session-section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.session-section-header h4 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.92rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-cool);
+}
+
+.session-section-header .meta {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--muted-soft);
+  letter-spacing: 0.04em;
+}
+
+.session-section-controls {
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.session-section-pinned .session-card {
+  border-color: rgba(200, 169, 106, 0.32);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.session-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+}
+
+.pin-link {
+  align-self: flex-start;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.pin-link:hover:not(:disabled) {
+  color: var(--accent-strong);
+}
+
+.pin-link.active {
+  color: var(--accent);
+}
+
 .pagination-controls {
   margin-left: auto;
 }

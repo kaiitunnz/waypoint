@@ -174,6 +174,21 @@ export async function postAction(
   await ensureOk(response, `failed to ${action}`);
 }
 
+export async function setSessionPinned(
+  host: string,
+  token: string,
+  sessionId: string,
+  pinned: boolean,
+): Promise<SessionRecord> {
+  const response = await fetch(`${host}/api/sessions/${sessionId}/pin`, {
+    method: pinned ? "POST" : "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, pinned ? "failed to pin session" : "failed to unpin session");
+  const body = await response.json();
+  return body.session as SessionRecord;
+}
+
 export async function fetchSchedules(host: string, token: string): Promise<ScheduledSession[]> {
   const response = await fetch(`${host}/api/schedules`, {
     headers: { Authorization: `Bearer ${token}` },

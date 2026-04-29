@@ -90,7 +90,7 @@ The YAML file is the canonical place for settings; env vars are an escape hatch 
 
 The frontend launch form also reads `default_backend` and `default_cwd` from backend config through `/api/me`, so switching to a different Waypoint backend updates those defaults automatically. If the selected Waypoint host exposes SSH targets, those appear in the same picker and only affect new managed launches on that host.
 
-When an SSH target is selected, the launch form uses that target's `default_remote_cwd` as the default remote path and lets you override it per launch. The session still keeps the local `cwd` separately for repo metadata and UI display.
+When an SSH target is selected, the launch form uses that target's `default_cwd` as the default remote path and lets you override it per launch. Managed sessions now use the same `cwd` value for UI display and the actual SSH-side working directory.
 
 ### Frontend
 

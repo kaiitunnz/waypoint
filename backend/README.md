@@ -39,7 +39,7 @@ The current config shape supports zero or more `ssh_targets` entries with:
 - `ssh_destination` and optional `ssh_args`
 - `supported_backends`, which defaults to both `codex` and `claude_code`
 - `codex_bin` and `claude_bin` on the remote host
-- `default_remote_cwd`, which seeds the remote working-directory field and defaults to `~`
+- `default_cwd`, which seeds the remote working-directory field and defaults to `~`
 - `remote_env` for secrets such as `OPENAI_API_KEY`
 
-Managed launches always keep a local `cwd` for repo metadata and UI display. When an SSH target is selected, the frontend also submits an explicit `remote_cwd` for the remote host; if it omits one, Waypoint uses that target's `default_remote_cwd`. Remote `codex` launches use the Codex app-server over SSH, while remote `claude_code` launches use tmux plus an SSH-wrapped `claude` command.
+Managed launches use a single `cwd` value for both UI display and the actual remote working directory. When an SSH target is selected, the frontend seeds that field from the target's `default_cwd`. Remote `codex` launches use the Codex app-server over SSH, while remote `claude_code` launches use tmux plus an SSH-wrapped `claude` command.

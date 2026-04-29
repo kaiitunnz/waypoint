@@ -16,7 +16,7 @@ ssh_targets:
       - "2222"
     codex_bin: codex
     claude_bin: claude
-    default_remote_cwd: "~"
+    default_cwd: "~"
     # Default `bash -ilc` (interactive + login) sources the full rcfile chain
     # so PATH from `.bashrc` (nvm/cargo/pyenv/etc.) is available. Switch to
     # `bash -lc` if your `.bashrc` writes to stdout (would corrupt the stream).

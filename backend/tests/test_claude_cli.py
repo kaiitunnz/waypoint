@@ -87,6 +87,7 @@ def _attach_state(
         claude_session_id="claude-uuid",
         stdout_task=asyncio.create_task(asyncio.sleep(0)),
         stderr_task=asyncio.create_task(asyncio.sleep(0)),
+        wait_task=asyncio.create_task(asyncio.sleep(0)),
     )
     adapter._sessions[session_id] = state
     return state, process
@@ -232,3 +233,35 @@ def test_map_decision_table() -> None:
 
 def test_default_timeout_is_finite() -> None:
     assert 0 < DEFAULT_TIMEOUT_SECONDS < 24 * 3600
+
+
+@pytest.mark.asyncio
+async def test_send_input_reports_dead_process_with_stderr_tail() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, process = _attach_state(adapter)
+    state.stderr_tail.append("env: claude: No such file or directory")
+    process.returncode = 127
+    from waypoint.claude_cli import ClaudeCliError
+
+    with pytest.raises(ClaudeCliError) as info:
+        await adapter.send_input("sess", "hi")
+    message = str(info.value)
+    assert "rc=127" in message
+    assert "env: claude: No such file or directory" in message
+
+
+@pytest.mark.asyncio
+async def test_watch_process_emits_error_event_with_stderr_tail() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, process = _attach_state(adapter)
+    state.stderr_tail.append("env: claude: No such file or directory")
+    process.returncode = 127
+    await adapter._watch_process(state)
+    assert any(
+        item[1] == EventKind.SYSTEM_NOTE
+        and "rc=127" in item[2]
+        and "env: claude" in item[2]
+        for item in emitted
+    )

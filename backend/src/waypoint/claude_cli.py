@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shutil
+from collections import deque
 from collections.abc import Callable, Coroutine
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -40,6 +41,8 @@ GATED_TOOLS_REGEX = "^(?:" + "|".join(GATED_TOOLS) + ")$"
 
 DEFAULT_TIMEOUT_SECONDS = 300.0
 
+STDERR_TAIL_LINES = 50
+
 
 @dataclass
 class ClaudePendingApproval:
@@ -63,9 +66,13 @@ class ClaudeSessionState:
     claude_session_id: str
     stdout_task: asyncio.Task[None]
     stderr_task: asyncio.Task[None]
+    wait_task: asyncio.Task[None]
     pending: dict[str, ClaudePendingApproval] = field(default_factory=dict)
     last_message_text: dict[str, str] = field(default_factory=dict)
     terminal_fragments: list[str] = field(default_factory=list)
+    stderr_tail: deque[str] = field(
+        default_factory=lambda: deque(maxlen=STDERR_TAIL_LINES)
+    )
     closing: bool = False
 
 
@@ -127,8 +134,14 @@ class ClaudeCliAdapter:
 
     async def send_input(self, session_id: str, text: str) -> None:
         state = self._require_session(session_id)
+        if state.process.returncode is not None:
+            raise ClaudeCliError(
+                self._format_dead_process_error(state, state.process.returncode)
+            )
         if state.process.stdin is None or state.process.stdin.is_closing():
-            raise ClaudeCliError("claude session input is closed")
+            raise ClaudeCliError(
+                self._format_dead_process_error(state, state.process.returncode)
+            )
         envelope = {
             "type": "user",
             "message": {"role": "user", "content": text},
@@ -251,7 +264,7 @@ class ClaudeCliAdapter:
                     state.process.kill()
                 with suppress(Exception):
                     await state.process.wait()
-        for task in (state.stdout_task, state.stderr_task):
+        for task in (state.stdout_task, state.stderr_task, state.wait_task):
             task.cancel()
             with suppress(asyncio.CancelledError, Exception):
                 await task
@@ -297,9 +310,11 @@ class ClaudeCliAdapter:
             claude_session_id=claude_session_id,
             stdout_task=asyncio.create_task(asyncio.sleep(0)),  # placeholder
             stderr_task=asyncio.create_task(asyncio.sleep(0)),
+            wait_task=asyncio.create_task(asyncio.sleep(0)),
         )
         state.stdout_task = asyncio.create_task(self._read_stdout(state))
         state.stderr_task = asyncio.create_task(self._read_stderr(state))
+        state.wait_task = asyncio.create_task(self._watch_process(state))
         self._sessions[session_id] = state
         return state
 
@@ -384,7 +399,8 @@ class ClaudeCliAdapter:
                     break
                 text = line.decode("utf-8", errors="replace").rstrip()
                 if text:
-                    log.debug(
+                    state.stderr_tail.append(text)
+                    log.info(
                         "claude stderr",
                         extra={"session_id": state.session_id, "line": text},
                     )
@@ -394,6 +410,45 @@ class ClaudeCliAdapter:
             log.exception(
                 "claude stderr reader failed", extra={"session_id": state.session_id}
             )
+
+    async def _watch_process(self, state: ClaudeSessionState) -> None:
+        try:
+            returncode = await state.process.wait()
+        except asyncio.CancelledError:
+            raise
+        # Drain stderr/stdout readers so the tail captures the final lines.
+        for task in (state.stderr_task, state.stdout_task):
+            with suppress(asyncio.CancelledError, Exception):
+                await task
+        if state.closing:
+            return
+        text = self._format_dead_process_error(state, returncode)
+        await self._emit_event(
+            state.session_id,
+            EventKind.SYSTEM_NOTE,
+            text,
+            {
+                "method": "process.exit",
+                "returncode": returncode,
+                "stderr_tail": list(state.stderr_tail),
+                "status": SessionStatus.ERROR,
+            },
+            SessionStatus.ERROR,
+        )
+
+    def _format_dead_process_error(
+        self, state: ClaudeSessionState, returncode: int | None
+    ) -> str:
+        rc_text = (
+            "still running but stdin is closed"
+            if returncode is None
+            else f"rc={returncode}"
+        )
+        header = f"Claude process exited ({rc_text})"
+        tail = "\n".join(state.stderr_tail)
+        if not tail:
+            return header
+        return f"{header}\n--- stderr tail ---\n{tail}"
 
     async def _dispatch(self, state: ClaudeSessionState, event: dict[str, Any]) -> None:
         event_type = event.get("type")

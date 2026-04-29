@@ -960,6 +960,17 @@ pre {
   z-index: 1;
 }
 
+.scroll-top {
+  margin-left: auto;
+  position: sticky;
+  top: 12px;
+  z-index: 1;
+}
+
+.scroll-top + .scroll-bottom {
+  margin-left: 8px;
+}
+
 .list-actions {
   justify-content: space-between;
 }

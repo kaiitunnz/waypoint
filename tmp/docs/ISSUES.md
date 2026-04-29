@@ -79,4 +79,4 @@ Outstanding work from `WAYPOINT_DESIGN.md`. Items 1–5 of the doc's "Recommende
 - [ ] **Support more /-built-in commands.** Support more built-in commands like `/fork` and `/plan` and revise the current implementation for the commands like `/status` and `/permissions` which may be incorrect.
 - [ ] **Support mode switching.** Support switching mode between default, plan, auto, etc.
 - [ ] **Add a backend reset CLI.** Add a one-click reset CLI that will all the data and refresh to the initial state. Don't touch the config file.
-- [ ] **Add a back-to-top button.** Add a back-to-top button in the chat session UI.
+- [x] **Add a back-to-top button.** The chat view's filter row now renders a sticky `↑ Top` control alongside the existing `Latest` button. It mirrors the Latest pattern: `position: sticky; top: 12px;` so it floats at the viewport top while the row scrolls past, conditional render once `window.scrollY > 320`, suppressed in terminal view.

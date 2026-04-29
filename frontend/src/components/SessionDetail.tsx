@@ -58,6 +58,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [error, setError] = useState("");
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [showScrollToTop, setShowScrollToTop] = useState(false);
   const sectionRef = useRef<HTMLElement | null>(null);
   const nearBottomRef = useRef(true);
   const pendingEventsRef = useRef<EventRecord[]>([]);
@@ -93,6 +94,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     // stopping at a sentinel that sits above following layout.
     const target = document.documentElement.scrollHeight;
     window.scrollTo({ top: target, behavior });
+  }, []);
+
+  const scrollToTop = useCallback((behavior: ScrollBehavior = "smooth") => {
+    window.scrollTo({ top: 0, behavior });
   }, []);
 
   const flushPendingEvents = useCallback(() => {
@@ -220,6 +225,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   useEffect(() => {
     if (view !== "chat") {
       setShowScrollToBottom(false);
+      setShowScrollToTop(false);
       return;
     }
     function updateScrollState() {
@@ -228,6 +234,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       const nearBottom = remaining < 160;
       nearBottomRef.current = nearBottom;
       setShowScrollToBottom(!nearBottom);
+      setShowScrollToTop(window.scrollY > 320);
     }
     updateScrollState();
     window.addEventListener("scroll", updateScrollState, { passive: true });
@@ -417,6 +424,16 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
               <span className="muted">
                 Hiding {hiddenEventCount} low-signal event{hiddenEventCount === 1 ? "" : "s"}
               </span>
+            ) : null}
+            {showScrollToTop ? (
+              <button
+                className="secondary scroll-top"
+                onClick={() => scrollToTop()}
+                type="button"
+                aria-label="Scroll to top"
+              >
+                ↑ Top
+              </button>
             ) : null}
             {showScrollToBottom ? (
               <button className="secondary scroll-bottom" onClick={() => scrollToBottom()} type="button">

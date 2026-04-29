@@ -5,8 +5,42 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
-from waypoint.schemas import Backend
+from waypoint.schemas import Backend, BackendModelOption
 from waypoint.server_config import SshLaunchTargetConfig
+
+# Canonical Claude Code model picker entries. Mirrors the per-model factory
+# functions (WQ7/GQ7/RQ7/NQ7/...) baked into the CLI binary; Claude does not
+# expose a runtime model-list RPC, so we maintain this list and bump it when
+# the CLI ships new aliases. Free-text input is allowed via the API too, so
+# any string the binary accepts works even if not listed here.
+DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
+    BackendModelOption(
+        id="opus",
+        label="Opus 4.7",
+        description="Most capable for complex work",
+    ),
+    BackendModelOption(
+        id="sonnet",
+        label="Sonnet 4.6",
+        description="Best for everyday tasks",
+        is_default=True,
+    ),
+    BackendModelOption(
+        id="haiku",
+        label="Haiku 4.5",
+        description="Fast and lightweight",
+    ),
+    BackendModelOption(
+        id="opus[1m]",
+        label="Opus 4.7 (1M context)",
+        description="Long sessions with large codebases",
+    ),
+    BackendModelOption(
+        id="sonnet[1m]",
+        label="Sonnet 4.6 (1M context)",
+        description="Long sessions with large codebases",
+    ),
+)
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -58,6 +92,13 @@ class Settings(BaseModel):
     cors_origins: list[str] = Field(default_factory=lambda: list(DEFAULT_CORS_ORIGINS))
     cors_allow_origin_regex: str | None = DEFAULT_CORS_ORIGIN_REGEX
     ssh_targets: list[SshLaunchTargetConfig] = Field(default_factory=list)
+    # Default model per backend, keyed by Backend value (e.g. "claude_code",
+    # "codex"). Missing keys mean "let the backend pick" — no --model is
+    # forwarded and the backend falls back to its built-in default.
+    default_models: dict[str, str] = Field(default_factory=dict)
+    claude_models: list[BackendModelOption] = Field(
+        default_factory=lambda: list(DEFAULT_CLAUDE_MODELS)
+    )
 
     @property
     def database_path(self) -> Path:

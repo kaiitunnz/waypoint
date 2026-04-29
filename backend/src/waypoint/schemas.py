@@ -66,6 +66,7 @@ class SessionRecord(BaseModel):
     pid: int | None = None
     pinned_at: datetime | None = None
     permission_mode: str | None = None
+    model: str | None = None
 
 
 class EventRecord(BaseModel):
@@ -111,6 +112,7 @@ class SessionCreateRequest(BaseModel):
     args: list[str] = Field(default_factory=list)
     source_mode: SessionSource = SessionSource.MANAGED
     permission_mode: str | None = None
+    model: str | None = None
 
 
 class SessionAttachRequest(BaseModel):
@@ -149,6 +151,25 @@ class SessionPermissionModeRequest(BaseModel):
     mode: str
 
 
+class SessionModelRequest(BaseModel):
+    model: str | None = None
+
+
+class BackendModelOption(BaseModel):
+    id: str
+    label: str
+    description: str | None = None
+    is_default: bool = False
+    hidden: bool = False
+
+
+class BackendModelListResponse(BaseModel):
+    backend: Backend
+    models: list[BackendModelOption] = Field(default_factory=list)
+    default_model: str | None = None
+    supports_free_text: bool = False
+
+
 class AskQuestionAnswer(BaseModel):
     question: str
     answer: str | None = None
@@ -183,6 +204,7 @@ class ScheduledSessionRecord(BaseModel):
     args: list[str] = Field(default_factory=list)
     initial_prompt: str | None = None
     permission_mode: str | None = None
+    model: str | None = None
     scheduled_at: datetime
     created_at: datetime
     status: ScheduleStatus = ScheduleStatus.PENDING
@@ -198,6 +220,7 @@ class ScheduleCreateRequest(BaseModel):
     args: list[str] = Field(default_factory=list)
     initial_prompt: str | None = None
     permission_mode: str | None = None
+    model: str | None = None
     delay_seconds: int | None = None
     scheduled_at: datetime | None = None
 

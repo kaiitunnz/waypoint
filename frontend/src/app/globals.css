@@ -100,7 +100,11 @@ pre {
   width: 100%;
   max-width: 1024px;
   margin: 0 auto;
-  padding: 28px 20px 56px;
+  /* viewportFit: "cover" + black-translucent status bar means the screen
+   * extends edge-to-edge under the notch / home-indicator on iOS PWAs.
+   * Add safe-area insets so headers and buttons sit clear of the cut-out. */
+  padding: calc(28px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right))
+    calc(56px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
   display: grid;
   gap: 28px;
   position: relative;
@@ -915,7 +919,8 @@ pre {
 
 @media (max-width: 720px) {
   .page-shell {
-    padding: 20px 12px 40px;
+    padding: calc(20px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right))
+      calc(40px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
     gap: 22px;
   }
 

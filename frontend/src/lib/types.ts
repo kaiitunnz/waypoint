@@ -42,6 +42,7 @@ export interface SessionRecord {
   structured_log_path: string;
   pid?: number | null;
   pinned_at?: string | null;
+  permission_mode?: string | null;
 }
 
 export interface CodexThreadSummary {

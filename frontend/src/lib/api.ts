@@ -174,6 +174,25 @@ export async function postAction(
   await ensureOk(response, `failed to ${action}`);
 }
 
+export async function setSessionPermissionMode(
+  host: string,
+  token: string,
+  sessionId: string,
+  mode: string,
+): Promise<SessionRecord> {
+  const response = await fetch(`${host}/api/sessions/${sessionId}/mode`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ mode }),
+  });
+  await ensureOk(response, "failed to update permission mode");
+  const body = await response.json();
+  return body.session as SessionRecord;
+}
+
 export async function setSessionPinned(
   host: string,
   token: string,

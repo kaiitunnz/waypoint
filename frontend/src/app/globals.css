@@ -971,6 +971,49 @@ pre {
   margin-left: 8px;
 }
 
+.session-mode-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 10px 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--bg-card-soft);
+  align-self: flex-start;
+  width: fit-content;
+}
+
+.session-mode-control > span {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.session-mode-control select {
+  border: 0;
+  background: transparent;
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.session-mode-control select:disabled {
+  color: var(--muted-soft);
+  cursor: progress;
+}
+
+.session-mode-control select:focus-visible {
+  outline: 2px solid rgba(143, 179, 214, 0.5);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .reply-textarea-wrap {
   position: relative;
 }

@@ -22,6 +22,7 @@ import {
   isAuthError,
   postAction,
   sendInput,
+  setSessionPermissionMode,
 } from "@/lib/api";
 import { clearToken } from "@/lib/store";
 import {
@@ -44,6 +45,32 @@ const SLASH_COMMANDS: ReadonlyArray<{ command: string; description: string }> = 
   { command: "/permissions", description: "Forward to the agent's permissions" },
   { command: "/compact", description: "Compact context to reclaim tokens" },
 ];
+
+interface PermissionModeOption {
+  value: string;
+  label: string;
+}
+
+const CLAUDE_PERMISSION_MODES: ReadonlyArray<PermissionModeOption> = [
+  { value: "default", label: "Default" },
+  { value: "plan", label: "Plan" },
+  { value: "acceptEdits", label: "Accept Edits" },
+  { value: "auto", label: "Auto" },
+  { value: "bypassPermissions", label: "Bypass Permissions" },
+  { value: "dontAsk", label: "Don't Ask" },
+];
+
+const CODEX_PERMISSION_MODES: ReadonlyArray<PermissionModeOption> = [
+  { value: "default", label: "Default" },
+  { value: "auto_review", label: "Auto-review" },
+  { value: "full_access", label: "Full Access" },
+];
+
+function modesForBackend(backend: string): ReadonlyArray<PermissionModeOption> {
+  if (backend === "claude_code") return CLAUDE_PERMISSION_MODES;
+  if (backend === "codex") return CODEX_PERMISSION_MODES;
+  return [];
+}
 
 interface SessionDetailProps {
   host: string;
@@ -71,6 +98,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
+  const [modeBusy, setModeBusy] = useState(false);
   const sectionRef = useRef<HTMLElement | null>(null);
   const nearBottomRef = useRef(true);
   const pendingEventsRef = useRef<EventRecord[]>([]);
@@ -111,6 +139,31 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const scrollToTop = useCallback((behavior: ScrollBehavior = "smooth") => {
     window.scrollTo({ top: 0, behavior });
   }, []);
+
+  const handlePermissionModeChange = useCallback(
+    async (nextMode: string) => {
+      if (!session || nextMode === (session.permission_mode ?? "default")) {
+        return;
+      }
+      setModeBusy(true);
+      setError("");
+      try {
+        const updated = await setSessionPermissionMode(host, token, session.id, nextMode);
+        setSession(updated);
+      } catch (modeError) {
+        if (isAuthError(modeError)) {
+          handleAuthFailure();
+          return;
+        }
+        setError(
+          modeError instanceof Error ? modeError.message : "failed to update mode",
+        );
+      } finally {
+        setModeBusy(false);
+      }
+    },
+    [host, token, session, handleAuthFailure],
+  );
 
   const flushPendingEvents = useCallback(() => {
     flushFrameRef.current = null;
@@ -394,6 +447,22 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
             {session.source === "managed" ? "Managed" : "Attached"}
             {session.thread_id ? ` · thread ${session.thread_id}` : null}
           </p>
+          {modesForBackend(session.backend).length > 0 ? (
+            <label className="session-mode-control">
+              <span>Mode</span>
+              <select
+                value={session.permission_mode ?? "default"}
+                onChange={(event) => void handlePermissionModeChange(event.target.value)}
+                disabled={modeBusy}
+              >
+                {modesForBackend(session.backend).map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </header>
       ) : null}
       {error ? <p className="error">{error}</p> : null}

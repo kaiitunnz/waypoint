@@ -15,6 +15,8 @@
   --accent-cool: #8fb3d6;
   --danger: #e26c70;
   --warn: #d99a4a;
+  --success: #6cc99a;
+  --todo-glyph: #c8a3eb;
   --shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
   --shadow-soft: 0 6px 18px rgba(0, 0, 0, 0.32);
   --radius: 14px;
@@ -820,7 +822,7 @@ pre {
 .session-pulse.open {
   border-color: rgba(94, 210, 156, 0.32);
   background: rgba(94, 210, 156, 0.08);
-  color: #6cc99a;
+  color: var(--success);
 }
 
 .session-pulse.open .session-pulse-dot {
@@ -1083,7 +1085,7 @@ pre {
 
 .status {
   background: rgba(94, 210, 156, 0.1);
-  color: #6cc99a;
+  color: var(--success);
   border-color: rgba(94, 210, 156, 0.22);
 }
 
@@ -1244,7 +1246,7 @@ details.tool-disclosure[open] {
 .transcript.codex.tool_pair:hover .tool-glyph.bash,
 details.tool-disclosure[open] .tool-glyph.bash {
   background: rgba(94, 210, 156, 0.12);
-  color: #6cc99a;
+  color: var(--success);
   border-color: rgba(94, 210, 156, 0.28);
 }
 
@@ -1283,7 +1285,7 @@ details.tool-disclosure[open] .tool-glyph.write {
 details.tool-disclosure[open] .tool-glyph.task,
 details.tool-disclosure[open] .tool-glyph.todo {
   background: rgba(180, 150, 220, 0.12);
-  color: #c8a3eb;
+  color: var(--todo-glyph);
   border-color: rgba(180, 150, 220, 0.28);
 }
 
@@ -1300,7 +1302,7 @@ details.tool-disclosure[open] .tool-glyph.todo {
 }
 
 .transcript.codex.tool_pair .badge.tool-status.complete {
-  color: #6cc99a;
+  color: var(--success);
 }
 
 @media (max-width: 540px) {
@@ -1401,7 +1403,7 @@ details.tool-disclosure[open] .tool-glyph.todo {
 
 .tool-glyph.bash {
   background: rgba(94, 210, 156, 0.12);
-  color: #6cc99a;
+  color: var(--success);
   border-color: rgba(94, 210, 156, 0.28);
 }
 
@@ -1424,7 +1426,7 @@ details.tool-disclosure[open] .tool-glyph.todo {
 .tool-glyph.task,
 .tool-glyph.todo {
   background: rgba(180, 150, 220, 0.12);
-  color: #c8a3eb;
+  color: var(--todo-glyph);
   border-color: rgba(180, 150, 220, 0.28);
 }
 
@@ -1562,6 +1564,67 @@ details.tool-disclosure[open] .tool-glyph.todo {
   min-width: 0;
 }
 
+.todo-card {
+  display: grid;
+  gap: 12px;
+}
+
+.todo-list {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.todo-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(180, 150, 220, 0.18);
+  border-radius: var(--radius-sm);
+  background: rgba(180, 150, 220, 0.08);
+  color: var(--text);
+}
+
+.todo-item.in-progress {
+  border-color: rgba(200, 169, 106, 0.32);
+  background: rgba(200, 169, 106, 0.1);
+  color: var(--text-strong);
+}
+
+.todo-item.completed {
+  border-color: rgba(94, 210, 156, 0.2);
+  background: rgba(94, 210, 156, 0.08);
+  color: var(--muted);
+}
+
+.todo-marker {
+  color: var(--todo-glyph);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.todo-item.in-progress .todo-marker {
+  color: var(--accent-strong);
+}
+
+.todo-item.completed .todo-marker {
+  color: var(--success);
+}
+
+.todo-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.todo-empty {
+  margin: 0;
+  color: var(--muted-soft);
+}
+
 .tool-pair-section {
   display: grid;
   gap: 4px;
@@ -1597,7 +1660,7 @@ details.tool-disclosure[open] .tool-glyph.todo {
 
 .badge.tool-status.complete {
   background: rgba(94, 210, 156, 0.12);
-  color: #6cc99a;
+  color: var(--success);
   border-color: rgba(94, 210, 156, 0.22);
 }
 
@@ -2794,7 +2857,7 @@ details.tool-disclosure[open] .tool-glyph.todo {
 
 .badge.schedule-status.launched {
   background: rgba(94, 210, 156, 0.12);
-  color: #6cc99a;
+  color: var(--success);
   border-color: rgba(94, 210, 156, 0.22);
 }
 

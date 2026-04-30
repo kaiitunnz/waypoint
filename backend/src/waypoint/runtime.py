@@ -679,9 +679,19 @@ class SessionRuntime:
         return self.storage.update_session(session.id, status=SessionStatus.EXITED)
 
     async def _reattach_session(self, session: SessionRecord) -> SessionRecord:
+        # ERROR sessions reach this path while the prior adapter state may
+        # still be in `_sessions` — the stream/process watchers emit the
+        # error event but do not pop the slot. Tear it down explicitly here
+        # so `_spawn` does not overwrite a live state and orphan its
+        # subprocess + background tasks. terminate_session is a no-op when
+        # the session id is not tracked, so this is safe for clean EXITED
+        # paths too.
         if session.transport == SessionTransport.CLAUDE_CLI:
+            if self.claude is not None:
+                await self.claude.terminate_session(session.id)
             await self._restore_claude_session(session)
         elif session.transport == SessionTransport.CODEX_APP_SERVER:
+            await self.codex.terminate_session(session.id)
             await self._restore_codex_session(session)
         else:
             raise HTTPException(

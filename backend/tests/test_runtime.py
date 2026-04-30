@@ -52,12 +52,17 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         self.restore_calls: list[
             tuple[str, str, str, Any, str | None, str | None, str | None]
         ] = []
+        self.terminate_calls: list[str] = []
         self.permission_mode_calls: list[tuple[str, str]] = []
         self.model_calls: list[tuple[str, str | None]] = []
         self.effort_calls: list[tuple[str, str | None]] = []
         self.modes: dict[str, str] = {}
         self.models: dict[str, str | None] = {}
         self.efforts: dict[str, str | None] = {}
+
+    async def terminate_session(self, session_id: str) -> bool:
+        self.terminate_calls.append(session_id)
+        return True
 
     async def restore_session(
         self,
@@ -138,10 +143,15 @@ class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
     def __init__(self) -> None:
         super().__init__()
         self.restore_calls: list[tuple[str, str, str, Any, str | None, str | None]] = []
+        self.terminate_calls: list[str] = []
         self.model_calls: list[tuple[str, str | None]] = []
         self.effort_calls: list[tuple[str, str | None]] = []
         self.models: dict[str, str | None] = {}
         self.efforts: dict[str, str | None] = {}
+
+    async def terminate_session(self, session_id: str) -> bool:
+        self.terminate_calls.append(session_id)
+        return True
 
     async def restore_session(
         self,
@@ -240,6 +250,9 @@ async def test_handle_input_reattaches_exited_codex_session(tmp_path) -> None:
     assert fake.restore_calls == [
         ("sess", "/tmp/project", "thread-resume", None, None, None)
     ]
+    # Stale adapter state is torn down before the respawn so we don't orphan
+    # a client/process keyed under the same session id.
+    assert fake.terminate_calls == ["sess"]
     assert fake.inputs == [("sess", "picking back up")]
     assert updated.status == SessionStatus.RUNNING
 
@@ -277,8 +290,54 @@ async def test_handle_input_reattaches_errored_claude_session(tmp_path) -> None:
             None,
         )
     ]
+    assert fake.terminate_calls == ["claude-sess"]
     assert fake.inputs == [("claude-sess", "retry please")]
     assert updated.status == SessionStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_reattach_terminates_before_restoring_codex(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+
+    # Order-tracking fake: a stale stream emitting ERROR leaves the adapter's
+    # in-memory state in place, so restore must explicitly tear it down before
+    # respawning. Capture both calls in a single timeline to assert ordering.
+    class TimelineFake(FakeCodexRuntimeAdapter):
+        def __init__(self, log: list[str]) -> None:
+            super().__init__()
+            self._log = log
+
+        async def terminate_session(self, session_id: str) -> bool:
+            self._log.append(f"terminate:{session_id}")
+            return await super().terminate_session(session_id)
+
+        async def restore_session(
+            self,
+            session_id: str,
+            cwd: str,
+            thread_id: str,
+            client_factory_override: Any = None,
+            model: str | None = None,
+            effort: str | None = None,
+        ) -> None:
+            self._log.append(f"restore:{session_id}")
+            await super().restore_session(
+                session_id, cwd, thread_id, client_factory_override, model, effort
+            )
+
+    timeline: list[str] = []
+    fake = TimelineFake(timeline)
+    runtime.codex = cast(Any, fake)
+    session = make_session(
+        settings,
+        status=SessionStatus.ERROR,
+        thread_id="thread-resume",
+    )
+    storage.create_session(session)
+
+    await runtime.handle_input("sess", SessionInputRequest(text="back online"))
+
+    assert timeline == ["terminate:sess", "restore:sess"]
 
 
 @pytest.mark.asyncio

@@ -328,7 +328,9 @@ class CodexAppServerAdapter:
         return bool(state and state.pending_approval is not None)
 
     def terminal_snapshot(self, session_id: str) -> str:
-        state = self._require_session(session_id)
+        state = self._sessions.get(session_id)
+        if state is None:
+            return ""
         return "".join(state.terminal_fragments)
 
     async def shutdown(self) -> None:

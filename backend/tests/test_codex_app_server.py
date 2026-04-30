@@ -389,6 +389,16 @@ async def test_terminal_snapshot_returns_command_fragments() -> None:
     assert adapter.terminal_snapshot("sess") == "one\ntwo\n"
 
 
+def test_terminal_snapshot_returns_empty_for_inactive_session() -> None:
+    # Terminated/exited Codex sessions are popped from `_sessions` but the
+    # session record still lives in storage; the API still calls into us when
+    # the user opens the session detail page. Mirror the Claude adapter's
+    # graceful empty-string fallback instead of raising.
+    emitted: list = []
+    adapter, _ = make_adapter(emitted)
+    assert adapter.terminal_snapshot("never-started") == ""
+
+
 @pytest.mark.asyncio
 async def test_streamed_tool_result_suppresses_duplicate_completed_event() -> None:
     emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []

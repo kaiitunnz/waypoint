@@ -543,6 +543,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     session && supportsStructuredApproval(session.transport) && session.status === "waiting_input"
       ? findPendingApproval(events)
       : null;
+  const agentBusy = session ? isAgentBusy(session, connection) : false;
   const visibleEvents = filterMode === "all" ? renderedEvents : renderedEvents.filter(isImportantEvent);
   const hiddenEventCount = renderedEvents.length - visibleEvents.length;
   const transcriptItems = buildTranscriptItems(visibleEvents);
@@ -713,6 +714,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         canResume={canResume}
         canTerminate={Boolean(session && session.status !== "exited")}
         disabled={composerDisabled}
+        agentBusy={agentBusy}
         modeBusy={modeBusy}
         modelBusy={modelBusy}
         modelOptions={modelOptions}
@@ -735,6 +737,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
 }
 
 interface ReplyComposerProps {
+  agentBusy: boolean;
   backend: SessionRecord["backend"] | null;
   canDelete: boolean;
   canResume: boolean;
@@ -759,6 +762,7 @@ interface ReplyComposerProps {
 }
 
 const ReplyComposer = memo(function ReplyComposer({
+  agentBusy,
   backend,
   canDelete,
   canResume,
@@ -1144,6 +1148,16 @@ const ReplyComposer = memo(function ReplyComposer({
             ) : null}
           </div>
         ) : null}
+        {agentBusy ? (
+          <div
+            className="composer-activity"
+            role="status"
+            aria-live="polite"
+            aria-label="Agent is working"
+          >
+            <span className="composer-activity-spinner" aria-hidden />
+          </div>
+        ) : null}
         <span className="composer-shortcut" aria-hidden>
           <kbd>{shortcutKey}</kbd>
           <span>+</span>
@@ -1309,6 +1323,9 @@ function mergeEventText(existing: EventRecord, incoming: EventRecord): string {
   if (incoming.kind !== "tool_result") {
     return incoming.text;
   }
+  if (isTodoListEvent(existing) || isTodoListEvent(incoming)) {
+    return incoming.text || existing.text;
+  }
   if (isToolResultDelta(incoming)) {
     return `${existing.text}${incoming.text}`;
   }
@@ -1376,6 +1393,23 @@ function isToolResultDelta(event: EventRecord): boolean {
   }
   const method = event.metadata?.method;
   return method === "item/commandExecution/outputDelta" || method === "item/fileChange/outputDelta";
+}
+
+function isTodoListEvent(event: EventRecord): boolean {
+  return event.metadata?.item_type === "todo_list";
+}
+
+function isAgentBusy(
+  session: SessionRecord,
+  connection: ConnectionState,
+): boolean {
+  // Trust session.status: the runtime flips it to RUNNING when the user's
+  // input lands and to IDLE/ERROR/etc. once the turn ends. The previous
+  // implementation walked `events` to corroborate, but events flush via
+  // startTransition + rAF, lagging the urgent setSession update — so the
+  // walk could see the prior turn's `result` system_note and report idle
+  // for the entire window between "user sent" and "agent's first chunk."
+  return connection === "open" && session.status === "running";
 }
 
 function findPendingApproval(events: EventRecord[]): EventRecord | null {

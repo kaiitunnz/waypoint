@@ -969,10 +969,14 @@ class SessionRuntime:
             extra["answers"] = answers
         if tool_use_id:
             extra["tool_use_id"] = tool_use_id
+        # Same ordering as handle_input: flip status to RUNNING before
+        # _record_user_event broadcasts the session_state snapshot, otherwise
+        # the spinner stays off until Claude's next emitted chunk lands.
+        updated = self.storage.update_session(session.id, status=SessionStatus.RUNNING)
         await self._record_user_event(
             session.id, answer, submit=True, extra_metadata=extra
         )
-        return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
+        return updated
 
     async def approve(
         self, session_id: str, request: SessionApprovalRequest
@@ -988,6 +992,10 @@ class SessionRuntime:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="no pending approval request",
                 )
+            # Same ordering as handle_input: flip status to RUNNING before
+            # _record_system_event broadcasts the session_state snapshot, so
+            # the spinner doesn't lag until Claude's next emitted chunk.
+            updated = self.storage.update_session(session.id, status=SessionStatus.RUNNING)
             await self._record_system_event(
                 session.id,
                 f"Approval response sent: {request.decision}",
@@ -998,7 +1006,7 @@ class SessionRuntime:
             # via set_permission_mode. Sync storage + broadcast so the UI
             # pill reflects the change instead of staying stuck on "plan".
             await self._sync_claude_permission_mode(session)
-            return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
+            return updated
         await transport.respond_to_approval(session, request.decision, request.text)
         return self.get_session(session_id)
 

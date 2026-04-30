@@ -360,6 +360,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
         cursor: Annotated[int | None, Query()] = None,
         messages: Annotated[int | None, Query(ge=1)] = None,
+        # Legacy alias: pre-rename callers passed ``?limit=`` for raw
+        # event count. The semantics shifted to logical chat messages
+        # in the same release that renamed the param, so accept the old
+        # name and treat the value as the new field. Either is fine —
+        # if both are set, ``messages`` wins.
+        limit: Annotated[int | None, Query(ge=1)] = None,
         before_sequence: Annotated[int | None, Query(ge=0)] = None,
     ) -> Any:
         # `cursor` (id-after) is the legacy reconnect/catch-up path; if a
@@ -375,8 +381,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # logical chat messages (deltas of one agent reply or one tool
         # pair count as one). Clamp the client-supplied count to the
         # configured page size as both default and upper bound.
+        requested = messages if messages is not None else limit
         max_page = context.settings.chat_page_messages
-        effective_limit = max_page if messages is None else min(messages, max_page)
+        effective_limit = max_page if requested is None else min(requested, max_page)
         page = context.runtime.session_events_page(
             session_id,
             message_limit=effective_limit,

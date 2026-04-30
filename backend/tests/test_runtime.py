@@ -1196,7 +1196,7 @@ def test_session_events_page_tail_returns_latest_with_has_more_flag(tmp_path) ->
     runtime, storage, settings = make_runtime(tmp_path)
     session = _seed_session_with_events(storage, settings, count=10)
 
-    page = runtime.session_events_page(session.id, limit=4)
+    page = runtime.session_events_page(session.id, message_limit=4)
 
     assert [event.sequence for event in page.events] == [7, 8, 9, 10]
     assert page.has_more is True
@@ -1206,7 +1206,7 @@ def test_session_events_page_before_sequence_returns_older_window(tmp_path) -> N
     runtime, storage, settings = make_runtime(tmp_path)
     session = _seed_session_with_events(storage, settings, count=10)
 
-    page = runtime.session_events_page(session.id, limit=3, before_sequence=7)
+    page = runtime.session_events_page(session.id, message_limit=3, before_sequence=7)
 
     assert [event.sequence for event in page.events] == [4, 5, 6]
     assert page.has_more is True
@@ -1216,7 +1216,7 @@ def test_session_events_page_clears_has_more_at_start_of_history(tmp_path) -> No
     runtime, storage, settings = make_runtime(tmp_path)
     session = _seed_session_with_events(storage, settings, count=4)
 
-    page = runtime.session_events_page(session.id, limit=10, before_sequence=3)
+    page = runtime.session_events_page(session.id, message_limit=10, before_sequence=3)
 
     assert [event.sequence for event in page.events] == [1, 2]
     # No events with sequence < 1 → caller should hide the load-more affordance.
@@ -1228,7 +1228,51 @@ def test_session_events_page_empty_session_reports_no_more(tmp_path) -> None:
     session = make_session(settings)
     storage.create_session(session)
 
-    page = runtime.session_events_page(session.id, limit=5)
+    page = runtime.session_events_page(session.id, message_limit=5)
 
     assert page.events == []
+    assert page.has_more is False
+
+
+def test_session_events_page_collapses_codex_style_delta_run(tmp_path) -> None:
+    # Codex streams a single agent reply as many same-item_id deltas. The
+    # paginator must treat the run as one logical message so the user
+    # doesn't burn a page on a fragment of one bubble.
+    runtime, storage, settings = make_runtime(tmp_path)
+    session = make_session(settings)
+    storage.create_session(session)
+    base = datetime.now(UTC)
+    storage.append_event(
+        EventRecord(
+            session_id=session.id,
+            ts=base,
+            kind=EventKind.USER_INPUT,
+            text="hi",
+            sequence=1,
+        )
+    )
+    for i in range(50):
+        storage.append_event(
+            EventRecord(
+                session_id=session.id,
+                ts=base + timedelta(seconds=i + 1),
+                kind=EventKind.AGENT_OUTPUT,
+                text=f"d{i}",
+                metadata={"item_id": "msg-A"},
+                sequence=2 + i,
+            )
+        )
+
+    # 1 message = the full agent reply. has_more=True because the older
+    # user_input is still off-page.
+    page = runtime.session_events_page(session.id, message_limit=1)
+    assert len(page.events) == 50
+    assert {event.kind for event in page.events} == {EventKind.AGENT_OUTPUT}
+    assert page.has_more is True
+
+    # 2 messages = user_input + the entire agent reply. has_more=False.
+    page = runtime.session_events_page(session.id, message_limit=2)
+    assert page.events[0].kind == EventKind.USER_INPUT
+    assert page.events[0].sequence == 1
+    assert len(page.events) == 51
     assert page.has_more is False

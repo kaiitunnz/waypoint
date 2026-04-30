@@ -54,22 +54,22 @@ def test_load_settings_errors_when_explicit_path_missing(
         load_settings(config_path_override=missing)
 
 
-def test_load_settings_reads_events_page_size_from_yaml(
+def test_load_settings_reads_chat_page_messages_from_yaml(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config_file = tmp_path / "waypoint.yaml"
-    config_file.write_text("events_page_size: 60\n", encoding="utf-8")
+    config_file.write_text("chat_page_messages: 30\n", encoding="utf-8")
     monkeypatch.setattr(config_module, "DEFAULT_CONFIG_PATH", config_file)
     monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
     settings = load_settings()
-    assert settings.events_page_size == 60
+    assert settings.chat_page_messages == 30
 
 
-def test_events_page_size_rejects_out_of_range_values(
+def test_chat_page_messages_rejects_out_of_range_values(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config_file = tmp_path / "waypoint.yaml"
-    config_file.write_text("events_page_size: 0\n", encoding="utf-8")
+    config_file.write_text("chat_page_messages: 0\n", encoding="utf-8")
     monkeypatch.setattr(config_module, "DEFAULT_CONFIG_PATH", config_file)
     monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
     with pytest.raises(ValidationError):

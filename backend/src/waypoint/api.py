@@ -359,27 +359,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session_id: str,
         _: Annotated[str, Depends(token_dependency())],
         cursor: Annotated[int | None, Query()] = None,
-        limit: Annotated[int | None, Query(ge=1)] = None,
+        messages: Annotated[int | None, Query(ge=1)] = None,
         before_sequence: Annotated[int | None, Query(ge=0)] = None,
     ) -> Any:
         # `cursor` (id-after) is the legacy reconnect/catch-up path; if a
         # caller still passes it, honor those semantics and return *all*
-        # events newer than the cursor with no limit clamp.
+        # events newer than the cursor with no clamp.
         if cursor is not None:
             events = [
                 event.model_dump(mode="json")
                 for event in context.runtime.session_events(session_id, cursor)
             ]
             return {"events": events, "has_more": False}
-        # Tail / before_sequence path: serve a single bounded window so
-        # large transcripts don't pin the client on first paint. Clamp the
-        # client-supplied limit to the configured page size — both as the
-        # default when omitted and as the upper bound when supplied.
-        max_page = context.settings.events_page_size
-        effective_limit = max_page if limit is None else min(limit, max_page)
+        # Tail / before_sequence path: serve a single bounded window of
+        # logical chat messages (deltas of one agent reply or one tool
+        # pair count as one). Clamp the client-supplied count to the
+        # configured page size as both default and upper bound.
+        max_page = context.settings.chat_page_messages
+        effective_limit = max_page if messages is None else min(messages, max_page)
         page = context.runtime.session_events_page(
             session_id,
-            limit=effective_limit,
+            message_limit=effective_limit,
             before_sequence=before_sequence,
         )
         return page.model_dump(mode="json")

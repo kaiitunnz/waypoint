@@ -9,6 +9,7 @@ from typing import Any
 
 from waypoint.schemas import (
     Backend,
+    EventKind,
     EventRecord,
     ScheduledSessionRecord,
     ScheduleStatus,
@@ -16,6 +17,48 @@ from waypoint.schemas import (
     SessionStatus,
     SessionTransport,
 )
+
+# Event kinds that the chat view always renders as their own bubble. These
+# drive the page-size budget so a page of N reliably surfaces ~N visible
+# entries even when the backend pads the transcript with bookkeeping
+# events (Codex's item/started + item/completed system_notes for
+# userMessage/reasoning, "session restored" notes after a backend
+# restart, etc.). Non-anchor events ride along inside the same page
+# without consuming budget.
+_ANCHOR_KINDS: frozenset[EventKind] = frozenset(
+    {
+        EventKind.USER_INPUT,
+        EventKind.AGENT_OUTPUT,
+        EventKind.TOOL_CALL,
+        EventKind.TOOL_RESULT,
+        EventKind.APPROVAL_REQUEST,
+    }
+)
+
+
+def _is_message_anchor(event: EventRecord) -> bool:
+    return event.kind in _ANCHOR_KINDS
+
+
+def _anchor_key(event: EventRecord) -> tuple[str, Any]:
+    """Group key for the anchor walk.
+
+    Mirrors the frontend's coalesce rules:
+    - ``agent_output`` events sharing ``item_id`` collapse into one bubble
+      (``mergeEvents`` matches by kind+item_id).
+    - ``tool_call`` and ``tool_result`` events sharing ``item_id`` render
+      as one tool pair (``buildTranscriptItems``), so they share a key.
+    - Everything else is its own message — a per-event ``sequence`` makes
+      the key unique.
+    """
+    metadata = event.metadata if isinstance(event.metadata, dict) else {}
+    item_id = metadata.get("item_id")
+    if isinstance(item_id, str) and item_id:
+        if event.kind == EventKind.AGENT_OUTPUT:
+            return ("agent", item_id)
+        if event.kind in (EventKind.TOOL_CALL, EventKind.TOOL_RESULT):
+            return ("tool", item_id)
+    return ("solo", event.sequence)
 
 
 def _synchronized[**P, R](method: Callable[P, R]) -> Callable[P, R]:
@@ -250,62 +293,91 @@ class Storage:
         self,
         session_id: str,
         cursor: int | None = None,
+    ) -> list[EventRecord]:
+        """Read events for a session in ascending order.
+
+        - ``cursor`` (id-after): only events with ``id > cursor``. Used by
+          reconnection / catch-up paths that already know the last
+          observed event.
+        - No cursor: the entire transcript.
+
+        Bounded windows for the chat view go through
+        :meth:`list_events_by_message_count` instead — that paginator
+        respects logical-message boundaries so a page of N reliably
+        surfaces N visible chat entries regardless of how chatty the
+        backend is at the raw-event level.
+        """
+        query = "SELECT * FROM events WHERE session_id = ?"
+        params: list[Any] = [session_id]
+        if cursor is not None:
+            query += " AND id > ?"
+            params.append(cursor)
+        query += " ORDER BY sequence ASC, id ASC"
+        rows = self.connection.execute(query, params).fetchall()
+        return [self._event_from_row(row) for row in rows]
+
+    @_synchronized
+    def list_events_by_message_count(
+        self,
+        session_id: str,
         *,
-        limit: int | None = None,
+        message_limit: int,
         before_sequence: int | None = None,
     ) -> list[EventRecord]:
-        """Read events for a session.
+        """Return enough events to span ``message_limit`` logical chat
+        messages, plus any non-anchor events sandwiched in or trailing
+        the latest anchor.
 
-        Three modes:
-        - ``cursor`` (id-after): events with ``id > cursor``, oldest first.
-          Used by reconnection / catch-up paths that already know the last
-          observed event.
-        - ``before_sequence`` + ``limit``: the youngest ``limit`` events
-          older than ``before_sequence``, returned in ascending order so
-          the caller can prepend them to an existing window.
-        - ``limit`` alone: the latest ``limit`` events overall, ascending.
+        Walks events backward via SQLite cursor. Only anchor kinds
+        (user/agent/tool/approval, see ``_ANCHOR_KINDS``) consume budget
+        — bookkeeping ``system_note`` / ``status_update`` events ride
+        along free so the page count tracks visible bubbles, not raw
+        chattiness. Stops as soon as the ``(message_limit + 1)``-th
+        anchor boundary is seen.
 
-        ``cursor`` is mutually exclusive with the limit/tail modes; if both
-        appear, ``cursor`` wins to keep the existing semantics.
+        Returns events in ascending order so the caller can splice them
+        directly into the chat view.
         """
-        if cursor is not None:
-            query = "SELECT * FROM events WHERE session_id = ? AND id > ?"
-            query += " ORDER BY sequence ASC, id ASC"
-            rows = self.connection.execute(query, [session_id, cursor]).fetchall()
-            return [self._event_from_row(row) for row in rows]
-
-        if limit is None and before_sequence is None:
-            query = "SELECT * FROM events WHERE session_id = ?"
-            query += " ORDER BY sequence ASC, id ASC"
-            rows = self.connection.execute(query, [session_id]).fetchall()
-            return [self._event_from_row(row) for row in rows]
-
-        # Tail mode: pull the youngest matching rows in DESC order via SQL,
-        # then reverse in Python so the caller always sees ascending output
-        # (which is the order the rest of the runtime/UI assumes).
         query = "SELECT * FROM events WHERE session_id = ?"
         params: list[Any] = [session_id]
         if before_sequence is not None:
             query += " AND sequence < ?"
             params.append(before_sequence)
         query += " ORDER BY sequence DESC, id DESC"
-        if limit is not None:
-            query += " LIMIT ?"
-            params.append(limit)
-        rows = self.connection.execute(query, params).fetchall()
-        events = [self._event_from_row(row) for row in rows]
-        events.reverse()
-        return events
+
+        # Count *distinct* anchor keys, not contiguous runs: Codex
+        # interleaves events for concurrent tool calls so the same
+        # item_id can appear as multiple non-contiguous groups in
+        # sequence order, but the frontend coalesces them into one
+        # bubble. Counting distinct keys keeps the page-size budget
+        # aligned with the visible bubble count.
+        collected: list[EventRecord] = []
+        seen_anchors: set[tuple[str, Any]] = set()
+        current_anchor: tuple[str, Any] | None = None
+        message_count = 0
+        for row in self.connection.execute(query, params):
+            event = self._event_from_row(row)
+            if _is_message_anchor(event):
+                next_key = _anchor_key(event)
+                if next_key != current_anchor:
+                    if next_key not in seen_anchors:
+                        if message_count >= message_limit:
+                            break
+                        message_count += 1
+                        seen_anchors.add(next_key)
+                    current_anchor = next_key
+            collected.append(event)
+        collected.reverse()
+        return collected
 
     @_synchronized
-    def count_events_before_sequence(
-        self, session_id: str, before_sequence: int
-    ) -> int:
+    def has_events_before_sequence(self, session_id: str, before_sequence: int) -> bool:
+        """Cheap ``has_more`` probe for the chat paginator."""
         row = self.connection.execute(
-            "SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND sequence < ?",
+            "SELECT 1 FROM events WHERE session_id = ? AND sequence < ? LIMIT 1",
             [session_id, before_sequence],
         ).fetchone()
-        return int(row["n"]) if row is not None else 0
+        return row is not None
 
     @_synchronized
     def insert_token(self, token: str, expires_at: datetime) -> None:

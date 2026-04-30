@@ -117,11 +117,14 @@ class Settings(BaseModel):
     claude_models: list[BackendModelOption] = Field(
         default_factory=lambda: list(DEFAULT_CLAUDE_MODELS)
     )
-    # Default page size for `/api/sessions/{id}/events` and the upper bound
-    # the server clamps any client-supplied `?limit=` to. Sized so that an
-    # initial chat-view paint stays cheap on large transcripts (the frontend
-    # asks for the latest events first and can request older ones on demand).
-    events_page_size: int = Field(default=40, ge=1, le=1000)
+    # Default page size for `/api/sessions/{id}/events` measured in *logical
+    # chat messages* (agent_output deltas with the same item_id collapse
+    # into one, tool_call+tool_result pairs share an item_id, everything
+    # else counts individually). Sized so that an initial chat-view paint
+    # stays cheap on large transcripts and each "Load older" click reliably
+    # surfaces N visible bubbles regardless of how many raw events the
+    # backend emitted per message.
+    chat_page_messages: int = Field(default=20, ge=1, le=200)
 
     @property
     def database_path(self) -> Path:

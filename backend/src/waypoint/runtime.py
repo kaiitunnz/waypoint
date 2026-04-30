@@ -1271,32 +1271,36 @@ class SessionRuntime:
         self,
         session_id: str,
         *,
-        limit: int,
+        message_limit: int,
         before_sequence: int | None = None,
     ) -> EventsPageResponse:
-        """Return a single paginated window of events plus a `has_more` flag.
+        """Return a paginated window of events spanning ``message_limit``
+        logical chat messages, plus a `has_more` flag.
 
-        - ``before_sequence is None`` → tail mode: latest ``limit`` events.
-        - ``before_sequence is not None`` → return up to ``limit`` events
-          older than that sequence (used by the chat view's "Load older").
+        Pagination units are *visible* chat entries, not raw events:
+        Codex streams a single agent reply into hundreds of deltas, so
+        capping by raw count would mean one click of "Load older" yields
+        no new bubble (the bubble's leading text shifts but nothing new
+        appears). The storage paginator groups events by
+        ``_logical_message_key`` (item_id for agent_output and tool
+        pairs, per-event otherwise) so N messages reliably surface N
+        entries regardless of backend chattiness.
 
-        ``has_more`` indicates whether the caller can keep walking older
-        with another ``before_sequence`` request. The flag is cheap (one
-        ``SELECT COUNT(*)``) and lets the UI hide its load-more affordance
-        as soon as it has reached the start of the transcript.
+        - ``before_sequence is None`` → tail mode: latest N messages.
+        - ``before_sequence is not None`` → up to N messages older than
+          that sequence (used by the chat view's "Load older").
         """
         self.get_session(session_id)
-        events = self.storage.list_events(
+        events = self.storage.list_events_by_message_count(
             session_id,
-            limit=limit,
+            message_limit=message_limit,
             before_sequence=before_sequence,
         )
         oldest_in_window = events[0].sequence if events else before_sequence
         has_more = False
         if oldest_in_window is not None:
-            has_more = (
-                self.storage.count_events_before_sequence(session_id, oldest_in_window)
-                > 0
+            has_more = self.storage.has_events_before_sequence(
+                session_id, oldest_in_window
             )
         return EventsPageResponse(events=events, has_more=has_more)
 

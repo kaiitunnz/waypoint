@@ -6,8 +6,12 @@ default_cwd: ~/
 data_dir: ~/Library/Application Support/Waypoint
 cors_origins: []
 # cors_allow_origin_regex: ^https?://(localhost|127\.0\.0\.1|100\.\d{1,3}\.\d{1,3}\.\d{1,3})(:\d+)?$
-# events_page_size: 40  # latest N events on first paint; the chat UI
-                       # asks for older messages on demand from this same cap.
+# chat_page_messages: 20  # latest N *logical* chat messages per page.
+                          # Codex streams a single agent reply as
+                          # hundreds of same-item_id deltas; the
+                          # paginator collapses each delta run (and each
+                          # tool_call+tool_result pair) into one unit so
+                          # a page of N reliably surfaces N bubbles.
 
 ssh_targets:
   - id: devbox

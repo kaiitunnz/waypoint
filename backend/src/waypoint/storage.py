@@ -247,16 +247,65 @@ class Storage:
 
     @_synchronized
     def list_events(
-        self, session_id: str, cursor: int | None = None
+        self,
+        session_id: str,
+        cursor: int | None = None,
+        *,
+        limit: int | None = None,
+        before_sequence: int | None = None,
     ) -> list[EventRecord]:
+        """Read events for a session.
+
+        Three modes:
+        - ``cursor`` (id-after): events with ``id > cursor``, oldest first.
+          Used by reconnection / catch-up paths that already know the last
+          observed event.
+        - ``before_sequence`` + ``limit``: the youngest ``limit`` events
+          older than ``before_sequence``, returned in ascending order so
+          the caller can prepend them to an existing window.
+        - ``limit`` alone: the latest ``limit`` events overall, ascending.
+
+        ``cursor`` is mutually exclusive with the limit/tail modes; if both
+        appear, ``cursor`` wins to keep the existing semantics.
+        """
+        if cursor is not None:
+            query = "SELECT * FROM events WHERE session_id = ? AND id > ?"
+            query += " ORDER BY sequence ASC, id ASC"
+            rows = self.connection.execute(query, [session_id, cursor]).fetchall()
+            return [self._event_from_row(row) for row in rows]
+
+        if limit is None and before_sequence is None:
+            query = "SELECT * FROM events WHERE session_id = ?"
+            query += " ORDER BY sequence ASC, id ASC"
+            rows = self.connection.execute(query, [session_id]).fetchall()
+            return [self._event_from_row(row) for row in rows]
+
+        # Tail mode: pull the youngest matching rows in DESC order via SQL,
+        # then reverse in Python so the caller always sees ascending output
+        # (which is the order the rest of the runtime/UI assumes).
         query = "SELECT * FROM events WHERE session_id = ?"
         params: list[Any] = [session_id]
-        if cursor is not None:
-            query += " AND id > ?"
-            params.append(cursor)
-        query += " ORDER BY sequence ASC, id ASC"
+        if before_sequence is not None:
+            query += " AND sequence < ?"
+            params.append(before_sequence)
+        query += " ORDER BY sequence DESC, id DESC"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
         rows = self.connection.execute(query, params).fetchall()
-        return [self._event_from_row(row) for row in rows]
+        events = [self._event_from_row(row) for row in rows]
+        events.reverse()
+        return events
+
+    @_synchronized
+    def count_events_before_sequence(
+        self, session_id: str, before_sequence: int
+    ) -> int:
+        row = self.connection.execute(
+            "SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND sequence < ?",
+            [session_id, before_sequence],
+        ).fetchone()
+        return int(row["n"]) if row is not None else 0
 
     @_synchronized
     def insert_token(self, token: str, expires_at: datetime) -> None:

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -12,6 +12,7 @@ from waypoint.schemas import (
     ClaudeThreadImportRequest,
     CodexThreadImportRequest,
     EventKind,
+    EventRecord,
     SessionApprovalRequest,
     SessionCreateRequest,
     SessionInputRequest,
@@ -1170,3 +1171,64 @@ async def test_list_backend_models_honours_default_models_override(tmp_path) -> 
     settings.default_models = {Backend.CLAUDE_CODE.value: "opus"}
     response = await runtime.list_backend_models(Backend.CLAUDE_CODE)
     assert response["default_model"] == "opus"
+
+
+def _seed_session_with_events(
+    storage: Storage, settings: Settings, *, count: int
+) -> SessionRecord:
+    session = make_session(settings)
+    storage.create_session(session)
+    base = datetime.now(UTC)
+    for index in range(count):
+        storage.append_event(
+            EventRecord(
+                session_id=session.id,
+                ts=base + timedelta(seconds=index),
+                kind=EventKind.AGENT_OUTPUT,
+                text=f"chunk-{index}",
+                sequence=index + 1,
+            )
+        )
+    return session
+
+
+def test_session_events_page_tail_returns_latest_with_has_more_flag(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    session = _seed_session_with_events(storage, settings, count=10)
+
+    page = runtime.session_events_page(session.id, limit=4)
+
+    assert [event.sequence for event in page.events] == [7, 8, 9, 10]
+    assert page.has_more is True
+
+
+def test_session_events_page_before_sequence_returns_older_window(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    session = _seed_session_with_events(storage, settings, count=10)
+
+    page = runtime.session_events_page(session.id, limit=3, before_sequence=7)
+
+    assert [event.sequence for event in page.events] == [4, 5, 6]
+    assert page.has_more is True
+
+
+def test_session_events_page_clears_has_more_at_start_of_history(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    session = _seed_session_with_events(storage, settings, count=4)
+
+    page = runtime.session_events_page(session.id, limit=10, before_sequence=3)
+
+    assert [event.sequence for event in page.events] == [1, 2]
+    # No events with sequence < 1 → caller should hide the load-more affordance.
+    assert page.has_more is False
+
+
+def test_session_events_page_empty_session_reports_no_more(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    session = make_session(settings)
+    storage.create_session(session)
+
+    page = runtime.session_events_page(session.id, limit=5)
+
+    assert page.events == []
+    assert page.has_more is False

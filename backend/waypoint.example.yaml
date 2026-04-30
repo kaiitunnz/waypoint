@@ -6,6 +6,8 @@ default_cwd: ~/
 data_dir: ~/Library/Application Support/Waypoint
 cors_origins: []
 # cors_allow_origin_regex: ^https?://(localhost|127\.0\.0\.1|100\.\d{1,3}\.\d{1,3}\.\d{1,3})(:\d+)?$
+# events_page_size: 40  # latest N events on first paint; the chat UI
+                       # asks for older messages on demand from this same cap.
 
 ssh_targets:
   - id: devbox

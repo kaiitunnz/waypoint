@@ -105,6 +105,11 @@ class MeResponse(BaseModel):
     launch_targets: list[LaunchTargetSummary] = Field(default_factory=list)
 
 
+class EventsPageResponse(BaseModel):
+    events: list[EventRecord] = Field(default_factory=list)
+    has_more: bool = False
+
+
 class SessionCreateRequest(BaseModel):
     backend: Backend
     cwd: str

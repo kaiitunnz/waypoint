@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from waypoint import config as config_module
 from waypoint.config import DEFAULT_CONFIG_PATH, load_settings
@@ -51,3 +52,25 @@ def test_load_settings_errors_when_explicit_path_missing(
     missing = tmp_path / "explicit.yaml"
     with pytest.raises(FileNotFoundError):
         load_settings(config_path_override=missing)
+
+
+def test_load_settings_reads_events_page_size_from_yaml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "waypoint.yaml"
+    config_file.write_text("events_page_size: 60\n", encoding="utf-8")
+    monkeypatch.setattr(config_module, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
+    settings = load_settings()
+    assert settings.events_page_size == 60
+
+
+def test_events_page_size_rejects_out_of_range_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "waypoint.yaml"
+    config_file.write_text("events_page_size: 0\n", encoding="utf-8")
+    monkeypatch.setattr(config_module, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
+    with pytest.raises(ValidationError):
+        load_settings()

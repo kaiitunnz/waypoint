@@ -38,6 +38,7 @@ from waypoint.schemas import (
     CodexThreadSummary,
     EventKind,
     EventRecord,
+    EventsPageResponse,
     SessionApprovalRequest,
     SessionAttachRequest,
     SessionCreateRequest,
@@ -1265,6 +1266,39 @@ class SessionRuntime:
     ) -> list[EventRecord]:
         self.get_session(session_id)
         return self.storage.list_events(session_id, cursor)
+
+    def session_events_page(
+        self,
+        session_id: str,
+        *,
+        limit: int,
+        before_sequence: int | None = None,
+    ) -> EventsPageResponse:
+        """Return a single paginated window of events plus a `has_more` flag.
+
+        - ``before_sequence is None`` → tail mode: latest ``limit`` events.
+        - ``before_sequence is not None`` → return up to ``limit`` events
+          older than that sequence (used by the chat view's "Load older").
+
+        ``has_more`` indicates whether the caller can keep walking older
+        with another ``before_sequence`` request. The flag is cheap (one
+        ``SELECT COUNT(*)``) and lets the UI hide its load-more affordance
+        as soon as it has reached the start of the transcript.
+        """
+        self.get_session(session_id)
+        events = self.storage.list_events(
+            session_id,
+            limit=limit,
+            before_sequence=before_sequence,
+        )
+        oldest_in_window = events[0].sequence if events else before_sequence
+        has_more = False
+        if oldest_in_window is not None:
+            has_more = (
+                self.storage.count_events_before_sequence(session_id, oldest_in_window)
+                > 0
+            )
+        return EventsPageResponse(events=events, has_more=has_more)
 
     def terminal_snapshot(self, session_id: str) -> str:
         session = self.get_session(session_id)

@@ -548,15 +548,24 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const hiddenEventCount = renderedEvents.length - visibleEvents.length;
   const transcriptItems = buildTranscriptItems(visibleEvents);
   const usageSummary = extractUsageSummary(events);
-  // Session is dormant once the backend process has exited (clean shutdown
-  // or crash). Sending in this state implicitly reattaches via the backend's
-  // handle_input gate, so the composer stays interactive and only blocks
-  // when no session record has loaded yet.
-  const sessionDormant = Boolean(
+  // Session has stopped its backend process (clean shutdown or crash).
+  const sessionExited = Boolean(
     session && (session.status === "exited" || session.status === "error"),
   );
-  const composerDisabled = !session;
-  const canResume = Boolean(session && supportsResume(session.transport));
+  // Only structured transports (claude_cli, codex_app_server) can be brought
+  // back via _restore_*_session. Tmux has no resume contract, so the backend
+  // hard-fails reattach there and the composer must follow suit.
+  const reattachable = Boolean(
+    session &&
+      (session.transport === "claude_cli" || session.transport === "codex_app_server"),
+  );
+  const dormantReattach = sessionExited && reattachable;
+  const composerDisabled = sessionExited && !reattachable;
+  // Tmux's Resume control only makes sense while the pane is alive; once the
+  // session has exited there is nothing to resume into.
+  const canResume = Boolean(
+    session && supportsResume(session.transport) && !sessionExited,
+  );
   const interruptSession = useCallback(() => {
     void runAction("interrupt");
   }, [runAction]);
@@ -717,11 +726,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       ) : null}
       <ReplyComposer
         backend={session?.backend ?? null}
-        canDelete={sessionDormant}
+        canDelete={sessionExited}
         canResume={canResume}
-        canTerminate={Boolean(session && !sessionDormant)}
+        canTerminate={Boolean(session && !sessionExited)}
         disabled={composerDisabled}
-        dormant={sessionDormant}
+        dormant={dormantReattach}
         agentBusy={agentBusy}
         modeBusy={modeBusy}
         modelBusy={modelBusy}
@@ -1187,7 +1196,9 @@ const ReplyComposer = memo(function ReplyComposer({
           placeholder={
             dormant
               ? "Session has exited — send a message to reattach…"
-              : "Reply to the agent…"
+              : disabled
+                ? "Session has exited — composer disabled."
+                : "Reply to the agent…"
           }
           aria-label="Reply"
         />

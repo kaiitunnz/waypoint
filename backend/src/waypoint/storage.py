@@ -109,8 +109,10 @@ class Storage:
         self._ensure_column("sessions", "pinned_at", "TEXT")
         self._ensure_column("sessions", "permission_mode", "TEXT")
         self._ensure_column("sessions", "model", "TEXT")
+        self._ensure_column("sessions", "effort", "TEXT")
         self._ensure_column("scheduled_sessions", "permission_mode", "TEXT")
         self._ensure_column("scheduled_sessions", "model", "TEXT")
+        self._ensure_column("scheduled_sessions", "effort", "TEXT")
         self.connection.commit()
 
     @_synchronized
@@ -125,8 +127,8 @@ class Storage:
                 id, backend, source, transport, title, cwd, launch_target_id, repo_name, branch, status,
                 created_at, updated_at, last_event_at, tmux_session, tmux_window,
                 tmux_pane, thread_id, raw_log_path, structured_log_path, pid,
-                pinned_at, permission_mode, model
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                pinned_at, permission_mode, model, effort
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -152,6 +154,7 @@ class Storage:
                 session.pinned_at.isoformat() if session.pinned_at else None,
                 session.permission_mode,
                 session.model,
+                session.effort,
             ),
         )
         self.connection.commit()
@@ -304,9 +307,9 @@ class Storage:
             """
             INSERT INTO scheduled_sessions (
                 id, backend, cwd, launch_target_id, title, args,
-                initial_prompt, permission_mode, model, scheduled_at, created_at, status,
+                initial_prompt, permission_mode, model, effort, scheduled_at, created_at, status,
                 session_id, failure_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 schedule.id,
@@ -318,6 +321,7 @@ class Storage:
                 schedule.initial_prompt,
                 schedule.permission_mode,
                 schedule.model,
+                schedule.effort,
                 schedule.scheduled_at.isoformat(),
                 schedule.created_at.isoformat(),
                 schedule.status,

@@ -67,6 +67,7 @@ class SessionRecord(BaseModel):
     pinned_at: datetime | None = None
     permission_mode: str | None = None
     model: str | None = None
+    effort: str | None = None
 
 
 class EventRecord(BaseModel):
@@ -113,6 +114,7 @@ class SessionCreateRequest(BaseModel):
     source_mode: SessionSource = SessionSource.MANAGED
     permission_mode: str | None = None
     model: str | None = None
+    effort: str | None = None
 
 
 class SessionAttachRequest(BaseModel):
@@ -155,12 +157,21 @@ class SessionModelRequest(BaseModel):
     model: str | None = None
 
 
+class SessionEffortRequest(BaseModel):
+    effort: str | None = None
+
+
 class BackendModelOption(BaseModel):
     id: str
     label: str
     description: str | None = None
     is_default: bool = False
     hidden: bool = False
+    # Reasoning-effort levels this model accepts. Empty list means the model
+    # has no effort knob (e.g. Claude Haiku, or Codex models without an
+    # entry in `supported_reasoning_efforts`).
+    supported_efforts: list[str] = Field(default_factory=list)
+    default_effort: str | None = None
 
 
 class BackendModelListResponse(BaseModel):
@@ -168,6 +179,9 @@ class BackendModelListResponse(BaseModel):
     models: list[BackendModelOption] = Field(default_factory=list)
     default_model: str | None = None
     supports_free_text: bool = False
+    # Backend-wide default effort (used when no model-specific default
+    # applies); falls back to None to mean "let the runtime pick".
+    default_effort: str | None = None
 
 
 class AskQuestionAnswer(BaseModel):
@@ -205,6 +219,7 @@ class ScheduledSessionRecord(BaseModel):
     initial_prompt: str | None = None
     permission_mode: str | None = None
     model: str | None = None
+    effort: str | None = None
     scheduled_at: datetime
     created_at: datetime
     status: ScheduleStatus = ScheduleStatus.PENDING
@@ -221,6 +236,7 @@ class ScheduleCreateRequest(BaseModel):
     initial_prompt: str | None = None
     permission_mode: str | None = None
     model: str | None = None
+    effort: str | None = None
     delay_seconds: int | None = None
     scheduled_at: datetime | None = None
 

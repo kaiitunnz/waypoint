@@ -1572,6 +1572,54 @@ details.tool-disclosure[open] .tool-glyph.todo {
   font-variant-numeric: tabular-nums;
 }
 
+.message-copy {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line-soft);
+  color: var(--text-soft);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease;
+  flex-shrink: 0;
+  /* Visible by default but quiet enough to recede behind the actual message
+   * content; brightens on hover/focus to confirm the affordance. */
+  opacity: 0.7;
+}
+
+.transcript:hover .message-copy,
+.transcript:focus-within .message-copy,
+.message-copy:focus-visible {
+  opacity: 1;
+}
+
+.message-copy:hover {
+  background: var(--surface-2);
+  border-color: var(--line-strong);
+  color: var(--text-strong);
+}
+
+.message-copy.copied {
+  opacity: 1;
+  color: var(--accent-cool);
+  border-color: rgba(143, 179, 214, 0.32);
+  background: rgba(143, 179, 214, 0.1);
+}
+
+@media (hover: none) {
+  /* No hover on touch — the button has to read clearly without the
+   * brighten-on-hover step the desktop relies on. */
+  .message-copy {
+    opacity: 1;
+  }
+}
+
 /* Tool-call cards get a glyph chip + name, replacing the uniform "tool" pill. */
 .tool-glyph {
   display: inline-flex;

@@ -1,7 +1,57 @@
-import { memo, useState } from "react";
+import { memo, useCallback, useState } from "react";
 
 import { EventRecord, SessionTransport } from "@/lib/types";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
+
+export function CopyMessageButton({
+  text,
+  label = "Copy message",
+}: {
+  text: string;
+  label?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = useCallback(async () => {
+    if (!text) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // Insecure-context fallback (older mobile WebKit, plain-HTTP origins).
+        const el = document.createElement("textarea");
+        el.value = text;
+        el.setAttribute("readonly", "");
+        el.style.position = "fixed";
+        el.style.opacity = "0";
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand("copy");
+        document.body.removeChild(el);
+      }
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Surface no error UI — clipboard denials are uninteresting noise here.
+    }
+  }, [text]);
+  return (
+    <button
+      type="button"
+      className={`message-copy${copied ? " copied" : ""}`}
+      onClick={(event) => {
+        // Tool cards live inside a <details>, so the click would otherwise
+        // toggle the disclosure as well as copying.
+        event.stopPropagation();
+        event.preventDefault();
+        void onCopy();
+      }}
+      aria-label={copied ? "Copied" : label}
+      title={copied ? "Copied" : label}
+    >
+      <span aria-hidden>{copied ? "✓" : "⎘"}</span>
+    </button>
+  );
+}
 
 export interface ToolPair {
   call: EventRecord | null;
@@ -107,6 +157,7 @@ function CodexCard({
           <div className="transcript-role">
             <span className="badge user">you</span>
             <span className="role-time">{formatTime(event.ts)}</span>
+            <CopyMessageButton text={event.text} />
           </div>
           <MarkdownMessage text={event.text} />
         </article>
@@ -118,6 +169,7 @@ function CodexCard({
           <div className="transcript-role">
             <span className="badge agent">{agentLabel}</span>
             <span className="role-time">{formatTime(event.ts)}</span>
+            <CopyMessageButton text={event.text} />
           </div>
           <MarkdownMessage text={event.text} />
         </article>
@@ -947,6 +999,7 @@ function HeuristicCard({ event }: { event: EventRecord }) {
       <div className="transcript-role">
         <span className="badge neutral">{event.kind.replaceAll("_", " ")}</span>
         <span className="role-time">{formatTime(event.ts)}</span>
+        <CopyMessageButton text={event.text} />
       </div>
       <pre>{event.text}</pre>
     </article>

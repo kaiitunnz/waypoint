@@ -37,7 +37,12 @@ import {
   transportLabel,
 } from "@/lib/transport";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
-import { AskAnswerEntry, TranscriptCard, ToolPair } from "@/components/TranscriptCard";
+import {
+  AskAnswerEntry,
+  CopyMessageButton,
+  TranscriptCard,
+  ToolPair,
+} from "@/components/TranscriptCard";
 import {
   BackendModelOption,
   EventRecord,
@@ -1888,10 +1893,12 @@ function ApprovalCard({ event, onDecide }: ApprovalCardProps) {
     event.metadata.tool_input && typeof event.metadata.tool_input === "object"
       ? (event.metadata.tool_input as Record<string, unknown>)
       : null;
+  const copyText = approvalCopyText(event.text, toolName, toolInput);
   return (
     <section className="panel approval">
       <div className="session-row">
         <span className="badge fidelity structured">approval</span>
+        <CopyMessageButton text={copyText} label="Copy approval body" />
       </div>
       <ApprovalCardBody
         eventText={event.text}
@@ -1914,6 +1921,26 @@ function ApprovalCard({ event, onDecide }: ApprovalCardProps) {
       </div>
     </section>
   );
+}
+
+function approvalCopyText(
+  eventText: string,
+  toolName: string | null,
+  toolInput: Record<string, unknown> | null,
+): string {
+  if (toolName === "ExitPlanMode" && typeof toolInput?.plan === "string") {
+    return toolInput.plan as string;
+  }
+  if (
+    (toolName === "Task" || toolName === "Agent") &&
+    typeof toolInput?.prompt === "string"
+  ) {
+    return toolInput.prompt as string;
+  }
+  if (toolName === "Bash" && typeof toolInput?.command === "string") {
+    return toolInput.command as string;
+  }
+  return eventText;
 }
 
 function ApprovalCardBody({

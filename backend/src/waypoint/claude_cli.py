@@ -107,7 +107,7 @@ EmitEvent = Callable[
     Coroutine[Any, Any, None],
 ]
 LaunchFactory = Callable[
-    [str, str, str, bool, str, str | None],
+    [str, str, str, bool, str, str | None, str | None],
     "ClaudeLaunchSpec",
 ]
 
@@ -181,6 +181,15 @@ class ClaudeSessionState:
     last_plan_path: str | None = None
     closing: bool = False
     model: str | None = None
+    # Reasoning effort. Claude's CLI accepts `--effort <level>` at launch
+    # only — there is no in-process control_request to swap it — so changing
+    # this value at runtime requires terminating and respawning the process
+    # with `--resume <claude_session_id>` and the new flag.
+    effort: str | None = None
+    # Captures the launch_factory used to spawn this session so set_effort
+    # can respawn through the same factory (local vs. remote SSH) without
+    # re-resolving target config.
+    launch_factory: LaunchFactory | None = None
 
 
 class ClaudeCliError(RuntimeError):
@@ -214,6 +223,7 @@ class ClaudeCliAdapter:
         launch_factory_override: LaunchFactory | None = None,
         permission_mode: str | None = None,
         model: str | None = None,
+        effort: str | None = None,
     ) -> str:
         state = await self._spawn(
             session_id,
@@ -223,6 +233,7 @@ class ClaudeCliAdapter:
             launch_factory_override=launch_factory_override,
             permission_mode=permission_mode,
             model=model,
+            effort=effort,
         )
         return state.claude_session_id
 
@@ -234,6 +245,7 @@ class ClaudeCliAdapter:
         launch_factory_override: LaunchFactory | None = None,
         permission_mode: str | None = None,
         model: str | None = None,
+        effort: str | None = None,
     ) -> None:
         await self._spawn(
             session_id,
@@ -243,6 +255,7 @@ class ClaudeCliAdapter:
             launch_factory_override=launch_factory_override,
             permission_mode=permission_mode,
             model=model,
+            effort=effort,
         )
 
     async def set_permission_mode(self, session_id: str, mode: str) -> None:
@@ -289,6 +302,41 @@ class ClaudeCliAdapter:
     def session_model(self, session_id: str) -> str | None:
         state = self._sessions.get(session_id)
         return state.model if state is not None else None
+
+    async def set_effort(self, session_id: str, effort: str | None) -> None:
+        """Swap the session's reasoning-effort by relaunching the binary.
+
+        Claude exposes effort only via the ``--effort`` launch flag and the
+        ``/effort`` slash command. The slash command is blocklisted in
+        ``--print`` mode (the binary's `Tu()` set), and there is no
+        ``set_effort`` control_request, so the only way to change it from
+        Waypoint is to terminate the running process and respawn it with
+        ``--resume <claude_session_id>`` plus the new ``--effort``. Conversation
+        history is preserved by ``--resume``; in-flight tool approvals are
+        denied by ``terminate_session`` before the respawn.
+        """
+        state = self._require_session(session_id)
+        previous = state
+        cwd = previous.cwd
+        claude_session_id = previous.claude_session_id
+        permission_mode = previous.permission_mode
+        model = previous.model
+        launch_factory = previous.launch_factory
+        await self.terminate_session(session_id)
+        await self._spawn(
+            session_id,
+            cwd,
+            claude_session_id,
+            resume=True,
+            launch_factory_override=launch_factory,
+            permission_mode=permission_mode,
+            model=model,
+            effort=effort or None,
+        )
+
+    def session_effort(self, session_id: str) -> str | None:
+        state = self._sessions.get(session_id)
+        return state.effort if state is not None else None
 
     async def _send_control_request(
         self, session_id: str, request_id: str, request: dict[str, Any]
@@ -686,6 +734,7 @@ class ClaudeCliAdapter:
         launch_factory_override: LaunchFactory | None = None,
         permission_mode: str | None = None,
         model: str | None = None,
+        effort: str | None = None,
     ) -> ClaudeSessionState:
         resolved_mode = (
             permission_mode if permission_mode in CLAUDE_PERMISSION_MODES else "default"
@@ -694,11 +743,11 @@ class ClaudeCliAdapter:
         launch_factory = launch_factory_override or self._launch_factory
         if launch_factory is None:
             spec = self._build_local_launch_spec(
-                session_id, cwd, claude_session_id, resume, cli_mode, model
+                session_id, cwd, claude_session_id, resume, cli_mode, model, effort
             )
         else:
             spec = launch_factory(
-                session_id, cwd, claude_session_id, resume, cli_mode, model
+                session_id, cwd, claude_session_id, resume, cli_mode, model, effort
             )
         process = await asyncio.create_subprocess_exec(
             *spec.args,
@@ -719,6 +768,8 @@ class ClaudeCliAdapter:
             wait_task=asyncio.create_task(asyncio.sleep(0)),
             permission_mode=resolved_mode,
             model=model,
+            effort=effort or None,
+            launch_factory=launch_factory,
         )
         state.stdout_task = asyncio.create_task(self._read_stdout(state))
         state.stderr_task = asyncio.create_task(self._read_stderr(state))
@@ -734,6 +785,7 @@ class ClaudeCliAdapter:
         resume: bool,
         cli_mode: str,
         model: str | None = None,
+        effort: str | None = None,
     ) -> ClaudeLaunchSpec:
         binary = self._binary or shutil.which("claude")
         if binary is None:
@@ -753,6 +805,8 @@ class ClaudeCliAdapter:
         ]
         if model:
             args.extend(["--model", model])
+        if effort:
+            args.extend(["--effort", effort])
         if resume:
             args.extend(["--resume", claude_session_id])
         else:

@@ -8,6 +8,12 @@ from pydantic import BaseModel, Field
 from waypoint.schemas import Backend, BackendModelOption
 from waypoint.server_config import SshLaunchTargetConfig
 
+# Effort levels gated by the binary's per-model checks (`vy`/`L4_`/`k4_`):
+# opus-4-6/4-7 and sonnet-4-6 expose the full set; haiku and older opus/sonnet
+# don't accept --effort at all. We mirror those gates here so the picker hides
+# the knob when the model can't use it.
+CLAUDE_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh")
+
 # Canonical Claude Code model picker entries. Mirrors the per-model factory
 # functions (WQ7/GQ7/RQ7/NQ7/...) baked into the CLI binary; Claude does not
 # expose a runtime model-list RPC, so we maintain this list and bump it when
@@ -18,12 +24,16 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
         id="opus",
         label="Opus 4.7",
         description="Most capable for complex work",
+        supported_efforts=list(CLAUDE_EFFORT_LEVELS),
+        default_effort="high",
     ),
     BackendModelOption(
         id="sonnet",
         label="Sonnet 4.6",
         description="Best for everyday tasks",
         is_default=True,
+        supported_efforts=list(CLAUDE_EFFORT_LEVELS),
+        default_effort="high",
     ),
     BackendModelOption(
         id="haiku",
@@ -34,11 +44,15 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
         id="opus[1m]",
         label="Opus 4.7 (1M context)",
         description="Long sessions with large codebases",
+        supported_efforts=list(CLAUDE_EFFORT_LEVELS),
+        default_effort="high",
     ),
     BackendModelOption(
         id="sonnet[1m]",
         label="Sonnet 4.6 (1M context)",
         description="Long sessions with large codebases",
+        supported_efforts=list(CLAUDE_EFFORT_LEVELS),
+        default_effort="high",
     ),
 )
 
@@ -96,6 +110,10 @@ class Settings(BaseModel):
     # "codex"). Missing keys mean "let the backend pick" — no --model is
     # forwarded and the backend falls back to its built-in default.
     default_models: dict[str, str] = Field(default_factory=dict)
+    # Default reasoning effort per backend, keyed by Backend value. Missing
+    # keys mean "let the backend pick" (Codex falls back to the model's
+    # `default_reasoning_effort`; Claude omits `--effort` entirely).
+    default_efforts: dict[str, str] = Field(default_factory=dict)
     claude_models: list[BackendModelOption] = Field(
         default_factory=lambda: list(DEFAULT_CLAUDE_MODELS)
     )

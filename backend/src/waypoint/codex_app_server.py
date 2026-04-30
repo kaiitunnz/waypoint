@@ -67,6 +67,9 @@ class CodexSessionState:
     # waypoint contract — "set once, apply going forward" — even across
     # restarts.
     model: str | None = None
+    # Same shape as `model` for reasoning-effort: re-emit on each turn_start so
+    # the override survives restarts and turn reuse.
+    effort: str | None = None
 
 
 class CodexAppServerAdapter:
@@ -86,16 +89,22 @@ class CodexAppServerAdapter:
         cwd: str,
         client_factory_override: ClientFactory | None = None,
         model: str | None = None,
+        effort: str | None = None,
     ) -> str:
         state = await self._spawn_session(
             session_id,
             cwd,
             client_factory_override=client_factory_override,
             model=model,
+            effort=effort,
         )
         thread_params: dict[str, Any] = {"cwd": cwd}
         if model:
             thread_params["model"] = model
+        if effort:
+            # Codex SDK accepts the level under thread `config` per
+            # `model_reasoning_effort`; this seeds the thread default.
+            thread_params["config"] = {"model_reasoning_effort": effort}
         started = await self._call_client(
             state, state.client.thread_start, thread_params
         )
@@ -109,6 +118,7 @@ class CodexAppServerAdapter:
         thread_id: str,
         client_factory_override: ClientFactory | None = None,
         model: str | None = None,
+        effort: str | None = None,
     ) -> None:
         state = await self._spawn_session(
             session_id,
@@ -116,6 +126,7 @@ class CodexAppServerAdapter:
             thread_id=thread_id,
             client_factory_override=client_factory_override,
             model=model,
+            effort=effort,
         )
         await self._call_client(state, state.client.thread_resume, thread_id)
 
@@ -126,6 +137,7 @@ class CodexAppServerAdapter:
         thread_id: str = "",
         client_factory_override: ClientFactory | None = None,
         model: str | None = None,
+        effort: str | None = None,
     ) -> CodexSessionState:
         self._loop = asyncio.get_running_loop()
         holder: dict[str, CodexSessionState] = {}
@@ -167,6 +179,7 @@ class CodexAppServerAdapter:
             transport_lock=asyncio.Lock(),
             thread_id=thread_id,
             model=model,
+            effort=effort,
         )
         holder["state"] = state
         self._sessions[session_id] = state
@@ -216,6 +229,10 @@ class CodexAppServerAdapter:
         merged: dict[str, Any] = {}
         if state.model:
             merged["model"] = state.model
+        if state.effort:
+            # turn_start accepts `effort` directly; the SDK forwards it as the
+            # per-turn override that persists for subsequent turns.
+            merged["effort"] = state.effort
         if caller_params:
             # Caller-supplied entries always win — a per-turn override beats the
             # session's sticky default.
@@ -259,6 +276,19 @@ class CodexAppServerAdapter:
     def session_model(self, session_id: str) -> str | None:
         state = self._sessions.get(session_id)
         return state.model if state is not None else None
+
+    async def set_effort(self, session_id: str, effort: str | None) -> None:
+        """Update the session's sticky reasoning effort.
+
+        Same lifecycle as `set_model`: applied to the next `turn_start` and
+        persisted on the session state so restores keep it.
+        """
+        state = self._require_session(session_id)
+        state.effort = effort or None
+
+    def session_effort(self, session_id: str) -> str | None:
+        state = self._sessions.get(session_id)
+        return state.effort if state is not None else None
 
     async def list_models(
         self,

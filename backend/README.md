@@ -43,3 +43,28 @@ The current config shape supports zero or more `ssh_targets` entries with:
 - `remote_env` for secrets such as `OPENAI_API_KEY`
 
 Managed launches use a single `cwd` value for both UI display and the actual remote working directory. When an SSH target is selected, the frontend seeds that field from the target's `default_cwd`. Remote `codex` launches use the Codex app-server over SSH, while remote `claude_code` launches use tmux plus an SSH-wrapped `claude` command.
+
+## Remote Claude thread import
+
+Claude Code has no `thread/list` RPC, so for both local and remote SSH targets Waypoint discovers resumable sessions by reading the JSONL transcripts the CLI persists under `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/`. Remote targets run a small read-only bash + jq helper (`backend/scripts/claude_thread_enumerator.sh`) over the existing `bash -ilc` SSH wrapper via `bash -s`; the script body is fed on subprocess stdin so nothing lands on disk on the remote. Listings are cached per target for 30 s and invalidated on import or session delete.
+
+Remote prerequisites:
+
+- `bash`, `jq`, and `perl` on the remote host. If any are missing, the list call collapses to an empty result with a rate-limited WARN log on the backend; the UI shows the same "No importable Claude threads found." hint as the no-threads case.
+- The remote login shell must keep stdout silent — any rcfile that writes to stdout will corrupt other remote launches too. The enumerator emits a `__WP_BEGIN__` sentinel so its own parser can recover from rcfile noise, but the safer fix is to send rcfile output to stderr.
+- For sub-second list latency on cache miss, recommend SSH connection multiplexing in `waypoint.yaml`:
+
+  ```yaml
+  ssh_targets:
+    - id: devbox
+      ssh_destination: dev@example.com
+      ssh_args:
+        - -o
+        - ControlMaster=auto
+        - -o
+        - ControlPath=~/.ssh/cm-%r@%h:%p
+        - -o
+        - ControlPersist=60s
+  ```
+
+  Without multiplexing, a fresh SSH connection per list call dominates latency (~1–2 s); with `ControlPersist`, subsequent calls reuse the existing master connection and complete in ~100 ms.

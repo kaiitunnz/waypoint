@@ -2409,7 +2409,12 @@ details.tool-disclosure[open] .tool-glyph.todo {
  * having to find the scrollbar. */
 .scroll-top-floater {
   position: sticky;
-  top: 16px;
+  /* Sticky offsets are measured from the viewport, not the page-shell, so
+   * a fixed 16px would let the pill slide under the iOS notch. max() keeps
+   * the 16px gap on desktop (where the inset is 0) and uses the larger
+   * safe-area inset on phones, which already provides enough breathing
+   * room from the status bar. */
+  top: max(16px, env(safe-area-inset-top));
   z-index: 5;
   display: flex;
   justify-content: flex-end;

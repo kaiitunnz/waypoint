@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { EffortPicker } from "@/components/EffortPicker";
 import { ModelPicker } from "@/components/ModelPicker";
-import { Backend, CodexThreadSummary } from "@/lib/types";
+import { Backend, BackendModelListResponse, CodexThreadSummary } from "@/lib/types";
 
 interface LaunchPanelProps {
   host: string;
@@ -20,6 +21,7 @@ interface LaunchPanelProps {
     cwd: string,
     title: string,
     model: string | null,
+    effort: string | null,
   ) => Promise<void>;
   onAttach: (target: string, backendHint: Backend) => Promise<void>;
   onImportCodexThread: (threadId: string) => Promise<void>;
@@ -47,6 +49,8 @@ export function LaunchPanel({
   const [cwd, setCwd] = useState(defaultCwd);
   const [title, setTitle] = useState("");
   const [model, setModel] = useState("");
+  const [effort, setEffort] = useState("");
+  const [modelInfo, setModelInfo] = useState<BackendModelListResponse | null>(null);
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [formBusy, setFormBusy] = useState(false);
   const [importingThreadId, setImportingThreadId] = useState<string | null>(null);
@@ -56,6 +60,42 @@ export function LaunchPanel({
   useEffect(() => {
     setBackend(defaultBackend);
   }, [defaultBackend]);
+
+  // Reset effort whenever the backend changes — supported levels can shift
+  // and an "xhigh" carried over from one backend would be invalid on the
+  // next.
+  useEffect(() => {
+    setEffort("");
+    setModelInfo(null);
+  }, [backend, launchTargetId]);
+
+  const effortOptions = useMemo(() => {
+    if (!modelInfo) return [];
+    if (model) {
+      const opt = modelInfo.models.find((entry) => entry.id === model);
+      return opt?.supported_efforts ?? [];
+    }
+    // No explicit model picked — show the union of every supported level so
+    // the picker still works against the backend's default model.
+    const union = new Set<string>();
+    for (const entry of modelInfo.models) {
+      for (const level of entry.supported_efforts ?? []) {
+        union.add(level);
+      }
+    }
+    return Array.from(union);
+  }, [modelInfo, model]);
+
+  // Drop the picked level if the new model doesn't support it.
+  useEffect(() => {
+    if (effort && !effortOptions.includes(effort)) {
+      setEffort("");
+    }
+  }, [effort, effortOptions]);
+
+  const handleModelsLoaded = useCallback((response: BackendModelListResponse) => {
+    setModelInfo(response);
+  }, []);
 
   useEffect(() => {
     setCwd(defaultCwd);
@@ -70,7 +110,13 @@ export function LaunchPanel({
     event.preventDefault();
     setFormBusy(true);
     try {
-      await onCreate(backend, cwd, title, model.trim() || null);
+      await onCreate(
+        backend,
+        cwd,
+        title,
+        model.trim() || null,
+        effort.trim() || null,
+      );
       setTitle("");
     } finally {
       setFormBusy(false);
@@ -149,6 +195,13 @@ export function LaunchPanel({
           value={model}
           onChange={setModel}
           onAuthFailure={onAuthFailure}
+          onModelsLoaded={handleModelsLoaded}
+          disabled={formBusy}
+        />
+        <EffortPicker
+          options={effortOptions}
+          value={effort}
+          onChange={setEffort}
           disabled={formBusy}
         />
         <button className="primary" disabled={formBusy} type="submit">

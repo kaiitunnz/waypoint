@@ -243,6 +243,7 @@ export default function HomePage() {
     cwd: string,
     title: string,
     model: string | null,
+    effort: string | null,
   ) {
     try {
       const session = await createSession(host, token, {
@@ -253,6 +254,7 @@ export default function HomePage() {
         source_mode: "managed",
         args: [],
         model,
+        effort,
       });
       setSessions((current) => [
         session,

@@ -1,13 +1,19 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { EffortPicker } from "@/components/EffortPicker";
 import { ModelPicker } from "@/components/ModelPicker";
 import {
   modesForBackend,
   permissionModeLabel,
 } from "@/lib/permissionModes";
-import { Backend, ScheduleCreateRequest, ScheduledSession } from "@/lib/types";
+import {
+  Backend,
+  BackendModelListResponse,
+  ScheduleCreateRequest,
+  ScheduledSession,
+} from "@/lib/types";
 
 interface SchedulePanelProps {
   host: string;
@@ -46,6 +52,8 @@ export function SchedulePanel({
   const [prompt, setPrompt] = useState("");
   const [permissionMode, setPermissionMode] = useState<string>("default");
   const [model, setModel] = useState("");
+  const [effort, setEffort] = useState("");
+  const [modelInfo, setModelInfo] = useState<BackendModelListResponse | null>(null);
   const [mode, setMode] = useState<Mode>("delay");
   const [delayMinutes, setDelayMinutes] = useState("15");
   const [scheduledAt, setScheduledAt] = useState(defaultScheduledAt());
@@ -61,6 +69,35 @@ export function SchedulePanel({
       setPermissionMode(permissionOptions[0]?.value ?? "default");
     }
   }, [permissionOptions, permissionMode]);
+  useEffect(() => {
+    setEffort("");
+    setModelInfo(null);
+  }, [backend, launchTargetId]);
+
+  const effortOptions = useMemo(() => {
+    if (!modelInfo) return [];
+    if (model) {
+      const opt = modelInfo.models.find((entry) => entry.id === model);
+      return opt?.supported_efforts ?? [];
+    }
+    const union = new Set<string>();
+    for (const entry of modelInfo.models) {
+      for (const level of entry.supported_efforts ?? []) {
+        union.add(level);
+      }
+    }
+    return Array.from(union);
+  }, [modelInfo, model]);
+
+  useEffect(() => {
+    if (effort && !effortOptions.includes(effort)) {
+      setEffort("");
+    }
+  }, [effort, effortOptions]);
+
+  const handleModelsLoaded = useCallback((response: BackendModelListResponse) => {
+    setModelInfo(response);
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -72,6 +109,7 @@ export function SchedulePanel({
       initial_prompt: prompt.trim() || null,
       permission_mode: permissionMode || null,
       model: model.trim() || null,
+      effort: effort.trim() || null,
       args: [],
     };
     if (mode === "delay") {
@@ -177,8 +215,15 @@ export function SchedulePanel({
             value={model}
             onChange={setModel}
             onAuthFailure={onAuthFailure}
+            onModelsLoaded={handleModelsLoaded}
             disabled={busy}
             label="Model"
+          />
+          <EffortPicker
+            options={effortOptions}
+            value={effort}
+            onChange={setEffort}
+            disabled={busy}
           />
         </div>
         <label className="field">
@@ -286,6 +331,11 @@ function ScheduleRow({
         {schedule.model ? (
           <span className="badge model" title={`Model: ${schedule.model}`}>
             {schedule.model}
+          </span>
+        ) : null}
+        {schedule.effort ? (
+          <span className="badge effort" title={`Effort: ${schedule.effort}`}>
+            {schedule.effort}
           </span>
         ) : null}
         <span className="muted">{formatted}</span>

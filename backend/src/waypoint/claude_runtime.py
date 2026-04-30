@@ -9,6 +9,7 @@ from pathlib import Path
 HOOK_SCRIPT_NAME = "claude_pretool_hook.py"
 HOOK_SETTINGS_NAME = "claude_settings.json"
 HOOK_SECRET_NAME = "claude_hook_secret"
+THREAD_ENUMERATOR_NAME = "claude_thread_enumerator.sh"
 GATED_TOOLS_REGEX = (
     "^(?:Bash|Edit|Write|MultiEdit|NotebookEdit|Task|WebFetch|WebSearch"
     "|ExitPlanMode|AskUserQuestion)$"
@@ -20,6 +21,7 @@ class ClaudeHookBundle:
     hook_script_path: Path
     settings_path: Path
     secret: str
+    thread_enumerator_path: Path
 
 
 def _scripts_dir() -> Path:
@@ -68,8 +70,14 @@ def ensure_claude_hook_bundle(data_dir: Path) -> ClaudeHookBundle:
         }
     }
     settings_path.write_text(json.dumps(settings_payload, indent=2), encoding="utf-8")
+    thread_enumerator = _scripts_dir() / THREAD_ENUMERATOR_NAME
+    if not thread_enumerator.exists():
+        raise FileNotFoundError(
+            f"claude thread enumerator missing: {thread_enumerator}"
+        )
     return ClaudeHookBundle(
         hook_script_path=hook_script,
         settings_path=settings_path,
         secret=secret,
+        thread_enumerator_path=thread_enumerator,
     )

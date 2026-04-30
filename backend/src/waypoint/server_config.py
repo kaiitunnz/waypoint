@@ -290,3 +290,22 @@ def _render_remote_file_write(quoted_path: str, content: str) -> str:
 
 def _random_reverse_tunnel_port() -> int:
     return 20000 + secrets.randbelow(30000)
+
+
+def build_remote_thread_enumeration_args(
+    target: SshLaunchTargetConfig,
+    *,
+    env: dict[str, str] | None = None,
+) -> tuple[str, ...]:
+    """SSH argv that runs the Claude thread enumerator on a remote host.
+
+    The helper script body is fed via subprocess stdin (`bash -s`), not
+    embedded in argv, so the SSH command stays small and quoting concerns
+    vanish. ``target.build_remote_exec_args`` already wraps via
+    ``bash -ilc`` and prepends ``cd <cwd>`` so user rcfiles run.
+    """
+    cmd = ["env"]
+    for key, value in sorted((env or {}).items()):
+        cmd.append(f"{key}={value}")
+    cmd.extend(["bash", "-s"])
+    return target.build_remote_exec_args(cmd, target.default_cwd)

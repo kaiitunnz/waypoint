@@ -8,6 +8,7 @@ from waypoint.server_config import (
     _quote_remote_path,
     build_remote_claude_launch_factory,
     build_remote_codex_client_factory,
+    build_remote_thread_enumeration_args,
 )
 
 
@@ -278,3 +279,47 @@ def test_remote_claude_launch_factory_appends_model_flag(
         model="opus",
     )
     assert "--model opus" in launch.args[6]
+
+
+def test_build_remote_thread_enumeration_args_wraps_in_bash_and_passes_env(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    config = SshLaunchTargetConfig(
+        id="devbox",
+        name="Devbox",
+        ssh_destination="dev@example.com",
+        ssh_args=["-p", "2222"],
+        default_cwd="~/workspace",
+    )
+
+    args = build_remote_thread_enumeration_args(
+        config, env={"WAYPOINT_THREAD_ID": "abc-123"}
+    )
+
+    assert args[:4] == ("/usr/bin/ssh", "-p", "2222", "dev@example.com")
+    remote_command = args[4]
+    # Wrapped via bash -ilc so rcfiles run.
+    assert remote_command.startswith("bash -ilc ")
+    # cd into the configured default_cwd before exec.
+    assert "cd ~/workspace" in remote_command
+    # Helper script is fed via stdin (`bash -s`), so argv carries no body.
+    assert "bash -s" in remote_command
+    # Env override passed through to the remote shell's `env` invocation.
+    assert "WAYPOINT_THREAD_ID=abc-123" in remote_command
+
+
+def test_build_remote_thread_enumeration_args_without_env(monkeypatch) -> None:
+    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    config = SshLaunchTargetConfig(
+        id="devbox",
+        name="Devbox",
+        ssh_destination="dev@example.com",
+        default_cwd="~/workspace",
+    )
+
+    args = build_remote_thread_enumeration_args(config)
+    assert args[:2] == ("/usr/bin/ssh", "dev@example.com")
+    remote_command = args[2]
+    assert "bash -s" in remote_command
+    assert "WAYPOINT_THREAD_ID" not in remote_command

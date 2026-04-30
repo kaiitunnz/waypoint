@@ -206,6 +206,7 @@ def make_session(settings: Settings, **overrides) -> SessionRecord:
         transport=overrides.get("transport", SessionTransport.CODEX_APP_SERVER),
         title="Session",
         cwd="/tmp/project",
+        launch_target_id=overrides.get("launch_target_id"),
         status=overrides.get("status", SessionStatus.IDLE),
         created_at=now,
         updated_at=now,
@@ -732,9 +733,33 @@ async def test_list_importable_claude_threads_filters_existing_session(
     assert threads[0].branch == "feature/new"
 
 
+class FakeRemoteEnumerator:
+    def __init__(self, infos: list[ClaudeThreadInfo] | None = None) -> None:
+        self._infos = infos or []
+        self.list_calls: list[str] = []
+        self.find_calls: list[tuple[str, str]] = []
+        self.invalidate_calls: list[str] = []
+
+    async def list(self, target: SshLaunchTargetConfig) -> list[ClaudeThreadInfo]:
+        self.list_calls.append(target.id)
+        return list(self._infos)
+
+    async def find(
+        self, target: SshLaunchTargetConfig, thread_id: str
+    ) -> ClaudeThreadInfo | None:
+        self.find_calls.append((target.id, thread_id))
+        for info in self._infos:
+            if info.id == thread_id:
+                return info
+        return None
+
+    def invalidate(self, launch_target_id: str) -> None:
+        self.invalidate_calls.append(launch_target_id)
+
+
 @pytest.mark.asyncio
-async def test_list_importable_claude_threads_remote_target_returns_empty(
-    monkeypatch, tmp_path
+async def test_list_importable_claude_threads_remote_target_uses_enumerator(
+    tmp_path,
 ) -> None:
     settings = Settings(
         data_dir=tmp_path / "data",
@@ -752,13 +777,58 @@ async def test_list_importable_claude_threads_remote_target_returns_empty(
     storage = Storage(settings.database_path)
     runtime = SessionRuntime(settings, storage)
     runtime.claude = cast(Any, FakeClaudeAdapter())
+    info = _make_claude_thread_info(
+        id="11111111-1111-4111-8111-111111111111",
+        title="Remote thread",
+        cwd="/srv/project",
+        branch="main",
+    )
+    fake_enum = FakeRemoteEnumerator([info])
+    runtime.claude_thread_enumerator = cast(Any, fake_enum)
 
-    def explode() -> list[ClaudeThreadInfo]:
-        raise AssertionError("local enumeration must not run for remote targets")
+    summaries = await runtime.list_importable_claude_threads("devbox")
 
-    monkeypatch.setattr("waypoint.runtime.list_local_claude_threads", explode)
+    assert fake_enum.list_calls == ["devbox"]
+    assert [s.id for s in summaries] == [info.id]
+    assert summaries[0].cwd == "/srv/project"
 
-    assert await runtime.list_importable_claude_threads("devbox") == []
+
+@pytest.mark.asyncio
+async def test_list_importable_claude_threads_dedupes_by_target_and_thread(
+    tmp_path,
+) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        ssh_targets=[
+            SshLaunchTargetConfig(
+                id="devbox",
+                name="Devbox",
+                ssh_destination="dev@example.com",
+                supported_backends=[Backend.CLAUDE_CODE],
+                default_cwd="~/workspace",
+            )
+        ],
+    )
+    settings.ensure_dirs()
+    storage = Storage(settings.database_path)
+    runtime = SessionRuntime(settings, storage)
+    runtime.claude = cast(Any, FakeClaudeAdapter())
+    # An imported session for the SAME thread_id but no launch target
+    # should not hide the remote thread, since they are scoped separately.
+    storage.create_session(
+        make_session(
+            settings,
+            id="local-claude",
+            backend=Backend.CLAUDE_CODE,
+            transport=SessionTransport.CLAUDE_CLI,
+            thread_id="11111111-1111-4111-8111-111111111111",
+        )
+    )
+    info = _make_claude_thread_info(id="11111111-1111-4111-8111-111111111111")
+    runtime.claude_thread_enumerator = cast(Any, FakeRemoteEnumerator([info]))
+
+    summaries = await runtime.list_importable_claude_threads("devbox")
+    assert [s.id for s in summaries] == [info.id]
 
 
 @pytest.mark.asyncio
@@ -809,7 +879,7 @@ async def test_import_claude_thread_creates_session_and_resumes(
 
 
 @pytest.mark.asyncio
-async def test_import_claude_thread_rejects_remote_target(
+async def test_import_claude_thread_remote_target_uses_remote_factory(
     monkeypatch, tmp_path
 ) -> None:
     settings = Settings(
@@ -827,19 +897,96 @@ async def test_import_claude_thread_rejects_remote_target(
     settings.ensure_dirs()
     storage = Storage(settings.database_path)
     runtime = SessionRuntime(settings, storage)
-    runtime.claude = cast(Any, FakeClaudeAdapter())
+    fake_claude = FakeClaudeAdapter()
+    runtime.claude = cast(Any, fake_claude)
+    info = _make_claude_thread_info(
+        id="44444444-4444-4444-8444-444444444444",
+        cwd="/srv/work",
+        title="Remote pickup",
+        branch="feature/x",
+        repo_name="work",
+        preview="resume me",
+    )
+    fake_enum = FakeRemoteEnumerator([info])
+    runtime.claude_thread_enumerator = cast(Any, fake_enum)
+    monkeypatch.setattr(
+        runtime,
+        "_claude_launch_factory",
+        lambda launch_target_id: f"remote-factory-{launch_target_id}",
+    )
 
-    from fastapi import HTTPException
+    session = await runtime.import_claude_thread(
+        ClaudeThreadImportRequest(thread_id=info.id, launch_target_id="devbox")
+    )
 
-    with pytest.raises(HTTPException) as exc_info:
-        await runtime.import_claude_thread(
-            ClaudeThreadImportRequest(
-                thread_id="11111111-1111-4111-8111-111111111111",
-                launch_target_id="devbox",
-            )
+    assert session.launch_target_id == "devbox"
+    assert session.cwd == "/srv/work"
+    assert session.thread_id == info.id
+    assert fake_claude.restore_calls == [
+        (
+            session.id,
+            "/srv/work",
+            info.id,
+            "remote-factory-devbox",
+            "default",
+            None,
+            None,
         )
-    assert exc_info.value.status_code == 400
-    assert "local-only" in exc_info.value.detail
+    ]
+    assert fake_enum.invalidate_calls == ["devbox"]
+    events = storage.list_events(session.id)
+    assert "Imported stored Claude thread via SSH target Devbox" in events[-1].text
+
+
+@pytest.mark.asyncio
+async def test_find_imported_claude_session_scopes_by_launch_target(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    same_thread_id = "abcd1234-5678-4abc-8def-0123456789ab"
+    storage.create_session(
+        make_session(
+            settings,
+            id="local-sess",
+            backend=Backend.CLAUDE_CODE,
+            transport=SessionTransport.CLAUDE_CLI,
+            thread_id=same_thread_id,
+        )
+    )
+
+    # Local match
+    found_local = runtime._find_imported_claude_session(same_thread_id, None)
+    assert found_local is not None
+    assert found_local.id == "local-sess"
+
+    # Same thread_id under a remote target should NOT collide with the
+    # local one — different scope.
+    assert runtime._find_imported_claude_session(same_thread_id, "devbox") is None
+
+
+@pytest.mark.asyncio
+async def test_delete_remote_claude_session_invalidates_enumerator_cache(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake_enum = FakeRemoteEnumerator()
+    runtime.claude_thread_enumerator = cast(Any, fake_enum)
+    runtime.claude = cast(Any, FakeClaudeAdapter())
+    storage.create_session(
+        make_session(
+            settings,
+            id="remote-claude",
+            backend=Backend.CLAUDE_CODE,
+            transport=SessionTransport.CLAUDE_CLI,
+            status=SessionStatus.EXITED,
+            thread_id="dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            launch_target_id="devbox",
+        )
+    )
+
+    await runtime.delete("remote-claude")
+
+    assert fake_enum.invalidate_calls == ["devbox"]
 
 
 @pytest.mark.asyncio

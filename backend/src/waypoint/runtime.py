@@ -20,6 +20,7 @@ from waypoint.claude_threads import (
     find_local_claude_thread,
     list_local_claude_threads,
 )
+from waypoint.claude_threads_remote import RemoteClaudeThreadEnumerator
 from waypoint.codex_app_server import (
     ClientFactory,
     CodexAppServerAdapter,
@@ -122,6 +123,11 @@ class SessionRuntime:
         self.codex = CodexAppServerAdapter(self._emit_adapter_event)
         self.claude_hook = claude_hook
         self.claude = self._build_claude_adapter()
+        self.claude_thread_enumerator: RemoteClaudeThreadEnumerator | None = (
+            RemoteClaudeThreadEnumerator(claude_hook.thread_enumerator_path)
+            if claude_hook is not None
+            else None
+        )
         self.monitor_tasks: dict[str, asyncio.Task[None]] = {}
         self.file_offsets: dict[str, int] = {}
         self._transports: dict[SessionTransport, TransportAdapter] = {
@@ -414,63 +420,77 @@ class SessionRuntime:
     async def list_importable_claude_threads(
         self, launch_target_id: str | None = None
     ) -> list[ClaudeThreadSummary]:
-        # Remote SSH targets are out of scope: enumeration would require
-        # streaming the remote ~/.claude/projects/ tree and reading each
-        # transcript over SSH. Return an empty list so the UI degrades
-        # gracefully instead of surfacing an error.
-        if launch_target_id:
-            self._resolve_launch_target(launch_target_id, Backend.CLAUDE_CODE)
-            return []
         if self.claude is None:
             return []
         imported = {
-            session.thread_id
+            (session.launch_target_id, session.thread_id)
             for session in self.storage.list_sessions()
-            if session.backend == Backend.CLAUDE_CODE
-            and session.launch_target_id is None
-            and session.thread_id
+            if session.backend == Backend.CLAUDE_CODE and session.thread_id
         }
-        infos = await asyncio.to_thread(list_local_claude_threads)
+        if launch_target_id is None:
+            infos = await asyncio.to_thread(list_local_claude_threads)
+        else:
+            target = self._resolve_launch_target(launch_target_id, Backend.CLAUDE_CODE)
+            if target is None or self.claude_thread_enumerator is None:
+                return []
+            infos = await self.claude_thread_enumerator.list(target)
         return [
             self._claude_thread_summary(info)
             for info in infos
-            if info.id not in imported
+            if (launch_target_id, info.id) not in imported
         ]
 
     async def import_claude_thread(
         self, request: ClaudeThreadImportRequest
     ) -> SessionRecord:
-        if request.launch_target_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="claude thread import is local-only",
-            )
         if self.claude is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="claude adapter is not initialized",
             )
-        existing = self._find_imported_claude_session(request.thread_id)
+        launch_target = self._resolve_launch_target(
+            request.launch_target_id, Backend.CLAUDE_CODE
+        )
+        existing = self._find_imported_claude_session(
+            request.thread_id, request.launch_target_id
+        )
         if existing is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="claude thread already imported",
             )
-        info = await asyncio.to_thread(find_local_claude_thread, request.thread_id)
+        if launch_target is None:
+            info = await asyncio.to_thread(find_local_claude_thread, request.thread_id)
+        else:
+            if self.claude_thread_enumerator is None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="claude thread enumerator is not initialized",
+                )
+            info = await self.claude_thread_enumerator.find(
+                launch_target, request.thread_id
+            )
         if info is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="claude thread not found",
             )
-        cwd_path = Path(info.cwd).expanduser()
-        if not cwd_path.exists():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"claude thread cwd {info.cwd} no longer exists; " "cannot resume"
-                ),
-            )
-        cwd = str(cwd_path)
+        if launch_target is None:
+            cwd_path = Path(info.cwd).expanduser()
+            if not cwd_path.exists():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"claude thread cwd {info.cwd} no longer exists; "
+                        "cannot resume"
+                    ),
+                )
+            cwd = str(cwd_path)
+        else:
+            # Remote cwd lives on the SSH host; we can't stat it from here.
+            # If the directory is gone, claude itself surfaces the error
+            # through the existing exception path below.
+            cwd = info.cwd
         session_id = self._generate_session_id(Backend.CLAUDE_CODE)
         session_dir = self._session_dir(session_id)
         raw_log = session_dir / "raw.log"
@@ -484,7 +504,7 @@ class SessionRuntime:
             transport=SessionTransport.CLAUDE_CLI,
             title=info.title,
             cwd=cwd,
-            launch_target_id=None,
+            launch_target_id=launch_target.id if launch_target else None,
             repo_name=info.repo_name,
             branch=info.branch,
             status=SessionStatus.STARTING,
@@ -513,6 +533,7 @@ class SessionRuntime:
                 extra={
                     "session_id": session.id,
                     "claude_session_id": info.id,
+                    "launch_target_id": session.launch_target_id,
                 },
             )
             self.storage.update_session(session.id, status=SessionStatus.ERROR)
@@ -525,10 +546,12 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"failed to import claude thread: {exc}",
             ) from exc
+        if launch_target is not None and self.claude_thread_enumerator is not None:
+            self.claude_thread_enumerator.invalidate(launch_target.id)
         self.storage.update_session(session.id, status=SessionStatus.IDLE)
         await self._record_system_event(
             session.id,
-            f"Imported stored Claude thread ({cwd})",
+            self._claude_import_message(cwd, launch_target),
             status=SessionStatus.IDLE,
             metadata={"imported_thread_id": info.id},
         )
@@ -846,6 +869,12 @@ class SessionRuntime:
         if session.status != SessionStatus.EXITED:
             await self.terminate(session_id)
         self.storage.delete_session(session_id)
+        if (
+            session.backend == Backend.CLAUDE_CODE
+            and session.launch_target_id
+            and self.claude_thread_enumerator is not None
+        ):
+            self.claude_thread_enumerator.invalidate(session.launch_target_id)
         await self.broadcast.publish(
             SessionEnvelope(
                 type="session_list_update",
@@ -1296,6 +1325,16 @@ class SessionRuntime:
             )
         return "Claude session restored from previous backend process"
 
+    def _claude_import_message(
+        self, cwd: str, launch_target: SshLaunchTargetConfig | None
+    ) -> str:
+        if launch_target is not None:
+            return (
+                f"Imported stored Claude thread via SSH target {launch_target.name} "
+                f"on {launch_target.ssh_destination} ({cwd})"
+            )
+        return f"Imported stored Claude thread ({cwd})"
+
     @staticmethod
     def _claude_effort_swap_message(effort: str | None) -> str:
         if effort:
@@ -1467,13 +1506,15 @@ class SessionRuntime:
             updated_at=info.updated_at,
         )
 
-    def _find_imported_claude_session(self, thread_id: str) -> SessionRecord | None:
+    def _find_imported_claude_session(
+        self, thread_id: str, launch_target_id: str | None
+    ) -> SessionRecord | None:
         for session in self.storage.list_sessions():
             if session.backend != Backend.CLAUDE_CODE:
                 continue
-            if session.launch_target_id is not None:
-                continue
             if session.thread_id != thread_id:
+                continue
+            if session.launch_target_id != launch_target_id:
                 continue
             return session
         return None

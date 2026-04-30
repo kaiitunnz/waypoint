@@ -1,4 +1,3 @@
-import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -8,8 +7,6 @@ from pydantic import BaseModel, Field
 
 from waypoint.schemas import Backend, BackendModelOption
 from waypoint.server_config import SshLaunchTargetConfig
-
-log = logging.getLogger(__name__)
 
 # Effort levels gated by the binary's per-model checks (`vy`/`L4_`/`k4_`):
 # opus-4-6/4-7 and sonnet-4-6 expose the full set; haiku and older opus/sonnet
@@ -215,25 +212,6 @@ def _normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
                     **legacy_target,
                 }
             ]
-    legacy_page_size = normalized.pop("events_page_size", None)
-    if legacy_page_size is not None and "chat_page_messages" not in normalized:
-        # The field was renamed and re-scaled (raw events → logical chat
-        # messages, default 40 → 20). Honor the user's intent of
-        # "configured a non-default page" by carrying the value over,
-        # clamped to the new field's range. Warn so the operator
-        # eventually migrates the key in their yaml.
-        log.warning(
-            "config: 'events_page_size' is deprecated; rename to "
-            "'chat_page_messages'. The new field counts logical chat "
-            "messages (one Codex agent reply = 1 message regardless of "
-            "delta count), not raw events; clamping %s into [1, 200].",
-            legacy_page_size,
-        )
-        try:
-            value = int(legacy_page_size)
-        except (TypeError, ValueError):
-            value = 20
-        normalized["chat_page_messages"] = max(1, min(200, value))
     if "config_path" in normalized and normalized["config_path"] is not None:
         normalized["config_path"] = Path(normalized["config_path"]).expanduser()
     if "data_dir" in normalized and normalized["data_dir"] is not None:

@@ -380,6 +380,16 @@ class CodexAppServerAdapter:
                     item_id = self._extract_item_id(payload)
                     if item_id is not None:
                         metadata["item_id"] = item_id
+                    item = self._extract_item(payload) if "item" in payload else None
+                    if isinstance(item, dict):
+                        # Replace the wrapped {"root": {...}} form with the
+                        # unwrapped item so downstream consumers (frontend
+                        # transcript renderers, telemetry) don't each need to
+                        # re-implement the unwrap.
+                        payload["item"] = item
+                        item_type = item.get("type")
+                        if isinstance(item_type, str) and item_type:
+                            metadata["item_type"] = item_type
                     if (
                         kind == EventKind.TOOL_RESULT
                         and notification.method
@@ -526,6 +536,9 @@ class CodexAppServerAdapter:
         if method == "item/started":
             item = self._extract_item(payload)
             return self._format_item_started(item)
+        if method == "item/updated":
+            item = self._extract_item(payload)
+            return self._format_item_updated(item)
         if method == "item/completed":
             item = self._extract_item(payload)
             return self._format_item_completed(item)
@@ -574,9 +587,31 @@ class CodexAppServerAdapter:
             return EventKind.SYSTEM_NOTE, item.get("text", ""), SessionStatus.RUNNING
         if item_type == "agentMessage":
             return EventKind.AGENT_OUTPUT, item.get("text", ""), SessionStatus.RUNNING
+        if item_type == "todo_list":
+            return (
+                EventKind.TOOL_CALL,
+                self._format_todo_list(item),
+                SessionStatus.RUNNING,
+            )
         return (
             EventKind.SYSTEM_NOTE,
             f"Started {item_type or 'item'}",
+            SessionStatus.RUNNING,
+        )
+
+    def _format_item_updated(
+        self, item: dict[str, Any]
+    ) -> tuple[EventKind, str, SessionStatus]:
+        item_type = item.get("type")
+        if item_type == "todo_list":
+            return (
+                EventKind.TOOL_RESULT,
+                self._format_todo_list(item),
+                SessionStatus.RUNNING,
+            )
+        return (
+            EventKind.SYSTEM_NOTE,
+            f"Updated {item_type or 'item'}",
             SessionStatus.RUNNING,
         )
 
@@ -605,6 +640,13 @@ class CodexAppServerAdapter:
                 else SessionStatus.RUNNING
             )
             return EventKind.TOOL_RESULT, f"File changes completed: {paths}", status
+        if item_type == "todo_list":
+            status = (
+                SessionStatus.IDLE
+                if item.get("status") == "completed"
+                else SessionStatus.RUNNING
+            )
+            return EventKind.TOOL_RESULT, self._format_todo_list(item), status
         return (
             EventKind.SYSTEM_NOTE,
             f"Completed {item_type or 'item'}",
@@ -629,6 +671,21 @@ class CodexAppServerAdapter:
             if isinstance(root, dict):
                 return root
         return item if isinstance(item, dict) else {}
+
+    def _format_todo_list(self, item: dict[str, Any]) -> str:
+        entries = item.get("items", [])
+        if not isinstance(entries, list) or not entries:
+            return "Todo list"
+        lines: list[str] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            text = str(entry.get("text", "")).strip()
+            if not text:
+                continue
+            marker = "[x]" if entry.get("completed") else "[ ]"
+            lines.append(f"{marker} {text}")
+        return "\n".join(lines) if lines else "Todo list"
 
     def _payload_to_dict(self, payload: Any) -> dict[str, Any]:
         if hasattr(payload, "model_dump"):

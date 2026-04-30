@@ -513,7 +513,9 @@ def test_format_item_completed_routes_todo_list_as_tool_result() -> None:
     )
     assert kind == EventKind.TOOL_RESULT
     assert text == "[x] Step one"
-    assert status == SessionStatus.IDLE
+    # Item completion does not signal end of turn; only turn/completed should
+    # drop session status off RUNNING.
+    assert status == SessionStatus.RUNNING
 
 
 def test_format_item_completed_drops_agent_message_duplicate() -> None:

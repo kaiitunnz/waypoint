@@ -621,32 +621,33 @@ class CodexAppServerAdapter:
         item_type = item.get("type")
         if item_type == "agentMessage":
             return None, "", SessionStatus.RUNNING
+        # An item finishing isn't a turn finishing — the model usually has more
+        # tool calls or assistant output to emit before turn/completed lands.
+        # Always report RUNNING here; the session-level transition to IDLE
+        # belongs to the turn/completed handler.
         if item_type == "commandExecution":
             output = item.get("aggregatedOutput") or ""
             suffix = f"\n{output}" if output else ""
-            status = (
-                SessionStatus.IDLE
-                if item.get("status") == "completed"
-                else SessionStatus.RUNNING
+            return (
+                EventKind.TOOL_RESULT,
+                f"$ {item.get('command', '')}{suffix}",
+                SessionStatus.RUNNING,
             )
-            return EventKind.TOOL_RESULT, f"$ {item.get('command', '')}{suffix}", status
         if item_type == "fileChange":
             paths = ", ".join(
                 change.get("path", "") for change in item.get("changes", [])
             )
-            status = (
-                SessionStatus.IDLE
-                if item.get("status") == "completed"
-                else SessionStatus.RUNNING
+            return (
+                EventKind.TOOL_RESULT,
+                f"File changes completed: {paths}",
+                SessionStatus.RUNNING,
             )
-            return EventKind.TOOL_RESULT, f"File changes completed: {paths}", status
         if item_type == "todo_list":
-            status = (
-                SessionStatus.IDLE
-                if item.get("status") == "completed"
-                else SessionStatus.RUNNING
+            return (
+                EventKind.TOOL_RESULT,
+                self._format_todo_list(item),
+                SessionStatus.RUNNING,
             )
-            return EventKind.TOOL_RESULT, self._format_todo_list(item), status
         return (
             EventKind.SYSTEM_NOTE,
             f"Completed {item_type or 'item'}",

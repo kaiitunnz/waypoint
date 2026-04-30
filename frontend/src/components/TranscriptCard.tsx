@@ -861,12 +861,41 @@ function previewForToolEvent(event: EventRecord, toolLabel: string): string {
     if (toolName === "TodoWrite" && Array.isArray(input.todos)) {
       return `${input.todos.length} todo${input.todos.length === 1 ? "" : "s"}`;
     }
+    const generic = summarizeStructuredInput(input);
+    if (generic) {
+      return truncate(generic, 240);
+    }
   }
 
   // Fall back to summarising the raw event text. Strip a leading tool-name
   // line (Claude's "Bash\n{json}" shape) so the preview doesn't redundantly
   // repeat what the role-row chip already shows.
   return summarizeToolText(event.text, toolLabel);
+}
+
+function summarizeStructuredInput(input: Record<string, unknown>): string {
+  // Generic preview for tool calls that don't have a dedicated branch above
+  // (Skill, ToolSearch, custom MCP tools, etc.). Joining the entries on a
+  // single line surfaces the actual arg values instead of the bare "{" the
+  // line-based fallback used to produce for pretty-printed JSON.
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(input)) {
+    parts.push(`${key}: ${formatStructuredValue(value)}`);
+  }
+  return parts.join(", ");
+}
+
+function formatStructuredValue(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    return collapseWhitespace(JSON.stringify(value));
+  } catch {
+    return "";
+  }
 }
 
 function summarizeToolText(text: string, toolLabel?: string): string {
@@ -879,6 +908,22 @@ function summarizeToolText(text: string, toolLabel?: string): string {
   }
   if (!lines.length) {
     return "No output";
+  }
+  // Pretty-printed JSON puts the opening brace on its own line, which made
+  // the preview read as a useless "{ · N lines". When the body parses as
+  // JSON, collapse it into a one-line key/value summary instead.
+  const joined = lines.join("\n");
+  if (joined.startsWith("{") || joined.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(joined);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const generic = summarizeStructuredInput(parsed as Record<string, unknown>);
+        if (generic) return truncate(generic, 240);
+      }
+      return truncate(collapseWhitespace(JSON.stringify(parsed)), 240);
+    } catch {
+      // Fall through to the line-based summary.
+    }
   }
   const first = lines[0];
   const suffix = lines.length > 1 ? ` · ${lines.length} lines` : "";

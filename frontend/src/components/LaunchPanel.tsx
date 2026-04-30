@@ -394,11 +394,7 @@ export function LaunchPanel({
           threads={claudeThreads}
           loading={claudeThreadsLoading}
           targetLabel={targetLabel}
-          emptyHint={
-            launchTargetId
-              ? "Claude thread import is local-only."
-              : "No importable Claude threads found."
-          }
+          emptyHint="No importable Claude threads found."
           importingThreadId={importingThreadId}
           onImport={onImportClaudeThread}
           setImportingThreadId={setImportingThreadId}

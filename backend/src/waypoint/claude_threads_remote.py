@@ -94,7 +94,18 @@ class RemoteClaudeThreadEnumerator:
         *,
         env: dict[str, str] | None,
     ) -> str | None:
-        args = build_remote_thread_enumeration_args(target, env=env)
+        # Building the argv resolves ``ssh_bin`` via shutil.which / explicit
+        # path checks; both raise FileNotFoundError when the binary is
+        # missing or misconfigured. Treat that the same as a runtime
+        # failure so a misconfigured target degrades to an empty list with
+        # a WARN log instead of a 500 from background poll endpoints.
+        try:
+            args = build_remote_thread_enumeration_args(target, env=env)
+        except (FileNotFoundError, OSError) as exc:
+            self._warn_once(
+                target.id, "config-error", f"failed to build SSH argv: {exc}"
+            )
+            return None
         try:
             completed = await asyncio.to_thread(
                 subprocess.run,
@@ -119,7 +130,15 @@ class RemoteClaudeThreadEnumerator:
                 f"enumerator exit {completed.returncode}: {stderr_text}",
             )
             return None
-        return completed.stdout.decode("utf-8", errors="replace")
+        stdout = completed.stdout.decode("utf-8", errors="replace")
+        if SENTINEL not in stdout:
+            self._warn_once(
+                target.id,
+                "no-sentinel",
+                "enumerator stdout missing sentinel; rcfile contamination?",
+            )
+            return None
+        return stdout
 
     def _warn_once(self, target_id: str, error_class: str, message: str) -> None:
         key = (target_id, error_class)
@@ -133,9 +152,11 @@ class RemoteClaudeThreadEnumerator:
 
 
 def _parse_records(stdout: str) -> list[ClaudeThreadInfo]:
+    # Sentinel detection happens in ``_run_remote`` so the failure path
+    # routes through ``_warn_once`` for rate-limited dedupe; this function
+    # therefore only ever sees stdout that contains the sentinel.
     sentinel_index = stdout.find(SENTINEL)
     if sentinel_index == -1:
-        log.warning("claude thread enumerator output missing sentinel")
         return []
     payload = stdout[sentinel_index + len(SENTINEL) :]
     results: list[ClaudeThreadInfo] = []

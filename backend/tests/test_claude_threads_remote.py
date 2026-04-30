@@ -113,6 +113,55 @@ def test_list_returns_empty_on_missing_sentinel(monkeypatch, target) -> None:
     assert asyncio.run(enumerator.list(target)) == []
 
 
+def test_list_returns_empty_when_ssh_binary_missing(monkeypatch, target) -> None:
+    """A misconfigured ssh_bin must not bubble out as a 500. The argv
+    builder calls _resolve_local_binary which raises FileNotFoundError;
+    the enumerator should swallow it and return an empty list."""
+
+    def boom(_binary: str) -> str:
+        raise FileNotFoundError("binary not found on PATH: ssh")
+
+    monkeypatch.setattr("waypoint.server_config._resolve_local_binary", boom)
+    # subprocess.run must NEVER be called when argv resolution fails.
+    monkeypatch.setattr(
+        claude_threads_remote.subprocess,
+        "run",
+        lambda *a, **kw: pytest.fail("subprocess.run must not be invoked"),
+    )
+
+    enumerator = RemoteClaudeThreadEnumerator(ENUMERATOR_PATH)
+    assert asyncio.run(enumerator.list(target)) == []
+
+
+def test_warnings_are_deduped_per_target_and_error_class(
+    monkeypatch, target, caplog
+) -> None:
+    """A persistently noisy remote must not flood the log: the same
+    (target, error-class) pair produces exactly one WARN per process."""
+    _stub_subprocess(
+        monkeypatch,
+        _make_completed(stdout=json.dumps(VALID_RECORD) + "\n"),  # no sentinel
+    )
+
+    enumerator = RemoteClaudeThreadEnumerator(ENUMERATOR_PATH, ttl_seconds=60.0)
+
+    async def list_three_times() -> None:
+        for _ in range(3):
+            await enumerator.list(target)
+            enumerator.invalidate(target.id)
+
+    with caplog.at_level("WARNING", logger="waypoint.claude_threads_remote"):
+        asyncio.run(list_three_times())
+
+    sentinel_warnings = [
+        record
+        for record in caplog.records
+        if record.name == "waypoint.claude_threads_remote"
+        and "missing sentinel" in getattr(record, "detail", "")
+    ]
+    assert len(sentinel_warnings) == 1
+
+
 def test_cache_hit_within_ttl_skips_subprocess(monkeypatch, target) -> None:
     stdout = f"{claude_threads_remote.SENTINEL}\n{json.dumps(VALID_RECORD)}\n"
     calls = _stub_subprocess(monkeypatch, _make_completed(stdout=stdout))

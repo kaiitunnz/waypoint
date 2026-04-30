@@ -508,6 +508,193 @@ pre {
   padding: 0 4px;
 }
 
+/* ---------- Resume thread panel (unified) ---------- */
+
+.resume-panel-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px 24px;
+}
+
+.resume-panel-titles {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.resume-panel-titles h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: 0.005em;
+}
+
+.resume-panel-subhead {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  color: var(--muted-soft);
+}
+
+.resume-panel-filter {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px;
+  border-radius: var(--radius-pill);
+  background: rgba(8, 11, 16, 0.42);
+  border: 1px solid var(--line);
+}
+
+.resume-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 14px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  transition: background-color 140ms ease, color 140ms ease,
+    border-color 140ms ease;
+}
+
+.resume-filter-chip:hover:not(:disabled):not(.is-active) {
+  color: var(--text);
+  background: rgba(28, 33, 44, 0.6);
+}
+
+.resume-filter-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(200, 169, 106, 0.35);
+}
+
+.resume-filter-chip:disabled {
+  cursor: default;
+  color: var(--muted-soft);
+  opacity: 0.55;
+}
+
+.resume-filter-chip.is-active {
+  background: linear-gradient(180deg,
+    rgba(200, 169, 106, 0.18),
+    rgba(200, 169, 106, 0.08));
+  color: var(--accent-strong);
+  border-color: rgba(200, 169, 106, 0.42);
+}
+
+.resume-filter-label {
+  font-weight: 500;
+}
+
+.resume-filter-count {
+  display: inline-flex;
+  min-width: 1.6em;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.68rem;
+  color: inherit;
+  opacity: 0.75;
+  padding: 0 6px;
+  border-left: 1px solid currentColor;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.resume-filter-chip.is-active .resume-filter-count {
+  border-color: rgba(200, 169, 106, 0.4);
+  opacity: 0.95;
+}
+
+.resume-panel-loading,
+.resume-panel-empty {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* Backend imprint in the row's leading column. Replaces the ordinal
+   in the unified view; color cues which backend produced the thread. */
+.resume-thread-mark {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.22em;
+  text-transform: lowercase;
+  padding-top: 4px;
+  user-select: none;
+}
+
+.resume-thread-mark.is-codex {
+  color: var(--accent-cool);
+}
+
+.resume-thread-mark.is-claude_code {
+  color: var(--accent);
+}
+
+/* The existing ::before color-bar reuses backend tone — visible at rest
+   so users can scan provenance, full-strength on hover. */
+.resume-thread-row::before {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.resume-thread-row.is-codex::before {
+  background: rgba(143, 179, 214, 0.32);
+}
+
+.resume-thread-row.is-claude_code::before {
+  background: rgba(200, 169, 106, 0.32);
+}
+
+.resume-thread-row.is-codex:hover::before {
+  background: var(--accent-cool);
+}
+
+.resume-thread-row.is-claude_code:hover::before {
+  background: var(--accent);
+}
+
+/* Adjust the row's leading column to the wider 3-letter mark. */
+.resume-thread-list .import-thread-row {
+  grid-template-columns: 2.6em minmax(0, 1fr);
+}
+
+.resume-panel-foot {
+  display: flex;
+  justify-content: center;
+  padding-top: 4px;
+}
+
+.resume-panel-foot-link {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  color: var(--muted);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  transition: color 140ms ease, background-color 140ms ease;
+}
+
+.resume-panel-foot-link:hover {
+  color: var(--accent-strong);
+  background: rgba(200, 169, 106, 0.06);
+}
+
+.resume-panel-foot-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(200, 169, 106, 0.35);
+}
+
 .field {
   display: grid;
   gap: 6px;

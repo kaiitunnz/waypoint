@@ -74,3 +74,45 @@ def test_chat_page_messages_rejects_out_of_range_values(
     monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
     with pytest.raises(ValidationError):
         load_settings()
+
+
+def test_legacy_events_page_size_migrates_to_chat_page_messages(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config_file = tmp_path / "waypoint.yaml"
+    config_file.write_text("events_page_size: 77\n", encoding="utf-8")
+    monkeypatch.setattr(config_module, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
+    with caplog.at_level("WARNING", logger="waypoint.config"):
+        settings = load_settings()
+    # Migrated, clamped into [1, 200], and a deprecation warning was logged.
+    assert settings.chat_page_messages == 77
+    assert any("events_page_size" in record.message for record in caplog.records)
+
+
+def test_legacy_events_page_size_clamps_to_new_field_range(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "waypoint.yaml"
+    config_file.write_text("events_page_size: 999\n", encoding="utf-8")
+    monkeypatch.setattr(config_module, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
+    settings = load_settings()
+    # 999 was valid for the old (raw events, max 1000) field; clamp to
+    # the new field's 200 cap rather than failing validation.
+    assert settings.chat_page_messages == 200
+
+
+def test_explicit_chat_page_messages_wins_over_legacy_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "waypoint.yaml"
+    config_file.write_text(
+        "events_page_size: 77\nchat_page_messages: 42\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(config_module, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
+    settings = load_settings()
+    assert settings.chat_page_messages == 42

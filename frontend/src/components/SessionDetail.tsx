@@ -548,7 +548,14 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const hiddenEventCount = renderedEvents.length - visibleEvents.length;
   const transcriptItems = buildTranscriptItems(visibleEvents);
   const usageSummary = extractUsageSummary(events);
-  const composerDisabled = session?.status === "exited";
+  // Session is dormant once the backend process has exited (clean shutdown
+  // or crash). Sending in this state implicitly reattaches via the backend's
+  // handle_input gate, so the composer stays interactive and only blocks
+  // when no session record has loaded yet.
+  const sessionDormant = Boolean(
+    session && (session.status === "exited" || session.status === "error"),
+  );
+  const composerDisabled = !session;
   const canResume = Boolean(session && supportsResume(session.transport));
   const interruptSession = useCallback(() => {
     void runAction("interrupt");
@@ -710,10 +717,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       ) : null}
       <ReplyComposer
         backend={session?.backend ?? null}
-        canDelete={Boolean(session?.status === "exited")}
+        canDelete={sessionDormant}
         canResume={canResume}
-        canTerminate={Boolean(session && session.status !== "exited")}
+        canTerminate={Boolean(session && !sessionDormant)}
         disabled={composerDisabled}
+        dormant={sessionDormant}
         agentBusy={agentBusy}
         modeBusy={modeBusy}
         modelBusy={modelBusy}
@@ -743,6 +751,7 @@ interface ReplyComposerProps {
   canResume: boolean;
   canTerminate: boolean;
   disabled: boolean;
+  dormant: boolean;
   modeBusy: boolean;
   modelBusy: boolean;
   modelOptions: BackendModelOption[];
@@ -768,6 +777,7 @@ const ReplyComposer = memo(function ReplyComposer({
   canResume,
   canTerminate,
   disabled,
+  dormant,
   modeBusy,
   modelBusy,
   modelOptions,
@@ -1175,7 +1185,9 @@ const ReplyComposer = memo(function ReplyComposer({
           onKeyDown={handleDraftKeyDown}
           disabled={disabled}
           placeholder={
-            disabled ? "Session has exited — composer disabled." : "Reply to the agent…"
+            dormant
+              ? "Session has exited — send a message to reattach…"
+              : "Reply to the agent…"
           }
           aria-label="Reply"
         />
@@ -1215,7 +1227,7 @@ const ReplyComposer = memo(function ReplyComposer({
           className="ghost interrupt"
           onClick={() => void onInterrupt()}
           type="button"
-          disabled={disabled}
+          disabled={disabled || dormant}
           title="Interrupt the agent's current turn"
         >
           Interrupt

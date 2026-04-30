@@ -640,8 +640,15 @@ class SessionRuntime:
             if handled is not None:
                 return handled
         await transport.send_input(session, request.text)
+        # Flip status to RUNNING before recording the event. _record_user_event
+        # broadcasts a session_state snapshot derived from storage; if the
+        # update lands after the broadcast, the snapshot still says "idle" and
+        # the frontend's busy-state derivation lags until the agent's first
+        # output triggers another broadcast (visibly delayed for Claude, which
+        # emits nothing between stdin write and first content).
+        updated = self.storage.update_session(session.id, status=SessionStatus.RUNNING)
         await self._record_user_event(session.id, request.text, submit=request.submit)
-        return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
+        return updated
 
     async def interrupt(self, session_id: str) -> SessionRecord:
         session = self.get_session(session_id)

@@ -995,6 +995,12 @@ class ClaudeCliAdapter:
     ) -> None:
         subtype = event.get("subtype")
         if subtype == "init":
+            # Claude's stream-json mode emits `init` at the start of every
+            # `--print` run, which here means once per user turn (not just at
+            # session start). Tagging this with IDLE downgrades the freshly
+            # set RUNNING status from handle_input and drops the spinner
+            # until the first content chunk lands. Mark it RUNNING — by the
+            # time init fires, the binary is already processing input.
             await self._emit_event(
                 state.session_id,
                 EventKind.SYSTEM_NOTE,
@@ -1002,9 +1008,9 @@ class ClaudeCliAdapter:
                 {
                     "method": "system.init",
                     "payload": event,
-                    "status": SessionStatus.IDLE,
+                    "status": SessionStatus.RUNNING,
                 },
-                SessionStatus.IDLE,
+                SessionStatus.RUNNING,
             )
             return
         if subtype in {"hook_started", "hook_response"}:

@@ -278,6 +278,52 @@ async def test_interrupt_noop_without_active_turn() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_input_after_interrupt_starts_fresh_turn() -> None:
+    # Reproduces the issue #12 flow programmatically: interrupt clears the
+    # in-flight turn via turn/completed[status=interrupted], the session state
+    # stays put, and the next send_input takes the turn_start branch (not
+    # turn_steer) because active_turn_id was reset.
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    state = adapter._sessions["sess"]
+
+    await adapter.send_input("sess", "first")
+    assert state.active_turn_id == "turn-1"
+    assert state.stream_task is not None
+
+    await adapter.interrupt("sess")
+    assert ("turn_interrupt", ("thread-1", "turn-1")) in fake.calls
+
+    fake.notifications.put_nowait(
+        FakeNotification(
+            "turn/completed",
+            {"turn": {"id": "turn-1", "status": "interrupted"}},
+        )
+    )
+    await state.stream_task
+
+    assert state.active_turn_id is None
+    assert state.stream_task is None
+    assert "sess" in adapter._sessions
+
+    fake.calls.clear()
+    await adapter.send_input("sess", "second")
+
+    methods = [call[0] for call in fake.calls]
+    assert methods.count("turn_start") == 1
+    assert methods.count("turn_steer") == 0
+    assert state.active_turn_id == "turn-1"
+
+    if state.stream_task is not None:
+        state.stream_task.cancel()
+        try:
+            await state.stream_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+
+@pytest.mark.asyncio
 async def test_respond_to_approval_resolves_pending() -> None:
     emitted: list = []
     adapter, fake = make_adapter(emitted)

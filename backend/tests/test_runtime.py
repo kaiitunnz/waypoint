@@ -49,12 +49,41 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         self.start_calls: list[
             tuple[str, str, str, Any, str | None, str | None, str | None]
         ] = []
+        self.restore_calls: list[
+            tuple[str, str, str, Any, str | None, str | None, str | None]
+        ] = []
         self.permission_mode_calls: list[tuple[str, str]] = []
         self.model_calls: list[tuple[str, str | None]] = []
         self.effort_calls: list[tuple[str, str | None]] = []
         self.modes: dict[str, str] = {}
         self.models: dict[str, str | None] = {}
         self.efforts: dict[str, str | None] = {}
+
+    async def restore_session(
+        self,
+        session_id: str,
+        cwd: str,
+        claude_session_id: str,
+        launch_factory_override: Any = None,
+        permission_mode: str | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+    ) -> None:
+        self.restore_calls.append(
+            (
+                session_id,
+                cwd,
+                claude_session_id,
+                launch_factory_override,
+                permission_mode,
+                model,
+                effort,
+            )
+        )
+        if model is not None:
+            self.models[session_id] = model
+        if effort is not None:
+            self.efforts[session_id] = effort
 
     async def start_session(
         self,
@@ -188,6 +217,113 @@ def make_thread(**overrides: Any) -> Any:
         ephemeral=overrides.pop("ephemeral", False),
         git_info=git_info,
     )
+
+
+@pytest.mark.asyncio
+async def test_handle_input_reattaches_exited_codex_session(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeCodexRuntimeAdapter()
+    runtime.codex = cast(Any, fake)
+    session = make_session(
+        settings,
+        status=SessionStatus.EXITED,
+        thread_id="thread-resume",
+    )
+    storage.create_session(session)
+
+    updated = await runtime.handle_input(
+        "sess", SessionInputRequest(text="picking back up")
+    )
+
+    # Reattach uses the stored thread_id to resume the existing Codex thread,
+    # then the input forwards through the freshly attached client.
+    assert fake.restore_calls == [
+        ("sess", "/tmp/project", "thread-resume", None, None, None)
+    ]
+    assert fake.inputs == [("sess", "picking back up")]
+    assert updated.status == SessionStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_handle_input_reattaches_errored_claude_session(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    runtime.claude = cast(Any, fake)
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend=Backend.CLAUDE_CODE,
+        transport=SessionTransport.CLAUDE_CLI,
+        thread_id="claude-thread",
+        status=SessionStatus.ERROR,
+        permission_mode="default",
+    )
+    storage.create_session(session)
+
+    updated = await runtime.handle_input(
+        "claude-sess", SessionInputRequest(text="retry please")
+    )
+
+    # ERROR is treated like EXITED for reattach: respawn the CLI with --resume
+    # plus the stored permission/model/effort so the conversation continues.
+    assert fake.restore_calls == [
+        (
+            "claude-sess",
+            "/tmp/project",
+            "claude-thread",
+            None,
+            "default",
+            None,
+            None,
+        )
+    ]
+    assert fake.inputs == [("claude-sess", "retry please")]
+    assert updated.status == SessionStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_handle_input_rejects_reattach_for_tmux_session(tmp_path) -> None:
+    from fastapi import HTTPException
+
+    runtime, storage, settings = make_runtime(tmp_path)
+    session = make_session(
+        settings,
+        id="tmux-sess",
+        backend=Backend.CLAUDE_CODE,
+        transport=SessionTransport.TMUX,
+        status=SessionStatus.EXITED,
+        thread_id=None,
+    )
+    storage.create_session(session)
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.handle_input(
+            "tmux-sess", SessionInputRequest(text="anyone home?")
+        )
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_handle_input_rejects_reattach_when_thread_id_missing(tmp_path) -> None:
+    from fastapi import HTTPException
+
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeCodexRuntimeAdapter()
+    runtime.codex = cast(Any, fake)
+    session = make_session(
+        settings,
+        status=SessionStatus.EXITED,
+        thread_id=None,
+    )
+    storage.create_session(session)
+
+    # _restore_codex_session refuses to reattach without a thread id and tags
+    # the session EXITED again; the handler surfaces that as 400 instead of
+    # silently spawning a fresh thread.
+    with pytest.raises(HTTPException) as exc:
+        await runtime.handle_input("sess", SessionInputRequest(text="hi"))
+    assert exc.value.status_code == 400
+    assert fake.restore_calls == []
 
 
 @pytest.mark.asyncio

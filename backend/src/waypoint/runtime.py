@@ -634,6 +634,8 @@ class SessionRuntime:
         self, session_id: str, request: SessionInputRequest
     ) -> SessionRecord:
         session = self.get_session(session_id)
+        if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
+            session = await self._reattach_session(session)
         transport = self.transport_for(session)
         if transport.is_structured:
             handled = await self._route_codex_compact(session, request)
@@ -675,6 +677,29 @@ class SessionRuntime:
             session.id, "Session terminated", status=SessionStatus.EXITED
         )
         return self.storage.update_session(session.id, status=SessionStatus.EXITED)
+
+    async def _reattach_session(self, session: SessionRecord) -> SessionRecord:
+        if session.transport == SessionTransport.CLAUDE_CLI:
+            await self._restore_claude_session(session)
+        elif session.transport == SessionTransport.CODEX_APP_SERVER:
+            await self._restore_codex_session(session)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="this session cannot be reattached after exit",
+            )
+        # _restore_*_session swallows failures (it tags the session ERROR or
+        # EXITED and emits a system_note instead of raising). Re-read storage
+        # so the caller sees the post-restore status, and translate any
+        # terminal state into a 400 so the frontend surfaces a clear error
+        # rather than silently relaunching into a dead session.
+        refreshed = self.get_session(session.id)
+        if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"failed to reattach session ({refreshed.status})",
+            )
+        return refreshed
 
     async def delete(self, session_id: str) -> None:
         session = self.get_session(session_id)
@@ -995,7 +1020,9 @@ class SessionRuntime:
             # Same ordering as handle_input: flip status to RUNNING before
             # _record_system_event broadcasts the session_state snapshot, so
             # the spinner doesn't lag until Claude's next emitted chunk.
-            updated = self.storage.update_session(session.id, status=SessionStatus.RUNNING)
+            updated = self.storage.update_session(
+                session.id, status=SessionStatus.RUNNING
+            )
             await self._record_system_event(
                 session.id,
                 f"Approval response sent: {request.decision}",

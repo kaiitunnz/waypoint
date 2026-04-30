@@ -24,6 +24,7 @@ import {
   isAuthError,
   postAction,
   sendInput,
+  setSessionEffort,
   setSessionModel,
   setSessionPermissionMode,
 } from "@/lib/api";
@@ -51,6 +52,16 @@ const SLASH_COMMANDS: ReadonlyArray<{ command: string; description: string }> = 
   { command: "/permissions", description: "Forward to the agent's permissions" },
   { command: "/compact", description: "Compact context to reclaim tokens" },
 ];
+
+const EFFORT_LABEL: Record<string, string> = {
+  none: "None",
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+};
 
 interface SessionDetailProps {
   host: string;
@@ -89,6 +100,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [modeBusy, setModeBusy] = useState(false);
   const [modelOptions, setModelOptions] = useState<BackendModelOption[]>([]);
   const [modelBusy, setModelBusy] = useState(false);
+  const [effortBusy, setEffortBusy] = useState(false);
   const sectionRef = useRef<HTMLElement | null>(null);
   const nearBottomRef = useRef(true);
   const pendingEventsRef = useRef<EventRecord[]>([]);
@@ -210,6 +222,36 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         );
       } finally {
         setModelBusy(false);
+      }
+    },
+    [host, token, session, handleAuthFailure],
+  );
+
+  const handleEffortChange = useCallback(
+    async (nextEffort: string) => {
+      if (!session) {
+        return;
+      }
+      const cleaned = nextEffort.trim() || null;
+      const current = session.effort ?? null;
+      if (cleaned === current) {
+        return;
+      }
+      setEffortBusy(true);
+      setError("");
+      try {
+        const updated = await setSessionEffort(host, token, session.id, cleaned);
+        setSession(updated);
+      } catch (effortError) {
+        if (isAuthError(effortError)) {
+          handleAuthFailure();
+          return;
+        }
+        setError(
+          effortError instanceof Error ? effortError.message : "failed to update effort",
+        );
+      } finally {
+        setEffortBusy(false);
       }
     },
     [host, token, session, handleAuthFailure],
@@ -675,12 +717,15 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         modelBusy={modelBusy}
         modelOptions={modelOptions}
         currentModel={session?.model ?? null}
+        currentEffort={session?.effort ?? null}
+        effortBusy={effortBusy}
         permissionMode={session?.permission_mode ?? null}
         transport={session?.transport ?? null}
         onDelete={removeFromList}
         onInterrupt={interruptSession}
         onModeChange={handlePermissionModeChange}
         onModelChange={handleModelChange}
+        onEffortChange={handleEffortChange}
         onResume={resumeSession}
         onSend={submitInput}
         onTerminate={terminate}
@@ -699,12 +744,15 @@ interface ReplyComposerProps {
   modelBusy: boolean;
   modelOptions: BackendModelOption[];
   currentModel: string | null;
+  currentEffort: string | null;
+  effortBusy: boolean;
   permissionMode: string | null;
   transport: SessionTransport | null;
   onDelete: () => void | Promise<void>;
   onInterrupt: () => void | Promise<void>;
   onModeChange: (mode: string) => void | Promise<void>;
   onModelChange: (model: string) => void | Promise<void>;
+  onEffortChange: (effort: string) => void | Promise<void>;
   onResume: () => void | Promise<void>;
   onSend: (text: string) => Promise<boolean>;
   onTerminate: () => void | Promise<void>;
@@ -720,12 +768,15 @@ const ReplyComposer = memo(function ReplyComposer({
   modelBusy,
   modelOptions,
   currentModel,
+  currentEffort,
+  effortBusy,
   permissionMode,
   transport,
   onDelete,
   onInterrupt,
   onModeChange,
   onModelChange,
+  onEffortChange,
   onResume,
   onSend,
   onTerminate,
@@ -735,6 +786,10 @@ const ReplyComposer = memo(function ReplyComposer({
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  // Pending effort for backends that need a session restart to apply (Claude)
+  // — staged here until the user confirms via the Apply button. `null` means
+  // no pending change.
+  const [pendingEffort, setPendingEffort] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composerRef = useRef<HTMLElement | null>(null);
   const overflowRef = useRef<HTMLDivElement | null>(null);
@@ -897,6 +952,48 @@ const ReplyComposer = memo(function ReplyComposer({
           ...modelOptions,
         ]
       : modelOptions;
+  // Effort levels gated by the currently-selected model. With no explicit
+  // model pick (rare for a live session, but possible), fall back to the
+  // union of every model's supported levels.
+  const matchingModelEntry = currentModel
+    ? modelOptions.find((opt) => opt.id === currentModel)
+    : undefined;
+  const effortOptions: string[] = matchingModelEntry
+    ? matchingModelEntry.supported_efforts ?? []
+    : Array.from(
+        new Set(
+          modelOptions.flatMap((opt) => opt.supported_efforts ?? []),
+        ),
+      );
+  const hasEffortPicker = effortOptions.length > 0 || currentEffort !== null;
+  // Claude can't swap effort in-process — the binary's `/effort` slash
+  // command is blocklisted in --print mode and there's no `set_effort`
+  // control_request, so the runtime restarts the CLI with --resume + the
+  // new --effort. Surface that consequence as an explicit confirm step
+  // instead of applying on dropdown change like Codex.
+  const effortRequiresConfirm = backend === "claude_code";
+  const effortDisplayValue = pendingEffort ?? (currentEffort ?? "");
+  const effortPendingDiffers =
+    effortRequiresConfirm &&
+    pendingEffort !== null &&
+    pendingEffort !== (currentEffort ?? "");
+
+  const handleEffortSelect = (next: string) => {
+    if (effortRequiresConfirm) {
+      // Stage the pick locally; the parent's onEffortChange only fires after
+      // explicit confirm so the user knows the session will restart.
+      setPendingEffort(next === (currentEffort ?? "") ? null : next);
+      return;
+    }
+    void onEffortChange(next);
+  };
+
+  const applyPendingEffort = async () => {
+    if (pendingEffort === null) return;
+    const value = pendingEffort;
+    setPendingEffort(null);
+    await onEffortChange(value);
+  };
 
   return (
     <section className="composer" ref={composerRef}>
@@ -935,6 +1032,38 @@ const ReplyComposer = memo(function ReplyComposer({
               ))}
             </select>
           </label>
+        ) : null}
+        {hasEffortPicker ? (
+          <label className="composer-effort">
+            <span>effort</span>
+            <select
+              value={effortDisplayValue}
+              onChange={(event) => handleEffortSelect(event.target.value)}
+              disabled={effortBusy || disabled}
+              aria-label="Reasoning effort"
+            >
+              <option value="">Default</option>
+              {effortOptions.map((option) => (
+                <option key={option} value={option}>
+                  {EFFORT_LABEL[option] ?? option}
+                </option>
+              ))}
+              {currentEffort && !effortOptions.includes(currentEffort) ? (
+                <option value={currentEffort}>{currentEffort}</option>
+              ) : null}
+            </select>
+          </label>
+        ) : null}
+        {effortPendingDiffers ? (
+          <button
+            type="button"
+            className="composer-effort-confirm"
+            onClick={() => void applyPendingEffort()}
+            disabled={effortBusy}
+            title="Restart the Claude session with the new effort level"
+          >
+            {effortBusy ? "Restarting…" : "Apply (restarts session)"}
+          </button>
         ) : null}
         <span className="composer-shortcut" aria-hidden>
           <kbd>{shortcutKey}</kbd>
@@ -1280,6 +1409,11 @@ function SessionHeader({
         {session.model ? (
           <span className="badge model" title={`Model: ${session.model}`}>
             {session.model}
+          </span>
+        ) : null}
+        {session.effort ? (
+          <span className="badge effort" title={`Effort: ${session.effort}`}>
+            {session.effort}
           </span>
         ) : null}
         <span className="session-header-meta">

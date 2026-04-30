@@ -1072,6 +1072,15 @@ pre {
   text-transform: none;
 }
 
+.badge.effort {
+  font-family: var(--font-mono);
+  background: rgba(200, 169, 106, 0.12);
+  color: var(--warn, var(--accent));
+  border-color: rgba(200, 169, 106, 0.28);
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+}
+
 .status {
   background: rgba(94, 210, 156, 0.1);
   color: #6cc99a;
@@ -1772,7 +1781,8 @@ details.tool-disclosure[open] .tool-glyph.todo {
 }
 
 .composer-mode,
-.composer-model {
+.composer-model,
+.composer-effort {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1783,7 +1793,8 @@ details.tool-disclosure[open] .tool-glyph.todo {
 }
 
 .composer-mode > span,
-.composer-model > span {
+.composer-model > span,
+.composer-effort > span {
   font-family: var(--font-mono);
   font-size: 0.66rem;
   letter-spacing: 0.18em;
@@ -1792,7 +1803,8 @@ details.tool-disclosure[open] .tool-glyph.todo {
 }
 
 .composer-mode select,
-.composer-model select {
+.composer-model select,
+.composer-effort select {
   border: 0;
   background: transparent;
   color: var(--accent-strong);
@@ -1804,16 +1816,40 @@ details.tool-disclosure[open] .tool-glyph.todo {
 }
 
 .composer-mode select:disabled,
-.composer-model select:disabled {
+.composer-model select:disabled,
+.composer-effort select:disabled {
   color: var(--muted-soft);
   cursor: progress;
 }
 
 .composer-mode select:focus-visible,
-.composer-model select:focus-visible {
+.composer-model select:focus-visible,
+.composer-effort select:focus-visible {
   outline: 2px solid rgba(200, 169, 106, 0.45);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+.composer-effort-confirm {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  padding: 5px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(200, 169, 106, 0.45);
+  background: rgba(200, 169, 106, 0.18);
+  color: var(--warn, var(--accent));
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.composer-effort-confirm:hover:not(:disabled) {
+  background: rgba(200, 169, 106, 0.28);
+}
+
+.composer-effort-confirm:disabled {
+  opacity: 0.7;
+  cursor: progress;
 }
 
 .composer-shortcut {
@@ -2764,21 +2800,29 @@ details.tool-disclosure[open] .tool-glyph.todo {
   }
 
   .composer-mode,
-  .composer-model {
+  .composer-model,
+  .composer-effort {
     padding: 3px 6px 3px 10px;
     gap: 6px;
   }
 
   .composer-mode > span,
-  .composer-model > span {
+  .composer-model > span,
+  .composer-effort > span {
     font-size: 0.6rem;
     letter-spacing: 0.14em;
   }
 
   .composer-mode select,
-  .composer-model select {
+  .composer-model select,
+  .composer-effort select {
     font-size: 0.74rem;
     padding: 1px 2px;
+  }
+
+  .composer-effort-confirm {
+    font-size: 0.66rem;
+    padding: 4px 8px;
   }
 
   .composer-shortcut {

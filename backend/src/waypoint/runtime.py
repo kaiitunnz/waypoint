@@ -855,8 +855,10 @@ class SessionRuntime:
                 "supports_free_text": True,
             }
         if backend == Backend.CODEX:
-            launch_target = self._find_launch_target(launch_target_id)
-            cwd = (launch_target.default_cwd if launch_target else None) or "~"
+            # Local Codex spawn uses cwd as a Popen working directory which
+            # doesn't expand `~`; route through the helper that does the
+            # expansion (and prefers an SSH target's default_cwd when set).
+            cwd = self._codex_client_cwd(launch_target_id)
             try:
                 response = await self.codex.list_models(
                     cwd=cwd,

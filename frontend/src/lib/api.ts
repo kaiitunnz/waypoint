@@ -114,11 +114,11 @@ export async function fetchEvents(
   host: string,
   token: string,
   sessionId: string,
-  options: { limit?: number; beforeSequence?: number } = {},
+  options: { messages?: number; beforeSequence?: number } = {},
 ): Promise<EventsPage> {
   const params = new URLSearchParams();
-  if (options.limit !== undefined) {
-    params.set("limit", String(options.limit));
+  if (options.messages !== undefined) {
+    params.set("messages", String(options.messages));
   }
   if (options.beforeSequence !== undefined) {
     params.set("before_sequence", String(options.beforeSequence));

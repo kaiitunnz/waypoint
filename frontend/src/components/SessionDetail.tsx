@@ -560,7 +560,17 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       (session.transport === "claude_cli" || session.transport === "codex_app_server"),
   );
   const dormantReattach = sessionExited && reattachable;
-  const composerDisabled = sessionExited && !reattachable;
+  // Block submission until the session record resolves — the parent renders
+  // ReplyComposer eagerly to keep layout stable, so without this guard a fast
+  // typist could fire requests against an unresolved session view.
+  const composerDisabled = !session || (sessionExited && !reattachable);
+  const composerPlaceholder = !session
+    ? "Loading session…"
+    : dormantReattach
+      ? "Session has exited — send a message to reattach…"
+      : composerDisabled
+        ? "Session has exited — composer disabled."
+        : "Reply to the agent…";
   // Tmux's Resume control only makes sense while the pane is alive; once the
   // session has exited there is nothing to resume into.
   const canResume = Boolean(
@@ -731,6 +741,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         canTerminate={Boolean(session && !sessionExited)}
         disabled={composerDisabled}
         dormant={dormantReattach}
+        placeholder={composerPlaceholder}
         agentBusy={agentBusy}
         modeBusy={modeBusy}
         modelBusy={modelBusy}
@@ -761,6 +772,7 @@ interface ReplyComposerProps {
   canTerminate: boolean;
   disabled: boolean;
   dormant: boolean;
+  placeholder: string;
   modeBusy: boolean;
   modelBusy: boolean;
   modelOptions: BackendModelOption[];
@@ -787,6 +799,7 @@ const ReplyComposer = memo(function ReplyComposer({
   canTerminate,
   disabled,
   dormant,
+  placeholder,
   modeBusy,
   modelBusy,
   modelOptions,
@@ -1193,13 +1206,7 @@ const ReplyComposer = memo(function ReplyComposer({
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleDraftKeyDown}
           disabled={disabled}
-          placeholder={
-            dormant
-              ? "Session has exited — send a message to reattach…"
-              : disabled
-                ? "Session has exited — composer disabled."
-                : "Reply to the agent…"
-          }
+          placeholder={placeholder}
           aria-label="Reply"
         />
         {suggestionsOpen ? (

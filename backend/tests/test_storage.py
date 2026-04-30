@@ -349,6 +349,31 @@ def test_list_events_by_message_count_before_sequence_returns_older_window(
     assert [event.sequence for event in page] == [3, 4]
 
 
+def test_list_events_by_message_count_caps_anchorless_pages(tmp_path) -> None:
+    # Sessions with no anchor events at all (tmux raw_terminal_chunk
+    # streams, system_note-only history after a cold restart) would
+    # otherwise pull the entire transcript per page since nothing
+    # increments the message counter. The hard event cap keeps payload
+    # bounded and surfaces ``has_more`` so the caller can paginate.
+    storage, now = _seed_session(tmp_path)
+    for i in range(2500):
+        _append(
+            storage,
+            "sess",
+            sequence=i + 1,
+            kind=EventKind.SYSTEM_NOTE,
+            text=f"note-{i}",
+            ts=now + timedelta(seconds=i),
+        )
+    page = storage.list_events_by_message_count("sess", message_limit=20)
+    assert len(page) == 2000  # _MAX_EVENTS_PER_PAGE
+    # Cap was hit walking DESC from sequence 2500; the page covers the
+    # 2000 newest events (501..2500 in ASC order).
+    assert page[0].sequence == 501
+    assert page[-1].sequence == 2500
+    assert storage.has_events_before_sequence("sess", page[0].sequence) is True
+
+
 def test_has_events_before_sequence(tmp_path) -> None:
     storage, now = _seed_session(tmp_path)
     for i in range(3):

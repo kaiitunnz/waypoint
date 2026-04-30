@@ -35,6 +35,14 @@ _ANCHOR_KINDS: frozenset[EventKind] = frozenset(
     }
 )
 
+# Hard cap on raw events returned by ``list_events_by_message_count``. The
+# anchor-budget walk would otherwise scan arbitrarily far when a session
+# has no anchor events at all (tmux raw_terminal_chunk stream, history
+# of just system_notes after a restart, etc.) since nothing increments
+# the message counter. Capping here keeps the page payload bounded; the
+# caller still gets ``has_more=True`` and can paginate further.
+_MAX_EVENTS_PER_PAGE: int = 2000
+
 
 def _is_message_anchor(event: EventRecord) -> bool:
     return event.kind in _ANCHOR_KINDS
@@ -367,6 +375,8 @@ class Storage:
                         seen_anchors.add(next_key)
                     current_anchor = next_key
             collected.append(event)
+            if len(collected) >= _MAX_EVENTS_PER_PAGE:
+                break
         collected.reverse()
         return collected
 

@@ -103,6 +103,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [effortBusy, setEffortBusy] = useState(false);
   const [hasOlderEvents, setHasOlderEvents] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  // Tracks the smallest raw sequence ever received from the server. Distinct
+  // from `events[0].sequence` because `mergeEvents` advances a coalesced
+  // item's sequence to the *last* delta — using that as a cursor would
+  // re-fetch every earlier delta of the same logical message. We compute
+  // this from the raw payload before coalescing.
+  const [oldestRawSequence, setOldestRawSequence] = useState<number | null>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
   const nearBottomRef = useRef(true);
   const pendingEventsRef = useRef<EventRecord[]>([]);
@@ -285,11 +291,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   );
 
   const loadOlderEvents = useCallback(async () => {
-    if (loadingOlder || !hasOlderEvents || events.length === 0) {
-      return;
-    }
-    const oldestSequence = events[0]?.sequence;
-    if (oldestSequence === undefined) {
+    if (loadingOlder || !hasOlderEvents || oldestRawSequence === null) {
       return;
     }
     setLoadingOlder(true);
@@ -301,15 +303,21 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     const beforeScrollY = window.scrollY;
     try {
       const page = await fetchEvents(host, token, sessionId, {
-        beforeSequence: oldestSequence,
+        beforeSequence: oldestRawSequence,
       });
       if (page.events.length === 0) {
         setHasOlderEvents(false);
         return;
       }
       const sanitized = page.events.map(sanitizeEvent);
-      setEvents((current) => mergeOlderEvents(current, sanitized));
+      setEvents((current) => foldOlderEvents(current, sanitized));
       setHasOlderEvents(page.has_more);
+      const incomingMin = minRawSequence(sanitized);
+      if (incomingMin !== null) {
+        setOldestRawSequence((current) =>
+          current === null ? incomingMin : Math.min(current, incomingMin),
+        );
+      }
       // Two rAF ticks: the first lets React commit, the second waits for
       // layout to flush so scrollHeight reflects the new transcript.
       window.requestAnimationFrame(() => {
@@ -332,7 +340,15 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     } finally {
       setLoadingOlder(false);
     }
-  }, [events, handleAuthFailure, hasOlderEvents, host, loadingOlder, sessionId, token]);
+  }, [
+    handleAuthFailure,
+    hasOlderEvents,
+    host,
+    loadingOlder,
+    oldestRawSequence,
+    sessionId,
+    token,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -347,11 +363,14 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           return;
         }
         setSession(loadedSession);
-        const coalesced = loadedPage.events
-          .map(sanitizeEvent)
-          .reduce<EventRecord[]>((acc, event) => mergeEvents(acc, event), []);
+        const sanitized = loadedPage.events.map(sanitizeEvent);
+        const coalesced = sanitized.reduce<EventRecord[]>(
+          (acc, event) => mergeEvents(acc, event),
+          [],
+        );
         setEvents(coalesced);
         setHasOlderEvents(loadedPage.has_more);
+        setOldestRawSequence(minRawSequence(sanitized));
         setSnapshot(stripAnsi(loadedSnapshot));
       } catch (loadError) {
         if (active) {
@@ -1377,27 +1396,85 @@ const ReplyComposer = memo(function ReplyComposer({
   );
 });
 
-function mergeOlderEvents(
+function minRawSequence(events: EventRecord[]): number | null {
+  let min: number | null = null;
+  for (const event of events) {
+    if (min === null || event.sequence < min) {
+      min = event.sequence;
+    }
+  }
+  return min;
+}
+
+function foldOlderEvents(
   current: EventRecord[],
   older: EventRecord[],
 ): EventRecord[] {
-  // The "load older" payload arrives in ascending order and sits entirely
-  // before `current`. Filter against the existing window's sequence/id set
-  // to defend against a race with WebSocket-delivered duplicates (an event
-  // emitted right at the boundary could appear in both fetches), then
-  // prepend.
+  // `older` arrives ascending and sits entirely before `current` in
+  // sequence space. The naive prepend is wrong for streamed items: a
+  // logical agent_output / tool_result that started before the current
+  // window and was already coalesced must not split into separate cards.
+  // Fold older deltas into the matching item by item_id (text prepended
+  // in sequence order), and only prepend events that don't match anything
+  // currently visible. Defensive id/sequence dedupe handles WebSocket
+  // races at the page boundary.
   const seenIds = new Set<number>();
   const seenSequences = new Set<number>();
   for (const event of current) {
     if (typeof event.id === "number") seenIds.add(event.id);
     seenSequences.add(event.sequence);
   }
-  const deduped = older.filter((event) => {
-    if (typeof event.id === "number" && seenIds.has(event.id)) return false;
-    if (seenSequences.has(event.sequence)) return false;
-    return true;
-  });
-  return [...deduped, ...current];
+  // Map of `${kind}:${item_id}` → index in `current`. Used to fold older
+  // deltas into the existing merged entry instead of prepending them.
+  const currentItemIndex = new Map<string, number>();
+  for (let i = 0; i < current.length; i += 1) {
+    const event = current[i];
+    if (event.kind !== "agent_output" && event.kind !== "tool_result") continue;
+    const itemId = readItemId(event);
+    if (!itemId) continue;
+    currentItemIndex.set(`${event.kind}:${itemId}`, i);
+  }
+  // Accumulate text to prepend to each affected current entry, keyed by index.
+  const prependedText = new Map<number, string>();
+  // Older events that don't fold into a current item form their own list,
+  // coalesced amongst themselves via the standard mergeEvents (forward pass
+  // is correct here because they are sequence-ascending and all sit before
+  // the current window, so no item_id collision with `current` is possible
+  // by construction of `currentItemIndex`).
+  let standalone: EventRecord[] = [];
+  for (const event of older) {
+    if (typeof event.id === "number" && seenIds.has(event.id)) continue;
+    if (seenSequences.has(event.sequence)) continue;
+    const itemId = readItemId(event);
+    if ((event.kind === "agent_output" || event.kind === "tool_result") && itemId) {
+      const targetIdx = currentItemIndex.get(`${event.kind}:${itemId}`);
+      if (targetIdx !== undefined) {
+        const accumulator = prependedText.get(targetIdx) ?? "";
+        prependedText.set(targetIdx, accumulator + event.text);
+        continue;
+      }
+    }
+    standalone = mergeEvents(standalone, event);
+  }
+  let next = current;
+  if (prependedText.size > 0) {
+    next = current.map((event, index) => {
+      const prepend = prependedText.get(index);
+      if (prepend === undefined) return event;
+      return prependOlderText(event, prepend);
+    });
+  }
+  return [...standalone, ...next];
+}
+
+function prependOlderText(existing: EventRecord, olderText: string): EventRecord {
+  // todo_list snapshots are state-replacing rather than streaming; the
+  // newer (existing) snapshot is authoritative — older snapshots add no
+  // information and must not be concatenated.
+  if (isTodoListEvent(existing)) {
+    return existing;
+  }
+  return { ...existing, text: `${olderText}${existing.text}` };
 }
 
 function mergeEvents(current: EventRecord[], incoming: EventRecord): EventRecord[] {

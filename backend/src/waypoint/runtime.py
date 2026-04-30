@@ -15,6 +15,11 @@ from fastapi import HTTPException, status
 
 from waypoint.claude_cli import ClaudeCliAdapter, ClaudeCliError
 from waypoint.claude_runtime import ClaudeHookBundle
+from waypoint.claude_threads import (
+    ClaudeThreadInfo,
+    find_local_claude_thread,
+    list_local_claude_threads,
+)
 from waypoint.codex_app_server import (
     ClientFactory,
     CodexAppServerAdapter,
@@ -26,6 +31,8 @@ from waypoint.normalizer import TerminalNormalizer
 from waypoint.scheduler import Scheduler, validate_permission_mode_for_backend
 from waypoint.schemas import (
     Backend,
+    ClaudeThreadImportRequest,
+    ClaudeThreadSummary,
     CodexThreadImportRequest,
     CodexThreadSummary,
     EventKind,
@@ -401,6 +408,129 @@ class SessionRuntime:
             self._codex_import_message(cwd, launch_target),
             status=SessionStatus.IDLE,
             metadata={"imported_thread_id": thread.id},
+        )
+        return self.get_session(session.id)
+
+    async def list_importable_claude_threads(
+        self, launch_target_id: str | None = None
+    ) -> list[ClaudeThreadSummary]:
+        # Remote SSH targets are out of scope: enumeration would require
+        # streaming the remote ~/.claude/projects/ tree and reading each
+        # transcript over SSH. Return an empty list so the UI degrades
+        # gracefully instead of surfacing an error.
+        if launch_target_id:
+            self._resolve_launch_target(launch_target_id, Backend.CLAUDE_CODE)
+            return []
+        if self.claude is None:
+            return []
+        imported = {
+            session.thread_id
+            for session in self.storage.list_sessions()
+            if session.backend == Backend.CLAUDE_CODE
+            and session.launch_target_id is None
+            and session.thread_id
+        }
+        infos = await asyncio.to_thread(list_local_claude_threads)
+        return [
+            self._claude_thread_summary(info)
+            for info in infos
+            if info.id not in imported
+        ]
+
+    async def import_claude_thread(
+        self, request: ClaudeThreadImportRequest
+    ) -> SessionRecord:
+        if request.launch_target_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="claude thread import is local-only",
+            )
+        if self.claude is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="claude adapter is not initialized",
+            )
+        existing = self._find_imported_claude_session(request.thread_id)
+        if existing is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="claude thread already imported",
+            )
+        info = await asyncio.to_thread(find_local_claude_thread, request.thread_id)
+        if info is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="claude thread not found",
+            )
+        cwd_path = Path(info.cwd).expanduser()
+        if not cwd_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"claude thread cwd {info.cwd} no longer exists; " "cannot resume"
+                ),
+            )
+        cwd = str(cwd_path)
+        session_id = self._generate_session_id(Backend.CLAUDE_CODE)
+        session_dir = self._session_dir(session_id)
+        raw_log = session_dir / "raw.log"
+        structured_log = session_dir / "events.jsonl"
+        raw_log.touch(exist_ok=True)
+        now = datetime.now(UTC)
+        session = SessionRecord(
+            id=session_id,
+            backend=Backend.CLAUDE_CODE,
+            source=SessionSource.MANAGED,
+            transport=SessionTransport.CLAUDE_CLI,
+            title=info.title,
+            cwd=cwd,
+            launch_target_id=None,
+            repo_name=info.repo_name,
+            branch=info.branch,
+            status=SessionStatus.STARTING,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            thread_id=info.id,
+            raw_log_path=str(raw_log),
+            structured_log_path=str(structured_log),
+            permission_mode="default",
+        )
+        self.storage.create_session(session)
+        try:
+            await self.claude.restore_session(
+                session.id,
+                cwd,
+                info.id,
+                self._claude_launch_factory(session.launch_target_id),
+                permission_mode=session.permission_mode,
+                model=session.model,
+                effort=session.effort,
+            )
+        except (ClaudeCliError, FileNotFoundError, OSError) as exc:
+            log.exception(
+                "claude import failed",
+                extra={
+                    "session_id": session.id,
+                    "claude_session_id": info.id,
+                },
+            )
+            self.storage.update_session(session.id, status=SessionStatus.ERROR)
+            await self._record_system_event(
+                session.id,
+                f"Claude thread import failed: {exc}",
+                status=SessionStatus.ERROR,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"failed to import claude thread: {exc}",
+            ) from exc
+        self.storage.update_session(session.id, status=SessionStatus.IDLE)
+        await self._record_system_event(
+            session.id,
+            f"Imported stored Claude thread ({cwd})",
+            status=SessionStatus.IDLE,
+            metadata={"imported_thread_id": info.id},
         )
         return self.get_session(session.id)
 
@@ -1324,6 +1454,29 @@ class SessionRuntime:
     def _codex_thread_cwd(self, thread: Any) -> str:
         cwd = getattr(thread, "cwd", "")
         return getattr(cwd, "root", cwd)
+
+    def _claude_thread_summary(self, info: ClaudeThreadInfo) -> ClaudeThreadSummary:
+        return ClaudeThreadSummary(
+            id=info.id,
+            title=info.title,
+            cwd=info.cwd,
+            repo_name=info.repo_name,
+            branch=info.branch,
+            preview=info.preview,
+            created_at=info.created_at,
+            updated_at=info.updated_at,
+        )
+
+    def _find_imported_claude_session(self, thread_id: str) -> SessionRecord | None:
+        for session in self.storage.list_sessions():
+            if session.backend != Backend.CLAUDE_CODE:
+                continue
+            if session.launch_target_id is not None:
+                continue
+            if session.thread_id != thread_id:
+                continue
+            return session
+        return None
 
     def _claude_launch_factory(self, launch_target_id: str | None):
         launch_target = self._find_launch_target(launch_target_id)

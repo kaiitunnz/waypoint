@@ -22,6 +22,7 @@ from waypoint.config import Settings, load_settings
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     Backend,
+    ClaudeThreadImportRequest,
     CodexThreadImportRequest,
     LoginRequest,
     MeResponse,
@@ -162,6 +163,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         session = await context.runtime.import_codex_thread(request)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.get("/api/claude/threads")
+    async def list_claude_threads(
+        _: Annotated[str, Depends(token_dependency())],
+        launch_target_id: Annotated[str | None, Query()] = None,
+    ) -> Any:
+        threads = [
+            thread.model_dump(mode="json")
+            for thread in await context.runtime.list_importable_claude_threads(
+                launch_target_id
+            )
+        ]
+        return {"threads": threads}
+
+    @app.post("/api/sessions/import-claude")
+    async def import_claude_thread(
+        request: ClaudeThreadImportRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.import_claude_thread(request)
         return {"session": session.model_dump(mode="json")}
 
     @app.get("/api/sessions/{session_id}")

@@ -4,10 +4,12 @@ from typing import Any, cast
 
 import pytest
 
+from waypoint.claude_threads import ClaudeThreadInfo
 from waypoint.config import Settings
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     Backend,
+    ClaudeThreadImportRequest,
     CodexThreadImportRequest,
     EventKind,
     SessionApprovalRequest,
@@ -674,6 +676,187 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
     events = storage.list_events(session.id)
     assert events[-1].kind == EventKind.SYSTEM_NOTE
     assert "Imported stored Codex thread via SSH target Devbox" in events[-1].text
+
+
+def _make_claude_thread_info(**overrides: Any) -> ClaudeThreadInfo:
+    now = datetime.now(UTC)
+    return ClaudeThreadInfo(
+        id=overrides.pop("id", "11111111-1111-4111-8111-111111111111"),
+        cwd=overrides.pop("cwd", "/tmp/project"),
+        title=overrides.pop("title", "Investigation"),
+        branch=overrides.pop("branch", "main"),
+        repo_name=overrides.pop("repo_name", "project"),
+        preview=overrides.pop("preview", "Pick up where we left off"),
+        created_at=overrides.pop("created_at", now),
+        updated_at=overrides.pop("updated_at", now),
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_importable_claude_threads_filters_existing_session(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    runtime.claude = cast(Any, FakeClaudeAdapter())
+    storage.create_session(
+        make_session(
+            settings,
+            id="claude-existing",
+            backend=Backend.CLAUDE_CODE,
+            transport=SessionTransport.CLAUDE_CLI,
+            thread_id="11111111-1111-4111-8111-111111111111",
+        )
+    )
+    info_existing = _make_claude_thread_info(
+        id="11111111-1111-4111-8111-111111111111", title="Existing"
+    )
+    info_new = _make_claude_thread_info(
+        id="22222222-2222-4222-8222-222222222222",
+        title="Fresh thread",
+        preview="Hello",
+        cwd="/tmp/other-project",
+        repo_name="other-project",
+        branch="feature/new",
+    )
+
+    monkeypatch.setattr(
+        "waypoint.runtime.list_local_claude_threads",
+        lambda: [info_existing, info_new],
+    )
+
+    threads = await runtime.list_importable_claude_threads()
+
+    assert [thread.id for thread in threads] == ["22222222-2222-4222-8222-222222222222"]
+    assert threads[0].title == "Fresh thread"
+    assert threads[0].cwd == "/tmp/other-project"
+    assert threads[0].branch == "feature/new"
+
+
+@pytest.mark.asyncio
+async def test_list_importable_claude_threads_remote_target_returns_empty(
+    monkeypatch, tmp_path
+) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        ssh_targets=[
+            SshLaunchTargetConfig(
+                id="devbox",
+                name="Devbox",
+                ssh_destination="dev@example.com",
+                supported_backends=[Backend.CLAUDE_CODE],
+                default_cwd="~/workspace",
+            )
+        ],
+    )
+    settings.ensure_dirs()
+    storage = Storage(settings.database_path)
+    runtime = SessionRuntime(settings, storage)
+    runtime.claude = cast(Any, FakeClaudeAdapter())
+
+    def explode() -> list[ClaudeThreadInfo]:
+        raise AssertionError("local enumeration must not run for remote targets")
+
+    monkeypatch.setattr("waypoint.runtime.list_local_claude_threads", explode)
+
+    assert await runtime.list_importable_claude_threads("devbox") == []
+
+
+@pytest.mark.asyncio
+async def test_import_claude_thread_creates_session_and_resumes(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    runtime.claude = cast(Any, fake)
+    info = _make_claude_thread_info(
+        id="33333333-3333-4333-8333-333333333333",
+        cwd=str(tmp_path),
+        title="Resumed thread",
+        branch="main",
+        repo_name=tmp_path.name,
+        preview="Pick up where we left off",
+    )
+
+    monkeypatch.setattr(
+        "waypoint.runtime.find_local_claude_thread",
+        lambda thread_id: info if thread_id == info.id else None,
+    )
+
+    session = await runtime.import_claude_thread(
+        ClaudeThreadImportRequest(thread_id=info.id)
+    )
+
+    assert session.transport == SessionTransport.CLAUDE_CLI
+    assert session.backend == Backend.CLAUDE_CODE
+    assert session.thread_id == info.id
+    assert session.cwd == str(tmp_path)
+    assert session.branch == "main"
+    assert session.status == SessionStatus.IDLE
+    assert fake.restore_calls == [
+        (
+            session.id,
+            str(tmp_path),
+            info.id,
+            None,
+            "default",
+            None,
+            None,
+        )
+    ]
+    events = storage.list_events(session.id)
+    assert events[-1].kind == EventKind.SYSTEM_NOTE
+    assert "Imported stored Claude thread" in events[-1].text
+
+
+@pytest.mark.asyncio
+async def test_import_claude_thread_rejects_remote_target(
+    monkeypatch, tmp_path
+) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        ssh_targets=[
+            SshLaunchTargetConfig(
+                id="devbox",
+                name="Devbox",
+                ssh_destination="dev@example.com",
+                supported_backends=[Backend.CLAUDE_CODE],
+                default_cwd="~/workspace",
+            )
+        ],
+    )
+    settings.ensure_dirs()
+    storage = Storage(settings.database_path)
+    runtime = SessionRuntime(settings, storage)
+    runtime.claude = cast(Any, FakeClaudeAdapter())
+
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc_info:
+        await runtime.import_claude_thread(
+            ClaudeThreadImportRequest(
+                thread_id="11111111-1111-4111-8111-111111111111",
+                launch_target_id="devbox",
+            )
+        )
+    assert exc_info.value.status_code == 400
+    assert "local-only" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_import_claude_thread_missing_returns_404(monkeypatch, tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    runtime.claude = cast(Any, FakeClaudeAdapter())
+    monkeypatch.setattr(
+        "waypoint.runtime.find_local_claude_thread", lambda _thread_id: None
+    )
+
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc_info:
+        await runtime.import_claude_thread(
+            ClaudeThreadImportRequest(thread_id="11111111-1111-4111-8111-111111111111")
+        )
+    assert exc_info.value.status_code == 404
 
 
 @pytest.mark.asyncio

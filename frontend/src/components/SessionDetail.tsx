@@ -786,6 +786,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  const [tuneOpen, setTuneOpen] = useState(false);
   // Pending effort for backends that need a session restart to apply (Claude)
   // — staged here until the user confirms via the Apply button. `null` means
   // no pending change.
@@ -793,6 +794,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composerRef = useRef<HTMLElement | null>(null);
   const overflowRef = useRef<HTMLDivElement | null>(null);
+  const tuneRef = useRef<HTMLDivElement | null>(null);
 
   // Built-in slash commands are intercepted on the backend only for structured
   // transports (see runtime._handle_builtin_command); skip suggestions on tmux.
@@ -866,6 +868,28 @@ const ReplyComposer = memo(function ReplyComposer({
       window.removeEventListener("keydown", onKey);
     };
   }, [overflowOpen]);
+
+  useEffect(() => {
+    if (!tuneOpen) {
+      return;
+    }
+    function onPointer(event: PointerEvent) {
+      if (!tuneRef.current) return;
+      if (tuneRef.current.contains(event.target as Node)) return;
+      setTuneOpen(false);
+    }
+    function onKey(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setTuneOpen(false);
+      }
+    }
+    window.addEventListener("pointerdown", onPointer);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onPointer);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [tuneOpen]);
 
   function applySuggestion(index: number) {
     const chosen = suggestions[index];
@@ -992,78 +1016,133 @@ const ReplyComposer = memo(function ReplyComposer({
     if (pendingEffort === null) return;
     const value = pendingEffort;
     setPendingEffort(null);
+    setTuneOpen(false);
     await onEffortChange(value);
   };
+
+  const tuneVisible = modeOptions.length > 0 || hasModelPicker || hasEffortPicker;
+  const tuneSummary = (() => {
+    const parts: string[] = [];
+    if (modeOptions.length > 0) {
+      const matched = modeOptions.find(
+        (option) => option.value === (permissionMode ?? "default"),
+      );
+      parts.push(matched?.label ?? "Default");
+    }
+    if (hasModelPicker) {
+      const matched = modelEntries.find((option) => option.id === (currentModel ?? ""));
+      parts.push(matched?.label ?? (currentModel || "Default"));
+    }
+    if (hasEffortPicker) {
+      parts.push(currentEffort ? EFFORT_LABEL[currentEffort] ?? currentEffort : "Default");
+    }
+    return parts.join(" · ") || "Settings";
+  })();
 
   return (
     <section className="composer" ref={composerRef}>
       <div className="composer-toprow">
-        {modeOptions.length > 0 ? (
-          <label className="composer-mode">
-            <span>mode</span>
-            <select
-              value={permissionMode ?? "default"}
-              onChange={(event) => void onModeChange(event.target.value)}
-              disabled={modeBusy || disabled}
-              aria-label="Permission mode"
+        {tuneVisible ? (
+          <div className="composer-tune" ref={tuneRef}>
+            <button
+              type="button"
+              className={`composer-tune-trigger ${tuneOpen ? "open" : ""}`}
+              aria-haspopup="dialog"
+              aria-expanded={tuneOpen}
+              onClick={() => setTuneOpen((open) => !open)}
             >
-              {modeOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-        {hasModelPicker ? (
-          <label className="composer-model">
-            <span>model</span>
-            <select
-              value={currentModel ?? ""}
-              onChange={(event) => void onModelChange(event.target.value)}
-              disabled={modelBusy || disabled}
-              aria-label="Model"
-            >
-              <option value="">Default</option>
-              {modelEntries.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-        {hasEffortPicker ? (
-          <label className="composer-effort">
-            <span>effort</span>
-            <select
-              value={effortDisplayValue}
-              onChange={(event) => handleEffortSelect(event.target.value)}
-              disabled={effortBusy || disabled}
-              aria-label="Reasoning effort"
-            >
-              <option value="">Default</option>
-              {effortOptions.map((option) => (
-                <option key={option} value={option}>
-                  {EFFORT_LABEL[option] ?? option}
-                </option>
-              ))}
-              {currentEffort && !effortOptions.includes(currentEffort) ? (
-                <option value={currentEffort}>{currentEffort}</option>
+              <span className="composer-tune-glyph" aria-hidden>
+                ⚙
+              </span>
+              <span className="composer-tune-summary">{tuneSummary}</span>
+              {effortPendingDiffers ? (
+                <span
+                  className="composer-tune-pending"
+                  aria-label="Pending change"
+                  title="Pending change waits for Apply"
+                />
               ) : null}
-            </select>
-          </label>
-        ) : null}
-        {effortPendingDiffers ? (
-          <button
-            type="button"
-            className="composer-effort-confirm"
-            onClick={() => void applyPendingEffort()}
-            disabled={effortBusy}
-            title="Restart the Claude session with the new effort level"
-          >
-            {effortBusy ? "Restarting…" : "Apply (restarts session)"}
-          </button>
+            </button>
+            {tuneOpen ? (
+              <div
+                className="composer-tune-popover"
+                role="dialog"
+                aria-label="Session settings"
+              >
+                {modeOptions.length > 0 ? (
+                  <label className="composer-tune-field">
+                    <span>Permission mode</span>
+                    <select
+                      value={permissionMode ?? "default"}
+                      onChange={(event) => void onModeChange(event.target.value)}
+                      disabled={modeBusy || disabled}
+                    >
+                      {modeOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                {hasModelPicker ? (
+                  <label className="composer-tune-field">
+                    <span>Model</span>
+                    <select
+                      value={currentModel ?? ""}
+                      onChange={(event) => void onModelChange(event.target.value)}
+                      disabled={modelBusy || disabled}
+                    >
+                      <option value="">Default</option>
+                      {modelEntries.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                {hasEffortPicker ? (
+                  <label className="composer-tune-field">
+                    <span>Reasoning effort</span>
+                    <select
+                      value={effortDisplayValue}
+                      onChange={(event) => handleEffortSelect(event.target.value)}
+                      disabled={effortBusy || disabled}
+                    >
+                      <option value="">Default</option>
+                      {effortOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {EFFORT_LABEL[option] ?? option}
+                        </option>
+                      ))}
+                      {currentEffort && !effortOptions.includes(currentEffort) ? (
+                        <option value={currentEffort}>{currentEffort}</option>
+                      ) : null}
+                    </select>
+                  </label>
+                ) : null}
+                {effortPendingDiffers && pendingEffort ? (
+                  <div className="composer-tune-restart">
+                    <p>
+                      Restart Claude with{" "}
+                      <strong>{EFFORT_LABEL[pendingEffort] ?? pendingEffort}</strong> effort?
+                      The current turn is interrupted and the session resumes at the new
+                      level.
+                    </p>
+                    <button
+                      type="button"
+                      className="composer-tune-restart-apply"
+                      onClick={() => void applyPendingEffort()}
+                      disabled={effortBusy}
+                    >
+                      {effortBusy ? "Restarting…" : "Apply restart"}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         ) : null}
         <span className="composer-shortcut" aria-hidden>
           <kbd>{shortcutKey}</kbd>

@@ -1780,21 +1780,94 @@ details.tool-disclosure[open] .tool-glyph.todo {
   margin-left: auto;
 }
 
-.composer-mode,
-.composer-model,
-.composer-effort {
+.composer-tune {
+  position: relative;
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+
+.composer-tune-trigger {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 8px 5px 12px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 5px 12px 5px 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   background: rgba(8, 11, 16, 0.5);
+  color: var(--accent-strong);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
 }
 
-.composer-mode > span,
-.composer-model > span,
-.composer-effort > span {
+.composer-tune-trigger:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: rgba(28, 33, 44, 0.6);
+  color: var(--text-strong);
+}
+
+.composer-tune-trigger.open {
+  border-color: var(--line-strong);
+  background: rgba(28, 33, 44, 0.8);
+  color: var(--text-strong);
+}
+
+.composer-tune-trigger:focus-visible {
+  outline: 2px solid rgba(200, 169, 106, 0.45);
+  outline-offset: 2px;
+}
+
+.composer-tune-glyph {
+  flex: 0 0 auto;
+  font-size: 0.85rem;
+  color: var(--muted-soft);
+}
+
+.composer-tune-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-tune-pending {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 0 2px rgba(217, 154, 74, 0.18);
+}
+
+.composer-tune-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: min(320px, calc(100vw - 32px));
+  padding: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: rgba(14, 17, 24, 0.98);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(14px);
+  display: grid;
+  gap: 12px;
+  z-index: 30;
+}
+
+.composer-tune-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.composer-tune-field > span {
   font-family: var(--font-mono);
   font-size: 0.66rem;
   letter-spacing: 0.18em;
@@ -1802,52 +1875,69 @@ details.tool-disclosure[open] .tool-glyph.todo {
   color: var(--muted-soft);
 }
 
-.composer-mode select,
-.composer-model select,
-.composer-effort select {
-  border: 0;
-  background: transparent;
+.composer-tune-field select {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(8, 11, 16, 0.65);
   color: var(--accent-strong);
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   letter-spacing: 0.02em;
-  padding: 2px 4px;
   cursor: pointer;
 }
 
-.composer-mode select:disabled,
-.composer-model select:disabled,
-.composer-effort select:disabled {
+.composer-tune-field select:disabled {
   color: var(--muted-soft);
   cursor: progress;
 }
 
-.composer-mode select:focus-visible,
-.composer-model select:focus-visible,
-.composer-effort select:focus-visible {
+.composer-tune-field select:focus-visible {
   outline: 2px solid rgba(200, 169, 106, 0.45);
-  outline-offset: 2px;
-  border-radius: 4px;
+  outline-offset: 1px;
 }
 
-.composer-effort-confirm {
+.composer-tune-restart {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(217, 154, 74, 0.32);
+  border-radius: 6px;
+  background: rgba(217, 154, 74, 0.08);
+}
+
+.composer-tune-restart p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.composer-tune-restart strong {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.composer-tune-restart-apply {
+  justify-self: start;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 0.74rem;
   letter-spacing: 0.04em;
-  padding: 5px 10px;
+  padding: 7px 12px;
   border-radius: var(--radius-pill);
-  border: 1px solid rgba(200, 169, 106, 0.45);
-  background: rgba(200, 169, 106, 0.18);
-  color: var(--warn, var(--accent));
+  border: 1px solid rgba(217, 154, 74, 0.55);
+  background: rgba(217, 154, 74, 0.22);
+  color: var(--warn);
   cursor: pointer;
   white-space: nowrap;
 }
 
-.composer-effort-confirm:hover:not(:disabled) {
-  background: rgba(200, 169, 106, 0.28);
+.composer-tune-restart-apply:hover:not(:disabled) {
+  background: rgba(217, 154, 74, 0.32);
 }
 
-.composer-effort-confirm:disabled {
+.composer-tune-restart-apply:disabled {
   opacity: 0.7;
   cursor: progress;
 }
@@ -2799,30 +2889,39 @@ details.tool-disclosure[open] .tool-glyph.todo {
     gap: 6px;
   }
 
-  .composer-mode,
-  .composer-model,
-  .composer-effort {
-    padding: 3px 6px 3px 10px;
+  .composer-tune-trigger {
+    font-size: 0.72rem;
+    padding: 4px 10px 4px 8px;
     gap: 6px;
   }
 
-  .composer-mode > span,
-  .composer-model > span,
-  .composer-effort > span {
+  .composer-tune-glyph {
+    font-size: 0.78rem;
+  }
+
+  .composer-tune-popover {
+    width: min(320px, calc(100vw - 24px));
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .composer-tune-field > span {
     font-size: 0.6rem;
     letter-spacing: 0.14em;
   }
 
-  .composer-mode select,
-  .composer-model select,
-  .composer-effort select {
-    font-size: 0.74rem;
-    padding: 1px 2px;
+  .composer-tune-field select {
+    font-size: 0.78rem;
+    padding: 6px 8px;
   }
 
-  .composer-effort-confirm {
-    font-size: 0.66rem;
-    padding: 4px 8px;
+  .composer-tune-restart p {
+    font-size: 0.74rem;
+  }
+
+  .composer-tune-restart-apply {
+    font-size: 0.68rem;
+    padding: 6px 10px;
   }
 
   .composer-shortcut {

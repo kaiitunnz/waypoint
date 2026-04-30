@@ -1411,21 +1411,21 @@ function foldOlderEvents(
   older: EventRecord[],
 ): EventRecord[] {
   // `older` arrives ascending and sits entirely before `current` in
-  // sequence space. The naive prepend is wrong for streamed items: a
-  // logical agent_output / tool_result that started before the current
-  // window and was already coalesced must not split into separate cards.
-  // Fold older deltas into the matching item by item_id (text prepended
-  // in sequence order), and only prepend events that don't match anything
-  // currently visible. Defensive id/sequence dedupe handles WebSocket
-  // races at the page boundary.
+  // sequence space. We must replicate what the forward merge would have
+  // produced if the events had originally arrived in true sequence order
+  // — naive text prepending breaks tool_result snapshots (a final
+  // non-delta supersedes earlier deltas; mergeEventText handles this,
+  // but only when we run it in the right direction). So: build a
+  // per-target accumulator by replaying mergeEvents over the older
+  // events for that item_id, then merge the accumulator with the
+  // matching current entry exactly as if the accumulator had arrived
+  // first and the current entry second.
   const seenIds = new Set<number>();
   const seenSequences = new Set<number>();
   for (const event of current) {
     if (typeof event.id === "number") seenIds.add(event.id);
     seenSequences.add(event.sequence);
   }
-  // Map of `${kind}:${item_id}` → index in `current`. Used to fold older
-  // deltas into the existing merged entry instead of prepending them.
   const currentItemIndex = new Map<string, number>();
   for (let i = 0; i < current.length; i += 1) {
     const event = current[i];
@@ -1434,13 +1434,12 @@ function foldOlderEvents(
     if (!itemId) continue;
     currentItemIndex.set(`${event.kind}:${itemId}`, i);
   }
-  // Accumulate text to prepend to each affected current entry, keyed by index.
-  const prependedText = new Map<number, string>();
-  // Older events that don't fold into a current item form their own list,
-  // coalesced amongst themselves via the standard mergeEvents (forward pass
-  // is correct here because they are sequence-ascending and all sit before
-  // the current window, so no item_id collision with `current` is possible
-  // by construction of `currentItemIndex`).
+  // For each target current index, the (single) accumulator EventRecord
+  // built up from older events sharing that item_id, in sequence order.
+  const accumulators = new Map<number, EventRecord>();
+  // Older events that don't fold into anything currently visible.
+  // Coalesced amongst themselves via mergeEvents — the forward pass is
+  // correct here because they are sequence-ascending.
   let standalone: EventRecord[] = [];
   for (const event of older) {
     if (typeof event.id === "number" && seenIds.has(event.id)) continue;
@@ -1449,32 +1448,37 @@ function foldOlderEvents(
     if ((event.kind === "agent_output" || event.kind === "tool_result") && itemId) {
       const targetIdx = currentItemIndex.get(`${event.kind}:${itemId}`);
       if (targetIdx !== undefined) {
-        const accumulator = prependedText.get(targetIdx) ?? "";
-        prependedText.set(targetIdx, accumulator + event.text);
+        const existing = accumulators.get(targetIdx);
+        if (existing === undefined) {
+          accumulators.set(targetIdx, event);
+        } else {
+          // Replay mergeEvents on a one-element array to get the same
+          // text/metadata combine the forward path would have produced.
+          const merged = mergeEvents([existing], event);
+          accumulators.set(targetIdx, merged[0]);
+        }
         continue;
       }
     }
     standalone = mergeEvents(standalone, event);
   }
   let next = current;
-  if (prependedText.size > 0) {
+  if (accumulators.size > 0) {
     next = current.map((event, index) => {
-      const prepend = prependedText.get(index);
-      if (prepend === undefined) return event;
-      return prependOlderText(event, prepend);
+      const acc = accumulators.get(index);
+      if (acc === undefined) return event;
+      // Final fold: accumulator (older) plays the role of "existing",
+      // the current entry plays the role of "incoming". This routes
+      // the merge through mergeEventText with the same arguments
+      // forward processing would have used, so all of its branches
+      // (snapshot supersedes deltas, todo_list state-replacement,
+      // delta append, newline separator for non-delta concat) keep
+      // working on the backward path.
+      const merged = mergeEvents([acc], event);
+      return merged[0];
     });
   }
   return [...standalone, ...next];
-}
-
-function prependOlderText(existing: EventRecord, olderText: string): EventRecord {
-  // todo_list snapshots are state-replacing rather than streaming; the
-  // newer (existing) snapshot is authoritative — older snapshots add no
-  // information and must not be concatenated.
-  if (isTodoListEvent(existing)) {
-    return existing;
-  }
-  return { ...existing, text: `${olderText}${existing.text}` };
 }
 
 function mergeEvents(current: EventRecord[], incoming: EventRecord): EventRecord[] {

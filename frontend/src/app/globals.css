@@ -524,20 +524,9 @@ pre {
   gap: 4px;
 }
 
-.resume-panel-titles h3 {
+.resume-panel-titles h3,
+.resume-panel-titles p {
   margin: 0;
-  font-family: var(--font-display);
-  font-weight: 500;
-  letter-spacing: 0.005em;
-}
-
-.resume-panel-subhead {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.06em;
-  text-transform: lowercase;
-  color: var(--muted-soft);
 }
 
 .resume-panel-filter {

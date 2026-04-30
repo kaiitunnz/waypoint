@@ -34,7 +34,9 @@ interface UnifiedThread {
 }
 
 const COLLAPSED_VISIBLE = 2;
-const PAGE_SIZE = 12;
+const PAGE_SIZE_DESKTOP = 8;
+const PAGE_SIZE_MOBILE = 5;
+const MOBILE_BREAKPOINT = "(max-width: 720px)";
 
 const BACKEND_MARK: Record<Backend, string> = {
   codex: "cdx",
@@ -100,7 +102,19 @@ export function ResumeThreadPanel({
   const [filterTouched, setFilterTouched] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_DESKTOP);
   const [importingId, setImportingId] = useState<string | null>(null);
+
+  // Tighter pagination on phones — 5 rows fits without forcing a long
+  // scroll inside an already-cramped viewport.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mql = window.matchMedia(MOBILE_BREAKPOINT);
+    const sync = () => setPageSize(mql.matches ? PAGE_SIZE_MOBILE : PAGE_SIZE_DESKTOP);
+    sync();
+    mql.addEventListener("change", sync);
+    return () => mql.removeEventListener("change", sync);
+  }, []);
 
   // Auto-follow the launch form's backend selection until the user
   // explicitly picks a chip; that lock stays for the session so the
@@ -117,15 +131,16 @@ export function ResumeThreadPanel({
     return allThreads.filter((t) => t.backend === filter);
   }, [allThreads, filter]);
 
-  // Page reset whenever the filter or thread set changes underneath us.
+  // Page reset whenever the filter, thread set, or page size changes
+  // underneath us (e.g. rotating phone landscape ⇄ portrait).
   useEffect(() => {
     setPage(1);
-  }, [filter, filteredThreads.length]);
+  }, [filter, filteredThreads.length, pageSize]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredThreads.length / PAGE_SIZE));
-  const pageStart = (page - 1) * PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(filteredThreads.length / pageSize));
+  const pageStart = (page - 1) * pageSize;
   const visibleThreads = expanded
-    ? filteredThreads.slice(pageStart, pageStart + PAGE_SIZE)
+    ? filteredThreads.slice(pageStart, pageStart + pageSize)
     : filteredThreads.slice(0, COLLAPSED_VISIBLE);
 
   const loading = codexLoading || claudeLoading;
@@ -156,7 +171,7 @@ export function ResumeThreadPanel({
       <div className="resume-panel-header">
         <div className="resume-panel-titles">
           <h3>Resume thread</h3>
-          <p className="meta resume-panel-subhead">{subhead}</p>
+          <p className="muted">{subhead}</p>
         </div>
         {dualBackend ? (
           <div
@@ -261,7 +276,7 @@ export function ResumeThreadPanel({
           {expanded && totalPages > 1 ? (
             <div className="import-thread-footer resume-thread-footer">
               <span>
-                {pageStart + 1}–{Math.min(filteredThreads.length, pageStart + PAGE_SIZE)} of {filteredThreads.length}
+                {pageStart + 1}–{Math.min(filteredThreads.length, pageStart + pageSize)} of {filteredThreads.length}
               </span>
               <div className="import-thread-pager">
                 <button

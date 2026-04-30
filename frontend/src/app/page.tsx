@@ -17,10 +17,12 @@ import {
   createSchedule as createScheduleRequest,
   createSession,
   deleteSession as deleteSessionRequest,
+  fetchClaudeThreads,
   fetchCodexThreads,
   fetchMe,
   fetchSchedules,
   fetchSessions,
+  importClaudeThread as importClaudeThreadRequest,
   importCodexThread as importCodexThreadRequest,
   isAuthError,
   login,
@@ -38,6 +40,7 @@ import {
 } from "@/lib/store";
 import {
   Backend,
+  ClaudeThreadSummary,
   CodexThreadSummary,
   LaunchTargetSummary,
   ScheduleCreateRequest,
@@ -66,6 +69,8 @@ export default function HomePage() {
   const [schedules, setSchedules] = useState<ScheduledSession[]>([]);
   const [codexThreads, setCodexThreads] = useState<CodexThreadSummary[]>([]);
   const [codexThreadsLoading, setCodexThreadsLoading] = useState(false);
+  const [claudeThreads, setClaudeThreads] = useState<ClaudeThreadSummary[]>([]);
+  const [claudeThreadsLoading, setClaudeThreadsLoading] = useState(false);
 
   const activeLaunchTarget =
     launchTargets.find((target) => target.id === activeLaunchTargetId) ?? null;
@@ -90,6 +95,8 @@ export default function HomePage() {
       setConnection("idle");
       setCodexThreads([]);
       setCodexThreadsLoading(false);
+      setClaudeThreads([]);
+      setClaudeThreadsLoading(false);
       return;
     }
     let active = true;
@@ -229,6 +236,56 @@ export default function HomePage() {
     };
   }, [activeLaunchTargetId, host, launchTargets, supportedBackends, token]);
 
+  useEffect(() => {
+    if (!host || !token) {
+      setClaudeThreads([]);
+      setClaudeThreadsLoading(false);
+      return;
+    }
+    if (
+      activeLaunchTargetId &&
+      !launchTargets.some((target) => target.id === activeLaunchTargetId)
+    ) {
+      return;
+    }
+    if (!supportedBackends.includes("claude_code")) {
+      setClaudeThreads([]);
+      setClaudeThreadsLoading(false);
+      return;
+    }
+    let active = true;
+    setClaudeThreadsLoading(true);
+    fetchClaudeThreads(host, token, activeLaunchTargetId || undefined)
+      .then((threads) => {
+        if (!active) {
+          return;
+        }
+        setClaudeThreads(threads);
+      })
+      .catch((fetchError) => {
+        if (!active) {
+          return;
+        }
+        if (isAuthError(fetchError)) {
+          resetAuthState("Session expired. Log in again.");
+          return;
+        }
+        setError(
+          fetchError instanceof Error
+            ? fetchError.message
+            : "failed to fetch claude threads",
+        );
+      })
+      .finally(() => {
+        if (active) {
+          setClaudeThreadsLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeLaunchTargetId, host, launchTargets, supportedBackends, token]);
+
   async function handleLogin(nextHost: string, password: string) {
     const nextToken = await login(nextHost, password);
     writeHost(nextHost);
@@ -323,6 +380,33 @@ export default function HomePage() {
     }
   }
 
+  async function handleImportClaudeThread(threadId: string) {
+    try {
+      const session = await importClaudeThreadRequest(host, token, {
+        thread_id: threadId,
+        launch_target_id: activeLaunchTargetId || null,
+      });
+      setSessions((current) => [
+        session,
+        ...current.filter((item) => item.id !== session.id),
+      ]);
+      setClaudeThreads((current) =>
+        current.filter((thread) => thread.id !== threadId),
+      );
+      router.push(`/session/${session.id}`);
+    } catch (importError) {
+      if (isAuthError(importError)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      setError(
+        importError instanceof Error
+          ? importError.message
+          : "failed to import claude thread",
+      );
+    }
+  }
+
   function resetAuthState(message: string) {
     clearToken();
     setToken("");
@@ -334,6 +418,8 @@ export default function HomePage() {
     setSchedules([]);
     setCodexThreads([]);
     setCodexThreadsLoading(false);
+    setClaudeThreads([]);
+    setClaudeThreadsLoading(false);
     setError(message);
   }
 
@@ -478,6 +564,8 @@ export default function HomePage() {
     setActiveLaunchTargetId(readLaunchTarget(nextHost));
     setCodexThreads([]);
     setCodexThreadsLoading(false);
+    setClaudeThreads([]);
+    setClaudeThreadsLoading(false);
     setError("Switched backend. Log in to continue.");
   }
 
@@ -530,9 +618,12 @@ export default function HomePage() {
           supportedBackends={supportedBackends}
           codexThreads={codexThreads}
           codexThreadsLoading={codexThreadsLoading}
+          claudeThreads={claudeThreads}
+          claudeThreadsLoading={claudeThreadsLoading}
           onAttach={handleAttach}
           onCreate={handleCreate}
           onImportCodexThread={handleImportCodexThread}
+          onImportClaudeThread={handleImportClaudeThread}
           onAuthFailure={() => resetAuthState("Session expired. Log in again.")}
         />
       ) : null}

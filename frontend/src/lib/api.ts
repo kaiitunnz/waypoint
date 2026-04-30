@@ -3,6 +3,7 @@
 import {
   Backend,
   BackendModelListResponse,
+  ClaudeThreadSummary,
   CodexThreadSummary,
   EventRecord,
   MeResponse,
@@ -68,6 +69,25 @@ export async function fetchCodexThreads(
   await ensureOk(response, "failed to fetch codex threads");
   const payload = await response.json();
   return payload.threads as CodexThreadSummary[];
+}
+
+export async function fetchClaudeThreads(
+  host: string,
+  token: string,
+  launchTargetId?: string,
+): Promise<ClaudeThreadSummary[]> {
+  const params = new URLSearchParams();
+  if (launchTargetId) {
+    params.set("launch_target_id", launchTargetId);
+  }
+  const suffix = params.size ? `?${params.toString()}` : "";
+  const response = await fetch(`${host}/api/claude/threads${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch claude threads");
+  const payload = await response.json();
+  return payload.threads as ClaudeThreadSummary[];
 }
 
 export async function fetchMe(host: string, token: string): Promise<MeResponse> {
@@ -159,6 +179,24 @@ export async function importCodexThread(
     body: JSON.stringify(payload),
   });
   await ensureOk(response, "failed to import codex thread");
+  const body = await response.json();
+  return body.session as SessionRecord;
+}
+
+export async function importClaudeThread(
+  host: string,
+  token: string,
+  payload: Record<string, unknown>,
+): Promise<SessionRecord> {
+  const response = await fetch(`${host}/api/sessions/import-claude`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  await ensureOk(response, "failed to import claude thread");
   const body = await response.json();
   return body.session as SessionRecord;
 }

@@ -85,6 +85,11 @@ export interface MeResponse {
   launch_targets: LaunchTargetSummary[];
 }
 
+export interface EventsPage {
+  events: EventRecord[];
+  has_more: boolean;
+}
+
 export interface LaunchTargetSummary {
   id: string;
   name: string;

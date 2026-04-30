@@ -101,6 +101,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [modelOptions, setModelOptions] = useState<BackendModelOption[]>([]);
   const [modelBusy, setModelBusy] = useState(false);
   const [effortBusy, setEffortBusy] = useState(false);
+  const [hasOlderEvents, setHasOlderEvents] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const sectionRef = useRef<HTMLElement | null>(null);
   const nearBottomRef = useRef(true);
   const pendingEventsRef = useRef<EventRecord[]>([]);
@@ -282,11 +284,61 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     [flushPendingEvents],
   );
 
+  const loadOlderEvents = useCallback(async () => {
+    if (loadingOlder || !hasOlderEvents || events.length === 0) {
+      return;
+    }
+    const oldestSequence = events[0]?.sequence;
+    if (oldestSequence === undefined) {
+      return;
+    }
+    setLoadingOlder(true);
+    // Anchor scroll position to the same DOM offset from the document
+    // bottom: when older messages are prepended, scrollHeight grows, so we
+    // restore by `scrollTo(scrollY + delta)`. Without this the viewport
+    // would visibly jump up to the new oldest content.
+    const beforeHeight = document.documentElement.scrollHeight;
+    const beforeScrollY = window.scrollY;
+    try {
+      const page = await fetchEvents(host, token, sessionId, {
+        beforeSequence: oldestSequence,
+      });
+      if (page.events.length === 0) {
+        setHasOlderEvents(false);
+        return;
+      }
+      const sanitized = page.events.map(sanitizeEvent);
+      setEvents((current) => mergeOlderEvents(current, sanitized));
+      setHasOlderEvents(page.has_more);
+      // Two rAF ticks: the first lets React commit, the second waits for
+      // layout to flush so scrollHeight reflects the new transcript.
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          const delta = document.documentElement.scrollHeight - beforeHeight;
+          if (delta > 0) {
+            // Disable smooth-scroll one-shot to avoid an animated jump.
+            window.scrollTo({ top: beforeScrollY + delta, behavior: "auto" });
+          }
+        });
+      });
+    } catch (loadError) {
+      if (isAuthError(loadError)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(
+        loadError instanceof Error ? loadError.message : "failed to load older messages",
+      );
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [events, handleAuthFailure, hasOlderEvents, host, loadingOlder, sessionId, token]);
+
   useEffect(() => {
     let active = true;
     async function load() {
       try {
-        const [loadedSession, loadedEvents, loadedSnapshot] = await Promise.all([
+        const [loadedSession, loadedPage, loadedSnapshot] = await Promise.all([
           fetchSession(host, token, sessionId),
           fetchEvents(host, token, sessionId),
           fetchTerminalSnapshot(host, token, sessionId),
@@ -295,10 +347,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           return;
         }
         setSession(loadedSession);
-        const coalesced = loadedEvents
+        const coalesced = loadedPage.events
           .map(sanitizeEvent)
           .reduce<EventRecord[]>((acc, event) => mergeEvents(acc, event), []);
         setEvents(coalesced);
+        setHasOlderEvents(loadedPage.has_more);
         setSnapshot(stripAnsi(loadedSnapshot));
       } catch (loadError) {
         if (active) {
@@ -648,6 +701,18 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       </div>
       {view === "chat" ? (
         <section className="stack transcript-stack">
+          {hasOlderEvents ? (
+            <div className="transcript-load-older">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void loadOlderEvents()}
+                disabled={loadingOlder}
+              >
+                {loadingOlder ? "Loading older messages…" : "Load older messages"}
+              </button>
+            </div>
+          ) : null}
           {filterMode === "important" && hiddenEventCount > 0 ? (
             <p className="filter-hint">
               Hiding {hiddenEventCount} low-signal event{hiddenEventCount === 1 ? "" : "s"} ·{" "}
@@ -1311,6 +1376,29 @@ const ReplyComposer = memo(function ReplyComposer({
     </section>
   );
 });
+
+function mergeOlderEvents(
+  current: EventRecord[],
+  older: EventRecord[],
+): EventRecord[] {
+  // The "load older" payload arrives in ascending order and sits entirely
+  // before `current`. Filter against the existing window's sequence/id set
+  // to defend against a race with WebSocket-delivered duplicates (an event
+  // emitted right at the boundary could appear in both fetches), then
+  // prepend.
+  const seenIds = new Set<number>();
+  const seenSequences = new Set<number>();
+  for (const event of current) {
+    if (typeof event.id === "number") seenIds.add(event.id);
+    seenSequences.add(event.sequence);
+  }
+  const deduped = older.filter((event) => {
+    if (typeof event.id === "number" && seenIds.has(event.id)) return false;
+    if (seenSequences.has(event.sequence)) return false;
+    return true;
+  });
+  return [...deduped, ...current];
+}
 
 function mergeEvents(current: EventRecord[], incoming: EventRecord): EventRecord[] {
   const dup = current.some((event) => event.id === incoming.id || event.sequence === incoming.sequence);

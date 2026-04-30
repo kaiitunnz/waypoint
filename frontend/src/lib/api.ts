@@ -6,6 +6,7 @@ import {
   ClaudeThreadSummary,
   CodexThreadSummary,
   EventRecord,
+  EventsPage,
   MeResponse,
   ScheduleCreateRequest,
   ScheduledSession,
@@ -109,14 +110,31 @@ export async function fetchSession(host: string, token: string, sessionId: strin
   return payload.session as SessionRecord;
 }
 
-export async function fetchEvents(host: string, token: string, sessionId: string): Promise<EventRecord[]> {
-  const response = await fetch(`${host}/api/sessions/${sessionId}/events`, {
+export async function fetchEvents(
+  host: string,
+  token: string,
+  sessionId: string,
+  options: { limit?: number; beforeSequence?: number } = {},
+): Promise<EventsPage> {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) {
+    params.set("limit", String(options.limit));
+  }
+  if (options.beforeSequence !== undefined) {
+    params.set("before_sequence", String(options.beforeSequence));
+  }
+  const query = params.toString();
+  const url = `${host}/api/sessions/${sessionId}/events${query ? `?${query}` : ""}`;
+  const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
   await ensureOk(response, "failed to fetch events");
   const payload = await response.json();
-  return payload.events as EventRecord[];
+  return {
+    events: (payload.events ?? []) as EventRecord[],
+    has_more: Boolean(payload.has_more),
+  };
 }
 
 export async function fetchTerminalSnapshot(host: string, token: string, sessionId: string): Promise<string> {

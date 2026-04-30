@@ -1106,6 +1106,19 @@ pre {
   box-shadow: inset 0 0 0 1px rgba(143, 179, 214, 0.32);
 }
 
+.transcript-load-older {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 8px;
+}
+
+.transcript-load-older button {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  padding: 6px 14px;
+}
+
 .filter-hint {
   margin: 0;
   padding: 0 4px;

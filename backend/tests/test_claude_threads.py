@@ -68,8 +68,6 @@ def test_list_local_claude_threads_extracts_metadata(claude_root) -> None:
                 git_branch="feature/cache",
             ),
             {"type": "ai-title", "aiTitle": "Cache miss investigation"},
-            # Pad to clear the MIN_TRANSCRIPT_BYTES floor.
-            {"type": "padding", "filler": "x" * 1500},
         ],
     )
 
@@ -84,13 +82,38 @@ def test_list_local_claude_threads_extracts_metadata(claude_root) -> None:
     assert info.repo_name == "project"
 
 
+def test_list_local_claude_threads_includes_short_valid_transcripts(
+    claude_root,
+) -> None:
+    """A short but resumable transcript (queue-op + user + assistant)
+    must show up — there is no minimum-byte floor."""
+    project = claude_root / "-tmp-short"
+    transcript = project / "77777777-7777-4777-8777-777777777777.jsonl"
+    _write_transcript(
+        transcript,
+        [
+            {"type": "queue-operation", "operation": "enqueue"},
+            _make_user_record(cwd="/tmp/short", text="hi"),
+            {
+                "type": "assistant",
+                "cwd": "/tmp/short",
+                "message": {"role": "assistant", "content": "hello"},
+            },
+        ],
+    )
+    assert transcript.stat().st_size < 1024
+
+    results = list_local_claude_threads()
+    assert [info.id for info in results] == ["77777777-7777-4777-8777-777777777777"]
+
+
 def test_list_local_claude_threads_skips_empty_and_invalid(claude_root) -> None:
     project = claude_root / "-private-tmp-project"
     project.mkdir(parents=True)
 
-    # Tiny transcript with no user record — Claude bookkeeping only.
-    tiny = project / "22222222-2222-4222-8222-222222222222.jsonl"
-    tiny.write_text(
+    # Bookkeeping-only transcript — no user record.
+    bookkeeping = project / "22222222-2222-4222-8222-222222222222.jsonl"
+    bookkeeping.write_text(
         json.dumps({"type": "queue-operation"}) + "\n",
         encoding="utf-8",
     )
@@ -103,10 +126,7 @@ def test_list_local_claude_threads_skips_empty_and_invalid(claude_root) -> None:
     real = project / "33333333-3333-4333-8333-333333333333.jsonl"
     _write_transcript(
         real,
-        [
-            _make_user_record(cwd="/private/tmp/project", text="hello"),
-            {"type": "padding", "filler": "x" * 1500},
-        ],
+        [_make_user_record(cwd="/private/tmp/project", text="hello")],
     )
 
     results = list_local_claude_threads()
@@ -119,17 +139,11 @@ def test_list_local_claude_threads_sorts_by_updated_at(claude_root) -> None:
     newer = project / "55555555-5555-4555-8555-555555555555.jsonl"
     _write_transcript(
         older,
-        [
-            _make_user_record(cwd="/tmp/project", text="older"),
-            {"type": "padding", "filler": "x" * 1500},
-        ],
+        [_make_user_record(cwd="/tmp/project", text="older")],
     )
     _write_transcript(
         newer,
-        [
-            _make_user_record(cwd="/tmp/project", text="newer"),
-            {"type": "padding", "filler": "x" * 1500},
-        ],
+        [_make_user_record(cwd="/tmp/project", text="newer")],
     )
     older_ts = datetime(2026, 1, 1, tzinfo=UTC).timestamp()
     newer_ts = datetime(2026, 4, 1, tzinfo=UTC).timestamp()
@@ -149,17 +163,11 @@ def test_find_local_claude_thread_locates_by_session_id(claude_root) -> None:
     target_id = "66666666-6666-4666-8666-666666666666"
     _write_transcript(
         project_a / "11111111-1111-4111-8111-111111111111.jsonl",
-        [
-            _make_user_record(cwd="/tmp/a", text="not-this-one"),
-            {"type": "padding", "filler": "x" * 1500},
-        ],
+        [_make_user_record(cwd="/tmp/a", text="not-this-one")],
     )
     _write_transcript(
         project_b / f"{target_id}.jsonl",
-        [
-            _make_user_record(cwd="/tmp/b", text="this-one"),
-            {"type": "padding", "filler": "x" * 1500},
-        ],
+        [_make_user_record(cwd="/tmp/b", text="this-one")],
     )
 
     info = find_local_claude_thread(target_id)

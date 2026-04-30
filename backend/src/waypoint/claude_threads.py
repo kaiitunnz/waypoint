@@ -11,9 +11,8 @@ thread" workflow analogous to the Codex one.
 Notes:
 - The encoded-cwd directory name is lossy (``[^a-zA-Z0-9] -> '-'``); do
   NOT reverse it. Read ``cwd`` from the JSONL records themselves.
-- Files smaller than ``MIN_TRANSCRIPT_BYTES`` are treated as empty/aborted
-  sessions (Claude writes a few queue-operation lines before the user
-  ever submits a prompt) and skipped.
+- Transcripts without a parsed user record are skipped — that's the
+  only signal needed to filter out aborted/bookkeeping-only sessions.
 - We stop scanning each transcript as soon as we have title, cwd, branch,
   and a preview; transcripts can be many MB.
 """
@@ -27,10 +26,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 log = logging.getLogger("waypoint.claude_threads")
-
-# Sessions below this size only contain bookkeeping records (queue-op,
-# attachment metadata) without a user prompt — not useful to resume.
-MIN_TRANSCRIPT_BYTES = 1024
 
 # Cap how many lines we read per transcript before giving up on metadata.
 # Real sessions surface cwd / title / first user message in the first few
@@ -116,8 +111,6 @@ def _read_thread_info(path: Path) -> ClaudeThreadInfo | None:
     try:
         stat = path.stat()
     except OSError:
-        return None
-    if stat.st_size < MIN_TRANSCRIPT_BYTES:
         return None
     session_id = path.stem
     if not UUID_RE.match(session_id):

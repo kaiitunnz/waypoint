@@ -359,6 +359,14 @@ class Storage:
         # sequence order, but the frontend coalesces them into one
         # bubble. Counting distinct keys keeps the page-size budget
         # aligned with the visible bubble count.
+        #
+        # The event-count safety cap only kicks in (a) before any anchor
+        # has been seen — the anchorless tmux/system-note case the cap
+        # exists for — or (b) when crossing into a *new* anchor that
+        # would push us past the cap. We never break in the middle of
+        # collecting a single anchor's events; otherwise a Codex reply
+        # streamed as 2500 deltas would arrive truncated and the user
+        # would have to "Load older" to reconstruct one bubble.
         collected: list[EventRecord] = []
         seen_anchors: set[tuple[str, Any]] = set()
         current_anchor: tuple[str, Any] | None = None
@@ -371,11 +379,13 @@ class Storage:
                     if next_key not in seen_anchors:
                         if message_count >= message_limit:
                             break
+                        if len(collected) >= _MAX_EVENTS_PER_PAGE:
+                            break
                         message_count += 1
                         seen_anchors.add(next_key)
                     current_anchor = next_key
             collected.append(event)
-            if len(collected) >= _MAX_EVENTS_PER_PAGE:
+            if current_anchor is None and len(collected) >= _MAX_EVENTS_PER_PAGE:
                 break
         collected.reverse()
         return collected

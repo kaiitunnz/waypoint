@@ -374,6 +374,98 @@ def test_list_events_by_message_count_caps_anchorless_pages(tmp_path) -> None:
     assert storage.has_events_before_sequence("sess", page[0].sequence) is True
 
 
+def test_list_events_by_message_count_does_not_truncate_a_single_anchor(
+    tmp_path,
+) -> None:
+    # The event cap is a safety net for anchorless walks; a real
+    # logical message must come through whole even if it has more raw
+    # events than the cap. Otherwise the chat view paints a chopped-off
+    # Codex reply (2500-delta agent_output) and the user has to "Load
+    # older" to reassemble one bubble — which contradicts the
+    # paginator's contract.
+    storage, now = _seed_session(tmp_path)
+    for i in range(2500):
+        _append(
+            storage,
+            "sess",
+            sequence=i + 1,
+            kind=EventKind.AGENT_OUTPUT,
+            text=f"d{i}",
+            ts=now + timedelta(seconds=i),
+            item_id="msg-A",
+        )
+    page = storage.list_events_by_message_count("sess", message_limit=1)
+    # All 2500 events belong to the single anchor and must arrive
+    # together, even though that exceeds _MAX_EVENTS_PER_PAGE.
+    assert len(page) == 2500
+    assert page[0].sequence == 1
+    assert page[-1].sequence == 2500
+
+
+def test_list_events_by_message_count_caps_at_anchor_boundary(tmp_path) -> None:
+    # When pages span multiple anchors and the cumulative event count
+    # crosses the cap, stop at the next *anchor boundary* rather than
+    # in the middle of a message.
+    storage, now = _seed_session(tmp_path)
+    seq = 0
+    # 1500-event anchor A (newer), then 1500-event anchor B (older).
+    for i in range(1500):
+        seq += 1
+        _append(
+            storage,
+            "sess",
+            sequence=seq,
+            kind=EventKind.AGENT_OUTPUT,
+            text=f"b{i}",
+            ts=now + timedelta(seconds=seq),
+            item_id="msg-B",
+        )
+    for i in range(1500):
+        seq += 1
+        _append(
+            storage,
+            "sess",
+            sequence=seq,
+            kind=EventKind.AGENT_OUTPUT,
+            text=f"a{i}",
+            ts=now + timedelta(seconds=seq),
+            item_id="msg-A",
+        )
+    page = storage.list_events_by_message_count("sess", message_limit=10)
+    # A fits whole (1500 events). The walk would cross into B at event
+    # 1501, but cap (>= 2000) hasn't been reached yet, so B starts
+    # collecting too. After all 1500 of B's events the cap is at 3000
+    # > 2000, but we already finished B before the next anchor — page
+    # contains everything (3000 events) and has_more=False.
+    assert len(page) == 3000
+
+
+def test_list_events_by_message_count_caps_before_third_anchor(tmp_path) -> None:
+    # With three large anchors, the cap kicks in at the boundary into
+    # the third (cumulative > 2000), keeping the first two whole.
+    storage, now = _seed_session(tmp_path)
+    seq = 0
+    for label in ("c", "b", "a"):  # oldest to newest, so DESC order is a, b, c
+        for i in range(1500):
+            seq += 1
+            _append(
+                storage,
+                "sess",
+                sequence=seq,
+                kind=EventKind.AGENT_OUTPUT,
+                text=f"{label}{i}",
+                ts=now + timedelta(seconds=seq),
+                item_id=f"msg-{label.upper()}",
+            )
+    page = storage.list_events_by_message_count("sess", message_limit=10)
+    # DESC walk: A whole (1500), B starts (cap not yet hit), B whole
+    # (cumulative 3000 >= 2000). Trying to cross into C: cap check
+    # fires, break before adding any C events.
+    assert len(page) == 3000
+    assert page[0].text == "b0"  # oldest in page
+    assert page[-1].text == "a1499"  # newest in page
+
+
 def test_has_events_before_sequence(tmp_path) -> None:
     storage, now = _seed_session(tmp_path)
     for i in range(3):

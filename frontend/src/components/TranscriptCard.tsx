@@ -3,6 +3,28 @@ import { memo, useCallback, useState } from "react";
 import { EventRecord, SessionTransport } from "@/lib/types";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 
+function legacyCopy(text: string): boolean {
+  // execCommand("copy") has different security gating than the async API:
+  // it works on plain-HTTP origins and when document focus is ambiguous,
+  // as long as the call originates from a user gesture. It returns false
+  // (rather than throwing) when the host browser refuses.
+  const el = document.createElement("textarea");
+  el.value = text;
+  el.setAttribute("readonly", "");
+  el.style.position = "fixed";
+  el.style.opacity = "0";
+  document.body.appendChild(el);
+  el.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  document.body.removeChild(el);
+  return ok;
+}
+
 export function CopyMessageButton({
   text,
   label = "Copy message",
@@ -13,26 +35,24 @@ export function CopyMessageButton({
   const [copied, setCopied] = useState(false);
   const onCopy = useCallback(async () => {
     if (!text) return;
-    try {
-      if (navigator.clipboard?.writeText) {
+    let ok = false;
+    if (navigator.clipboard?.writeText) {
+      try {
         await navigator.clipboard.writeText(text);
-      } else {
-        // Insecure-context fallback (older mobile WebKit, plain-HTTP origins).
-        const el = document.createElement("textarea");
-        el.value = text;
-        el.setAttribute("readonly", "");
-        el.style.position = "fixed";
-        el.style.opacity = "0";
-        document.body.appendChild(el);
-        el.select();
-        document.execCommand("copy");
-        document.body.removeChild(el);
+        ok = true;
+      } catch {
+        // writeText can reject at runtime — NotAllowedError when the
+        // document loses focus or the user denied clipboard-write
+        // permission. Fall back to the legacy path before giving up so
+        // we don't silently no-op in those contexts.
+        ok = legacyCopy(text);
       }
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Surface no error UI — clipboard denials are uninteresting noise here.
+    } else {
+      ok = legacyCopy(text);
     }
+    if (!ok) return;
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
   }, [text]);
   return (
     <button

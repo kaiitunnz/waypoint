@@ -214,6 +214,25 @@ export async function setSessionModel(
   return body.session as SessionRecord;
 }
 
+export async function setSessionEffort(
+  host: string,
+  token: string,
+  sessionId: string,
+  effort: string | null,
+): Promise<SessionRecord> {
+  const response = await fetch(`${host}/api/sessions/${sessionId}/effort`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ effort }),
+  });
+  await ensureOk(response, "failed to update effort");
+  const body = await response.json();
+  return body.session as SessionRecord;
+}
+
 export async function fetchBackendModels(
   host: string,
   token: string,

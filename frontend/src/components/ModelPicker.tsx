@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { fetchBackendModels, isAuthError } from "@/lib/api";
-import { Backend, BackendModelOption } from "@/lib/types";
+import { Backend, BackendModelListResponse, BackendModelOption } from "@/lib/types";
 
 interface ModelPickerProps {
   host: string;
@@ -13,6 +13,11 @@ interface ModelPickerProps {
   value: string;
   onChange: (value: string) => void;
   onAuthFailure?: () => void;
+  // Fires after each successful discovery response so callers (e.g. an
+  // EffortPicker rendered alongside) can derive their own options without
+  // duplicating the fetch — Codex discovery spawns a transient client per
+  // call.
+  onModelsLoaded?: (response: BackendModelListResponse) => void;
   disabled?: boolean;
   label?: string;
   hint?: string;
@@ -26,6 +31,7 @@ export function ModelPicker({
   value,
   onChange,
   onAuthFailure,
+  onModelsLoaded,
   disabled,
   label = "Model",
   hint,
@@ -38,6 +44,7 @@ export function ModelPicker({
       .then((response) => {
         if (cancelled) return;
         setOptions(response.models);
+        onModelsLoaded?.(response);
       })
       .catch((error) => {
         if (cancelled) return;
@@ -52,7 +59,7 @@ export function ModelPicker({
     return () => {
       cancelled = true;
     };
-  }, [host, token, backend, launchTargetId, onAuthFailure]);
+  }, [host, token, backend, launchTargetId, onAuthFailure, onModelsLoaded]);
 
   // Surface a custom-named model the caller already has even if it's not in
   // the curated list — covers schedules / sessions cloned from older state.

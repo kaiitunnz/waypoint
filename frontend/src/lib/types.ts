@@ -43,6 +43,7 @@ export interface SessionRecord {
   pinned_at?: string | null;
   permission_mode?: string | null;
   model?: string | null;
+  effort?: string | null;
 }
 
 export interface CodexThreadSummary {
@@ -94,6 +95,7 @@ export interface ScheduledSession {
   initial_prompt?: string | null;
   permission_mode?: string | null;
   model?: string | null;
+  effort?: string | null;
   scheduled_at: string;
   created_at: string;
   status: ScheduleStatus;
@@ -110,6 +112,7 @@ export interface ScheduleCreateRequest {
   initial_prompt?: string | null;
   permission_mode?: string | null;
   model?: string | null;
+  effort?: string | null;
   delay_seconds?: number | null;
   scheduled_at?: string | null;
 }
@@ -120,12 +123,15 @@ export interface BackendModelOption {
   description?: string | null;
   is_default?: boolean;
   hidden?: boolean;
+  supported_efforts?: string[];
+  default_effort?: string | null;
 }
 
 export interface BackendModelListResponse {
   backend: Backend;
   models: BackendModelOption[];
   default_model?: string | null;
+  default_effort?: string | null;
   supports_free_text?: boolean;
 }
 

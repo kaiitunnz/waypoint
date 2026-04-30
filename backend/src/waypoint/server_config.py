@@ -74,9 +74,24 @@ class SshLaunchTargetConfig(BaseModel):
         codex_args.extend(["app-server", "--listen", "stdio://"])
         return self.build_remote_exec_args(codex_args, cwd)
 
-    def build_remote_exec_args(self, command: list[str], cwd: str) -> tuple[str, ...]:
+    def build_remote_exec_args(
+        self, command: list[str], cwd: str | None = None
+    ) -> tuple[str, ...]:
+        """Build the SSH argv for a remote command.
+
+        ``cwd`` is optional: when omitted (or ``None``), no ``cd`` is
+        prepended and the command runs in whatever directory the remote
+        login shell lands in. This is the right choice for tooling whose
+        only filesystem dependency is an absolute path (e.g. the Claude
+        thread enumerator reads ``$CLAUDE_CONFIG_DIR/projects/``), so a
+        stale or deleted ``default_cwd`` on the SSH target can't break
+        the call.
+        """
         ssh_bin = _resolve_local_binary(self.ssh_bin)
-        remote_parts = [f"cd {_quote_remote_path(cwd)}", "&&", "exec"]
+        remote_parts: list[str] = []
+        if cwd:
+            remote_parts.extend([f"cd {_quote_remote_path(cwd)}", "&&"])
+        remote_parts.append("exec")
         if self.remote_env:
             remote_parts.append("env")
             for key, value in sorted(self.remote_env.items()):
@@ -301,11 +316,16 @@ def build_remote_thread_enumeration_args(
 
     The helper script body is fed via subprocess stdin (`bash -s`), not
     embedded in argv, so the SSH command stays small and quoting concerns
-    vanish. ``target.build_remote_exec_args`` already wraps via
-    ``bash -ilc`` and prepends ``cd <cwd>`` so user rcfiles run.
+    vanish. ``target.build_remote_exec_args`` wraps via ``bash -ilc`` so
+    user rcfiles run and ``$CLAUDE_CONFIG_DIR`` resolves correctly.
+
+    No ``cd`` is prepended: the helper only reads
+    ``$CLAUDE_CONFIG_DIR/projects/`` (an absolute path), so a stale or
+    deleted ``default_cwd`` on the target must not be able to fail the
+    list / import-by-UUID call.
     """
     cmd = ["env"]
     for key, value in sorted((env or {}).items()):
         cmd.append(f"{key}={value}")
     cmd.extend(["bash", "-s"])
-    return target.build_remote_exec_args(cmd, target.default_cwd)
+    return target.build_remote_exec_args(cmd)

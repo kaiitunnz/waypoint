@@ -173,6 +173,22 @@ def test_remote_command_skips_wrapping_when_shell_blank(monkeypatch) -> None:
     assert command[2].startswith("cd ~/workspace")
 
 
+def test_build_remote_exec_args_omits_cd_when_cwd_is_none(monkeypatch) -> None:
+    """Callers whose only filesystem dependency is an absolute path must
+    be able to opt out of the cwd prefix so a stale ``default_cwd`` on
+    the target can't fail their command."""
+    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    config = SshLaunchTargetConfig(
+        id="devbox", name="Devbox", ssh_destination="dev@example.com"
+    )
+
+    args = config.build_remote_exec_args(["bash", "-s"])
+
+    remote_command = args[-1]
+    assert "cd " not in remote_command
+    assert "exec bash -s" in remote_command
+
+
 def test_ssh_target_remote_command_supports_claude(monkeypatch) -> None:
     monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
     config = SshLaunchTargetConfig(
@@ -301,12 +317,34 @@ def test_build_remote_thread_enumeration_args_wraps_in_bash_and_passes_env(
     remote_command = args[4]
     # Wrapped via bash -ilc so rcfiles run.
     assert remote_command.startswith("bash -ilc ")
-    # cd into the configured default_cwd before exec.
-    assert "cd ~/workspace" in remote_command
+    # The enumerator only reads $CLAUDE_CONFIG_DIR/projects (absolute),
+    # so it must NOT cd into default_cwd — a stale/deleted directory on
+    # the target should not be able to fail listing.
+    assert "cd " not in remote_command
     # Helper script is fed via stdin (`bash -s`), so argv carries no body.
     assert "bash -s" in remote_command
     # Env override passed through to the remote shell's `env` invocation.
     assert "WAYPOINT_THREAD_ID=abc-123" in remote_command
+
+
+def test_build_remote_thread_enumeration_args_ignores_default_cwd(
+    monkeypatch,
+) -> None:
+    """Even when default_cwd is set on the target, the enumeration argv
+    must not include a `cd` step. Regression for the case where a user
+    deletes/renames default_cwd on the remote: listing must still work."""
+    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    config = SshLaunchTargetConfig(
+        id="devbox",
+        name="Devbox",
+        ssh_destination="dev@example.com",
+        default_cwd="/srv/long-gone-project",
+    )
+
+    args = build_remote_thread_enumeration_args(config)
+    remote_command = args[2]
+    assert "/srv/long-gone-project" not in remote_command
+    assert "cd " not in remote_command
 
 
 def test_build_remote_thread_enumeration_args_without_env(monkeypatch) -> None:

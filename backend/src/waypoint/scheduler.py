@@ -107,6 +107,7 @@ class Scheduler:
             initial_prompt=request.initial_prompt,
             permission_mode=permission_mode,
             model=request.model or None,
+            effort=request.effort or None,
             scheduled_at=scheduled_at,
             created_at=now,
             status=ScheduleStatus.PENDING,
@@ -191,6 +192,7 @@ class Scheduler:
                     source_mode=SessionSource.MANAGED,
                     permission_mode=schedule.permission_mode,
                     model=schedule.model,
+                    effort=schedule.effort,
                 )
             )
             self._runtime.storage.update_schedule(

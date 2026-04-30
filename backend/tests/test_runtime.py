@@ -46,11 +46,15 @@ class FakeStructuredAdapter:
 class FakeClaudeAdapter(FakeStructuredAdapter):
     def __init__(self) -> None:
         super().__init__()
-        self.start_calls: list[tuple[str, str, str, Any, str | None, str | None]] = []
+        self.start_calls: list[
+            tuple[str, str, str, Any, str | None, str | None, str | None]
+        ] = []
         self.permission_mode_calls: list[tuple[str, str]] = []
         self.model_calls: list[tuple[str, str | None]] = []
+        self.effort_calls: list[tuple[str, str | None]] = []
         self.modes: dict[str, str] = {}
         self.models: dict[str, str | None] = {}
+        self.efforts: dict[str, str | None] = {}
 
     async def start_session(
         self,
@@ -60,6 +64,7 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         launch_factory_override: Any = None,
         permission_mode: str | None = None,
         model: str | None = None,
+        effort: str | None = None,
     ) -> str:
         self.start_calls.append(
             (
@@ -69,10 +74,13 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
                 launch_factory_override,
                 permission_mode,
                 model,
+                effort,
             )
         )
         if model is not None:
             self.models[session_id] = model
+        if effort is not None:
+            self.efforts[session_id] = effort
         return claude_session_id
 
     async def set_permission_mode(self, session_id: str, mode: str) -> None:
@@ -83,19 +91,28 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         self.model_calls.append((session_id, model))
         self.models[session_id] = model
 
+    async def set_effort(self, session_id: str, effort: str | None) -> None:
+        self.effort_calls.append((session_id, effort))
+        self.efforts[session_id] = effort
+
     def session_permission_mode(self, session_id: str) -> str | None:
         return self.modes.get(session_id)
 
     def session_model(self, session_id: str) -> str | None:
         return self.models.get(session_id)
 
+    def session_effort(self, session_id: str) -> str | None:
+        return self.efforts.get(session_id)
+
 
 class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
     def __init__(self) -> None:
         super().__init__()
-        self.restore_calls: list[tuple[str, str, str, Any, str | None]] = []
+        self.restore_calls: list[tuple[str, str, str, Any, str | None, str | None]] = []
         self.model_calls: list[tuple[str, str | None]] = []
+        self.effort_calls: list[tuple[str, str | None]] = []
         self.models: dict[str, str | None] = {}
+        self.efforts: dict[str, str | None] = {}
 
     async def restore_session(
         self,
@@ -104,19 +121,29 @@ class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
         thread_id: str,
         client_factory_override: Any = None,
         model: str | None = None,
+        effort: str | None = None,
     ) -> None:
         self.restore_calls.append(
-            (session_id, cwd, thread_id, client_factory_override, model)
+            (session_id, cwd, thread_id, client_factory_override, model, effort)
         )
         if model is not None:
             self.models[session_id] = model
+        if effort is not None:
+            self.efforts[session_id] = effort
 
     async def set_model(self, session_id: str, model: str | None) -> None:
         self.model_calls.append((session_id, model))
         self.models[session_id] = model
 
+    async def set_effort(self, session_id: str, effort: str | None) -> None:
+        self.effort_calls.append((session_id, effort))
+        self.efforts[session_id] = effort
+
     def session_model(self, session_id: str) -> str | None:
         return self.models.get(session_id)
+
+    def session_effort(self, session_id: str) -> str | None:
+        return self.efforts.get(session_id)
 
 
 def make_runtime(tmp_path) -> tuple[SessionRuntime, Storage, Settings]:
@@ -355,6 +382,7 @@ async def test_create_session_uses_structured_claude_for_ssh_target(
             "remote-launch-factory",
             "default",
             None,
+            None,
         )
     ]
 
@@ -444,6 +472,7 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
             "/srv/worktree/project",
             "thread-9",
             "remote-factory",
+            None,
             None,
         )
     ]

@@ -187,6 +187,7 @@ class SessionRuntime:
                 self._claude_launch_factory(session.launch_target_id),
                 permission_mode=session.permission_mode,
                 model=session.model,
+                effort=session.effort,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(
@@ -237,6 +238,7 @@ class SessionRuntime:
                 session.thread_id,
                 self._codex_client_factory(session.launch_target_id),
                 model=session.model,
+                effort=session.effort,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(
@@ -441,6 +443,12 @@ class SessionRuntime:
         resolved_model = request.model or self.settings.default_models.get(
             request.backend.value
         )
+        # Same precedence for reasoning effort. Missing key means "let the
+        # backend pick" (Codex falls back to the model's default; Claude
+        # omits the --effort flag).
+        resolved_effort = request.effort or self.settings.default_efforts.get(
+            request.backend.value
+        )
         if request.backend == Backend.CODEX:
             raw_log.touch(exist_ok=True)
             session = SessionRecord(
@@ -461,6 +469,7 @@ class SessionRuntime:
                 structured_log_path=str(structured_log),
                 permission_mode=permission_mode,
                 model=resolved_model,
+                effort=resolved_effort,
             )
             self.storage.create_session(session)
             try:
@@ -469,6 +478,7 @@ class SessionRuntime:
                     request.cwd,
                     self._codex_client_factory(session.launch_target_id),
                     model=resolved_model,
+                    effort=resolved_effort,
                 )
             except Exception:
                 self.storage.update_session(session.id, status=SessionStatus.ERROR)
@@ -504,6 +514,7 @@ class SessionRuntime:
                 structured_log_path=str(structured_log),
                 permission_mode=permission_mode,
                 model=resolved_model,
+                effort=resolved_effort,
             )
             self.storage.create_session(session)
             try:
@@ -514,6 +525,7 @@ class SessionRuntime:
                     self._claude_launch_factory(session.launch_target_id),
                     permission_mode=session.permission_mode,
                     model=session.model,
+                    effort=session.effort,
                 )
             except (ClaudeCliError, FileNotFoundError, OSError) as exc:
                 self.storage.update_session(session.id, status=SessionStatus.ERROR)
@@ -767,6 +779,57 @@ class SessionRuntime:
         )
         return updated
 
+    async def set_effort(self, session_id: str, effort: str | None) -> SessionRecord:
+        session = self.get_session(session_id)
+        cleaned = effort.strip() if isinstance(effort, str) and effort.strip() else None
+        if session.backend == Backend.CLAUDE_CODE:
+            if self.claude is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="claude adapter is not configured on this backend",
+                )
+            # Claude has no in-process effort knob — set_effort terminates the
+            # CLI and respawns it with `--resume <id> --effort <new>`. Block
+            # the swap if the same value is already in effect so we don't
+            # restart needlessly.
+            if cleaned == (session.effort or None):
+                return session
+            try:
+                await self.claude.set_effort(session_id, cleaned)
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+                ) from exc
+            await self._record_system_event(
+                session_id,
+                self._claude_effort_swap_message(cleaned),
+                status=SessionStatus.IDLE,
+            )
+        elif session.backend == Backend.CODEX:
+            try:
+                await self.codex.set_effort(session_id, cleaned)
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+                ) from exc
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"effort selection is not supported for {session.backend}",
+            )
+        updated = self.storage.update_session(session_id, effort=cleaned)
+        await self.broadcast.publish(
+            SessionEnvelope(
+                type="session_list_update",
+                payload={
+                    "sessions": [
+                        item.model_dump(mode="json") for item in self.list_sessions()
+                    ]
+                },
+            )
+        )
+        return updated
+
     async def list_backend_models(
         self,
         backend: Backend,
@@ -774,6 +837,7 @@ class SessionRuntime:
         include_hidden: bool = False,
     ) -> dict[str, Any]:
         default_model = self.settings.default_models.get(backend.value)
+        default_effort = self.settings.default_efforts.get(backend.value)
         if backend == Backend.CLAUDE_CODE:
             options = [
                 opt.model_dump(mode="json") for opt in self.settings.claude_models
@@ -787,6 +851,7 @@ class SessionRuntime:
                 "backend": backend.value,
                 "models": options,
                 "default_model": default_model,
+                "default_effort": default_effort,
                 "supports_free_text": True,
             }
         if backend == Backend.CODEX:
@@ -809,6 +874,10 @@ class SessionRuntime:
             for entry in response.data:
                 if entry.hidden and not include_hidden:
                     continue
+                supported_efforts = [
+                    option.reasoning_effort.value
+                    for option in (entry.supported_reasoning_efforts or [])
+                ]
                 models.append(
                     {
                         "id": entry.model,
@@ -816,6 +885,12 @@ class SessionRuntime:
                         "description": entry.description or None,
                         "is_default": entry.is_default,
                         "hidden": entry.hidden,
+                        "supported_efforts": supported_efforts,
+                        "default_effort": (
+                            entry.default_reasoning_effort.value
+                            if entry.default_reasoning_effort is not None
+                            else None
+                        ),
                     }
                 )
                 if default_model is None and entry.is_default:
@@ -824,6 +899,7 @@ class SessionRuntime:
                 "backend": backend.value,
                 "models": models,
                 "default_model": default_model,
+                "default_effort": default_effort,
                 "supports_free_text": True,
             }
         raise HTTPException(
@@ -1035,6 +1111,12 @@ class SessionRuntime:
                 f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd})"
             )
         return "Claude session restored from previous backend process"
+
+    @staticmethod
+    def _claude_effort_swap_message(effort: str | None) -> str:
+        if effort:
+            return f"Restarted Claude session with --effort {effort}"
+        return "Restarted Claude session with default effort"
 
     def launch_target_summaries(self) -> list[dict[str, Any]]:
         summaries: list[dict[str, Any]] = []

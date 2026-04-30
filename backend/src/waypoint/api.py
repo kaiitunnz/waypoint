@@ -30,6 +30,7 @@ from waypoint.schemas import (
     SessionApprovalRequest,
     SessionAttachRequest,
     SessionCreateRequest,
+    SessionEffortRequest,
     SessionEnvelope,
     SessionInputRequest,
     SessionModelRequest,
@@ -252,6 +253,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         session = await context.runtime.set_model(session_id, body.model)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.post("/api/sessions/{session_id}/effort")
+    async def session_set_effort(
+        session_id: str,
+        body: SessionEffortRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.set_effort(session_id, body.effort)
         return {"session": session.model_dump(mode="json")}
 
     @app.get("/api/backends/{backend}/models")

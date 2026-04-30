@@ -34,7 +34,10 @@ interface UnifiedThread {
 }
 
 const COLLAPSED_VISIBLE = 2;
-const PAGE_SIZE_DESKTOP = 8;
+// Desktop and mobile values are kept separate even when equal today —
+// future tuning may diverge them again, and the matchMedia hook below
+// already wires them.
+const PAGE_SIZE_DESKTOP = 5;
 const PAGE_SIZE_MOBILE = 5;
 const MOBILE_BREAKPOINT = "(max-width: 720px)";
 

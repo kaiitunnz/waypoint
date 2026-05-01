@@ -555,7 +555,7 @@ async def test_create_session_uses_structured_claude_for_ssh_target(
     )
 
     monkeypatch.setattr(
-        "waypoint.runtime.build_remote_claude_launch_factory",
+        "waypoint.backends.claude_code.plugin.build_remote_claude_launch_factory",
         lambda *args, **kwargs: "remote-launch-factory",
     )
 
@@ -603,10 +603,11 @@ async def test_list_importable_codex_threads_filters_existing_session(
         ),
     )
 
-    async def fake_run(launch_target_id, operation, **kwargs):
+    async def fake_run(_runtime, launch_target_id, operation, **kwargs):
         return [thread_one, thread_two]
 
-    monkeypatch.setattr(runtime, "_run_codex_client_operation", fake_run)
+    codex_plugin = runtime.registry.get("codex")
+    monkeypatch.setattr(codex_plugin, "run_client_operation", fake_run)
 
     threads = await runtime.list_importable_codex_threads()
 
@@ -646,14 +647,17 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
         ),
     )
 
-    async def fake_read(thread_id: str, launch_target_id: str | None) -> Any:
+    async def fake_read(_runtime, thread_id: str, launch_target_id: str | None) -> Any:
         assert thread_id == "thread-9"
         assert launch_target_id == "devbox"
         return thread
 
-    monkeypatch.setattr(runtime, "_read_codex_thread", fake_read)
+    codex_plugin = runtime.registry.get("codex")
+    monkeypatch.setattr(codex_plugin, "_read_thread", fake_read)
     monkeypatch.setattr(
-        runtime, "_codex_client_factory", lambda launch_target_id: "remote-factory"
+        codex_plugin,
+        "client_factory",
+        lambda _runtime, launch_target_id: "remote-factory",
     )
 
     session = await runtime.import_codex_thread(
@@ -722,7 +726,7 @@ async def test_list_importable_claude_threads_filters_existing_session(
     )
 
     monkeypatch.setattr(
-        "waypoint.runtime.list_local_claude_threads",
+        "waypoint.backends.claude_code.plugin.list_local_claude_threads",
         lambda: [info_existing, info_new],
     )
 
@@ -849,7 +853,7 @@ async def test_import_claude_thread_creates_session_and_resumes(
     )
 
     monkeypatch.setattr(
-        "waypoint.runtime.find_local_claude_thread",
+        "waypoint.backends.claude_code.plugin.find_local_claude_thread",
         lambda thread_id: info if thread_id == info.id else None,
     )
 
@@ -910,10 +914,11 @@ async def test_import_claude_thread_remote_target_uses_remote_factory(
     )
     fake_enum = FakeRemoteEnumerator([info])
     runtime.claude_thread_enumerator = cast(Any, fake_enum)
+    claude_plugin = runtime.registry.get("claude_code")
     monkeypatch.setattr(
-        runtime,
-        "_claude_launch_factory",
-        lambda launch_target_id: f"remote-factory-{launch_target_id}",
+        claude_plugin,
+        "launch_factory",
+        lambda _runtime, launch_target_id: f"remote-factory-{launch_target_id}",
     )
 
     session = await runtime.import_claude_thread(
@@ -956,13 +961,16 @@ async def test_find_imported_claude_session_scopes_by_launch_target(
     )
 
     # Local match
-    found_local = runtime._find_imported_claude_session(same_thread_id, None)
+    claude_plugin = cast(Any, runtime.registry.get("claude_code"))
+    found_local = claude_plugin._find_imported_session(runtime, same_thread_id, None)
     assert found_local is not None
     assert found_local.id == "local-sess"
 
     # Same thread_id under a remote target should NOT collide with the
     # local one — different scope.
-    assert runtime._find_imported_claude_session(same_thread_id, "devbox") is None
+    assert claude_plugin._find_imported_session(
+        runtime, same_thread_id, "devbox"
+    ) is None
 
 
 @pytest.mark.asyncio
@@ -995,7 +1003,7 @@ async def test_import_claude_thread_missing_returns_404(monkeypatch, tmp_path) -
     runtime, storage, settings = make_runtime(tmp_path)
     runtime.claude = cast(Any, FakeClaudeAdapter())
     monkeypatch.setattr(
-        "waypoint.runtime.find_local_claude_thread", lambda _thread_id: None
+        "waypoint.backends.claude_code.plugin.find_local_claude_thread", lambda _thread_id: None
     )
 
     from fastapi import HTTPException
@@ -1011,7 +1019,7 @@ async def test_import_claude_thread_missing_returns_404(monkeypatch, tmp_path) -
 async def test_set_permission_mode_codex_persists_and_threads_to_next_turn(
     tmp_path,
 ) -> None:
-    from waypoint.backends.codex.transport import CODEX_PERMISSION_PRESETS
+    from waypoint.backends.codex.permission_modes import CODEX_PERMISSION_PRESETS
 
     runtime, storage, settings = make_runtime(tmp_path)
     fake = FakeStructuredAdapter()

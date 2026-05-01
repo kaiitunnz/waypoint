@@ -9,7 +9,6 @@ from fastapi import HTTPException, status
 # imports keep working; the source of truth lives in
 # `backends/codex/permission_modes.py`.
 from waypoint.backends.codex.permission_modes import (
-    CODEX_PERMISSION_PRESETS,
     codex_turn_params_for,
 )
 from waypoint.schemas import SessionRecord

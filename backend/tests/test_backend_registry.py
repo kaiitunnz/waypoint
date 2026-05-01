@@ -53,7 +53,7 @@ def test_schema_field_rejects_unknown_backend() -> None:
     from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
 
     now = datetime.now(UTC)
-    with pt.raises(Exception):
+    with pt.raises(Exception):  # noqa: B017 — pydantic raises ValidationError
         SessionRecord(
             id="x",
             backend="opencode",  # not registered

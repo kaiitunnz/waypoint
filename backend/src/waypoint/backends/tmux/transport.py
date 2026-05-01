@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
 
+from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.schemas import (
     SessionInputRequest,
     SessionRecord,
     SessionSource,
     SessionStatus,
 )
-from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:

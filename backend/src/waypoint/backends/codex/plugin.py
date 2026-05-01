@@ -8,9 +8,15 @@ captures: ``model_source=LIVE_RPC`` (models come from the App Server's
 Codex-only today; it surfaces here as a registered slash command.
 """
 
+import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from codex_app_server.client import AppServerClient
 from fastapi import HTTPException, status
 
 from waypoint.backends.capabilities import (
@@ -18,12 +24,25 @@ from waypoint.backends.capabilities import (
     ModelSource,
     SlashCommandSpec,
 )
+from waypoint.backends.codex.adapter import ClientFactory, default_client_factory
 from waypoint.backends.codex.permission_modes import (
     CODEX_PERMISSION_MODE_SPECS,
     CODEX_PERMISSION_PRESETS,
 )
-from waypoint.schemas import SessionRecord, SessionStatus
-from waypoint.server_config import SshLaunchTargetConfig
+from waypoint.git_meta import GitMeta
+from waypoint.schemas import (
+    CodexThreadImportRequest,
+    CodexThreadSummary,
+    SessionCreateRequest,
+    SessionRecord,
+    SessionSource,
+    SessionStatus,
+    SessionTransport,
+)
+from waypoint.server_config import (
+    SshLaunchTargetConfig,
+    build_remote_codex_client_factory,
+)
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
@@ -143,7 +162,7 @@ class CodexPlugin:
                 session.id,
                 session.cwd,
                 session.thread_id,
-                runtime._codex_client_factory(session.launch_target_id),
+                self.client_factory(runtime, session.launch_target_id),
                 model=session.model,
                 effort=session.effort,
             )
@@ -208,6 +227,274 @@ class CodexPlugin:
             )
         return f"Imported stored Codex thread ({cwd})"
 
+    # --- launch / discovery helpers ----------------------------------
+
+    def client_factory(
+        self, runtime: "SessionRuntime", launch_target_id: str | None
+    ) -> ClientFactory | None:
+        launch_target = runtime._find_launch_target(launch_target_id)
+        if launch_target is None:
+            return None
+        return build_remote_codex_client_factory(launch_target)
+
+    def client_cwd(self, runtime: "SessionRuntime", launch_target_id: str | None) -> str:
+        launch_target = runtime._find_launch_target(launch_target_id)
+        if launch_target is not None:
+            return launch_target.default_cwd
+        return str(Path(runtime.settings.default_cwd).expanduser())
+
+    async def run_client_operation(
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None,
+        operation: Callable[[AppServerClient], Awaitable[Any]],
+        *,
+        cwd: str | None = None,
+    ) -> Any:
+        default_cwd = self.client_cwd(runtime, launch_target_id)
+        client_factory: ClientFactory = (
+            self.client_factory(runtime, launch_target_id) or default_client_factory
+        )
+        client = client_factory(cwd or default_cwd, _deny_approval)
+        try:
+            await asyncio.to_thread(client.start)
+            await asyncio.to_thread(client.initialize)
+            return await operation(client)
+        finally:
+            with suppress(Exception):
+                await asyncio.to_thread(client.close)
+
+    async def _read_thread(
+        self,
+        runtime: "SessionRuntime",
+        thread_id: str,
+        launch_target_id: str | None,
+    ) -> Any:
+        runtime._resolve_launch_target(launch_target_id, self.id)
+
+        async def operation(client: AppServerClient) -> Any:
+            response = await asyncio.to_thread(client.thread_read, thread_id, False)
+            return response.thread
+
+        try:
+            return await self.run_client_operation(
+                runtime, launch_target_id, operation=operation
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"failed to read codex thread: {exc}",
+            ) from exc
+
+    def _find_imported_session(
+        self,
+        runtime: "SessionRuntime",
+        thread_id: str,
+        launch_target_id: str | None,
+    ) -> SessionRecord | None:
+        for session in runtime.storage.list_sessions():
+            if session.backend != self.id:
+                continue
+            if session.thread_id != thread_id:
+                continue
+            if session.launch_target_id != launch_target_id:
+                continue
+            return session
+        return None
+
+    def _thread_summary(self, thread: Any) -> CodexThreadSummary:
+        cwd = _thread_cwd(thread)
+        return CodexThreadSummary(
+            id=thread.id,
+            title=_thread_title(thread),
+            cwd=cwd,
+            repo_name=_thread_repo_name(thread),
+            branch=_thread_branch(thread),
+            preview=(thread.preview or "").strip() or None,
+            created_at=datetime.fromtimestamp(thread.created_at, UTC),
+            updated_at=datetime.fromtimestamp(thread.updated_at, UTC),
+        )
+
+    async def list_threads(
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None = None,
+    ) -> list[CodexThreadSummary]:
+        runtime._resolve_launch_target(launch_target_id, self.id)
+        imported = {
+            (session.launch_target_id, session.thread_id)
+            for session in runtime.storage.list_sessions()
+            if session.backend == self.id and session.thread_id
+        }
+
+        async def operation(client: AppServerClient) -> list[Any]:
+            threads: list[Any] = []
+            cursor: str | None = None
+            while True:
+                response = await asyncio.to_thread(
+                    client.thread_list,
+                    {"archived": False, "cursor": cursor, "limit": 100},
+                )
+                threads.extend(response.data)
+                if response.next_cursor is None:
+                    return threads
+                cursor = response.next_cursor
+
+        threads = await self.run_client_operation(
+            runtime, launch_target_id, operation=operation
+        )
+        summaries = [
+            self._thread_summary(thread)
+            for thread in threads
+            if not thread.ephemeral and (launch_target_id, thread.id) not in imported
+        ]
+        return sorted(summaries, key=lambda thread: thread.updated_at, reverse=True)
+
+    async def create_session(
+        self,
+        runtime: "SessionRuntime",
+        request: SessionCreateRequest,
+        *,
+        session_id: str,
+        launch_target: SshLaunchTargetConfig | None,
+        title: str,
+        raw_log: Path,
+        structured_log: Path,
+        git_meta: GitMeta,
+        permission_mode: str | None,
+        resolved_model: str | None,
+        resolved_effort: str | None,
+    ) -> SessionRecord:
+        raw_log.touch(exist_ok=True)
+        now = datetime.now(UTC)
+        session = SessionRecord(
+            id=session_id,
+            backend=request.backend,
+            source=SessionSource.MANAGED,
+            transport=SessionTransport.CODEX_APP_SERVER,
+            title=title,
+            cwd=request.cwd,
+            launch_target_id=launch_target.id if launch_target else None,
+            repo_name=git_meta.repo_name,
+            branch=git_meta.branch,
+            status=SessionStatus.STARTING,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            raw_log_path=str(raw_log),
+            structured_log_path=str(structured_log),
+            permission_mode=permission_mode,
+            model=resolved_model,
+            effort=resolved_effort,
+        )
+        runtime.storage.create_session(session)
+        try:
+            thread_id = await runtime.codex.start_session(
+                session_id,
+                request.cwd,
+                self.client_factory(runtime, session.launch_target_id),
+                model=resolved_model,
+                effort=resolved_effort,
+            )
+        except Exception:
+            runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
+            raise
+        runtime.storage.update_session(
+            session.id, thread_id=thread_id, status=SessionStatus.IDLE
+        )
+        await runtime._record_system_event(
+            session.id,
+            self.format_start_message(request.cwd, launch_target),
+            status=SessionStatus.IDLE,
+        )
+        return runtime.get_session(session.id)
+
+    async def import_thread(
+        self,
+        runtime: "SessionRuntime",
+        request: CodexThreadImportRequest,
+    ) -> SessionRecord:
+        launch_target = runtime._resolve_launch_target(
+            request.launch_target_id, self.id
+        )
+        existing = self._find_imported_session(
+            runtime, request.thread_id, request.launch_target_id
+        )
+        if existing is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="codex thread already imported",
+            )
+        thread = await self._read_thread(
+            runtime, request.thread_id, request.launch_target_id
+        )
+        if thread.ephemeral:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ephemeral codex threads cannot be imported",
+            )
+        session_id = runtime._generate_session_id(self.id)
+        session_dir = runtime._session_dir(session_id)
+        raw_log = session_dir / "raw.log"
+        structured_log = session_dir / "events.jsonl"
+        raw_log.touch(exist_ok=True)
+        cwd = _thread_cwd(thread)
+        now = datetime.now(UTC)
+        session = SessionRecord(
+            id=session_id,
+            backend=self.id,
+            source=SessionSource.MANAGED,
+            transport=SessionTransport.CODEX_APP_SERVER,
+            title=_thread_title(thread),
+            cwd=cwd,
+            launch_target_id=launch_target.id if launch_target else None,
+            repo_name=_thread_repo_name(thread),
+            branch=_thread_branch(thread),
+            status=SessionStatus.STARTING,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            thread_id=thread.id,
+            raw_log_path=str(raw_log),
+            structured_log_path=str(structured_log),
+            permission_mode="default",
+        )
+        runtime.storage.create_session(session)
+        try:
+            await runtime.codex.restore_session(
+                session.id,
+                session.cwd,
+                thread.id,
+                self.client_factory(runtime, session.launch_target_id),
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.exception(
+                "codex import failed",
+                extra={
+                    "session_id": session.id,
+                    "thread_id": thread.id,
+                    "launch_target_id": session.launch_target_id,
+                },
+            )
+            runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
+            await runtime._record_system_event(
+                session.id,
+                f"Codex thread import failed: {exc}",
+                status=SessionStatus.ERROR,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"failed to import codex thread: {exc}",
+            ) from exc
+        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+        await runtime._record_system_event(
+            session.id,
+            self.format_import_message(cwd, launch_target),
+            status=SessionStatus.IDLE,
+            metadata={"imported_thread_id": thread.id},
+        )
+        return runtime.get_session(session.id)
+
     async def list_models(
         self,
         runtime: "SessionRuntime",
@@ -216,11 +503,11 @@ class CodexPlugin:
     ) -> dict[str, Any]:
         default_model = runtime.settings.default_models.get(self.id)
         default_effort = runtime.settings.default_efforts.get(self.id)
-        cwd = runtime._codex_client_cwd(launch_target_id)
+        cwd = self.client_cwd(runtime, launch_target_id)
         try:
             response = await runtime.codex.list_models(
                 cwd=cwd,
-                client_factory_override=runtime._codex_client_factory(launch_target_id),
+                client_factory_override=self.client_factory(runtime, launch_target_id),
                 include_hidden=include_hidden,
             )
         except Exception as exc:  # noqa: BLE001
@@ -260,6 +547,39 @@ class CodexPlugin:
             "default_effort": default_effort,
             "supports_free_text": True,
         }
+
+
+def _deny_approval(_method: str, _params: dict[str, Any] | None) -> dict[str, Any]:
+    return {"decision": "decline"}
+
+
+def _thread_cwd(thread: Any) -> str:
+    cwd = getattr(thread, "cwd", "")
+    return getattr(cwd, "root", cwd)
+
+
+def _thread_title(thread: Any) -> str:
+    if thread.name:
+        return thread.name
+    preview = (thread.preview or "").strip()
+    if preview:
+        return preview.splitlines()[0][:80]
+    return f"Codex {Path(_thread_cwd(thread)).name or thread.id}"
+
+
+def _thread_branch(thread: Any) -> str | None:
+    git_info = getattr(thread, "git_info", None)
+    return git_info.branch if git_info is not None else None
+
+
+def _thread_repo_name(thread: Any) -> str | None:
+    git_info = getattr(thread, "git_info", None)
+    if git_info is not None and git_info.origin_url:
+        normalized = git_info.origin_url.rstrip("/").removesuffix(".git")
+        name = normalized.rsplit("/", 1)[-1]
+        if name:
+            return name
+    return Path(_thread_cwd(thread)).name or None
 
 
 def build_plugin() -> CodexPlugin:

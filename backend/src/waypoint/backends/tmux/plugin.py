@@ -9,12 +9,22 @@ and disables every inline control knob (model/effort/permission mode)
 because no protocol is available to set them mid-session.
 """
 
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Never
 
 from fastapi import HTTPException, status
 
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
-from waypoint.schemas import SessionRecord
+from waypoint.backends.tmux.adapter import TmuxError
+from waypoint.git_meta import GitMeta
+from waypoint.schemas import (
+    SessionCreateRequest,
+    SessionRecord,
+    SessionSource,
+    SessionStatus,
+    SessionTransport,
+)
 from waypoint.server_config import SshLaunchTargetConfig
 from waypoint.transports.base import TransportAdapter
 
@@ -111,6 +121,69 @@ class TmuxPlugin:
             f"Managed session started for {backend_label} via SSH target {launch_target.name} "
             f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd})"
         )
+
+    async def create_session(
+        self,
+        runtime: "SessionRuntime",
+        request: SessionCreateRequest,
+        *,
+        session_id: str,
+        launch_target: SshLaunchTargetConfig | None,
+        title: str,
+        raw_log: Path,
+        structured_log: Path,
+        git_meta: GitMeta,
+        permission_mode: str | None,
+        resolved_model: str | None,
+        resolved_effort: str | None,
+    ) -> SessionRecord:
+        # Tmux fallback launches the actual backend binary inside a tmux
+        # pane and tails the pane log. The plugin doesn't pick the
+        # binary itself — it asks the registry for the cli_binary the
+        # requested backend advertises. A backend without a cli_binary
+        # (e.g. an HTTP-only OpenCode) can opt out of tmux fallback by
+        # leaving the capability unset.
+        command = runtime._command_for_backend(
+            request.backend, request.args, launch_target, request.cwd
+        )
+        try:
+            target = await runtime.tmux.start_managed_session(
+                session_id, request.cwd, command
+            )
+            await runtime.tmux.pipe_output(target.pane, raw_log)
+        except TmuxError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        now = datetime.now(UTC)
+        session = SessionRecord(
+            id=session_id,
+            backend=request.backend,
+            source=SessionSource.MANAGED,
+            transport=SessionTransport.TMUX,
+            title=title,
+            cwd=request.cwd,
+            launch_target_id=launch_target.id if launch_target else None,
+            repo_name=git_meta.repo_name,
+            branch=git_meta.branch,
+            status=SessionStatus.STARTING,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            tmux_session=target.session,
+            tmux_window=target.window,
+            tmux_pane=target.pane,
+            raw_log_path=str(raw_log),
+            structured_log_path=str(structured_log),
+            pid=target.pane_pid,
+        )
+        runtime.storage.create_session(session)
+        await runtime._record_system_event(
+            session.id,
+            self.format_start_message(request.backend, launch_target, request.cwd),
+        )
+        runtime._ensure_monitor(session.id)
+        return runtime.get_session(session.id)
 
 
 def build_plugin() -> TmuxPlugin:

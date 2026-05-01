@@ -4,29 +4,21 @@ import logging
 import re
 import secrets
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from codex_app_server.client import AppServerClient
 from fastapi import HTTPException, status
 
 from waypoint.backends import BackendRegistry, get_registry
 from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeCliError
 from waypoint.backends.claude_code.runtime_hook import ClaudeHookBundle
-from waypoint.backends.claude_code.threads import (
-    ClaudeThreadInfo,
-    find_local_claude_thread,
-    list_local_claude_threads,
-)
 from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
 from waypoint.backends.codex.adapter import (
-    ClientFactory,
     CodexAppServerAdapter,
-    default_client_factory,
 )
+from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
 from waypoint.backends.tmux.normalize import TerminalNormalizer
 from waypoint.config import Settings
 from waypoint.git_meta import resolve_git_meta
@@ -52,10 +44,7 @@ from waypoint.schemas import (
 )
 from waypoint.server_config import (
     SshLaunchTargetConfig,
-    build_remote_claude_launch_factory,
-    build_remote_codex_client_factory,
 )
-from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
 from waypoint.storage import Storage
 from waypoint.transports import TransportAdapter
 
@@ -184,261 +173,26 @@ class SessionRuntime:
     async def list_importable_codex_threads(
         self, launch_target_id: str | None = None
     ) -> list[CodexThreadSummary]:
-        self._resolve_launch_target(launch_target_id, Backend.CODEX)
-        imported = {
-            (session.launch_target_id, session.thread_id)
-            for session in self.storage.list_sessions()
-            if session.backend == Backend.CODEX and session.thread_id
-        }
-
-        async def operation(client: AppServerClient) -> list[Any]:
-            threads: list[Any] = []
-            cursor: str | None = None
-            while True:
-                response = await asyncio.to_thread(
-                    client.thread_list,
-                    {"archived": False, "cursor": cursor, "limit": 100},
-                )
-                threads.extend(response.data)
-                if response.next_cursor is None:
-                    return threads
-                cursor = response.next_cursor
-
-        threads = await self._run_codex_client_operation(
-            launch_target_id, operation=operation
-        )
-        summaries = [
-            self._codex_thread_summary(thread)
-            for thread in threads
-            if not thread.ephemeral and (launch_target_id, thread.id) not in imported
-        ]
-        return sorted(summaries, key=lambda thread: thread.updated_at, reverse=True)
+        plugin = self.registry.get(Backend.CODEX)
+        return await plugin.list_threads(self, launch_target_id)  # type: ignore[attr-defined]
 
     async def import_codex_thread(
         self, request: CodexThreadImportRequest
     ) -> SessionRecord:
-        launch_target = self._resolve_launch_target(
-            request.launch_target_id, Backend.CODEX
-        )
-        existing = self._find_imported_codex_session(
-            request.thread_id, request.launch_target_id
-        )
-        if existing is not None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="codex thread already imported",
-            )
-        thread = await self._read_codex_thread(
-            request.thread_id, request.launch_target_id
-        )
-        if thread.ephemeral:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="ephemeral codex threads cannot be imported",
-            )
-        session_id = self._generate_session_id(Backend.CODEX)
-        session_dir = self._session_dir(session_id)
-        raw_log = session_dir / "raw.log"
-        structured_log = session_dir / "events.jsonl"
-        raw_log.touch(exist_ok=True)
-        cwd = self._codex_thread_cwd(thread)
-        now = datetime.now(UTC)
-        session = SessionRecord(
-            id=session_id,
-            backend=Backend.CODEX,
-            source=SessionSource.MANAGED,
-            transport=SessionTransport.CODEX_APP_SERVER,
-            title=self._codex_thread_title(thread),
-            cwd=cwd,
-            launch_target_id=launch_target.id if launch_target else None,
-            repo_name=self._codex_thread_repo_name(thread),
-            branch=self._codex_thread_branch(thread),
-            status=SessionStatus.STARTING,
-            created_at=now,
-            updated_at=now,
-            last_event_at=now,
-            thread_id=thread.id,
-            raw_log_path=str(raw_log),
-            structured_log_path=str(structured_log),
-            permission_mode="default",
-        )
-        self.storage.create_session(session)
-        try:
-            await self.codex.restore_session(
-                session.id,
-                session.cwd,
-                thread.id,
-                self._codex_client_factory(session.launch_target_id),
-            )
-        except Exception as exc:  # noqa: BLE001
-            log.exception(
-                "codex import failed",
-                extra={
-                    "session_id": session.id,
-                    "thread_id": thread.id,
-                    "launch_target_id": session.launch_target_id,
-                },
-            )
-            self.storage.update_session(session.id, status=SessionStatus.ERROR)
-            await self._record_system_event(
-                session.id,
-                f"Codex thread import failed: {exc}",
-                status=SessionStatus.ERROR,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"failed to import codex thread: {exc}",
-            ) from exc
-        self.storage.update_session(session.id, status=SessionStatus.IDLE)
         plugin = self.registry.get(Backend.CODEX)
-        await self._record_system_event(
-            session.id,
-            plugin.format_import_message(cwd, launch_target),  # type: ignore[attr-defined]
-            status=SessionStatus.IDLE,
-            metadata={"imported_thread_id": thread.id},
-        )
-        return self.get_session(session.id)
+        return await plugin.import_thread(self, request)  # type: ignore[attr-defined]
 
     async def list_importable_claude_threads(
         self, launch_target_id: str | None = None
     ) -> list[ClaudeThreadSummary]:
-        if self.claude is None:
-            return []
-        imported = {
-            (session.launch_target_id, session.thread_id)
-            for session in self.storage.list_sessions()
-            if session.backend == Backend.CLAUDE_CODE and session.thread_id
-        }
-        if launch_target_id is None:
-            infos = await asyncio.to_thread(list_local_claude_threads)
-        else:
-            target = self._resolve_launch_target(launch_target_id, Backend.CLAUDE_CODE)
-            if target is None or self.claude_thread_enumerator is None:
-                return []
-            infos = await self.claude_thread_enumerator.list(target)
-        return [
-            self._claude_thread_summary(info)
-            for info in infos
-            if (launch_target_id, info.id) not in imported
-        ]
+        plugin = self.registry.get(Backend.CLAUDE_CODE)
+        return await plugin.list_threads(self, launch_target_id)  # type: ignore[attr-defined]
 
     async def import_claude_thread(
         self, request: ClaudeThreadImportRequest
     ) -> SessionRecord:
-        if self.claude is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="claude adapter is not initialized",
-            )
-        launch_target = self._resolve_launch_target(
-            request.launch_target_id, Backend.CLAUDE_CODE
-        )
-        existing = self._find_imported_claude_session(
-            request.thread_id, request.launch_target_id
-        )
-        if existing is not None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="claude thread already imported",
-            )
-        if launch_target is None:
-            info = await asyncio.to_thread(find_local_claude_thread, request.thread_id)
-        else:
-            if self.claude_thread_enumerator is None:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="claude thread enumerator is not initialized",
-                )
-            info = await self.claude_thread_enumerator.find(
-                launch_target, request.thread_id
-            )
-        if info is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="claude thread not found",
-            )
-        if launch_target is None:
-            cwd_path = Path(info.cwd).expanduser()
-            if not cwd_path.exists():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        f"claude thread cwd {info.cwd} no longer exists; "
-                        "cannot resume"
-                    ),
-                )
-            cwd = str(cwd_path)
-        else:
-            # Remote cwd lives on the SSH host; we can't stat it from here.
-            # If the directory is gone, claude itself surfaces the error
-            # through the existing exception path below.
-            cwd = info.cwd
-        session_id = self._generate_session_id(Backend.CLAUDE_CODE)
-        session_dir = self._session_dir(session_id)
-        raw_log = session_dir / "raw.log"
-        structured_log = session_dir / "events.jsonl"
-        raw_log.touch(exist_ok=True)
-        now = datetime.now(UTC)
-        session = SessionRecord(
-            id=session_id,
-            backend=Backend.CLAUDE_CODE,
-            source=SessionSource.MANAGED,
-            transport=SessionTransport.CLAUDE_CLI,
-            title=info.title,
-            cwd=cwd,
-            launch_target_id=launch_target.id if launch_target else None,
-            repo_name=info.repo_name,
-            branch=info.branch,
-            status=SessionStatus.STARTING,
-            created_at=now,
-            updated_at=now,
-            last_event_at=now,
-            thread_id=info.id,
-            raw_log_path=str(raw_log),
-            structured_log_path=str(structured_log),
-            permission_mode="default",
-        )
-        self.storage.create_session(session)
-        try:
-            await self.claude.restore_session(
-                session.id,
-                cwd,
-                info.id,
-                self._claude_launch_factory(session.launch_target_id),
-                permission_mode=session.permission_mode,
-                model=session.model,
-                effort=session.effort,
-            )
-        except (ClaudeCliError, FileNotFoundError, OSError) as exc:
-            log.exception(
-                "claude import failed",
-                extra={
-                    "session_id": session.id,
-                    "claude_session_id": info.id,
-                    "launch_target_id": session.launch_target_id,
-                },
-            )
-            self.storage.update_session(session.id, status=SessionStatus.ERROR)
-            await self._record_system_event(
-                session.id,
-                f"Claude thread import failed: {exc}",
-                status=SessionStatus.ERROR,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"failed to import claude thread: {exc}",
-            ) from exc
-        if launch_target is not None and self.claude_thread_enumerator is not None:
-            self.claude_thread_enumerator.invalidate(launch_target.id)
-        self.storage.update_session(session.id, status=SessionStatus.IDLE)
         plugin = self.registry.get(Backend.CLAUDE_CODE)
-        await self._record_system_event(
-            session.id,
-            plugin.format_import_message(cwd, launch_target),  # type: ignore[attr-defined]
-            status=SessionStatus.IDLE,
-            metadata={"imported_thread_id": info.id},
-        )
-        return self.get_session(session.id)
+        return await plugin.import_thread(self, request)  # type: ignore[attr-defined]
 
     async def create_session(self, request: SessionCreateRequest) -> SessionRecord:
         if request.source_mode != SessionSource.MANAGED:
@@ -485,143 +239,32 @@ class SessionRuntime:
         resolved_effort = request.effort or self.settings.default_efforts.get(
             request.backend
         )
-        if request.backend == Backend.CODEX:
-            raw_log.touch(exist_ok=True)
-            session = SessionRecord(
-                id=session_id,
-                backend=request.backend,
-                source=SessionSource.MANAGED,
-                transport=SessionTransport.CODEX_APP_SERVER,
-                title=title,
-                cwd=request.cwd,
-                launch_target_id=launch_target.id if launch_target else None,
-                repo_name=git_meta.repo_name,
-                branch=git_meta.branch,
-                status=SessionStatus.STARTING,
-                created_at=datetime.now(UTC),
-                updated_at=datetime.now(UTC),
-                last_event_at=datetime.now(UTC),
-                raw_log_path=str(raw_log),
-                structured_log_path=str(structured_log),
-                permission_mode=permission_mode,
-                model=resolved_model,
-                effort=resolved_effort,
-            )
-            self.storage.create_session(session)
-            try:
-                thread_id = await self.codex.start_session(
-                    session_id,
-                    request.cwd,
-                    self._codex_client_factory(session.launch_target_id),
-                    model=resolved_model,
-                    effort=resolved_effort,
-                )
-            except Exception:
-                self.storage.update_session(session.id, status=SessionStatus.ERROR)
-                raise
-            self.storage.update_session(
-                session.id, thread_id=thread_id, status=SessionStatus.IDLE
-            )
-            plugin = self.registry.get(Backend.CODEX)
-            await self._record_system_event(
-                session.id,
-                plugin.format_start_message(request.cwd, launch_target),  # type: ignore[attr-defined]
-                status=SessionStatus.IDLE,
-            )
-            return self.get_session(session.id)
-        if request.backend == Backend.CLAUDE_CODE and self.claude is not None:
-            raw_log.touch(exist_ok=True)
-            claude_session_id = self._generate_claude_session_id()
-            session = SessionRecord(
-                id=session_id,
-                backend=request.backend,
-                source=SessionSource.MANAGED,
-                transport=SessionTransport.CLAUDE_CLI,
-                title=title,
-                cwd=request.cwd,
-                launch_target_id=launch_target.id if launch_target else None,
-                repo_name=git_meta.repo_name,
-                branch=git_meta.branch,
-                status=SessionStatus.STARTING,
-                created_at=datetime.now(UTC),
-                updated_at=datetime.now(UTC),
-                last_event_at=datetime.now(UTC),
-                thread_id=claude_session_id,
-                raw_log_path=str(raw_log),
-                structured_log_path=str(structured_log),
-                permission_mode=permission_mode,
-                model=resolved_model,
-                effort=resolved_effort,
-            )
-            self.storage.create_session(session)
-            try:
-                await self.claude.start_session(
-                    session_id,
-                    request.cwd,
-                    claude_session_id,
-                    self._claude_launch_factory(session.launch_target_id),
-                    permission_mode=session.permission_mode,
-                    model=session.model,
-                    effort=session.effort,
-                )
-            except (ClaudeCliError, FileNotFoundError, OSError) as exc:
-                self.storage.update_session(session.id, status=SessionStatus.ERROR)
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-                ) from exc
-            self.storage.update_session(session.id, status=SessionStatus.IDLE)
-            plugin = self.registry.get(Backend.CLAUDE_CODE)
-            await self._record_system_event(
-                session.id,
-                plugin.format_start_message(  # type: ignore[attr-defined]
-                    claude_session_id, request.cwd, launch_target
-                ),
-                status=SessionStatus.IDLE,
-            )
-            return self.get_session(session.id)
-        command = self._command_for_backend(
-            request.backend, request.args, launch_target, request.cwd
-        )
-        try:
-            target = await self.tmux.start_managed_session(
-                session_id, request.cwd, command
-            )
-            await self.tmux.pipe_output(target.pane, raw_log)
-        except TmuxError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-            ) from exc
-        session = SessionRecord(
-            id=session_id,
-            backend=request.backend,
-            source=SessionSource.MANAGED,
-            transport=SessionTransport.TMUX,
+        # Pick the plugin that owns the session lifecycle: structured
+        # backends (Claude, Codex) launch their own protocol process; if
+        # the requested backend has no structured plugin running (e.g.
+        # the Claude adapter wasn't initialised), fall through to the
+        # tmux plugin which spawns the CLI directly inside a pane.
+        plugin = self.registry.get(request.backend)
+        if request.backend == Backend.CLAUDE_CODE and self.claude is None:
+            plugin = self.registry.get("tmux")
+        elif (
+            not plugin.capabilities.is_structured
+            and self.registry.has_backend("tmux")
+        ):
+            plugin = self.registry.get("tmux")
+        return await plugin.create_session(  # type: ignore[attr-defined]
+            self,
+            request,
+            session_id=session_id,
+            launch_target=launch_target,
             title=title,
-            cwd=request.cwd,
-            launch_target_id=launch_target.id if launch_target else None,
-            repo_name=git_meta.repo_name,
-            branch=git_meta.branch,
-            status=SessionStatus.STARTING,
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-            last_event_at=datetime.now(UTC),
-            tmux_session=target.session,
-            tmux_window=target.window,
-            tmux_pane=target.pane,
-            raw_log_path=str(raw_log),
-            structured_log_path=str(structured_log),
-            pid=target.pane_pid,
+            raw_log=raw_log,
+            structured_log=structured_log,
+            git_meta=git_meta,
+            permission_mode=permission_mode,
+            resolved_model=resolved_model,
+            resolved_effort=resolved_effort,
         )
-        self.storage.create_session(session)
-        tmux_plugin = self.registry.get("tmux")
-        await self._record_system_event(
-            session.id,
-            tmux_plugin.format_start_message(  # type: ignore[attr-defined]
-                request.backend, launch_target, request.cwd
-            ),
-        )
-        self._ensure_monitor(session.id)
-        return self.get_session(session.id)
 
     async def attach_tmux(self, request: SessionAttachRequest) -> SessionRecord:
         try:
@@ -1122,152 +765,6 @@ class SessionRuntime:
             return None
         return self.ssh_targets.get(launch_target_id)
 
-    def _codex_client_factory(self, launch_target_id: str | None):
-        launch_target = self._find_launch_target(launch_target_id)
-        if launch_target is None:
-            return None
-        return build_remote_codex_client_factory(launch_target)
-
-    def _codex_client_cwd(self, launch_target_id: str | None) -> str:
-        launch_target = self._find_launch_target(launch_target_id)
-        if launch_target is not None:
-            return launch_target.default_cwd
-        return str(Path(self.settings.default_cwd).expanduser())
-
-    async def _run_codex_client_operation(
-        self,
-        launch_target_id: str | None,
-        operation: Callable[[AppServerClient], Awaitable[Any]],
-        *,
-        cwd: str | None = None,
-    ) -> Any:
-        default_cwd = self._codex_client_cwd(launch_target_id)
-        client_factory: ClientFactory = (
-            self._codex_client_factory(launch_target_id) or default_client_factory
-        )
-        client = client_factory(
-            cwd or default_cwd,
-            self._deny_codex_approval,
-        )
-        try:
-            await asyncio.to_thread(client.start)
-            await asyncio.to_thread(client.initialize)
-            return await operation(client)
-        finally:
-            with suppress(Exception):
-                await asyncio.to_thread(client.close)
-
-    async def _read_codex_thread(
-        self, thread_id: str, launch_target_id: str | None
-    ) -> Any:
-        self._resolve_launch_target(launch_target_id, Backend.CODEX)
-
-        async def operation(client: AppServerClient) -> Any:
-            response = await asyncio.to_thread(client.thread_read, thread_id, False)
-            return response.thread
-
-        try:
-            return await self._run_codex_client_operation(
-                launch_target_id, operation=operation
-            )
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"failed to read codex thread: {exc}",
-            ) from exc
-
-    def _find_imported_codex_session(
-        self, thread_id: str, launch_target_id: str | None
-    ) -> SessionRecord | None:
-        for session in self.storage.list_sessions():
-            if session.backend != Backend.CODEX:
-                continue
-            if session.thread_id != thread_id:
-                continue
-            if session.launch_target_id != launch_target_id:
-                continue
-            return session
-        return None
-
-    def _deny_codex_approval(
-        self, _method: str, _params: dict[str, Any] | None
-    ) -> dict[str, Any]:
-        return {"decision": "decline"}
-
-    def _codex_thread_summary(self, thread: Any) -> CodexThreadSummary:
-        cwd = self._codex_thread_cwd(thread)
-        return CodexThreadSummary(
-            id=thread.id,
-            title=self._codex_thread_title(thread),
-            cwd=cwd,
-            repo_name=self._codex_thread_repo_name(thread),
-            branch=self._codex_thread_branch(thread),
-            preview=(thread.preview or "").strip() or None,
-            created_at=datetime.fromtimestamp(thread.created_at, UTC),
-            updated_at=datetime.fromtimestamp(thread.updated_at, UTC),
-        )
-
-    def _codex_thread_title(self, thread: Any) -> str:
-        if thread.name:
-            return thread.name
-        preview = (thread.preview or "").strip()
-        if preview:
-            return preview.splitlines()[0][:80]
-        return f"Codex {Path(self._codex_thread_cwd(thread)).name or thread.id}"
-
-    def _codex_thread_branch(self, thread: Any) -> str | None:
-        git_info = getattr(thread, "git_info", None)
-        return git_info.branch if git_info is not None else None
-
-    def _codex_thread_repo_name(self, thread: Any) -> str | None:
-        git_info = getattr(thread, "git_info", None)
-        if git_info is not None and git_info.origin_url:
-            normalized = git_info.origin_url.rstrip("/").removesuffix(".git")
-            name = normalized.rsplit("/", 1)[-1]
-            if name:
-                return name
-        return Path(self._codex_thread_cwd(thread)).name or None
-
-    def _codex_thread_cwd(self, thread: Any) -> str:
-        cwd = getattr(thread, "cwd", "")
-        return getattr(cwd, "root", cwd)
-
-    def _claude_thread_summary(self, info: ClaudeThreadInfo) -> ClaudeThreadSummary:
-        return ClaudeThreadSummary(
-            id=info.id,
-            title=info.title,
-            cwd=info.cwd,
-            repo_name=info.repo_name,
-            branch=info.branch,
-            preview=info.preview,
-            created_at=info.created_at,
-            updated_at=info.updated_at,
-        )
-
-    def _find_imported_claude_session(
-        self, thread_id: str, launch_target_id: str | None
-    ) -> SessionRecord | None:
-        for session in self.storage.list_sessions():
-            if session.backend != Backend.CLAUDE_CODE:
-                continue
-            if session.thread_id != thread_id:
-                continue
-            if session.launch_target_id != launch_target_id:
-                continue
-            return session
-        return None
-
-    def _claude_launch_factory(self, launch_target_id: str | None):
-        launch_target = self._find_launch_target(launch_target_id)
-        if launch_target is None or self.claude_hook is None or self.claude is None:
-            return None
-        return build_remote_claude_launch_factory(
-            launch_target,
-            hook_script_path=self.claude_hook.hook_script_path,
-            hook_secret=self.claude_hook.secret,
-            local_backend_port=self.settings.port,
-        )
-
     async def _record_user_event(
         self,
         session_id: str,
@@ -1350,11 +847,6 @@ class SessionRuntime:
         token = secrets.token_hex(4)
         prefix = SAFE_NAME.sub("-", backend)
         return f"{prefix}-{token}"
-
-    def _generate_claude_session_id(self) -> str:
-        import uuid
-
-        return str(uuid.uuid4())
 
     def _session_dir(self, session_id: str) -> Path:
         path = self.settings.sessions_dir / session_id

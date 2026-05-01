@@ -109,21 +109,47 @@ started_marker_for() {
   echo "${RUN_DIR}/${service}.started-this-run"
 }
 
-# Skip `next build` when no relevant input is newer than the existing
-# build output. The .next/ tree stays on disk between runs, so a hit is
-# "do nothing" — no cache to restore — which beats general-purpose
-# build runners on this single-package workflow. If you change build
-# behavior in a way the listed inputs don't capture (e.g. adding a new
-# config file Next reads), add it to the list. Force a rebuild with
-# WAYPOINT_STACK_FORCE_FRONTEND_BUILD=1 or `rm -rf frontend/.next`.
-# Caveat: this is mtime-based, so switching to a branch whose files
-# happen to have older mtimes can produce a false negative.
+# Skip `next build` when neither the git HEAD nor any tracked input has
+# moved since the last build. The .next/ tree stays on disk between
+# runs, so a hit is "do nothing" — no cache to restore — which beats
+# general-purpose build runners on this single-package workflow.
+# Two-stage check:
+#   1. If the recorded HEAD (.next/BUILD_REF) differs from the current
+#      HEAD, rebuild. Catches `git checkout`, where mtimes don't always
+#      bump for files that change content between branches.
+#   2. Otherwise, fall through to an mtime check against BUILD_ID for
+#      uncommitted edits.
+# Force a rebuild with WAYPOINT_STACK_FORCE_FRONTEND_BUILD=1 or
+# `rm -rf frontend/.next`. Add to the input list when something new
+# starts driving build output.
+frontend_build_ref_file() {
+  echo "${FRONTEND_DIR}/.next/BUILD_REF"
+}
+
+current_git_head() {
+  git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || true
+}
+
 frontend_build_is_fresh() {
   if [[ "${WAYPOINT_STACK_FORCE_FRONTEND_BUILD:-0}" == "1" ]]; then
     return 1
   fi
   local marker="${FRONTEND_DIR}/.next/BUILD_ID"
   [[ -f "${marker}" ]] || return 1
+
+  # Git ref check. Only enforced when both sides exist; if either is
+  # missing (no git, or no recorded ref yet), we trust the mtime check
+  # alone so manual `npm run build` invocations don't trigger spurious
+  # rebuilds.
+  local ref_file current_ref last_ref
+  ref_file="$(frontend_build_ref_file)"
+  if [[ -f "${ref_file}" ]]; then
+    current_ref="$(current_git_head)"
+    last_ref="$(cat "${ref_file}" 2>/dev/null || true)"
+    if [[ -n "${current_ref}" && "${current_ref}" != "${last_ref}" ]]; then
+      return 1
+    fi
+  fi
 
   local inputs=()
   local candidate
@@ -143,6 +169,15 @@ frontend_build_is_fresh() {
   local newer
   newer=$(find "${inputs[@]}" -newer "${marker}" -print -quit 2>/dev/null) || true
   [[ -z "${newer}" ]]
+}
+
+# Stamp the ref of the tree we just built. Best-effort: silently does
+# nothing outside a git repo.
+record_frontend_build_ref() {
+  local current_ref
+  current_ref="$(current_git_head)"
+  [[ -n "${current_ref}" ]] || return 0
+  printf '%s\n' "${current_ref}" >"$(frontend_build_ref_file)"
 }
 
 read_pid() {
@@ -271,6 +306,7 @@ start_frontend() {
       cd "${FRONTEND_DIR}"
       env PORT="${FRONTEND_PORT}" npm run build >>"${FRONTEND_LOG}" 2>&1
     )
+    record_frontend_build_ref
   fi
 
   echo "starting frontend on 0.0.0.0:${FRONTEND_PORT}"

@@ -67,26 +67,42 @@ export function readRecentCwds(host: string, targetId: string): string[] {
   }
   const all = readRecentCwdSelections();
   const scoped = all[recentCwdScope(host, targetId)];
-  return Array.isArray(scoped)
-    ? scoped.filter((item): item is string => typeof item === "string" && item.length > 0)
-    : [];
+  if (!Array.isArray(scoped)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of scoped) {
+    if (typeof item !== "string") continue;
+    const normalized = normalizeCwd(item);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
 }
 
 export function pushRecentCwd(host: string, targetId: string, cwd: string): string[] {
-  const normalized = cwd.trim();
+  const normalized = normalizeCwd(cwd);
   if (!host || !normalized) {
     return readRecentCwds(host, targetId);
   }
   const all = readRecentCwdSelections();
   const scope = recentCwdScope(host, targetId);
   const current = Array.isArray(all[scope]) ? all[scope] : [];
-  const next = [
-    normalized,
-    ...current.filter((item): item is string => typeof item === "string" && item !== normalized),
-  ].slice(0, RECENT_CWDS_LIMIT);
-  all[scope] = next;
+  const next: string[] = [normalized];
+  const seen = new Set<string>([normalized]);
+  for (const item of current) {
+    if (typeof item !== "string") continue;
+    const itemNormalized = normalizeCwd(item);
+    if (!itemNormalized || seen.has(itemNormalized)) continue;
+    seen.add(itemNormalized);
+    next.push(itemNormalized);
+  }
+  const trimmed = next.slice(0, RECENT_CWDS_LIMIT);
+  all[scope] = trimmed;
   window.localStorage.setItem(RECENT_CWDS_KEY, JSON.stringify(all));
-  return next;
+  return trimmed;
 }
 
 // Seed the per-scope list with paths the server already knows about
@@ -104,7 +120,7 @@ export function mergeRecentCwds(
   const all = readRecentCwdSelections();
   const byScope = new Map<string, string[]>();
   for (const { targetId, cwd } of entries) {
-    const normalized = cwd.trim();
+    const normalized = normalizeCwd(cwd);
     if (!normalized) continue;
     const scope = recentCwdScope(host, targetId);
     const list = byScope.get(scope) ?? [];
@@ -115,14 +131,24 @@ export function mergeRecentCwds(
   }
   let dirty = false;
   for (const [scope, seeded] of byScope) {
-    const current = Array.isArray(all[scope])
-      ? all[scope].filter((item): item is string => typeof item === "string" && item.length > 0)
-      : [];
+    const currentRaw = Array.isArray(all[scope]) ? all[scope] : [];
+    const current: string[] = [];
+    const seen = new Set<string>();
+    for (const item of currentRaw) {
+      if (typeof item !== "string") continue;
+      const normalized = normalizeCwd(item);
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      current.push(normalized);
+    }
     const merged = [
       ...current,
-      ...seeded.filter((item) => !current.includes(item)),
+      ...seeded.filter((item) => !seen.has(item)),
     ].slice(0, RECENT_CWDS_LIMIT);
-    if (merged.length !== current.length || merged.some((item, idx) => item !== current[idx])) {
+    if (
+      merged.length !== currentRaw.length ||
+      merged.some((item, idx) => item !== currentRaw[idx])
+    ) {
       all[scope] = merged;
       dirty = true;
     }
@@ -130,6 +156,19 @@ export function mergeRecentCwds(
   if (dirty) {
     window.localStorage.setItem(RECENT_CWDS_KEY, JSON.stringify(all));
   }
+}
+
+// Cheap path canonicalisation so trivially equivalent paths stop
+// fragmenting the recents list (e.g. `/repo/` vs `/repo`, `//foo/bar`
+// vs `/foo/bar`). Anything beyond syntax — `~` expansion, relative-
+// vs-absolute, symlinks — needs the backend's filesystem and is
+// deliberately out of scope here.
+function normalizeCwd(cwd: string): string {
+  const trimmed = cwd.trim();
+  if (!trimmed) return "";
+  const collapsed = trimmed.replace(/\/{2,}/g, "/");
+  if (collapsed === "/") return collapsed;
+  return collapsed.replace(/\/+$/, "");
 }
 
 function inferBackendHost(): string {

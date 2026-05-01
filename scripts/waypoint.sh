@@ -41,6 +41,7 @@ Environment overrides:
   WAYPOINT_STACK_START_TIMEOUT     Default: 30
   WAYPOINT_STACK_UV_CACHE_DIR      Default: tmp/waypoint/uv-cache
   WAYPOINT_STACK_FORCE_FRONTEND_BUILD=1  Always rebuild the frontend (default: skip when up to date)
+  WAYPOINT_STACK_CAFFEINATE=0      Disable the macOS sleep inhibitor (default: engaged on Darwin)
 
 The script loads ${ENV_FILE} if it exists before applying defaults.
 EOF
@@ -355,6 +356,53 @@ wait_for_exit() {
   ! is_pid_running "${pid}"
 }
 
+# macOS-only sleep inhibitor. We hold a `caffeinate -i -s` process for
+# the lifetime of the stack so scheduled sessions and phone clients
+# don't lose the host on idle/system sleep. `-d`/`-m` are intentionally
+# omitted: display sleep and disk idle sleep are fine. Disable via
+# WAYPOINT_STACK_CAFFEINATE=0; no-op on non-Darwin platforms.
+caffeinate_enabled() {
+  [[ "$(uname)" == "Darwin" ]] \
+    && [[ "${WAYPOINT_STACK_CAFFEINATE:-1}" == "1" ]] \
+    && command -v caffeinate >/dev/null 2>&1
+}
+
+start_caffeinate() {
+  caffeinate_enabled || return 0
+  clear_stale_pid "caffeinate"
+  if is_service_running "caffeinate"; then
+    return 0
+  fi
+  echo "engaging caffeinate to keep the system awake while the stack runs"
+  nohup caffeinate -i -s >/dev/null 2>&1 &
+  echo $! >"$(pid_file_for caffeinate)"
+}
+
+stop_caffeinate() {
+  clear_stale_pid "caffeinate"
+  local pid
+  pid="$(read_pid caffeinate)"
+  if [[ -z "${pid}" ]]; then
+    return 0
+  fi
+  echo "stopping caffeinate (pid ${pid})"
+  kill "${pid}" >/dev/null 2>&1 || true
+  if ! wait_for_exit "${pid}"; then
+    kill -9 "${pid}" >/dev/null 2>&1 || true
+  fi
+  rm -f "$(pid_file_for caffeinate)"
+}
+
+status_caffeinate() {
+  [[ "$(uname)" == "Darwin" ]] || return 0
+  clear_stale_pid "caffeinate"
+  local pid
+  pid="$(read_pid caffeinate)"
+  if [[ -n "${pid}" ]]; then
+    echo "caffeinate: running pid=${pid}"
+  fi
+}
+
 stop_service() {
   local service="$1"
   local pid
@@ -482,14 +530,18 @@ start_stack() {
     return 1
   fi
 
+  start_caffeinate
   status_stack
 }
 
 stop_stack() {
+  stop_caffeinate &
+  local cf=$!
   stop_service "frontend" &
   local fe=$!
   stop_service "backend" &
   local be=$!
+  wait "${cf}" || true
   wait "${fe}" || true
   wait "${be}" || true
 }
@@ -502,6 +554,7 @@ restart_stack() {
 status_stack() {
   status_service "backend" "${BACKEND_PORT}"
   status_service "frontend" "${FRONTEND_PORT}"
+  status_caffeinate
 }
 
 main() {

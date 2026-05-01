@@ -146,11 +146,10 @@ function StructuredCard({
     toolUseId?: string,
   ) => Promise<boolean> | void;
 }) {
-  // Pull the human-readable backend name from the catalog fallback;
-  // strips to the first word and lowercases (e.g. "Claude Code" →
-  // "claude") so Codex transcripts read "codex" and Claude reads
-  // "claude" without a literal switch. New backends inherit the
-  // pattern automatically.
+  // Convention: the chat-bubble agent label is the first word of the
+  // transport label, lowercased ("Claude Cli" → "claude", "Codex App
+  // Server" → "codex"). New backends inherit it for free as long as
+  // their transport label leads with a single-word agent name.
   const agentLabel = transportLabel(transport).split(" ")[0] || transport;
   return (
     <CodexCard

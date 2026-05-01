@@ -5,15 +5,20 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { EffortPicker } from "@/components/EffortPicker";
 import { ModelPicker } from "@/components/ModelPicker";
 import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
+import type { BackendCatalog } from "@/lib/backends";
 import { humaniseBackend } from "@/lib/backends";
-import {
-  Backend,
-  BackendModelListResponse,
-  ClaudeThreadSummary,
-  CodexThreadSummary,
-} from "@/lib/types";
+import { Backend, BackendModelListResponse } from "@/lib/types";
 
-type ThreadSummary = CodexThreadSummary | ClaudeThreadSummary;
+interface ThreadSummary {
+  id: string;
+  title: string;
+  cwd: string;
+  repo_name?: string | null;
+  branch?: string | null;
+  preview?: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 interface LaunchPanelProps {
   host: string;
@@ -23,6 +28,7 @@ interface LaunchPanelProps {
   targetLabel: string | null;
   launchTargetId: string | null;
   supportedBackends: Backend[];
+  catalog: BackendCatalog;
   threadsByBackend: Record<Backend, ThreadSummary[]>;
   loadingByBackend: Record<Backend, boolean>;
   onCreate: (
@@ -45,6 +51,7 @@ export function LaunchPanel({
   targetLabel,
   launchTargetId,
   supportedBackends,
+  catalog,
   threadsByBackend,
   loadingByBackend,
   onCreate,
@@ -144,7 +151,9 @@ export function LaunchPanel({
           <span>Backend</span>
           <select value={backend} onChange={(event) => setBackend(event.target.value as Backend)}>
             {supportedBackends.map((id) => (
-              <option key={id} value={id}>{humaniseBackend(id)}</option>
+              <option key={id} value={id}>
+                {catalog.byId(id)?.label ?? humaniseBackend(id)}
+              </option>
             ))}
           </select>
         </label>
@@ -197,7 +206,9 @@ export function LaunchPanel({
           <span>Backend hint</span>
           <select value={backend} onChange={(event) => setBackend(event.target.value as Backend)}>
             {supportedBackends.map((id) => (
-              <option key={id} value={id}>{humaniseBackend(id)}</option>
+              <option key={id} value={id}>
+                {catalog.byId(id)?.label ?? humaniseBackend(id)}
+              </option>
             ))}
           </select>
         </label>
@@ -213,6 +224,7 @@ export function LaunchPanel({
           supportedBackends={supportedBackends}
           preferredBackend={backend}
           onImportThread={onImportThread}
+          catalog={catalog}
         />
       ) : null}
     </section>

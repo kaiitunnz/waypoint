@@ -50,28 +50,6 @@ export interface SessionRecord {
   effort?: string | null;
 }
 
-export interface CodexThreadSummary {
-  id: string;
-  title: string;
-  cwd: string;
-  repo_name?: string | null;
-  branch?: string | null;
-  preview?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ClaudeThreadSummary {
-  id: string;
-  title: string;
-  cwd: string;
-  repo_name?: string | null;
-  branch?: string | null;
-  preview?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface EventRecord {
   id?: number;
   session_id: string;
@@ -100,6 +78,7 @@ export interface BackendCapabilities {
   supports_terminate: boolean;
   supports_set_model_inline: boolean;
   supports_set_effort_inline: boolean;
+  supports_set_effort_with_restart: boolean;
   supports_set_permission_mode_inline: boolean;
   supports_thread_discovery: boolean;
   supports_thread_import: boolean;

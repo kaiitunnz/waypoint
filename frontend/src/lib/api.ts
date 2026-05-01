@@ -4,8 +4,6 @@ import {
   Backend,
   BackendDescriptor,
   BackendModelListResponse,
-  ClaudeThreadSummary,
-  CodexThreadSummary,
   EventRecord,
   EventsPage,
   MeResponse,
@@ -75,27 +73,6 @@ export async function fetchBackendThreads<T = unknown>(
   await ensureOk(response, `failed to fetch ${backend} threads`);
   const payload = await response.json();
   return (payload.threads ?? []) as T[];
-}
-
-export async function fetchCodexThreads(
-  host: string,
-  token: string,
-  launchTargetId?: string,
-): Promise<CodexThreadSummary[]> {
-  return fetchBackendThreads<CodexThreadSummary>(host, token, "codex", launchTargetId);
-}
-
-export async function fetchClaudeThreads(
-  host: string,
-  token: string,
-  launchTargetId?: string,
-): Promise<ClaudeThreadSummary[]> {
-  return fetchBackendThreads<ClaudeThreadSummary>(
-    host,
-    token,
-    "claude_code",
-    launchTargetId,
-  );
 }
 
 export async function fetchMe(host: string, token: string): Promise<MeResponse> {
@@ -223,22 +200,6 @@ export async function importBackendThread(
   await ensureOk(response, `failed to import ${backend} thread`);
   const body = await response.json();
   return body.session as SessionRecord;
-}
-
-export async function importCodexThread(
-  host: string,
-  token: string,
-  payload: Record<string, unknown>,
-): Promise<SessionRecord> {
-  return importBackendThread(host, token, "codex", payload);
-}
-
-export async function importClaudeThread(
-  host: string,
-  token: string,
-  payload: Record<string, unknown>,
-): Promise<SessionRecord> {
-  return importBackendThread(host, token, "claude_code", payload);
 }
 
 export async function postAction(

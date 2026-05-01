@@ -87,8 +87,8 @@ export function buildCatalog(descriptors: BackendDescriptor[]): BackendCatalog {
   };
 }
 
-export function humaniseBackend(id: Backend): string {
-  return FALLBACK_LABELS[id] ?? id;
+export function humaniseBackend(id: Backend, catalog?: BackendCatalog): string {
+  return catalog?.byId(id)?.label ?? FALLBACK_LABELS[id] ?? id;
 }
 
 /**

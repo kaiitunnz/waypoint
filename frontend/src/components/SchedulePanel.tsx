@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { EffortPicker } from "@/components/EffortPicker";
 import { ModelPicker } from "@/components/ModelPicker";
+import type { BackendCatalog } from "@/lib/backends";
 import {
   humaniseBackend,
   permissionModeLabel,
@@ -24,6 +25,7 @@ interface SchedulePanelProps {
   targetLabel: string | null;
   launchTargetId: string | null;
   supportedBackends: Backend[];
+  catalog: BackendCatalog;
   schedules: ScheduledSession[];
   onCreate: (payload: ScheduleCreateRequest) => Promise<void>;
   onCancel: (scheduleId: string) => Promise<void>;
@@ -41,6 +43,7 @@ export function SchedulePanel({
   targetLabel,
   launchTargetId,
   supportedBackends,
+  catalog,
   schedules,
   onCreate,
   onCancel,
@@ -61,7 +64,10 @@ export function SchedulePanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const permissionOptions = useMemo(() => permissionModesFor(backend), [backend]);
+  const permissionOptions = useMemo(
+    () => permissionModesFor(backend, catalog),
+    [backend, catalog],
+  );
 
   useEffect(() => setBackend(defaultBackend), [defaultBackend]);
   useEffect(() => setCwd(defaultCwd), [defaultCwd]);
@@ -172,10 +178,11 @@ export function SchedulePanel({
           <label className="field">
             <span>Backend</span>
             <select value={backend} onChange={(event) => setBackend(event.target.value as Backend)}>
-              {supportedBackends.includes("codex") ? <option value="codex">Codex</option> : null}
-              {supportedBackends.includes("claude_code") ? (
-                <option value="claude_code">Claude Code</option>
-              ) : null}
+              {supportedBackends.map((id) => (
+                <option key={id} value={id}>
+                  {catalog.byId(id)?.label ?? humaniseBackend(id)}
+                </option>
+              ))}
             </select>
           </label>
           {targetLabel ? (
@@ -282,7 +289,12 @@ export function SchedulePanel({
         <div className="stack">
           <h4 className="schedule-heading">Upcoming</h4>
           {upcoming.map((schedule) => (
-            <ScheduleRow key={schedule.id} schedule={schedule} onCancel={onCancel} />
+            <ScheduleRow
+              key={schedule.id}
+              schedule={schedule}
+              onCancel={onCancel}
+              catalog={catalog}
+            />
           ))}
         </div>
       ) : null}
@@ -300,7 +312,12 @@ export function SchedulePanel({
             </button>
           </div>
           {recent.map((schedule) => (
-            <ScheduleRow key={schedule.id} schedule={schedule} onCancel={onCancel} />
+            <ScheduleRow
+              key={schedule.id}
+              schedule={schedule}
+              onCancel={onCancel}
+              catalog={catalog}
+            />
           ))}
         </div>
       ) : null}
@@ -311,19 +328,25 @@ export function SchedulePanel({
 function ScheduleRow({
   schedule,
   onCancel,
+  catalog,
 }: {
   schedule: ScheduledSession;
   onCancel: (id: string) => Promise<void>;
+  catalog: BackendCatalog;
 }) {
   const when = new Date(schedule.scheduled_at);
   const formatted = when.toLocaleString();
   const relative = formatRelative(when);
-  const modeLabel = permissionModeLabel(schedule.backend, schedule.permission_mode);
+  const modeLabel = permissionModeLabel(
+    schedule.backend,
+    schedule.permission_mode,
+    catalog,
+  );
   return (
     <article className={`schedule-row schedule-${schedule.status}`}>
       <div className="session-row">
         <span className={`badge ${schedule.backend}`}>
-          {humaniseBackend(schedule.backend)}
+          {catalog.byId(schedule.backend)?.label ?? humaniseBackend(schedule.backend)}
         </span>
         <span className={`badge schedule-status ${schedule.status}`}>{schedule.status}</span>
         {modeLabel ? (

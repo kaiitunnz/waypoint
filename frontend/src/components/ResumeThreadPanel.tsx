@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import type { BackendCatalog } from "@/lib/backends";
 import { humaniseBackend } from "@/lib/backends";
 import { Backend } from "@/lib/types";
 
@@ -27,6 +28,7 @@ interface ResumeThreadPanelProps {
   supportedBackends: Backend[];
   preferredBackend: Backend;
   onImportThread: (backend: Backend, threadId: string) => Promise<void>;
+  catalog?: BackendCatalog;
 }
 
 type Filter = "all" | Backend;
@@ -43,15 +45,15 @@ const PAGE_SIZE_DESKTOP = 5;
 const PAGE_SIZE_MOBILE = 5;
 const MOBILE_BREAKPOINT = "(max-width: 720px)";
 
-// 3-letter glyph used by the per-row index chip. We derive it from the
-// human-readable label so a new backend gets reasonable defaults out
-// of the box; deployments can override per backend by editing
-// `humaniseBackend` (or, once the catalog is threaded through, by
-// surfacing `BackendDescriptor.badges.glyph`).
-function backendGlyph(id: Backend): string {
-  if (id === "codex") return "cdx";
-  if (id === "claude_code") return "cld";
-  return humaniseBackend(id).slice(0, 3).toLowerCase();
+// 3-letter glyph used by the per-row index chip. Pulled from the
+// backend's capability descriptor (``badges.glyph``) when the catalog
+// is hydrated; a label-derived fallback covers pre-catalog renders
+// and unknown backends.
+function backendGlyph(id: Backend, catalog?: BackendCatalog): string {
+  const badge = catalog?.byId(id)?.badges?.glyph;
+  if (badge) return badge.toLowerCase();
+  const label = catalog?.byId(id)?.label ?? humaniseBackend(id);
+  return label.slice(0, 3).toLowerCase();
 }
 
 export function ResumeThreadPanel({
@@ -61,6 +63,7 @@ export function ResumeThreadPanel({
   supportedBackends,
   preferredBackend,
   onImportThread,
+  catalog,
 }: ResumeThreadPanelProps) {
   const dualBackend = supportedBackends.length >= 2;
 
@@ -177,7 +180,7 @@ export function ResumeThreadPanel({
             {supportedBackends.map((id) => (
               <FilterChip
                 key={id}
-                label={humaniseBackend(id)}
+                label={catalog?.byId(id)?.label ?? humaniseBackend(id)}
                 count={counts[id] ?? 0}
                 active={filter === id}
                 disabled={(counts[id] ?? 0) === 0}
@@ -202,7 +205,8 @@ export function ResumeThreadPanel({
         <div className="import-thread-list resume-thread-list">
           {visibleThreads.map((thread) => {
             const isImporting = importingId === thread.id;
-            const backendLabel = humaniseBackend(thread.backend);
+            const backendLabel =
+              catalog?.byId(thread.backend)?.label ?? humaniseBackend(thread.backend);
             return (
               <article
                 className={`import-thread-row resume-thread-row is-${thread.backend}`}
@@ -214,7 +218,7 @@ export function ResumeThreadPanel({
                   aria-label={backendLabel}
                   title={backendLabel}
                 >
-                  {backendGlyph(thread.backend)}
+                  {backendGlyph(thread.backend, catalog)}
                 </span>
                 <div className="import-thread-body">
                   <div className="import-thread-headline">

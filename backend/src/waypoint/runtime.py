@@ -23,10 +23,6 @@ from waypoint.git_meta import resolve_git_meta
 from waypoint.scheduler import Scheduler, validate_permission_mode_for_backend
 from waypoint.schemas import (
     Backend,
-    ClaudeThreadImportRequest,
-    ClaudeThreadSummary,
-    CodexThreadImportRequest,
-    CodexThreadSummary,
     EventKind,
     EventRecord,
     EventsPageResponse,
@@ -158,30 +154,6 @@ class SessionRuntime:
             )
         return session
 
-    async def list_importable_codex_threads(
-        self, launch_target_id: str | None = None
-    ) -> list[CodexThreadSummary]:
-        plugin = self.registry.get(Backend.CODEX)
-        return await plugin.list_threads(self, launch_target_id)  # type: ignore[attr-defined]
-
-    async def import_codex_thread(
-        self, request: CodexThreadImportRequest
-    ) -> SessionRecord:
-        plugin = self.registry.get(Backend.CODEX)
-        return await plugin.import_thread(self, request)  # type: ignore[attr-defined]
-
-    async def list_importable_claude_threads(
-        self, launch_target_id: str | None = None
-    ) -> list[ClaudeThreadSummary]:
-        plugin = self.registry.get(Backend.CLAUDE_CODE)
-        return await plugin.list_threads(self, launch_target_id)  # type: ignore[attr-defined]
-
-    async def import_claude_thread(
-        self, request: ClaudeThreadImportRequest
-    ) -> SessionRecord:
-        plugin = self.registry.get(Backend.CLAUDE_CODE)
-        return await plugin.import_thread(self, request)  # type: ignore[attr-defined]
-
     async def create_session(self, request: SessionCreateRequest) -> SessionRecord:
         if request.source_mode != SessionSource.MANAGED:
             raise HTTPException(
@@ -240,7 +212,7 @@ class SessionRuntime:
             and self.registry.has_backend("tmux")
         ):
             plugin = self.registry.get("tmux")
-        return await plugin.create_session(  # type: ignore[attr-defined]
+        return await plugin.create_session(
             self,
             request,
             session_id=session_id,

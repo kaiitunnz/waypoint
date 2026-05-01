@@ -175,19 +175,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ]
         return {"sessions": sessions}
 
-    @app.get("/api/codex/threads")
-    async def list_codex_threads(
-        _: Annotated[str, Depends(token_dependency())],
-        launch_target_id: Annotated[str | None, Query()] = None,
-    ) -> Any:
-        threads = [
-            thread.model_dump(mode="json")
-            for thread in await context.runtime.list_importable_codex_threads(
-                launch_target_id
-            )
-        ]
-        return {"threads": threads}
-
     @app.get("/api/backends/{backend}/threads")
     async def list_backend_threads(
         backend: str,
@@ -205,24 +192,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"thread discovery is not supported for {backend}",
             )
-        # Routed through the runtime helpers for now; Step 6's follow-up
-        # moves these onto the plugin so this dispatcher disappears.
-        if backend == "codex":
-            threads = [
-                thread.model_dump(mode="json")
-                for thread in await context.runtime.list_importable_codex_threads(
-                    launch_target_id
-                )
-            ]
-        elif backend == "claude_code":
-            threads = [
-                thread.model_dump(mode="json")
-                for thread in await context.runtime.list_importable_claude_threads(
-                    launch_target_id
-                )
-            ]
-        else:
-            threads = []
+        threads = [
+            thread.model_dump(mode="json")
+            for thread in await plugin.list_threads(
+                context.runtime, launch_target_id
+            )
+        ]
         return {"threads": threads}
 
     @app.post("/api/sessions")
@@ -231,35 +206,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         session = await context.runtime.create_session(request)
-        return {"session": session.model_dump(mode="json")}
-
-    @app.post("/api/sessions/import-codex")
-    async def import_codex_thread(
-        request: CodexThreadImportRequest,
-        _: Annotated[str, Depends(token_dependency())],
-    ) -> Any:
-        session = await context.runtime.import_codex_thread(request)
-        return {"session": session.model_dump(mode="json")}
-
-    @app.get("/api/claude/threads")
-    async def list_claude_threads(
-        _: Annotated[str, Depends(token_dependency())],
-        launch_target_id: Annotated[str | None, Query()] = None,
-    ) -> Any:
-        threads = [
-            thread.model_dump(mode="json")
-            for thread in await context.runtime.list_importable_claude_threads(
-                launch_target_id
-            )
-        ]
-        return {"threads": threads}
-
-    @app.post("/api/sessions/import-claude")
-    async def import_claude_thread(
-        request: ClaudeThreadImportRequest,
-        _: Annotated[str, Depends(token_dependency())],
-    ) -> Any:
-        session = await context.runtime.import_claude_thread(request)
         return {"session": session.model_dump(mode="json")}
 
     @app.post("/api/backends/{backend}/sessions/import")
@@ -279,17 +225,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"thread import is not supported for {backend}",
             )
+        # Each plugin owns its request schema. CodexPlugin and
+        # ClaudeCodePlugin happen to use distinct Pydantic models
+        # today; the dispatcher trusts the plugin to validate.
         if backend == "codex":
-            request = CodexThreadImportRequest.model_validate(body)
-            session = await context.runtime.import_codex_thread(request)
+            request: Any = CodexThreadImportRequest.model_validate(body)
         elif backend == "claude_code":
-            claude_request = ClaudeThreadImportRequest.model_validate(body)
-            session = await context.runtime.import_claude_thread(claude_request)
+            request = ClaudeThreadImportRequest.model_validate(body)
         else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"thread import not implemented for {backend}",
-            )
+            request = body
+        session = await plugin.import_thread(context.runtime, request)
         return {"session": session.model_dump(mode="json")}
 
     @app.get("/api/sessions/{session_id}")

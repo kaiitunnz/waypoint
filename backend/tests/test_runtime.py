@@ -609,7 +609,7 @@ async def test_list_importable_codex_threads_filters_existing_session(
     codex_plugin = runtime.registry.get("codex")
     monkeypatch.setattr(codex_plugin, "run_client_operation", fake_run)
 
-    threads = await runtime.list_importable_codex_threads()
+    threads = await runtime.registry.get("codex").list_threads(runtime, )
 
     assert [thread.id for thread in threads] == ["thread-2"]
     assert threads[0].title == "Investigate remote import support"
@@ -660,7 +660,7 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
         lambda _runtime, launch_target_id: "remote-factory",
     )
 
-    session = await runtime.import_codex_thread(
+    session = await runtime.registry.get("codex").import_thread(runtime, 
         CodexThreadImportRequest(thread_id="thread-9", launch_target_id="devbox")
     )
 
@@ -730,7 +730,7 @@ async def test_list_importable_claude_threads_filters_existing_session(
         lambda: [info_existing, info_new],
     )
 
-    threads = await runtime.list_importable_claude_threads()
+    threads = await runtime.registry.get("claude_code").list_threads(runtime, )
 
     assert [thread.id for thread in threads] == ["22222222-2222-4222-8222-222222222222"]
     assert threads[0].title == "Fresh thread"
@@ -791,7 +791,7 @@ async def test_list_importable_claude_threads_remote_target_uses_enumerator(
     fake_enum = FakeRemoteEnumerator([info])
     runtime.claude_thread_enumerator = cast(Any, fake_enum)
 
-    summaries = await runtime.list_importable_claude_threads("devbox")
+    summaries = await runtime.registry.get("claude_code").list_threads(runtime, "devbox")
 
     assert fake_enum.list_calls == ["devbox"]
     assert [s.id for s in summaries] == [info.id]
@@ -832,7 +832,7 @@ async def test_list_importable_claude_threads_dedupes_by_target_and_thread(
     info = _make_claude_thread_info(id="11111111-1111-4111-8111-111111111111")
     runtime.claude_thread_enumerator = cast(Any, FakeRemoteEnumerator([info]))
 
-    summaries = await runtime.list_importable_claude_threads("devbox")
+    summaries = await runtime.registry.get("claude_code").list_threads(runtime, "devbox")
     assert [s.id for s in summaries] == [info.id]
 
 
@@ -857,7 +857,7 @@ async def test_import_claude_thread_creates_session_and_resumes(
         lambda thread_id: info if thread_id == info.id else None,
     )
 
-    session = await runtime.import_claude_thread(
+    session = await runtime.registry.get("claude_code").import_thread(runtime, 
         ClaudeThreadImportRequest(thread_id=info.id)
     )
 
@@ -921,7 +921,7 @@ async def test_import_claude_thread_remote_target_uses_remote_factory(
         lambda _runtime, launch_target_id: f"remote-factory-{launch_target_id}",
     )
 
-    session = await runtime.import_claude_thread(
+    session = await runtime.registry.get("claude_code").import_thread(runtime, 
         ClaudeThreadImportRequest(thread_id=info.id, launch_target_id="devbox")
     )
 
@@ -1009,7 +1009,7 @@ async def test_import_claude_thread_missing_returns_404(monkeypatch, tmp_path) -
     from fastapi import HTTPException
 
     with pytest.raises(HTTPException) as exc_info:
-        await runtime.import_claude_thread(
+        await runtime.registry.get("claude_code").import_thread(runtime, 
             ClaudeThreadImportRequest(thread_id="11111111-1111-4111-8111-111111111111")
         )
     assert exc_info.value.status_code == 404

@@ -96,6 +96,43 @@ class BackendPlugin(Protocol):
         """Restore a previously-running session after a runtime restart."""
         ...
 
+    async def list_threads(
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None = None,
+    ) -> list[Any]:
+        """Return importable thread summaries for this backend.
+
+        Each plugin returns its own summary type (CodexThreadSummary,
+        ClaudeThreadSummary). The API serialises via ``model_dump`` so
+        the wire shape is plugin-controlled.
+        """
+        ...
+
+    async def import_thread(
+        self, runtime: "SessionRuntime", request: Any
+    ) -> SessionRecord:
+        """Import an existing backend-side thread as a Waypoint session."""
+        ...
+
+    async def create_session(
+        self,
+        runtime: "SessionRuntime",
+        request: Any,
+        *,
+        session_id: str,
+        launch_target: Any,
+        title: str,
+        raw_log: Any,
+        structured_log: Any,
+        git_meta: Any,
+        permission_mode: str | None,
+        resolved_model: str | None,
+        resolved_effort: str | None,
+    ) -> SessionRecord:
+        """Spawn a new session for this backend."""
+        ...
+
     async def maybe_handle_input(
         self,
         runtime: "SessionRuntime",

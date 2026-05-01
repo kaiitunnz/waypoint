@@ -163,6 +163,17 @@ def test_registry_rejects_duplicate_id() -> None:
         def register_routes(self, app: Any, context: Any) -> None:
             return None
 
+        async def list_threads(
+            self, runtime: Any, launch_target_id: str | None = None
+        ) -> list[Any]:
+            return []
+
+        async def import_thread(self, runtime: Any, request: Any) -> Any:
+            raise NotImplementedError
+
+        async def create_session(self, runtime: Any, request: Any, **kwargs: Any) -> Any:
+            raise NotImplementedError
+
     registry.register(Stub())
     with pytest.raises(ValueError):
         registry.register(Stub())

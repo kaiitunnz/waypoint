@@ -138,6 +138,18 @@ class TmuxPlugin:
         # there's no protocol round-trip to make here.
         runtime._ensure_monitor(session.id)
 
+    async def list_threads(
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None = None,
+    ) -> list[Any]:
+        return []
+
+    async def import_thread(
+        self, runtime: "SessionRuntime", request: Any
+    ) -> SessionRecord:
+        _unsupported("thread import")
+
     def format_start_message(
         self,
         backend_label: str,

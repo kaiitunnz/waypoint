@@ -97,7 +97,7 @@ plugin without calling into it:
 | `slash_commands` | `tuple[SlashCommandSpec, ...]` | Frontend slash-suggestion list. |
 | `approval_decisions` | `tuple[str, ...]` | Buttons rendered on the structured approval card. |
 | `badges` | `dict[str, str]` | UI palette: `{"glyph": "X", "color": "#34d399"}`. |
-| `cli_binary` | `str \| None` | Required for tmux fallback launches; `None` opts out. |
+| `cli_binary` | `str \| None` | Default CLI invoked for local launches and for tmux fallback launches; `None` opts out. Override per-deployment via `plugin_configs.<id>.local_bin` (local) or `ssh_targets[*].plugin_configs.<id>.remote_bin` (per SSH target). |
 | `target_aliases` | `tuple[str, ...]` | Substrings used to infer this backend from a tmux pane name. |
 
 ### Transport view
@@ -331,8 +331,9 @@ If your backend needs SSH-launched sessions, three pieces are involved:
 
 1. [`launch_targets.py`](../backend/src/waypoint/launch_targets.py)
    stays plugin-agnostic — it owns `SshLaunchTargetConfig` and a single
-   `plugin_configs: dict[plugin_id, dict[str, Any]]` mapping. Presence
-   of a key means "this target supports the plugin"; omitting
+   `plugin_configs: dict[plugin_id, PluginLaunchTargetConfig]` mapping
+   dispatched at validation time to each plugin's `launch_target_schema`.
+   Presence of a key means "this target supports the plugin"; omitting
    `plugin_configs` entirely defaults to every registered non-fallback
    plugin so a minimal target Just Works.
 2. Each plugin declares its own `launch_target_schema: type[PluginLaunchTargetConfig]`.

@@ -23,14 +23,19 @@ class PluginConfig(BaseModel):
     """Base class for per-plugin global config blocks.
 
     Carries fields the runtime consumes uniformly across plugins
-    (``default_model`` / ``default_effort``); plugin-specific fields
-    (e.g. Claude's static model catalogue) live on the subclass.
+    (``default_model`` / ``default_effort``, ``local_bin``); plugin-specific
+    fields (e.g. Claude's static model catalogue) live on the subclass.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     default_model: str | None = None
     default_effort: str | None = None
+    # Path or PATH-resolvable name of the plugin's CLI binary on the
+    # local host. ``None`` means "fall back to the plugin's
+    # ``capabilities.cli_binary``" so a default install Just Works.
+    # The SSH-target counterpart is ``PluginLaunchTargetConfig.remote_bin``.
+    local_bin: str | None = None
 
 
 class PluginLaunchTargetConfig(BaseModel):

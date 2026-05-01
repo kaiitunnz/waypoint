@@ -21,9 +21,11 @@ plugin_configs:
   codex:
     # default_model: gpt-5
     # default_effort: high
+    # local_bin: /opt/codex/bin/codex   # path on the local host; falls back to `codex`
   claude_code:
     # default_model: opus
     # default_effort: high
+    # local_bin: /opt/claude/bin/claude
     # models:
     #   - id: opus
     #     label: Opus 4.7

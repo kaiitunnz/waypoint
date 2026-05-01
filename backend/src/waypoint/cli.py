@@ -133,15 +133,20 @@ def run_reset(settings: Settings | None = None, *, confirmed: bool) -> None:
 def run_doctor(settings: Settings | None = None) -> None:
     settings = settings or load_settings()
     # System binaries are checked unconditionally; per-plugin binaries
-    # come from each registered plugin's ``capabilities.cli_binary`` so a
-    # new backend shows up here automatically without editing this file.
+    # come from each registered plugin's ``capabilities.cli_binary``
+    # (overridable per-plugin via ``plugin_configs.<id>.local_bin``)
+    # so a new backend shows up here automatically without editing
+    # this file.
     checks: dict[str, Any] = {
         "tmux": shutil.which("tmux"),
         "ssh": shutil.which("ssh"),
         "tailscale": shutil.which("tailscale"),
     }
     for plugin in get_registry().all():
-        binary = plugin.capabilities.cli_binary
+        binary = (
+            settings.plugin_config(plugin.id).local_bin
+            or plugin.capabilities.cli_binary
+        )
         if binary is None or binary in checks:
             continue
         checks[binary] = shutil.which(binary)

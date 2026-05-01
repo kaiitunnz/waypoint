@@ -711,7 +711,10 @@ class SessionRuntime:
     ) -> list[str]:
         plugin = self.registry.get(backend)
         if launch_target is None:
-            executable = plugin.capabilities.cli_binary
+            executable = (
+                self.settings.plugin_config(backend).local_bin
+                or plugin.capabilities.cli_binary
+            )
             if executable is None:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,

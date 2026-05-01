@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { EffortPicker } from "@/components/EffortPicker";
 import { ModelPicker } from "@/components/ModelPicker";
+import { humaniseBackend } from "@/lib/backends";
 import {
   modesForBackend,
   permissionModeLabel,
@@ -322,7 +323,7 @@ function ScheduleRow({
     <article className={`schedule-row schedule-${schedule.status}`}>
       <div className="session-row">
         <span className={`badge ${schedule.backend}`}>
-          {schedule.backend === "codex" ? "Codex" : "Claude"}
+          {humaniseBackend(schedule.backend)}
         </span>
         <span className={`badge schedule-status ${schedule.status}`}>{schedule.status}</span>
         {modeLabel ? (

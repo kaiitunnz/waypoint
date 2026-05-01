@@ -1,6 +1,10 @@
-export type Backend = "claude_code" | "codex";
+// Plugin-supplied backends register at runtime, so these are arbitrary
+// strings rather than a closed union; the frontend looks up labels,
+// badges, capabilities, etc. via `useBackendCatalog()` instead of
+// hand-mirroring per-backend constants.
+export type Backend = string;
+export type SessionTransport = string;
 export type SessionSource = "managed" | "attached_tmux";
-export type SessionTransport = "tmux" | "codex_app_server" | "claude_cli";
 export type SessionStatus =
   | "starting"
   | "idle"
@@ -78,11 +82,51 @@ export interface EventRecord {
   sequence: number;
 }
 
+export interface BackendPermissionMode {
+  id: string;
+  label: string;
+  description?: string | null;
+  requires_session_restart?: boolean;
+}
+
+export interface BackendSlashCommand {
+  name: string;
+  description?: string | null;
+}
+
+export interface BackendCapabilities {
+  is_structured: boolean;
+  supports_resume: boolean;
+  supports_terminate: boolean;
+  supports_set_model_inline: boolean;
+  supports_set_effort_inline: boolean;
+  supports_set_permission_mode_inline: boolean;
+  supports_thread_discovery: boolean;
+  supports_thread_import: boolean;
+  supports_slash_compact: boolean;
+  model_source: "static" | "live_rpc" | "none";
+  approval_decisions: string[];
+  effort_levels: string[];
+  permission_modes: BackendPermissionMode[];
+  slash_commands: BackendSlashCommand[];
+  cli_binary?: string | null;
+  target_aliases: string[];
+}
+
+export interface BackendDescriptor {
+  id: Backend;
+  transport_id: SessionTransport;
+  label: string;
+  badges: Record<string, string>;
+  capabilities: BackendCapabilities;
+}
+
 export interface MeResponse {
   authenticated: boolean;
   default_backend: Backend;
   default_cwd: string;
   launch_targets: LaunchTargetSummary[];
+  backends?: BackendDescriptor[];
 }
 
 export interface EventsPage {

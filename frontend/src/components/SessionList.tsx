@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { MouseEvent, ReactNode, useEffect, useState } from "react";
 
+import { humaniseBackend } from "@/lib/backends";
 import { SessionRecord } from "@/lib/types";
 import { transportLabel } from "@/lib/transport";
 
@@ -104,7 +105,7 @@ export function SessionList({
       <Link className="panel session-card" href={`/session/${session.id}`} key={session.id}>
         <div className="session-row">
           <span className={`badge ${session.backend}`}>
-            {session.backend === "codex" ? "Codex" : "Claude"}
+            {humaniseBackend(session.backend)}
           </span>
           <span className={`badge transport ${session.transport}`}>
             {transportLabel(session.transport)}

@@ -28,6 +28,7 @@ import {
   setSessionModel,
   setSessionPermissionMode,
 } from "@/lib/api";
+import { humaniseBackend } from "@/lib/backends";
 import { clearToken } from "@/lib/store";
 import { modesForBackend } from "@/lib/permissionModes";
 import {
@@ -1715,7 +1716,7 @@ function SessionHeader({
       </p>
       <div className="session-header-tags">
         <span className={`badge ${session.backend}`}>
-          {session.backend === "codex" ? "Codex" : "Claude"}
+          {humaniseBackend(session.backend)}
         </span>
         <span className={`badge transport ${session.transport}`}>
           {transportLabel(session.transport)}

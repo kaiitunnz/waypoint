@@ -2,6 +2,7 @@
 
 import {
   Backend,
+  BackendDescriptor,
   BackendModelListResponse,
   ClaudeThreadSummary,
   CodexThreadSummary,
@@ -98,6 +99,19 @@ export async function fetchMe(host: string, token: string): Promise<MeResponse> 
   });
   await ensureOk(response, "failed to fetch backend settings");
   return (await response.json()) as MeResponse;
+}
+
+export async function fetchBackends(
+  host: string,
+  token: string,
+): Promise<BackendDescriptor[]> {
+  const response = await fetch(`${host}/api/backends`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch backend catalog");
+  const payload = await response.json();
+  return (payload.backends ?? []) as BackendDescriptor[];
 }
 
 export async function fetchSession(host: string, token: string, sessionId: string): Promise<SessionRecord> {

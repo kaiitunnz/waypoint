@@ -606,9 +606,7 @@ def test_extract_item_id_pulls_top_level_and_nested_ids() -> None:
     from waypoint.backends.codex.normalize import extract_item_id
 
     assert extract_item_id({"itemId": "abc", "delta": "x"}) == "abc"
-    assert (
-        extract_item_id({"item": {"id": "xyz", "type": "agentMessage"}}) == "xyz"
-    )
+    assert extract_item_id({"item": {"id": "xyz", "type": "agentMessage"}}) == "xyz"
     assert extract_item_id({}) is None
 
 

@@ -374,9 +374,7 @@ class CodexAppServerAdapter:
                     state, state.client.next_notification
                 )
                 payload = payload_to_dict(notification.payload)
-                kind, text, status = map_notification(
-                    notification.method, payload
-                )
+                kind, text, status = map_notification(notification.method, payload)
                 if kind is not None and text:
                     if notification.method == "item/commandExecution/outputDelta":
                         state.terminal_fragments.append(text)
@@ -451,9 +449,7 @@ class CodexAppServerAdapter:
                     state, state.client.next_notification
                 )
                 payload = payload_to_dict(notification.payload)
-                kind, text, status = map_notification(
-                    notification.method, payload
-                )
+                kind, text, status = map_notification(notification.method, payload)
                 if kind is not None and text:
                     metadata: dict[str, Any] = {
                         "method": notification.method,

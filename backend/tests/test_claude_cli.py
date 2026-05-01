@@ -762,7 +762,10 @@ async def test_exit_plan_mode_decline_keeps_plan_mode() -> None:
 
 
 def test_build_local_launch_spec_uses_session_cli_mode(monkeypatch) -> None:
-    monkeypatch.setattr("waypoint.backends.claude_code.adapter.shutil.which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.adapter.shutil.which",
+        lambda _: "/usr/bin/claude",
+    )
     adapter = _make_adapter([])
     spec = adapter._build_local_launch_spec(
         "sess",
@@ -779,7 +782,10 @@ def test_build_local_launch_spec_uses_session_cli_mode(monkeypatch) -> None:
 
 
 def test_build_local_launch_spec_emits_model_flag(monkeypatch) -> None:
-    monkeypatch.setattr("waypoint.backends.claude_code.adapter.shutil.which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.adapter.shutil.which",
+        lambda _: "/usr/bin/claude",
+    )
     adapter = _make_adapter([])
     spec = adapter._build_local_launch_spec(
         "sess",

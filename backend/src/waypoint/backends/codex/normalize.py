@@ -77,8 +77,7 @@ def map_notification(
     if method == "turn/plan/updated":
         plan = payload.get("plan", [])
         text = "\n".join(
-            f"- {entry.get('step', '')} [{entry.get('status', '')}]"
-            for entry in plan
+            f"- {entry.get('step', '')} [{entry.get('status', '')}]" for entry in plan
         )
         return EventKind.SYSTEM_NOTE, text, SessionStatus.RUNNING
     if method == "error":
@@ -102,9 +101,7 @@ def _format_item_started(
             SessionStatus.RUNNING,
         )
     if item_type == "fileChange":
-        paths = ", ".join(
-            change.get("path", "") for change in item.get("changes", [])
-        )
+        paths = ", ".join(change.get("path", "") for change in item.get("changes", []))
         return (
             EventKind.TOOL_CALL,
             f"Preparing file changes: {paths}",
@@ -169,9 +166,7 @@ def _format_item_completed(
             SessionStatus.RUNNING,
         )
     if item_type == "fileChange":
-        paths = ", ".join(
-            change.get("path", "") for change in item.get("changes", [])
-        )
+        paths = ", ".join(change.get("path", "") for change in item.get("changes", []))
         return (
             EventKind.TOOL_RESULT,
             f"File changes completed: {paths}",

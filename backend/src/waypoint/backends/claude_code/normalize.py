@@ -117,9 +117,7 @@ def stringify_tool_result(content: Any) -> str:
         parts: list[str] = []
         for entry in content:
             if isinstance(entry, dict):
-                if entry.get("type") == "text" and isinstance(
-                    entry.get("text"), str
-                ):
+                if entry.get("type") == "text" and isinstance(entry.get("text"), str):
                     parts.append(entry["text"])
                 elif "text" in entry:
                     parts.append(str(entry["text"]))

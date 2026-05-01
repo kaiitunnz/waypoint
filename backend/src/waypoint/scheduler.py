@@ -27,9 +27,7 @@ log = logging.getLogger("waypoint.scheduler")
 POLL_INTERVAL_SECONDS = 5.0
 
 
-def validate_permission_mode_for_backend(
-    backend: str, mode: str | None
-) -> str | None:
+def validate_permission_mode_for_backend(backend: str, mode: str | None) -> str | None:
     """Resolve a user-supplied starting mode for a given backend.
 
     Returns the canonical mode string when accepted, ``None`` when the caller

@@ -188,9 +188,7 @@ class Storage:
         # here (Codex thread id, Claude session uuid, tmux pane targets, ...);
         # `_session_from_row` reconstructs it from the legacy columns when
         # the JSON blob is empty so older rows keep round-tripping.
-        self._ensure_column(
-            "sessions", "transport_state", "TEXT NOT NULL DEFAULT '{}'"
-        )
+        self._ensure_column("sessions", "transport_state", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column("scheduled_sessions", "permission_mode", "TEXT")
         self._ensure_column("scheduled_sessions", "model", "TEXT")
         self._ensure_column("scheduled_sessions", "effort", "TEXT")

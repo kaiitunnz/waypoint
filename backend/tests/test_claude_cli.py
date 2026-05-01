@@ -426,8 +426,9 @@ async def test_dispatch_assistant_skips_exit_plan_mode_tool_call() -> None:
 
 def test_format_approval_text_omits_plan_body() -> None:
     """Approval card stays compact; the plan is rendered above as agent_output."""
-    adapter = _make_adapter([])
-    text = adapter._format_approval_text(
+    from waypoint.backends.claude_code.normalize import format_approval_text
+
+    text = format_approval_text(
         {
             "tool_name": "ExitPlanMode",
             "tool_input": {"plan": "## Plan\n\n1. Step one"},

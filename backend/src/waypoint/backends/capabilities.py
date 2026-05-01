@@ -53,3 +53,10 @@ class BackendCapabilities:
     # target name when the user attaches to an existing pane without
     # specifying which CLI is running there.
     target_aliases: tuple[str, ...] = ()
+    # Marks this plugin as the wrapper used when a structured plugin's
+    # adapter isn't ready (or it isn't structured at all). The runtime
+    # routes managed-session creation here when the requested plugin
+    # opts out via ``is_available_for_managed_launch=False``. Exactly
+    # one registered plugin should set this to ``True``; today only
+    # the tmux fallback does.
+    is_fallback_for_managed_launch: bool = False

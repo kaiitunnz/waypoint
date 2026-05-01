@@ -16,10 +16,15 @@ from waypoint.settings import Settings, load_settings
 def _backend_choices() -> list[str]:
     """Backend ids accepted by ``session start`` / ``session attach``.
 
-    Excludes the tmux fallback — that's a wrapper transport, not a
-    user-selectable coding agent.
+    Excludes managed-launch fallback wrappers (capabilities flag
+    ``is_fallback_for_managed_launch``) — those are routed to via the
+    registry, not selected as a real backend.
     """
-    return [plugin.id for plugin in get_registry().all() if plugin.id != "tmux"]
+    return [
+        plugin.id
+        for plugin in get_registry().all()
+        if not plugin.capabilities.is_fallback_for_managed_launch
+    ]
 
 
 def build_parser() -> argparse.ArgumentParser:

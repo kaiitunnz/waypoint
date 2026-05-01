@@ -47,18 +47,20 @@ def parse_config_path(raw: str | None) -> Path | None:
 def _default_backend_id() -> str:
     """Pick a default backend at validation time.
 
-    Prefers ``codex`` when registered (the historical default), falling
-    back to the first non-tmux registered plugin so a custom registry
-    without Codex still validates without an explicit
-    ``default_backend`` override.
+    Prefers ``codex`` when registered (the historical default),
+    falling back to the first registered non-fallback plugin so a
+    custom registry without Codex still validates without an explicit
+    ``default_backend`` override. The fallback wrapper plugin (today:
+    tmux) is the last resort — it should never be a user's default.
     """
     registry = get_registry()
     if registry.has_backend("codex"):
         return "codex"
     for plugin in registry.all():
-        if plugin.id != "tmux":
+        if not plugin.capabilities.is_fallback_for_managed_launch:
             return plugin.id
-    return "tmux"
+    plugins = registry.all()
+    return plugins[0].id if plugins else "tmux"
 
 
 class Settings(BaseModel):

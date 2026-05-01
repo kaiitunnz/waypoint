@@ -180,17 +180,20 @@ class SessionRuntime:
         resolved_model = request.model or plugin_config.default_model
         resolved_effort = request.effort or plugin_config.default_effort
         # Pick the plugin that owns the session lifecycle: structured
-        # backends (Claude, Codex) launch their own protocol process; if
-        # the requested backend reports its adapter isn't ready (e.g.
-        # the Claude PreToolUse hook bundle failed to materialise), or
-        # if the backend isn't structured at all, fall through to the
-        # tmux plugin which spawns the CLI directly inside a pane.
+        # backends launch their own protocol process; if the requested
+        # backend reports its adapter isn't ready (e.g. the Claude
+        # PreToolUse hook bundle failed to materialise), or if the
+        # backend isn't structured at all, fall through to the
+        # registry's wrapper plugin (today: tmux) so the user still
+        # gets a session.
         plugin = self.registry.get(request.backend)
         if (
             not plugin.is_available_for_managed_launch(self)
             or not plugin.capabilities.is_structured
-        ) and self.registry.has_backend("tmux"):
-            plugin = self.registry.get("tmux")
+        ):
+            fallback = self.registry.fallback_for_managed_launch()
+            if fallback is not None:
+                plugin = fallback
         return await plugin.create_session(
             self,
             request,

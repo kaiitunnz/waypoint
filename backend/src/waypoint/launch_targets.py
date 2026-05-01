@@ -25,13 +25,20 @@ SAFE_TILDE_HEAD = re.compile(r"~[A-Za-z0-9._-]*$")
 
 
 def _default_supported_backends() -> list[str]:
-    """Default to every registered, non-tmux backend.
+    """Default to every registered non-fallback backend.
 
-    Tmux is the wrapper plugin — it never owns a managed SSH launch
-    itself, so we exclude it from the default list. Adding a new
-    structured backend (Opencode, etc.) shows up here automatically.
+    Managed-launch fallback wrappers (capabilities flag
+    ``is_fallback_for_managed_launch``) never own a managed SSH
+    launch themselves — they exist to wrap a real backend's CLI in a
+    tmux pane. Excluding them keeps the picker focused on real coding
+    agents and lets new structured backends show up here
+    automatically.
     """
-    return [plugin.id for plugin in get_registry().all() if plugin.id != "tmux"]
+    return [
+        plugin.id
+        for plugin in get_registry().all()
+        if not plugin.capabilities.is_fallback_for_managed_launch
+    ]
 
 
 class SshLaunchTargetConfig(BaseModel):

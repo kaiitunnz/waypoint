@@ -66,6 +66,7 @@ class TmuxPlugin:
         supports_slash_compact=False,
         model_source=ModelSource.NONE,
         badges={"glyph": "T", "color": "#94a3b8"},
+        is_fallback_for_managed_launch=True,
     )
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:

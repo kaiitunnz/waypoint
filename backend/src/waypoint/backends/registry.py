@@ -41,6 +41,20 @@ class BackendRegistry:
     def all(self) -> list[BackendPlugin]:
         return list(self._by_id.values())
 
+    def fallback_for_managed_launch(self) -> BackendPlugin | None:
+        """Return the plugin marked as the managed-launch fallback.
+
+        Used when a structured plugin's adapter isn't ready (Claude's
+        hook bundle failed to materialise) or when the requested
+        plugin isn't structured at all. Returns ``None`` when no
+        fallback is registered, in which case the runtime surfaces
+        the underlying error instead of silently swapping plugins.
+        """
+        for plugin in self._by_id.values():
+            if plugin.capabilities.is_fallback_for_managed_launch:
+                return plugin
+        return None
+
     def backends(self) -> set[str]:
         return set(self._by_id)
 

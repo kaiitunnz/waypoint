@@ -8,7 +8,11 @@ from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_PERMISSION_MODE_SPECS,
     CLAUDE_PERMISSION_MODES,
 )
-from waypoint.backends.claude_code.plugin import ClaudeCodePlugin, build_plugin
+from waypoint.backends.claude_code.plugin import (
+    ClaudeCodePlugin,
+    ClaudeCodePluginConfig,
+    build_plugin,
+)
 
 __all__ = [
     "CLAUDE_ACCEPT_EDITS_TOOLS",
@@ -17,6 +21,7 @@ __all__ = [
     "CLAUDE_PERMISSION_MODE_SPECS",
     "CLAUDE_PERMISSION_MODES",
     "ClaudeCodePlugin",
+    "ClaudeCodePluginConfig",
     "DEFAULT_CLAUDE_MODELS",
     "build_plugin",
 ]

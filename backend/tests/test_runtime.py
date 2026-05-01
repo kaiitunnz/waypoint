@@ -5,10 +5,9 @@ from typing import Any, cast
 import pytest
 
 from waypoint.backends.claude_code.threads import ClaudeThreadInfo
-from waypoint.config import Settings
+from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
-    Backend,
     ClaudeThreadImportRequest,
     CodexThreadImportRequest,
     EventKind,
@@ -19,9 +18,8 @@ from waypoint.schemas import (
     SessionRecord,
     SessionSource,
     SessionStatus,
-    SessionTransport,
 )
-from waypoint.server_config import SshLaunchTargetConfig
+from waypoint.settings import Settings
 from waypoint.storage import Storage
 
 
@@ -215,9 +213,9 @@ def make_session(settings: Settings, **overrides) -> SessionRecord:
     now = datetime.now(UTC)
     return SessionRecord(
         id=overrides.get("id", "sess"),
-        backend=overrides.get("backend", Backend.CODEX),
+        backend=overrides.get("backend", "codex"),
         source=SessionSource.MANAGED,
-        transport=overrides.get("transport", SessionTransport.CODEX_APP_SERVER),
+        transport=overrides.get("transport", "codex_app_server"),
         title="Session",
         cwd="/tmp/project",
         launch_target_id=overrides.get("launch_target_id"),
@@ -282,8 +280,8 @@ async def test_handle_input_reattaches_errored_claude_session(tmp_path) -> None:
     session = make_session(
         settings,
         id="claude-sess",
-        backend=Backend.CLAUDE_CODE,
-        transport=SessionTransport.CLAUDE_CLI,
+        backend="claude_code",
+        transport="claude_cli",
         thread_id="claude-thread",
         status=SessionStatus.ERROR,
         permission_mode="default",
@@ -365,8 +363,8 @@ async def test_handle_input_rejects_reattach_for_tmux_session(tmp_path) -> None:
     session = make_session(
         settings,
         id="tmux-sess",
-        backend=Backend.CLAUDE_CODE,
-        transport=SessionTransport.TMUX,
+        backend="claude_code",
+        transport="tmux",
         status=SessionStatus.EXITED,
         thread_id=None,
     )
@@ -428,8 +426,8 @@ async def test_handle_input_permissions_forwards_to_claude_cli(tmp_path) -> None
     session = make_session(
         settings,
         id="claude-sess",
-        backend=Backend.CLAUDE_CODE,
-        transport=SessionTransport.CLAUDE_CLI,
+        backend="claude_code",
+        transport="claude_cli",
         thread_id="claude-thread",
     )
     storage.create_session(session)
@@ -450,8 +448,8 @@ async def test_handle_input_help_forwards_to_backend(tmp_path) -> None:
     session = make_session(
         settings,
         id="claude-sess",
-        backend=Backend.CLAUDE_CODE,
-        transport=SessionTransport.CLAUDE_CLI,
+        backend="claude_code",
+        transport="claude_cli",
     )
     storage.create_session(session)
 
@@ -468,8 +466,8 @@ async def test_handle_input_builtin_compact_forwards_to_claude_cli(tmp_path) -> 
     session = make_session(
         settings,
         id="claude-sess",
-        backend=Backend.CLAUDE_CODE,
-        transport=SessionTransport.CLAUDE_CLI,
+        backend="claude_code",
+        transport="claude_cli",
     )
     storage.create_session(session)
 
@@ -542,7 +540,7 @@ async def test_create_session_uses_structured_claude_for_ssh_target(
                 id="devbox",
                 name="Devbox",
                 ssh_destination="dev@example.com",
-                supported_backends=[Backend.CLAUDE_CODE],
+                supported_backends=["claude_code"],
                 default_cwd="~/workspace",
             )
         ],
@@ -574,7 +572,7 @@ async def test_create_session_uses_structured_claude_for_ssh_target(
 
     session = await runtime.create_session(
         SessionCreateRequest(
-            backend=Backend.CLAUDE_CODE,
+            backend="claude_code",
             cwd="~/workspace",
             launch_target_id="devbox",
             title=None,
@@ -583,7 +581,7 @@ async def test_create_session_uses_structured_claude_for_ssh_target(
         )
     )
 
-    assert session.transport == SessionTransport.CLAUDE_CLI
+    assert session.transport == "claude_cli"
     assert session.launch_target_id == "devbox"
     assert session.cwd == "~/workspace"
     assert fake.start_calls == [
@@ -641,7 +639,7 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
                 id="devbox",
                 name="Devbox",
                 ssh_destination="dev@example.com",
-                supported_backends=[Backend.CODEX],
+                supported_backends=["codex"],
                 default_cwd="~/workspace",
             )
         ],
@@ -678,7 +676,7 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
         CodexThreadImportRequest(thread_id="thread-9", launch_target_id="devbox"),
     )
 
-    assert session.transport == SessionTransport.CODEX_APP_SERVER
+    assert session.transport == "codex_app_server"
     assert session.cwd == "/srv/worktree/project"
     assert session.launch_target_id == "devbox"
     assert session.repo_name == "project"
@@ -722,8 +720,8 @@ async def test_list_importable_claude_threads_filters_existing_session(
         make_session(
             settings,
             id="claude-existing",
-            backend=Backend.CLAUDE_CODE,
-            transport=SessionTransport.CLAUDE_CLI,
+            backend="claude_code",
+            transport="claude_cli",
             thread_id="11111111-1111-4111-8111-111111111111",
         )
     )
@@ -787,7 +785,7 @@ async def test_list_importable_claude_threads_remote_target_uses_enumerator(
                 id="devbox",
                 name="Devbox",
                 ssh_destination="dev@example.com",
-                supported_backends=[Backend.CLAUDE_CODE],
+                supported_backends=["claude_code"],
                 default_cwd="~/workspace",
             )
         ],
@@ -825,7 +823,7 @@ async def test_list_importable_claude_threads_dedupes_by_target_and_thread(
                 id="devbox",
                 name="Devbox",
                 ssh_destination="dev@example.com",
-                supported_backends=[Backend.CLAUDE_CODE],
+                supported_backends=["claude_code"],
                 default_cwd="~/workspace",
             )
         ],
@@ -840,8 +838,8 @@ async def test_list_importable_claude_threads_dedupes_by_target_and_thread(
         make_session(
             settings,
             id="local-claude",
-            backend=Backend.CLAUDE_CODE,
-            transport=SessionTransport.CLAUDE_CLI,
+            backend="claude_code",
+            transport="claude_cli",
             thread_id="11111111-1111-4111-8111-111111111111",
         )
     )
@@ -879,8 +877,8 @@ async def test_import_claude_thread_creates_session_and_resumes(
         runtime, ClaudeThreadImportRequest(thread_id=info.id)
     )
 
-    assert session.transport == SessionTransport.CLAUDE_CLI
-    assert session.backend == Backend.CLAUDE_CODE
+    assert session.transport == "claude_cli"
+    assert session.backend == "claude_code"
     assert session.thread_id == info.id
     assert session.cwd == str(tmp_path)
     assert session.branch == "main"
@@ -912,7 +910,7 @@ async def test_import_claude_thread_remote_target_uses_remote_factory(
                 id="devbox",
                 name="Devbox",
                 ssh_destination="dev@example.com",
-                supported_backends=[Backend.CLAUDE_CODE],
+                supported_backends=["claude_code"],
                 default_cwd="~/workspace",
             )
         ],
@@ -972,8 +970,8 @@ async def test_find_imported_claude_session_scopes_by_launch_target(
         make_session(
             settings,
             id="local-sess",
-            backend=Backend.CLAUDE_CODE,
-            transport=SessionTransport.CLAUDE_CLI,
+            backend="claude_code",
+            transport="claude_cli",
             thread_id=same_thread_id,
         )
     )
@@ -1003,8 +1001,8 @@ async def test_delete_remote_claude_session_invalidates_enumerator_cache(
         make_session(
             settings,
             id="remote-claude",
-            backend=Backend.CLAUDE_CODE,
-            transport=SessionTransport.CLAUDE_CLI,
+            backend="claude_code",
+            transport="claude_cli",
             status=SessionStatus.EXITED,
             thread_id="dddddddd-dddd-4ddd-8ddd-dddddddddddd",
             launch_target_id="devbox",
@@ -1082,8 +1080,8 @@ async def test_set_permission_mode_claude_calls_adapter(tmp_path) -> None:
     session = make_session(
         settings,
         id="claude-sess",
-        backend=Backend.CLAUDE_CODE,
-        transport=SessionTransport.CLAUDE_CLI,
+        backend="claude_code",
+        transport="claude_cli",
     )
     storage.create_session(session)
 
@@ -1105,8 +1103,8 @@ async def test_approve_syncs_storage_when_adapter_flips_mode(tmp_path) -> None:
     session = make_session(
         settings,
         id="claude-sess",
-        backend=Backend.CLAUDE_CODE,
-        transport=SessionTransport.CLAUDE_CLI,
+        backend="claude_code",
+        transport="claude_cli",
         permission_mode="plan",
     )
     storage.create_session(session)
@@ -1130,8 +1128,8 @@ async def test_set_permission_mode_claude_rejects_unknown_mode(tmp_path) -> None
     session = make_session(
         settings,
         id="claude-sess",
-        backend=Backend.CLAUDE_CODE,
-        transport=SessionTransport.CLAUDE_CLI,
+        backend="claude_code",
+        transport="claude_cli",
     )
     storage.create_session(session)
 
@@ -1148,8 +1146,8 @@ async def test_set_model_claude_calls_adapter_and_persists(tmp_path) -> None:
     session = make_session(
         settings,
         id="claude-sess",
-        backend=Backend.CLAUDE_CODE,
-        transport=SessionTransport.CLAUDE_CLI,
+        backend="claude_code",
+        transport="claude_cli",
     )
     storage.create_session(session)
 
@@ -1181,23 +1179,28 @@ async def test_set_model_codex_calls_adapter_and_persists(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_list_backend_models_returns_curated_claude_list(tmp_path) -> None:
     runtime, _, settings = make_runtime(tmp_path)
-    response = await runtime.list_backend_models(Backend.CLAUDE_CODE)
+    response = await runtime.list_backend_models("claude_code")
 
-    assert response["backend"] == Backend.CLAUDE_CODE.value
+    assert response["backend"] == "claude_code"
     assert response["supports_free_text"] is True
     ids = [entry["id"] for entry in response["models"]]
-    # Mirrors DEFAULT_CLAUDE_MODELS in config.py.
+    # Mirrors DEFAULT_CLAUDE_MODELS in backends/claude_code/models.py.
     assert "opus" in ids and "sonnet" in ids and "haiku" in ids
     # Default falls back to the entry flagged is_default in the curated list
-    # when no settings.default_models override is present.
+    # when no plugin_configs.claude_code.default_model override is present.
     assert response["default_model"] == "sonnet"
 
 
 @pytest.mark.asyncio
 async def test_list_backend_models_honours_default_models_override(tmp_path) -> None:
-    runtime, _, settings = make_runtime(tmp_path)
-    settings.default_models = {Backend.CLAUDE_CODE.value: "opus"}
-    response = await runtime.list_backend_models(Backend.CLAUDE_CODE)
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        plugin_configs={"claude_code": {"default_model": "opus"}},
+    )
+    settings.ensure_dirs()
+    storage = Storage(settings.database_path)
+    runtime = SessionRuntime(settings, storage)
+    response = await runtime.list_backend_models("claude_code")
     assert response["default_model"] == "opus"
 
 

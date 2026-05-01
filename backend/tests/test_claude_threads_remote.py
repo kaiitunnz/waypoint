@@ -9,7 +9,7 @@ import pytest
 
 from waypoint.backends.claude_code import threads_remote as claude_threads_remote
 from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
-from waypoint.server_config import SshLaunchTargetConfig
+from waypoint.launch_targets import SshLaunchTargetConfig
 
 ENUMERATOR_PATH = (
     Path(__file__).resolve().parents[1] / "scripts" / "claude_thread_enumerator.sh"
@@ -121,7 +121,7 @@ def test_list_returns_empty_when_ssh_binary_missing(monkeypatch, target) -> None
     def boom(_binary: str) -> str:
         raise FileNotFoundError("binary not found on PATH: ssh")
 
-    monkeypatch.setattr("waypoint.server_config._resolve_local_binary", boom)
+    monkeypatch.setattr("waypoint.launch_targets._resolve_local_binary", boom)
     # subprocess.run must NEVER be called when argv resolution fails.
     monkeypatch.setattr(
         claude_threads_remote.subprocess,

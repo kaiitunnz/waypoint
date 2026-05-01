@@ -14,8 +14,8 @@ from fastapi import HTTPException, status
 from waypoint.backends import BackendRegistry, get_registry
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
 from waypoint.backends.tmux.normalize import TerminalNormalizer
-from waypoint.config import Settings
 from waypoint.git_meta import resolve_git_meta
+from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.scheduler import Scheduler
 from waypoint.schemas import (
     EventKind,
@@ -29,13 +29,12 @@ from waypoint.schemas import (
     SessionRecord,
     SessionSource,
     SessionStatus,
-    SessionTransport,
 )
-from waypoint.server_config import (
-    SshLaunchTargetConfig,
-)
+from waypoint.settings import Settings
 from waypoint.storage import Storage
 from waypoint.transports import TransportAdapter
+
+TMUX_TRANSPORT_ID = "tmux"
 
 log = logging.getLogger("waypoint.runtime")
 
@@ -172,19 +171,14 @@ class SessionRuntime:
             )
             or "default"
         )
-        # Per-request model wins; otherwise fall back to the per-backend default
-        # from settings. Missing key (or empty) means "let the backend pick" —
-        # we omit --model / params.model so the underlying CLI uses its own
-        # default instead of waypoint forcing one.
-        resolved_model = request.model or self.settings.default_models.get(
-            request.backend
-        )
-        # Same precedence for reasoning effort. Missing key means "let the
-        # backend pick" (Codex falls back to the model's default; Claude
-        # omits the --effort flag).
-        resolved_effort = request.effort or self.settings.default_efforts.get(
-            request.backend
-        )
+        # Per-request model wins; otherwise fall back to the per-backend
+        # default from the plugin's config block. ``None`` means "let the
+        # backend pick" — we omit --model / params.model so the underlying
+        # CLI uses its own default instead of waypoint forcing one. Same
+        # precedence applies to reasoning effort.
+        plugin_config = self.settings.plugin_config(request.backend)
+        resolved_model = request.model or plugin_config.default_model
+        resolved_effort = request.effort or plugin_config.default_effort
         # Pick the plugin that owns the session lifecycle: structured
         # backends (Claude, Codex) launch their own protocol process; if
         # the requested backend reports its adapter isn't ready (e.g.
@@ -234,7 +228,7 @@ class SessionRuntime:
             id=session_id,
             backend=backend,
             source=SessionSource.ATTACHED_TMUX,
-            transport=SessionTransport.TMUX,
+            transport=TMUX_TRANSPORT_ID,
             title=title,
             cwd=target.cwd,
             repo_name=git_meta.repo_name,
@@ -743,7 +737,7 @@ class SessionRuntime:
         if session_id in self.monitor_tasks:
             return
         session = self.get_session(session_id)
-        if session.transport != SessionTransport.TMUX:
+        if session.transport != TMUX_TRANSPORT_ID:
             return
         self.monitor_tasks[session_id] = asyncio.create_task(
             self._monitor_session(session_id)

@@ -4,6 +4,11 @@ Backend-specific remote-launch builders (codex App Server client, claude
 CLI launch + PreToolUse hook bootstrap, claude thread enumeration) live
 next to their plugin in ``backends/<id>/remote.py``. This module owns
 the model and the generic SSH argv primitives only.
+
+Per-target binary overrides (the path to ``codex`` / ``claude`` on the
+remote host) live in ``remote_bins`` keyed by plugin id, which keeps
+the launch target plugin-agnostic — adding a new backend doesn't
+require an edit here.
 """
 
 import re
@@ -13,13 +18,20 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 
-from waypoint.schemas import Backend
+from waypoint.backends.registry import get_registry
+from waypoint.schemas import BackendId
 
 SAFE_TILDE_HEAD = re.compile(r"~[A-Za-z0-9._-]*$")
 
 
-def _default_supported_backends() -> list[Backend]:
-    return [Backend.CODEX, Backend.CLAUDE_CODE]
+def _default_supported_backends() -> list[str]:
+    """Default to every registered, non-tmux backend.
+
+    Tmux is the wrapper plugin — it never owns a managed SSH launch
+    itself, so we exclude it from the default list. Adding a new
+    structured backend (Opencode, etc.) shows up here automatically.
+    """
+    return [plugin.id for plugin in get_registry().all() if plugin.id != "tmux"]
 
 
 class SshLaunchTargetConfig(BaseModel):
@@ -29,8 +41,6 @@ class SshLaunchTargetConfig(BaseModel):
     ssh_destination: str
     ssh_bin: str = "ssh"
     ssh_args: list[str] = Field(default_factory=list)
-    codex_bin: str = "codex"
-    claude_bin: str = "claude"
     default_cwd: str = "~"
     # Remote login shell wrapper used to run codex/claude commands so user
     # rcfiles (PATH, env vars, helpers) get sourced. `-i` (interactive) is
@@ -41,18 +51,22 @@ class SshLaunchTargetConfig(BaseModel):
     # shell. NB: any `.bashrc` line that writes to stdout would corrupt
     # codex/claude's stream protocols, so keep rcfile output on stderr only.
     remote_shell: str = "bash -ilc"
-    supported_backends: list[Backend] = Field(
+    supported_backends: list[BackendId] = Field(
         default_factory=_default_supported_backends
     )
     config_overrides: list[str] = Field(default_factory=list)
     remote_env: dict[str, str] = Field(default_factory=dict)
+    # Per-plugin remote binary overrides keyed by plugin id; e.g.
+    # ``{"claude_code": "/opt/claude/bin/claude", "codex": "codex"}``. A
+    # missing entry falls back to the plugin's ``capabilities.cli_binary``.
+    remote_bins: dict[BackendId, str] = Field(default_factory=dict)
 
     @field_validator("supported_backends")
     @classmethod
-    def validate_supported_backends(cls, value: list[Backend]) -> list[Backend]:
+    def validate_supported_backends(cls, value: list[str]) -> list[str]:
         if not value:
             return _default_supported_backends()
-        deduped: list[Backend] = []
+        deduped: list[str] = []
         for backend in value:
             if backend not in deduped:
                 deduped.append(backend)
@@ -61,10 +75,19 @@ class SshLaunchTargetConfig(BaseModel):
     def supports(self, backend: str) -> bool:
         return backend in self.supported_backends
 
-    def resolve_default_backend(self, fallback: Backend) -> Backend:
+    def resolve_default_backend(self, fallback: str) -> str:
         if fallback in self.supported_backends:
             return fallback
         return self.supported_backends[0]
+
+    def remote_bin_for(self, plugin_id: str, default: str | None = None) -> str | None:
+        """Return the remote binary path to use for ``plugin_id``.
+
+        Falls back to ``default`` (typically the plugin's
+        ``capabilities.cli_binary``) when the user hasn't pinned one
+        for this target.
+        """
+        return self.remote_bins.get(plugin_id) or default
 
     def build_remote_exec_args(
         self, command: list[str], cwd: str | None = None

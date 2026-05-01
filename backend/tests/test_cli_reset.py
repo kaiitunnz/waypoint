@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from waypoint.cli import run_reset
-from waypoint.config import Settings
+from waypoint.settings import Settings
 
 
 def _seed(tmp_path: Path) -> Settings:

@@ -4,17 +4,23 @@ The generic SSH primitives (``build_remote_exec_args``,
 ``wrap_remote_command``) live on ``SshLaunchTargetConfig``; everything
 codex-shaped — building the ``codex app-server --listen stdio://`` argv
 and wrapping it in an ``AppServerClient`` factory — lives here so
-``server_config.py`` stays plugin-agnostic.
+``launch_targets.py`` stays plugin-agnostic.
 """
 
 from codex_app_server.client import AppServerClient, AppServerConfig
 
 from waypoint.backends.codex.adapter import ApprovalCallback, ClientFactory
-from waypoint.server_config import SshLaunchTargetConfig
+from waypoint.launch_targets import SshLaunchTargetConfig
+
+CODEX_PLUGIN_ID = "codex"
+CODEX_DEFAULT_BIN = "codex"
 
 
 def build_codex_launch_args(target: SshLaunchTargetConfig, cwd: str) -> tuple[str, ...]:
-    codex_args = [target.codex_bin]
+    codex_bin = (
+        target.remote_bin_for(CODEX_PLUGIN_ID, CODEX_DEFAULT_BIN) or CODEX_DEFAULT_BIN
+    )
+    codex_args = [codex_bin]
     for override in target.config_overrides:
         codex_args.extend(["--config", override])
     codex_args.extend(["app-server", "--listen", "stdio://"])

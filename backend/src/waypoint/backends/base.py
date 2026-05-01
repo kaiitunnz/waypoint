@@ -3,14 +3,15 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from pydantic import BaseModel
 
 from waypoint.backends.capabilities import BackendCapabilities
+from waypoint.backends.plugin_config import PluginConfig
 from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
+    from waypoint.launch_targets import SshLaunchTargetConfig
     from waypoint.runtime import SessionRuntime
-    from waypoint.server_config import SshLaunchTargetConfig
 
 
 @runtime_checkable
@@ -34,6 +35,10 @@ class BackendPlugin(Protocol):
     # ``capabilities.supports_thread_import`` first, so this only needs
     # to be set when that capability is True.
     import_request_schema: type[BaseModel] | None
+    # Subclass of ``PluginConfig`` that the YAML validator parses
+    # ``plugin_configs.<plugin_id>`` into. Plugins without bespoke
+    # configuration can point at ``PluginConfig`` itself.
+    config_schema: type[PluginConfig]
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
         """Return a TransportAdapter routing send/interrupt/etc. for this plugin."""
@@ -214,11 +219,12 @@ class BackendPlugin(Protocol):
         backend on a given SSH launch target.
 
         Used by the tmux fallback when wrapping a remote ``claude`` /
-        ``codex`` invocation. Plugins typically read the per-backend
-        override field on the launch target (``claude_bin``,
-        ``codex_bin``) so users can pin a remote install path. Wrapper
-        plugins that never get launched themselves (tmux) can return an
-        empty string — the runtime only calls this on the inner backend.
+        ``codex`` invocation. Plugins typically read
+        ``launch_target.remote_bin_for(self.id, self.capabilities.cli_binary)``
+        so users can pin a remote install path via the per-target
+        ``remote_bins`` mapping. Wrapper plugins that never get
+        launched themselves (tmux) can return an empty string — the
+        runtime only calls this on the inner backend.
         """
         ...
 

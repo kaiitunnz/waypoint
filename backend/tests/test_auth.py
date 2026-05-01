@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from waypoint.auth import TokenStore
-from waypoint.config import Settings
+from waypoint.settings import Settings
 from waypoint.storage import Storage
 
 

@@ -4,13 +4,15 @@ from waypoint.backends.claude_code.remote import (
     build_remote_claude_launch_factory,
     build_remote_thread_enumeration_args,
 )
-from waypoint.server_config import SshLaunchTargetConfig
+from waypoint.launch_targets import SshLaunchTargetConfig
 
 
 def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
     monkeypatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    monkeypatch.setattr(
+        "waypoint.launch_targets.shutil.which", lambda _: "/usr/bin/ssh"
+    )
     monkeypatch.setattr(
         "waypoint.backends.claude_code.remote.secrets.randbelow", lambda _: 1234
     )
@@ -19,7 +21,7 @@ def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
         name="Devbox",
         ssh_destination="dev@example.com",
         remote_env={"OPENAI_API_KEY": "sk-test"},
-        claude_bin="/opt/claude/bin/claude",
+        remote_bins={"claude_code": "/opt/claude/bin/claude"},
     )
     hook_script = tmp_path / "hook.py"
     hook_script.write_text("#!/usr/bin/env python3\nprint('hook')\n", encoding="utf-8")
@@ -77,7 +79,9 @@ def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
 def test_remote_claude_launch_factory_appends_model_flag(
     monkeypatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    monkeypatch.setattr(
+        "waypoint.launch_targets.shutil.which", lambda _: "/usr/bin/ssh"
+    )
     monkeypatch.setattr(
         "waypoint.backends.claude_code.remote.secrets.randbelow", lambda _: 1234
     )
@@ -85,7 +89,7 @@ def test_remote_claude_launch_factory_appends_model_flag(
         id="devbox",
         name="Devbox",
         ssh_destination="dev@example.com",
-        claude_bin="/opt/claude/bin/claude",
+        remote_bins={"claude_code": "/opt/claude/bin/claude"},
     )
     hook_script = tmp_path / "hook.py"
     hook_script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
@@ -111,7 +115,9 @@ def test_remote_claude_launch_factory_appends_model_flag(
 def test_build_remote_thread_enumeration_args_wraps_in_bash_and_passes_env(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    monkeypatch.setattr(
+        "waypoint.launch_targets.shutil.which", lambda _: "/usr/bin/ssh"
+    )
     config = SshLaunchTargetConfig(
         id="devbox",
         name="Devbox",
@@ -144,7 +150,9 @@ def test_build_remote_thread_enumeration_args_ignores_default_cwd(
     """Even when default_cwd is set on the target, the enumeration argv
     must not include a `cd` step. Regression for the case where a user
     deletes/renames default_cwd on the remote: listing must still work."""
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    monkeypatch.setattr(
+        "waypoint.launch_targets.shutil.which", lambda _: "/usr/bin/ssh"
+    )
     config = SshLaunchTargetConfig(
         id="devbox",
         name="Devbox",
@@ -159,7 +167,9 @@ def test_build_remote_thread_enumeration_args_ignores_default_cwd(
 
 
 def test_build_remote_thread_enumeration_args_without_env(monkeypatch) -> None:
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    monkeypatch.setattr(
+        "waypoint.launch_targets.shutil.which", lambda _: "/usr/bin/ssh"
+    )
     config = SshLaunchTargetConfig(
         id="devbox",
         name="Devbox",

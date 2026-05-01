@@ -17,7 +17,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from waypoint.auth import TokenStore, require_token
 from waypoint.backends import BackendRegistry
-from waypoint.config import Settings, load_settings
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     LoginRequest,
@@ -34,6 +33,7 @@ from waypoint.schemas import (
     SessionPermissionModeRequest,
     TerminalSnapshot,
 )
+from waypoint.settings import Settings, load_settings
 from waypoint.storage import Storage
 from waypoint.tailnet import fetch_snapshot
 

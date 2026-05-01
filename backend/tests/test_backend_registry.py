@@ -100,11 +100,14 @@ def test_registry_rejects_duplicate_id() -> None:
 
     from pydantic import BaseModel
 
+    from waypoint.backends.plugin_config import PluginConfig
+
     class Stub:
         id = "stub"
         transport_id = "stub-tr"
         label = "Stub"
         import_request_schema: type[BaseModel] | None = None
+        config_schema: type[PluginConfig] = PluginConfig
         capabilities = BackendCapabilities(is_structured=False, supports_resume=False)
 
         def transport_view(self, runtime: Any) -> Any:

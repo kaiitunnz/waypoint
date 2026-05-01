@@ -1,9 +1,8 @@
 import os
 from pathlib import Path
 
-from waypoint.config import load_settings
-from waypoint.schemas import Backend
-from waypoint.server_config import SshLaunchTargetConfig, quote_remote_path
+from waypoint.launch_targets import SshLaunchTargetConfig, quote_remote_path
+from waypoint.settings import load_settings
 
 
 def test_quote_remote_path_preserves_leading_tilde() -> None:
@@ -39,7 +38,8 @@ def test_load_settings_parses_yaml_defaults_and_ssh_targets(
                 "    ssh_args:",
                 "      - -p",
                 "      - '2222'",
-                "    codex_bin: /opt/codex/bin/codex",
+                "    remote_bins:",
+                "      codex: /opt/codex/bin/codex",
                 "    default_cwd: ~/workspace",
                 "    supported_backends:",
                 "      - codex",
@@ -64,7 +64,8 @@ def test_load_settings_parses_yaml_defaults_and_ssh_targets(
     assert loaded.ssh_targets[0].ssh_args == ["-p", "2222"]
     assert loaded.ssh_targets[0].default_cwd == "~/workspace"
     assert loaded.ssh_targets[0].remote_env["OPENAI_API_KEY"] == "sk-test"
-    assert loaded.ssh_targets[0].supported_backends == [Backend.CODEX]
+    assert loaded.ssh_targets[0].supported_backends == ["codex"]
+    assert loaded.ssh_targets[0].remote_bins == {"codex": "/opt/codex/bin/codex"}
 
 
 def test_load_settings_env_overrides_yaml(monkeypatch, tmp_path: Path) -> None:
@@ -91,7 +92,9 @@ def test_load_settings_env_overrides_yaml(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_build_remote_exec_args_wraps_with_login_shell_by_default(monkeypatch) -> None:
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    monkeypatch.setattr(
+        "waypoint.launch_targets.shutil.which", lambda _: "/usr/bin/ssh"
+    )
     config = SshLaunchTargetConfig(
         id="devbox", name="Devbox", ssh_destination="dev@example.com"
     )
@@ -104,7 +107,9 @@ def test_build_remote_exec_args_wraps_with_login_shell_by_default(monkeypatch) -
 
 
 def test_build_remote_exec_args_skips_wrapping_when_shell_blank(monkeypatch) -> None:
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    monkeypatch.setattr(
+        "waypoint.launch_targets.shutil.which", lambda _: "/usr/bin/ssh"
+    )
     config = SshLaunchTargetConfig(
         id="devbox",
         name="Devbox",
@@ -121,7 +126,9 @@ def test_build_remote_exec_args_omits_cd_when_cwd_is_none(monkeypatch) -> None:
     """Callers whose only filesystem dependency is an absolute path must
     be able to opt out of the cwd prefix so a stale ``default_cwd`` on
     the target can't fail their command."""
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    monkeypatch.setattr(
+        "waypoint.launch_targets.shutil.which", lambda _: "/usr/bin/ssh"
+    )
     config = SshLaunchTargetConfig(
         id="devbox", name="Devbox", ssh_destination="dev@example.com"
     )
@@ -131,3 +138,16 @@ def test_build_remote_exec_args_omits_cd_when_cwd_is_none(monkeypatch) -> None:
     remote_command = args[-1]
     assert "cd " not in remote_command
     assert "exec bash -s" in remote_command
+
+
+def test_remote_bin_for_falls_back_to_default(monkeypatch) -> None:
+    config = SshLaunchTargetConfig(
+        id="devbox",
+        name="Devbox",
+        ssh_destination="dev@example.com",
+        remote_bins={"claude_code": "/opt/claude/bin/claude"},
+    )
+
+    assert config.remote_bin_for("claude_code", "claude") == "/opt/claude/bin/claude"
+    assert config.remote_bin_for("codex", "codex") == "codex"
+    assert config.remote_bin_for("opencode", None) is None

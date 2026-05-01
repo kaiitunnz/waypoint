@@ -14,7 +14,6 @@ from waypoint.schemas import (
     ScheduleStatus,
     SessionRecord,
     SessionStatus,
-    SessionTransport,
 )
 
 # Event kinds that the chat view always renders as their own bubble. These
@@ -591,7 +590,10 @@ class Storage:
             datetime.fromisoformat(raw_pinned_at) if raw_pinned_at else None
         )
         payload["status"] = SessionStatus(payload["status"])
-        payload["transport"] = payload.get("transport") or SessionTransport.TMUX.value
+        # Legacy rows written before the transport column existed default to
+        # the tmux fallback — that's what every pre-Step-6 attached session
+        # was running.
+        payload["transport"] = payload.get("transport") or "tmux"
         # Prefer the JSON blob; fall back to legacy columns for rows
         # written before the column was introduced. Plugin code reads
         # `transport_state` exclusively after Step 6.

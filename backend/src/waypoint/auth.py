@@ -4,8 +4,8 @@ from typing import Annotated
 
 from fastapi import Header, HTTPException, status
 
-from waypoint.config import Settings
 from waypoint.schemas import LoginResponse
+from waypoint.settings import Settings
 from waypoint.storage import Storage
 
 

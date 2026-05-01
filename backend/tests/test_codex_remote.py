@@ -1,5 +1,5 @@
 from waypoint.backends.codex.remote import build_remote_codex_client_factory
-from waypoint.server_config import SshLaunchTargetConfig
+from waypoint.launch_targets import SshLaunchTargetConfig
 
 
 def test_remote_client_factory_uses_default_cwd_when_not_provided(
@@ -12,7 +12,9 @@ def test_remote_client_factory_uses_default_cwd_when_not_provided(
         default_cwd="~/workspace",
     )
 
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    monkeypatch.setattr(
+        "waypoint.launch_targets.shutil.which", lambda _: "/usr/bin/ssh"
+    )
     client = build_remote_codex_client_factory(config)("~/workspace", lambda *_: {})
 
     assert client.config.launch_args_override is not None
@@ -21,7 +23,9 @@ def test_remote_client_factory_uses_default_cwd_when_not_provided(
 
 
 def test_remote_client_factory_uses_ssh_launch_args(monkeypatch) -> None:
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
+    monkeypatch.setattr(
+        "waypoint.launch_targets.shutil.which", lambda _: "/usr/bin/ssh"
+    )
     config = SshLaunchTargetConfig(
         id="devbox",
         name="Devbox",

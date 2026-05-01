@@ -8,8 +8,18 @@ from typing import Any
 import uvicorn
 
 from waypoint.api import AppContext, create_app
-from waypoint.config import Settings, load_settings
-from waypoint.schemas import Backend, SessionAttachRequest, SessionCreateRequest
+from waypoint.backends.registry import get_registry
+from waypoint.schemas import SessionAttachRequest, SessionCreateRequest
+from waypoint.settings import Settings, load_settings
+
+
+def _backend_choices() -> list[str]:
+    """Backend ids accepted by ``session start`` / ``session attach``.
+
+    Excludes the tmux fallback — that's a wrapper transport, not a
+    user-selectable coding agent.
+    """
+    return [plugin.id for plugin in get_registry().all() if plugin.id != "tmux"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -39,10 +49,9 @@ def build_parser() -> argparse.ArgumentParser:
     session.add_argument("--config", default=None)
     session_subparsers = session.add_subparsers(dest="session_command", required=True)
 
+    backend_choices = _backend_choices()
     start = session_subparsers.add_parser("start")
-    start.add_argument(
-        "--backend", choices=[backend.value for backend in Backend], required=True
-    )
+    start.add_argument("--backend", choices=backend_choices, required=True)
     start.add_argument("--cwd", required=True)
     start.add_argument("--launch-target-id")
     start.add_argument("--title")
@@ -50,9 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     attach = session_subparsers.add_parser("attach")
     attach.add_argument("--tmux", required=True)
-    attach.add_argument(
-        "--backend-hint", choices=[backend.value for backend in Backend]
-    )
+    attach.add_argument("--backend-hint", choices=backend_choices)
     attach.add_argument("--title")
 
     return parser
@@ -120,14 +127,20 @@ def run_reset(settings: Settings | None = None, *, confirmed: bool) -> None:
 
 def run_doctor(settings: Settings | None = None) -> None:
     settings = settings or load_settings()
-    checks = {
+    # System binaries are checked unconditionally; per-plugin binaries
+    # come from each registered plugin's ``capabilities.cli_binary`` so a
+    # new backend shows up here automatically without editing this file.
+    checks: dict[str, Any] = {
         "tmux": shutil.which("tmux"),
-        "codex": shutil.which("codex"),
-        "claude": shutil.which("claude"),
         "ssh": shutil.which("ssh"),
         "tailscale": shutil.which("tailscale"),
-        "config_path": str(settings.config_path) if settings.config_path else None,
     }
+    for plugin in get_registry().all():
+        binary = plugin.capabilities.cli_binary
+        if binary is None or binary in checks:
+            continue
+        checks[binary] = shutil.which(binary)
+    checks["config_path"] = str(settings.config_path) if settings.config_path else None
     print(json.dumps(checks, indent=2))
 
 
@@ -138,7 +151,7 @@ async def run_session_command(args: argparse.Namespace) -> None:
         if args.session_command == "start":
             session = await context.runtime.create_session(
                 SessionCreateRequest(
-                    backend=Backend(args.backend),
+                    backend=args.backend,
                     cwd=args.cwd,
                     launch_target_id=args.launch_target_id,
                     title=args.title,
@@ -149,7 +162,7 @@ async def run_session_command(args: argparse.Namespace) -> None:
         elif args.session_command == "attach":
             payload: dict[str, Any] = {"tmux_target": args.tmux, "title": args.title}
             if args.backend_hint:
-                payload["backend_hint"] = Backend(args.backend_hint)
+                payload["backend_hint"] = args.backend_hint
             session = await context.runtime.attach_tmux(
                 SessionAttachRequest.model_validate(payload)
             )

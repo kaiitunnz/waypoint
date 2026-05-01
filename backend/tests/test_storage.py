@@ -2,7 +2,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 from waypoint.schemas import (
-    Backend,
     EventKind,
     EventRecord,
     SessionRecord,
@@ -17,7 +16,7 @@ def test_storage_round_trip(tmp_path) -> None:
     now = datetime.now(UTC)
     session = SessionRecord(
         id="session-1",
-        backend=Backend.CODEX,
+        backend="codex",
         source=SessionSource.MANAGED,
         title="Codex session",
         cwd="/tmp",
@@ -54,7 +53,7 @@ def test_storage_round_trips_pinned_at(tmp_path) -> None:
     now = datetime.now(UTC)
     session = SessionRecord(
         id="session-pin",
-        backend=Backend.CODEX,
+        backend="codex",
         source=SessionSource.MANAGED,
         title="Codex session",
         cwd="/tmp",
@@ -88,7 +87,7 @@ def _seed_session(
     storage.create_session(
         SessionRecord(
             id=session_id,
-            backend=Backend.CODEX,
+            backend="codex",
             source=SessionSource.MANAGED,
             title="seeded",
             cwd="/tmp",
@@ -511,7 +510,7 @@ def test_transport_state_round_trip(tmp_path) -> None:
     now = datetime.now(UTC)
     session = SessionRecord(
         id="session-state",
-        backend=Backend.CODEX,
+        backend="codex",
         source=SessionSource.MANAGED,
         title="Codex session",
         cwd="/tmp",
@@ -539,7 +538,7 @@ def test_legacy_columns_seed_transport_state(tmp_path) -> None:
     now = datetime.now(UTC)
     session = SessionRecord(
         id="session-legacy",
-        backend=Backend.CODEX,
+        backend="codex",
         source=SessionSource.MANAGED,
         title="Codex session",
         cwd="/tmp",
@@ -569,7 +568,7 @@ def test_append_event_stamps_envelope_version(tmp_path) -> None:
     now = datetime.now(UTC)
     session = SessionRecord(
         id="session-evt",
-        backend=Backend.CODEX,
+        backend="codex",
         source=SessionSource.MANAGED,
         title="Codex session",
         cwd="/tmp",

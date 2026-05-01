@@ -35,7 +35,9 @@ from waypoint.backends.codex.permission_modes import (
     CODEX_PERMISSION_PRESETS,
 )
 from waypoint.backends.codex.remote import build_remote_codex_client_factory
+from waypoint.backends.plugin_config import PluginConfig
 from waypoint.git_meta import GitMeta
+from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
     CodexThreadImportRequest,
     CodexThreadSummary,
@@ -44,9 +46,7 @@ from waypoint.schemas import (
     SessionRecord,
     SessionSource,
     SessionStatus,
-    SessionTransport,
 )
-from waypoint.server_config import SshLaunchTargetConfig
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
@@ -55,11 +55,21 @@ if TYPE_CHECKING:
 log = logging.getLogger("waypoint.backends.codex")
 
 
+class CodexPluginConfig(PluginConfig):
+    """Codex plugin configuration block.
+
+    Codex discovers its model catalogue at runtime via ``model/list``,
+    so no static model list lives here — only the per-plugin defaults
+    inherited from :class:`PluginConfig`.
+    """
+
+
 class CodexPlugin:
     id = "codex"
     transport_id = "codex_app_server"
     label = "Codex"
     import_request_schema: type[BaseModel] | None = CodexThreadImportRequest
+    config_schema: type[PluginConfig] = CodexPluginConfig
     capabilities = BackendCapabilities(
         is_structured=True,
         supports_resume=False,
@@ -111,7 +121,7 @@ class CodexPlugin:
         return True
 
     def remote_executable(self, launch_target: SshLaunchTargetConfig) -> str:
-        return launch_target.codex_bin
+        return launch_target.remote_bin_for(self.id, self.capabilities.cli_binary) or ""
 
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -323,6 +333,11 @@ class CodexPlugin:
 
     # --- launch / discovery helpers ----------------------------------
 
+    def _config(self, runtime: "SessionRuntime") -> CodexPluginConfig:
+        config = runtime.settings.plugin_config(self.id)
+        assert isinstance(config, CodexPluginConfig)
+        return config
+
     def client_factory(
         self, runtime: "SessionRuntime", launch_target_id: str | None
     ) -> ClientFactory | None:
@@ -467,7 +482,7 @@ class CodexPlugin:
             id=session_id,
             backend=request.backend,
             source=SessionSource.MANAGED,
-            transport=SessionTransport.CODEX_APP_SERVER,
+            transport=self.transport_id,
             title=title,
             cwd=request.cwd,
             launch_target_id=launch_target.id if launch_target else None,
@@ -540,7 +555,7 @@ class CodexPlugin:
             id=session_id,
             backend=self.id,
             source=SessionSource.MANAGED,
-            transport=SessionTransport.CODEX_APP_SERVER,
+            transport=self.transport_id,
             title=_thread_title(thread),
             cwd=cwd,
             launch_target_id=launch_target.id if launch_target else None,
@@ -597,8 +612,9 @@ class CodexPlugin:
         launch_target_id: str | None = None,
         include_hidden: bool = False,
     ) -> dict[str, Any]:
-        default_model = runtime.settings.default_models.get(self.id)
-        default_effort = runtime.settings.default_efforts.get(self.id)
+        config = self._config(runtime)
+        default_model = config.default_model
+        default_effort = config.default_effort
         cwd = self.client_cwd(runtime, launch_target_id)
         try:
             response = await self._require_adapter().list_models(
@@ -684,5 +700,6 @@ def build_plugin() -> CodexPlugin:
 
 __all__ = [
     "CodexPlugin",
+    "CodexPluginConfig",
     "build_plugin",
 ]

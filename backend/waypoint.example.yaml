@@ -13,6 +13,22 @@ cors_origins: []
                           # tool_call+tool_result pair) into one unit so
                           # a page of N reliably surfaces N bubbles.
 
+# Per-plugin config blocks keyed by plugin id. Each block is validated
+# against the plugin's `config_schema` (see `backends/<id>/plugin.py`).
+# Keys here must match a registered plugin; unknown ids fail
+# validation. Omit a block to use the schema's defaults.
+plugin_configs:
+  codex:
+    # default_model: gpt-5
+    # default_effort: high
+  claude_code:
+    # default_model: opus
+    # default_effort: high
+    # models:
+    #   - id: opus
+    #     label: Opus 4.7
+    #     is_default: true
+
 ssh_targets:
   - id: devbox
     name: SSH coding backend
@@ -20,8 +36,11 @@ ssh_targets:
     ssh_args:
       - -p
       - "2222"
-    codex_bin: codex
-    claude_bin: claude
+    # Per-plugin remote binary overrides keyed by plugin id; missing
+    # entries fall back to the plugin's `capabilities.cli_binary`.
+    remote_bins:
+      codex: codex
+      claude_code: claude
     default_cwd: "~"
     # Default `bash -ilc` (interactive + login) sources the full rcfile chain
     # so PATH from `.bashrc` (nvm/cargo/pyenv/etc.) is available. Switch to

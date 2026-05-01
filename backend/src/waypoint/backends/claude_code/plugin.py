@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from waypoint.backends.capabilities import (
     BackendCapabilities,
@@ -42,8 +42,11 @@ from waypoint.backends.claude_code.threads import (
     list_local_claude_threads,
 )
 from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
+from waypoint.backends.plugin_config import PluginConfig
 from waypoint.git_meta import GitMeta
+from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
+    BackendModelOption,
     ClaudeThreadImportRequest,
     ClaudeThreadSummary,
     SessionCreateRequest,
@@ -51,9 +54,7 @@ from waypoint.schemas import (
     SessionRecord,
     SessionSource,
     SessionStatus,
-    SessionTransport,
 )
-from waypoint.server_config import SshLaunchTargetConfig
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
@@ -63,11 +64,25 @@ if TYPE_CHECKING:
 log = logging.getLogger("waypoint.backends.claude_code")
 
 
+class ClaudeCodePluginConfig(PluginConfig):
+    """Claude Code plugin configuration block.
+
+    Owns the curated model catalogue (no live ``model/list`` RPC for
+    Claude — the binary's per-model factory map is mirrored statically
+    here).
+    """
+
+    models: list[BackendModelOption] = Field(
+        default_factory=lambda: list(DEFAULT_CLAUDE_MODELS)
+    )
+
+
 class ClaudeCodePlugin:
     id = "claude_code"
     transport_id = "claude_cli"
     label = "Claude Code"
     import_request_schema: type[BaseModel] | None = ClaudeThreadImportRequest
+    config_schema: type[PluginConfig] = ClaudeCodePluginConfig
     capabilities = BackendCapabilities(
         is_structured=True,
         supports_resume=False,
@@ -149,7 +164,7 @@ class ClaudeCodePlugin:
         return self.adapter is not None
 
     def remote_executable(self, launch_target: SshLaunchTargetConfig) -> str:
-        return launch_target.claude_bin
+        return launch_target.remote_bin_for(self.id, self.capabilities.cli_binary) or ""
 
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -206,11 +221,16 @@ class ClaudeCodePlugin:
             )
         return mode
 
+    def _config(self, runtime: "SessionRuntime") -> ClaudeCodePluginConfig:
+        config = runtime.settings.plugin_config(self.id)
+        assert isinstance(config, ClaudeCodePluginConfig)
+        return config
+
     def static_model_options(self, runtime: "SessionRuntime") -> list[Any]:
-        # Settings carries the (configurable) Claude model catalogue. The
-        # plugin defers to it so deployments can patch the list via
-        # waypoint.yaml without forking this module.
-        return list(runtime.settings.claude_models)
+        # Plugin config carries the (configurable) Claude model catalogue.
+        # Deployments patch the list via ``plugin_configs.claude_code.models``
+        # in waypoint.yaml without forking this module.
+        return list(self._config(runtime).models)
 
     @property
     def permission_mode_ids(self) -> tuple[str, ...]:
@@ -283,13 +303,12 @@ class ClaudeCodePlugin:
         launch_target_id: str | None = None,
         include_hidden: bool = False,
     ) -> dict[str, Any]:
-        default_model = runtime.settings.default_models.get(self.id)
-        default_effort = runtime.settings.default_efforts.get(self.id)
-        options = [
-            opt.model_dump(mode="json") for opt in runtime.settings.claude_models
-        ]
+        config = self._config(runtime)
+        default_model = config.default_model
+        default_effort = config.default_effort
+        options = [opt.model_dump(mode="json") for opt in config.models]
         if default_model is None:
-            for opt in runtime.settings.claude_models:
+            for opt in config.models:
                 if opt.is_default:
                     default_model = opt.id
                     break
@@ -584,7 +603,7 @@ class ClaudeCodePlugin:
             id=session_id,
             backend=request.backend,
             source=SessionSource.MANAGED,
-            transport=SessionTransport.CLAUDE_CLI,
+            transport=self.transport_id,
             title=title,
             cwd=request.cwd,
             launch_target_id=launch_target.id if launch_target else None,
@@ -684,7 +703,7 @@ class ClaudeCodePlugin:
             id=session_id,
             backend=self.id,
             source=SessionSource.MANAGED,
-            transport=SessionTransport.CLAUDE_CLI,
+            transport=self.transport_id,
             title=info.title,
             cwd=cwd,
             launch_target_id=launch_target.id if launch_target else None,
@@ -756,5 +775,6 @@ __all__ = [
     "CLAUDE_PERMISSION_MODES",
     "DEFAULT_CLAUDE_MODELS",
     "ClaudeCodePlugin",
+    "ClaudeCodePluginConfig",
     "build_plugin",
 ]

@@ -17,16 +17,16 @@ from fastapi import HTTPException, status
 from pydantic import BaseModel
 
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
+from waypoint.backends.plugin_config import PluginConfig
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.git_meta import GitMeta
+from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
     SessionCreateRequest,
     SessionRecord,
     SessionSource,
     SessionStatus,
-    SessionTransport,
 )
-from waypoint.server_config import SshLaunchTargetConfig
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
@@ -40,11 +40,21 @@ def _unsupported(action: str) -> Never:
     )
 
 
+class TmuxPluginConfig(PluginConfig):
+    """Tmux fallback plugin configuration block.
+
+    Tmux exposes no model/effort knobs; the inherited
+    :class:`PluginConfig` defaults are unused but the field is required
+    so all plugins satisfy the same contract.
+    """
+
+
 class TmuxPlugin:
     id = "tmux"
     transport_id = "tmux"
     label = "Tmux"
     import_request_schema: type[BaseModel] | None = None
+    config_schema: type[PluginConfig] = TmuxPluginConfig
     capabilities = BackendCapabilities(
         is_structured=False,
         supports_resume=True,
@@ -225,7 +235,7 @@ class TmuxPlugin:
             id=session_id,
             backend=request.backend,
             source=SessionSource.MANAGED,
-            transport=SessionTransport.TMUX,
+            transport=self.transport_id,
             title=title,
             cwd=request.cwd,
             launch_target_id=launch_target.id if launch_target else None,
@@ -255,4 +265,4 @@ def build_plugin() -> TmuxPlugin:
     return TmuxPlugin()
 
 
-__all__ = ["TmuxPlugin", "build_plugin"]
+__all__ = ["TmuxPlugin", "TmuxPluginConfig", "build_plugin"]

@@ -3,19 +3,12 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
-from waypoint.backends.claude_code.models import (
-    CLAUDE_EFFORT_LEVELS,
-    DEFAULT_CLAUDE_MODELS,
-)
-from waypoint.schemas import Backend, BackendModelOption
-from waypoint.server_config import SshLaunchTargetConfig
-
-# `CLAUDE_EFFORT_LEVELS` and `DEFAULT_CLAUDE_MODELS` re-exported for legacy
-# `from waypoint.config import …` imports; the source of truth lives in
-# `backends/claude_code/models.py`.
-__all_claude_re_exports__ = (CLAUDE_EFFORT_LEVELS, DEFAULT_CLAUDE_MODELS)
+from waypoint.backends.plugin_config import PluginConfig
+from waypoint.backends.registry import get_registry
+from waypoint.launch_targets import SshLaunchTargetConfig
+from waypoint.schemas import BackendId
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -51,12 +44,29 @@ def parse_config_path(raw: str | None) -> Path | None:
     return Path(os.path.expandvars(raw)).expanduser()
 
 
+def _default_backend_id() -> str:
+    """Pick a default backend at validation time.
+
+    Prefers ``codex`` when registered (the historical default), falling
+    back to the first non-tmux registered plugin so a custom registry
+    without Codex still validates without an explicit
+    ``default_backend`` override.
+    """
+    registry = get_registry()
+    if registry.has_backend("codex"):
+        return "codex"
+    for plugin in registry.all():
+        if plugin.id != "tmux":
+            return plugin.id
+    return "tmux"
+
+
 class Settings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8787
     password: str = "change-me"
     config_path: Path | None = None
-    default_backend: Backend = Backend.CODEX
+    default_backend: BackendId = Field(default_factory=_default_backend_id)
     default_cwd: str = "~/"
     data_dir: Path = Field(default_factory=default_data_dir)
     sessions_dir_name: str = "sessions"
@@ -67,17 +77,13 @@ class Settings(BaseModel):
     cors_origins: list[str] = Field(default_factory=lambda: list(DEFAULT_CORS_ORIGINS))
     cors_allow_origin_regex: str | None = DEFAULT_CORS_ORIGIN_REGEX
     ssh_targets: list[SshLaunchTargetConfig] = Field(default_factory=list)
-    # Default model per backend, keyed by Backend value (e.g. "claude_code",
-    # "codex"). Missing keys mean "let the backend pick" — no --model is
-    # forwarded and the backend falls back to its built-in default.
-    default_models: dict[str, str] = Field(default_factory=dict)
-    # Default reasoning effort per backend, keyed by Backend value. Missing
-    # keys mean "let the backend pick" (Codex falls back to the model's
-    # `default_reasoning_effort`; Claude omits `--effort` entirely).
-    default_efforts: dict[str, str] = Field(default_factory=dict)
-    claude_models: list[BackendModelOption] = Field(
-        default_factory=lambda: list(DEFAULT_CLAUDE_MODELS)
-    )
+    # Per-plugin configuration blocks keyed by plugin id; each value is
+    # validated against the plugin's ``config_schema`` and exposed via
+    # :meth:`plugin_config`. Missing entries fall back to the schema's
+    # defaults so plugin-specific YAML stays optional. The raw dict here
+    # is the wire shape (parsed from YAML); the typed instances are
+    # cached in ``_resolved_plugin_configs``.
+    plugin_configs: dict[BackendId, dict[str, Any]] = Field(default_factory=dict)
     # Default page size for `/api/sessions/{id}/events` measured in *logical
     # chat messages* (agent_output deltas with the same item_id collapse
     # into one, tool_call+tool_result pairs share an item_id, everything
@@ -87,6 +93,22 @@ class Settings(BaseModel):
     # backend emitted per message.
     chat_page_messages: int = Field(default=20, ge=1, le=200)
 
+    _resolved_plugin_configs: dict[str, PluginConfig] = PrivateAttr(
+        default_factory=dict
+    )
+
+    @model_validator(mode="after")
+    def _resolve_plugin_configs_eagerly(self) -> "Settings":
+        # Eager validation surfaces YAML errors at startup rather than at
+        # first runtime access; the typed instances live in a private
+        # attribute so the public ``plugin_configs`` field stays the raw
+        # wire shape that round-trips through ``model_dump``.
+        registry = get_registry()
+        for plugin_id, raw in self.plugin_configs.items():
+            schema = registry.get(plugin_id).config_schema
+            self._resolved_plugin_configs[plugin_id] = schema.model_validate(raw or {})
+        return self
+
     @property
     def database_path(self) -> Path:
         return self.data_dir / self.database_name
@@ -94,6 +116,21 @@ class Settings(BaseModel):
     @property
     def sessions_dir(self) -> Path:
         return self.data_dir / self.sessions_dir_name
+
+    def plugin_config(self, plugin_id: str) -> PluginConfig:
+        """Return the validated config for ``plugin_id``.
+
+        Falls back to a default-constructed instance of the plugin's
+        ``config_schema`` when the user hasn't supplied a block in
+        ``waypoint.yaml``.
+        """
+        cached = self._resolved_plugin_configs.get(plugin_id)
+        if cached is not None:
+            return cached
+        plugin = get_registry().get(plugin_id)
+        cfg = plugin.config_schema()
+        self._resolved_plugin_configs[plugin_id] = cfg
+        return cfg
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -161,18 +198,6 @@ def _env_overrides() -> dict[str, Any]:
 
 def _normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(payload)
-    legacy_remote = normalized.pop("codex_remote", None)
-    if legacy_remote and "ssh_targets" not in normalized:
-        legacy_target = dict(legacy_remote)
-        if legacy_target.pop("enabled", False):
-            normalized["ssh_targets"] = [
-                {
-                    "id": "ssh-default",
-                    "name": "SSH coding backend",
-                    "supported_backends": [Backend.CODEX.value],
-                    **legacy_target,
-                }
-            ]
     if "config_path" in normalized and normalized["config_path"] is not None:
         normalized["config_path"] = Path(normalized["config_path"]).expanduser()
     if "data_dir" in normalized and normalized["data_dir"] is not None:

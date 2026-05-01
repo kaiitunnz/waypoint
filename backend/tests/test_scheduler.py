@@ -4,17 +4,15 @@ from typing import Any, cast
 import pytest
 from fastapi import HTTPException
 
-from waypoint.config import Settings
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
-    Backend,
     ScheduleCreateRequest,
     ScheduleStatus,
     SessionRecord,
     SessionSource,
     SessionStatus,
-    SessionTransport,
 )
+from waypoint.settings import Settings
 from waypoint.storage import Storage
 
 
@@ -31,9 +29,9 @@ def make_session(settings: Settings, session_id: str) -> SessionRecord:
     now = datetime.now(UTC)
     return SessionRecord(
         id=session_id,
-        backend=Backend.CODEX,
+        backend="codex",
         source=SessionSource.MANAGED,
-        transport=SessionTransport.CODEX_APP_SERVER,
+        transport="codex_app_server",
         title="Scheduled",
         cwd="/tmp/project",
         status=SessionStatus.IDLE,
@@ -51,7 +49,7 @@ async def test_create_schedule_with_delay_persists_pending(tmp_path) -> None:
     runtime = make_runtime(tmp_path)
     schedule = runtime.scheduler.create_schedule(
         ScheduleCreateRequest(
-            backend=Backend.CODEX,
+            backend="codex",
             cwd="/tmp/project",
             initial_prompt="hello",
             delay_seconds=60,
@@ -69,7 +67,7 @@ async def test_create_schedule_requires_time_input(tmp_path) -> None:
     runtime = make_runtime(tmp_path)
     with pytest.raises(HTTPException) as exc:
         runtime.scheduler.create_schedule(
-            ScheduleCreateRequest(backend=Backend.CODEX, cwd="/tmp/project")
+            ScheduleCreateRequest(backend="codex", cwd="/tmp/project")
         )
     assert exc.value.status_code == 400
 
@@ -78,9 +76,7 @@ async def test_create_schedule_requires_time_input(tmp_path) -> None:
 async def test_cancel_schedule_marks_cancelled(tmp_path) -> None:
     runtime = make_runtime(tmp_path)
     schedule = runtime.scheduler.create_schedule(
-        ScheduleCreateRequest(
-            backend=Backend.CODEX, cwd="/tmp/project", delay_seconds=300
-        )
+        ScheduleCreateRequest(backend="codex", cwd="/tmp/project", delay_seconds=300)
     )
     cancelled = runtime.scheduler.cancel_schedule(schedule.id)
     assert cancelled.status == ScheduleStatus.CANCELLED
@@ -97,20 +93,16 @@ async def test_cancel_schedule_marks_cancelled(tmp_path) -> None:
 async def test_clear_history_removes_terminal_schedules(tmp_path) -> None:
     runtime = make_runtime(tmp_path)
     pending = runtime.scheduler.create_schedule(
-        ScheduleCreateRequest(
-            backend=Backend.CODEX, cwd="/tmp/project", delay_seconds=600
-        )
+        ScheduleCreateRequest(backend="codex", cwd="/tmp/project", delay_seconds=600)
     )
     cancelled = runtime.scheduler.create_schedule(
-        ScheduleCreateRequest(
-            backend=Backend.CODEX, cwd="/tmp/project", delay_seconds=600
-        )
+        ScheduleCreateRequest(backend="codex", cwd="/tmp/project", delay_seconds=600)
     )
     runtime.scheduler.cancel_schedule(cancelled.id)
     runtime.storage.update_schedule(
         runtime.scheduler.create_schedule(
             ScheduleCreateRequest(
-                backend=Backend.CODEX, cwd="/tmp/project", delay_seconds=600
+                backend="codex", cwd="/tmp/project", delay_seconds=600
             )
         ).id,
         status=ScheduleStatus.LAUNCHED,
@@ -129,7 +121,7 @@ async def test_fire_due_schedules_creates_session_and_sends_prompt(
     runtime = make_runtime(tmp_path)
     schedule = runtime.scheduler.create_schedule(
         ScheduleCreateRequest(
-            backend=Backend.CODEX,
+            backend="codex",
             cwd="/tmp/project",
             initial_prompt="ship it",
             delay_seconds=0,
@@ -166,9 +158,7 @@ async def test_fire_due_schedules_creates_session_and_sends_prompt(
 async def test_fire_due_schedules_records_failure(tmp_path, monkeypatch) -> None:
     runtime = make_runtime(tmp_path)
     schedule = runtime.scheduler.create_schedule(
-        ScheduleCreateRequest(
-            backend=Backend.CODEX, cwd="/tmp/project", delay_seconds=0
-        )
+        ScheduleCreateRequest(backend="codex", cwd="/tmp/project", delay_seconds=0)
     )
     runtime.storage.update_schedule(
         schedule.id, scheduled_at=datetime.now(UTC) - timedelta(seconds=1)
@@ -192,7 +182,7 @@ async def test_scheduled_at_input_normalised_to_utc(tmp_path) -> None:
     naive_when = datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=5)
     schedule = runtime.scheduler.create_schedule(
         ScheduleCreateRequest(
-            backend=Backend.CODEX,
+            backend="codex",
             cwd="/tmp/project",
             scheduled_at=cast(Any, naive_when),
         )
@@ -206,7 +196,7 @@ async def test_create_schedule_persists_permission_mode(tmp_path) -> None:
     runtime = make_runtime(tmp_path)
     schedule = runtime.scheduler.create_schedule(
         ScheduleCreateRequest(
-            backend=Backend.CLAUDE_CODE,
+            backend="claude_code",
             cwd="/tmp/project",
             permission_mode="plan",
             delay_seconds=60,
@@ -224,7 +214,7 @@ async def test_create_schedule_rejects_unknown_permission_mode(tmp_path) -> None
     with pytest.raises(HTTPException) as exc:
         runtime.scheduler.create_schedule(
             ScheduleCreateRequest(
-                backend=Backend.CODEX,
+                backend="codex",
                 cwd="/tmp/project",
                 permission_mode="not-a-mode",
                 delay_seconds=60,
@@ -240,7 +230,7 @@ async def test_fire_passes_permission_mode_to_create_session(
     runtime = make_runtime(tmp_path)
     schedule = runtime.scheduler.create_schedule(
         ScheduleCreateRequest(
-            backend=Backend.CLAUDE_CODE,
+            backend="claude_code",
             cwd="/tmp/project",
             permission_mode="acceptEdits",
             delay_seconds=0,

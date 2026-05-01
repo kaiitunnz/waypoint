@@ -6,35 +6,6 @@ from typing import Annotated, Any
 from pydantic import BaseModel, BeforeValidator, Field
 
 
-class Backend(StrEnum):
-    """Built-in backend ids.
-
-    Schemas accept any backend registered with the plugin registry via
-    :data:`BackendId`; this enum stays for legacy code that references
-    ``Backend.CODEX`` and friends as constants.
-    """
-
-    CLAUDE_CODE = "claude_code"
-    CODEX = "codex"
-
-
-class SessionSource(StrEnum):
-    MANAGED = "managed"
-    ATTACHED_TMUX = "attached_tmux"
-
-
-class SessionTransport(StrEnum):
-    """Built-in transport ids.
-
-    Same arrangement as :class:`Backend` — schemas use :data:`SessionTransportId`
-    so plugins can introduce new transports without editing this file.
-    """
-
-    TMUX = "tmux"
-    CODEX_APP_SERVER = "codex_app_server"
-    CLAUDE_CLI = "claude_cli"
-
-
 def _validate_backend_id(value: Any) -> str:
     if isinstance(value, StrEnum):
         value = str(value)
@@ -59,8 +30,17 @@ def _validate_transport_id(value: Any) -> str:
     return value
 
 
+# Annotated string types validated against the live plugin registry.
+# Schemas use these so adding a new backend never requires editing this
+# module: any plugin registered via ``backends/bootstrap.py`` is
+# automatically accepted as a valid id.
 BackendId = Annotated[str, BeforeValidator(_validate_backend_id)]
 SessionTransportId = Annotated[str, BeforeValidator(_validate_transport_id)]
+
+
+class SessionSource(StrEnum):
+    MANAGED = "managed"
+    ATTACHED_TMUX = "attached_tmux"
 
 
 class SessionStatus(StrEnum):
@@ -88,7 +68,7 @@ class SessionRecord(BaseModel):
     id: str
     backend: BackendId
     source: SessionSource
-    transport: SessionTransportId = SessionTransport.TMUX.value
+    transport: SessionTransportId = "tmux"
     title: str
     cwd: str
     launch_target_id: str | None = None
@@ -142,13 +122,13 @@ class LaunchTargetSummary(BaseModel):
     name: str
     kind: str = "ssh"
     supported_backends: list[BackendId] = Field(default_factory=list)
-    default_backend: BackendId = Backend.CODEX.value
+    default_backend: BackendId = "codex"
     default_cwd: str | None = None
 
 
 class MeResponse(BaseModel):
     authenticated: bool = True
-    default_backend: BackendId = Backend.CODEX.value
+    default_backend: BackendId = "codex"
     default_cwd: str = "~/"
     launch_targets: list[LaunchTargetSummary] = Field(default_factory=list)
     # Plugin catalogue mirrored from `/api/backends`; lets `/api/me`

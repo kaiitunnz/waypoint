@@ -4,7 +4,7 @@ transcripts over SSH.
 Lives next to ``adapter.py`` and ``threads_remote.py`` so the
 PreToolUse hook bootstrap (which has to ship a Python script + a JSON
 settings blob to the remote in addition to the bare ``claude``
-invocation) doesn't leak into ``server_config.py``.
+invocation) doesn't leak into ``launch_targets.py``.
 """
 
 import json
@@ -14,11 +14,14 @@ from pathlib import Path
 
 from waypoint.backends.claude_code.adapter import ClaudeLaunchSpec, LaunchFactory
 from waypoint.backends.claude_code.runtime_hook import GATED_TOOLS_REGEX
-from waypoint.server_config import (
+from waypoint.launch_targets import (
     SshLaunchTargetConfig,
     _resolve_local_binary,
     quote_remote_path,
 )
+
+CLAUDE_PLUGIN_ID = "claude_code"
+CLAUDE_DEFAULT_BIN = "claude"
 
 # Placeholder that gets substituted (via sed) on the remote with the
 # absolute path of the hook script after `$HOME` is resolved.
@@ -64,8 +67,12 @@ def build_remote_claude_launch_factory(
                 ]
             }
         }
+        claude_bin = (
+            target.remote_bin_for(CLAUDE_PLUGIN_ID, CLAUDE_DEFAULT_BIN)
+            or CLAUDE_DEFAULT_BIN
+        )
         claude_args = [
-            target.claude_bin,
+            claude_bin,
             "-p",
             "--input-format=stream-json",
             "--output-format=stream-json",

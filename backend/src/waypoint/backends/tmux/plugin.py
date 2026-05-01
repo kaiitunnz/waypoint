@@ -61,6 +61,12 @@ class TmuxPlugin:
 
         return TmuxTransport(runtime)
 
+    def setup(self, runtime: "SessionRuntime") -> None:
+        return None
+
+    def register_routes(self, app: Any, context: Any) -> None:
+        return None
+
     def validate_permission_mode(self, mode: str | None) -> str | None:
         return None  # tmux has no concept of permission modes
 

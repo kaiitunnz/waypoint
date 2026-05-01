@@ -157,6 +157,12 @@ def test_registry_rejects_duplicate_id() -> None:
         async def post_approval(self, runtime: Any, session: Any) -> None:
             return None
 
+        def setup(self, runtime: Any) -> None:
+            return None
+
+        def register_routes(self, app: Any, context: Any) -> None:
+            return None
+
     registry.register(Stub())
     with pytest.raises(ValueError):
         registry.register(Stub())

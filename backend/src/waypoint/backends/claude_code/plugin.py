@@ -15,13 +15,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, status
 
 from waypoint.backends.capabilities import (
     BackendCapabilities,
     ModelSource,
 )
-from waypoint.backends.claude_code.adapter import ClaudeCliError
+from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeCliError
 from waypoint.backends.claude_code.models import (
     CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
@@ -30,11 +30,13 @@ from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_PERMISSION_MODE_SPECS,
     CLAUDE_PERMISSION_MODES,
 )
+from waypoint.backends.claude_code.runtime_hook import ensure_claude_hook_bundle
 from waypoint.backends.claude_code.threads import (
     ClaudeThreadInfo,
     find_local_claude_thread,
     list_local_claude_threads,
 )
+from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
 from waypoint.git_meta import GitMeta
 from waypoint.schemas import (
     ClaudeThreadImportRequest,
@@ -87,6 +89,62 @@ class ClaudeCodePlugin:
         from waypoint.backends.claude_code.transport import ClaudeTransport
 
         return ClaudeTransport(runtime)
+
+    def setup(self, runtime: "SessionRuntime") -> None:
+        # Build the PreToolUse webhook bundle, the CLI adapter, and the
+        # remote thread enumerator — collectively the "claude side" of
+        # the runtime. Resilient to ensure_claude_hook_bundle failing
+        # (read-only data dir, missing scripts, etc.); we log and
+        # leave runtime.claude=None so the runtime keeps working
+        # without Claude support.
+        if runtime.claude is not None:
+            return  # already provisioned (e.g. tests injected a fake)
+        try:
+            hook = ensure_claude_hook_bundle(runtime.settings.data_dir)
+        except Exception:  # noqa: BLE001
+            log.exception(
+                "claude hook bundle setup failed; claude support disabled"
+            )
+            return
+        runtime.claude_hook = hook
+        hook_url = f"http://127.0.0.1:{runtime.settings.port}"
+        runtime.claude = ClaudeCliAdapter(
+            runtime._emit_adapter_event,
+            hook_settings_path=hook.settings_path,
+            hook_secret=hook.secret,
+            hook_url=hook_url,
+        )
+        runtime.claude_thread_enumerator = RemoteClaudeThreadEnumerator(
+            hook.thread_enumerator_path
+        )
+
+    def register_routes(self, app: FastAPI, context: Any) -> None:
+        # Mount the PreToolUse approval webhook here so api.py stays
+        # backend-agnostic. The hook itself runs inside the Claude CLI
+        # subprocess and POSTs back to /api/internal/hooks/claude/approval
+        # with a shared secret; a third backend has no business
+        # registering the same route.
+        @app.post("/api/internal/hooks/claude/approval")
+        async def claude_hook_approval(request: Request) -> Any:
+            secret = request.headers.get("x-waypoint-hook-secret", "")
+            hook = context.runtime.claude_hook
+            if hook is None or not hook.secret or secret != hook.secret:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="invalid hook secret",
+                )
+            if context.runtime.claude is None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="claude adapter is not initialized",
+                )
+            try:
+                payload = await request.json()
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="invalid json"
+                ) from exc
+            return await context.runtime.claude.await_approval(payload)
 
     def validate_permission_mode(self, mode: str | None) -> str | None:
         if mode is None or mode == "":

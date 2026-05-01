@@ -5,6 +5,8 @@ from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
+    from fastapi import FastAPI
+
     from waypoint.runtime import SessionRuntime
 
 
@@ -128,5 +130,25 @@ class BackendPlugin(Protocol):
         Claude flips the CLI's permission mode after an ExitPlanMode
         approval; the plugin syncs the runtime + broadcast here so the
         UI pill reflects the new mode.
+        """
+        ...
+
+    def setup(self, runtime: "SessionRuntime") -> None:
+        """One-shot initialisation hook called from ``SessionRuntime.__init__``.
+
+        Plugins use this to build their adapter, hook bundles, and any
+        per-process resources. Default is a no-op so plugins that
+        don't need bootstrapping (Tmux fallback) opt out.
+        """
+        ...
+
+    def register_routes(self, app: "FastAPI", context: Any) -> None:
+        """Optional FastAPI route-registration hook.
+
+        Called once during ``create_app`` after the runtime is built.
+        The Claude plugin uses this to mount its PreToolUse approval
+        webhook; other plugins can mount internal routes (OpenCode
+        webhook receiver, Codex stream proxies) without touching
+        ``api.py``.
         """
         ...

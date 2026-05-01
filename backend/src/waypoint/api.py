@@ -9,7 +9,6 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
-    Request,
     WebSocket,
     WebSocketDisconnect,
     status,
@@ -18,7 +17,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from waypoint.auth import TokenStore, require_token
 from waypoint.backends import BackendRegistry
-from waypoint.backends.claude_code.runtime_hook import ensure_claude_hook_bundle
 from waypoint.config import Settings, load_settings
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
@@ -99,11 +97,8 @@ class AppContext:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or load_settings()
         self.settings.ensure_dirs()
-        self.claude_hook = ensure_claude_hook_bundle(self.settings.data_dir)
         self.storage = Storage(self.settings.database_path)
-        self.runtime = SessionRuntime(
-            self.settings, self.storage, claude_hook=self.claude_hook
-        )
+        self.runtime = SessionRuntime(self.settings, self.storage)
         self.tokens = TokenStore(self.settings, self.storage)
 
 
@@ -162,26 +157,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         return {"backends": _backend_descriptors(context.runtime.registry)}
 
-    @app.post("/api/internal/hooks/claude/approval")
-    async def claude_hook_approval(request: Request) -> Any:
-        secret = request.headers.get("x-waypoint-hook-secret", "")
-        if not context.claude_hook.secret or secret != context.claude_hook.secret:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="invalid hook secret"
-            )
-        if context.runtime.claude is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="claude adapter is not initialized",
-            )
-        try:
-            payload = await request.json()
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="invalid json"
-            ) from exc
-        decision = await context.runtime.claude.await_approval(payload)
-        return decision
+    # Plugin-registered routes (e.g. the Claude PreToolUse hook) come
+    # in here so api.py stays backend-agnostic.
+    for plugin in context.runtime.registry.all():
+        plugin.register_routes(app, context)
 
     @app.get("/api/tailnet/peers")
     async def tailnet_peers(_: Annotated[str, Depends(token_dependency())]) -> Any:

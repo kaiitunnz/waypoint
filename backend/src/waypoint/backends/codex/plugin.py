@@ -83,6 +83,17 @@ class CodexPlugin:
 
         return CodexTransport(runtime)
 
+    def setup(self, runtime: "SessionRuntime") -> None:
+        # Codex's adapter wires straight to the App Server SDK with no
+        # external bootstrap; runtime builds it directly today. Hook
+        # left in place so a future Codex sidecar (token fetch, OAuth
+        # refresh, etc.) has somewhere to land without touching
+        # runtime.py.
+        return None
+
+    def register_routes(self, app: Any, context: Any) -> None:
+        return None
+
     def validate_permission_mode(self, mode: str | None) -> str | None:
         if mode is None or mode == "":
             return None

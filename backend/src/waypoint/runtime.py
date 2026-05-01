@@ -15,9 +15,7 @@ from waypoint.backends import BackendRegistry, get_registry
 from waypoint.backends.claude_code.adapter import ClaudeCliAdapter
 from waypoint.backends.claude_code.runtime_hook import ClaudeHookBundle
 from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
-from waypoint.backends.codex.adapter import (
-    CodexAppServerAdapter,
-)
+from waypoint.backends.codex.adapter import CodexAppServerAdapter
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
 from waypoint.backends.tmux.normalize import TerminalNormalizer
 from waypoint.config import Settings
@@ -96,7 +94,6 @@ class SessionRuntime:
         self,
         settings: Settings,
         storage: Storage,
-        claude_hook: "ClaudeHookBundle | None" = None,
         registry: BackendRegistry | None = None,
     ) -> None:
         self.settings = settings
@@ -107,14 +104,14 @@ class SessionRuntime:
         self.ssh_targets = {
             target.id: target for target in self.settings.ssh_targets if target.enabled
         }
+        # Codex's App Server SDK has no external bootstrap; the adapter
+        # is built straight here. Claude is wired up by the plugin's
+        # `setup()` because it needs the PreToolUse hook bundle on
+        # disk first.
         self.codex = CodexAppServerAdapter(self._emit_adapter_event)
-        self.claude_hook = claude_hook
-        self.claude = self._build_claude_adapter()
-        self.claude_thread_enumerator: RemoteClaudeThreadEnumerator | None = (
-            RemoteClaudeThreadEnumerator(claude_hook.thread_enumerator_path)
-            if claude_hook is not None
-            else None
-        )
+        self.claude_hook: ClaudeHookBundle | None = None
+        self.claude: ClaudeCliAdapter | None = None
+        self.claude_thread_enumerator: RemoteClaudeThreadEnumerator | None = None
         self.monitor_tasks: dict[str, asyncio.Task[None]] = {}
         self.file_offsets: dict[str, int] = {}
         self.registry = registry or get_registry()
@@ -122,21 +119,12 @@ class SessionRuntime:
             plugin.transport_id: plugin.transport_view(self)
             for plugin in self.registry.all()
         }
+        for plugin in self.registry.all():
+            plugin.setup(self)
         self.scheduler = Scheduler(self)
 
     def transport_for(self, session: SessionRecord) -> TransportAdapter:
         return self._transports[session.transport]
-
-    def _build_claude_adapter(self) -> ClaudeCliAdapter | None:
-        if self.claude_hook is None:
-            return None
-        hook_url = f"http://127.0.0.1:{self.settings.port}"
-        return ClaudeCliAdapter(
-            self._emit_adapter_event,
-            hook_settings_path=self.claude_hook.settings_path,
-            hook_secret=self.claude_hook.secret,
-            hook_url=hook_url,
-        )
 
     async def start(self) -> None:
         for session in self.storage.list_sessions():

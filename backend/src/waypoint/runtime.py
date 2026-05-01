@@ -136,7 +136,7 @@ class SessionRuntime:
         self.scheduler = Scheduler(self)
 
     def transport_for(self, session: SessionRecord) -> TransportAdapter:
-        return self._transports[session.transport.value]
+        return self._transports[session.transport]
 
     def _build_claude_adapter(self) -> ClaudeCliAdapter | None:
         if self.claude_hook is None:
@@ -592,13 +592,13 @@ class SessionRuntime:
         # we omit --model / params.model so the underlying CLI uses its own
         # default instead of waypoint forcing one.
         resolved_model = request.model or self.settings.default_models.get(
-            request.backend.value
+            request.backend
         )
         # Same precedence for reasoning effort. Missing key means "let the
         # backend pick" (Codex falls back to the model's default; Claude
         # omits the --effort flag).
         resolved_effort = request.effort or self.settings.default_efforts.get(
-            request.backend.value
+            request.backend
         )
         if request.backend == Backend.CODEX:
             raw_log.touch(exist_ok=True)
@@ -1031,12 +1031,12 @@ class SessionRuntime:
 
     async def list_backend_models(
         self,
-        backend: Backend,
+        backend: str,
         launch_target_id: str | None = None,
         include_hidden: bool = False,
     ) -> dict[str, Any]:
-        default_model = self.settings.default_models.get(backend.value)
-        default_effort = self.settings.default_efforts.get(backend.value)
+        default_model = self.settings.default_models.get(backend)
+        default_effort = self.settings.default_efforts.get(backend)
         if backend == Backend.CLAUDE_CODE:
             options = [
                 opt.model_dump(mode="json") for opt in self.settings.claude_models
@@ -1047,7 +1047,7 @@ class SessionRuntime:
                         default_model = opt.id
                         break
             return {
-                "backend": backend.value,
+                "backend": backend,
                 "models": options,
                 "default_model": default_model,
                 "default_effort": default_effort,
@@ -1097,7 +1097,7 @@ class SessionRuntime:
                 if default_model is None and entry.is_default:
                     default_model = entry.model
             return {
-                "backend": backend.value,
+                "backend": backend,
                 "models": models,
                 "default_model": default_model,
                 "default_effort": default_effort,
@@ -1396,7 +1396,7 @@ class SessionRuntime:
     def _resolve_launch_target(
         self,
         launch_target_id: str | None,
-        backend: Backend,
+        backend: str,
     ) -> SshLaunchTargetConfig | None:
         if not launch_target_id:
             return None
@@ -1567,7 +1567,7 @@ class SessionRuntime:
 
     def _managed_start_message(
         self,
-        backend: Backend,
+        backend: str,
         launch_target: SshLaunchTargetConfig | None,
         cwd: str | None,
     ) -> str:
@@ -1656,9 +1656,9 @@ class SessionRuntime:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(event.model_dump(mode="json")) + "\n")
 
-    def _generate_session_id(self, backend: Backend) -> str:
+    def _generate_session_id(self, backend: str) -> str:
         token = secrets.token_hex(4)
-        prefix = SAFE_NAME.sub("-", backend.value)
+        prefix = SAFE_NAME.sub("-", backend)
         return f"{prefix}-{token}"
 
     def _generate_claude_session_id(self) -> str:
@@ -1673,7 +1673,7 @@ class SessionRuntime:
 
     def _command_for_backend(
         self,
-        backend: Backend,
+        backend: str,
         args: list[str],
         launch_target: SshLaunchTargetConfig | None = None,
         cwd: str | None = None,

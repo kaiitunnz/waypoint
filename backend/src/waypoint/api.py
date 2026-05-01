@@ -288,11 +288,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/backends/{backend}/models")
     async def list_backend_models(
-        backend: Backend,
+        backend: str,
         _: Annotated[str, Depends(token_dependency())],
         launch_target_id: Annotated[str | None, Query()] = None,
         include_hidden: Annotated[bool, Query()] = False,
     ) -> Any:
+        if not context.runtime.registry.has_backend(backend):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"unknown backend: {backend}",
+            )
         return await context.runtime.list_backend_models(
             backend,
             launch_target_id=launch_target_id,

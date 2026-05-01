@@ -504,3 +504,61 @@ def test_storage_serializes_concurrent_threads(tmp_path) -> None:
         results = list(pool.map(hammer, tokens))
 
     assert all(result is not None for result in results)
+
+
+def test_transport_state_round_trip(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="session-state",
+        backend=Backend.CODEX,
+        source=SessionSource.MANAGED,
+        title="Codex session",
+        cwd="/tmp",
+        status=SessionStatus.RUNNING,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="/tmp/raw.log",
+        structured_log_path="/tmp/events.jsonl",
+        transport_state={"thread_id": "tid-42", "extra": {"nested": True}},
+    )
+    storage.create_session(session)
+    loaded = storage.get_session("session-state")
+    assert loaded is not None
+    assert loaded.transport_state == {"thread_id": "tid-42", "extra": {"nested": True}}
+
+    updated = storage.update_session(
+        "session-state", transport_state={"thread_id": "tid-43"}
+    )
+    assert updated.transport_state == {"thread_id": "tid-43"}
+
+
+def test_legacy_columns_seed_transport_state(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="session-legacy",
+        backend=Backend.CODEX,
+        source=SessionSource.MANAGED,
+        title="Codex session",
+        cwd="/tmp",
+        status=SessionStatus.RUNNING,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="/tmp/raw.log",
+        structured_log_path="/tmp/events.jsonl",
+        thread_id="tid-99",
+        pid=4242,
+    )
+    storage.create_session(session)
+    # Simulate a row written before the JSON column existed.
+    storage.connection.execute(
+        "UPDATE sessions SET transport_state = '{}' WHERE id = ?",
+        ("session-legacy",),
+    )
+    storage.connection.commit()
+    loaded = storage.get_session("session-legacy")
+    assert loaded is not None
+    assert loaded.transport_state == {"thread_id": "tid-99", "pid": 4242}

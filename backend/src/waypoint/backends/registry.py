@@ -30,7 +30,7 @@ class BackendRegistry:
         return plugin
 
     def plugin_for(self, session: SessionRecord) -> BackendPlugin:
-        return self.for_transport(session.transport.value)
+        return self.for_transport(session.transport)
 
     def has_backend(self, backend_id: str) -> bool:
         return backend_id in self._by_id

@@ -45,6 +45,54 @@ def test_registry_capability_descriptors() -> None:
     assert tmx.supports_resume and not cc.supports_resume and not cdx.supports_resume
 
 
+def test_schema_field_rejects_unknown_backend() -> None:
+    from datetime import UTC, datetime
+
+    import pytest as pt
+
+    from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
+
+    now = datetime.now(UTC)
+    with pt.raises(Exception):
+        SessionRecord(
+            id="x",
+            backend="opencode",  # not registered
+            source=SessionSource.MANAGED,
+            title="t",
+            cwd="/",
+            status=SessionStatus.IDLE,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            raw_log_path="raw",
+            structured_log_path="events",
+        )
+
+
+def test_schema_field_accepts_registered_backend_string() -> None:
+    from datetime import UTC, datetime
+
+    from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
+
+    now = datetime.now(UTC)
+    record = SessionRecord(
+        id="x",
+        backend="codex",
+        source=SessionSource.MANAGED,
+        title="t",
+        cwd="/",
+        status=SessionStatus.IDLE,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="raw",
+        structured_log_path="events",
+        transport="codex_app_server",
+    )
+    assert record.backend == "codex"
+    assert record.transport == "codex_app_server"
+
+
 def test_registry_rejects_duplicate_id() -> None:
     registry = BackendRegistry()
 

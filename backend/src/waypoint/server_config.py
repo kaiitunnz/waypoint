@@ -59,7 +59,7 @@ class SshLaunchTargetConfig(BaseModel):
                 deduped.append(backend)
         return deduped
 
-    def supports(self, backend: Backend) -> bool:
+    def supports(self, backend: str) -> bool:
         return backend in self.supported_backends
 
     def resolve_default_backend(self, fallback: Backend) -> Backend:
@@ -108,7 +108,7 @@ class SshLaunchTargetConfig(BaseModel):
         return f"{shell} {shlex.quote(command)}"
 
     def remote_command_for_backend(
-        self, backend: Backend, args: list[str], cwd: str
+        self, backend: str, args: list[str], cwd: str
     ) -> tuple[str, ...]:
         executable = (
             self.claude_bin if backend == Backend.CLAUDE_CODE else self.codex_bin

@@ -30,7 +30,7 @@ POLL_INTERVAL_SECONDS = 5.0
 
 
 def validate_permission_mode_for_backend(
-    backend: Backend, mode: str | None
+    backend: str, mode: str | None
 ) -> str | None:
     """Resolve a user-supplied starting mode for a given backend.
 
@@ -51,7 +51,7 @@ def validate_permission_mode_for_backend(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"unsupported {backend.value} permission mode: {mode}; "
+                f"unsupported {backend} permission mode: {mode}; "
                 f"expected one of {', '.join(allowed)}"
             ),
         )

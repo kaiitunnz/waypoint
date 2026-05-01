@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from waypoint.schemas import (
-    Backend,
     EventKind,
     EventRecord,
     ScheduledSessionRecord,
@@ -46,6 +45,30 @@ _MAX_EVENTS_PER_PAGE: int = 2000
 
 def _is_message_anchor(event: EventRecord) -> bool:
     return event.kind in _ANCHOR_KINDS
+
+
+_LEGACY_STATE_KEYS: tuple[str, ...] = (
+    "thread_id",
+    "tmux_session",
+    "tmux_window",
+    "tmux_pane",
+    "pid",
+)
+
+
+def _legacy_state_from_row(payload: dict[str, Any]) -> dict[str, Any]:
+    """Build a `transport_state` dict from the legacy per-transport columns.
+
+    Used when reading rows written before the JSON column existed; lets the
+    plugin layer treat `session.transport_state` as the canonical source
+    while the legacy columns are still being populated by older writers.
+    """
+    state: dict[str, Any] = {}
+    for key in _LEGACY_STATE_KEYS:
+        value = payload.get(key)
+        if value is not None and value != "":
+            state[key] = value
+    return state
 
 
 def _anchor_key(event: EventRecord) -> tuple[str, Any]:
@@ -161,6 +184,13 @@ class Storage:
         self._ensure_column("sessions", "permission_mode", "TEXT")
         self._ensure_column("sessions", "model", "TEXT")
         self._ensure_column("sessions", "effort", "TEXT")
+        # Per-plugin opaque session state. Each plugin decides what to put
+        # here (Codex thread id, Claude session uuid, tmux pane targets, ...);
+        # `_session_from_row` reconstructs it from the legacy columns when
+        # the JSON blob is empty so older rows keep round-tripping.
+        self._ensure_column(
+            "sessions", "transport_state", "TEXT NOT NULL DEFAULT '{}'"
+        )
         self._ensure_column("scheduled_sessions", "permission_mode", "TEXT")
         self._ensure_column("scheduled_sessions", "model", "TEXT")
         self._ensure_column("scheduled_sessions", "effort", "TEXT")
@@ -178,8 +208,8 @@ class Storage:
                 id, backend, source, transport, title, cwd, launch_target_id, repo_name, branch, status,
                 created_at, updated_at, last_event_at, tmux_session, tmux_window,
                 tmux_pane, thread_id, raw_log_path, structured_log_path, pid,
-                pinned_at, permission_mode, model, effort
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                pinned_at, permission_mode, model, effort, transport_state
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -206,6 +236,7 @@ class Storage:
                 session.permission_mode,
                 session.model,
                 session.effort,
+                json.dumps(session.transport_state),
             ),
         )
         self.connection.commit()
@@ -554,9 +585,22 @@ class Storage:
             datetime.fromisoformat(raw_pinned_at) if raw_pinned_at else None
         )
         payload["status"] = SessionStatus(payload["status"])
-        payload["transport"] = SessionTransport(
-            payload.get("transport", SessionTransport.TMUX)
-        )
+        payload["transport"] = payload.get("transport") or SessionTransport.TMUX.value
+        # Prefer the JSON blob; fall back to legacy columns for rows
+        # written before the column was introduced. Plugin code reads
+        # `transport_state` exclusively after Step 6.
+        raw_state = payload.pop("transport_state", None)
+        parsed_state: dict[str, Any] = {}
+        if raw_state:
+            try:
+                decoded = json.loads(raw_state)
+            except json.JSONDecodeError:
+                decoded = None
+            if isinstance(decoded, dict):
+                parsed_state = decoded
+        if not parsed_state:
+            parsed_state = _legacy_state_from_row(payload)
+        payload["transport_state"] = parsed_state
         return SessionRecord.model_validate(payload)
 
     def _schedule_from_row(self, row: sqlite3.Row) -> ScheduledSessionRecord:
@@ -564,7 +608,6 @@ class Storage:
         for field_name in ("scheduled_at", "created_at"):
             payload[field_name] = datetime.fromisoformat(payload[field_name])
         payload["status"] = ScheduleStatus(payload.get("status", "pending"))
-        payload["backend"] = Backend(payload["backend"])
         raw_args = payload.get("args") or "[]"
         try:
             parsed_args = json.loads(raw_args)
@@ -582,6 +625,8 @@ class Storage:
     def _serialize_field(self, value: Any) -> Any:
         if isinstance(value, datetime):
             return value.isoformat()
+        if isinstance(value, dict):
+            return json.dumps(value)
         return value
 
     def _ensure_column(self, table: str, column: str, ddl: str) -> None:

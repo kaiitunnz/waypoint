@@ -20,9 +20,6 @@ UV_CACHE_DIR=""
 BACKEND_LOG="${LOG_DIR}/backend.log"
 FRONTEND_LOG="${LOG_DIR}/frontend.log"
 
-BACKEND_STARTED_THIS_RUN=0
-FRONTEND_STARTED_THIS_RUN=0
-
 usage() {
   cat <<'EOF'
 Usage: scripts/waypoint.sh <command> [service]
@@ -106,6 +103,11 @@ log_file_for() {
   echo "${LOG_DIR}/${service}.log"
 }
 
+started_marker_for() {
+  local service="$1"
+  echo "${RUN_DIR}/${service}.started-this-run"
+}
+
 read_pid() {
   local service="$1"
   local pid_file
@@ -183,9 +185,10 @@ start_backend() {
 
   if port_in_use "${BACKEND_PORT}"; then
     echo "backend port ${BACKEND_PORT} is already in use" >&2
-    exit 1
+    return 1
   fi
 
+  : >"$(started_marker_for backend)"
   : >"${BACKEND_LOG}"
   echo "starting backend on ${BACKEND_HOST}:${BACKEND_PORT}"
   (
@@ -199,8 +202,6 @@ start_backend() {
       uv run waypoint serve >>"${BACKEND_LOG}" 2>&1 &
     echo $! >"$(pid_file_for backend)"
   )
-
-  BACKEND_STARTED_THIS_RUN=1
 
   if ! wait_for_http "backend" "http://127.0.0.1:${BACKEND_PORT}/health" "$(read_pid backend)"; then
     echo "backend failed to become healthy" >&2
@@ -220,9 +221,10 @@ start_frontend() {
 
   if port_in_use "${FRONTEND_PORT}"; then
     echo "frontend port ${FRONTEND_PORT} is already in use" >&2
-    exit 1
+    return 1
   fi
 
+  : >"$(started_marker_for frontend)"
   : >"${FRONTEND_LOG}"
   echo "building frontend"
   (
@@ -236,8 +238,6 @@ start_frontend() {
     nohup env PORT="${FRONTEND_PORT}" npm run start >>"${FRONTEND_LOG}" 2>&1 &
     echo $! >"$(pid_file_for frontend)"
   )
-
-  FRONTEND_STARTED_THIS_RUN=1
 
   if ! wait_for_http "frontend" "http://127.0.0.1:${FRONTEND_PORT}" "$(read_pid frontend)"; then
     echo "frontend failed to become healthy" >&2
@@ -287,12 +287,19 @@ stop_service() {
 }
 
 stop_started_services() {
-  if (( FRONTEND_STARTED_THIS_RUN == 1 )); then
-    stop_service "frontend"
+  local pids=()
+  if [[ -f "$(started_marker_for frontend)" ]]; then
+    stop_service "frontend" &
+    pids+=("$!")
   fi
-  if (( BACKEND_STARTED_THIS_RUN == 1 )); then
-    stop_service "backend"
+  if [[ -f "$(started_marker_for backend)" ]]; then
+    stop_service "backend" &
+    pids+=("$!")
   fi
+  for pid in "${pids[@]}"; do
+    wait "${pid}" || true
+  done
+  rm -f "$(started_marker_for frontend)" "$(started_marker_for backend)"
 }
 
 service_health() {
@@ -360,14 +367,33 @@ start_stack() {
   require_command "npm"
   require_command "uv"
 
-  start_backend
-  start_frontend
+  ensure_state_dirs
+  rm -f "$(started_marker_for backend)" "$(started_marker_for frontend)"
+
+  start_backend &
+  local backend_pid=$!
+  start_frontend &
+  local frontend_pid=$!
+
+  local backend_rc=0 frontend_rc=0
+  wait "${backend_pid}" || backend_rc=$?
+  wait "${frontend_pid}" || frontend_rc=$?
+
+  if (( backend_rc != 0 || frontend_rc != 0 )); then
+    stop_started_services
+    return 1
+  fi
+
   status_stack
 }
 
 stop_stack() {
-  stop_service "frontend"
-  stop_service "backend"
+  stop_service "frontend" &
+  local fe=$!
+  stop_service "backend" &
+  local be=$!
+  wait "${fe}" || true
+  wait "${be}" || true
 }
 
 restart_stack() {
@@ -389,14 +415,12 @@ main() {
       print_root_dir
       ;;
     start)
-      trap stop_started_services ERR
       start_stack
       ;;
     stop)
       stop_stack
       ;;
     restart)
-      trap stop_started_services ERR
       restart_stack
       ;;
     status)

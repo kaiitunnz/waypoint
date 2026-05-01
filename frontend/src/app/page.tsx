@@ -30,6 +30,7 @@ import {
 import { useBackendCatalog } from "@/lib/backends";
 import {
   clearToken,
+  mergeRecentCwds,
   pushRecentCwd,
   readRecentCwds,
   readHost,
@@ -64,6 +65,33 @@ type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
+
+function seedRecentCwdsFromHistory(
+  host: string,
+  sessions: SessionRecord[],
+  schedules: ScheduledSession[],
+): void {
+  const entries: { targetId: string; cwd: string; ts: number }[] = [];
+  for (const session of sessions) {
+    entries.push({
+      targetId: session.launch_target_id ?? "",
+      cwd: session.cwd,
+      ts: Date.parse(session.updated_at || session.created_at) || 0,
+    });
+  }
+  for (const schedule of schedules) {
+    entries.push({
+      targetId: schedule.launch_target_id ?? "",
+      cwd: schedule.cwd,
+      ts: Date.parse(schedule.created_at) || 0,
+    });
+  }
+  entries.sort((a, b) => b.ts - a.ts);
+  mergeRecentCwds(
+    host,
+    entries.map(({ targetId, cwd }) => ({ targetId, cwd })),
+  );
+}
 // Hand-mirrored fallback used until `/api/me` lands. Once the catalog
 // arrives we derive `allBackends` from `me.backends.map(b => b.id)`
 // so adding a backend at the registry shows up here without an edit.
@@ -163,6 +191,8 @@ export default function HomePage() {
           ? storedTargetId
           : "";
         setActiveLaunchTargetId(nextTargetId);
+        seedRecentCwdsFromHistory(host, items, scheduleItems);
+        setRecentCwds(readRecentCwds(host, nextTargetId));
       })
       .catch((fetchError) => {
         if (active) {

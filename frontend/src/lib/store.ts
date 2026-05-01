@@ -89,6 +89,49 @@ export function pushRecentCwd(host: string, targetId: string, cwd: string): stri
   return next;
 }
 
+// Seed the per-scope list with paths the server already knows about
+// (existing sessions/schedules), so a returning user gets useful
+// suggestions before they create anything new. `entries` should be in
+// the order callers want to *prefer* — newer first wins ties. Existing
+// localStorage entries are kept and stay ahead of seeded ones.
+export function mergeRecentCwds(
+  host: string,
+  entries: { targetId: string; cwd: string }[],
+): void {
+  if (typeof window === "undefined" || !host || entries.length === 0) {
+    return;
+  }
+  const all = readRecentCwdSelections();
+  const byScope = new Map<string, string[]>();
+  for (const { targetId, cwd } of entries) {
+    const normalized = cwd.trim();
+    if (!normalized) continue;
+    const scope = recentCwdScope(host, targetId);
+    const list = byScope.get(scope) ?? [];
+    if (!list.includes(normalized)) {
+      list.push(normalized);
+    }
+    byScope.set(scope, list);
+  }
+  let dirty = false;
+  for (const [scope, seeded] of byScope) {
+    const current = Array.isArray(all[scope])
+      ? all[scope].filter((item): item is string => typeof item === "string" && item.length > 0)
+      : [];
+    const merged = [
+      ...current,
+      ...seeded.filter((item) => !current.includes(item)),
+    ].slice(0, RECENT_CWDS_LIMIT);
+    if (merged.length !== current.length || merged.some((item, idx) => item !== current[idx])) {
+      all[scope] = merged;
+      dirty = true;
+    }
+  }
+  if (dirty) {
+    window.localStorage.setItem(RECENT_CWDS_KEY, JSON.stringify(all));
+  }
+}
+
 function inferBackendHost(): string {
   const protocol = window.location.protocol === "https:" ? "https:" : "http:";
   const hostname = window.location.hostname || "127.0.0.1";

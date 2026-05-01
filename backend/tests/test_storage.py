@@ -562,3 +562,48 @@ def test_legacy_columns_seed_transport_state(tmp_path) -> None:
     loaded = storage.get_session("session-legacy")
     assert loaded is not None
     assert loaded.transport_state == {"thread_id": "tid-99", "pid": 4242}
+
+
+def test_append_event_stamps_envelope_version(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="session-evt",
+        backend=Backend.CODEX,
+        source=SessionSource.MANAGED,
+        title="Codex session",
+        cwd="/tmp",
+        status=SessionStatus.RUNNING,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="/tmp/raw.log",
+        structured_log_path="/tmp/events.jsonl",
+    )
+    storage.create_session(session)
+    persisted = storage.append_event(
+        EventRecord(
+            session_id="session-evt",
+            ts=now,
+            kind=EventKind.AGENT_OUTPUT,
+            text="hello",
+            metadata={"item_id": "msg-1"},
+            sequence=1,
+        )
+    )
+    assert persisted.metadata["version"] == 1
+    assert persisted.metadata["item_id"] == "msg-1"
+
+    explicit = storage.append_event(
+        EventRecord(
+            session_id="session-evt",
+            ts=now,
+            kind=EventKind.AGENT_OUTPUT,
+            text="world",
+            metadata={"version": 2, "item_id": "msg-2"},
+            sequence=2,
+        )
+    )
+    # Existing version isn't clobbered — replay paths can opt into a
+    # newer schema without storage rewriting them.
+    assert explicit.metadata["version"] == 2

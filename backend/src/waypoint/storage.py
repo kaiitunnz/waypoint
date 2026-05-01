@@ -294,6 +294,14 @@ class Storage:
 
     @_synchronized
     def append_event(self, event: EventRecord) -> EventRecord:
+        # Stamp every persisted event with the canonical envelope version
+        # so older transcripts replay safely under newer readers (the
+        # frontend's `parseEvent` looks at `metadata.version` to decide
+        # which schema to apply).
+        if "version" not in event.metadata:
+            event = event.model_copy(
+                update={"metadata": {**event.metadata, "version": 1}}
+            )
         cursor = self.connection.execute(
             """
             INSERT INTO events (session_id, ts, kind, text, metadata, sequence)

@@ -54,7 +54,7 @@ _registry: BackendRegistry | None = None
 def get_registry() -> BackendRegistry:
     global _registry
     if _registry is None:
-        from waypoint.backends._legacy_shims import build_default_registry
+        from waypoint.backends.bootstrap import build_default_registry
 
         _registry = build_default_registry()
     return _registry

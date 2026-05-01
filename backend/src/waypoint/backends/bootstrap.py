@@ -1,11 +1,8 @@
-"""Default registry assembly.
+"""Default registry assembly — entry point for built-in plugins.
 
-Used to host legacy shim plugin classes during Steps 1-4 of the
-refactor; now that every built-in backend has its own plugin module
-this file is just the registration entry point. Kept under the
-``_legacy_shims`` name for one release so any callers that imported
-``build_default_registry`` from here keep resolving; the next pass
-moves it to ``backends/registry.py``.
+Adding a new backend means importing its plugin class and calling
+``registry.register(...)`` here. External code should not need to
+edit anything else under ``waypoint/`` to pick up a new backend.
 """
 
 from waypoint.backends.claude_code.plugin import ClaudeCodePlugin

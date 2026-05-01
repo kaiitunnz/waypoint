@@ -34,7 +34,7 @@ backend/src/waypoint/
     ├── capabilities.py  ← BackendCapabilities + PermissionModeSpec etc.
     ├── events.py        ← EventEnvelope (versioned metadata schema)
     ├── registry.py      ← BackendRegistry, get_registry()
-    ├── _legacy_shims.py ← build_default_registry() — registration entry
+    ├── bootstrap.py     ← build_default_registry() — registration entry
     ├── claude_code/
     │   ├── plugin.py
     │   ├── adapter.py        ← stream-json subprocess driver
@@ -293,9 +293,7 @@ support, acts like the tmux fallback) only needs:
 ### 3. Register it
 
 Edit
-[`backends/_legacy_shims.py::build_default_registry`](../backend/src/waypoint/backends/_legacy_shims.py)
-(rename pending — it's the registration entry point, not a shim
-anymore):
+[`backends/bootstrap.py::build_default_registry`](../backend/src/waypoint/backends/bootstrap.py):
 
 ```python
 def build_default_registry() -> BackendRegistry:
@@ -363,7 +361,7 @@ When Claude or Codex ships a new protocol message:
   — `EventEnvelope` schema.
 - [`backend/src/waypoint/backends/registry.py`](../backend/src/waypoint/backends/registry.py)
   — `BackendRegistry` and `get_registry()`.
-- [`backend/src/waypoint/backends/_legacy_shims.py`](../backend/src/waypoint/backends/_legacy_shims.py)
+- [`backend/src/waypoint/backends/bootstrap.py`](../backend/src/waypoint/backends/bootstrap.py)
   — `build_default_registry()` is the registration entry point.
 - [`backend/src/waypoint/backends/claude_code/plugin.py`](../backend/src/waypoint/backends/claude_code/plugin.py)
   — full reference plugin (static models, hook bundle, route

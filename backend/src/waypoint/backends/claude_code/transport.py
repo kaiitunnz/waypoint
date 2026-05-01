@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
 
-from waypoint.claude_cli import ClaudeCliError
+from waypoint.backends.claude_code.adapter import ClaudeCliError
 from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
 

@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from waypoint.claude_cli import (
+from waypoint.backends.claude_code.adapter import (
     DEFAULT_TIMEOUT_SECONDS,
     ClaudeCliAdapter,
     ClaudeSessionState,
@@ -208,7 +208,7 @@ async def test_terminate_session_closes_stdin_and_resolves_pending(monkeypatch) 
     state, process = _attach_state(adapter)
     # Set up a pending approval that would otherwise block forever.
     future: asyncio.Future = asyncio.get_running_loop().create_future()
-    from waypoint.claude_cli import ClaudePendingApproval
+    from waypoint.backends.claude_code.adapter import ClaudePendingApproval
 
     state.pending["toolu_1"] = ClaudePendingApproval(
         tool_use_id="toolu_1", payload={}, future=future
@@ -243,7 +243,7 @@ async def test_send_input_reports_dead_process_with_stderr_tail() -> None:
     state, process = _attach_state(adapter)
     state.stderr_tail.append("env: claude: No such file or directory")
     process.returncode = 127
-    from waypoint.claude_cli import ClaudeCliError
+    from waypoint.backends.claude_code.adapter import ClaudeCliError
 
     with pytest.raises(ClaudeCliError) as info:
         await adapter.send_input("sess", "hi")
@@ -761,7 +761,7 @@ async def test_exit_plan_mode_decline_keeps_plan_mode() -> None:
 
 
 def test_build_local_launch_spec_uses_session_cli_mode(monkeypatch) -> None:
-    monkeypatch.setattr("waypoint.claude_cli.shutil.which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr("waypoint.backends.claude_code.adapter.shutil.which", lambda _: "/usr/bin/claude")
     adapter = _make_adapter([])
     spec = adapter._build_local_launch_spec(
         "sess",
@@ -778,7 +778,7 @@ def test_build_local_launch_spec_uses_session_cli_mode(monkeypatch) -> None:
 
 
 def test_build_local_launch_spec_emits_model_flag(monkeypatch) -> None:
-    monkeypatch.setattr("waypoint.claude_cli.shutil.which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr("waypoint.backends.claude_code.adapter.shutil.which", lambda _: "/usr/bin/claude")
     adapter = _make_adapter([])
     spec = adapter._build_local_launch_spec(
         "sess",

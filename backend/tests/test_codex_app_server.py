@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from waypoint.codex_app_server import CodexAppServerAdapter
+from waypoint.backends.codex.adapter import CodexAppServerAdapter
 from waypoint.schemas import EventKind, SessionStatus
 
 
@@ -329,7 +329,7 @@ async def test_respond_to_approval_resolves_pending() -> None:
     adapter, fake = make_adapter(emitted)
     await adapter.start_session("sess", "/tmp/work")
     state = adapter._sessions["sess"]
-    from waypoint.codex_app_server import PendingApproval
+    from waypoint.backends.codex.adapter import PendingApproval
 
     pending = PendingApproval(
         method="item/commandExecution/requestApproval", params={"command": "ls"}

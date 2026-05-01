@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from waypoint import claude_threads_remote
-from waypoint.claude_threads_remote import RemoteClaudeThreadEnumerator
+from waypoint.backends.claude_code import threads_remote as claude_threads_remote
+from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
 from waypoint.server_config import SshLaunchTargetConfig
 
 ENUMERATOR_PATH = (

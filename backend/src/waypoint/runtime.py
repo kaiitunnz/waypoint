@@ -14,22 +14,22 @@ from codex_app_server.client import AppServerClient
 from fastapi import HTTPException, status
 
 from waypoint.backends import BackendRegistry, get_registry
-from waypoint.claude_cli import ClaudeCliAdapter, ClaudeCliError
-from waypoint.claude_runtime import ClaudeHookBundle
-from waypoint.claude_threads import (
+from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeCliError
+from waypoint.backends.claude_code.runtime_hook import ClaudeHookBundle
+from waypoint.backends.claude_code.threads import (
     ClaudeThreadInfo,
     find_local_claude_thread,
     list_local_claude_threads,
 )
-from waypoint.claude_threads_remote import RemoteClaudeThreadEnumerator
-from waypoint.codex_app_server import (
+from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
+from waypoint.backends.codex.adapter import (
     ClientFactory,
     CodexAppServerAdapter,
     default_client_factory,
 )
+from waypoint.backends.tmux.normalize import TerminalNormalizer
 from waypoint.config import Settings
 from waypoint.git_meta import resolve_git_meta
-from waypoint.normalizer import TerminalNormalizer
 from waypoint.scheduler import Scheduler, validate_permission_mode_for_backend
 from waypoint.schemas import (
     Backend,
@@ -55,8 +55,8 @@ from waypoint.server_config import (
     build_remote_claude_launch_factory,
     build_remote_codex_client_factory,
 )
+from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
 from waypoint.storage import Storage
-from waypoint.tmux import TmuxAdapter, TmuxError
 from waypoint.transports import TransportAdapter
 
 log = logging.getLogger("waypoint.runtime")

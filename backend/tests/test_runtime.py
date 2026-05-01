@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pytest
 
-from waypoint.claude_threads import ClaudeThreadInfo
+from waypoint.backends.claude_code.threads import ClaudeThreadInfo
 from waypoint.config import Settings
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
@@ -1011,7 +1011,7 @@ async def test_import_claude_thread_missing_returns_404(monkeypatch, tmp_path) -
 async def test_set_permission_mode_codex_persists_and_threads_to_next_turn(
     tmp_path,
 ) -> None:
-    from waypoint.transports.codex import CODEX_PERMISSION_PRESETS
+    from waypoint.backends.codex.transport import CODEX_PERMISSION_PRESETS
 
     runtime, storage, settings = make_runtime(tmp_path)
     fake = FakeStructuredAdapter()

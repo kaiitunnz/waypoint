@@ -53,10 +53,9 @@ class ClaudeCodePlugin:
     )
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
-        # Imported lazily to avoid the cycle: transports.claude →
-        # claude_cli → backends.claude_code.permission_modes →
-        # backends/claude_code/__init__ → backends.claude_code.plugin.
-        from waypoint.transports.claude import ClaudeTransport
+        # Imported lazily to avoid the cycle: transport → adapter →
+        # permission_modes → backends/claude_code/__init__ → plugin.
+        from waypoint.backends.claude_code.transport import ClaudeTransport
 
         return ClaudeTransport(runtime)
 

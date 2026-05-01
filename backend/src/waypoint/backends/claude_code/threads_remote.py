@@ -21,7 +21,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from waypoint.claude_threads import ClaudeThreadInfo
+from waypoint.backends.claude_code.threads import ClaudeThreadInfo
 from waypoint.server_config import (
     SshLaunchTargetConfig,
     build_remote_thread_enumeration_args,

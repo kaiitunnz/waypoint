@@ -8,8 +8,8 @@ from pathlib import Path
 from codex_app_server.client import AppServerClient, AppServerConfig
 from pydantic import BaseModel, Field, field_validator
 
-from waypoint.claude_cli import ClaudeLaunchSpec
-from waypoint.claude_runtime import GATED_TOOLS_REGEX
+from waypoint.backends.claude_code.adapter import ClaudeLaunchSpec
+from waypoint.backends.claude_code.runtime_hook import GATED_TOOLS_REGEX
 from waypoint.schemas import Backend
 
 SAFE_TILDE_HEAD = re.compile(r"~[A-Za-z0-9._-]*$")

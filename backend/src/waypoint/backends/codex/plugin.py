@@ -55,7 +55,7 @@ class CodexPlugin:
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
         # Lazy to avoid the same import-cycle pattern documented in
         # `backends/claude_code/plugin.py`.
-        from waypoint.transports.codex import CodexTransport
+        from waypoint.backends.codex.transport import CodexTransport
 
         return CodexTransport(runtime)
 

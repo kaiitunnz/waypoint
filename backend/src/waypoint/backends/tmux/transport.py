@@ -13,7 +13,7 @@ from waypoint.schemas import (
     SessionSource,
     SessionStatus,
 )
-from waypoint.tmux import TmuxError
+from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:

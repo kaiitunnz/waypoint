@@ -46,7 +46,7 @@ class TmuxPlugin:
     )
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
-        from waypoint.transports.tmux import TmuxTransport
+        from waypoint.backends.tmux.transport import TmuxTransport
 
         return TmuxTransport(runtime)
 

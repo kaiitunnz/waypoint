@@ -1,11 +1,11 @@
-from waypoint.transports.base import TransportAdapter
-from waypoint.transports.claude import ClaudeTransport
-from waypoint.transports.codex import CodexTransport
-from waypoint.transports.tmux import TmuxTransport
+"""Transport-adapter base protocol.
 
-__all__ = [
-    "ClaudeTransport",
-    "CodexTransport",
-    "TmuxTransport",
-    "TransportAdapter",
-]
+The per-backend transport classes now live in their plugin homes
+(`waypoint.backends.<id>.transport`). This module keeps the
+`TransportAdapter` ABC at a backend-agnostic location since plugins
+can't depend on each other.
+"""
+
+from waypoint.transports.base import TransportAdapter
+
+__all__ = ["TransportAdapter"]

@@ -292,8 +292,8 @@ support, acts like the tmux fallback) only needs:
 
 ### 3. Register it
 
-Edit
-[`backends/bootstrap.py::build_default_registry`](../backend/src/waypoint/backends/bootstrap.py):
+For built-in plugins (those that ship inside the waypoint package),
+edit [`backends/bootstrap.py::build_default_registry`](../backend/src/waypoint/backends/bootstrap.py):
 
 ```python
 def build_default_registry() -> BackendRegistry:
@@ -302,12 +302,28 @@ def build_default_registry() -> BackendRegistry:
     registry.register(CodexPlugin())
     registry.register(OpenCodePlugin())
     registry.register(TmuxPlugin())
+    _register_entry_point_plugins(registry)
     return registry
 ```
 
-That's it for the wiring. The runtime's session lifecycle, API
-endpoints, scheduler validation, and frontend picker all pick the
-plugin up at the next process restart.
+For **third-party** plugins shipped as a separate Python package,
+publish a `waypoint.backends` entry point in your `pyproject.toml`
+instead of editing waypoint:
+
+```toml
+[project.entry-points."waypoint.backends"]
+opencode = "waypoint_opencode:build_plugin"
+```
+
+The value resolves to either a callable that returns a
+`BackendPlugin` instance or a plugin instance directly. Discovery
+runs once at registry build (process startup); failures during
+``load()`` are logged and skipped so a broken external plugin can't
+take the runtime down.
+
+Either path: the runtime's session lifecycle, API endpoints,
+scheduler validation, and frontend picker all pick the plugin up at
+the next process restart.
 
 ### 4. (Optional) Add launch-target plumbing
 

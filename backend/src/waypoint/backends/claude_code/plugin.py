@@ -36,6 +36,10 @@ from waypoint.backends.claude_code.runtime_hook import (
     ClaudeHookBundle,
     ensure_claude_hook_bundle,
 )
+from waypoint.backends.claude_code.schemas import (
+    ClaudeThreadImportRequest,
+    ClaudeThreadSummary,
+)
 from waypoint.backends.claude_code.threads import (
     ClaudeThreadInfo,
     find_local_claude_thread,
@@ -47,8 +51,6 @@ from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
     BackendModelOption,
-    ClaudeThreadImportRequest,
-    ClaudeThreadSummary,
     SessionCreateRequest,
     SessionEnvelope,
     SessionRecord,

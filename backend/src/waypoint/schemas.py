@@ -160,38 +160,6 @@ class SessionAttachRequest(BaseModel):
     title: str | None = None
 
 
-class CodexThreadSummary(BaseModel):
-    id: str
-    title: str
-    cwd: str
-    repo_name: str | None = None
-    branch: str | None = None
-    preview: str | None = None
-    created_at: datetime
-    updated_at: datetime
-
-
-class CodexThreadImportRequest(BaseModel):
-    thread_id: str
-    launch_target_id: str | None = None
-
-
-class ClaudeThreadSummary(BaseModel):
-    id: str
-    title: str
-    cwd: str
-    repo_name: str | None = None
-    branch: str | None = None
-    preview: str | None = None
-    created_at: datetime
-    updated_at: datetime
-
-
-class ClaudeThreadImportRequest(BaseModel):
-    thread_id: str
-    launch_target_id: str | None = None
-
-
 class SessionInputRequest(BaseModel):
     text: str
     submit: bool = True

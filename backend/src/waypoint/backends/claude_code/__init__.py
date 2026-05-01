@@ -13,6 +13,10 @@ from waypoint.backends.claude_code.plugin import (
     ClaudeCodePluginConfig,
     build_plugin,
 )
+from waypoint.backends.claude_code.schemas import (
+    ClaudeThreadImportRequest,
+    ClaudeThreadSummary,
+)
 
 __all__ = [
     "CLAUDE_ACCEPT_EDITS_TOOLS",
@@ -22,6 +26,8 @@ __all__ = [
     "CLAUDE_PERMISSION_MODES",
     "ClaudeCodePlugin",
     "ClaudeCodePluginConfig",
+    "ClaudeThreadImportRequest",
+    "ClaudeThreadSummary",
     "DEFAULT_CLAUDE_MODELS",
     "build_plugin",
 ]

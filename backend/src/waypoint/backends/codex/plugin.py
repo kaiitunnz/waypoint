@@ -35,12 +35,14 @@ from waypoint.backends.codex.permission_modes import (
     CODEX_PERMISSION_PRESETS,
 )
 from waypoint.backends.codex.remote import build_remote_codex_client_factory
+from waypoint.backends.codex.schemas import (
+    CodexThreadImportRequest,
+    CodexThreadSummary,
+)
 from waypoint.backends.plugin_config import PluginConfig
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
-    CodexThreadImportRequest,
-    CodexThreadSummary,
     SessionCreateRequest,
     SessionInputRequest,
     SessionRecord,

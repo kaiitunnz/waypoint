@@ -8,12 +8,18 @@ from waypoint.backends.codex.plugin import (
     CodexPluginConfig,
     build_plugin,
 )
+from waypoint.backends.codex.schemas import (
+    CodexThreadImportRequest,
+    CodexThreadSummary,
+)
 
 __all__ = [
     "CODEX_PERMISSION_MODE_SPECS",
     "CODEX_PERMISSION_PRESETS",
     "CodexPlugin",
     "CodexPluginConfig",
+    "CodexThreadImportRequest",
+    "CodexThreadSummary",
     "build_plugin",
     "codex_turn_params_for",
 ]

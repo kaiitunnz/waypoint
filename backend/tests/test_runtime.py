@@ -4,12 +4,12 @@ from typing import Any, cast
 
 import pytest
 
+from waypoint.backends.claude_code.schemas import ClaudeThreadImportRequest
 from waypoint.backends.claude_code.threads import ClaudeThreadInfo
+from waypoint.backends.codex.schemas import CodexThreadImportRequest
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
-    ClaudeThreadImportRequest,
-    CodexThreadImportRequest,
     EventKind,
     EventRecord,
     SessionApprovalRequest,

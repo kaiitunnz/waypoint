@@ -8,9 +8,8 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
 
-from waypoint.claude_cli import CLAUDE_PERMISSION_MODES
+from waypoint.backends.registry import get_registry
 from waypoint.schemas import (
-    Backend,
     ScheduleCreateRequest,
     ScheduledSessionRecord,
     ScheduleStatus,
@@ -19,7 +18,6 @@ from waypoint.schemas import (
     SessionInputRequest,
     SessionSource,
 )
-from waypoint.transports.codex import CODEX_PERMISSION_PRESETS
 
 if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
@@ -40,12 +38,12 @@ def validate_permission_mode_for_backend(
     """
     if mode is None or mode == "":
         return None
-    allowed: tuple[str, ...]
-    if backend == Backend.CLAUDE_CODE:
-        allowed = CLAUDE_PERMISSION_MODES
-    elif backend == Backend.CODEX:
-        allowed = tuple(CODEX_PERMISSION_PRESETS)
-    else:
+    registry = get_registry()
+    if not registry.has_backend(backend):
+        return None
+    plugin = registry.get(backend)
+    allowed = tuple(spec.id for spec in plugin.capabilities.permission_modes)
+    if not allowed:
         return None
     if mode not in allowed:
         raise HTTPException(

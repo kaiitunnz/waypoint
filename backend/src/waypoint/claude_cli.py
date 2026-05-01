@@ -13,6 +13,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+# Re-exported from the backend plugin so legacy imports keep resolving;
+# the source of truth lives in `backends/claude_code/permission_modes.py`.
+from waypoint.backends.claude_code.permission_modes import (
+    CLAUDE_ACCEPT_EDITS_TOOLS,
+    CLAUDE_AUTO_APPROVE_MODES,
+    CLAUDE_PERMISSION_MODES,
+)
 from waypoint.schemas import EventKind, SessionStatus
 
 log = logging.getLogger("waypoint.claude_cli")
@@ -23,18 +30,6 @@ CONTROL_REQUEST_TIMEOUT_SECONDS = 10.0
 # contents). Give the reader plenty of room so one fat line doesn't tear down
 # the session.
 CLAUDE_STREAM_BUFFER_LIMIT = 16 * 1024 * 1024
-CLAUDE_PERMISSION_MODES = (
-    "default",
-    "plan",
-    "acceptEdits",
-    "auto",
-    "bypassPermissions",
-    "dontAsk",
-)
-# Modes that bypass Waypoint's PreToolUse approval card entirely.
-CLAUDE_AUTO_APPROVE_MODES = frozenset({"auto", "bypassPermissions", "dontAsk"})
-# Tools acceptEdits auto-approves; everything else still surfaces the card.
-CLAUDE_ACCEPT_EDITS_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
 
 
 async def _drain_until_newline(reader: asyncio.StreamReader) -> None:

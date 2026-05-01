@@ -246,12 +246,14 @@ class TmuxPlugin:
             created_at=now,
             updated_at=now,
             last_event_at=now,
-            tmux_session=target.session,
-            tmux_window=target.window,
-            tmux_pane=target.pane,
             raw_log_path=str(raw_log),
             structured_log_path=str(structured_log),
-            pid=target.pane_pid,
+            transport_state={
+                "tmux_session": target.session,
+                "tmux_window": target.window,
+                "tmux_pane": target.pane,
+                "pid": target.pane_pid,
+            },
         )
         runtime.storage.create_session(session)
         await runtime._record_system_event(

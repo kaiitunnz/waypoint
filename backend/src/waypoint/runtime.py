@@ -240,12 +240,14 @@ class SessionRuntime:
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
             last_event_at=datetime.now(UTC),
-            tmux_session=target.session,
-            tmux_window=target.window,
-            tmux_pane=target.pane,
             raw_log_path=str(raw_log),
             structured_log_path=str(structured_log),
-            pid=target.pane_pid,
+            transport_state={
+                "tmux_session": target.session,
+                "tmux_window": target.window,
+                "tmux_pane": target.pane,
+                "pid": target.pane_pid,
+            },
         )
         self.storage.create_session(session)
         self.file_offsets[session.id] = 0
@@ -804,7 +806,8 @@ class SessionRuntime:
 
     async def _refresh_state(self, session_id: str) -> None:
         session = self.get_session(session_id)
-        target = session.tmux_pane or session.tmux_session or session.id
+        state = session.transport_state
+        target = state.get("tmux_pane") or state.get("tmux_session") or session.id
         try:
             target_info = await self.tmux.describe_target(target)
         except TmuxError as exc:
@@ -819,7 +822,8 @@ class SessionRuntime:
                 )
             self.storage.update_session(session.id, status=SessionStatus.EXITED)
             return
-        updates: dict[str, Any] = {"pid": target_info.pane_pid}
+        new_state = {**state, "pid": target_info.pane_pid}
+        updates: dict[str, Any] = {"transport_state": new_state}
         if target_info.pane_dead and session.status != SessionStatus.EXITED:
             log.info(
                 "tmux pane reported dead",

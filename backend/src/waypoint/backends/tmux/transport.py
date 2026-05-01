@@ -32,7 +32,8 @@ class TmuxTransport(TransportAdapter):
 
     @staticmethod
     def _target(session: SessionRecord) -> str:
-        return session.tmux_pane or session.tmux_session or session.id
+        state = session.transport_state
+        return state.get("tmux_pane") or state.get("tmux_session") or session.id
 
     async def send_input(self, session: SessionRecord, text: str) -> None:
         try:
@@ -52,9 +53,10 @@ class TmuxTransport(TransportAdapter):
         target = self._target(session)
         with suppress(TmuxError):
             await self.adapter.stop_pipe(target)
-        if session.source == SessionSource.MANAGED and session.tmux_session:
+        tmux_session = session.transport_state.get("tmux_session")
+        if session.source == SessionSource.MANAGED and tmux_session:
             with suppress(TmuxError):
-                await self.adapter.kill_session(session.tmux_session)
+                await self.adapter.kill_session(tmux_session)
         monitor = self._runtime.monitor_tasks.pop(session.id, None)
         if monitor is not None:
             monitor.cancel()

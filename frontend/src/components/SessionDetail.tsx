@@ -1751,7 +1751,9 @@ function SessionHeader({
         ) : null}
         <span className="session-header-meta">
           {sourceLabel}
-          {session.thread_id ? ` · ${session.thread_id}` : null}
+          {typeof session.transport_state?.thread_id === "string"
+            ? ` · ${session.transport_state.thread_id}`
+            : null}
         </span>
       </div>
     </header>

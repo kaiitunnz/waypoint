@@ -38,7 +38,7 @@ def make_session(settings: Settings, session_id: str) -> SessionRecord:
         created_at=now,
         updated_at=now,
         last_event_at=now,
-        thread_id="thread-1",
+        transport_state={"thread_id": "thread-1"},
         raw_log_path=str(session_dir / "raw.log"),
         structured_log_path=str(session_dir / "events.jsonl"),
     )

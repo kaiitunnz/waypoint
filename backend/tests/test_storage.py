@@ -533,11 +533,14 @@ def test_transport_state_round_trip(tmp_path) -> None:
     assert updated.transport_state == {"thread_id": "tid-43"}
 
 
-def test_legacy_columns_seed_transport_state(tmp_path) -> None:
+def test_session_with_empty_transport_state_round_trips_as_empty(tmp_path) -> None:
+    """A row whose ``transport_state`` is an explicit empty JSON object
+    must load as an empty dict (no implicit reconstruction from
+    sibling columns now that the per-plugin typed columns are gone)."""
     storage = Storage(tmp_path / "waypoint.db")
     now = datetime.now(UTC)
     session = SessionRecord(
-        id="session-legacy",
+        id="session-empty",
         backend="codex",
         source=SessionSource.MANAGED,
         title="Codex session",
@@ -548,19 +551,16 @@ def test_legacy_columns_seed_transport_state(tmp_path) -> None:
         last_event_at=now,
         raw_log_path="/tmp/raw.log",
         structured_log_path="/tmp/events.jsonl",
-        thread_id="tid-99",
-        pid=4242,
     )
     storage.create_session(session)
-    # Simulate a row written before the JSON column existed.
     storage.connection.execute(
         "UPDATE sessions SET transport_state = '{}' WHERE id = ?",
-        ("session-legacy",),
+        ("session-empty",),
     )
     storage.connection.commit()
-    loaded = storage.get_session("session-legacy")
+    loaded = storage.get_session("session-empty")
     assert loaded is not None
-    assert loaded.transport_state == {"thread_id": "tid-99", "pid": 4242}
+    assert loaded.transport_state == {}
 
 
 def test_append_event_stamps_envelope_version(tmp_path) -> None:

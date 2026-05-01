@@ -244,7 +244,8 @@ class CodexPlugin:
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        if not session.thread_id:
+        thread_id = session.transport_state.get("thread_id")
+        if not thread_id:
             runtime.storage.update_session(session.id, status=SessionStatus.EXITED)
             await runtime._record_system_event(
                 session.id,
@@ -267,7 +268,7 @@ class CodexPlugin:
             await self._require_adapter().restore_session(
                 session.id,
                 session.cwd,
-                session.thread_id,
+                thread_id,
                 self.client_factory(runtime, session.launch_target_id),
                 model=session.model,
                 effort=session.effort,
@@ -277,7 +278,7 @@ class CodexPlugin:
                 "codex restore failed",
                 extra={
                     "session_id": session.id,
-                    "thread_id": session.thread_id,
+                    "thread_id": thread_id,
                     "cwd": session.cwd,
                 },
             )
@@ -408,7 +409,7 @@ class CodexPlugin:
         for session in runtime.storage.list_sessions():
             if session.backend != self.id:
                 continue
-            if session.thread_id != thread_id:
+            if session.transport_state.get("thread_id") != thread_id:
                 continue
             if session.launch_target_id != launch_target_id:
                 continue
@@ -434,11 +435,14 @@ class CodexPlugin:
         launch_target_id: str | None = None,
     ) -> list[CodexThreadSummary]:
         runtime._resolve_launch_target(launch_target_id, self.id)
-        imported = {
-            (session.launch_target_id, session.thread_id)
-            for session in runtime.storage.list_sessions()
-            if session.backend == self.id and session.thread_id
-        }
+        imported: set[tuple[str | None, str]] = set()
+        for session in runtime.storage.list_sessions():
+            if session.backend != self.id:
+                continue
+            thread_id = session.transport_state.get("thread_id")
+            if not thread_id:
+                continue
+            imported.add((session.launch_target_id, thread_id))
 
         async def operation(client: AppServerClient) -> list[Any]:
             threads: list[Any] = []
@@ -513,7 +517,9 @@ class CodexPlugin:
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
             raise
         runtime.storage.update_session(
-            session.id, thread_id=thread_id, status=SessionStatus.IDLE
+            session.id,
+            transport_state={**session.transport_state, "thread_id": thread_id},
+            status=SessionStatus.IDLE,
         )
         await runtime._record_system_event(
             session.id,
@@ -567,9 +573,9 @@ class CodexPlugin:
             created_at=now,
             updated_at=now,
             last_event_at=now,
-            thread_id=thread.id,
             raw_log_path=str(raw_log),
             structured_log_path=str(structured_log),
+            transport_state={"thread_id": thread.id},
             permission_mode="default",
         )
         runtime.storage.create_session(session)

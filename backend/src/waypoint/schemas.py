@@ -78,20 +78,14 @@ class SessionRecord(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_event_at: datetime
-    # Per-plugin opaque state, persisted as JSON. Scaffolding for the
-    # eventual retirement of the legacy `tmux_*`/`thread_id`/`pid`
-    # columns: storage already round-trips this field, but no plugin
-    # writes to it yet — built-ins still populate the typed columns
-    # below. A follow-up pass will move per-plugin state into this
-    # dict and drop the explicit columns.
+    # Per-plugin opaque state, persisted as a JSON column. Each plugin
+    # decides what goes in here — Codex / Claude store ``thread_id``;
+    # the tmux fallback stores ``tmux_session`` / ``tmux_window`` /
+    # ``tmux_pane`` / ``pid``. Generic code (runtime, storage, API)
+    # never reads individual keys; only plugins do.
     transport_state: dict[str, Any] = Field(default_factory=dict)
-    tmux_session: str | None = None
-    tmux_window: str | None = None
-    tmux_pane: str | None = None
-    thread_id: str | None = None
     raw_log_path: str
     structured_log_path: str
-    pid: int | None = None
     pinned_at: datetime | None = None
     permission_mode: str | None = None
     model: str | None = None

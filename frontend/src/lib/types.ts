@@ -37,13 +37,13 @@ export interface SessionRecord {
   created_at: string;
   updated_at: string;
   last_event_at: string;
-  tmux_session?: string | null;
-  tmux_window?: string | null;
-  tmux_pane?: string | null;
-  thread_id?: string | null;
+  // Per-plugin opaque state. Common keys: `thread_id` (Codex / Claude),
+  // `tmux_session` / `tmux_window` / `tmux_pane` / `pid` (tmux fallback).
+  // The shape depends on which plugin owns the session — only that
+  // plugin's UI code should reach into specific keys.
+  transport_state: Record<string, unknown>;
   raw_log_path: string;
   structured_log_path: string;
-  pid?: number | null;
   pinned_at?: string | null;
   permission_mode?: string | null;
   model?: string | null;

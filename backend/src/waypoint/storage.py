@@ -46,30 +46,6 @@ def _is_message_anchor(event: EventRecord) -> bool:
     return event.kind in _ANCHOR_KINDS
 
 
-_LEGACY_STATE_KEYS: tuple[str, ...] = (
-    "thread_id",
-    "tmux_session",
-    "tmux_window",
-    "tmux_pane",
-    "pid",
-)
-
-
-def _legacy_state_from_row(payload: dict[str, Any]) -> dict[str, Any]:
-    """Build a `transport_state` dict from the legacy per-transport columns.
-
-    Used when reading rows written before the JSON column existed; lets the
-    plugin layer treat `session.transport_state` as the canonical source
-    while the legacy columns are still being populated by older writers.
-    """
-    state: dict[str, Any] = {}
-    for key in _LEGACY_STATE_KEYS:
-        value = payload.get(key)
-        if value is not None and value != "":
-            state[key] = value
-    return state
-
-
 def _anchor_key(event: EventRecord) -> tuple[str, Any]:
     """Group key for the anchor walk.
 
@@ -134,13 +110,13 @@ class Storage:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 last_event_at TEXT NOT NULL,
-                tmux_session TEXT,
-                tmux_window TEXT,
-                tmux_pane TEXT,
-                thread_id TEXT,
                 raw_log_path TEXT NOT NULL,
                 structured_log_path TEXT NOT NULL,
-                pid INTEGER
+                transport_state TEXT NOT NULL DEFAULT '{}',
+                pinned_at TEXT,
+                permission_mode TEXT,
+                model TEXT,
+                effort TEXT
             );
 
             CREATE TABLE IF NOT EXISTS events (
@@ -176,18 +152,6 @@ class Storage:
                 failure_reason TEXT
             );
             """)
-        self._ensure_column("sessions", "transport", "TEXT NOT NULL DEFAULT 'tmux'")
-        self._ensure_column("sessions", "thread_id", "TEXT")
-        self._ensure_column("sessions", "launch_target_id", "TEXT")
-        self._ensure_column("sessions", "pinned_at", "TEXT")
-        self._ensure_column("sessions", "permission_mode", "TEXT")
-        self._ensure_column("sessions", "model", "TEXT")
-        self._ensure_column("sessions", "effort", "TEXT")
-        # Per-plugin opaque session state. Each plugin decides what to put
-        # here (Codex thread id, Claude session uuid, tmux pane targets, ...);
-        # `_session_from_row` reconstructs it from the legacy columns when
-        # the JSON blob is empty so older rows keep round-tripping.
-        self._ensure_column("sessions", "transport_state", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column("scheduled_sessions", "permission_mode", "TEXT")
         self._ensure_column("scheduled_sessions", "model", "TEXT")
         self._ensure_column("scheduled_sessions", "effort", "TEXT")
@@ -202,11 +166,11 @@ class Storage:
         self.connection.execute(
             """
             INSERT INTO sessions (
-                id, backend, source, transport, title, cwd, launch_target_id, repo_name, branch, status,
-                created_at, updated_at, last_event_at, tmux_session, tmux_window,
-                tmux_pane, thread_id, raw_log_path, structured_log_path, pid,
-                pinned_at, permission_mode, model, effort, transport_state
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, backend, source, transport, title, cwd, launch_target_id,
+                repo_name, branch, status, created_at, updated_at, last_event_at,
+                raw_log_path, structured_log_path, transport_state, pinned_at,
+                permission_mode, model, effort
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -222,18 +186,13 @@ class Storage:
                 session.created_at.isoformat(),
                 session.updated_at.isoformat(),
                 session.last_event_at.isoformat(),
-                session.tmux_session,
-                session.tmux_window,
-                session.tmux_pane,
-                session.thread_id,
                 session.raw_log_path,
                 session.structured_log_path,
-                session.pid,
+                json.dumps(session.transport_state),
                 session.pinned_at.isoformat() if session.pinned_at else None,
                 session.permission_mode,
                 session.model,
                 session.effort,
-                json.dumps(session.transport_state),
             ),
         )
         self.connection.commit()
@@ -590,25 +549,12 @@ class Storage:
             datetime.fromisoformat(raw_pinned_at) if raw_pinned_at else None
         )
         payload["status"] = SessionStatus(payload["status"])
-        # Legacy rows written before the transport column existed default to
-        # the tmux fallback — that's what every pre-Step-6 attached session
-        # was running.
-        payload["transport"] = payload.get("transport") or "tmux"
-        # Prefer the JSON blob; fall back to legacy columns for rows
-        # written before the column was introduced. Plugin code reads
-        # `transport_state` exclusively after Step 6.
-        raw_state = payload.pop("transport_state", None)
-        parsed_state: dict[str, Any] = {}
-        if raw_state:
-            try:
-                decoded = json.loads(raw_state)
-            except json.JSONDecodeError:
-                decoded = None
-            if isinstance(decoded, dict):
-                parsed_state = decoded
-        if not parsed_state:
-            parsed_state = _legacy_state_from_row(payload)
-        payload["transport_state"] = parsed_state
+        raw_state = payload.pop("transport_state", None) or "{}"
+        try:
+            decoded = json.loads(raw_state)
+        except json.JSONDecodeError:
+            decoded = {}
+        payload["transport_state"] = decoded if isinstance(decoded, dict) else {}
         return SessionRecord.model_validate(payload)
 
     def _schedule_from_row(self, row: sqlite3.Row) -> ScheduledSessionRecord:

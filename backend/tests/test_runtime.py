@@ -211,6 +211,15 @@ def make_session(settings: Settings, **overrides) -> SessionRecord:
     session_dir = settings.sessions_dir / overrides.get("id", "sess")
     session_dir.mkdir(parents=True, exist_ok=True)
     now = datetime.now(UTC)
+    transport_state = dict(overrides.get("transport_state", {}))
+    if "thread_id" in overrides:
+        thread_id = overrides["thread_id"]
+        if thread_id is None:
+            transport_state.pop("thread_id", None)
+        else:
+            transport_state["thread_id"] = thread_id
+    elif "thread_id" not in transport_state:
+        transport_state["thread_id"] = "thread-1"
     return SessionRecord(
         id=overrides.get("id", "sess"),
         backend=overrides.get("backend", "codex"),
@@ -223,7 +232,7 @@ def make_session(settings: Settings, **overrides) -> SessionRecord:
         created_at=now,
         updated_at=now,
         last_event_at=now,
-        thread_id=overrides.get("thread_id", "thread-1"),
+        transport_state=transport_state,
         raw_log_path=str(session_dir / "raw.log"),
         structured_log_path=str(session_dir / "events.jsonl"),
         permission_mode=overrides.get("permission_mode"),
@@ -588,7 +597,7 @@ async def test_create_session_uses_structured_claude_for_ssh_target(
         (
             session.id,
             "~/workspace",
-            session.thread_id,
+            session.transport_state["thread_id"],
             "remote-launch-factory",
             "default",
             None,
@@ -879,7 +888,7 @@ async def test_import_claude_thread_creates_session_and_resumes(
 
     assert session.transport == "claude_cli"
     assert session.backend == "claude_code"
-    assert session.thread_id == info.id
+    assert session.transport_state["thread_id"] == info.id
     assert session.cwd == str(tmp_path)
     assert session.branch == "main"
     assert session.status == SessionStatus.IDLE
@@ -943,7 +952,7 @@ async def test_import_claude_thread_remote_target_uses_remote_factory(
 
     assert session.launch_target_id == "devbox"
     assert session.cwd == "/srv/work"
-    assert session.thread_id == info.id
+    assert session.transport_state["thread_id"] == info.id
     assert fake_claude.restore_calls == [
         (
             session.id,

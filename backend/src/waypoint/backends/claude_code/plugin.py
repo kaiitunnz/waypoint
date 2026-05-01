@@ -419,7 +419,8 @@ class ClaudeCodePlugin:
                 status=SessionStatus.ERROR,
             )
             return
-        if not session.thread_id:
+        thread_id = session.transport_state.get("thread_id")
+        if not thread_id:
             runtime.storage.update_session(session.id, status=SessionStatus.EXITED)
             await runtime._record_system_event(
                 session.id,
@@ -442,7 +443,7 @@ class ClaudeCodePlugin:
             await self.adapter.restore_session(
                 session.id,
                 session.cwd,
-                session.thread_id,
+                thread_id,
                 self.launch_factory(runtime, session.launch_target_id),
                 permission_mode=session.permission_mode,
                 model=session.model,
@@ -453,7 +454,7 @@ class ClaudeCodePlugin:
                 "claude restore failed",
                 extra={
                     "session_id": session.id,
-                    "claude_session_id": session.thread_id,
+                    "claude_session_id": thread_id,
                 },
             )
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
@@ -546,7 +547,7 @@ class ClaudeCodePlugin:
         for session in runtime.storage.list_sessions():
             if session.backend != self.id:
                 continue
-            if session.thread_id != thread_id:
+            if session.transport_state.get("thread_id") != thread_id:
                 continue
             if session.launch_target_id != launch_target_id:
                 continue
@@ -560,11 +561,14 @@ class ClaudeCodePlugin:
     ) -> list[ClaudeThreadSummary]:
         if self.adapter is None:
             return []
-        imported = {
-            (session.launch_target_id, session.thread_id)
-            for session in runtime.storage.list_sessions()
-            if session.backend == self.id and session.thread_id
-        }
+        imported: set[tuple[str | None, str]] = set()
+        for session in runtime.storage.list_sessions():
+            if session.backend != self.id:
+                continue
+            thread_id = session.transport_state.get("thread_id")
+            if not thread_id:
+                continue
+            imported.add((session.launch_target_id, thread_id))
         if launch_target_id is None:
             infos = await asyncio.to_thread(list_local_claude_threads)
         else:
@@ -615,9 +619,9 @@ class ClaudeCodePlugin:
             created_at=now,
             updated_at=now,
             last_event_at=now,
-            thread_id=claude_session_id,
             raw_log_path=str(raw_log),
             structured_log_path=str(structured_log),
+            transport_state={"thread_id": claude_session_id},
             permission_mode=permission_mode,
             model=resolved_model,
             effort=resolved_effort,
@@ -715,9 +719,9 @@ class ClaudeCodePlugin:
             created_at=now,
             updated_at=now,
             last_event_at=now,
-            thread_id=info.id,
             raw_log_path=str(raw_log),
             structured_log_path=str(structured_log),
+            transport_state={"thread_id": info.id},
             permission_mode="default",
         )
         runtime.storage.create_session(session)

@@ -3,9 +3,8 @@
 import Link from "next/link";
 import { MouseEvent, ReactNode, useEffect, useState } from "react";
 
-import { humaniseBackend } from "@/lib/backends";
+import { humaniseBackend, transportLabel } from "@/lib/backends";
 import { SessionRecord } from "@/lib/types";
-import { transportLabel } from "@/lib/transport";
 
 interface SessionListProps {
   sessions: SessionRecord[];

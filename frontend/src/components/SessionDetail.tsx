@@ -28,15 +28,15 @@ import {
   setSessionModel,
   setSessionPermissionMode,
 } from "@/lib/api";
-import { humaniseBackend } from "@/lib/backends";
-import { clearToken } from "@/lib/store";
-import { modesForBackend } from "@/lib/permissionModes";
 import {
   fidelityFor,
+  humaniseBackend,
+  permissionModesFor,
   supportsResume,
   supportsStructuredApproval,
   transportLabel,
-} from "@/lib/transport";
+} from "@/lib/backends";
+import { clearToken } from "@/lib/store";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import {
   AskAnswerEntry,
@@ -1084,7 +1084,7 @@ const ReplyComposer = memo(function ReplyComposer({
     void handleSend();
   }
 
-  const modeOptions = backend ? modesForBackend(backend) : [];
+  const modeOptions = backend ? permissionModesFor(backend) : [];
   const hasOverflow = canTerminate || canDelete;
   const shortcutKey = SHORTCUT_IS_MAC ? "⌘" : "Ctrl";
   const hasModelPicker = modelOptions.length > 0 || currentModel !== null;
@@ -1151,7 +1151,7 @@ const ReplyComposer = memo(function ReplyComposer({
     const parts: string[] = [];
     if (modeOptions.length > 0) {
       const matched = modeOptions.find(
-        (option) => option.value === (permissionMode ?? "default"),
+        (option) => option.id === (permissionMode ?? "default"),
       );
       parts.push(matched?.label ?? "Default");
     }
@@ -1204,7 +1204,7 @@ const ReplyComposer = memo(function ReplyComposer({
                       disabled={modeBusy || disabled}
                     >
                       {modeOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
+                        <option key={option.id} value={option.id}>
                           {option.label}
                         </option>
                       ))}

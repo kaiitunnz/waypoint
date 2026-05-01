@@ -4,11 +4,11 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { EffortPicker } from "@/components/EffortPicker";
 import { ModelPicker } from "@/components/ModelPicker";
-import { humaniseBackend } from "@/lib/backends";
 import {
-  modesForBackend,
+  humaniseBackend,
   permissionModeLabel,
-} from "@/lib/permissionModes";
+  permissionModesFor,
+} from "@/lib/backends";
 import {
   Backend,
   BackendModelListResponse,
@@ -61,13 +61,13 @@ export function SchedulePanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const permissionOptions = useMemo(() => modesForBackend(backend), [backend]);
+  const permissionOptions = useMemo(() => permissionModesFor(backend), [backend]);
 
   useEffect(() => setBackend(defaultBackend), [defaultBackend]);
   useEffect(() => setCwd(defaultCwd), [defaultCwd]);
   useEffect(() => {
-    if (!permissionOptions.some((option) => option.value === permissionMode)) {
-      setPermissionMode(permissionOptions[0]?.value ?? "default");
+    if (!permissionOptions.some((option) => option.id === permissionMode)) {
+      setPermissionMode(permissionOptions[0]?.id ?? "default");
     }
   }, [permissionOptions, permissionMode]);
   useEffect(() => {
@@ -201,7 +201,7 @@ export function SchedulePanel({
                 onChange={(event) => setPermissionMode(event.target.value)}
               >
                 {permissionOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
+                  <option key={option.id} value={option.id}>
                     {option.label}
                   </option>
                 ))}

@@ -19,6 +19,7 @@ import { fetchBackends } from "@/lib/api";
 import type {
   Backend,
   BackendDescriptor,
+  BackendPermissionMode,
   MeResponse,
   SessionTransport,
 } from "@/lib/types";
@@ -37,6 +38,36 @@ const FALLBACK_LABELS: Record<string, string> = {
   claude_code: "Claude Code",
   codex: "Codex",
   tmux: "Tmux",
+};
+
+const FALLBACK_TRANSPORT_LABELS: Record<string, string> = {
+  codex_app_server: "codex app server",
+  claude_cli: "claude cli",
+  tmux: "tmux",
+};
+
+// Hand-mirrored from the backend's BackendCapabilities defaults so
+// catalog-less callers (early bootstrap, lib helpers) still get the
+// right answer for the two built-ins. New backends MUST be reachable
+// via the live catalog — these fallbacks only cover today's known
+// transports.
+const FALLBACK_STRUCTURED = new Set(["codex_app_server", "claude_cli"]);
+const FALLBACK_RESUMABLE = new Set(["tmux"]);
+
+const FALLBACK_PERMISSION_MODES: Record<string, BackendPermissionMode[]> = {
+  claude_code: [
+    { id: "default", label: "Default" },
+    { id: "plan", label: "Plan" },
+    { id: "acceptEdits", label: "Accept Edits" },
+    { id: "auto", label: "Auto" },
+    { id: "bypassPermissions", label: "Bypass Permissions" },
+    { id: "dontAsk", label: "Don't Ask" },
+  ],
+  codex: [
+    { id: "default", label: "Default" },
+    { id: "auto_review", label: "Auto-review" },
+    { id: "full_access", label: "Full Access" },
+  ],
 };
 
 export function buildCatalog(descriptors: BackendDescriptor[]): BackendCatalog {
@@ -58,6 +89,71 @@ export function buildCatalog(descriptors: BackendDescriptor[]): BackendCatalog {
 
 export function humaniseBackend(id: Backend): string {
   return FALLBACK_LABELS[id] ?? id;
+}
+
+/**
+ * Backend-agnostic helpers that consult the catalog when present and
+ * fall back to the hand-mirrored defaults for the two built-ins so
+ * pre-bootstrap callers (login screen, error boundaries) still render
+ * sensibly without a hook.
+ */
+export function transportLabel(
+  transport: SessionTransport,
+  catalog?: BackendCatalog,
+): string {
+  return (
+    catalog?.byTransport(transport)?.label.toLowerCase() ??
+    FALLBACK_TRANSPORT_LABELS[transport] ??
+    transport
+  );
+}
+
+export function fidelityFor(
+  transport: SessionTransport,
+  catalog?: BackendCatalog,
+): "structured" | "heuristic" {
+  const caps = catalog?.byTransport(transport)?.capabilities;
+  const structured = caps
+    ? caps.is_structured
+    : FALLBACK_STRUCTURED.has(transport);
+  return structured ? "structured" : "heuristic";
+}
+
+export function supportsResume(
+  transport: SessionTransport,
+  catalog?: BackendCatalog,
+): boolean {
+  const caps = catalog?.byTransport(transport)?.capabilities;
+  return caps ? caps.supports_resume : FALLBACK_RESUMABLE.has(transport);
+}
+
+export function supportsStructuredApproval(
+  transport: SessionTransport,
+  catalog?: BackendCatalog,
+): boolean {
+  const caps = catalog?.byTransport(transport)?.capabilities;
+  return caps ? caps.is_structured : FALLBACK_STRUCTURED.has(transport);
+}
+
+export function permissionModesFor(
+  backend: Backend,
+  catalog?: BackendCatalog,
+): readonly BackendPermissionMode[] {
+  const live = catalog?.byId(backend)?.capabilities.permission_modes;
+  if (live && live.length > 0) return live;
+  return FALLBACK_PERMISSION_MODES[backend] ?? [];
+}
+
+export function permissionModeLabel(
+  backend: Backend,
+  value: string | null | undefined,
+  catalog?: BackendCatalog,
+): string | null {
+  if (!value) return null;
+  const match = permissionModesFor(backend, catalog).find(
+    (mode) => mode.id === value,
+  );
+  return match?.label ?? value;
 }
 
 /** Single-flight catalog hook fed by `MeResponse.backends`. */

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from codex_app_server.client import AppServerClient
 from fastapi import HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from waypoint.backends.capabilities import (
     BackendCapabilities,
@@ -39,7 +39,7 @@ from waypoint.backends.codex.schemas import (
     CodexThreadImportRequest,
     CodexThreadSummary,
 )
-from waypoint.backends.plugin_config import PluginConfig
+from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
@@ -66,12 +66,24 @@ class CodexPluginConfig(PluginConfig):
     """
 
 
+class CodexLaunchTargetConfig(PluginLaunchTargetConfig):
+    """Per-target Codex configuration.
+
+    Adds ``config_overrides`` — a list of ``key=value`` strings fed
+    through to the remote ``codex --config K=V`` flag (typically used
+    to pin reasoning effort or model on a specific dev box).
+    """
+
+    config_overrides: list[str] = Field(default_factory=list)
+
+
 class CodexPlugin:
     id = "codex"
     transport_id = "codex_app_server"
     label = "Codex"
     import_request_schema: type[BaseModel] | None = CodexThreadImportRequest
     config_schema: type[PluginConfig] = CodexPluginConfig
+    launch_target_schema: type[PluginLaunchTargetConfig] = CodexLaunchTargetConfig
     capabilities = BackendCapabilities(
         is_structured=True,
         supports_resume=False,
@@ -707,6 +719,7 @@ def build_plugin() -> CodexPlugin:
 
 
 __all__ = [
+    "CodexLaunchTargetConfig",
     "CodexPlugin",
     "CodexPluginConfig",
     "build_plugin",

@@ -5,7 +5,7 @@ import pytest
 from pydantic import BaseModel
 
 from waypoint.backends import BackendCapabilities, BackendRegistry, get_registry
-from waypoint.backends.plugin_config import PluginConfig
+from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.backends.registry import reset_registry_for_tests
 
 
@@ -30,6 +30,7 @@ class _StubPlugin:
     label = "Stub"
     import_request_schema: type[BaseModel] | None = None
     config_schema: type[PluginConfig] = PluginConfig
+    launch_target_schema: type[PluginLaunchTargetConfig] = PluginLaunchTargetConfig
     capabilities = BackendCapabilities(is_structured=False, supports_resume=False)
 
     def transport_view(self, runtime: Any) -> Any:

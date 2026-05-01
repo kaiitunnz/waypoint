@@ -17,7 +17,7 @@ from fastapi import HTTPException, status
 from pydantic import BaseModel
 
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
-from waypoint.backends.plugin_config import PluginConfig
+from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
@@ -55,6 +55,7 @@ class TmuxPlugin:
     label = "Tmux"
     import_request_schema: type[BaseModel] | None = None
     config_schema: type[PluginConfig] = TmuxPluginConfig
+    launch_target_schema: type[PluginLaunchTargetConfig] = PluginLaunchTargetConfig
     capabilities = BackendCapabilities(
         is_structured=False,
         supports_resume=True,

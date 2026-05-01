@@ -46,7 +46,7 @@ from waypoint.backends.claude_code.threads import (
     list_local_claude_threads,
 )
 from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
-from waypoint.backends.plugin_config import PluginConfig
+from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
@@ -85,6 +85,7 @@ class ClaudeCodePlugin:
     label = "Claude Code"
     import_request_schema: type[BaseModel] | None = ClaudeThreadImportRequest
     config_schema: type[PluginConfig] = ClaudeCodePluginConfig
+    launch_target_schema: type[PluginLaunchTargetConfig] = PluginLaunchTargetConfig
     capabilities = BackendCapabilities(
         is_structured=True,
         supports_resume=False,

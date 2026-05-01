@@ -4,6 +4,7 @@ from waypoint.backends.codex.permission_modes import (
     codex_turn_params_for,
 )
 from waypoint.backends.codex.plugin import (
+    CodexLaunchTargetConfig,
     CodexPlugin,
     CodexPluginConfig,
     build_plugin,
@@ -16,6 +17,7 @@ from waypoint.backends.codex.schemas import (
 __all__ = [
     "CODEX_PERMISSION_MODE_SPECS",
     "CODEX_PERMISSION_PRESETS",
+    "CodexLaunchTargetConfig",
     "CodexPlugin",
     "CodexPluginConfig",
     "CodexThreadImportRequest",

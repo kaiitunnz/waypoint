@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from pydantic import BaseModel
 
 from waypoint.backends.capabilities import BackendCapabilities
-from waypoint.backends.plugin_config import PluginConfig
+from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
 
@@ -39,6 +39,10 @@ class BackendPlugin(Protocol):
     # ``plugin_configs.<plugin_id>`` into. Plugins without bespoke
     # configuration can point at ``PluginConfig`` itself.
     config_schema: type[PluginConfig]
+    # Subclass of ``PluginLaunchTargetConfig`` parsed out of
+    # ``ssh_targets[*].plugin_configs.<plugin_id>``. Plugins without
+    # per-target knobs beyond ``remote_bin`` point at the base class.
+    launch_target_schema: type[PluginLaunchTargetConfig]
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
         """Return a TransportAdapter routing send/interrupt/etc. for this plugin."""

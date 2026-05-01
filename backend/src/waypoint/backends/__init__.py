@@ -6,7 +6,7 @@ from waypoint.backends.capabilities import (
     SlashCommandSpec,
 )
 from waypoint.backends.events import ApprovalPayload, EventEnvelope, ItemPayload
-from waypoint.backends.plugin_config import PluginConfig
+from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.backends.registry import (
     BackendRegistry,
     get_registry,
@@ -23,6 +23,7 @@ __all__ = [
     "ModelSource",
     "PermissionModeSpec",
     "PluginConfig",
+    "PluginLaunchTargetConfig",
     "SlashCommandSpec",
     "get_registry",
     "reset_registry_for_tests",

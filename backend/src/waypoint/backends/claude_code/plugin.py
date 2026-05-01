@@ -40,6 +40,7 @@ from waypoint.schemas import (
     ClaudeThreadImportRequest,
     ClaudeThreadSummary,
     SessionCreateRequest,
+    SessionEnvelope,
     SessionRecord,
     SessionSource,
     SessionStatus,
@@ -195,6 +196,90 @@ class ClaudeCodePlugin:
 
     def effort_swap_message(self, effort: str | None) -> str:
         return _claude_effort_swap_message(effort)
+
+    async def maybe_handle_input(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        request: Any,
+    ) -> SessionRecord | None:
+        # Claude has no slash routing today; let the runtime forward
+        # everything to the structured stdin path.
+        return None
+
+    async def answer_question(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        answer: str,
+        tool_use_id: str | None,
+        answers: list[dict[str, Any]] | None,
+    ) -> SessionRecord:
+        if runtime.claude is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="answer-question is only supported for Claude sessions",
+            )
+        try:
+            handled = await runtime.claude.respond_to_ask_question(
+                session.id, answer, tool_use_id
+            )
+        except ClaudeCliError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        if not handled:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="no pending question for this session",
+            )
+        # Stash structured per-question answers + notes so the frontend
+        # renders this user_input as a styled "answers" card instead of
+        # the raw `"<question>"="<answer>" user notes: …` payload Claude
+        # was tuned around.
+        extra: dict[str, Any] = {"kind": "ask_user_question_answer"}
+        if answers:
+            extra["answers"] = answers
+        if tool_use_id:
+            extra["tool_use_id"] = tool_use_id
+        # Same ordering as handle_input: flip status to RUNNING before
+        # _record_user_event broadcasts the session_state snapshot,
+        # otherwise the spinner stays off until Claude's next chunk.
+        updated = runtime.storage.update_session(
+            session.id, status=SessionStatus.RUNNING
+        )
+        await runtime._record_user_event(
+            session.id, answer, submit=True, extra_metadata=extra
+        )
+        return updated
+
+    async def post_approval(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        # Side-effect of an ExitPlanMode approval: the Claude adapter
+        # has already flipped the binary's permission mode to default
+        # via set_permission_mode. Sync storage + broadcast so the UI
+        # pill reflects the change instead of staying stuck on "plan".
+        if runtime.claude is None:
+            return
+        current = runtime.claude.session_permission_mode(session.id)
+        if current is None:
+            return
+        previous = session.permission_mode or "default"
+        if current == previous:
+            return
+        runtime.storage.update_session(session.id, permission_mode=current)
+        await runtime.broadcast.publish(
+            SessionEnvelope(
+                type="session_list_update",
+                payload={
+                    "sessions": [
+                        item.model_dump(mode="json")
+                        for item in runtime.list_sessions()
+                    ]
+                },
+            )
+        )
 
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord

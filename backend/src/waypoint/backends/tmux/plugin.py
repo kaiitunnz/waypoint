@@ -102,6 +102,29 @@ class TmuxPlugin:
             "supports_free_text": False,
         }
 
+    async def maybe_handle_input(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        request: Any,
+    ) -> SessionRecord | None:
+        return None
+
+    async def answer_question(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        answer: str,
+        tool_use_id: str | None,
+        answers: list[dict[str, Any]] | None,
+    ) -> SessionRecord:
+        _unsupported("answer-question")
+
+    async def post_approval(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        return None
+
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

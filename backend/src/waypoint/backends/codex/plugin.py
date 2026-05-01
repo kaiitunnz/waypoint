@@ -34,6 +34,7 @@ from waypoint.schemas import (
     CodexThreadImportRequest,
     CodexThreadSummary,
     SessionCreateRequest,
+    SessionInputRequest,
     SessionRecord,
     SessionSource,
     SessionStatus,
@@ -134,6 +135,61 @@ class CodexPlugin:
 
     def effort_swap_message(self, effort: str | None) -> str:
         return ""  # never published; apply_effort returns False
+
+    async def answer_question(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        answer: str,
+        tool_use_id: str | None,
+        answers: list[dict[str, Any]] | None,
+    ) -> SessionRecord:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="answer-question is only supported for Claude sessions",
+        )
+
+    async def post_approval(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        return None
+
+    async def maybe_handle_input(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        request: SessionInputRequest,
+    ) -> SessionRecord | None:
+        # Codex's app-server doesn't parse user text as control
+        # commands — `/compact` only takes effect via the
+        # thread/compact/start RPC. Every other slash command
+        # (`/help`, `/status`, `/permissions`, plus the Codex-/Claude-
+        # specific extras) is forwarded as user input so the CLI/SDK
+        # can surface its own response.
+        command = request.text.strip()
+        if command.split(None, 1)[0].lower() != "/compact":
+            return None
+        try:
+            await runtime.codex.compact_thread(session.id)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        await runtime._record_user_event(
+            session.id,
+            request.text,
+            submit=request.submit,
+            status=session.status,
+        )
+        await runtime._record_system_event(
+            session.id,
+            "Compacting codex thread…",
+            status=SessionStatus.RUNNING,
+            metadata={"builtin_command": "/compact"},
+        )
+        return runtime.storage.update_session(
+            session.id, status=SessionStatus.RUNNING
+        )
 
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord

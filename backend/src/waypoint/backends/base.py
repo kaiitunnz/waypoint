@@ -93,3 +93,40 @@ class BackendPlugin(Protocol):
     ) -> None:
         """Restore a previously-running session after a runtime restart."""
         ...
+
+    async def maybe_handle_input(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        request: Any,
+    ) -> SessionRecord | None:
+        """Optional pre-send hook for slash routing.
+
+        Return ``None`` to let the runtime forward the user input to
+        ``transport.send_input``. Return a populated ``SessionRecord``
+        to short-circuit (e.g. Codex's ``/compact`` slash routes
+        through ``thread/compact/start`` instead of stdin).
+        """
+        ...
+
+    async def answer_question(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        answer: str,
+        tool_use_id: str | None,
+        answers: list[dict[str, Any]] | None,
+    ) -> SessionRecord:
+        """Respond to a Claude AskUserQuestion tool call."""
+        ...
+
+    async def post_approval(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        """Run any side effects triggered by an approval response.
+
+        Claude flips the CLI's permission mode after an ExitPlanMode
+        approval; the plugin syncs the runtime + broadcast here so the
+        UI pill reflects the new mode.
+        """
+        ...

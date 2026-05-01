@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import HTTPException, status
 
 from waypoint.backends import BackendRegistry, get_registry
-from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeCliError
+from waypoint.backends.claude_code.adapter import ClaudeCliAdapter
 from waypoint.backends.claude_code.runtime_hook import ClaudeHookBundle
 from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
 from waypoint.backends.codex.adapter import (
@@ -321,8 +321,9 @@ class SessionRuntime:
         if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             session = await self._reattach_session(session)
         transport = self.transport_for(session)
+        plugin = self.registry.plugin_for(session)
         if transport.is_structured:
-            handled = await self._route_codex_compact(session, request)
+            handled = await plugin.maybe_handle_input(self, session, request)
             if handled is not None:
                 return handled
         await transport.send_input(session, request.text)
@@ -551,41 +552,8 @@ class SessionRuntime:
         answers: list[dict[str, Any]] | None = None,
     ) -> SessionRecord:
         session = self.get_session(session_id)
-        if session.transport != SessionTransport.CLAUDE_CLI or self.claude is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="answer-question is only supported for Claude sessions",
-            )
-        try:
-            handled = await self.claude.respond_to_ask_question(
-                session_id, answer, tool_use_id
-            )
-        except ClaudeCliError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-            ) from exc
-        if not handled:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="no pending question for this session",
-            )
-        # Stash the structured per-question answers + notes so the frontend
-        # can render this user_input as a styled "answers" card instead of
-        # the raw `"<question>"="<answer>" user notes: …` payload Claude
-        # was tuned around.
-        extra: dict[str, Any] = {"kind": "ask_user_question_answer"}
-        if answers:
-            extra["answers"] = answers
-        if tool_use_id:
-            extra["tool_use_id"] = tool_use_id
-        # Same ordering as handle_input: flip status to RUNNING before
-        # _record_user_event broadcasts the session_state snapshot, otherwise
-        # the spinner stays off until Claude's next emitted chunk lands.
-        updated = self.storage.update_session(session.id, status=SessionStatus.RUNNING)
-        await self._record_user_event(
-            session.id, answer, submit=True, extra_metadata=extra
-        )
-        return updated
+        plugin = self.registry.plugin_for(session)
+        return await plugin.answer_question(self, session, answer, tool_use_id, answers)
 
     async def approve(
         self, session_id: str, request: SessionApprovalRequest
@@ -612,68 +580,11 @@ class SessionRuntime:
                 f"Approval response sent: {request.decision}",
                 status=SessionStatus.RUNNING,
             )
-            # Side-effect of an ExitPlanMode approval: the Claude adapter
-            # has already flipped the binary's permission mode to default
-            # via set_permission_mode. Sync storage + broadcast so the UI
-            # pill reflects the change instead of staying stuck on "plan".
-            await self._sync_claude_permission_mode(session)
+            plugin = self.registry.plugin_for(session)
+            await plugin.post_approval(self, session)
             return updated
         await transport.respond_to_approval(session, request.decision, request.text)
         return self.get_session(session_id)
-
-    async def _sync_claude_permission_mode(self, session: SessionRecord) -> None:
-        if session.transport != SessionTransport.CLAUDE_CLI or self.claude is None:
-            return
-        current = self.claude.session_permission_mode(session.id)
-        if current is None:
-            return
-        previous = session.permission_mode or "default"
-        if current == previous:
-            return
-        self.storage.update_session(session.id, permission_mode=current)
-        await self.broadcast.publish(
-            SessionEnvelope(
-                type="session_list_update",
-                payload={
-                    "sessions": [
-                        item.model_dump(mode="json") for item in self.list_sessions()
-                    ]
-                },
-            )
-        )
-
-    async def _route_codex_compact(
-        self, session: SessionRecord, request: SessionInputRequest
-    ) -> SessionRecord | None:
-        # Codex's app-server doesn't parse user text as control commands —
-        # `/compact` only takes effect via the thread/compact/start RPC. Every
-        # other slash command (including `/help`, `/status`, `/permissions`,
-        # and Codex- or Claude-specific extras) is forwarded as user input so
-        # the underlying CLI / SDK can surface its own response.
-        if session.backend != Backend.CODEX:
-            return None
-        command = request.text.strip()
-        if command.split(None, 1)[0].lower() != "/compact":
-            return None
-        try:
-            await self.codex.compact_thread(session.id)
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-            ) from exc
-        await self._record_user_event(
-            session.id,
-            request.text,
-            submit=request.submit,
-            status=session.status,
-        )
-        await self._record_system_event(
-            session.id,
-            "Compacting codex thread…",
-            status=SessionStatus.RUNNING,
-            metadata={"builtin_command": "/compact"},
-        )
-        return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
 
     def session_events(
         self, session_id: str, cursor: int | None = None

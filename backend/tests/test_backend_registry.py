@@ -139,6 +139,24 @@ def test_registry_rejects_duplicate_id() -> None:
         async def restore_session(self, runtime: Any, session: Any) -> None:
             return None
 
+        async def maybe_handle_input(
+            self, runtime: Any, session: Any, request: Any
+        ) -> Any:
+            return None
+
+        async def answer_question(
+            self,
+            runtime: Any,
+            session: Any,
+            answer: str,
+            tool_use_id: str | None,
+            answers: list[dict[str, Any]] | None,
+        ) -> Any:
+            raise NotImplementedError
+
+        async def post_approval(self, runtime: Any, session: Any) -> None:
+            return None
+
     registry.register(Stub())
     with pytest.raises(ValueError):
         registry.register(Stub())

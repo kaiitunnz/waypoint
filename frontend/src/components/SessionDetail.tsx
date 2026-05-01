@@ -70,16 +70,18 @@ const EFFORT_LABEL: Record<string, string> = {
   max: "Max",
 };
 
+export type ConnectionState = "connecting" | "open" | "reconnecting";
+
 interface SessionDetailProps {
   host: string;
   token: string;
   sessionId: string;
   onAuthFailure?: () => void;
+  onConnectionChange?: (state: ConnectionState) => void;
 }
 
 type ViewMode = "chat" | "terminal";
 type FilterMode = "important" | "all";
-type ConnectionState = "connecting" | "open" | "reconnecting";
 
 // The composer sticks to the viewport bottom; floating scroll affordances
 // read `--composer-height` to sit just above it. The fallback keeps things
@@ -92,7 +94,13 @@ const SHORTCUT_IS_MAC =
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 
-export function SessionDetail({ host, token, sessionId, onAuthFailure }: SessionDetailProps) {
+export function SessionDetail({
+  host,
+  token,
+  sessionId,
+  onAuthFailure,
+  onConnectionChange,
+}: SessionDetailProps) {
   const router = useRouter();
   const catalog = useBackendCatalog(host || null, token || null, null);
   const [session, setSession] = useState<SessionRecord | null>(null);
@@ -111,6 +119,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [effortBusy, setEffortBusy] = useState(false);
   const [hasOlderEvents, setHasOlderEvents] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   // Tracks the smallest raw sequence ever received from the server. Distinct
   // from `events[0].sequence` because `mergeEvents` advances a coalesced
   // item's sequence to the *last* delta — using that as a cursor would
@@ -128,6 +137,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     onAuthFailure?.();
     router.replace("/");
   }, [onAuthFailure, router]);
+
+  useEffect(() => {
+    onConnectionChange?.(connection);
+  }, [connection, onConnectionChange]);
 
   const refreshSnapshot = useCallback(async () => {
     setSnapshotLoading(true);
@@ -357,6 +370,49 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     sessionId,
     token,
   ]);
+
+  const refresh = useCallback(async () => {
+    if (refreshing) {
+      return;
+    }
+    setRefreshing(true);
+    setError("");
+    // Drop any queued WS events so they don't clobber the freshly-fetched
+    // page on the next animation frame; subsequent live events still merge
+    // into the new array via the standard event handler.
+    pendingEventsRef.current = [];
+    if (flushFrameRef.current !== null) {
+      window.cancelAnimationFrame(flushFrameRef.current);
+      flushFrameRef.current = null;
+    }
+    try {
+      const [loadedSession, loadedPage, loadedSnapshot] = await Promise.all([
+        fetchSession(host, token, sessionId),
+        fetchEvents(host, token, sessionId),
+        fetchTerminalSnapshot(host, token, sessionId),
+      ]);
+      setSession(loadedSession);
+      const sanitized = loadedPage.events.map(sanitizeEvent);
+      const coalesced = sanitized.reduce<EventRecord[]>(
+        (acc, event) => mergeEvents(acc, event),
+        [],
+      );
+      setEvents(coalesced);
+      setHasOlderEvents(loadedPage.has_more);
+      setOldestRawSequence(minRawSequence(sanitized));
+      setSnapshot(stripAnsi(loadedSnapshot));
+    } catch (refreshError) {
+      if (isAuthError(refreshError)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(
+        refreshError instanceof Error ? refreshError.message : "failed to refresh session",
+      );
+    } finally {
+      setRefreshing(false);
+    }
+  }, [handleAuthFailure, host, refreshing, sessionId, token]);
 
   useEffect(() => {
     let active = true;
@@ -854,11 +910,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                 ?.capabilities.supports_set_effort_with_restart,
           )
         }
+        refreshBusy={refreshing}
         onDelete={removeFromList}
         onInterrupt={interruptSession}
         onModeChange={handlePermissionModeChange}
         onModelChange={handleModelChange}
         onEffortChange={handleEffortChange}
+        onRefresh={refresh}
         onResume={resumeSession}
         onSend={submitInput}
         onTerminate={terminate}
@@ -889,11 +947,13 @@ interface ReplyComposerProps {
   // UX so the user knows the session will restart, vs. Codex which
   // applies inline.
   effortRequiresConfirm: boolean;
+  refreshBusy: boolean;
   onDelete: () => void | Promise<void>;
   onInterrupt: () => void | Promise<void>;
   onModeChange: (mode: string) => void | Promise<void>;
   onModelChange: (model: string) => void | Promise<void>;
   onEffortChange: (effort: string) => void | Promise<void>;
+  onRefresh: () => void | Promise<void>;
   onResume: () => void | Promise<void>;
   onSend: (text: string) => Promise<boolean>;
   onTerminate: () => void | Promise<void>;
@@ -917,11 +977,13 @@ const ReplyComposer = memo(function ReplyComposer({
   permissionMode,
   transport,
   effortRequiresConfirm,
+  refreshBusy,
   onDelete,
   onInterrupt,
   onModeChange,
   onModelChange,
   onEffortChange,
+  onRefresh,
   onResume,
   onSend,
   onTerminate,
@@ -1106,7 +1168,8 @@ const ReplyComposer = memo(function ReplyComposer({
   }
 
   const modeOptions = backend ? permissionModesFor(backend) : [];
-  const hasOverflow = canTerminate || canDelete;
+  // Refresh is always available, so the overflow menu is always present.
+  const hasOverflow = true;
   const shortcutKey = SHORTCUT_IS_MAC ? "⌘" : "Ctrl";
   const hasModelPicker = modelOptions.length > 0 || currentModel !== null;
   // Surface a custom-named model the user already has even if it's not in the
@@ -1380,6 +1443,19 @@ const ReplyComposer = memo(function ReplyComposer({
             </button>
             {overflowOpen ? (
               <div className="composer-overflow-menu" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="composer-overflow-item"
+                  disabled={refreshBusy}
+                  onClick={() => {
+                    setOverflowOpen(false);
+                    void onRefresh();
+                  }}
+                >
+                  <span className="glyph">↻</span>
+                  {refreshBusy ? "Refreshing…" : "Refresh"}
+                </button>
                 {canTerminate ? (
                   <button
                     type="button"

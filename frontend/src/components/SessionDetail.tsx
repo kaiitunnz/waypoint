@@ -111,7 +111,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [effortBusy, setEffortBusy] = useState(false);
   const [hasOlderEvents, setHasOlderEvents] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   // Tracks the smallest raw sequence ever received from the server. Distinct
   // from `events[0].sequence` because `mergeEvents` advances a coalesced
   // item's sequence to the *last* delta — using that as a cursor would
@@ -359,48 +358,14 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     token,
   ]);
 
-  const refresh = useCallback(async () => {
-    if (refreshing) {
-      return;
-    }
-    setRefreshing(true);
-    setError("");
-    // Drop any queued WS events so they don't clobber the freshly-fetched
-    // page on the next animation frame; subsequent live events still merge
-    // into the new array via the standard event handler.
-    pendingEventsRef.current = [];
-    if (flushFrameRef.current !== null) {
-      window.cancelAnimationFrame(flushFrameRef.current);
-      flushFrameRef.current = null;
-    }
-    try {
-      const [loadedSession, loadedPage, loadedSnapshot] = await Promise.all([
-        fetchSession(host, token, sessionId),
-        fetchEvents(host, token, sessionId),
-        fetchTerminalSnapshot(host, token, sessionId),
-      ]);
-      setSession(loadedSession);
-      const sanitized = loadedPage.events.map(sanitizeEvent);
-      const coalesced = sanitized.reduce<EventRecord[]>(
-        (acc, event) => mergeEvents(acc, event),
-        [],
-      );
-      setEvents(coalesced);
-      setHasOlderEvents(loadedPage.has_more);
-      setOldestRawSequence(minRawSequence(sanitized));
-      setSnapshot(stripAnsi(loadedSnapshot));
-    } catch (refreshError) {
-      if (isAuthError(refreshError)) {
-        handleAuthFailure();
-        return;
-      }
-      setError(
-        refreshError instanceof Error ? refreshError.message : "failed to refresh session",
-      );
-    } finally {
-      setRefreshing(false);
-    }
-  }, [handleAuthFailure, host, refreshing, sessionId, token]);
+  // Web apps don't get a native "refresh page" affordance; the overflow-menu
+  // entry below is the user-visible substitute, so it does the same thing as
+  // the browser's reload button. A full reload is also the simplest way to
+  // resync after the websocket has been bouncing — no bespoke refetch path
+  // to keep in lockstep with the initial-load path.
+  const refresh = useCallback(() => {
+    window.location.reload();
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -899,7 +864,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                 ?.capabilities.supports_set_effort_with_restart,
           )
         }
-        refreshBusy={refreshing}
         onDelete={removeFromList}
         onInterrupt={interruptSession}
         onModeChange={handlePermissionModeChange}
@@ -937,13 +901,12 @@ interface ReplyComposerProps {
   // UX so the user knows the session will restart, vs. Codex which
   // applies inline.
   effortRequiresConfirm: boolean;
-  refreshBusy: boolean;
   onDelete: () => void | Promise<void>;
   onInterrupt: () => void | Promise<void>;
   onModeChange: (mode: string) => void | Promise<void>;
   onModelChange: (model: string) => void | Promise<void>;
   onEffortChange: (effort: string) => void | Promise<void>;
-  onRefresh: () => void | Promise<void>;
+  onRefresh: () => void;
   onResume: () => void | Promise<void>;
   onSend: (text: string) => Promise<boolean>;
   onTerminate: () => void | Promise<void>;
@@ -968,7 +931,6 @@ const ReplyComposer = memo(function ReplyComposer({
   permissionMode,
   transport,
   effortRequiresConfirm,
-  refreshBusy,
   onDelete,
   onInterrupt,
   onModeChange,
@@ -1349,24 +1311,26 @@ const ReplyComposer = memo(function ReplyComposer({
             <span className="composer-activity-spinner" aria-hidden />
           </div>
         ) : null}
-        <span
-          className={`composer-connection ${connection}`}
-          title={`Backend socket ${connection}`}
-          role="status"
-          aria-live="polite"
-        >
-          {connection === "open"
-            ? "live"
-            : connection === "reconnecting"
-              ? "reconnecting"
-              : "connecting"}
-        </span>
-        <span className="composer-shortcut" aria-hidden>
-          <kbd>{shortcutKey}</kbd>
-          <span>+</span>
-          <kbd>↵</kbd>
-          <span>to send</span>
-        </span>
+        <div className="composer-toprow-trail">
+          <span className="composer-shortcut" aria-hidden>
+            <kbd>{shortcutKey}</kbd>
+            <span>+</span>
+            <kbd>↵</kbd>
+            <span>to send</span>
+          </span>
+          <span
+            className={`composer-connection ${connection}`}
+            title={`Backend socket ${connection}`}
+            role="status"
+            aria-live="polite"
+          >
+            {connection === "open"
+              ? "live"
+              : connection === "reconnecting"
+                ? "reconnecting"
+                : "connecting"}
+          </span>
+        </div>
       </div>
       <div className="reply-textarea-wrap">
         <textarea
@@ -1450,14 +1414,13 @@ const ReplyComposer = memo(function ReplyComposer({
                   type="button"
                   role="menuitem"
                   className="composer-overflow-item"
-                  disabled={refreshBusy}
                   onClick={() => {
                     setOverflowOpen(false);
-                    void onRefresh();
+                    onRefresh();
                   }}
                 >
                   <span className="glyph">↻</span>
-                  {refreshBusy ? "Refreshing…" : "Refresh"}
+                  Refresh
                 </button>
                 {canTerminate ? (
                   <button

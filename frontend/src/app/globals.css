@@ -2011,11 +2011,17 @@ details.tool-disclosure[open] .tool-glyph.todo {
   min-width: 0;
 }
 
-/* The connection chip claims the spare space; the shortcut hint sits flush
- * to its right with no extra gap. On mobile the shortcut is hidden, and
- * the chip alone right-anchors. */
-.composer-toprow .composer-connection {
+/* Right-anchored trailing group: the keyboard-shortcut hint then the
+ * connection chip. The chip stays visible (and right-anchored) on mobile
+ * even when the shortcut hint is hidden, because the wrapper itself owns
+ * the auto margin. */
+.composer-toprow-trail {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .composer-connection {
@@ -2388,24 +2394,31 @@ details.tool-disclosure[open] .tool-glyph.todo {
   gap: 10px;
   padding: 9px 12px;
   border-radius: 6px;
-  background: transparent;
+  /* Subtle persistent background + border so each row reads as a discrete
+   * button at rest (without it the row reads as plain text). */
+  border: 1px solid var(--line);
+  background: rgba(28, 33, 44, 0.45);
   color: var(--text);
   font-size: 0.88rem;
   text-align: left;
   letter-spacing: 0.01em;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
 .composer-overflow-item:hover:not(:disabled) {
-  background: rgba(28, 33, 44, 0.7);
+  background: rgba(28, 33, 44, 0.85);
+  border-color: var(--line-strong);
 }
 
 .composer-overflow-item.danger {
   color: var(--danger);
+  background: rgba(226, 108, 112, 0.08);
+  border-color: rgba(226, 108, 112, 0.32);
 }
 
 .composer-overflow-item.danger:hover:not(:disabled) {
-  background: rgba(226, 108, 112, 0.12);
+  background: rgba(226, 108, 112, 0.18);
+  border-color: rgba(226, 108, 112, 0.5);
 }
 
 .composer-overflow-item .glyph {

@@ -355,17 +355,29 @@ export default function HomePage() {
     }
   }
 
-  async function handleImportCodexThread(threadId: string) {
+  async function handleImportThread(backend: Backend, threadId: string) {
     try {
-      const session = await importCodexThreadRequest(host, token, {
+      const payload = {
         thread_id: threadId,
         launch_target_id: activeLaunchTargetId || null,
-      });
+      };
+      const session =
+        backend === "codex"
+          ? await importCodexThreadRequest(host, token, payload)
+          : await importClaudeThreadRequest(host, token, payload);
       setSessions((current) => [
         session,
         ...current.filter((item) => item.id !== session.id),
       ]);
-      setCodexThreads((current) => current.filter((thread) => thread.id !== threadId));
+      if (backend === "codex") {
+        setCodexThreads((current) =>
+          current.filter((thread) => thread.id !== threadId),
+        );
+      } else {
+        setClaudeThreads((current) =>
+          current.filter((thread) => thread.id !== threadId),
+        );
+      }
       router.push(`/session/${session.id}`);
     } catch (importError) {
       if (isAuthError(importError)) {
@@ -375,34 +387,7 @@ export default function HomePage() {
       setError(
         importError instanceof Error
           ? importError.message
-          : "failed to import codex thread",
-      );
-    }
-  }
-
-  async function handleImportClaudeThread(threadId: string) {
-    try {
-      const session = await importClaudeThreadRequest(host, token, {
-        thread_id: threadId,
-        launch_target_id: activeLaunchTargetId || null,
-      });
-      setSessions((current) => [
-        session,
-        ...current.filter((item) => item.id !== session.id),
-      ]);
-      setClaudeThreads((current) =>
-        current.filter((thread) => thread.id !== threadId),
-      );
-      router.push(`/session/${session.id}`);
-    } catch (importError) {
-      if (isAuthError(importError)) {
-        resetAuthState("Session expired. Log in again.");
-        return;
-      }
-      setError(
-        importError instanceof Error
-          ? importError.message
-          : "failed to import claude thread",
+          : `failed to import ${backend} thread`,
       );
     }
   }
@@ -616,14 +601,17 @@ export default function HomePage() {
           targetLabel={activeLaunchTarget?.name ?? null}
           launchTargetId={activeLaunchTargetId || null}
           supportedBackends={supportedBackends}
-          codexThreads={codexThreads}
-          codexThreadsLoading={codexThreadsLoading}
-          claudeThreads={claudeThreads}
-          claudeThreadsLoading={claudeThreadsLoading}
+          threadsByBackend={{
+            codex: codexThreads,
+            claude_code: claudeThreads,
+          }}
+          loadingByBackend={{
+            codex: codexThreadsLoading,
+            claude_code: claudeThreadsLoading,
+          }}
           onAttach={handleAttach}
           onCreate={handleCreate}
-          onImportCodexThread={handleImportCodexThread}
-          onImportClaudeThread={handleImportClaudeThread}
+          onImportThread={handleImportThread}
           onAuthFailure={() => resetAuthState("Session expired. Log in again.")}
         />
       ) : null}

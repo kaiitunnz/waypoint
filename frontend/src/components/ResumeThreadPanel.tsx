@@ -2,35 +2,37 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import {
-  Backend,
-  ClaudeThreadSummary,
-  CodexThreadSummary,
-} from "@/lib/types";
+import { humaniseBackend } from "@/lib/backends";
+import { Backend } from "@/lib/types";
 
-interface ResumeThreadPanelProps {
-  codexThreads: CodexThreadSummary[];
-  codexLoading: boolean;
-  claudeThreads: ClaudeThreadSummary[];
-  claudeLoading: boolean;
-  targetLabel: string | null;
-  supportedBackends: Backend[];
-  preferredBackend: Backend;
-  onImportCodexThread: (threadId: string) => Promise<void>;
-  onImportClaudeThread: (threadId: string) => Promise<void>;
-}
-
-type Filter = "all" | Backend;
-
-interface UnifiedThread {
+// Shared shape for the per-row data the panel displays. Codex and
+// Claude thread summaries happen to be identical today; declaring it
+// here keeps the panel structurally typed instead of branching on the
+// summary union.
+interface ThreadSummary {
   id: string;
-  backend: Backend;
   title: string;
   cwd: string;
   repo_name?: string | null;
   branch?: string | null;
   preview?: string | null;
+  created_at: string;
   updated_at: string;
+}
+
+interface ResumeThreadPanelProps {
+  threadsByBackend: Record<Backend, ThreadSummary[]>;
+  loadingByBackend: Record<Backend, boolean>;
+  targetLabel: string | null;
+  supportedBackends: Backend[];
+  preferredBackend: Backend;
+  onImportThread: (backend: Backend, threadId: string) => Promise<void>;
+}
+
+type Filter = "all" | Backend;
+
+interface UnifiedThread extends ThreadSummary {
+  backend: Backend;
 }
 
 const COLLAPSED_VISIBLE = 2;
@@ -41,65 +43,53 @@ const PAGE_SIZE_DESKTOP = 5;
 const PAGE_SIZE_MOBILE = 5;
 const MOBILE_BREAKPOINT = "(max-width: 720px)";
 
-const BACKEND_MARK: Record<Backend, string> = {
-  codex: "cdx",
-  claude_code: "cld",
-};
-
-const BACKEND_LABEL: Record<Backend, string> = {
-  codex: "Codex",
-  claude_code: "Claude",
-};
+// 3-letter glyph used by the per-row index chip. We derive it from the
+// human-readable label so a new backend gets reasonable defaults out
+// of the box; deployments can override per backend by editing
+// `humaniseBackend` (or, once the catalog is threaded through, by
+// surfacing `BackendDescriptor.badges.glyph`).
+function backendGlyph(id: Backend): string {
+  if (id === "codex") return "cdx";
+  if (id === "claude_code") return "cld";
+  return humaniseBackend(id).slice(0, 3).toLowerCase();
+}
 
 export function ResumeThreadPanel({
-  codexThreads,
-  codexLoading,
-  claudeThreads,
-  claudeLoading,
+  threadsByBackend,
+  loadingByBackend,
   targetLabel,
   supportedBackends,
   preferredBackend,
-  onImportCodexThread,
-  onImportClaudeThread,
+  onImportThread,
 }: ResumeThreadPanelProps) {
-  const showCodex = supportedBackends.includes("codex");
-  const showClaude = supportedBackends.includes("claude_code");
-  const dualBackend = showCodex && showClaude;
+  const dualBackend = supportedBackends.length >= 2;
 
   const allThreads: UnifiedThread[] = useMemo(() => {
     const merged: UnifiedThread[] = [];
-    if (showCodex) {
-      for (const t of codexThreads) {
-        merged.push({ ...t, backend: "codex" });
-      }
-    }
-    if (showClaude) {
-      for (const t of claudeThreads) {
-        merged.push({ ...t, backend: "claude_code" });
+    for (const id of supportedBackends) {
+      for (const t of threadsByBackend[id] ?? []) {
+        merged.push({ ...t, backend: id });
       }
     }
     merged.sort((a, b) =>
       a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0,
     );
     return merged;
-  }, [codexThreads, claudeThreads, showCodex, showClaude]);
+  }, [threadsByBackend, supportedBackends]);
 
-  const counts = useMemo(
-    () => ({
-      all: allThreads.length,
-      codex: showCodex ? codexThreads.length : 0,
-      claude_code: showClaude ? claudeThreads.length : 0,
-    }),
-    [allThreads.length, codexThreads.length, claudeThreads.length, showCodex, showClaude],
-  );
+  const counts = useMemo(() => {
+    const byBackend: Record<string, number> = { all: allThreads.length };
+    for (const id of supportedBackends) {
+      byBackend[id] = (threadsByBackend[id] ?? []).length;
+    }
+    return byBackend;
+  }, [allThreads.length, threadsByBackend, supportedBackends]);
 
   const initialFilter: Filter = dualBackend
     ? supportedBackends.includes(preferredBackend)
       ? preferredBackend
       : "all"
-    : showCodex
-      ? "codex"
-      : "claude_code";
+    : (supportedBackends[0] ?? "all");
 
   const [filter, setFilter] = useState<Filter>(initialFilter);
   const [filterTouched, setFilterTouched] = useState(false);
@@ -146,18 +136,14 @@ export function ResumeThreadPanel({
     ? filteredThreads.slice(pageStart, pageStart + pageSize)
     : filteredThreads.slice(0, COLLAPSED_VISIBLE);
 
-  const loading = codexLoading || claudeLoading;
+  const loading = supportedBackends.some((id) => loadingByBackend[id]);
   const totalForLabel = counts.all;
   const subhead = subheadFor(totalForLabel, dualBackend, targetLabel);
 
   async function handleImport(thread: UnifiedThread) {
     setImportingId(thread.id);
     try {
-      if (thread.backend === "codex") {
-        await onImportCodexThread(thread.id);
-      } else {
-        await onImportClaudeThread(thread.id);
-      }
+      await onImportThread(thread.backend, thread.id);
     } finally {
       setImportingId(null);
     }
@@ -188,20 +174,16 @@ export function ResumeThreadPanel({
               active={filter === "all"}
               onClick={() => chooseFilter("all")}
             />
-            <FilterChip
-              label="Codex"
-              count={counts.codex}
-              active={filter === "codex"}
-              disabled={counts.codex === 0}
-              onClick={() => chooseFilter("codex")}
-            />
-            <FilterChip
-              label="Claude"
-              count={counts.claude_code}
-              active={filter === "claude_code"}
-              disabled={counts.claude_code === 0}
-              onClick={() => chooseFilter("claude_code")}
-            />
+            {supportedBackends.map((id) => (
+              <FilterChip
+                key={id}
+                label={humaniseBackend(id)}
+                count={counts[id] ?? 0}
+                active={filter === id}
+                disabled={(counts[id] ?? 0) === 0}
+                onClick={() => chooseFilter(id)}
+              />
+            ))}
           </div>
         ) : null}
       </div>
@@ -220,17 +202,19 @@ export function ResumeThreadPanel({
         <div className="import-thread-list resume-thread-list">
           {visibleThreads.map((thread) => {
             const isImporting = importingId === thread.id;
+            const backendLabel = humaniseBackend(thread.backend);
             return (
               <article
                 className={`import-thread-row resume-thread-row is-${thread.backend}`}
                 key={`${thread.backend}:${thread.id}`}
+                data-backend={thread.backend}
               >
                 <span
                   className={`import-thread-index resume-thread-mark is-${thread.backend}`}
-                  aria-label={BACKEND_LABEL[thread.backend]}
-                  title={BACKEND_LABEL[thread.backend]}
+                  aria-label={backendLabel}
+                  title={backendLabel}
                 >
-                  {BACKEND_MARK[thread.backend]}
+                  {backendGlyph(thread.backend)}
                 </span>
                 <div className="import-thread-body">
                   <div className="import-thread-headline">
@@ -377,7 +361,7 @@ function emptyHintFor(
   if (filter === "all" || !dualBackend) {
     return `No importable threads found${where}.`;
   }
-  return `No ${BACKEND_LABEL[filter]} sessions${where}.`;
+  return `No ${humaniseBackend(filter)} sessions${where}.`;
 }
 
 function formatRelativeTime(value: string): string {

@@ -365,7 +365,7 @@ cd frontend && npm run lint
 
 Then a manual flow:
 
-1. `./scripts/dev-stack.sh restart`
+1. `./scripts/waypoint.sh restart`
 2. Open the frontend; the new backend appears in the picker on the
    launch panel and the `humaniseBackend` fallback renders its label.
 3. Launch a session. Verify events arrive with `metadata.version=1`

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_DIR="${ROOT_DIR}/backend"
 FRONTEND_DIR="${ROOT_DIR}/frontend"
-STATE_DIR="${ROOT_DIR}/tmp/dev-stack"
+STATE_DIR="${ROOT_DIR}/tmp/waypoint"
 RUN_DIR="${STATE_DIR}/run"
 LOG_DIR="${STATE_DIR}/logs"
 ENV_FILE="${ROOT_DIR}/.env"
@@ -25,9 +25,10 @@ FRONTEND_STARTED_THIS_RUN=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/dev-stack.sh <command> [service]
+Usage: scripts/waypoint.sh <command> [service]
 
 Commands:
+  pwd             Print the repository root
   start           Start backend and frontend in the background
   stop            Stop backend and frontend
   restart         Restart backend and frontend
@@ -38,10 +39,10 @@ Environment overrides:
   WAYPOINT_STACK_BACKEND_HOST      Default: 0.0.0.0
   WAYPOINT_STACK_BACKEND_PORT      Default: 8787
   WAYPOINT_STACK_CONFIG            Default: backend/waypoint.yaml
-  WAYPOINT_STACK_BACKEND_DATA_DIR  Default: tmp/dev-stack/backend-data
+  WAYPOINT_STACK_BACKEND_DATA_DIR  Default: tmp/waypoint/backend-data
   WAYPOINT_STACK_FRONTEND_PORT     Default: 3000
   WAYPOINT_STACK_START_TIMEOUT     Default: 30
-  WAYPOINT_STACK_UV_CACHE_DIR      Default: tmp/dev-stack/uv-cache
+  WAYPOINT_STACK_UV_CACHE_DIR      Default: tmp/waypoint/uv-cache
 
 The script loads ${ENV_FILE} if it exists before applying defaults.
 EOF
@@ -54,6 +55,10 @@ load_env_file() {
     source "${ENV_FILE}"
     set +a
   fi
+}
+
+print_root_dir() {
+  printf '%s\n' "${ROOT_DIR}"
 }
 
 init_config() {
@@ -380,6 +385,9 @@ main() {
   load_env_file
   init_config
   case "${command}" in
+    pwd)
+      print_root_dir
+      ;;
     start)
       trap stop_started_services ERR
       start_stack
@@ -403,7 +411,7 @@ main() {
     *)
       echo "unknown command: ${command}" >&2
       usage >&2
-      exit 1
+      return 1
       ;;
   esac
 }

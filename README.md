@@ -122,17 +122,17 @@ When the frontend is opened from a phone, it now infers the backend URL from the
 For a repo-local workflow that feels closer to `docker compose up/down`, use:
 
 ```bash
-./scripts/dev-stack.sh start
-./scripts/dev-stack.sh status
-./scripts/dev-stack.sh logs
-./scripts/dev-stack.sh stop
+./scripts/waypoint.sh start
+./scripts/waypoint.sh status
+./scripts/waypoint.sh logs
+./scripts/waypoint.sh stop
 ```
 
 The script:
 
 - starts `uv run waypoint serve` in `backend/`
 - runs `npm run build` and then starts `npm run start` in `frontend/`
-- stores PID files, logs, backend runtime data, and a local `uv` cache under `tmp/dev-stack/`
+- stores PID files, logs, backend runtime data, and a local `uv` cache under `tmp/waypoint/`
 - waits for backend `http://127.0.0.1:8787/health` and the frontend root URL before reporting success
 
 Supported commands are `start`, `stop`, `restart`, `status`, and `logs [backend|frontend]`.
@@ -146,9 +146,9 @@ cp .env.example .env
 Useful overrides:
 
 ```bash
-WAYPOINT_STACK_BACKEND_PORT=8788 WAYPOINT_STACK_FRONTEND_PORT=3001 ./scripts/dev-stack.sh start
-WAYPOINT_STACK_CONFIG=/absolute/path/to/waypoint.yaml ./scripts/dev-stack.sh restart
-WAYPOINT_STACK_BACKEND_DATA_DIR=/tmp/waypoint-data ./scripts/dev-stack.sh start
+WAYPOINT_STACK_BACKEND_PORT=8788 WAYPOINT_STACK_FRONTEND_PORT=3001 ./scripts/waypoint.sh start
+WAYPOINT_STACK_CONFIG=/absolute/path/to/waypoint.yaml ./scripts/waypoint.sh restart
+WAYPOINT_STACK_BACKEND_DATA_DIR=/tmp/waypoint-data ./scripts/waypoint.sh start
 ```
 
 This is intended for local development. If you want a machine-managed background service on macOS, keep using `backend/scripts/install_launchd.sh` for the backend and treat the frontend separately.

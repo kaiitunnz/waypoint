@@ -1,51 +1,22 @@
-"""Legacy plugin shims.
+"""Default registry assembly.
 
-Step 1 of the refactor wires the registry without changing behaviour.
-Each shim advertises today's per-backend transport adapter and a
-capability descriptor that mirrors the hard-coded flags those adapters
-expose. Steps 3-5 progressively replace these shims with real plugin
-classes (e.g. ``ClaudeCodePlugin``, ``CodexPlugin``) that own
-backend-specific lifecycle/control/discovery methods.
+Used to host legacy shim plugin classes during Steps 1-4 of the
+refactor; now that every built-in backend has its own plugin module
+this file is just the registration entry point. Kept under the
+``_legacy_shims`` name for one release so any callers that imported
+``build_default_registry`` from here keep resolving; the next pass
+moves it to ``backends/registry.py``.
 """
 
-from typing import TYPE_CHECKING
-
-from waypoint.backends.capabilities import BackendCapabilities, ModelSource
 from waypoint.backends.claude_code.plugin import ClaudeCodePlugin
 from waypoint.backends.codex.plugin import CodexPlugin
 from waypoint.backends.registry import BackendRegistry
-from waypoint.transports.base import TransportAdapter
-
-if TYPE_CHECKING:
-    from waypoint.runtime import SessionRuntime
-
-
-class _LegacyTmuxPlugin:
-    id = "tmux"
-    transport_id = "tmux"
-    label = "Tmux"
-    capabilities = BackendCapabilities(
-        is_structured=False,
-        supports_resume=True,
-        supports_set_model_inline=False,
-        supports_set_effort_inline=False,
-        supports_set_permission_mode_inline=False,
-        supports_thread_discovery=False,
-        supports_thread_import=False,
-        supports_slash_compact=False,
-        model_source=ModelSource.NONE,
-        badges={"glyph": "T", "color": "#94a3b8"},
-    )
-
-    def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
-        from waypoint.transports.tmux import TmuxTransport
-
-        return TmuxTransport(runtime)
+from waypoint.backends.tmux.plugin import TmuxPlugin
 
 
 def build_default_registry() -> BackendRegistry:
     registry = BackendRegistry()
     registry.register(ClaudeCodePlugin())
     registry.register(CodexPlugin())
-    registry.register(_LegacyTmuxPlugin())
+    registry.register(TmuxPlugin())
     return registry

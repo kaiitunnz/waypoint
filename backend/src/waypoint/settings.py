@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 from waypoint.backends.plugin_config import PluginConfig
 from waypoint.backends.registry import get_registry
@@ -79,13 +79,12 @@ class Settings(BaseModel):
     cors_origins: list[str] = Field(default_factory=lambda: list(DEFAULT_CORS_ORIGINS))
     cors_allow_origin_regex: str | None = DEFAULT_CORS_ORIGIN_REGEX
     ssh_targets: list[SshLaunchTargetConfig] = Field(default_factory=list)
-    # Per-plugin configuration blocks keyed by plugin id; each value is
-    # validated against the plugin's ``config_schema`` and exposed via
-    # :meth:`plugin_config`. Missing entries fall back to the schema's
-    # defaults so plugin-specific YAML stays optional. The raw dict here
-    # is the wire shape (parsed from YAML); the typed instances are
-    # cached in ``_resolved_plugin_configs``.
-    plugin_configs: dict[BackendId, dict[str, Any]] = Field(default_factory=dict)
+    # Per-plugin configuration blocks keyed by plugin id. Each raw YAML
+    # block is dispatched at validation time to the plugin's
+    # ``config_schema`` so subclass fields (e.g. claude's curated model
+    # catalogue) survive ``extra="forbid"``. Missing entries fall back
+    # to the schema's defaults so plugin-specific YAML stays optional.
+    plugin_configs: dict[BackendId, PluginConfig] = Field(default_factory=dict)
     # Default page size for `/api/sessions/{id}/events` measured in *logical
     # chat messages* (agent_output deltas with the same item_id collapse
     # into one, tool_call+tool_result pairs share an item_id, everything
@@ -95,21 +94,21 @@ class Settings(BaseModel):
     # backend emitted per message.
     chat_page_messages: int = Field(default=20, ge=1, le=200)
 
-    _resolved_plugin_configs: dict[str, PluginConfig] = PrivateAttr(
-        default_factory=dict
-    )
-
-    @model_validator(mode="after")
-    def _resolve_plugin_configs_eagerly(self) -> "Settings":
-        # Eager validation surfaces YAML errors at startup rather than at
-        # first runtime access; the typed instances live in a private
-        # attribute so the public ``plugin_configs`` field stays the raw
-        # wire shape that round-trips through ``model_dump``.
+    @field_validator("plugin_configs", mode="before")
+    @classmethod
+    def _dispatch_plugin_configs(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
         registry = get_registry()
-        for plugin_id, raw in self.plugin_configs.items():
+        dispatched: dict[str, PluginConfig] = {}
+        for plugin_id, raw in value.items():
+            if not isinstance(plugin_id, str) or not registry.has_backend(plugin_id):
+                raise ValueError(f"unknown backend: {plugin_id!r}")
             schema = registry.get(plugin_id).config_schema
-            self._resolved_plugin_configs[plugin_id] = schema.model_validate(raw or {})
-        return self
+            dispatched[plugin_id] = (
+                raw if isinstance(raw, schema) else schema.model_validate(raw or {})
+            )
+        return dispatched
 
     @property
     def database_path(self) -> Path:
@@ -126,13 +125,10 @@ class Settings(BaseModel):
         ``config_schema`` when the user hasn't supplied a block in
         ``waypoint.yaml``.
         """
-        cached = self._resolved_plugin_configs.get(plugin_id)
-        if cached is not None:
-            return cached
-        plugin = get_registry().get(plugin_id)
-        cfg = plugin.config_schema()
-        self._resolved_plugin_configs[plugin_id] = cfg
-        return cfg
+        cfg = self.plugin_configs.get(plugin_id)
+        if cfg is not None:
+            return cfg
+        return get_registry().get(plugin_id).config_schema()
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

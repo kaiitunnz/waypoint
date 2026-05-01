@@ -20,7 +20,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 from waypoint.backends.plugin_config import PluginLaunchTargetConfig
 from waypoint.backends.registry import get_registry
@@ -68,27 +68,28 @@ class SshLaunchTargetConfig(BaseModel):
     # of a key means "this target supports the plugin"; an empty
     # mapping means "supports every non-fallback registered plugin
     # with defaults" so a minimal target spec (just ``ssh_destination``)
-    # Just Works. Each value is validated against the plugin's
-    # ``launch_target_schema`` and exposed as a typed instance via
-    # :meth:`plugin_config`.
-    plugin_configs: dict[BackendId, dict[str, Any]] = Field(default_factory=dict)
-
-    _resolved_plugin_configs: dict[str, PluginLaunchTargetConfig] = PrivateAttr(
+    # Just Works. Each raw YAML block is dispatched at validation time
+    # to the plugin's ``launch_target_schema`` so subclass fields (e.g.
+    # codex's ``config_overrides``) survive ``extra="forbid"``.
+    plugin_configs: dict[BackendId, PluginLaunchTargetConfig] = Field(
         default_factory=dict
     )
 
-    @model_validator(mode="after")
-    def _resolve_plugin_configs_eagerly(self) -> "SshLaunchTargetConfig":
-        # Eager validation surfaces YAML errors at startup rather than
-        # at first runtime access; the typed instances live in a
-        # private attribute so the public ``plugin_configs`` field
-        # stays the raw wire shape that round-trips through
-        # ``model_dump``.
+    @field_validator("plugin_configs", mode="before")
+    @classmethod
+    def _dispatch_plugin_configs(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
         registry = get_registry()
-        for plugin_id, raw in self.plugin_configs.items():
+        dispatched: dict[str, PluginLaunchTargetConfig] = {}
+        for plugin_id, raw in value.items():
+            if not isinstance(plugin_id, str) or not registry.has_backend(plugin_id):
+                raise ValueError(f"unknown backend: {plugin_id!r}")
             schema = registry.get(plugin_id).launch_target_schema
-            self._resolved_plugin_configs[plugin_id] = schema.model_validate(raw or {})
-        return self
+            dispatched[plugin_id] = (
+                raw if isinstance(raw, schema) else schema.model_validate(raw or {})
+            )
+        return dispatched
 
     def supported_plugins(self) -> list[str]:
         """Plugin ids this target accepts managed launches for.
@@ -118,13 +119,10 @@ class SshLaunchTargetConfig(BaseModel):
         block in ``waypoint.yaml`` (i.e. the plugin is implicitly
         supported via the empty-``plugin_configs`` default).
         """
-        cached = self._resolved_plugin_configs.get(plugin_id)
-        if cached is not None:
-            return cached
-        plugin = get_registry().get(plugin_id)
-        cfg = plugin.launch_target_schema()
-        self._resolved_plugin_configs[plugin_id] = cfg
-        return cfg
+        cfg = self.plugin_configs.get(plugin_id)
+        if cfg is not None:
+            return cfg
+        return get_registry().get(plugin_id).launch_target_schema()
 
     def remote_bin_for(self, plugin_id: str, default: str | None = None) -> str | None:
         """Convenience for the common case: get the remote binary path

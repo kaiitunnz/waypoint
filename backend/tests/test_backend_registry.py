@@ -98,14 +98,26 @@ def test_registry_rejects_duplicate_id() -> None:
 
     registry = BackendRegistry()
 
+    from pydantic import BaseModel
+
     class Stub:
         id = "stub"
         transport_id = "stub-tr"
         label = "Stub"
+        import_request_schema: type[BaseModel] | None = None
         capabilities = BackendCapabilities(is_structured=False, supports_resume=False)
 
         def transport_view(self, runtime: Any) -> Any:
             raise NotImplementedError
+
+        def is_available_for_managed_launch(self, runtime: Any) -> bool:
+            return True
+
+        async def terminate_session(self, runtime: Any, session: Any) -> None:
+            return None
+
+        def on_session_deleted(self, runtime: Any, session: Any) -> None:
+            return None
 
         def validate_permission_mode(self, mode: str | None) -> str | None:
             return None
@@ -171,7 +183,9 @@ def test_registry_rejects_duplicate_id() -> None:
         async def import_thread(self, runtime: Any, request: Any) -> Any:
             raise NotImplementedError
 
-        async def create_session(self, runtime: Any, request: Any, **kwargs: Any) -> Any:
+        async def create_session(
+            self, runtime: Any, request: Any, **kwargs: Any
+        ) -> Any:
             raise NotImplementedError
 
     registry.register(Stub())

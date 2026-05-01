@@ -12,7 +12,6 @@ from waypoint.schemas import (
     SessionInputRequest,
     SessionRecord,
     SessionSource,
-    SessionStatus,
 )
 from waypoint.transports.base import TransportAdapter
 
@@ -85,6 +84,3 @@ class TmuxTransport(TransportAdapter):
             return ""
         snapshot = raw_log_path.read_text(encoding="utf-8", errors="ignore")
         return self._runtime.normalizer.clean(snapshot)
-
-    def status_after_send(self) -> SessionStatus:
-        return SessionStatus.RUNNING

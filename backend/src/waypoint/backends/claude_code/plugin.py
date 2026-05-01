@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, HTTPException, Request, status
+from pydantic import BaseModel
 
 from waypoint.backends.capabilities import (
     BackendCapabilities,
@@ -65,11 +66,13 @@ class ClaudeCodePlugin:
     id = "claude_code"
     transport_id = "claude_cli"
     label = "Claude Code"
+    import_request_schema: type[BaseModel] | None = ClaudeThreadImportRequest
     capabilities = BackendCapabilities(
         is_structured=True,
         supports_resume=False,
         supports_set_model_inline=True,
         supports_set_effort_inline=False,
+        supports_set_effort_with_restart=True,
         supports_set_permission_mode_inline=True,
         supports_thread_discovery=True,
         supports_thread_import=True,
@@ -102,9 +105,7 @@ class ClaudeCodePlugin:
         try:
             hook = ensure_claude_hook_bundle(runtime.settings.data_dir)
         except Exception:  # noqa: BLE001
-            log.exception(
-                "claude hook bundle setup failed; claude support disabled"
-            )
+            log.exception("claude hook bundle setup failed; claude support disabled")
             return
         runtime.claude_hook = hook
         hook_url = f"http://127.0.0.1:{runtime.settings.port}"
@@ -117,6 +118,27 @@ class ClaudeCodePlugin:
         runtime.claude_thread_enumerator = RemoteClaudeThreadEnumerator(
             hook.thread_enumerator_path
         )
+
+    def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
+        # The Claude adapter is wired up lazily by setup() — if the
+        # PreToolUse hook bundle failed to materialise we leave
+        # runtime.claude=None and the runtime falls through to the tmux
+        # plugin so the user still gets a session.
+        return runtime.claude is not None
+
+    async def terminate_session(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        if runtime.claude is not None:
+            await runtime.claude.terminate_session(session.id)
+
+    def on_session_deleted(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        # Claude caches per-launch-target thread listings remotely;
+        # invalidate so a re-import after delete sees the freed slot.
+        if session.launch_target_id and runtime.claude_thread_enumerator is not None:
+            runtime.claude_thread_enumerator.invalidate(session.launch_target_id)
 
     def register_routes(self, app: FastAPI, context: Any) -> None:
         # Mount the PreToolUse approval webhook here so api.py stays
@@ -238,7 +260,9 @@ class ClaudeCodePlugin:
     ) -> dict[str, Any]:
         default_model = runtime.settings.default_models.get(self.id)
         default_effort = runtime.settings.default_efforts.get(self.id)
-        options = [opt.model_dump(mode="json") for opt in runtime.settings.claude_models]
+        options = [
+            opt.model_dump(mode="json") for opt in runtime.settings.claude_models
+        ]
         if default_model is None:
             for opt in runtime.settings.claude_models:
                 if opt.is_default:
@@ -332,8 +356,7 @@ class ClaudeCodePlugin:
                 type="session_list_update",
                 payload={
                     "sessions": [
-                        item.model_dump(mode="json")
-                        for item in runtime.list_sessions()
+                        item.model_dump(mode="json") for item in runtime.list_sessions()
                     ]
                 },
             )

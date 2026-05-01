@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from pydantic import BaseModel
+
 from waypoint.backends.capabilities import BackendCapabilities
 from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
@@ -25,6 +27,12 @@ class BackendPlugin(Protocol):
     transport_id: str
     label: str
     capabilities: BackendCapabilities
+    # Pydantic model used by the dispatcher in api.py to validate the
+    # JSON body of POST /api/backends/{id}/sessions/import. ``None`` for
+    # plugins that don't accept thread imports — the dispatcher gates on
+    # ``capabilities.supports_thread_import`` first, so this only needs
+    # to be set when that capability is True.
+    import_request_schema: type[BaseModel] | None
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
         """Return a TransportAdapter routing send/interrupt/etc. for this plugin."""
@@ -176,6 +184,39 @@ class BackendPlugin(Protocol):
         Plugins use this to build their adapter, hook bundles, and any
         per-process resources. Default is a no-op so plugins that
         don't need bootstrapping (Tmux fallback) opt out.
+        """
+        ...
+
+    def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
+        """Whether the plugin is ready to spawn a fresh managed session.
+
+        Structured backends use this to signal that their adapter
+        bootstrap (Claude's hook bundle, a future OAuth handshake, …)
+        succeeded. The runtime falls back to the tmux plugin when the
+        answer is False, preserving the ``backend == "claude_code"``
+        fallback path without naming a specific backend.
+        """
+        ...
+
+    async def terminate_session(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        """Tear down any in-process state for ``session``.
+
+        Called before re-restoring an EXITED/ERROR session so the prior
+        adapter slot (Claude/Codex stream watchers, subprocess handles)
+        is dropped instead of left dangling. Default is a no-op.
+        """
+        ...
+
+    def on_session_deleted(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        """Hook fired after a session row is deleted from storage.
+
+        Plugins that cache cross-session metadata (e.g. Claude's remote
+        thread enumerator) invalidate here so the next listing reflects
+        the deletion.
         """
         ...
 

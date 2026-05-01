@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Never
 
 from fastapi import HTTPException, status
+from pydantic import BaseModel
 
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
 from waypoint.backends.tmux.adapter import TmuxError
@@ -43,6 +44,7 @@ class TmuxPlugin:
     id = "tmux"
     transport_id = "tmux"
     label = "Tmux"
+    import_request_schema: type[BaseModel] | None = None
     capabilities = BackendCapabilities(
         is_structured=False,
         supports_resume=True,
@@ -65,6 +67,19 @@ class TmuxPlugin:
         return None
 
     def register_routes(self, app: Any, context: Any) -> None:
+        return None
+
+    def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
+        return True
+
+    async def terminate_session(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        return None
+
+    def on_session_deleted(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
         return None
 
     def validate_permission_mode(self, mode: str | None) -> str | None:

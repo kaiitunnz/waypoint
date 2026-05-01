@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from codex_app_server.client import AppServerClient
 from fastapi import HTTPException, status
+from pydantic import BaseModel
 
 from waypoint.backends.capabilities import (
     BackendCapabilities,
@@ -56,6 +57,7 @@ class CodexPlugin:
     id = "codex"
     transport_id = "codex_app_server"
     label = "Codex"
+    import_request_schema: type[BaseModel] | None = CodexThreadImportRequest
     capabilities = BackendCapabilities(
         is_structured=True,
         supports_resume=False,
@@ -68,9 +70,7 @@ class CodexPlugin:
         permission_modes=CODEX_PERMISSION_MODE_SPECS,
         effort_levels=(),  # discovered per-model from `model/list`
         model_source=ModelSource.LIVE_RPC,
-        slash_commands=(
-            SlashCommandSpec("compact", "Compact the current thread"),
-        ),
+        slash_commands=(SlashCommandSpec("compact", "Compact the current thread"),),
         badges={"glyph": "X", "color": "#34d399"},
         cli_binary="codex",
         target_aliases=("codex",),
@@ -92,6 +92,19 @@ class CodexPlugin:
         return None
 
     def register_routes(self, app: Any, context: Any) -> None:
+        return None
+
+    def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
+        return True
+
+    async def terminate_session(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        await runtime.codex.terminate_session(session.id)
+
+    def on_session_deleted(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
         return None
 
     def validate_permission_mode(self, mode: str | None) -> str | None:
@@ -198,9 +211,7 @@ class CodexPlugin:
             status=SessionStatus.RUNNING,
             metadata={"builtin_command": "/compact"},
         )
-        return runtime.storage.update_session(
-            session.id, status=SessionStatus.RUNNING
-        )
+        return runtime.storage.update_session(session.id, status=SessionStatus.RUNNING)
 
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -304,7 +315,9 @@ class CodexPlugin:
             return None
         return build_remote_codex_client_factory(launch_target)
 
-    def client_cwd(self, runtime: "SessionRuntime", launch_target_id: str | None) -> str:
+    def client_cwd(
+        self, runtime: "SessionRuntime", launch_target_id: str | None
+    ) -> str:
         launch_target = runtime._find_launch_target(launch_target_id)
         if launch_target is not None:
             return launch_target.default_cwd

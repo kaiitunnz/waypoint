@@ -29,6 +29,12 @@ class BackendCapabilities:
     supports_terminate: bool = True
     supports_set_model_inline: bool = False
     supports_set_effort_inline: bool = False
+    # The plugin can change effort by restarting the protocol process
+    # (Claude: stop CLI + respawn with a new --effort) rather than
+    # applying it mid-stream. Effectively widens the gate around
+    # ``apply_effort`` so plugins that surface a "swap with restart"
+    # path don't have to also claim ``supports_set_effort_inline``.
+    supports_set_effort_with_restart: bool = False
     supports_set_permission_mode_inline: bool = False
     supports_thread_discovery: bool = False
     supports_thread_import: bool = False

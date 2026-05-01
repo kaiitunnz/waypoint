@@ -32,7 +32,10 @@ from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_PERMISSION_MODES,
 )
 from waypoint.backends.claude_code.remote import build_remote_claude_launch_factory
-from waypoint.backends.claude_code.runtime_hook import ensure_claude_hook_bundle
+from waypoint.backends.claude_code.runtime_hook import (
+    ClaudeHookBundle,
+    ensure_claude_hook_bundle,
+)
 from waypoint.backends.claude_code.threads import (
     ClaudeThreadInfo,
     find_local_claude_thread,
@@ -84,45 +87,66 @@ class ClaudeCodePlugin:
         target_aliases=("claude",),
     )
 
+    def __init__(self) -> None:
+        self.adapter: ClaudeCliAdapter | None = None
+        self.hook: ClaudeHookBundle | None = None
+        self.thread_enumerator: RemoteClaudeThreadEnumerator | None = None
+
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
         # Imported lazily to avoid the cycle: transport → adapter →
         # permission_modes → backends/claude_code/__init__ → plugin.
         from waypoint.backends.claude_code.transport import ClaudeTransport
 
-        return ClaudeTransport(runtime)
+        return ClaudeTransport(runtime, self)
 
     def setup(self, runtime: "SessionRuntime") -> None:
         # Build the PreToolUse webhook bundle, the CLI adapter, and the
         # remote thread enumerator — collectively the "claude side" of
         # the runtime. Resilient to ensure_claude_hook_bundle failing
         # (read-only data dir, missing scripts, etc.); we log and
-        # leave runtime.claude=None so the runtime keeps working
-        # without Claude support.
-        if runtime.claude is not None:
-            return  # already provisioned (e.g. tests injected a fake)
+        # leave self.adapter=None so the runtime keeps working without
+        # Claude support and the tmux fallback path takes over.
         try:
             hook = ensure_claude_hook_bundle(runtime.settings.data_dir)
         except Exception:  # noqa: BLE001
             log.exception("claude hook bundle setup failed; claude support disabled")
+            self.hook = None
+            self.adapter = None
+            self.thread_enumerator = None
             return
-        runtime.claude_hook = hook
+        self.hook = hook
         hook_url = f"http://127.0.0.1:{runtime.settings.port}"
-        runtime.claude = ClaudeCliAdapter(
+        self.adapter = ClaudeCliAdapter(
             runtime._emit_adapter_event,
             hook_settings_path=hook.settings_path,
             hook_secret=hook.secret,
             hook_url=hook_url,
         )
-        runtime.claude_thread_enumerator = RemoteClaudeThreadEnumerator(
+        self.thread_enumerator = RemoteClaudeThreadEnumerator(
             hook.thread_enumerator_path
         )
+
+    async def shutdown(self, runtime: "SessionRuntime") -> None:
+        if self.adapter is not None:
+            await self.adapter.shutdown()
+            self.adapter = None
+        self.hook = None
+        self.thread_enumerator = None
+
+    def _require_adapter(self) -> ClaudeCliAdapter:
+        if self.adapter is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="claude adapter is not initialized",
+            )
+        return self.adapter
 
     def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
         # The Claude adapter is wired up lazily by setup() — if the
         # PreToolUse hook bundle failed to materialise we leave
-        # runtime.claude=None and the runtime falls through to the tmux
+        # self.adapter=None and the runtime falls through to the tmux
         # plugin so the user still gets a session.
-        return runtime.claude is not None
+        return self.adapter is not None
 
     def remote_executable(self, launch_target: SshLaunchTargetConfig) -> str:
         return launch_target.claude_bin
@@ -130,16 +154,16 @@ class ClaudeCodePlugin:
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        if runtime.claude is not None:
-            await runtime.claude.terminate_session(session.id)
+        if self.adapter is not None:
+            await self.adapter.terminate_session(session.id)
 
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
         # Claude caches per-launch-target thread listings remotely;
         # invalidate so a re-import after delete sees the freed slot.
-        if session.launch_target_id and runtime.claude_thread_enumerator is not None:
-            runtime.claude_thread_enumerator.invalidate(session.launch_target_id)
+        if session.launch_target_id and self.thread_enumerator is not None:
+            self.thread_enumerator.invalidate(session.launch_target_id)
 
     def register_routes(self, app: FastAPI, context: Any) -> None:
         # Mount the PreToolUse approval webhook here so api.py stays
@@ -150,13 +174,13 @@ class ClaudeCodePlugin:
         @app.post("/api/internal/hooks/claude/approval")
         async def claude_hook_approval(request: Request) -> Any:
             secret = request.headers.get("x-waypoint-hook-secret", "")
-            hook = context.runtime.claude_hook
+            hook = self.hook
             if hook is None or not hook.secret or secret != hook.secret:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="invalid hook secret",
                 )
-            if context.runtime.claude is None:
+            if self.adapter is None:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="claude adapter is not initialized",
@@ -167,7 +191,7 @@ class ClaudeCodePlugin:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST, detail="invalid json"
                 ) from exc
-            return await context.runtime.claude.await_approval(payload)
+            return await self.adapter.await_approval(payload)
 
     def validate_permission_mode(self, mode: str | None) -> str | None:
         if mode is None or mode == "":
@@ -195,13 +219,13 @@ class ClaudeCodePlugin:
     async def apply_permission_mode(
         self, runtime: "SessionRuntime", session: SessionRecord, mode: str
     ) -> None:
-        if runtime.claude is None:
+        if self.adapter is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="claude adapter is not configured on this backend",
             )
         try:
-            await runtime.claude.set_permission_mode(session.id, mode)
+            await self.adapter.set_permission_mode(session.id, mode)
         except Exception as exc:  # noqa: BLE001 — surface adapter errors as 400
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
@@ -213,13 +237,13 @@ class ClaudeCodePlugin:
         session: SessionRecord,
         model: str | None,
     ) -> None:
-        if runtime.claude is None:
+        if self.adapter is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="claude adapter is not configured on this backend",
             )
         try:
-            await runtime.claude.set_model(session.id, model)
+            await self.adapter.set_model(session.id, model)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
@@ -234,7 +258,7 @@ class ClaudeCodePlugin:
         """Returns True when the runtime should also publish a system
         note describing the effort swap; False signals "nothing changed".
         """
-        if runtime.claude is None:
+        if self.adapter is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="claude adapter is not configured on this backend",
@@ -246,7 +270,7 @@ class ClaudeCodePlugin:
         if effort == (session.effort or None):
             return False
         try:
-            await runtime.claude.set_effort(session.id, effort)
+            await self.adapter.set_effort(session.id, effort)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
@@ -298,13 +322,13 @@ class ClaudeCodePlugin:
         tool_use_id: str | None,
         answers: list[dict[str, Any]] | None,
     ) -> SessionRecord:
-        if runtime.claude is None:
+        if self.adapter is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="answer-question is only supported for Claude sessions",
             )
         try:
-            handled = await runtime.claude.respond_to_ask_question(
+            handled = await self.adapter.respond_to_ask_question(
                 session.id, answer, tool_use_id
             )
         except ClaudeCliError as exc:
@@ -343,9 +367,9 @@ class ClaudeCodePlugin:
         # has already flipped the binary's permission mode to default
         # via set_permission_mode. Sync storage + broadcast so the UI
         # pill reflects the change instead of staying stuck on "plan".
-        if runtime.claude is None:
+        if self.adapter is None:
             return
-        current = runtime.claude.session_permission_mode(session.id)
+        current = self.adapter.session_permission_mode(session.id)
         if current is None:
             return
         previous = session.permission_mode or "default"
@@ -366,7 +390,7 @@ class ClaudeCodePlugin:
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        if runtime.claude is None:
+        if self.adapter is None:
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
             await runtime._record_system_event(
                 session.id,
@@ -394,7 +418,7 @@ class ClaudeCodePlugin:
             )
             return
         try:
-            await runtime.claude.restore_session(
+            await self.adapter.restore_session(
                 session.id,
                 session.cwd,
                 session.thread_id,
@@ -468,16 +492,12 @@ class ClaudeCodePlugin:
 
     def launch_factory(self, runtime: "SessionRuntime", launch_target_id: str | None):
         launch_target = runtime._find_launch_target(launch_target_id)
-        if (
-            launch_target is None
-            or runtime.claude_hook is None
-            or runtime.claude is None
-        ):
+        if launch_target is None or self.hook is None or self.adapter is None:
             return None
         return build_remote_claude_launch_factory(
             launch_target,
-            hook_script_path=runtime.claude_hook.hook_script_path,
-            hook_secret=runtime.claude_hook.secret,
+            hook_script_path=self.hook.hook_script_path,
+            hook_secret=self.hook.secret,
             local_backend_port=runtime.settings.port,
         )
 
@@ -517,7 +537,7 @@ class ClaudeCodePlugin:
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
     ) -> list[ClaudeThreadSummary]:
-        if runtime.claude is None:
+        if self.adapter is None:
             return []
         imported = {
             (session.launch_target_id, session.thread_id)
@@ -528,9 +548,9 @@ class ClaudeCodePlugin:
             infos = await asyncio.to_thread(list_local_claude_threads)
         else:
             target = runtime._resolve_launch_target(launch_target_id, self.id)
-            if target is None or runtime.claude_thread_enumerator is None:
+            if target is None or self.thread_enumerator is None:
                 return []
-            infos = await runtime.claude_thread_enumerator.list(target)
+            infos = await self.thread_enumerator.list(target)
         return [
             self._thread_summary(info)
             for info in infos
@@ -552,7 +572,7 @@ class ClaudeCodePlugin:
         resolved_model: str | None,
         resolved_effort: str | None,
     ) -> SessionRecord:
-        if runtime.claude is None:
+        if self.adapter is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="claude adapter is not configured on this backend",
@@ -583,7 +603,7 @@ class ClaudeCodePlugin:
         )
         runtime.storage.create_session(session)
         try:
-            await runtime.claude.start_session(
+            await self.adapter.start_session(
                 session_id,
                 request.cwd,
                 claude_session_id,
@@ -610,7 +630,7 @@ class ClaudeCodePlugin:
         runtime: "SessionRuntime",
         request: ClaudeThreadImportRequest,
     ) -> SessionRecord:
-        if runtime.claude is None:
+        if self.adapter is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="claude adapter is not initialized",
@@ -629,14 +649,12 @@ class ClaudeCodePlugin:
         if launch_target is None:
             info = await asyncio.to_thread(find_local_claude_thread, request.thread_id)
         else:
-            if runtime.claude_thread_enumerator is None:
+            if self.thread_enumerator is None:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="claude thread enumerator is not initialized",
                 )
-            info = await runtime.claude_thread_enumerator.find(
-                launch_target, request.thread_id
-            )
+            info = await self.thread_enumerator.find(launch_target, request.thread_id)
         if info is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -683,7 +701,7 @@ class ClaudeCodePlugin:
         )
         runtime.storage.create_session(session)
         try:
-            await runtime.claude.restore_session(
+            await self.adapter.restore_session(
                 session.id,
                 cwd,
                 info.id,
@@ -711,8 +729,8 @@ class ClaudeCodePlugin:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"failed to import claude thread: {exc}",
             ) from exc
-        if launch_target is not None and runtime.claude_thread_enumerator is not None:
-            runtime.claude_thread_enumerator.invalidate(launch_target.id)
+        if launch_target is not None and self.thread_enumerator is not None:
+            self.thread_enumerator.invalidate(launch_target.id)
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
         await runtime._record_system_event(
             session.id,

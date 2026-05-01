@@ -7,25 +7,13 @@ from collections import defaultdict
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastapi import HTTPException, status
 
 from waypoint.backends import BackendRegistry, get_registry
-from waypoint.backends.codex.adapter import CodexAppServerAdapter
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
 from waypoint.backends.tmux.normalize import TerminalNormalizer
-
-if TYPE_CHECKING:
-    # Type-only references — Claude's adapter, hook bundle, and remote
-    # thread enumerator are wired up by the plugin's `setup()` (the
-    # PreToolUse hook bundle has to land on disk first), so the runtime
-    # only needs the names for annotations.
-    from waypoint.backends.claude_code.adapter import ClaudeCliAdapter
-    from waypoint.backends.claude_code.runtime_hook import ClaudeHookBundle
-    from waypoint.backends.claude_code.threads_remote import (
-        RemoteClaudeThreadEnumerator,
-    )
 from waypoint.config import Settings
 from waypoint.git_meta import resolve_git_meta
 from waypoint.scheduler import Scheduler
@@ -107,14 +95,6 @@ class SessionRuntime:
         self.ssh_targets = {
             target.id: target for target in self.settings.ssh_targets if target.enabled
         }
-        # Codex's App Server SDK has no external bootstrap; the adapter
-        # is built straight here. Claude is wired up by the plugin's
-        # `setup()` because it needs the PreToolUse hook bundle on
-        # disk first.
-        self.codex = CodexAppServerAdapter(self._emit_adapter_event)
-        self.claude_hook: ClaudeHookBundle | None = None
-        self.claude: ClaudeCliAdapter | None = None
-        self.claude_thread_enumerator: RemoteClaudeThreadEnumerator | None = None
         self.monitor_tasks: dict[str, asyncio.Task[None]] = {}
         self.file_offsets: dict[str, int] = {}
         self.registry = registry or get_registry()
@@ -145,9 +125,8 @@ class SessionRuntime:
             with suppress(asyncio.CancelledError):
                 await task
         self.monitor_tasks.clear()
-        await self.codex.shutdown()
-        if self.claude is not None:
-            await self.claude.shutdown()
+        for plugin in self.registry.all():
+            await plugin.shutdown(self)
         self.storage.close()
 
     def list_sessions(self) -> list[SessionRecord]:

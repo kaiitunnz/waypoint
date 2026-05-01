@@ -175,6 +175,9 @@ def test_registry_rejects_duplicate_id() -> None:
         def setup(self, runtime: Any) -> None:
             return None
 
+        async def shutdown(self, runtime: Any) -> None:
+            return None
+
         def register_routes(self, app: Any, context: Any) -> None:
             return None
 

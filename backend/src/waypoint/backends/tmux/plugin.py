@@ -66,6 +66,9 @@ class TmuxPlugin:
     def setup(self, runtime: "SessionRuntime") -> None:
         return None
 
+    async def shutdown(self, runtime: "SessionRuntime") -> None:
+        return None
+
     def register_routes(self, app: Any, context: Any) -> None:
         return None
 

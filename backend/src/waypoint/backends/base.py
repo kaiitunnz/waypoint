@@ -188,6 +188,16 @@ class BackendPlugin(Protocol):
         """
         ...
 
+    async def shutdown(self, runtime: "SessionRuntime") -> None:
+        """Tear down per-process resources owned by this plugin.
+
+        Called from ``SessionRuntime.stop`` so plugins can close their
+        adapter (kill subprocesses, drain queues, close SDK clients) in
+        the same order they were brought up. Default is a no-op for
+        plugins that don't own any background state.
+        """
+        ...
+
     def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
         """Whether the plugin is ready to spawn a fresh managed session.
 

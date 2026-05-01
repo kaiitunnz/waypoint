@@ -9,6 +9,8 @@ from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
+    from waypoint.backends.claude_code.adapter import ClaudeCliAdapter
+    from waypoint.backends.claude_code.plugin import ClaudeCodePlugin
     from waypoint.runtime import SessionRuntime
 
 
@@ -16,20 +18,22 @@ class ClaudeTransport(TransportAdapter):
     is_structured = True
     supports_resume = False
 
-    def __init__(self, runtime: SessionRuntime) -> None:
+    def __init__(self, runtime: SessionRuntime, plugin: ClaudeCodePlugin) -> None:
         self._runtime = runtime
+        self._plugin = plugin
 
     @property
-    def adapter(self):
-        return self._runtime.claude
+    def adapter(self) -> ClaudeCliAdapter | None:
+        return self._plugin.adapter
 
-    def _require_adapter(self):
-        if self.adapter is None:
+    def _require_adapter(self) -> ClaudeCliAdapter:
+        adapter = self.adapter
+        if adapter is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="claude adapter is not initialized",
             )
-        return self.adapter
+        return adapter
 
     async def send_input(self, session: SessionRecord, text: str) -> None:
         adapter = self._require_adapter()

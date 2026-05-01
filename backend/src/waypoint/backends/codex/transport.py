@@ -15,6 +15,8 @@ from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
+    from waypoint.backends.codex.adapter import CodexAppServerAdapter
+    from waypoint.backends.codex.plugin import CodexPlugin
     from waypoint.runtime import SessionRuntime
 
 
@@ -22,12 +24,22 @@ class CodexTransport(TransportAdapter):
     is_structured = True
     supports_resume = False
 
-    def __init__(self, runtime: SessionRuntime) -> None:
+    def __init__(self, runtime: SessionRuntime, plugin: CodexPlugin) -> None:
         self._runtime = runtime
+        self._plugin = plugin
 
     @property
-    def adapter(self):  # late binding so tests can swap runtime.codex
-        return self._runtime.codex
+    def adapter(self) -> CodexAppServerAdapter:
+        # Late binding so tests can swap ``plugin.adapter`` after setup;
+        # the codex plugin always holds a real adapter post-setup so the
+        # cast is safe in the live-session path.
+        adapter = self._plugin.adapter
+        if adapter is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="codex adapter is not initialized",
+            )
+        return adapter
 
     async def send_input(self, session: SessionRecord, text: str) -> None:
         try:

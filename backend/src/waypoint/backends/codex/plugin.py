@@ -25,7 +25,11 @@ from waypoint.backends.capabilities import (
     ModelSource,
     SlashCommandSpec,
 )
-from waypoint.backends.codex.adapter import ClientFactory, default_client_factory
+from waypoint.backends.codex.adapter import (
+    ClientFactory,
+    CodexAppServerAdapter,
+    default_client_factory,
+)
 from waypoint.backends.codex.permission_modes import (
     CODEX_PERMISSION_MODE_SPECS,
     CODEX_PERMISSION_PRESETS,
@@ -74,20 +78,31 @@ class CodexPlugin:
         target_aliases=("codex",),
     )
 
+    def __init__(self) -> None:
+        self.adapter: CodexAppServerAdapter | None = None
+
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
         # Lazy to avoid the same import-cycle pattern documented in
         # `backends/claude_code/plugin.py`.
         from waypoint.backends.codex.transport import CodexTransport
 
-        return CodexTransport(runtime)
+        return CodexTransport(runtime, self)
 
     def setup(self, runtime: "SessionRuntime") -> None:
         # Codex's adapter wires straight to the App Server SDK with no
-        # external bootstrap; runtime builds it directly today. Hook
-        # left in place so a future Codex sidecar (token fetch, OAuth
-        # refresh, etc.) has somewhere to land without touching
-        # runtime.py.
-        return None
+        # external bootstrap. The plugin owns the adapter so every call
+        # site reads ``self.adapter`` instead of reaching into the
+        # runtime.
+        self.adapter = CodexAppServerAdapter(runtime._emit_adapter_event)
+
+    async def shutdown(self, runtime: "SessionRuntime") -> None:
+        if self.adapter is not None:
+            await self.adapter.shutdown()
+            self.adapter = None
+
+    def _require_adapter(self) -> CodexAppServerAdapter:
+        assert self.adapter is not None, "codex plugin adapter not initialized"
+        return self.adapter
 
     def register_routes(self, app: Any, context: Any) -> None:
         return None
@@ -101,7 +116,7 @@ class CodexPlugin:
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        await runtime.codex.terminate_session(session.id)
+        await self._require_adapter().terminate_session(session.id)
 
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -138,7 +153,7 @@ class CodexPlugin:
         model: str | None,
     ) -> None:
         try:
-            await runtime.codex.set_model(session.id, model)
+            await self._require_adapter().set_model(session.id, model)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
@@ -151,7 +166,7 @@ class CodexPlugin:
         effort: str | None,
     ) -> bool:
         try:
-            await runtime.codex.set_effort(session.id, effort)
+            await self._require_adapter().set_effort(session.id, effort)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
@@ -195,7 +210,7 @@ class CodexPlugin:
         if command.split(None, 1)[0].lower() != "/compact":
             return None
         try:
-            await runtime.codex.compact_thread(session.id)
+            await self._require_adapter().compact_thread(session.id)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
@@ -237,7 +252,7 @@ class CodexPlugin:
             )
             return
         try:
-            await runtime.codex.restore_session(
+            await self._require_adapter().restore_session(
                 session.id,
                 session.cwd,
                 session.thread_id,
@@ -470,7 +485,7 @@ class CodexPlugin:
         )
         runtime.storage.create_session(session)
         try:
-            thread_id = await runtime.codex.start_session(
+            thread_id = await self._require_adapter().start_session(
                 session_id,
                 request.cwd,
                 self.client_factory(runtime, session.launch_target_id),
@@ -542,7 +557,7 @@ class CodexPlugin:
         )
         runtime.storage.create_session(session)
         try:
-            await runtime.codex.restore_session(
+            await self._require_adapter().restore_session(
                 session.id,
                 session.cwd,
                 thread.id,
@@ -586,7 +601,7 @@ class CodexPlugin:
         default_effort = runtime.settings.default_efforts.get(self.id)
         cwd = self.client_cwd(runtime, launch_target_id)
         try:
-            response = await runtime.codex.list_models(
+            response = await self._require_adapter().list_models(
                 cwd=cwd,
                 client_factory_override=self.client_factory(runtime, launch_target_id),
                 include_hidden=include_hidden,

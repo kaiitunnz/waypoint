@@ -25,7 +25,9 @@ class ClaudeHookBundle:
 
 
 def _scripts_dir() -> Path:
-    return Path(__file__).resolve().parents[2] / "scripts"
+    # __file__ lives at backend/src/waypoint/backends/claude_code/runtime_hook.py;
+    # the hook scripts ship at backend/scripts/.
+    return Path(__file__).resolve().parents[4] / "scripts"
 
 
 def ensure_claude_hook_bundle(data_dir: Path) -> ClaudeHookBundle:

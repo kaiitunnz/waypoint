@@ -41,5 +41,5 @@ class TransportAdapter(ABC):
     async def resume(self, session: SessionRecord) -> None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"resume is not supported for {session.transport.value} sessions",
+            detail=f"resume is not supported for {session.transport} sessions",
         )

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from waypoint.claude_threads import (
+from waypoint.backends.claude_code.threads import (
     claude_projects_root,
     find_local_claude_thread,
     list_local_claude_threads,

@@ -7,13 +7,12 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
 
+from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.schemas import (
     SessionInputRequest,
     SessionRecord,
     SessionSource,
-    SessionStatus,
 )
-from waypoint.tmux import TmuxError
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
@@ -85,6 +84,3 @@ class TmuxTransport(TransportAdapter):
             return ""
         snapshot = raw_log_path.read_text(encoding="utf-8", errors="ignore")
         return self._runtime.normalizer.clean(snapshot)
-
-    def status_after_send(self) -> SessionStatus:
-        return SessionStatus.RUNNING

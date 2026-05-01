@@ -17,18 +17,17 @@ import {
   createSchedule as createScheduleRequest,
   createSession,
   deleteSession as deleteSessionRequest,
-  fetchClaudeThreads,
-  fetchCodexThreads,
+  fetchBackendThreads,
   fetchMe,
   fetchSchedules,
   fetchSessions,
-  importClaudeThread as importClaudeThreadRequest,
-  importCodexThread as importCodexThreadRequest,
+  importBackendThread,
   isAuthError,
   login,
   postAction,
   setSessionPinned,
 } from "@/lib/api";
+import { useBackendCatalog } from "@/lib/backends";
 import {
   clearToken,
   readHost,
@@ -40,8 +39,7 @@ import {
 } from "@/lib/store";
 import {
   Backend,
-  ClaudeThreadSummary,
-  CodexThreadSummary,
+  BackendDescriptor,
   LaunchTargetSummary,
   ScheduleCreateRequest,
   ScheduledSession,
@@ -49,11 +47,25 @@ import {
   SessionRecord,
 } from "@/lib/types";
 
+interface ThreadSummary {
+  id: string;
+  title: string;
+  cwd: string;
+  repo_name?: string | null;
+  branch?: string | null;
+  preview?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
-const ALL_BACKENDS: Backend[] = ["codex", "claude_code"];
+// Hand-mirrored fallback used until `/api/me` lands. Once the catalog
+// arrives we derive `allBackends` from `me.backends.map(b => b.id)`
+// so adding a backend at the registry shows up here without an edit.
+const FALLBACK_BACKENDS: Backend[] = ["codex", "claude_code"];
 
 export default function HomePage() {
   const router = useRouter();
@@ -67,16 +79,38 @@ export default function HomePage() {
   const [launchTargets, setLaunchTargets] = useState<LaunchTargetSummary[]>([]);
   const [activeLaunchTargetId, setActiveLaunchTargetId] = useState("");
   const [schedules, setSchedules] = useState<ScheduledSession[]>([]);
-  const [codexThreads, setCodexThreads] = useState<CodexThreadSummary[]>([]);
-  const [codexThreadsLoading, setCodexThreadsLoading] = useState(false);
-  const [claudeThreads, setClaudeThreads] = useState<ClaudeThreadSummary[]>([]);
-  const [claudeThreadsLoading, setClaudeThreadsLoading] = useState(false);
+  const [threadsByBackend, setThreadsByBackend] = useState<
+    Record<Backend, ThreadSummary[]>
+  >({});
+  const [loadingByBackend, setLoadingByBackend] = useState<
+    Record<Backend, boolean>
+  >({});
+  const [backendDescriptors, setBackendDescriptors] = useState<
+    BackendDescriptor[] | null
+  >(null);
+  const registeredBackends: Backend[] =
+    backendDescriptors !== null
+      ? backendDescriptors.map((entry) => entry.id)
+      : FALLBACK_BACKENDS;
+  const catalog = useBackendCatalog(
+    host || null,
+    token || null,
+    backendDescriptors !== null
+      ? {
+          authenticated: true,
+          default_backend: defaultBackend,
+          default_cwd: defaultCwd,
+          launch_targets: launchTargets,
+          backends: backendDescriptors,
+        }
+      : null,
+  );
 
   const activeLaunchTarget =
     launchTargets.find((target) => target.id === activeLaunchTargetId) ?? null;
   const supportedBackends = activeLaunchTarget?.supported_backends.length
     ? activeLaunchTarget.supported_backends
-    : ALL_BACKENDS;
+    : registeredBackends;
   const effectiveDefaultBackend = supportedBackends.includes(activeLaunchTarget?.default_backend ?? defaultBackend)
     ? (activeLaunchTarget?.default_backend ?? defaultBackend)
     : supportedBackends[0];
@@ -93,10 +127,8 @@ export default function HomePage() {
   useEffect(() => {
     if (!host || !token) {
       setConnection("idle");
-      setCodexThreads([]);
-      setCodexThreadsLoading(false);
-      setClaudeThreads([]);
-      setClaudeThreadsLoading(false);
+      setThreadsByBackend({});
+      setLoadingByBackend({});
       return;
     }
     let active = true;
@@ -113,6 +145,9 @@ export default function HomePage() {
         setDefaultBackend(me.default_backend);
         setDefaultCwd(me.default_cwd || "~/");
         setLaunchTargets(me.launch_targets);
+        if (me.backends && me.backends.length > 0) {
+          setBackendDescriptors(me.backends);
+        }
         setSchedules(scheduleItems);
         const storedTargetId = readLaunchTarget(host);
         const nextTargetId = me.launch_targets.some(
@@ -186,60 +221,24 @@ export default function HomePage() {
     };
   }, [host, token]);
 
-  useEffect(() => {
-    if (!host || !token) {
-      setCodexThreads([]);
-      setCodexThreadsLoading(false);
-      return;
-    }
-    if (
-      activeLaunchTargetId &&
-      !launchTargets.some((target) => target.id === activeLaunchTargetId)
-    ) {
-      return;
-    }
-    if (!supportedBackends.includes("codex")) {
-      setCodexThreads([]);
-      setCodexThreadsLoading(false);
-      return;
-    }
-    let active = true;
-    setCodexThreadsLoading(true);
-    fetchCodexThreads(host, token, activeLaunchTargetId || undefined)
-      .then((threads) => {
-        if (!active) {
-          return;
-        }
-        setCodexThreads(threads);
-      })
-      .catch((fetchError) => {
-        if (!active) {
-          return;
-        }
-        if (isAuthError(fetchError)) {
-          resetAuthState("Session expired. Log in again.");
-          return;
-        }
-        setError(
-          fetchError instanceof Error
-            ? fetchError.message
-            : "failed to fetch codex threads",
-        );
-      })
-      .finally(() => {
-        if (active) {
-          setCodexThreadsLoading(false);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [activeLaunchTargetId, host, launchTargets, supportedBackends, token]);
+  // The set of backends we should fetch threads for: those that
+  // advertise `supports_thread_discovery=True` AND are listed by the
+  // active launch target (or all registered backends when launching
+  // locally). Computed via JSON for stable dep keys so the effect does
+  // not retrigger on identity-only changes.
+  const discoveryBackends = supportedBackends.filter((id) => {
+    const caps = catalog.byId(id)?.capabilities;
+    // Default to True so a fresh page load (catalog not yet hydrated)
+    // tries the call rather than silently skipping the per-backend
+    // fetch — the dispatcher returns 400 cheaply for tmux either way.
+    return caps?.supports_thread_discovery ?? true;
+  });
+  const discoveryBackendsKey = JSON.stringify(discoveryBackends);
 
   useEffect(() => {
     if (!host || !token) {
-      setClaudeThreads([]);
-      setClaudeThreadsLoading(false);
+      setThreadsByBackend({});
+      setLoadingByBackend({});
       return;
     }
     if (
@@ -248,43 +247,60 @@ export default function HomePage() {
     ) {
       return;
     }
-    if (!supportedBackends.includes("claude_code")) {
-      setClaudeThreads([]);
-      setClaudeThreadsLoading(false);
-      return;
-    }
     let active = true;
-    setClaudeThreadsLoading(true);
-    fetchClaudeThreads(host, token, activeLaunchTargetId || undefined)
-      .then((threads) => {
-        if (!active) {
-          return;
-        }
-        setClaudeThreads(threads);
-      })
-      .catch((fetchError) => {
-        if (!active) {
-          return;
-        }
-        if (isAuthError(fetchError)) {
-          resetAuthState("Session expired. Log in again.");
-          return;
-        }
-        setError(
-          fetchError instanceof Error
-            ? fetchError.message
-            : "failed to fetch claude threads",
-        );
-      })
-      .finally(() => {
-        if (active) {
-          setClaudeThreadsLoading(false);
-        }
-      });
+    const ids = JSON.parse(discoveryBackendsKey) as Backend[];
+    setLoadingByBackend((current) => {
+      const next: Record<Backend, boolean> = {};
+      for (const id of ids) {
+        next[id] = current[id] ?? true;
+      }
+      return next;
+    });
+    setThreadsByBackend((current) => {
+      const next: Record<Backend, ThreadSummary[]> = {};
+      for (const id of ids) {
+        next[id] = current[id] ?? [];
+      }
+      return next;
+    });
+    for (const id of ids) {
+      setLoadingByBackend((current) => ({ ...current, [id]: true }));
+      fetchBackendThreads<ThreadSummary>(
+        host,
+        token,
+        id,
+        activeLaunchTargetId || undefined,
+      )
+        .then((threads) => {
+          if (!active) {
+            return;
+          }
+          setThreadsByBackend((current) => ({ ...current, [id]: threads }));
+        })
+        .catch((fetchError) => {
+          if (!active) {
+            return;
+          }
+          if (isAuthError(fetchError)) {
+            resetAuthState("Session expired. Log in again.");
+            return;
+          }
+          setError(
+            fetchError instanceof Error
+              ? fetchError.message
+              : `failed to fetch ${id} threads`,
+          );
+        })
+        .finally(() => {
+          if (active) {
+            setLoadingByBackend((current) => ({ ...current, [id]: false }));
+          }
+        });
+    }
     return () => {
       active = false;
     };
-  }, [activeLaunchTargetId, host, launchTargets, supportedBackends, token]);
+  }, [activeLaunchTargetId, host, launchTargets, discoveryBackendsKey, token]);
 
   async function handleLogin(nextHost: string, password: string) {
     const nextToken = await login(nextHost, password);
@@ -355,17 +371,23 @@ export default function HomePage() {
     }
   }
 
-  async function handleImportCodexThread(threadId: string) {
+  async function handleImportThread(backend: Backend, threadId: string) {
     try {
-      const session = await importCodexThreadRequest(host, token, {
+      const payload = {
         thread_id: threadId,
         launch_target_id: activeLaunchTargetId || null,
-      });
+      };
+      const session = await importBackendThread(host, token, backend, payload);
       setSessions((current) => [
         session,
         ...current.filter((item) => item.id !== session.id),
       ]);
-      setCodexThreads((current) => current.filter((thread) => thread.id !== threadId));
+      setThreadsByBackend((current) => ({
+        ...current,
+        [backend]: (current[backend] ?? []).filter(
+          (thread) => thread.id !== threadId,
+        ),
+      }));
       router.push(`/session/${session.id}`);
     } catch (importError) {
       if (isAuthError(importError)) {
@@ -375,34 +397,7 @@ export default function HomePage() {
       setError(
         importError instanceof Error
           ? importError.message
-          : "failed to import codex thread",
-      );
-    }
-  }
-
-  async function handleImportClaudeThread(threadId: string) {
-    try {
-      const session = await importClaudeThreadRequest(host, token, {
-        thread_id: threadId,
-        launch_target_id: activeLaunchTargetId || null,
-      });
-      setSessions((current) => [
-        session,
-        ...current.filter((item) => item.id !== session.id),
-      ]);
-      setClaudeThreads((current) =>
-        current.filter((thread) => thread.id !== threadId),
-      );
-      router.push(`/session/${session.id}`);
-    } catch (importError) {
-      if (isAuthError(importError)) {
-        resetAuthState("Session expired. Log in again.");
-        return;
-      }
-      setError(
-        importError instanceof Error
-          ? importError.message
-          : "failed to import claude thread",
+          : `failed to import ${backend} thread`,
       );
     }
   }
@@ -416,10 +411,8 @@ export default function HomePage() {
     setLaunchTargets([]);
     setActiveLaunchTargetId("");
     setSchedules([]);
-    setCodexThreads([]);
-    setCodexThreadsLoading(false);
-    setClaudeThreads([]);
-    setClaudeThreadsLoading(false);
+    setThreadsByBackend({});
+    setLoadingByBackend({});
     setError(message);
   }
 
@@ -562,10 +555,8 @@ export default function HomePage() {
     setSessions([]);
     setLaunchTargets([]);
     setActiveLaunchTargetId(readLaunchTarget(nextHost));
-    setCodexThreads([]);
-    setCodexThreadsLoading(false);
-    setClaudeThreads([]);
-    setClaudeThreadsLoading(false);
+    setThreadsByBackend({});
+    setLoadingByBackend({});
     setError("Switched backend. Log in to continue.");
   }
 
@@ -616,14 +607,12 @@ export default function HomePage() {
           targetLabel={activeLaunchTarget?.name ?? null}
           launchTargetId={activeLaunchTargetId || null}
           supportedBackends={supportedBackends}
-          codexThreads={codexThreads}
-          codexThreadsLoading={codexThreadsLoading}
-          claudeThreads={claudeThreads}
-          claudeThreadsLoading={claudeThreadsLoading}
+          catalog={catalog}
+          threadsByBackend={threadsByBackend}
+          loadingByBackend={loadingByBackend}
           onAttach={handleAttach}
           onCreate={handleCreate}
-          onImportCodexThread={handleImportCodexThread}
-          onImportClaudeThread={handleImportClaudeThread}
+          onImportThread={handleImportThread}
           onAuthFailure={() => resetAuthState("Session expired. Log in again.")}
         />
       ) : null}
@@ -636,6 +625,7 @@ export default function HomePage() {
           targetLabel={activeLaunchTarget?.name ?? null}
           launchTargetId={activeLaunchTargetId || null}
           supportedBackends={supportedBackends}
+          catalog={catalog}
           schedules={schedules}
           onCreate={handleCreateSchedule}
           onCancel={handleCancelSchedule}

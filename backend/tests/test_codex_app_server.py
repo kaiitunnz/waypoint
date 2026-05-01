@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from waypoint.codex_app_server import CodexAppServerAdapter
+from waypoint.backends.codex.adapter import CodexAppServerAdapter
 from waypoint.schemas import EventKind, SessionStatus
 
 
@@ -329,7 +329,7 @@ async def test_respond_to_approval_resolves_pending() -> None:
     adapter, fake = make_adapter(emitted)
     await adapter.start_session("sess", "/tmp/work")
     state = adapter._sessions["sess"]
-    from waypoint.codex_app_server import PendingApproval
+    from waypoint.backends.codex.adapter import PendingApproval
 
     pending = PendingApproval(
         method="item/commandExecution/requestApproval", params={"command": "ls"}
@@ -489,8 +489,9 @@ async def test_streamed_tool_result_suppresses_duplicate_completed_event() -> No
 
 
 def test_map_notification_agent_message_delta() -> None:
-    adapter = CodexAppServerAdapter(lambda *_: None, client_factory=lambda *_: None)  # type: ignore[arg-type]
-    kind, text, status = adapter._map_notification(
+    from waypoint.backends.codex.normalize import map_notification
+
+    kind, text, status = map_notification(
         "item/agentMessage/delta",
         {"delta": "hello"},
     )
@@ -500,8 +501,9 @@ def test_map_notification_agent_message_delta() -> None:
 
 
 def test_map_notification_command_execution_started() -> None:
-    adapter = CodexAppServerAdapter(lambda *_: None, client_factory=lambda *_: None)  # type: ignore[arg-type]
-    kind, text, status = adapter._map_notification(
+    from waypoint.backends.codex.normalize import map_notification
+
+    kind, text, status = map_notification(
         "item/started",
         {"item": {"type": "commandExecution", "command": "ls -la"}},
     )
@@ -510,8 +512,9 @@ def test_map_notification_command_execution_started() -> None:
 
 
 def test_map_notification_todo_list_updated() -> None:
-    adapter = CodexAppServerAdapter(lambda *_: None, client_factory=lambda *_: None)  # type: ignore[arg-type]
-    kind, text, status = adapter._map_notification(
+    from waypoint.backends.codex.normalize import map_notification
+
+    kind, text, status = map_notification(
         "item/updated",
         {
             "item": {
@@ -529,8 +532,9 @@ def test_map_notification_todo_list_updated() -> None:
 
 
 def test_format_todo_list_renders_markers_and_skips_blanks() -> None:
-    adapter = CodexAppServerAdapter(lambda *_: None, client_factory=lambda *_: None)  # type: ignore[arg-type]
-    text = adapter._format_todo_list(
+    from waypoint.backends.codex.normalize import format_todo_list
+
+    text = format_todo_list(
         {
             "items": [
                 {"text": "First", "completed": True},
@@ -543,15 +547,23 @@ def test_format_todo_list_renders_markers_and_skips_blanks() -> None:
 
 
 def test_format_todo_list_empty_returns_placeholder() -> None:
-    adapter = CodexAppServerAdapter(lambda *_: None, client_factory=lambda *_: None)  # type: ignore[arg-type]
-    assert adapter._format_todo_list({"items": []}) == "Todo list"
-    assert adapter._format_todo_list({}) == "Todo list"
+    from waypoint.backends.codex.normalize import format_todo_list
+
+    assert format_todo_list({"items": []}) == "Todo list"
+    assert format_todo_list({}) == "Todo list"
 
 
 def test_format_item_started_routes_todo_list_as_tool_call() -> None:
-    adapter = CodexAppServerAdapter(lambda *_: None, client_factory=lambda *_: None)  # type: ignore[arg-type]
-    kind, text, status = adapter._format_item_started(
-        {"type": "todo_list", "items": [{"text": "Step one", "completed": False}]}
+    from waypoint.backends.codex.normalize import map_notification
+
+    kind, text, status = map_notification(
+        "item/started",
+        {
+            "item": {
+                "type": "todo_list",
+                "items": [{"text": "Step one", "completed": False}],
+            }
+        },
     )
     assert kind == EventKind.TOOL_CALL
     assert text == "[ ] Step one"
@@ -559,13 +571,17 @@ def test_format_item_started_routes_todo_list_as_tool_call() -> None:
 
 
 def test_format_item_completed_routes_todo_list_as_tool_result() -> None:
-    adapter = CodexAppServerAdapter(lambda *_: None, client_factory=lambda *_: None)  # type: ignore[arg-type]
-    kind, text, status = adapter._format_item_completed(
+    from waypoint.backends.codex.normalize import map_notification
+
+    kind, text, status = map_notification(
+        "item/completed",
         {
-            "type": "todo_list",
-            "status": "completed",
-            "items": [{"text": "Step one", "completed": True}],
-        }
+            "item": {
+                "type": "todo_list",
+                "status": "completed",
+                "items": [{"text": "Step one", "completed": True}],
+            }
+        },
     )
     assert kind == EventKind.TOOL_RESULT
     assert text == "[x] Step one"
@@ -575,9 +591,11 @@ def test_format_item_completed_routes_todo_list_as_tool_result() -> None:
 
 
 def test_format_item_completed_drops_agent_message_duplicate() -> None:
-    adapter = CodexAppServerAdapter(lambda *_: None, client_factory=lambda *_: None)  # type: ignore[arg-type]
-    kind, text, status = adapter._format_item_completed(
-        {"type": "agentMessage", "text": "hello"}
+    from waypoint.backends.codex.normalize import map_notification
+
+    kind, text, status = map_notification(
+        "item/completed",
+        {"item": {"type": "agentMessage", "text": "hello"}},
     )
     assert kind is None
     assert text == ""
@@ -585,13 +603,11 @@ def test_format_item_completed_drops_agent_message_duplicate() -> None:
 
 
 def test_extract_item_id_pulls_top_level_and_nested_ids() -> None:
-    adapter = CodexAppServerAdapter(lambda *_: None, client_factory=lambda *_: None)  # type: ignore[arg-type]
-    assert adapter._extract_item_id({"itemId": "abc", "delta": "x"}) == "abc"
-    assert (
-        adapter._extract_item_id({"item": {"id": "xyz", "type": "agentMessage"}})
-        == "xyz"
-    )
-    assert adapter._extract_item_id({}) is None
+    from waypoint.backends.codex.normalize import extract_item_id
+
+    assert extract_item_id({"itemId": "abc", "delta": "x"}) == "abc"
+    assert extract_item_id({"item": {"id": "xyz", "type": "agentMessage"}}) == "xyz"
+    assert extract_item_id({}) is None
 
 
 def test_map_decision_table() -> None:

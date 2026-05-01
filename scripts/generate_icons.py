@@ -20,11 +20,11 @@ Usage:
 """
 
 import argparse
-from io import BytesIO
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 
 from PIL import Image
@@ -161,7 +161,9 @@ def main() -> int:
         print(f"error: source not found: {args.source}", file=sys.stderr)
         return 2
     if not args.favicon_source.is_file():
-        print(f"error: favicon source not found: {args.favicon_source}", file=sys.stderr)
+        print(
+            f"error: favicon source not found: {args.favicon_source}", file=sys.stderr
+        )
         return 2
 
     app_source = Image.open(args.source).convert("RGBA")
@@ -175,11 +177,21 @@ def main() -> int:
     drift: list[Path] = []
     for target in APP_ICON_TARGETS:
         rendered = png_bytes(render(app_source, target))
-        if sync_bytes(target.path, rendered, label=f"{target.size}x{target.size}", check=args.check):
+        if sync_bytes(
+            target.path,
+            rendered,
+            label=f"{target.size}x{target.size}",
+            check=args.check,
+        ):
             drift.append(target.path)
     for target in FAVICON_PNG_TARGETS:
         rendered = png_bytes(render(favicon_source, target))
-        if sync_bytes(target.path, rendered, label=f"{target.size}x{target.size}", check=args.check):
+        if sync_bytes(
+            target.path,
+            rendered,
+            label=f"{target.size}x{target.size}",
+            check=args.check,
+        ):
             drift.append(target.path)
 
     if sync_bytes(
@@ -214,7 +226,10 @@ def main() -> int:
         print(f"warning: svg source not found: {SVG_SOURCE}", file=sys.stderr)
 
     if args.check and drift:
-        print(f"\n{len(drift)} icon(s) out of date — rerun without --check", file=sys.stderr)
+        print(
+            f"\n{len(drift)} icon(s) out of date — rerun without --check",
+            file=sys.stderr,
+        )
         return 1
     return 0
 

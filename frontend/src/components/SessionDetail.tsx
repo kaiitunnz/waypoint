@@ -28,14 +28,16 @@ import {
   setSessionModel,
   setSessionPermissionMode,
 } from "@/lib/api";
-import { clearToken } from "@/lib/store";
-import { modesForBackend } from "@/lib/permissionModes";
 import {
   fidelityFor,
+  humaniseBackend,
+  permissionModesFor,
   supportsResume,
   supportsStructuredApproval,
   transportLabel,
-} from "@/lib/transport";
+  useBackendCatalog,
+} from "@/lib/backends";
+import { clearToken } from "@/lib/store";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import {
   AskAnswerEntry,
@@ -92,6 +94,7 @@ const RECONNECT_MAX_MS = 15000;
 
 export function SessionDetail({ host, token, sessionId, onAuthFailure }: SessionDetailProps) {
   const router = useRouter();
+  const catalog = useBackendCatalog(host || null, token || null, null);
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [snapshot, setSnapshot] = useState("");
@@ -629,12 +632,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const sessionExited = Boolean(
     session && (session.status === "exited" || session.status === "error"),
   );
-  // Only structured transports (claude_cli, codex_app_server) can be brought
-  // back via _restore_*_session. Tmux has no resume contract, so the backend
+  // Only structured transports can be brought back via the plugin's
+  // restore_session path. Tmux has no resume contract, so the backend
   // hard-fails reattach there and the composer must follow suit.
   const reattachable = Boolean(
-    session &&
-      (session.transport === "claude_cli" || session.transport === "codex_app_server"),
+    session && fidelityFor(session.transport) === "structured",
   );
   const dormantReattach = sessionExited && reattachable;
   // Block submission until the session record resolves — the parent renders
@@ -840,6 +842,18 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         effortBusy={effortBusy}
         permissionMode={session?.permission_mode ?? null}
         transport={session?.transport ?? null}
+        effortRequiresConfirm={
+          // The plugin advertises "effort swap requires a restart"
+          // (Claude does, Codex doesn't) and we surface the confirm
+          // step accordingly. Falls back to false until the catalog
+          // hydrates so a fresh load doesn't gate the picker.
+          Boolean(
+            session &&
+              catalog
+                .byId(session.backend)
+                ?.capabilities.supports_set_effort_with_restart,
+          )
+        }
         onDelete={removeFromList}
         onInterrupt={interruptSession}
         onModeChange={handlePermissionModeChange}
@@ -870,6 +884,11 @@ interface ReplyComposerProps {
   effortBusy: boolean;
   permissionMode: string | null;
   transport: SessionTransport | null;
+  // True when the backend's effort swap requires a session restart
+  // (Claude respawns the CLI). Drives the "confirm before applying"
+  // UX so the user knows the session will restart, vs. Codex which
+  // applies inline.
+  effortRequiresConfirm: boolean;
   onDelete: () => void | Promise<void>;
   onInterrupt: () => void | Promise<void>;
   onModeChange: (mode: string) => void | Promise<void>;
@@ -897,6 +916,7 @@ const ReplyComposer = memo(function ReplyComposer({
   effortBusy,
   permissionMode,
   transport,
+  effortRequiresConfirm,
   onDelete,
   onInterrupt,
   onModeChange,
@@ -921,10 +941,12 @@ const ReplyComposer = memo(function ReplyComposer({
   const overflowRef = useRef<HTMLDivElement | null>(null);
   const tuneRef = useRef<HTMLDivElement | null>(null);
 
-  // Built-in slash commands are intercepted on the backend only for structured
-  // transports (see runtime._handle_builtin_command); skip suggestions on tmux.
+  // Built-in slash commands are intercepted on the backend only for
+  // structured transports (see plugin.maybe_handle_input); skip
+  // suggestions on tmux. While the session is still loading
+  // (transport=null), default to off.
   const supportsSlash =
-    transport === "codex_app_server" || transport === "claude_cli";
+    transport !== null && fidelityFor(transport) === "structured";
 
   const suggestions = supportsSlash && !suggestionsDismissed
     ? SLASH_COMMANDS.filter((entry) => {
@@ -1083,7 +1105,7 @@ const ReplyComposer = memo(function ReplyComposer({
     void handleSend();
   }
 
-  const modeOptions = backend ? modesForBackend(backend) : [];
+  const modeOptions = backend ? permissionModesFor(backend) : [];
   const hasOverflow = canTerminate || canDelete;
   const shortcutKey = SHORTCUT_IS_MAC ? "⌘" : "Ctrl";
   const hasModelPicker = modelOptions.length > 0 || currentModel !== null;
@@ -1115,12 +1137,6 @@ const ReplyComposer = memo(function ReplyComposer({
         ),
       );
   const hasEffortPicker = effortOptions.length > 0 || currentEffort !== null;
-  // Claude can't swap effort in-process — the binary's `/effort` slash
-  // command is blocklisted in --print mode and there's no `set_effort`
-  // control_request, so the runtime restarts the CLI with --resume + the
-  // new --effort. Surface that consequence as an explicit confirm step
-  // instead of applying on dropdown change like Codex.
-  const effortRequiresConfirm = backend === "claude_code";
   const effortDisplayValue = pendingEffort ?? (currentEffort ?? "");
   const effortPendingDiffers =
     effortRequiresConfirm &&
@@ -1150,7 +1166,7 @@ const ReplyComposer = memo(function ReplyComposer({
     const parts: string[] = [];
     if (modeOptions.length > 0) {
       const matched = modeOptions.find(
-        (option) => option.value === (permissionMode ?? "default"),
+        (option) => option.id === (permissionMode ?? "default"),
       );
       parts.push(matched?.label ?? "Default");
     }
@@ -1203,7 +1219,7 @@ const ReplyComposer = memo(function ReplyComposer({
                       disabled={modeBusy || disabled}
                     >
                       {modeOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
+                        <option key={option.id} value={option.id}>
                           {option.label}
                         </option>
                       ))}
@@ -1715,7 +1731,7 @@ function SessionHeader({
       </p>
       <div className="session-header-tags">
         <span className={`badge ${session.backend}`}>
-          {session.backend === "codex" ? "Codex" : "Claude"}
+          {humaniseBackend(session.backend)}
         </span>
         <span className={`badge transport ${session.transport}`}>
           {transportLabel(session.transport)}

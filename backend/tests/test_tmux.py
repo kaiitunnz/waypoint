@@ -1,6 +1,6 @@
 import asyncio
 
-from waypoint.tmux import TmuxAdapter
+from waypoint.backends.tmux.adapter import TmuxAdapter
 
 
 def test_send_input_uses_literal_mode_and_submit() -> None:

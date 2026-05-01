@@ -2,9 +2,8 @@
 
 import {
   Backend,
+  BackendDescriptor,
   BackendModelListResponse,
-  ClaudeThreadSummary,
-  CodexThreadSummary,
   EventRecord,
   EventsPage,
   MeResponse,
@@ -53,42 +52,27 @@ export async function fetchSessions(host: string, token: string): Promise<Sessio
   return payload.sessions as SessionRecord[];
 }
 
-export async function fetchCodexThreads(
+export async function fetchBackendThreads<T = unknown>(
   host: string,
   token: string,
+  backend: string,
   launchTargetId?: string,
-): Promise<CodexThreadSummary[]> {
+): Promise<T[]> {
   const params = new URLSearchParams();
   if (launchTargetId) {
     params.set("launch_target_id", launchTargetId);
   }
   const suffix = params.size ? `?${params.toString()}` : "";
-  const response = await fetch(`${host}/api/codex/threads${suffix}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-  await ensureOk(response, "failed to fetch codex threads");
+  const response = await fetch(
+    `${host}/api/backends/${backend}/threads${suffix}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    },
+  );
+  await ensureOk(response, `failed to fetch ${backend} threads`);
   const payload = await response.json();
-  return payload.threads as CodexThreadSummary[];
-}
-
-export async function fetchClaudeThreads(
-  host: string,
-  token: string,
-  launchTargetId?: string,
-): Promise<ClaudeThreadSummary[]> {
-  const params = new URLSearchParams();
-  if (launchTargetId) {
-    params.set("launch_target_id", launchTargetId);
-  }
-  const suffix = params.size ? `?${params.toString()}` : "";
-  const response = await fetch(`${host}/api/claude/threads${suffix}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-  await ensureOk(response, "failed to fetch claude threads");
-  const payload = await response.json();
-  return payload.threads as ClaudeThreadSummary[];
+  return (payload.threads ?? []) as T[];
 }
 
 export async function fetchMe(host: string, token: string): Promise<MeResponse> {
@@ -98,6 +82,19 @@ export async function fetchMe(host: string, token: string): Promise<MeResponse> 
   });
   await ensureOk(response, "failed to fetch backend settings");
   return (await response.json()) as MeResponse;
+}
+
+export async function fetchBackends(
+  host: string,
+  token: string,
+): Promise<BackendDescriptor[]> {
+  const response = await fetch(`${host}/api/backends`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch backend catalog");
+  const payload = await response.json();
+  return (payload.backends ?? []) as BackendDescriptor[];
 }
 
 export async function fetchSession(host: string, token: string, sessionId: string): Promise<SessionRecord> {
@@ -183,38 +180,24 @@ export async function attachTmux(
   return body.session as SessionRecord;
 }
 
-export async function importCodexThread(
+export async function importBackendThread(
   host: string,
   token: string,
+  backend: string,
   payload: Record<string, unknown>,
 ): Promise<SessionRecord> {
-  const response = await fetch(`${host}/api/sessions/import-codex`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
+  const response = await fetch(
+    `${host}/api/backends/${backend}/sessions/import`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
     },
-    body: JSON.stringify(payload),
-  });
-  await ensureOk(response, "failed to import codex thread");
-  const body = await response.json();
-  return body.session as SessionRecord;
-}
-
-export async function importClaudeThread(
-  host: string,
-  token: string,
-  payload: Record<string, unknown>,
-): Promise<SessionRecord> {
-  const response = await fetch(`${host}/api/sessions/import-claude`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-  await ensureOk(response, "failed to import claude thread");
+  );
+  await ensureOk(response, `failed to import ${backend} thread`);
   const body = await response.json();
   return body.session as SessionRecord;
 }

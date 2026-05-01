@@ -1,12 +1,19 @@
 from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 
 class Backend(StrEnum):
+    """Built-in backend ids.
+
+    Schemas accept any backend registered with the plugin registry via
+    :data:`BackendId`; this enum stays for legacy code that references
+    ``Backend.CODEX`` and friends as constants.
+    """
+
     CLAUDE_CODE = "claude_code"
     CODEX = "codex"
 
@@ -17,9 +24,43 @@ class SessionSource(StrEnum):
 
 
 class SessionTransport(StrEnum):
+    """Built-in transport ids.
+
+    Same arrangement as :class:`Backend` — schemas use :data:`SessionTransportId`
+    so plugins can introduce new transports without editing this file.
+    """
+
     TMUX = "tmux"
     CODEX_APP_SERVER = "codex_app_server"
     CLAUDE_CLI = "claude_cli"
+
+
+def _validate_backend_id(value: Any) -> str:
+    if isinstance(value, StrEnum):
+        value = str(value)
+    if not isinstance(value, str) or not value:
+        raise TypeError(f"backend id must be a non-empty string, got {value!r}")
+    from waypoint.backends.registry import get_registry
+
+    if not get_registry().has_backend(value):
+        raise ValueError(f"unknown backend: {value!r}")
+    return value
+
+
+def _validate_transport_id(value: Any) -> str:
+    if isinstance(value, StrEnum):
+        value = str(value)
+    if not isinstance(value, str) or not value:
+        raise TypeError(f"transport id must be a non-empty string, got {value!r}")
+    from waypoint.backends.registry import get_registry
+
+    if not get_registry().has_transport(value):
+        raise ValueError(f"unknown transport: {value!r}")
+    return value
+
+
+BackendId = Annotated[str, BeforeValidator(_validate_backend_id)]
+SessionTransportId = Annotated[str, BeforeValidator(_validate_transport_id)]
 
 
 class SessionStatus(StrEnum):
@@ -45,9 +86,9 @@ class EventKind(StrEnum):
 
 class SessionRecord(BaseModel):
     id: str
-    backend: Backend
+    backend: BackendId
     source: SessionSource
-    transport: SessionTransport = SessionTransport.TMUX
+    transport: SessionTransportId = SessionTransport.TMUX.value
     title: str
     cwd: str
     launch_target_id: str | None = None
@@ -57,6 +98,13 @@ class SessionRecord(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_event_at: datetime
+    # Per-plugin opaque state, persisted as JSON. Scaffolding for the
+    # eventual retirement of the legacy `tmux_*`/`thread_id`/`pid`
+    # columns: storage already round-trips this field, but no plugin
+    # writes to it yet — built-ins still populate the typed columns
+    # below. A follow-up pass will move per-plugin state into this
+    # dict and drop the explicit columns.
+    transport_state: dict[str, Any] = Field(default_factory=dict)
     tmux_session: str | None = None
     tmux_window: str | None = None
     tmux_pane: str | None = None
@@ -93,16 +141,20 @@ class LaunchTargetSummary(BaseModel):
     id: str
     name: str
     kind: str = "ssh"
-    supported_backends: list[Backend] = Field(default_factory=list)
-    default_backend: Backend = Backend.CODEX
+    supported_backends: list[BackendId] = Field(default_factory=list)
+    default_backend: BackendId = Backend.CODEX.value
     default_cwd: str | None = None
 
 
 class MeResponse(BaseModel):
     authenticated: bool = True
-    default_backend: Backend = Backend.CODEX
+    default_backend: BackendId = Backend.CODEX.value
     default_cwd: str = "~/"
     launch_targets: list[LaunchTargetSummary] = Field(default_factory=list)
+    # Plugin catalogue mirrored from `/api/backends`; lets `/api/me`
+    # consumers (the frontend's bootstrap, auth shell) hydrate the
+    # backend picker without a second round-trip.
+    backends: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class EventsPageResponse(BaseModel):
@@ -111,7 +163,7 @@ class EventsPageResponse(BaseModel):
 
 
 class SessionCreateRequest(BaseModel):
-    backend: Backend
+    backend: BackendId
     cwd: str
     launch_target_id: str | None = None
     title: str | None = None
@@ -124,7 +176,7 @@ class SessionCreateRequest(BaseModel):
 
 class SessionAttachRequest(BaseModel):
     tmux_target: str
-    backend_hint: Backend | None = None
+    backend_hint: BackendId | None = None
     title: str | None = None
 
 
@@ -196,7 +248,7 @@ class BackendModelOption(BaseModel):
 
 
 class BackendModelListResponse(BaseModel):
-    backend: Backend
+    backend: BackendId
     models: list[BackendModelOption] = Field(default_factory=list)
     default_model: str | None = None
     supports_free_text: bool = False
@@ -232,7 +284,7 @@ class ScheduleStatus(StrEnum):
 
 class ScheduledSessionRecord(BaseModel):
     id: str
-    backend: Backend
+    backend: BackendId
     cwd: str
     launch_target_id: str | None = None
     title: str | None = None
@@ -249,7 +301,7 @@ class ScheduledSessionRecord(BaseModel):
 
 
 class ScheduleCreateRequest(BaseModel):
-    backend: Backend
+    backend: BackendId
     cwd: str
     launch_target_id: str | None = None
     title: str | None = None

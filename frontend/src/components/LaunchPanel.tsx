@@ -5,12 +5,20 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { EffortPicker } from "@/components/EffortPicker";
 import { ModelPicker } from "@/components/ModelPicker";
 import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
-import {
-  Backend,
-  BackendModelListResponse,
-  ClaudeThreadSummary,
-  CodexThreadSummary,
-} from "@/lib/types";
+import type { BackendCatalog } from "@/lib/backends";
+import { humaniseBackend } from "@/lib/backends";
+import { Backend, BackendModelListResponse } from "@/lib/types";
+
+interface ThreadSummary {
+  id: string;
+  title: string;
+  cwd: string;
+  repo_name?: string | null;
+  branch?: string | null;
+  preview?: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 interface LaunchPanelProps {
   host: string;
@@ -20,10 +28,9 @@ interface LaunchPanelProps {
   targetLabel: string | null;
   launchTargetId: string | null;
   supportedBackends: Backend[];
-  codexThreads: CodexThreadSummary[];
-  codexThreadsLoading: boolean;
-  claudeThreads: ClaudeThreadSummary[];
-  claudeThreadsLoading: boolean;
+  catalog: BackendCatalog;
+  threadsByBackend: Record<Backend, ThreadSummary[]>;
+  loadingByBackend: Record<Backend, boolean>;
   onCreate: (
     backend: Backend,
     cwd: string,
@@ -32,8 +39,7 @@ interface LaunchPanelProps {
     effort: string | null,
   ) => Promise<void>;
   onAttach: (target: string, backendHint: Backend) => Promise<void>;
-  onImportCodexThread: (threadId: string) => Promise<void>;
-  onImportClaudeThread: (threadId: string) => Promise<void>;
+  onImportThread: (backend: Backend, threadId: string) => Promise<void>;
   onAuthFailure?: () => void;
 }
 
@@ -45,14 +51,12 @@ export function LaunchPanel({
   targetLabel,
   launchTargetId,
   supportedBackends,
-  codexThreads,
-  codexThreadsLoading,
-  claudeThreads,
-  claudeThreadsLoading,
+  catalog,
+  threadsByBackend,
+  loadingByBackend,
   onCreate,
   onAttach,
-  onImportCodexThread,
-  onImportClaudeThread,
+  onImportThread,
   onAuthFailure,
 }: LaunchPanelProps) {
   const [backend, setBackend] = useState<Backend>(defaultBackend);
@@ -146,8 +150,11 @@ export function LaunchPanel({
         <label className="field">
           <span>Backend</span>
           <select value={backend} onChange={(event) => setBackend(event.target.value as Backend)}>
-            {supportedBackends.includes("codex") ? <option value="codex">Codex</option> : null}
-            {supportedBackends.includes("claude_code") ? <option value="claude_code">Claude Code</option> : null}
+            {supportedBackends.map((id) => (
+              <option key={id} value={id}>
+                {catalog.byId(id)?.label ?? humaniseBackend(id)}
+              </option>
+            ))}
           </select>
         </label>
         {targetLabel ? (
@@ -198,8 +205,11 @@ export function LaunchPanel({
         <label className="field">
           <span>Backend hint</span>
           <select value={backend} onChange={(event) => setBackend(event.target.value as Backend)}>
-            <option value="codex">Codex</option>
-            <option value="claude_code">Claude Code</option>
+            {supportedBackends.map((id) => (
+              <option key={id} value={id}>
+                {catalog.byId(id)?.label ?? humaniseBackend(id)}
+              </option>
+            ))}
           </select>
         </label>
         <button className="secondary" disabled={formBusy} type="submit">
@@ -208,15 +218,13 @@ export function LaunchPanel({
       </form>
       {supportedBackends.length > 0 ? (
         <ResumeThreadPanel
-          codexThreads={codexThreads}
-          codexLoading={codexThreadsLoading}
-          claudeThreads={claudeThreads}
-          claudeLoading={claudeThreadsLoading}
+          threadsByBackend={threadsByBackend}
+          loadingByBackend={loadingByBackend}
           targetLabel={targetLabel}
           supportedBackends={supportedBackends}
           preferredBackend={backend}
-          onImportCodexThread={onImportCodexThread}
-          onImportClaudeThread={onImportClaudeThread}
+          onImportThread={onImportThread}
+          catalog={catalog}
         />
       ) : null}
     </section>

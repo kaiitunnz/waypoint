@@ -6,13 +6,19 @@ import shutil
 import threading
 from collections.abc import Callable, Coroutine
 from contextlib import suppress
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from codex_app_server.client import AppServerClient, AppServerConfig
 from codex_app_server.generated.v2_all import ModelListResponse
-from codex_app_server.models import UnknownNotification
 
+from waypoint.backends.codex.normalize import (
+    extract_item,
+    extract_item_id,
+    format_approval_text,
+    map_notification,
+    payload_to_dict,
+)
 from waypoint.schemas import EventKind, SessionStatus
 
 log = logging.getLogger("waypoint.codex")
@@ -154,7 +160,7 @@ class CodexAppServerAdapter:
                     self._emit_event(
                         state.session_id,
                         EventKind.APPROVAL_REQUEST,
-                        self._format_approval_text(method, payload),
+                        format_approval_text(method, payload),
                         {
                             "method": method,
                             "request": payload,
@@ -367,10 +373,8 @@ class CodexAppServerAdapter:
                 notification = await self._call_client(
                     state, state.client.next_notification
                 )
-                payload = self._payload_to_dict(notification.payload)
-                kind, text, status = self._map_notification(
-                    notification.method, payload
-                )
+                payload = payload_to_dict(notification.payload)
+                kind, text, status = map_notification(notification.method, payload)
                 if kind is not None and text:
                     if notification.method == "item/commandExecution/outputDelta":
                         state.terminal_fragments.append(text)
@@ -379,10 +383,10 @@ class CodexAppServerAdapter:
                         "payload": payload,
                         "status": status,
                     }
-                    item_id = self._extract_item_id(payload)
+                    item_id = extract_item_id(payload)
                     if item_id is not None:
                         metadata["item_id"] = item_id
-                    item = self._extract_item(payload) if "item" in payload else None
+                    item = extract_item(payload) if "item" in payload else None
                     if isinstance(item, dict):
                         # Replace the wrapped {"root": {...}} form with the
                         # unwrapped item so downstream consumers (frontend
@@ -444,17 +448,15 @@ class CodexAppServerAdapter:
                 notification = await self._call_client(
                     state, state.client.next_notification
                 )
-                payload = self._payload_to_dict(notification.payload)
-                kind, text, status = self._map_notification(
-                    notification.method, payload
-                )
+                payload = payload_to_dict(notification.payload)
+                kind, text, status = map_notification(notification.method, payload)
                 if kind is not None and text:
                     metadata: dict[str, Any] = {
                         "method": notification.method,
                         "payload": payload,
                         "status": status,
                     }
-                    item_id = self._extract_item_id(payload)
+                    item_id = extract_item_id(payload)
                     if item_id is not None:
                         metadata["item_id"] = item_id
                     await self._emit_event(
@@ -490,234 +492,6 @@ class CodexAppServerAdapter:
             return self._sessions[session_id]
         except KeyError as exc:
             raise RuntimeError(f"codex session not active: {session_id}") from exc
-
-    def _map_notification(
-        self,
-        method: str,
-        payload: dict[str, Any],
-    ) -> tuple[EventKind | None, str, SessionStatus]:
-        if method == "item/agentMessage/delta":
-            return (
-                EventKind.AGENT_OUTPUT,
-                str(payload.get("delta", "")),
-                SessionStatus.RUNNING,
-            )
-        if method == "item/commandExecution/outputDelta":
-            return (
-                EventKind.TOOL_RESULT,
-                str(payload.get("delta", "")),
-                SessionStatus.RUNNING,
-            )
-        if method == "item/fileChange/outputDelta":
-            return (
-                EventKind.TOOL_RESULT,
-                str(payload.get("delta", "")),
-                SessionStatus.RUNNING,
-            )
-        if method == "turn/started":
-            turn = payload.get("turn", {})
-            return (
-                EventKind.SYSTEM_NOTE,
-                f"Turn started: {turn.get('id', '')}".strip(),
-                SessionStatus.RUNNING,
-            )
-        if method == "turn/completed":
-            turn = payload.get("turn", {})
-            status = self._map_turn_status(turn.get("status"))
-            return (
-                EventKind.SYSTEM_NOTE,
-                f"Turn {turn.get('status', 'completed')}",
-                status,
-            )
-        if method == "thread/compacted":
-            return (
-                EventKind.SYSTEM_NOTE,
-                "Codex thread compacted",
-                SessionStatus.IDLE,
-            )
-        if method == "item/started":
-            item = self._extract_item(payload)
-            return self._format_item_started(item)
-        if method == "item/updated":
-            item = self._extract_item(payload)
-            return self._format_item_updated(item)
-        if method == "item/completed":
-            item = self._extract_item(payload)
-            return self._format_item_completed(item)
-        if method == "turn/plan/updated":
-            plan = payload.get("plan", [])
-            text = "\n".join(
-                f"- {entry.get('step', '')} [{entry.get('status', '')}]"
-                for entry in plan
-            )
-            return EventKind.SYSTEM_NOTE, text, SessionStatus.RUNNING
-        if method == "error":
-            error = payload.get("error", {})
-            return (
-                EventKind.SYSTEM_NOTE,
-                str(error.get("message", "Codex error")),
-                SessionStatus.ERROR,
-            )
-        return None, "", SessionStatus.RUNNING
-
-    def _format_item_started(
-        self, item: dict[str, Any]
-    ) -> tuple[EventKind, str, SessionStatus]:
-        item_type = item.get("type")
-        if item_type == "commandExecution":
-            return (
-                EventKind.TOOL_CALL,
-                f"$ {item.get('command', '')}",
-                SessionStatus.RUNNING,
-            )
-        if item_type == "fileChange":
-            paths = ", ".join(
-                change.get("path", "") for change in item.get("changes", [])
-            )
-            return (
-                EventKind.TOOL_CALL,
-                f"Preparing file changes: {paths}",
-                SessionStatus.RUNNING,
-            )
-        if item_type == "mcpToolCall":
-            return (
-                EventKind.TOOL_CALL,
-                f"MCP {item.get('server', '')}:{item.get('tool', '')}",
-                SessionStatus.RUNNING,
-            )
-        if item_type == "plan":
-            return EventKind.SYSTEM_NOTE, item.get("text", ""), SessionStatus.RUNNING
-        if item_type == "agentMessage":
-            return EventKind.AGENT_OUTPUT, item.get("text", ""), SessionStatus.RUNNING
-        if item_type == "todo_list":
-            return (
-                EventKind.TOOL_CALL,
-                self._format_todo_list(item),
-                SessionStatus.RUNNING,
-            )
-        return (
-            EventKind.SYSTEM_NOTE,
-            f"Started {item_type or 'item'}",
-            SessionStatus.RUNNING,
-        )
-
-    def _format_item_updated(
-        self, item: dict[str, Any]
-    ) -> tuple[EventKind, str, SessionStatus]:
-        item_type = item.get("type")
-        if item_type == "todo_list":
-            return (
-                EventKind.TOOL_RESULT,
-                self._format_todo_list(item),
-                SessionStatus.RUNNING,
-            )
-        return (
-            EventKind.SYSTEM_NOTE,
-            f"Updated {item_type or 'item'}",
-            SessionStatus.RUNNING,
-        )
-
-    def _format_item_completed(
-        self, item: dict[str, Any]
-    ) -> tuple[EventKind | None, str, SessionStatus]:
-        item_type = item.get("type")
-        if item_type == "agentMessage":
-            return None, "", SessionStatus.RUNNING
-        # An item finishing isn't a turn finishing — the model usually has more
-        # tool calls or assistant output to emit before turn/completed lands.
-        # Always report RUNNING here; the session-level transition to IDLE
-        # belongs to the turn/completed handler.
-        if item_type == "commandExecution":
-            output = item.get("aggregatedOutput") or ""
-            suffix = f"\n{output}" if output else ""
-            return (
-                EventKind.TOOL_RESULT,
-                f"$ {item.get('command', '')}{suffix}",
-                SessionStatus.RUNNING,
-            )
-        if item_type == "fileChange":
-            paths = ", ".join(
-                change.get("path", "") for change in item.get("changes", [])
-            )
-            return (
-                EventKind.TOOL_RESULT,
-                f"File changes completed: {paths}",
-                SessionStatus.RUNNING,
-            )
-        if item_type == "todo_list":
-            return (
-                EventKind.TOOL_RESULT,
-                self._format_todo_list(item),
-                SessionStatus.RUNNING,
-            )
-        return (
-            EventKind.SYSTEM_NOTE,
-            f"Completed {item_type or 'item'}",
-            SessionStatus.RUNNING,
-        )
-
-    def _extract_item_id(self, payload: dict[str, Any]) -> str | None:
-        candidate = payload.get("itemId")
-        if isinstance(candidate, str) and candidate:
-            return candidate
-        item = self._extract_item(payload) if "item" in payload else None
-        if isinstance(item, dict):
-            inner = item.get("id")
-            if isinstance(inner, str) and inner:
-                return inner
-        return None
-
-    def _extract_item(self, payload: dict[str, Any]) -> dict[str, Any]:
-        item = payload.get("item", {})
-        if isinstance(item, dict) and len(item) == 1 and "root" in item:
-            root = item["root"]
-            if isinstance(root, dict):
-                return root
-        return item if isinstance(item, dict) else {}
-
-    def _format_todo_list(self, item: dict[str, Any]) -> str:
-        entries = item.get("items", [])
-        if not isinstance(entries, list) or not entries:
-            return "Todo list"
-        lines: list[str] = []
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            text = str(entry.get("text", "")).strip()
-            if not text:
-                continue
-            marker = "[x]" if entry.get("completed") else "[ ]"
-            lines.append(f"{marker} {text}")
-        return "\n".join(lines) if lines else "Todo list"
-
-    def _payload_to_dict(self, payload: Any) -> dict[str, Any]:
-        if hasattr(payload, "model_dump"):
-            dumped = payload.model_dump(mode="json", by_alias=True)
-            return dumped if isinstance(dumped, dict) else {"value": dumped}
-        if is_dataclass(payload) and not isinstance(payload, type):
-            dumped = asdict(payload)
-            return dumped if isinstance(dumped, dict) else {"value": dumped}
-        if isinstance(payload, UnknownNotification):
-            return payload.params
-        if isinstance(payload, dict):
-            return payload
-        return {"value": str(payload)}
-
-    def _map_turn_status(self, value: Any) -> SessionStatus:
-        if value == "completed":
-            return SessionStatus.IDLE
-        if value == "interrupted":
-            return SessionStatus.INTERRUPTED
-        if value == "failed":
-            return SessionStatus.ERROR
-        return SessionStatus.RUNNING
-
-    def _format_approval_text(self, method: str, params: dict[str, Any]) -> str:
-        if method == "item/commandExecution/requestApproval":
-            return f"Approve command: {params.get('command', '')}"
-        if method == "item/fileChange/requestApproval":
-            return "Approve file changes"
-        return f"Approve request: {method}"
 
     def _map_decision(self, decision: str) -> str:
         lowered = decision.strip()

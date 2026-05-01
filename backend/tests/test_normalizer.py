@@ -1,4 +1,4 @@
-from waypoint.normalizer import TerminalNormalizer
+from waypoint.backends.tmux.normalize import TerminalNormalizer
 from waypoint.schemas import EventKind, SessionStatus
 
 

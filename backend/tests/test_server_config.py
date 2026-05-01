@@ -3,26 +3,20 @@ from pathlib import Path
 
 from waypoint.config import load_settings
 from waypoint.schemas import Backend
-from waypoint.server_config import (
-    SshLaunchTargetConfig,
-    _quote_remote_path,
-    build_remote_claude_launch_factory,
-    build_remote_codex_client_factory,
-    build_remote_thread_enumeration_args,
-)
+from waypoint.server_config import SshLaunchTargetConfig, quote_remote_path
 
 
 def test_quote_remote_path_preserves_leading_tilde() -> None:
-    assert _quote_remote_path("~") == "~"
-    assert _quote_remote_path("~/") == "~/"
-    assert _quote_remote_path("~/workspace") == "~/workspace"
-    assert _quote_remote_path("~/My Projects") == "~/'My Projects'"
-    assert _quote_remote_path("~user/work") == "~user/work"
-    assert _quote_remote_path("/srv/work") == "/srv/work"
-    assert _quote_remote_path("/srv/My Work") == "'/srv/My Work'"
-    assert _quote_remote_path("~;touch /tmp/pwned") == "'~;touch /tmp/pwned'"
-    assert _quote_remote_path("~$(id)/work") == "'~$(id)/work'"
-    assert _quote_remote_path("~user;uname -a/work") == "'~user;uname -a/work'"
+    assert quote_remote_path("~") == "~"
+    assert quote_remote_path("~/") == "~/"
+    assert quote_remote_path("~/workspace") == "~/workspace"
+    assert quote_remote_path("~/My Projects") == "~/'My Projects'"
+    assert quote_remote_path("~user/work") == "~user/work"
+    assert quote_remote_path("/srv/work") == "/srv/work"
+    assert quote_remote_path("/srv/My Work") == "'/srv/My Work'"
+    assert quote_remote_path("~;touch /tmp/pwned") == "'~;touch /tmp/pwned'"
+    assert quote_remote_path("~$(id)/work") == "'~$(id)/work'"
+    assert quote_remote_path("~user;uname -a/work") == "'~user;uname -a/work'"
 
 
 def test_load_settings_parses_yaml_defaults_and_ssh_targets(
@@ -96,70 +90,20 @@ def test_load_settings_env_overrides_yaml(monkeypatch, tmp_path: Path) -> None:
     assert loaded.password == "from-env"
 
 
-def test_remote_client_factory_uses_default_cwd_when_not_provided(
-    monkeypatch,
-) -> None:
-    config = SshLaunchTargetConfig(
-        id="devbox",
-        name="Devbox",
-        ssh_destination="dev@example.com",
-        default_cwd="~/workspace",
-    )
-
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
-    client = build_remote_codex_client_factory(config)("~/workspace", lambda *_: {})
-
-    assert client.config.launch_args_override is not None
-    # `~` must reach the remote shell unquoted so it can be expanded.
-    assert "cd ~/workspace" in client.config.launch_args_override[2]
-
-
-def test_remote_client_factory_uses_ssh_launch_args(monkeypatch) -> None:
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
-    config = SshLaunchTargetConfig(
-        id="devbox",
-        name="Devbox",
-        ssh_destination="dev@example.com",
-        ssh_args=["-p", "2222"],
-        remote_env={"OPENAI_API_KEY": "sk-test"},
-        config_overrides=['model="gpt-5"'],
-    )
-
-    client = build_remote_codex_client_factory(config)(
-        "/srv/work/project-a", lambda *_: {}
-    )
-
-    assert client.config.launch_args_override is not None
-    assert client.config.cwd is None
-    assert client.config.launch_args_override[:4] == (
-        "/usr/bin/ssh",
-        "-p",
-        "2222",
-        "dev@example.com",
-    )
-    remote_command = client.config.launch_args_override[4]
-    assert "cd /srv/work/project-a" in remote_command
-    assert "app-server --listen stdio://" in remote_command
-    assert "OPENAI_API_KEY=sk-test" in remote_command
-
-
-def test_remote_command_wraps_with_login_shell_by_default(monkeypatch) -> None:
+def test_build_remote_exec_args_wraps_with_login_shell_by_default(monkeypatch) -> None:
     monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
     config = SshLaunchTargetConfig(
         id="devbox", name="Devbox", ssh_destination="dev@example.com"
     )
 
-    command = config.remote_command_for_backend(
-        Backend.CLAUDE_CODE, ["--resume"], "~/workspace"
-    )
+    args = config.build_remote_exec_args(["claude", "--resume"], "~/workspace")
 
-    assert command[2].startswith("bash -ilc ")
-    # Inner command still contains the cd/exec line.
-    assert "cd ~/workspace" in command[2]
-    assert "claude --resume" in command[2]
+    assert args[2].startswith("bash -ilc ")
+    assert "cd ~/workspace" in args[2]
+    assert "claude --resume" in args[2]
 
 
-def test_remote_command_skips_wrapping_when_shell_blank(monkeypatch) -> None:
+def test_build_remote_exec_args_skips_wrapping_when_shell_blank(monkeypatch) -> None:
     monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
     config = SshLaunchTargetConfig(
         id="devbox",
@@ -168,9 +112,9 @@ def test_remote_command_skips_wrapping_when_shell_blank(monkeypatch) -> None:
         remote_shell="",
     )
 
-    command = config.remote_command_for_backend(Backend.CODEX, [], "~/workspace")
+    args = config.build_remote_exec_args(["codex"], "~/workspace")
 
-    assert command[2].startswith("cd ~/workspace")
+    assert args[2].startswith("cd ~/workspace")
 
 
 def test_build_remote_exec_args_omits_cd_when_cwd_is_none(monkeypatch) -> None:
@@ -187,177 +131,3 @@ def test_build_remote_exec_args_omits_cd_when_cwd_is_none(monkeypatch) -> None:
     remote_command = args[-1]
     assert "cd " not in remote_command
     assert "exec bash -s" in remote_command
-
-
-def test_ssh_target_remote_command_supports_claude(monkeypatch) -> None:
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
-    config = SshLaunchTargetConfig(
-        id="devbox",
-        name="Devbox",
-        ssh_destination="dev@example.com",
-        claude_bin="/opt/claude/bin/claude",
-    )
-
-    command = config.remote_command_for_backend(
-        Backend.CLAUDE_CODE, ["--resume"], "~/workspace"
-    )
-
-    assert command[:2] == ("/usr/bin/ssh", "dev@example.com")
-    assert "cd ~/workspace" in command[2]
-    assert "/opt/claude/bin/claude --resume" in command[2]
-
-
-def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
-    monkeypatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
-    monkeypatch.setattr("waypoint.server_config.secrets.randbelow", lambda _: 1234)
-    config = SshLaunchTargetConfig(
-        id="devbox",
-        name="Devbox",
-        ssh_destination="dev@example.com",
-        remote_env={"OPENAI_API_KEY": "sk-test"},
-        claude_bin="/opt/claude/bin/claude",
-    )
-    hook_script = tmp_path / "hook.py"
-    hook_script.write_text("#!/usr/bin/env python3\nprint('hook')\n", encoding="utf-8")
-
-    factory = build_remote_claude_launch_factory(
-        config,
-        hook_script_path=hook_script,
-        hook_secret="secret-123",
-        local_backend_port=8787,
-    )
-    launch = factory(
-        "claude-sess", "~/workspace", "claude-uuid", resume=True, cli_mode="plan"
-    )
-
-    assert launch.cwd is None
-    assert launch.env is None
-    assert launch.args[:6] == [
-        "/usr/bin/ssh",
-        "-o",
-        "ExitOnForwardFailure=yes",
-        "-R",
-        "21234:127.0.0.1:8787",
-        "dev@example.com",
-    ]
-    remote_command = launch.args[6]
-    assert 'WAYPOINT_DIR="$HOME/.waypoint/claude/claude-sess"' in remote_command
-    assert 'mkdir -p "$WAYPOINT_DIR"' in remote_command
-    assert "claude_pretool_hook.py" in remote_command
-    assert "claude_settings.json" in remote_command
-    # The hook command path placeholder must be substituted via sed so claude
-    # gets an absolute path (it does not expand `~` itself).
-    assert "__WAYPOINT_HOOK_PATH__" in remote_command
-    assert (
-        'sed -i.bak "s|__WAYPOINT_HOOK_PATH__|$WAYPOINT_DIR/claude_pretool_hook.py|g"'
-        in remote_command
-    )
-    assert '--settings "$WAYPOINT_DIR/claude_settings.json"' in remote_command
-    assert "WAYPOINT_HOOK_URL=http://127.0.0.1:21234" in remote_command
-    assert "WAYPOINT_HOOK_SECRET=secret-123" in remote_command
-    assert "WAYPOINT_SESSION_ID=claude-sess" in remote_command
-    assert "OPENAI_API_KEY=sk-test" in remote_command
-    assert "/opt/claude/bin/claude -p" in remote_command
-    assert "--resume claude-uuid" in remote_command
-    assert "--permission-mode plan" in remote_command
-    # Without an explicit model the remote command must not carry --model.
-    assert "--model" not in remote_command
-
-
-def test_remote_claude_launch_factory_appends_model_flag(
-    monkeypatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
-    monkeypatch.setattr("waypoint.server_config.secrets.randbelow", lambda _: 1234)
-    config = SshLaunchTargetConfig(
-        id="devbox",
-        name="Devbox",
-        ssh_destination="dev@example.com",
-        claude_bin="/opt/claude/bin/claude",
-    )
-    hook_script = tmp_path / "hook.py"
-    hook_script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
-
-    factory = build_remote_claude_launch_factory(
-        config,
-        hook_script_path=hook_script,
-        hook_secret="secret-123",
-        local_backend_port=8787,
-    )
-    launch = factory(
-        "claude-sess",
-        "~/workspace",
-        "claude-uuid",
-        resume=False,
-        cli_mode="default",
-        model="opus",
-    )
-    assert "--model opus" in launch.args[6]
-
-
-def test_build_remote_thread_enumeration_args_wraps_in_bash_and_passes_env(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
-    config = SshLaunchTargetConfig(
-        id="devbox",
-        name="Devbox",
-        ssh_destination="dev@example.com",
-        ssh_args=["-p", "2222"],
-        default_cwd="~/workspace",
-    )
-
-    args = build_remote_thread_enumeration_args(
-        config, env={"WAYPOINT_THREAD_ID": "abc-123"}
-    )
-
-    assert args[:4] == ("/usr/bin/ssh", "-p", "2222", "dev@example.com")
-    remote_command = args[4]
-    # Wrapped via bash -ilc so rcfiles run.
-    assert remote_command.startswith("bash -ilc ")
-    # The enumerator only reads $CLAUDE_CONFIG_DIR/projects (absolute),
-    # so it must NOT cd into default_cwd — a stale/deleted directory on
-    # the target should not be able to fail listing.
-    assert "cd " not in remote_command
-    # Helper script is fed via stdin (`bash -s`), so argv carries no body.
-    assert "bash -s" in remote_command
-    # Env override passed through to the remote shell's `env` invocation.
-    assert "WAYPOINT_THREAD_ID=abc-123" in remote_command
-
-
-def test_build_remote_thread_enumeration_args_ignores_default_cwd(
-    monkeypatch,
-) -> None:
-    """Even when default_cwd is set on the target, the enumeration argv
-    must not include a `cd` step. Regression for the case where a user
-    deletes/renames default_cwd on the remote: listing must still work."""
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
-    config = SshLaunchTargetConfig(
-        id="devbox",
-        name="Devbox",
-        ssh_destination="dev@example.com",
-        default_cwd="/srv/long-gone-project",
-    )
-
-    args = build_remote_thread_enumeration_args(config)
-    remote_command = args[2]
-    assert "/srv/long-gone-project" not in remote_command
-    assert "cd " not in remote_command
-
-
-def test_build_remote_thread_enumeration_args_without_env(monkeypatch) -> None:
-    monkeypatch.setattr("waypoint.server_config.shutil.which", lambda _: "/usr/bin/ssh")
-    config = SshLaunchTargetConfig(
-        id="devbox",
-        name="Devbox",
-        ssh_destination="dev@example.com",
-        default_cwd="~/workspace",
-    )
-
-    args = build_remote_thread_enumeration_args(config)
-    assert args[:2] == ("/usr/bin/ssh", "dev@example.com")
-    remote_command = args[2]
-    assert "bash -s" in remote_command
-    assert "WAYPOINT_THREAD_ID" not in remote_command

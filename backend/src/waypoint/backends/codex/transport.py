@@ -1,57 +1,45 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
 
+# Re-exported from the backend plugin so legacy
+# `from waypoint.transports.codex import CODEX_PERMISSION_PRESETS`
+# imports keep working; the source of truth lives in
+# `backends/codex/permission_modes.py`.
+from waypoint.backends.codex.permission_modes import (
+    codex_turn_params_for,
+)
 from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
+    from waypoint.backends.codex.adapter import CodexAppServerAdapter
+    from waypoint.backends.codex.plugin import CodexPlugin
     from waypoint.runtime import SessionRuntime
-
-
-# Maps Waypoint's per-session mode string to the params Codex's TUI builds
-# for the equivalent /permissions picker entry. See
-# tmp/docs/BACKEND_CONTROL_PROTOCOLS.md for source-of-truth wiring.
-CODEX_PERMISSION_PRESETS: dict[str, dict[str, Any]] = {
-    "default": {
-        "approval_policy": "on-request",
-        "sandbox_policy": {"type": "workspaceWrite"},
-        "approvals_reviewer": "user",
-    },
-    "auto_review": {
-        "approval_policy": "on-request",
-        "sandbox_policy": {"type": "workspaceWrite"},
-        "approvals_reviewer": "guardian_subagent",
-    },
-    "full_access": {
-        "approval_policy": "never",
-        "sandbox_policy": {"type": "dangerFullAccess"},
-        "approvals_reviewer": "user",
-    },
-}
-
-
-def codex_turn_params_for(mode: str | None) -> dict[str, Any] | None:
-    if mode is None:
-        return None
-    preset = CODEX_PERMISSION_PRESETS.get(mode)
-    if preset is None:
-        return None
-    return dict(preset)
 
 
 class CodexTransport(TransportAdapter):
     is_structured = True
     supports_resume = False
 
-    def __init__(self, runtime: SessionRuntime) -> None:
+    def __init__(self, runtime: SessionRuntime, plugin: CodexPlugin) -> None:
         self._runtime = runtime
+        self._plugin = plugin
 
     @property
-    def adapter(self):  # late binding so tests can swap runtime.codex
-        return self._runtime.codex
+    def adapter(self) -> CodexAppServerAdapter:
+        # Late binding so tests can swap ``plugin.adapter`` after setup;
+        # the codex plugin always holds a real adapter post-setup so the
+        # cast is safe in the live-session path.
+        adapter = self._plugin.adapter
+        if adapter is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="codex adapter is not initialized",
+            )
+        return adapter
 
     async def send_input(self, session: SessionRecord, text: str) -> None:
         try:

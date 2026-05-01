@@ -13,6 +13,22 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from waypoint.backends.claude_code.normalize import (
+    format_approval_text,
+    format_compact_boundary,
+    format_rate_limit,
+    format_status_event,
+    iter_content_blocks,
+    stringify_tool_result,
+)
+
+# Re-exported from the backend plugin so legacy imports keep resolving;
+# the source of truth lives in `backends/claude_code/permission_modes.py`.
+from waypoint.backends.claude_code.permission_modes import (
+    CLAUDE_ACCEPT_EDITS_TOOLS,
+    CLAUDE_AUTO_APPROVE_MODES,
+    CLAUDE_PERMISSION_MODES,
+)
 from waypoint.schemas import EventKind, SessionStatus
 
 log = logging.getLogger("waypoint.claude_cli")
@@ -23,18 +39,6 @@ CONTROL_REQUEST_TIMEOUT_SECONDS = 10.0
 # contents). Give the reader plenty of room so one fat line doesn't tear down
 # the session.
 CLAUDE_STREAM_BUFFER_LIMIT = 16 * 1024 * 1024
-CLAUDE_PERMISSION_MODES = (
-    "default",
-    "plan",
-    "acceptEdits",
-    "auto",
-    "bypassPermissions",
-    "dontAsk",
-)
-# Modes that bypass Waypoint's PreToolUse approval card entirely.
-CLAUDE_AUTO_APPROVE_MODES = frozenset({"auto", "bypassPermissions", "dontAsk"})
-# Tools acceptEdits auto-approves; everything else still surfaces the card.
-CLAUDE_ACCEPT_EDITS_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
 
 
 async def _drain_until_newline(reader: asyncio.StreamReader) -> None:
@@ -638,7 +642,7 @@ class ClaudeCliAdapter:
                     await self._emit_event(
                         waypoint_session_id,
                         EventKind.APPROVAL_REQUEST,
-                        self._format_approval_text(payload),
+                        format_approval_text(payload),
                         {
                             "tool_name": payload.get("tool_name"),
                             "tool_input": payload.get("tool_input"),
@@ -968,7 +972,7 @@ class ClaudeCliAdapter:
             await self._emit_event(
                 state.session_id,
                 EventKind.SYSTEM_NOTE,
-                self._format_rate_limit(event.get("rate_limit_info", {})),
+                format_rate_limit(event.get("rate_limit_info", {})),
                 {
                     "method": "rate_limit_event",
                     "payload": event,
@@ -1023,7 +1027,7 @@ class ClaudeCliAdapter:
             return
         if subtype == "status":
             # /compact and similar CLI commands surface their lifecycle here.
-            text, status = self._format_status_event(event)
+            text, status = format_status_event(event)
             if text:
                 await self._emit_event(
                     state.session_id,
@@ -1042,7 +1046,7 @@ class ClaudeCliAdapter:
             await self._emit_event(
                 state.session_id,
                 EventKind.SYSTEM_NOTE,
-                self._format_compact_boundary(metadata),
+                format_compact_boundary(metadata),
                 {
                     "method": "system.compact_boundary",
                     "payload": event,
@@ -1069,7 +1073,7 @@ class ClaudeCliAdapter:
     ) -> None:
         message = event.get("message") or {}
         message_id = str(message.get("id") or "")
-        for block in self._iter_content_blocks(message.get("content")):
+        for block in iter_content_blocks(message.get("content")):
             block_type = block.get("type")
             if block_type == "text":
                 text = block.get("text") or ""
@@ -1119,12 +1123,12 @@ class ClaudeCliAdapter:
         self, state: ClaudeSessionState, event: dict[str, Any]
     ) -> None:
         message = event.get("message") or {}
-        for block in self._iter_content_blocks(message.get("content")):
+        for block in iter_content_blocks(message.get("content")):
             if block.get("type") != "tool_result":
                 continue
             tool_use_id = str(block.get("tool_use_id") or "")
             content = block.get("content")
-            text = self._stringify_tool_result(content)
+            text = stringify_tool_result(content)
             is_error = bool(block.get("is_error"))
             kind = EventKind.TOOL_RESULT
             status = SessionStatus.RUNNING
@@ -1167,115 +1171,6 @@ class ClaudeCliAdapter:
             },
             SessionStatus.ERROR if is_error else SessionStatus.IDLE,
         )
-
-    def _format_status_event(self, event: dict[str, Any]) -> tuple[str, SessionStatus]:
-        status_label = event.get("status")
-        compact_result = event.get("compact_result")
-        if status_label == "compacting":
-            return "Compacting context…", SessionStatus.RUNNING
-        if compact_result is not None:
-            return (
-                f"Context compaction {compact_result}",
-                (
-                    SessionStatus.IDLE
-                    if compact_result == "success"
-                    else SessionStatus.ERROR
-                ),
-            )
-        return "", SessionStatus.RUNNING
-
-    def _format_compact_boundary(self, metadata: dict[str, Any]) -> str:
-        pre = metadata.get("pre_tokens")
-        post = metadata.get("post_tokens")
-        duration_ms = metadata.get("duration_ms")
-        trigger = metadata.get("trigger") or "manual"
-        parts = [f"Context compacted ({trigger})"]
-        if pre is not None and post is not None:
-            parts.append(f"{pre} → {post} tokens")
-        if duration_ms is not None:
-            parts.append(f"{duration_ms} ms")
-        return " · ".join(parts)
-
-    def _format_rate_limit(self, info: dict[str, Any]) -> str:
-        status = info.get("status", "unknown")
-        rl_type = info.get("rate_limit_type", "")
-        return f"Rate limit ({rl_type}): {status}".strip()
-
-    def _format_approval_text(self, payload: dict[str, Any]) -> str:
-        tool_name = payload.get("tool_name") or "tool"
-        tool_input = payload.get("tool_input") or {}
-        if tool_name == "Bash":
-            command = tool_input.get("command") or ""
-            return f"Approve Bash command:\n{command}"
-        if tool_name in {"Edit", "Write", "MultiEdit"}:
-            path = tool_input.get("file_path") or tool_input.get("path") or ""
-            return f"Approve {tool_name} on {path}"
-        if tool_name == "ExitPlanMode":
-            # Plan text is already rendered as a markdown agent_output above
-            # this card — keep this prompt compact to avoid duplication.
-            return "Approve plan and exit plan mode"
-        if tool_name in {"Task", "Agent"}:
-            # The prompt body can be many kilobytes; the frontend renders it
-            # as markdown from metadata.tool_input.prompt instead of dumping
-            # JSON here.
-            description = str(tool_input.get("description") or "").strip()
-            subagent = str(tool_input.get("subagent_type") or "").strip()
-            label = description or "subagent task"
-            if subagent:
-                label = f"{label} (via {subagent})"
-            return f"Approve subagent task: {label}"
-        if tool_name == "WebFetch":
-            url = str(tool_input.get("url") or "").strip()
-            return f"Approve WebFetch: {url}" if url else "Approve WebFetch"
-        if tool_name == "WebSearch":
-            query = str(tool_input.get("query") or "").strip()
-            return f"Approve WebSearch: {query}" if query else "Approve WebSearch"
-        if tool_name == "NotebookEdit":
-            path = str(tool_input.get("notebook_path") or "").strip()
-            return f"Approve NotebookEdit on {path}" if path else "Approve NotebookEdit"
-        return f"Approve {tool_name}: {json.dumps(tool_input)[:240]}"
-
-    @staticmethod
-    def _iter_content_blocks(content: Any) -> list[dict[str, Any]]:
-        # Claude Code normally streams message content as a list of typed
-        # blocks, but synthetic turns (notably the user echo after /compact)
-        # can arrive as a bare string or a list mixing strings and dicts.
-        # Coerce everything to a list of dicts so callers can rely on .get().
-        if not content:
-            return []
-        if isinstance(content, str):
-            return [{"type": "text", "text": content}]
-        if not isinstance(content, list):
-            return []
-        blocks: list[dict[str, Any]] = []
-        for entry in content:
-            if isinstance(entry, dict):
-                blocks.append(entry)
-            elif isinstance(entry, str):
-                blocks.append({"type": "text", "text": entry})
-        return blocks
-
-    def _stringify_tool_result(self, content: Any) -> str:
-        if content is None:
-            return ""
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts: list[str] = []
-            for entry in content:
-                if isinstance(entry, dict):
-                    if entry.get("type") == "text" and isinstance(
-                        entry.get("text"), str
-                    ):
-                        parts.append(entry["text"])
-                    elif "text" in entry:
-                        parts.append(str(entry["text"]))
-                    else:
-                        parts.append(json.dumps(entry))
-                else:
-                    parts.append(str(entry))
-            return "\n".join(parts)
-        return json.dumps(content)
 
     def _map_decision(self, decision: str) -> str:
         lowered = decision.strip().lower()

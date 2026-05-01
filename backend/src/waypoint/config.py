@@ -5,56 +5,17 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
+from waypoint.backends.claude_code.models import (
+    CLAUDE_EFFORT_LEVELS,
+    DEFAULT_CLAUDE_MODELS,
+)
 from waypoint.schemas import Backend, BackendModelOption
 from waypoint.server_config import SshLaunchTargetConfig
 
-# Effort levels gated by the binary's per-model checks (`vy`/`L4_`/`k4_`):
-# opus-4-6/4-7 and sonnet-4-6 expose the full set; haiku and older opus/sonnet
-# don't accept --effort at all. We mirror those gates here so the picker hides
-# the knob when the model can't use it.
-CLAUDE_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh")
-
-# Canonical Claude Code model picker entries. Mirrors the per-model factory
-# functions (WQ7/GQ7/RQ7/NQ7/...) baked into the CLI binary; Claude does not
-# expose a runtime model-list RPC, so we maintain this list and bump it when
-# the CLI ships new aliases. Free-text input is allowed via the API too, so
-# any string the binary accepts works even if not listed here.
-DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
-    BackendModelOption(
-        id="opus",
-        label="Opus 4.7",
-        description="Most capable for complex work",
-        supported_efforts=list(CLAUDE_EFFORT_LEVELS),
-        default_effort="high",
-    ),
-    BackendModelOption(
-        id="sonnet",
-        label="Sonnet 4.6",
-        description="Best for everyday tasks",
-        is_default=True,
-        supported_efforts=list(CLAUDE_EFFORT_LEVELS),
-        default_effort="high",
-    ),
-    BackendModelOption(
-        id="haiku",
-        label="Haiku 4.5",
-        description="Fast and lightweight",
-    ),
-    BackendModelOption(
-        id="opus[1m]",
-        label="Opus 4.7 (1M context)",
-        description="Long sessions with large codebases",
-        supported_efforts=list(CLAUDE_EFFORT_LEVELS),
-        default_effort="high",
-    ),
-    BackendModelOption(
-        id="sonnet[1m]",
-        label="Sonnet 4.6 (1M context)",
-        description="Long sessions with large codebases",
-        supported_efforts=list(CLAUDE_EFFORT_LEVELS),
-        default_effort="high",
-    ),
-)
+# `CLAUDE_EFFORT_LEVELS` and `DEFAULT_CLAUDE_MODELS` re-exported for legacy
+# `from waypoint.config import …` imports; the source of truth lives in
+# `backends/claude_code/models.py`.
+__all_claude_re_exports__ = (CLAUDE_EFFORT_LEVELS, DEFAULT_CLAUDE_MODELS)
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 

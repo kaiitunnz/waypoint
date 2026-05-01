@@ -23,6 +23,7 @@ Use this convention when opening issues:
 ## Layout
 
 - `backend/` — FastAPI daemon, tmux/session runtime, auth, persistence
+- `backend/src/waypoint/backends/` — one package per coding agent (`claude_code/`, `codex/`, `tmux/`); see [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the plugin contract and extension recipe
 - `frontend/` — Next.js PWA client
 - `3rdparty/codex/` — pinned Codex submodule used for the local app-server SDK
 
@@ -40,9 +41,11 @@ To extend this matrix:
 
 1. Update the row above with the new tested version.
 2. Re-run the integration paths that touch the wire format:
-   - Claude: `backend/src/waypoint/claude_cli.py` event dispatch (`_handle_system`, `_handle_assistant`, `_handle_user`, `_handle_result`) and the hook bootstrap in `backend/src/waypoint/server_config.py::_build_remote_claude_command`.
-   - Codex: `backend/src/waypoint/codex_app_server.py::_map_notification` and the SDK calls in `CodexAppServerAdapter`.
-3. If a bump breaks an event shape, prefer adding a branch in `_map_notification` / `_handle_*` over hard-pinning — the goal is for the matrix to grow, not to fork on version.
+   - Claude: `backend/src/waypoint/backends/claude_code/normalize.py` (status / compact / rate-limit / approval / content-block helpers) and `adapter.py`'s `_handle_*` stream handlers; hook bootstrap in `backends/claude_code/runtime_hook.py` + `server_config.py::_build_remote_claude_command`.
+   - Codex: `backend/src/waypoint/backends/codex/normalize.py::map_notification` and the SDK calls in `backends/codex/adapter.py::CodexAppServerAdapter`.
+3. If a bump breaks an event shape, prefer adding a branch in the relevant `normalize.py` over hard-pinning — the goal is for the matrix to grow, not to fork on version.
+
+Adding a brand-new coding agent (OpenCode, Aider, …) is its own flow — the runtime, API, and frontend dispatch by plugin id, so a new backend is "implement [`BackendPlugin`](backend/src/waypoint/backends/base.py) and register it." See [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the contract, capability descriptor, and a step-by-step recipe.
 
 ## Quick start
 

@@ -40,6 +40,7 @@ Environment overrides:
   WAYPOINT_STACK_FRONTEND_PORT     Default: 3000
   WAYPOINT_STACK_START_TIMEOUT     Default: 30
   WAYPOINT_STACK_UV_CACHE_DIR      Default: tmp/waypoint/uv-cache
+  WAYPOINT_STACK_FORCE_FRONTEND_BUILD=1  Always rebuild the frontend (default: skip when up to date)
 
 The script loads ${ENV_FILE} if it exists before applying defaults.
 EOF
@@ -106,6 +107,42 @@ log_file_for() {
 started_marker_for() {
   local service="$1"
   echo "${RUN_DIR}/${service}.started-this-run"
+}
+
+# Skip `next build` when no relevant input is newer than the existing
+# build output. The .next/ tree stays on disk between runs, so a hit is
+# "do nothing" — no cache to restore — which beats general-purpose
+# build runners on this single-package workflow. If you change build
+# behavior in a way the listed inputs don't capture (e.g. adding a new
+# config file Next reads), add it to the list. Force a rebuild with
+# WAYPOINT_STACK_FORCE_FRONTEND_BUILD=1 or `rm -rf frontend/.next`.
+# Caveat: this is mtime-based, so switching to a branch whose files
+# happen to have older mtimes can produce a false negative.
+frontend_build_is_fresh() {
+  if [[ "${WAYPOINT_STACK_FORCE_FRONTEND_BUILD:-0}" == "1" ]]; then
+    return 1
+  fi
+  local marker="${FRONTEND_DIR}/.next/BUILD_ID"
+  [[ -f "${marker}" ]] || return 1
+
+  local inputs=()
+  local candidate
+  for candidate in \
+    "${FRONTEND_DIR}/src" \
+    "${FRONTEND_DIR}/public" \
+    "${FRONTEND_DIR}/package.json" \
+    "${FRONTEND_DIR}/package-lock.json" \
+    "${FRONTEND_DIR}/next.config.ts" \
+    "${FRONTEND_DIR}/tsconfig.json"; do
+    [[ -e "${candidate}" ]] && inputs+=("${candidate}")
+  done
+  (( ${#inputs[@]} > 0 )) || return 1
+
+  # `-print -quit` bails at the first newer file so we don't walk the
+  # whole src tree on a hit.
+  local newer
+  newer=$(find "${inputs[@]}" -newer "${marker}" -print -quit 2>/dev/null) || true
+  [[ -z "${newer}" ]]
 }
 
 read_pid() {
@@ -226,11 +263,15 @@ start_frontend() {
 
   : >"$(started_marker_for frontend)"
   : >"${FRONTEND_LOG}"
-  echo "building frontend"
-  (
-    cd "${FRONTEND_DIR}"
-    env PORT="${FRONTEND_PORT}" npm run build >>"${FRONTEND_LOG}" 2>&1
-  )
+  if frontend_build_is_fresh; then
+    echo "frontend build up to date, skipping rebuild"
+  else
+    echo "building frontend"
+    (
+      cd "${FRONTEND_DIR}"
+      env PORT="${FRONTEND_PORT}" npm run build >>"${FRONTEND_LOG}" 2>&1
+    )
+  fi
 
   echo "starting frontend on 0.0.0.0:${FRONTEND_PORT}"
   (

@@ -2300,6 +2300,13 @@ details.tool-disclosure[open] .tool-glyph.todo {
   min-width: 0;
 }
 
+.composer-actions-trail {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .composer-actions .send {
   flex: 0 1 auto;
   min-width: 120px;
@@ -2341,7 +2348,7 @@ details.tool-disclosure[open] .tool-glyph.todo {
 
 .composer-overflow {
   position: relative;
-  margin-left: auto;
+  margin-left: 4px;
 }
 
 .composer-overflow-trigger {

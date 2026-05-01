@@ -1312,12 +1312,6 @@ const ReplyComposer = memo(function ReplyComposer({
           </div>
         ) : null}
         <div className="composer-toprow-trail">
-          <span className="composer-shortcut" aria-hidden>
-            <kbd>{shortcutKey}</kbd>
-            <span>+</span>
-            <kbd>↵</kbd>
-            <span>to send</span>
-          </span>
           <span
             className={`composer-connection ${connection}`}
             title={`Backend socket ${connection}`}
@@ -1396,64 +1390,72 @@ const ReplyComposer = memo(function ReplyComposer({
             Resume
           </button>
         ) : null}
-        {hasOverflow ? (
-          <div className="composer-overflow" ref={overflowRef}>
-            <button
-              type="button"
-              className={`composer-overflow-trigger ${overflowOpen ? "open" : ""}`}
-              aria-haspopup="menu"
-              aria-expanded={overflowOpen}
-              aria-label="More actions"
-              onClick={() => setOverflowOpen((open) => !open)}
-            >
-              ⋯
-            </button>
-            {overflowOpen ? (
-              <div className="composer-overflow-menu" role="menu">
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="composer-overflow-item"
-                  onClick={() => {
-                    setOverflowOpen(false);
-                    onRefresh();
-                  }}
-                >
-                  <span className="glyph">↻</span>
-                  Refresh
-                </button>
-                {canTerminate ? (
+        <div className="composer-actions-trail">
+          <span className="composer-shortcut" aria-hidden>
+            <kbd>{shortcutKey}</kbd>
+            <span>+</span>
+            <kbd>↵</kbd>
+            <span>to send</span>
+          </span>
+          {hasOverflow ? (
+            <div className="composer-overflow" ref={overflowRef}>
+              <button
+                type="button"
+                className={`composer-overflow-trigger ${overflowOpen ? "open" : ""}`}
+                aria-haspopup="menu"
+                aria-expanded={overflowOpen}
+                aria-label="More actions"
+                onClick={() => setOverflowOpen((open) => !open)}
+              >
+                ⋯
+              </button>
+              {overflowOpen ? (
+                <div className="composer-overflow-menu" role="menu">
                   <button
                     type="button"
                     role="menuitem"
-                    className="composer-overflow-item danger"
+                    className="composer-overflow-item"
                     onClick={() => {
                       setOverflowOpen(false);
-                      void onTerminate();
+                      onRefresh();
                     }}
                   >
-                    <span className="glyph">⏻</span>
-                    Terminate session
+                    <span className="glyph">↻</span>
+                    Refresh
                   </button>
-                ) : null}
-                {canDelete ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="composer-overflow-item danger"
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      void onDelete();
-                    }}
-                  >
-                    <span className="glyph">✕</span>
-                    Delete transcript
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+                  {canTerminate ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="composer-overflow-item danger"
+                      onClick={() => {
+                        setOverflowOpen(false);
+                        void onTerminate();
+                      }}
+                    >
+                      <span className="glyph">⏻</span>
+                      Terminate session
+                    </button>
+                  ) : null}
+                  {canDelete ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="composer-overflow-item danger"
+                      onClick={() => {
+                        setOverflowOpen(false);
+                        void onDelete();
+                      }}
+                    >
+                      <span className="glyph">✕</span>
+                      Delete transcript
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       </div>
     </section>
   );

@@ -33,7 +33,15 @@ ssh_targets:
   - id: devbox
     name: SSH coding backend
     ssh_destination: dev@example.com
+    # Multiplex SSH so subsequent calls reuse the master (~100ms
+    # instead of ~1–2s per fresh handshake). See README for details.
     ssh_args:
+      - -o
+      - ControlMaster=auto
+      - -o
+      - ControlPath=~/.ssh/cm-%C
+      - -o
+      - ControlPersist=600s
       - -p
       - "2222"
     # Per-plugin remote binary overrides keyed by plugin id; missing

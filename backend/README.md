@@ -62,9 +62,9 @@ Remote prerequisites:
         - -o
         - ControlMaster=auto
         - -o
-        - ControlPath=~/.ssh/cm-%r@%h:%p
+        - ControlPath=~/.ssh/cm-%C
         - -o
-        - ControlPersist=60s
+        - ControlPersist=600s
   ```
 
   Without multiplexing, a fresh SSH connection per list call dominates latency (~1–2 s); with `ControlPersist`, subsequent calls reuse the existing master connection and complete in ~100 ms.

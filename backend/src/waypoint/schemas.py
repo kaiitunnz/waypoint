@@ -98,10 +98,12 @@ class SessionRecord(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_event_at: datetime
-    # Per-plugin opaque state. Populated by each plugin via its lifecycle
-    # methods; storage persists this verbatim as JSON. The legacy columns
-    # below remain populated during the migration window so older readers
-    # keep working.
+    # Per-plugin opaque state, persisted as JSON. Scaffolding for the
+    # eventual retirement of the legacy `tmux_*`/`thread_id`/`pid`
+    # columns: storage already round-trips this field, but no plugin
+    # writes to it yet — built-ins still populate the typed columns
+    # below. A follow-up pass will move per-plugin state into this
+    # dict and drop the explicit columns.
     transport_state: dict[str, Any] = Field(default_factory=dict)
     tmux_session: str | None = None
     tmux_window: str | None = None

@@ -7,22 +7,29 @@ from collections import defaultdict
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, status
 
 from waypoint.backends import BackendRegistry, get_registry
-from waypoint.backends.claude_code.adapter import ClaudeCliAdapter
-from waypoint.backends.claude_code.runtime_hook import ClaudeHookBundle
-from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
 from waypoint.backends.codex.adapter import CodexAppServerAdapter
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
 from waypoint.backends.tmux.normalize import TerminalNormalizer
+
+if TYPE_CHECKING:
+    # Type-only references — Claude's adapter, hook bundle, and remote
+    # thread enumerator are wired up by the plugin's `setup()` (the
+    # PreToolUse hook bundle has to land on disk first), so the runtime
+    # only needs the names for annotations.
+    from waypoint.backends.claude_code.adapter import ClaudeCliAdapter
+    from waypoint.backends.claude_code.runtime_hook import ClaudeHookBundle
+    from waypoint.backends.claude_code.threads_remote import (
+        RemoteClaudeThreadEnumerator,
+    )
 from waypoint.config import Settings
 from waypoint.git_meta import resolve_git_meta
-from waypoint.scheduler import Scheduler, validate_permission_mode_for_backend
+from waypoint.scheduler import Scheduler
 from waypoint.schemas import (
-    Backend,
     EventKind,
     EventRecord,
     EventsPageResponse,
@@ -181,8 +188,8 @@ class SessionRuntime:
         structured_log = session_dir / "events.jsonl"
         git_meta = await resolve_git_meta(request.cwd)
         permission_mode = (
-            validate_permission_mode_for_backend(
-                request.backend, request.permission_mode
+            self.registry.get(request.backend).validate_permission_mode(
+                request.permission_mode
             )
             or "default"
         )
@@ -201,16 +208,15 @@ class SessionRuntime:
         )
         # Pick the plugin that owns the session lifecycle: structured
         # backends (Claude, Codex) launch their own protocol process; if
-        # the requested backend has no structured plugin running (e.g.
-        # the Claude adapter wasn't initialised), fall through to the
+        # the requested backend reports its adapter isn't ready (e.g.
+        # the Claude PreToolUse hook bundle failed to materialise), or
+        # if the backend isn't structured at all, fall through to the
         # tmux plugin which spawns the CLI directly inside a pane.
         plugin = self.registry.get(request.backend)
-        if request.backend == Backend.CLAUDE_CODE and self.claude is None:
-            plugin = self.registry.get("tmux")
-        elif (
-            not plugin.capabilities.is_structured
-            and self.registry.has_backend("tmux")
-        ):
+        if (
+            not plugin.is_available_for_managed_launch(self)
+            or not plugin.capabilities.is_structured
+        ) and self.registry.has_backend("tmux"):
             plugin = self.registry.get("tmux")
         return await plugin.create_session(
             self,
@@ -337,11 +343,7 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="this session cannot be reattached after exit",
             )
-        if session.transport == SessionTransport.CLAUDE_CLI:
-            if self.claude is not None:
-                await self.claude.terminate_session(session.id)
-        elif session.transport == SessionTransport.CODEX_APP_SERVER:
-            await self.codex.terminate_session(session.id)
+        await plugin.terminate_session(self, session)
         await plugin.restore_session(self, session)
         # _restore_*_session swallows failures (it tags the session ERROR or
         # EXITED and emits a system_note instead of raising). Re-read storage
@@ -361,12 +363,7 @@ class SessionRuntime:
         if session.status != SessionStatus.EXITED:
             await self.terminate(session_id)
         self.storage.delete_session(session_id)
-        if (
-            session.backend == Backend.CLAUDE_CODE
-            and session.launch_target_id
-            and self.claude_thread_enumerator is not None
-        ):
-            self.claude_thread_enumerator.invalidate(session.launch_target_id)
+        self.registry.plugin_for(session).on_session_deleted(self, session)
         await self.broadcast.publish(
             SessionEnvelope(
                 type="session_list_update",
@@ -433,21 +430,24 @@ class SessionRuntime:
         session = self.get_session(session_id)
         cleaned = effort.strip() if isinstance(effort, str) and effort.strip() else None
         plugin = self.registry.plugin_for(session)
-        # Some backends (Claude) treat set_effort as a session restart and
-        # advertise `supports_set_effort_inline=False` because the knob
-        # isn't truly inline. We still let the call through here — the
-        # plugin decides whether the swap actually does anything (e.g.
-        # short-circuit when the value is unchanged) and reports back.
-        if (
-            not plugin.capabilities.supports_set_effort_inline
-            and not hasattr(plugin, "apply_effort")
+        # Effort can be applied inline (Codex) or via a session restart
+        # (Claude respawns the CLI with the new --effort). Plugins that
+        # support neither (tmux) raise from `apply_effort`; we keep the
+        # explicit gate here so the dispatcher returns a clean 400
+        # without exercising the plugin path.
+        caps = plugin.capabilities
+        if not (
+            caps.supports_set_effort_inline or caps.supports_set_effort_with_restart
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"effort selection is not supported for {session.backend}",
             )
         announce = await plugin.apply_effort(self, session, cleaned)
-        if not announce and not plugin.capabilities.supports_set_effort_inline:
+        # Restart-style swaps short-circuit when the value is unchanged
+        # (apply_effort returns False); skip the storage write/broadcast
+        # in that case so we don't churn for nothing.
+        if not announce and not caps.supports_set_effort_inline:
             return session
         if announce:
             await self._record_system_event(
@@ -752,7 +752,7 @@ class SessionRuntime:
             for alias in plugin.capabilities.target_aliases:
                 if alias and alias.lower() in lowered:
                     return plugin.id
-        return Backend.CODEX.value
+        return self.settings.default_backend
 
     def _ensure_monitor(self, session_id: str) -> None:
         if session_id in self.monitor_tasks:

@@ -20,8 +20,6 @@ from waypoint.backends import BackendRegistry
 from waypoint.config import Settings, load_settings
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
-    ClaudeThreadImportRequest,
-    CodexThreadImportRequest,
     LoginRequest,
     MeResponse,
     ScheduleCreateRequest,
@@ -63,6 +61,9 @@ def _backend_descriptors(registry: BackendRegistry) -> list[dict[str, Any]]:
                     "supports_terminate": caps.supports_terminate,
                     "supports_set_model_inline": caps.supports_set_model_inline,
                     "supports_set_effort_inline": caps.supports_set_effort_inline,
+                    "supports_set_effort_with_restart": (
+                        caps.supports_set_effort_with_restart
+                    ),
                     "supports_set_permission_mode_inline": (
                         caps.supports_set_permission_mode_inline
                     ),
@@ -194,9 +195,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         threads = [
             thread.model_dump(mode="json")
-            for thread in await plugin.list_threads(
-                context.runtime, launch_target_id
-            )
+            for thread in await plugin.list_threads(context.runtime, launch_target_id)
         ]
         return {"threads": threads}
 
@@ -225,15 +224,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"thread import is not supported for {backend}",
             )
-        # Each plugin owns its request schema. CodexPlugin and
-        # ClaudeCodePlugin happen to use distinct Pydantic models
-        # today; the dispatcher trusts the plugin to validate.
-        if backend == "codex":
-            request: Any = CodexThreadImportRequest.model_validate(body)
-        elif backend == "claude_code":
-            request = ClaudeThreadImportRequest.model_validate(body)
-        else:
-            request = body
+        # Each plugin declares its own request shape via
+        # `import_request_schema`. The dispatcher validates and hands a
+        # typed object to `import_thread`; plugins without a schema fall
+        # back to the raw dict.
+        schema = plugin.import_request_schema
+        request: Any = schema.model_validate(body) if schema is not None else body
         session = await plugin.import_thread(context.runtime, request)
         return {"session": session.model_dump(mode="json")}
 

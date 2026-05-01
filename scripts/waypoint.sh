@@ -109,19 +109,33 @@ started_marker_for() {
   echo "${RUN_DIR}/${service}.started-this-run"
 }
 
-# Skip `next build` when neither the git HEAD nor any tracked input has
-# moved since the last build. The .next/ tree stays on disk between
-# runs, so a hit is "do nothing" — no cache to restore — which beats
-# general-purpose build runners on this single-package workflow.
-# Two-stage check:
-#   1. If the recorded HEAD (.next/BUILD_REF) differs from the current
-#      HEAD, rebuild. Catches `git checkout`, where mtimes don't always
-#      bump for files that change content between branches.
-#   2. Otherwise, fall through to an mtime check against BUILD_ID for
-#      uncommitted edits.
-# Force a rebuild with WAYPOINT_STACK_FORCE_FRONTEND_BUILD=1 or
-# `rm -rf frontend/.next`. Add to the input list when something new
-# starts driving build output.
+# Repo-relative paths that drive the Next build. Listed once and shared
+# by both the mtime check (resolved to absolute paths) and the git diff
+# check (kept relative for git pathspec).
+FRONTEND_BUILD_INPUTS_RELATIVE=(
+  "frontend/src"
+  "frontend/public"
+  "frontend/package.json"
+  "frontend/package-lock.json"
+  "frontend/next.config.ts"
+  "frontend/tsconfig.json"
+)
+
+# Skip `next build` when nothing the build cares about has changed.
+# .next/ stays on disk between runs, so a hit is "do nothing" — no
+# cache to restore — which beats general-purpose build runners on this
+# single-package workflow. Three layers:
+#   1. If recorded HEAD (.next/BUILD_REF) matches current HEAD, the
+#      tree's committed state is identical to last build — skip
+#      straight to the mtime check for uncommitted edits.
+#   2. If HEAD has moved, ask git which paths changed between the two
+#      refs. If none of them are build inputs (docs / backend / CI),
+#      the build output is still valid; bump BUILD_REF forward and
+#      proceed to the mtime check.
+#   3. mtime fallback: compares input file mtimes against BUILD_ID for
+#      uncommitted changes that don't move HEAD.
+# Force a full rebuild with WAYPOINT_STACK_FORCE_FRONTEND_BUILD=1 or
+# `rm -rf frontend/.next`.
 frontend_build_ref_file() {
   echo "${FRONTEND_DIR}/.next/BUILD_REF"
 }
@@ -137,30 +151,37 @@ frontend_build_is_fresh() {
   local marker="${FRONTEND_DIR}/.next/BUILD_ID"
   [[ -f "${marker}" ]] || return 1
 
-  # Git ref check. Only enforced when both sides exist; if either is
-  # missing (no git, or no recorded ref yet), we trust the mtime check
-  # alone so manual `npm run build` invocations don't trigger spurious
-  # rebuilds.
+  # Ref check, gated on both sides existing — manual `npm run build`
+  # outside this script never wrote BUILD_REF, so we fall back to the
+  # mtime check for that case.
   local ref_file current_ref last_ref
   ref_file="$(frontend_build_ref_file)"
   if [[ -f "${ref_file}" ]]; then
     current_ref="$(current_git_head)"
     last_ref="$(cat "${ref_file}" 2>/dev/null || true)"
-    if [[ -n "${current_ref}" && "${current_ref}" != "${last_ref}" ]]; then
-      return 1
+    if [[ -n "${current_ref}" && -n "${last_ref}" && "${current_ref}" != "${last_ref}" ]]; then
+      local changed
+      if changed=$(git -C "${ROOT_DIR}" diff --name-only \
+            "${last_ref}" "${current_ref}" -- \
+            "${FRONTEND_BUILD_INPUTS_RELATIVE[@]}" 2>/dev/null); then
+        if [[ -n "${changed}" ]]; then
+          return 1
+        fi
+        # Build inputs untouched between the two refs. The output is
+        # still valid for current HEAD — record that so the next run
+        # doesn't redo this diff.
+        record_frontend_build_ref
+      else
+        # Diff failed (e.g. last_ref orphaned by a rebase). Play safe.
+        return 1
+      fi
     fi
   fi
 
   local inputs=()
-  local candidate
-  for candidate in \
-    "${FRONTEND_DIR}/src" \
-    "${FRONTEND_DIR}/public" \
-    "${FRONTEND_DIR}/package.json" \
-    "${FRONTEND_DIR}/package-lock.json" \
-    "${FRONTEND_DIR}/next.config.ts" \
-    "${FRONTEND_DIR}/tsconfig.json"; do
-    [[ -e "${candidate}" ]] && inputs+=("${candidate}")
+  local rel
+  for rel in "${FRONTEND_BUILD_INPUTS_RELATIVE[@]}"; do
+    [[ -e "${ROOT_DIR}/${rel}" ]] && inputs+=("${ROOT_DIR}/${rel}")
   done
   (( ${#inputs[@]} > 0 )) || return 1
 
@@ -171,8 +192,8 @@ frontend_build_is_fresh() {
   [[ -z "${newer}" ]]
 }
 
-# Stamp the ref of the tree we just built. Best-effort: silently does
-# nothing outside a git repo.
+# Stamp the ref of the tree the current .next/ output reflects.
+# Best-effort: silently does nothing outside a git repo.
 record_frontend_build_ref() {
   local current_ref
   current_ref="$(current_git_head)"

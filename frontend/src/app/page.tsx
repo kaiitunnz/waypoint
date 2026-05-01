@@ -30,6 +30,8 @@ import {
 import { useBackendCatalog } from "@/lib/backends";
 import {
   clearToken,
+  pushRecentCwd,
+  readRecentCwds,
   readHost,
   readLaunchTarget,
   readToken,
@@ -79,6 +81,7 @@ export default function HomePage() {
   const [launchTargets, setLaunchTargets] = useState<LaunchTargetSummary[]>([]);
   const [activeLaunchTargetId, setActiveLaunchTargetId] = useState("");
   const [schedules, setSchedules] = useState<ScheduledSession[]>([]);
+  const [recentCwds, setRecentCwds] = useState<string[]>([]);
   const [threadsByBackend, setThreadsByBackend] = useState<
     Record<Backend, ThreadSummary[]>
   >({});
@@ -123,6 +126,10 @@ export default function HomePage() {
     setToken(currentToken);
     setActiveLaunchTargetId(readLaunchTarget(currentHost));
   }, []);
+
+  useEffect(() => {
+    setRecentCwds(readRecentCwds(host, activeLaunchTargetId));
+  }, [activeLaunchTargetId, host]);
 
   useEffect(() => {
     if (!host || !token) {
@@ -333,6 +340,7 @@ export default function HomePage() {
         session,
         ...current.filter((item) => item.id !== session.id),
       ]);
+      setRecentCwds(pushRecentCwd(host, activeLaunchTargetId, cwd));
       router.push(`/session/${session.id}`);
     } catch (createError) {
       if (isAuthError(createError)) {
@@ -426,6 +434,7 @@ export default function HomePage() {
         created,
         ...current.filter((item) => item.id !== created.id),
       ]);
+      setRecentCwds(pushRecentCwd(host, activeLaunchTargetId, payload.cwd));
     } catch (createError) {
       if (isAuthError(createError)) {
         resetAuthState("Session expired. Log in again.");
@@ -606,6 +615,7 @@ export default function HomePage() {
           defaultCwd={effectiveDefaultCwd}
           targetLabel={activeLaunchTarget?.name ?? null}
           launchTargetId={activeLaunchTargetId || null}
+          recentCwds={recentCwds}
           supportedBackends={supportedBackends}
           catalog={catalog}
           threadsByBackend={threadsByBackend}
@@ -624,6 +634,7 @@ export default function HomePage() {
           defaultCwd={effectiveDefaultCwd}
           targetLabel={activeLaunchTarget?.name ?? null}
           launchTargetId={activeLaunchTargetId || null}
+          recentCwds={recentCwds}
           supportedBackends={supportedBackends}
           catalog={catalog}
           schedules={schedules}

@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { EffortPicker } from "@/components/EffortPicker";
 import { ModelPicker } from "@/components/ModelPicker";
+import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
 import type { BackendCatalog } from "@/lib/backends";
 import {
   humaniseBackend,
@@ -24,6 +25,7 @@ interface SchedulePanelProps {
   defaultCwd: string;
   targetLabel: string | null;
   launchTargetId: string | null;
+  recentCwds: string[];
   supportedBackends: Backend[];
   catalog: BackendCatalog;
   schedules: ScheduledSession[];
@@ -42,6 +44,7 @@ export function SchedulePanel({
   defaultCwd,
   targetLabel,
   launchTargetId,
+  recentCwds,
   supportedBackends,
   catalog,
   schedules,
@@ -185,17 +188,12 @@ export function SchedulePanel({
               ))}
             </select>
           </label>
-          {targetLabel ? (
-            <label className="field">
-              <span>Working directory on {targetLabel}</span>
-              <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="~" />
-            </label>
-          ) : (
-            <label className="field">
-              <span>Working directory</span>
-              <input value={cwd} onChange={(event) => setCwd(event.target.value)} />
-            </label>
-          )}
+          <WorkingDirectoryField
+            cwd={cwd}
+            onChange={setCwd}
+            targetLabel={targetLabel}
+            recentCwds={recentCwds}
+          />
           <label className="field">
             <span>Title</span>
             <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Optional" />

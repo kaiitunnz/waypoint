@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { EffortPicker } from "@/components/EffortPicker";
 import { ModelPicker } from "@/components/ModelPicker";
 import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
+import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
 import type { BackendCatalog } from "@/lib/backends";
 import { humaniseBackend } from "@/lib/backends";
 import { Backend, BackendModelListResponse } from "@/lib/types";
@@ -27,6 +28,7 @@ interface LaunchPanelProps {
   defaultCwd: string;
   targetLabel: string | null;
   launchTargetId: string | null;
+  recentCwds: string[];
   supportedBackends: Backend[];
   catalog: BackendCatalog;
   threadsByBackend: Record<Backend, ThreadSummary[]>;
@@ -50,6 +52,7 @@ export function LaunchPanel({
   defaultCwd,
   targetLabel,
   launchTargetId,
+  recentCwds,
   supportedBackends,
   catalog,
   threadsByBackend,
@@ -157,17 +160,12 @@ export function LaunchPanel({
             ))}
           </select>
         </label>
-        {targetLabel ? (
-          <label className="field">
-            <span>Working directory on {targetLabel}</span>
-            <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="~" />
-          </label>
-        ) : (
-          <label className="field">
-            <span>Working directory</span>
-            <input value={cwd} onChange={(event) => setCwd(event.target.value)} />
-          </label>
-        )}
+        <WorkingDirectoryField
+          cwd={cwd}
+          onChange={setCwd}
+          targetLabel={targetLabel}
+          recentCwds={recentCwds}
+        />
         <label className="field">
           <span>Title</span>
           <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Optional" />

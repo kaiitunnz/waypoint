@@ -531,29 +531,10 @@ pre {
 
 .resume-panel-filter {
   width: min(100%, 230px);
-  justify-items: stretch;
-}
-
-.resume-panel-filter span {
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.06em;
-  text-transform: lowercase;
-  color: var(--muted);
 }
 
 .resume-panel-filter select {
   min-width: 0;
-  border-radius: var(--radius-pill);
-  background:
-    linear-gradient(180deg, rgba(20, 24, 33, 0.9), rgba(12, 15, 21, 0.92)),
-    var(--bg-input);
-  border-color: var(--line);
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.04em;
-  text-transform: lowercase;
-  padding: 9px 14px;
 }
 
 .resume-panel-loading,

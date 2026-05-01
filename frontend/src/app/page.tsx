@@ -53,7 +53,10 @@ type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
-const ALL_BACKENDS: Backend[] = ["codex", "claude_code"];
+// Hand-mirrored fallback used until `/api/me` lands. Once the catalog
+// arrives we derive `allBackends` from `me.backends.map(b => b.id)`
+// so adding a backend at the registry shows up here without an edit.
+const FALLBACK_BACKENDS: Backend[] = ["codex", "claude_code"];
 
 export default function HomePage() {
   const router = useRouter();
@@ -71,12 +74,14 @@ export default function HomePage() {
   const [codexThreadsLoading, setCodexThreadsLoading] = useState(false);
   const [claudeThreads, setClaudeThreads] = useState<ClaudeThreadSummary[]>([]);
   const [claudeThreadsLoading, setClaudeThreadsLoading] = useState(false);
+  const [registeredBackends, setRegisteredBackends] =
+    useState<Backend[]>(FALLBACK_BACKENDS);
 
   const activeLaunchTarget =
     launchTargets.find((target) => target.id === activeLaunchTargetId) ?? null;
   const supportedBackends = activeLaunchTarget?.supported_backends.length
     ? activeLaunchTarget.supported_backends
-    : ALL_BACKENDS;
+    : registeredBackends;
   const effectiveDefaultBackend = supportedBackends.includes(activeLaunchTarget?.default_backend ?? defaultBackend)
     ? (activeLaunchTarget?.default_backend ?? defaultBackend)
     : supportedBackends[0];
@@ -113,6 +118,9 @@ export default function HomePage() {
         setDefaultBackend(me.default_backend);
         setDefaultCwd(me.default_cwd || "~/");
         setLaunchTargets(me.launch_targets);
+        if (me.backends && me.backends.length > 0) {
+          setRegisteredBackends(me.backends.map((entry) => entry.id));
+        }
         setSchedules(scheduleItems);
         const storedTargetId = readLaunchTarget(host);
         const nextTargetId = me.launch_targets.some(

@@ -1,5 +1,6 @@
 import { memo, useCallback, useState } from "react";
 
+import { fidelityFor, transportLabel } from "@/lib/backends";
 import { EventRecord, SessionTransport } from "@/lib/types";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 
@@ -116,7 +117,7 @@ export const TranscriptCard = memo(function TranscriptCard({
   pair,
   onAnswerAskQuestion,
 }: TranscriptCardProps) {
-  if (transport === "codex_app_server" || transport === "claude_cli") {
+  if (fidelityFor(transport) === "structured") {
     if (pair) {
       return (
         <ToolPairCard pair={pair} onAnswerAskQuestion={onAnswerAskQuestion} />
@@ -145,7 +146,12 @@ function StructuredCard({
     toolUseId?: string,
   ) => Promise<boolean> | void;
 }) {
-  const agentLabel = transport === "claude_cli" ? "claude" : "codex";
+  // Pull the human-readable backend name from the catalog fallback;
+  // strips to the first word and lowercases (e.g. "Claude Code" →
+  // "claude") so Codex transcripts read "codex" and Claude reads
+  // "claude" without a literal switch. New backends inherit the
+  // pattern automatically.
+  const agentLabel = transportLabel(transport).split(" ")[0] || transport;
   return (
     <CodexCard
       event={event}

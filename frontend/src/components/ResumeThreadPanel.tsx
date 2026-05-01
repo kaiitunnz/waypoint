@@ -88,6 +88,22 @@ export function ResumeThreadPanel({
     return byBackend;
   }, [allThreads.length, threadsByBackend, supportedBackends]);
 
+  const filterOptions = useMemo(
+    () => [
+      {
+        value: "all" as Filter,
+        label: `All (${counts.all})`,
+        disabled: false,
+      },
+      ...supportedBackends.map((id) => ({
+        value: id as Filter,
+        label: `${catalog?.byId(id)?.label ?? humaniseBackend(id)} (${counts[id] ?? 0})`,
+        disabled: (counts[id] ?? 0) === 0,
+      })),
+    ],
+    [catalog, counts, supportedBackends],
+  );
+
   const initialFilter: Filter = dualBackend
     ? supportedBackends.includes(preferredBackend)
       ? preferredBackend
@@ -113,7 +129,7 @@ export function ResumeThreadPanel({
   }, []);
 
   // Auto-follow the launch form's backend selection until the user
-  // explicitly picks a chip; that lock stays for the session so the
+  // explicitly picks an option; that lock stays for the session so the
   // filter doesn't keep snapping out from under them.
   useEffect(() => {
     if (!dualBackend || filterTouched) return;
@@ -166,28 +182,24 @@ export function ResumeThreadPanel({
           <p className="muted">{subhead}</p>
         </div>
         {dualBackend ? (
-          <div
-            className="resume-panel-filter"
-            role="radiogroup"
-            aria-label="Filter by backend"
-          >
-            <FilterChip
-              label="All"
-              count={counts.all}
-              active={filter === "all"}
-              onClick={() => chooseFilter("all")}
-            />
-            {supportedBackends.map((id) => (
-              <FilterChip
-                key={id}
-                label={catalog?.byId(id)?.label ?? humaniseBackend(id)}
-                count={counts[id] ?? 0}
-                active={filter === id}
-                disabled={(counts[id] ?? 0) === 0}
-                onClick={() => chooseFilter(id)}
-              />
-            ))}
-          </div>
+          <label className="field resume-panel-filter">
+            <span>Backend</span>
+            <select
+              aria-label="Filter by backend"
+              value={filter}
+              onChange={(event) => chooseFilter(event.target.value as Filter)}
+            >
+              {filterOptions.map((option) => (
+                <option
+                  key={option.value}
+                  value={option.value}
+                  disabled={option.disabled}
+                >
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
         ) : null}
       </div>
 
@@ -309,34 +321,6 @@ export function ResumeThreadPanel({
         </div>
       ) : null}
     </section>
-  );
-}
-
-function FilterChip({
-  label,
-  count,
-  active,
-  disabled,
-  onClick,
-}: {
-  label: string;
-  count: number;
-  active: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={active}
-      disabled={disabled}
-      className={`resume-filter-chip${active ? " is-active" : ""}`}
-      onClick={onClick}
-    >
-      <span className="resume-filter-label">{label}</span>
-      <span className="resume-filter-count">{count}</span>
-    </button>
   );
 }
 

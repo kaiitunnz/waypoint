@@ -1,10 +1,10 @@
 """Claude Code backend plugin.
 
 Owns the per-backend invariants that the runtime previously hard-coded:
-permission-mode catalogue, model catalogue, capability flags, and the
-transport adapter wiring. Steps 4-6 of the refactor migrate the
-runtime's Claude-specific lifecycle helpers behind plugin methods so
-``runtime.py`` becomes a generic dispatcher.
+permission-mode catalogue, model catalogue, capability flags, transport
+adapter wiring, and the per-control inline-application logic. The
+runtime dispatches to ``apply_*`` and ``list_models`` so it stays
+generic over plugins.
 """
 
 from typing import TYPE_CHECKING, Any
@@ -23,6 +23,7 @@ from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_PERMISSION_MODE_SPECS,
     CLAUDE_PERMISSION_MODES,
 )
+from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
@@ -47,6 +48,8 @@ class ClaudeCodePlugin:
         model_source=ModelSource.STATIC,
         slash_commands=(),
         badges={"glyph": "C", "color": "#a78bfa"},
+        cli_binary="claude",
+        target_aliases=("claude",),
     )
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
@@ -79,6 +82,98 @@ class ClaudeCodePlugin:
     @property
     def permission_mode_ids(self) -> tuple[str, ...]:
         return CLAUDE_PERMISSION_MODES
+
+    async def apply_permission_mode(
+        self, runtime: "SessionRuntime", session: SessionRecord, mode: str
+    ) -> None:
+        if runtime.claude is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="claude adapter is not configured on this backend",
+            )
+        try:
+            await runtime.claude.set_permission_mode(session.id, mode)
+        except Exception as exc:  # noqa: BLE001 — surface adapter errors as 400
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+
+    async def apply_model(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        model: str | None,
+    ) -> None:
+        if runtime.claude is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="claude adapter is not configured on this backend",
+            )
+        try:
+            await runtime.claude.set_model(session.id, model)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+
+    async def apply_effort(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        effort: str | None,
+    ) -> bool:
+        """Returns True when the runtime should also publish a system
+        note describing the effort swap; False signals "nothing changed".
+        """
+        if runtime.claude is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="claude adapter is not configured on this backend",
+            )
+        # Claude has no in-process effort knob — set_effort terminates the
+        # CLI and respawns it with `--resume <id> --effort <new>`. Skip
+        # the swap when the value is unchanged so we don't restart for
+        # nothing.
+        if effort == (session.effort or None):
+            return False
+        try:
+            await runtime.claude.set_effort(session.id, effort)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        return True
+
+    async def list_models(
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None = None,
+        include_hidden: bool = False,
+    ) -> dict[str, Any]:
+        default_model = runtime.settings.default_models.get(self.id)
+        default_effort = runtime.settings.default_efforts.get(self.id)
+        options = [opt.model_dump(mode="json") for opt in runtime.settings.claude_models]
+        if default_model is None:
+            for opt in runtime.settings.claude_models:
+                if opt.is_default:
+                    default_model = opt.id
+                    break
+        return {
+            "backend": self.id,
+            "models": options,
+            "default_model": default_model,
+            "default_effort": default_effort,
+            "supports_free_text": True,
+        }
+
+    def effort_swap_message(self, effort: str | None) -> str:
+        return _claude_effort_swap_message(effort)
+
+
+def _claude_effort_swap_message(effort: str | None) -> str:
+    if effort:
+        return f"Restarted Claude session with --effort {effort}"
+    return "Restarted Claude session with default effort"
 
 
 def build_plugin() -> ClaudeCodePlugin:

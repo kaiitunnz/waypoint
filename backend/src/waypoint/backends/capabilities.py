@@ -39,3 +39,11 @@ class BackendCapabilities:
     slash_commands: tuple[SlashCommandSpec, ...] = ()
     approval_decisions: tuple[str, ...] = ("approve", "decline")
     badges: dict[str, str] = field(default_factory=dict)
+    # CLI binary used when this backend is launched in attached-tmux
+    # fallback mode. ``None`` means the plugin doesn't ship a CLI
+    # entry-point and can't be paired with the tmux transport.
+    cli_binary: str | None = None
+    # Substrings (case-insensitive) used to infer a backend from a tmux
+    # target name when the user attaches to an existing pane without
+    # specifying which CLI is running there.
+    target_aliases: tuple[str, ...] = ()

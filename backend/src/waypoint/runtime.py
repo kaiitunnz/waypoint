@@ -886,46 +886,20 @@ class SessionRuntime:
 
     async def set_permission_mode(self, session_id: str, mode: str) -> SessionRecord:
         session = self.get_session(session_id)
-        if session.backend == Backend.CLAUDE_CODE:
-            from waypoint.claude_cli import CLAUDE_PERMISSION_MODES
-
-            if self.claude is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="claude adapter is not configured on this backend",
-                )
-            if mode not in CLAUDE_PERMISSION_MODES:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        f"unsupported claude permission mode: {mode}; "
-                        f"expected one of {', '.join(CLAUDE_PERMISSION_MODES)}"
-                    ),
-                )
-            try:
-                await self.claude.set_permission_mode(session_id, mode)
-            except Exception as exc:  # noqa: BLE001 — surface adapter errors as 400
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-                ) from exc
-        elif session.backend == Backend.CODEX:
-            from waypoint.transports.codex import CODEX_PERMISSION_PRESETS
-
-            if mode not in CODEX_PERMISSION_PRESETS:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        f"unsupported codex permission mode: {mode}; "
-                        f"expected one of {', '.join(CODEX_PERMISSION_PRESETS)}"
-                    ),
-                )
-            # Codex applies on next turn_start — no protocol round-trip here.
-        else:
+        plugin = self.registry.plugin_for(session)
+        if not plugin.capabilities.supports_set_permission_mode_inline:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"permission mode is not supported for {session.backend}",
             )
-        updated = self.storage.update_session(session_id, permission_mode=mode)
+        validated = plugin.validate_permission_mode(mode)
+        if validated is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="permission mode is required",
+            )
+        await plugin.apply_permission_mode(self, session, validated)
+        updated = self.storage.update_session(session_id, permission_mode=validated)
         await self.broadcast.publish(
             SessionEnvelope(
                 type="session_list_update",
@@ -941,30 +915,13 @@ class SessionRuntime:
     async def set_model(self, session_id: str, model: str | None) -> SessionRecord:
         session = self.get_session(session_id)
         cleaned = model.strip() if isinstance(model, str) and model.strip() else None
-        if session.backend == Backend.CLAUDE_CODE:
-            if self.claude is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="claude adapter is not configured on this backend",
-                )
-            try:
-                await self.claude.set_model(session_id, cleaned)
-            except Exception as exc:  # noqa: BLE001 — surface adapter errors as 400
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-                ) from exc
-        elif session.backend == Backend.CODEX:
-            try:
-                await self.codex.set_model(session_id, cleaned)
-            except Exception as exc:  # noqa: BLE001
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-                ) from exc
-        else:
+        plugin = self.registry.plugin_for(session)
+        if not plugin.capabilities.supports_set_model_inline:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"model selection is not supported for {session.backend}",
             )
+        await plugin.apply_model(self, session, cleaned)
         updated = self.storage.update_session(session_id, model=cleaned)
         await self.broadcast.publish(
             SessionEnvelope(
@@ -981,40 +938,28 @@ class SessionRuntime:
     async def set_effort(self, session_id: str, effort: str | None) -> SessionRecord:
         session = self.get_session(session_id)
         cleaned = effort.strip() if isinstance(effort, str) and effort.strip() else None
-        if session.backend == Backend.CLAUDE_CODE:
-            if self.claude is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="claude adapter is not configured on this backend",
-                )
-            # Claude has no in-process effort knob — set_effort terminates the
-            # CLI and respawns it with `--resume <id> --effort <new>`. Block
-            # the swap if the same value is already in effect so we don't
-            # restart needlessly.
-            if cleaned == (session.effort or None):
-                return session
-            try:
-                await self.claude.set_effort(session_id, cleaned)
-            except Exception as exc:  # noqa: BLE001
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-                ) from exc
-            await self._record_system_event(
-                session_id,
-                self._claude_effort_swap_message(cleaned),
-                status=SessionStatus.IDLE,
-            )
-        elif session.backend == Backend.CODEX:
-            try:
-                await self.codex.set_effort(session_id, cleaned)
-            except Exception as exc:  # noqa: BLE001
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-                ) from exc
-        else:
+        plugin = self.registry.plugin_for(session)
+        # Some backends (Claude) treat set_effort as a session restart and
+        # advertise `supports_set_effort_inline=False` because the knob
+        # isn't truly inline. We still let the call through here — the
+        # plugin decides whether the swap actually does anything (e.g.
+        # short-circuit when the value is unchanged) and reports back.
+        if (
+            not plugin.capabilities.supports_set_effort_inline
+            and not hasattr(plugin, "apply_effort")
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"effort selection is not supported for {session.backend}",
+            )
+        announce = await plugin.apply_effort(self, session, cleaned)
+        if not announce and not plugin.capabilities.supports_set_effort_inline:
+            return session
+        if announce:
+            await self._record_system_event(
+                session_id,
+                plugin.effort_swap_message(cleaned),
+                status=SessionStatus.IDLE,
             )
         updated = self.storage.update_session(session_id, effort=cleaned)
         await self.broadcast.publish(
@@ -1035,77 +980,16 @@ class SessionRuntime:
         launch_target_id: str | None = None,
         include_hidden: bool = False,
     ) -> dict[str, Any]:
-        default_model = self.settings.default_models.get(backend)
-        default_effort = self.settings.default_efforts.get(backend)
-        if backend == Backend.CLAUDE_CODE:
-            options = [
-                opt.model_dump(mode="json") for opt in self.settings.claude_models
-            ]
-            if default_model is None:
-                for opt in self.settings.claude_models:
-                    if opt.is_default:
-                        default_model = opt.id
-                        break
-            return {
-                "backend": backend,
-                "models": options,
-                "default_model": default_model,
-                "default_effort": default_effort,
-                "supports_free_text": True,
-            }
-        if backend == Backend.CODEX:
-            # Local Codex spawn uses cwd as a Popen working directory which
-            # doesn't expand `~`; route through the helper that does the
-            # expansion (and prefers an SSH target's default_cwd when set).
-            cwd = self._codex_client_cwd(launch_target_id)
-            try:
-                response = await self.codex.list_models(
-                    cwd=cwd,
-                    client_factory_override=self._codex_client_factory(
-                        launch_target_id
-                    ),
-                    include_hidden=include_hidden,
-                )
-            except Exception as exc:  # noqa: BLE001
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"codex model discovery failed: {exc}",
-                ) from exc
-            models: list[dict[str, Any]] = []
-            for entry in response.data:
-                if entry.hidden and not include_hidden:
-                    continue
-                supported_efforts = [
-                    option.reasoning_effort.value
-                    for option in (entry.supported_reasoning_efforts or [])
-                ]
-                models.append(
-                    {
-                        "id": entry.model,
-                        "label": entry.display_name or entry.model,
-                        "description": entry.description or None,
-                        "is_default": entry.is_default,
-                        "hidden": entry.hidden,
-                        "supported_efforts": supported_efforts,
-                        "default_effort": (
-                            entry.default_reasoning_effort.value
-                            if entry.default_reasoning_effort is not None
-                            else None
-                        ),
-                    }
-                )
-                if default_model is None and entry.is_default:
-                    default_model = entry.model
-            return {
-                "backend": backend,
-                "models": models,
-                "default_model": default_model,
-                "default_effort": default_effort,
-                "supports_free_text": True,
-            }
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"model discovery is not supported for {backend}",
+        if not self.registry.has_backend(backend):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"unknown backend: {backend}",
+            )
+        plugin = self.registry.get(backend)
+        return await plugin.list_models(
+            self,
+            launch_target_id=launch_target_id,
+            include_hidden=include_hidden,
         )
 
     async def set_pinned(self, session_id: str, pinned: bool) -> SessionRecord:
@@ -1679,7 +1563,13 @@ class SessionRuntime:
         cwd: str | None = None,
     ) -> list[str]:
         if launch_target is None:
-            executable = "claude" if backend == Backend.CLAUDE_CODE else "codex"
+            plugin = self.registry.get(backend)
+            executable = plugin.capabilities.cli_binary
+            if executable is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"backend {backend} has no CLI binary configured",
+                )
             return [executable, *args]
         return list(
             launch_target.remote_command_for_backend(
@@ -1687,11 +1577,13 @@ class SessionRuntime:
             )
         )
 
-    def _infer_backend(self, target: str) -> Backend:
+    def _infer_backend(self, target: str) -> str:
         lowered = target.lower()
-        if "claude" in lowered:
-            return Backend.CLAUDE_CODE
-        return Backend.CODEX
+        for plugin in self.registry.all():
+            for alias in plugin.capabilities.target_aliases:
+                if alias and alias.lower() in lowered:
+                    return plugin.id
+        return Backend.CODEX.value
 
     def _ensure_monitor(self, session_id: str) -> None:
         if session_id in self.monitor_tasks:

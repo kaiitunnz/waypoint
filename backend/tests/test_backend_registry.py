@@ -94,6 +94,8 @@ def test_schema_field_accepts_registered_backend_string() -> None:
 
 
 def test_registry_rejects_duplicate_id() -> None:
+    from typing import Any
+
     registry = BackendRegistry()
 
     class Stub:
@@ -102,8 +104,37 @@ def test_registry_rejects_duplicate_id() -> None:
         label = "Stub"
         capabilities = BackendCapabilities(is_structured=False, supports_resume=False)
 
-        def transport_view(self, runtime):  # noqa: ANN001
+        def transport_view(self, runtime: Any) -> Any:
             raise NotImplementedError
+
+        def validate_permission_mode(self, mode: str | None) -> str | None:
+            return None
+
+        async def apply_permission_mode(
+            self, runtime: Any, session: Any, mode: str
+        ) -> None:
+            raise NotImplementedError
+
+        async def apply_model(
+            self, runtime: Any, session: Any, model: str | None
+        ) -> None:
+            raise NotImplementedError
+
+        async def apply_effort(
+            self, runtime: Any, session: Any, effort: str | None
+        ) -> bool:
+            return False
+
+        def effort_swap_message(self, effort: str | None) -> str:
+            return ""
+
+        async def list_models(
+            self,
+            runtime: Any,
+            launch_target_id: str | None = None,
+            include_hidden: bool = False,
+        ) -> dict[str, Any]:
+            return {}
 
     registry.register(Stub())
     with pytest.raises(ValueError):

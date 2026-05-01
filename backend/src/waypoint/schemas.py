@@ -149,6 +149,10 @@ class MeResponse(BaseModel):
     default_backend: BackendId = Backend.CODEX.value
     default_cwd: str = "~/"
     launch_targets: list[LaunchTargetSummary] = Field(default_factory=list)
+    # Plugin catalogue mirrored from `/api/backends`; lets `/api/me`
+    # consumers (the frontend's bootstrap, auth shell) hydrate the
+    # backend picker without a second round-trip.
+    backends: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class EventsPageResponse(BaseModel):

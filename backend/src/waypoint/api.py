@@ -17,11 +17,11 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 
 from waypoint.auth import TokenStore, require_token
+from waypoint.backends import BackendRegistry
 from waypoint.claude_runtime import ensure_claude_hook_bundle
 from waypoint.config import Settings, load_settings
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
-    Backend,
     ClaudeThreadImportRequest,
     CodexThreadImportRequest,
     LoginRequest,
@@ -40,6 +40,59 @@ from waypoint.schemas import (
 )
 from waypoint.storage import Storage
 from waypoint.tailnet import fetch_snapshot
+
+
+def _backend_descriptors(registry: BackendRegistry) -> list[dict[str, Any]]:
+    """Serialise every registered backend for the frontend catalogue.
+
+    The frontend consumes this from ``GET /api/backends`` (and from the
+    ``backends`` field on ``GET /api/me``) instead of mirroring the
+    permission modes / model sources / badge palettes in TypeScript.
+    Adding a new plugin shows up in the picker the moment it registers.
+    """
+    payload: list[dict[str, Any]] = []
+    for plugin in registry.all():
+        caps = plugin.capabilities
+        payload.append(
+            {
+                "id": plugin.id,
+                "transport_id": plugin.transport_id,
+                "label": plugin.label,
+                "badges": dict(caps.badges),
+                "capabilities": {
+                    "is_structured": caps.is_structured,
+                    "supports_resume": caps.supports_resume,
+                    "supports_terminate": caps.supports_terminate,
+                    "supports_set_model_inline": caps.supports_set_model_inline,
+                    "supports_set_effort_inline": caps.supports_set_effort_inline,
+                    "supports_set_permission_mode_inline": (
+                        caps.supports_set_permission_mode_inline
+                    ),
+                    "supports_thread_discovery": caps.supports_thread_discovery,
+                    "supports_thread_import": caps.supports_thread_import,
+                    "supports_slash_compact": caps.supports_slash_compact,
+                    "model_source": caps.model_source.value,
+                    "approval_decisions": list(caps.approval_decisions),
+                    "effort_levels": list(caps.effort_levels),
+                    "permission_modes": [
+                        {
+                            "id": spec.id,
+                            "label": spec.label,
+                            "description": spec.description,
+                            "requires_session_restart": spec.requires_session_restart,
+                        }
+                        for spec in caps.permission_modes
+                    ],
+                    "slash_commands": [
+                        {"name": cmd.name, "description": cmd.description}
+                        for cmd in caps.slash_commands
+                    ],
+                    "cli_binary": caps.cli_binary,
+                    "target_aliases": list(caps.target_aliases),
+                },
+            }
+        )
+    return payload
 
 
 class AppContext:
@@ -100,7 +153,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             default_backend=context.settings.default_backend,
             default_cwd=context.settings.default_cwd,
             launch_targets=context.runtime.launch_target_summaries(),
+            backends=_backend_descriptors(context.runtime.registry),
         )
+
+    @app.get("/api/backends")
+    async def list_backends(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        return {"backends": _backend_descriptors(context.runtime.registry)}
 
     @app.post("/api/internal/hooks/claude/approval")
     async def claude_hook_approval(request: Request) -> Any:
@@ -149,6 +209,43 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ]
         return {"threads": threads}
 
+    @app.get("/api/backends/{backend}/threads")
+    async def list_backend_threads(
+        backend: str,
+        _: Annotated[str, Depends(token_dependency())],
+        launch_target_id: Annotated[str | None, Query()] = None,
+    ) -> Any:
+        if not context.runtime.registry.has_backend(backend):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"unknown backend: {backend}",
+            )
+        plugin = context.runtime.registry.get(backend)
+        if not plugin.capabilities.supports_thread_discovery:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"thread discovery is not supported for {backend}",
+            )
+        # Routed through the runtime helpers for now; Step 6's follow-up
+        # moves these onto the plugin so this dispatcher disappears.
+        if backend == "codex":
+            threads = [
+                thread.model_dump(mode="json")
+                for thread in await context.runtime.list_importable_codex_threads(
+                    launch_target_id
+                )
+            ]
+        elif backend == "claude_code":
+            threads = [
+                thread.model_dump(mode="json")
+                for thread in await context.runtime.list_importable_claude_threads(
+                    launch_target_id
+                )
+            ]
+        else:
+            threads = []
+        return {"threads": threads}
+
     @app.post("/api/sessions")
     async def create_session(
         request: SessionCreateRequest,
@@ -184,6 +281,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         session = await context.runtime.import_claude_thread(request)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.post("/api/backends/{backend}/sessions/import")
+    async def import_backend_thread(
+        backend: str,
+        body: dict[str, Any],
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        if not context.runtime.registry.has_backend(backend):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"unknown backend: {backend}",
+            )
+        plugin = context.runtime.registry.get(backend)
+        if not plugin.capabilities.supports_thread_import:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"thread import is not supported for {backend}",
+            )
+        if backend == "codex":
+            request = CodexThreadImportRequest.model_validate(body)
+            session = await context.runtime.import_codex_thread(request)
+        elif backend == "claude_code":
+            claude_request = ClaudeThreadImportRequest.model_validate(body)
+            session = await context.runtime.import_claude_thread(claude_request)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"thread import not implemented for {backend}",
+            )
         return {"session": session.model_dump(mode="json")}
 
     @app.get("/api/sessions/{session_id}")

@@ -32,7 +32,7 @@ def test_remote_client_factory_uses_ssh_launch_args(monkeypatch) -> None:
         ssh_destination="dev@example.com",
         ssh_args=["-p", "2222"],
         remote_env={"OPENAI_API_KEY": "sk-test"},
-        config_overrides=['model="gpt-5"'],
+        plugin_configs={"codex": {"config_overrides": ['model="gpt-5"']}},
     )
 
     client = build_remote_codex_client_factory(config)(
@@ -50,4 +50,5 @@ def test_remote_client_factory_uses_ssh_launch_args(monkeypatch) -> None:
     remote_command = client.config.launch_args_override[4]
     assert "cd /srv/work/project-a" in remote_command
     assert "app-server --listen stdio://" in remote_command
+    assert 'model="gpt-5"' in remote_command  # config_overrides → --config flag
     assert "OPENAI_API_KEY=sk-test" in remote_command

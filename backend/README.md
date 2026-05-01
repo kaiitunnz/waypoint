@@ -37,8 +37,7 @@ The current config shape supports zero or more `ssh_targets` entries with:
 - top-level backend defaults such as `host`, `port`, `password`, and `data_dir`
 - `id` and `name` for picker/UI identity
 - `ssh_destination` and optional `ssh_args`
-- `supported_backends`, which defaults to every registered structured backend (today: `codex` and `claude_code`)
-- `remote_bins`, a plugin-id → remote-binary mapping (e.g. `{codex: codex, claude_code: claude}`); missing entries fall back to the plugin's `cli_binary`
+- `plugin_configs`, a plugin-id → per-target plugin config mapping. Presence of a key means "this target supports the plugin"; omitting `plugin_configs` entirely defaults to every registered non-fallback plugin (today: `codex` + `claude_code`). Each block is validated against the plugin's `launch_target_schema` — common fields include `remote_bin` (path to the CLI on the remote host; falls back to the plugin's `cli_binary`), and codex adds `config_overrides` for the `--config K=V` flag.
 - `default_cwd`, which seeds the remote working-directory field and defaults to `~`
 - `remote_env` for secrets such as `OPENAI_API_KEY`
 

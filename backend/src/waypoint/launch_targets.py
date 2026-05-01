@@ -5,19 +5,24 @@ CLI launch + PreToolUse hook bootstrap, claude thread enumeration) live
 next to their plugin in ``backends/<id>/remote.py``. This module owns
 the model and the generic SSH argv primitives only.
 
-Per-target binary overrides (the path to ``codex`` / ``claude`` on the
-remote host) live in ``remote_bins`` keyed by plugin id, which keeps
-the launch target plugin-agnostic — adding a new backend doesn't
-require an edit here.
+Per-target per-plugin configuration (which plugins this target
+supports, the remote binary path for each, any plugin-specific knobs
+like Codex's ``--config`` overrides) lives in a single
+``plugin_configs`` mapping keyed by plugin id, mirroring
+``Settings.plugin_configs``. Each entry is validated against the
+plugin's ``launch_target_schema`` so adding a per-target knob to a
+new plugin doesn't require editing this module.
 """
 
 import re
 import shlex
 import shutil
 from pathlib import Path
+from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
+from waypoint.backends.plugin_config import PluginLaunchTargetConfig
 from waypoint.backends.registry import get_registry
 from waypoint.schemas import BackendId
 
@@ -25,7 +30,7 @@ SAFE_TILDE_HEAD = re.compile(r"~[A-Za-z0-9._-]*$")
 
 
 def _default_supported_backends() -> list[str]:
-    """Default to every registered non-fallback backend.
+    """Plugin ids implicitly supported when ``plugin_configs`` is empty.
 
     Managed-launch fallback wrappers (capabilities flag
     ``is_fallback_for_managed_launch``) never own a managed SSH
@@ -58,43 +63,75 @@ class SshLaunchTargetConfig(BaseModel):
     # shell. NB: any `.bashrc` line that writes to stdout would corrupt
     # codex/claude's stream protocols, so keep rcfile output on stderr only.
     remote_shell: str = "bash -ilc"
-    supported_backends: list[BackendId] = Field(
-        default_factory=_default_supported_backends
-    )
-    config_overrides: list[str] = Field(default_factory=list)
     remote_env: dict[str, str] = Field(default_factory=dict)
-    # Per-plugin remote binary overrides keyed by plugin id; e.g.
-    # ``{"claude_code": "/opt/claude/bin/claude", "codex": "codex"}``. A
-    # missing entry falls back to the plugin's ``capabilities.cli_binary``.
-    remote_bins: dict[BackendId, str] = Field(default_factory=dict)
+    # Per-plugin per-target config blocks keyed by plugin id. Presence
+    # of a key means "this target supports the plugin"; an empty
+    # mapping means "supports every non-fallback registered plugin
+    # with defaults" so a minimal target spec (just ``ssh_destination``)
+    # Just Works. Each value is validated against the plugin's
+    # ``launch_target_schema`` and exposed as a typed instance via
+    # :meth:`plugin_config`.
+    plugin_configs: dict[BackendId, dict[str, Any]] = Field(default_factory=dict)
 
-    @field_validator("supported_backends")
-    @classmethod
-    def validate_supported_backends(cls, value: list[str]) -> list[str]:
-        if not value:
+    _resolved_plugin_configs: dict[str, PluginLaunchTargetConfig] = PrivateAttr(
+        default_factory=dict
+    )
+
+    @model_validator(mode="after")
+    def _resolve_plugin_configs_eagerly(self) -> "SshLaunchTargetConfig":
+        # Eager validation surfaces YAML errors at startup rather than
+        # at first runtime access; the typed instances live in a
+        # private attribute so the public ``plugin_configs`` field
+        # stays the raw wire shape that round-trips through
+        # ``model_dump``.
+        registry = get_registry()
+        for plugin_id, raw in self.plugin_configs.items():
+            schema = registry.get(plugin_id).launch_target_schema
+            self._resolved_plugin_configs[plugin_id] = schema.model_validate(raw or {})
+        return self
+
+    def supported_plugins(self) -> list[str]:
+        """Plugin ids this target accepts managed launches for.
+
+        Empty ``plugin_configs`` falls back to every non-fallback
+        registered plugin (the zero-config default). Otherwise the
+        explicit list of keys.
+        """
+        if not self.plugin_configs:
             return _default_supported_backends()
-        deduped: list[str] = []
-        for backend in value:
-            if backend not in deduped:
-                deduped.append(backend)
-        return deduped
+        return list(self.plugin_configs)
 
-    def supports(self, backend: str) -> bool:
-        return backend in self.supported_backends
+    def supports(self, plugin_id: str) -> bool:
+        return plugin_id in self.supported_plugins()
 
     def resolve_default_backend(self, fallback: str) -> str:
-        if fallback in self.supported_backends:
+        supported = self.supported_plugins()
+        if fallback in supported:
             return fallback
-        return self.supported_backends[0]
+        return supported[0] if supported else fallback
+
+    def plugin_config(self, plugin_id: str) -> PluginLaunchTargetConfig:
+        """Return the validated per-plugin config for this target.
+
+        Falls back to a default-constructed instance of the plugin's
+        ``launch_target_schema`` when the user hasn't supplied a
+        block in ``waypoint.yaml`` (i.e. the plugin is implicitly
+        supported via the empty-``plugin_configs`` default).
+        """
+        cached = self._resolved_plugin_configs.get(plugin_id)
+        if cached is not None:
+            return cached
+        plugin = get_registry().get(plugin_id)
+        cfg = plugin.launch_target_schema()
+        self._resolved_plugin_configs[plugin_id] = cfg
+        return cfg
 
     def remote_bin_for(self, plugin_id: str, default: str | None = None) -> str | None:
-        """Return the remote binary path to use for ``plugin_id``.
-
-        Falls back to ``default`` (typically the plugin's
-        ``capabilities.cli_binary``) when the user hasn't pinned one
-        for this target.
+        """Convenience for the common case: get the remote binary path
+        for ``plugin_id`` on this target, falling back to ``default``
+        (typically the plugin's ``capabilities.cli_binary``).
         """
-        return self.remote_bins.get(plugin_id) or default
+        return self.plugin_config(plugin_id).remote_bin or default
 
     def build_remote_exec_args(
         self, command: list[str], cwd: str | None = None

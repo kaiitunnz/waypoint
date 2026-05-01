@@ -44,20 +44,22 @@ ssh_targets:
       - ControlPersist=600s
       - -p
       - "2222"
-    # Per-plugin remote binary overrides keyed by plugin id; missing
-    # entries fall back to the plugin's `capabilities.cli_binary`.
-    remote_bins:
-      codex: codex
-      claude_code: claude
+    # Per-plugin per-target config blocks. Presence of a key means
+    # "this target supports the plugin"; omitting `plugin_configs`
+    # entirely means "supports every registered non-fallback plugin
+    # with defaults". Each block is validated against the plugin's
+    # `launch_target_schema` (see `backends/<id>/plugin.py`).
+    plugin_configs:
+      codex:
+        # remote_bin: /opt/codex/bin/codex     # path on the remote host
+        config_overrides:
+          - model_reasoning_effort="high"      # codex --config K=V
+      claude_code:
+        # remote_bin: /opt/claude/bin/claude
     default_cwd: "~"
     # Default `bash -ilc` (interactive + login) sources the full rcfile chain
     # so PATH from `.bashrc` (nvm/cargo/pyenv/etc.) is available. Switch to
     # `bash -lc` if your `.bashrc` writes to stdout (would corrupt the stream).
     remote_shell: bash -ilc
-    supported_backends:
-      - codex
-      - claude_code
-    config_overrides:
-      - model_reasoning_effort="high"
     remote_env:
       OPENAI_API_KEY: sk-your-key

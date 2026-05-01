@@ -38,13 +38,11 @@ def test_load_settings_parses_yaml_defaults_and_ssh_targets(
                 "    ssh_args:",
                 "      - -p",
                 "      - '2222'",
-                "    remote_bins:",
-                "      codex: /opt/codex/bin/codex",
+                "    plugin_configs:",
+                "      codex:",
+                "        remote_bin: /opt/codex/bin/codex",
+                "        config_overrides: ['model_reasoning_effort=\"high\"']",
                 "    default_cwd: ~/workspace",
-                "    supported_backends:",
-                "      - codex",
-                "    config_overrides:",
-                '      - model_reasoning_effort="high"',
                 "    remote_env:",
                 "      OPENAI_API_KEY: sk-test",
             ]
@@ -58,14 +56,17 @@ def test_load_settings_parses_yaml_defaults_and_ssh_targets(
     assert loaded.port == 9999
     assert loaded.password == "from-yaml"
     assert len(loaded.ssh_targets) == 1
-    assert loaded.ssh_targets[0].id == "devbox"
-    assert loaded.ssh_targets[0].name == "Devbox"
-    assert loaded.ssh_targets[0].ssh_destination == "dev@example.com"
-    assert loaded.ssh_targets[0].ssh_args == ["-p", "2222"]
-    assert loaded.ssh_targets[0].default_cwd == "~/workspace"
-    assert loaded.ssh_targets[0].remote_env["OPENAI_API_KEY"] == "sk-test"
-    assert loaded.ssh_targets[0].supported_backends == ["codex"]
-    assert loaded.ssh_targets[0].remote_bins == {"codex": "/opt/codex/bin/codex"}
+    target = loaded.ssh_targets[0]
+    assert target.id == "devbox"
+    assert target.name == "Devbox"
+    assert target.ssh_destination == "dev@example.com"
+    assert target.ssh_args == ["-p", "2222"]
+    assert target.default_cwd == "~/workspace"
+    assert target.remote_env["OPENAI_API_KEY"] == "sk-test"
+    assert target.supported_plugins() == ["codex"]
+    codex_config = target.plugin_config("codex")
+    assert codex_config.remote_bin == "/opt/codex/bin/codex"
+    assert codex_config.config_overrides == ['model_reasoning_effort="high"']  # type: ignore[attr-defined]
 
 
 def test_load_settings_env_overrides_yaml(monkeypatch, tmp_path: Path) -> None:
@@ -145,9 +146,72 @@ def test_remote_bin_for_falls_back_to_default(monkeypatch) -> None:
         id="devbox",
         name="Devbox",
         ssh_destination="dev@example.com",
-        remote_bins={"claude_code": "/opt/claude/bin/claude"},
+        plugin_configs={"claude_code": {"remote_bin": "/opt/claude/bin/claude"}},
     )
 
     assert config.remote_bin_for("claude_code", "claude") == "/opt/claude/bin/claude"
     assert config.remote_bin_for("codex", "codex") == "codex"
-    assert config.remote_bin_for("opencode", None) is None
+
+
+def test_supported_plugins_default_includes_all_non_fallback(monkeypatch) -> None:
+    """Empty plugin_configs ⇒ supports every registered non-fallback
+    plugin (today: codex + claude_code, but not the tmux wrapper).
+    Adding a structured backend would lift it into this list
+    automatically."""
+    config = SshLaunchTargetConfig(
+        id="devbox", name="Devbox", ssh_destination="dev@example.com"
+    )
+    plugins = config.supported_plugins()
+    assert "codex" in plugins
+    assert "claude_code" in plugins
+    assert "tmux" not in plugins  # fallback wrapper
+    assert config.supports("codex") and config.supports("claude_code")
+    assert not config.supports("tmux")
+
+
+def test_supported_plugins_explicit_list_narrows(monkeypatch) -> None:
+    config = SshLaunchTargetConfig(
+        id="devbox",
+        name="Devbox",
+        ssh_destination="dev@example.com",
+        plugin_configs={"codex": {}},
+    )
+    assert config.supported_plugins() == ["codex"]
+    assert config.supports("codex")
+    assert not config.supports("claude_code")
+
+
+def test_resolve_default_backend_prefers_fallback_when_supported() -> None:
+    config = SshLaunchTargetConfig(
+        id="devbox",
+        name="Devbox",
+        ssh_destination="dev@example.com",
+        plugin_configs={"codex": {}, "claude_code": {}},
+    )
+    assert config.resolve_default_backend("codex") == "codex"
+    assert config.resolve_default_backend("claude_code") == "claude_code"
+    # Unsupported fallback drops to first explicit entry
+    assert config.resolve_default_backend("opencode") == "codex"
+
+
+def test_plugin_configs_validates_against_plugin_schema() -> None:
+    """Codex's launch_target_schema accepts ``config_overrides``;
+    claude_code's base schema doesn't, and ``extra='forbid'`` rejects
+    typos so misconfigurations fail loudly at load time."""
+    import pytest as pt
+    from pydantic import ValidationError
+
+    SshLaunchTargetConfig(
+        id="devbox",
+        name="Devbox",
+        ssh_destination="dev@example.com",
+        plugin_configs={"codex": {"config_overrides": ['x="y"']}},
+    )
+    with pt.raises(ValidationError):
+        SshLaunchTargetConfig(
+            id="devbox",
+            name="Devbox",
+            ssh_destination="dev@example.com",
+            # config_overrides is codex-only — claude_code rejects it.
+            plugin_configs={"claude_code": {"config_overrides": ["nope"]}},
+        )

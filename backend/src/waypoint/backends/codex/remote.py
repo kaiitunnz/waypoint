@@ -17,11 +17,17 @@ CODEX_DEFAULT_BIN = "codex"
 
 
 def build_codex_launch_args(target: SshLaunchTargetConfig, cwd: str) -> tuple[str, ...]:
-    codex_bin = (
-        target.remote_bin_for(CODEX_PLUGIN_ID, CODEX_DEFAULT_BIN) or CODEX_DEFAULT_BIN
-    )
+    # Lazy import to break the plugin → remote → plugin cycle; the
+    # value is always a ``CodexLaunchTargetConfig`` instance because
+    # the codex plugin registered itself with that
+    # ``launch_target_schema``.
+    from waypoint.backends.codex.plugin import CodexLaunchTargetConfig
+
+    config = target.plugin_config(CODEX_PLUGIN_ID)
+    assert isinstance(config, CodexLaunchTargetConfig)
+    codex_bin = config.remote_bin or CODEX_DEFAULT_BIN
     codex_args = [codex_bin]
-    for override in target.config_overrides:
+    for override in config.config_overrides:
         codex_args.extend(["--config", override])
     codex_args.extend(["app-server", "--listen", "stdio://"])
     return target.build_remote_exec_args(codex_args, cwd)

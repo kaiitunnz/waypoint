@@ -21,7 +21,7 @@ def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
         name="Devbox",
         ssh_destination="dev@example.com",
         remote_env={"OPENAI_API_KEY": "sk-test"},
-        remote_bins={"claude_code": "/opt/claude/bin/claude"},
+        plugin_configs={"claude_code": {"remote_bin": "/opt/claude/bin/claude"}},
     )
     hook_script = tmp_path / "hook.py"
     hook_script.write_text("#!/usr/bin/env python3\nprint('hook')\n", encoding="utf-8")
@@ -89,7 +89,7 @@ def test_remote_claude_launch_factory_appends_model_flag(
         id="devbox",
         name="Devbox",
         ssh_destination="dev@example.com",
-        remote_bins={"claude_code": "/opt/claude/bin/claude"},
+        plugin_configs={"claude_code": {"remote_bin": "/opt/claude/bin/claude"}},
     )
     hook_script = tmp_path / "hook.py"
     hook_script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")

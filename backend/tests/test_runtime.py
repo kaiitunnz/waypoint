@@ -549,7 +549,7 @@ async def test_create_session_uses_structured_claude_for_ssh_target(
                 id="devbox",
                 name="Devbox",
                 ssh_destination="dev@example.com",
-                supported_backends=["claude_code"],
+                plugin_configs={"claude_code": {}},
                 default_cwd="~/workspace",
             )
         ],
@@ -648,7 +648,7 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
                 id="devbox",
                 name="Devbox",
                 ssh_destination="dev@example.com",
-                supported_backends=["codex"],
+                plugin_configs={"codex": {}},
                 default_cwd="~/workspace",
             )
         ],
@@ -794,7 +794,7 @@ async def test_list_importable_claude_threads_remote_target_uses_enumerator(
                 id="devbox",
                 name="Devbox",
                 ssh_destination="dev@example.com",
-                supported_backends=["claude_code"],
+                plugin_configs={"claude_code": {}},
                 default_cwd="~/workspace",
             )
         ],
@@ -832,7 +832,7 @@ async def test_list_importable_claude_threads_dedupes_by_target_and_thread(
                 id="devbox",
                 name="Devbox",
                 ssh_destination="dev@example.com",
-                supported_backends=["claude_code"],
+                plugin_configs={"claude_code": {}},
                 default_cwd="~/workspace",
             )
         ],
@@ -919,7 +919,7 @@ async def test_import_claude_thread_remote_target_uses_remote_factory(
                 id="devbox",
                 name="Devbox",
                 ssh_destination="dev@example.com",
-                supported_backends=["claude_code"],
+                plugin_configs={"claude_code": {}},
                 default_cwd="~/workspace",
             )
         ],

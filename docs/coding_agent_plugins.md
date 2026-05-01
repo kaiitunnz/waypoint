@@ -327,21 +327,28 @@ the next process restart.
 
 ### 4. (Optional) Add launch-target plumbing
 
-If your backend needs SSH-launched sessions, two pieces are involved:
+If your backend needs SSH-launched sessions, three pieces are involved:
 
 1. [`launch_targets.py`](../backend/src/waypoint/launch_targets.py)
-   stays plugin-agnostic — it owns `SshLaunchTargetConfig` (the
-   `supported_backends` list, `build_remote_exec_args`, and the
-   plugin-keyed `remote_bins` mapping that lets users pin a remote
-   binary path per plugin id without editing this module).
-2. Backend-specific remote-launch builders live next to the plugin in
+   stays plugin-agnostic — it owns `SshLaunchTargetConfig` and a single
+   `plugin_configs: dict[plugin_id, dict[str, Any]]` mapping. Presence
+   of a key means "this target supports the plugin"; omitting
+   `plugin_configs` entirely defaults to every registered non-fallback
+   plugin so a minimal target Just Works.
+2. Each plugin declares its own `launch_target_schema: type[PluginLaunchTargetConfig]`.
+   Plugins with no per-target knobs beyond `remote_bin` (Claude, tmux)
+   point at the base class; Codex extends it with `config_overrides`
+   for the `--config K=V` flag. The validator on `SshLaunchTargetConfig`
+   parses each per-target block against the matching plugin's schema
+   and exposes typed instances via `target.plugin_config(plugin_id)`.
+3. Backend-specific remote-launch builders live next to the plugin in
    `backends/<id>/remote.py` — see
    [`backends/codex/remote.py`](../backend/src/waypoint/backends/codex/remote.py)
    and
    [`backends/claude_code/remote.py`](../backend/src/waypoint/backends/claude_code/remote.py).
-   The plugin's `remote_executable(launch_target)` method tells the
-   tmux fallback which binary to invoke remotely; it reads
-   `launch_target.remote_bin_for(self.id, self.capabilities.cli_binary)`.
+   The plugin's `remote_executable(launch_target)` reads
+   `launch_target.remote_bin_for(self.id, self.capabilities.cli_binary)`,
+   which is just a convenience over `target.plugin_config(...).remote_bin`.
 
 ### 5. Test it
 

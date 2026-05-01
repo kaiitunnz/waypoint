@@ -579,7 +579,7 @@ class SessionRuntime:
                     "id": target.id,
                     "name": target.name,
                     "kind": "ssh",
-                    "supported_backends": target.supported_backends,
+                    "supported_backends": target.supported_plugins(),
                     "default_backend": target.resolve_default_backend(
                         self.settings.default_backend
                     ),

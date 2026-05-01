@@ -113,6 +113,9 @@ def test_registry_rejects_duplicate_id() -> None:
         def is_available_for_managed_launch(self, runtime: Any) -> bool:
             return True
 
+        def remote_executable(self, launch_target: Any) -> str:
+            return ""
+
         async def terminate_session(self, runtime: Any, session: Any) -> None:
             return None
 

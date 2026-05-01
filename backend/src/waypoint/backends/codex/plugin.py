@@ -30,6 +30,7 @@ from waypoint.backends.codex.permission_modes import (
     CODEX_PERMISSION_MODE_SPECS,
     CODEX_PERMISSION_PRESETS,
 )
+from waypoint.backends.codex.remote import build_remote_codex_client_factory
 from waypoint.git_meta import GitMeta
 from waypoint.schemas import (
     CodexThreadImportRequest,
@@ -41,10 +42,7 @@ from waypoint.schemas import (
     SessionStatus,
     SessionTransport,
 )
-from waypoint.server_config import (
-    SshLaunchTargetConfig,
-    build_remote_codex_client_factory,
-)
+from waypoint.server_config import SshLaunchTargetConfig
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
@@ -96,6 +94,9 @@ class CodexPlugin:
 
     def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
         return True
+
+    def remote_executable(self, launch_target: SshLaunchTargetConfig) -> str:
+        return launch_target.codex_bin
 
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord

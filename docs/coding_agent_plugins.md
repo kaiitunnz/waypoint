@@ -311,11 +311,19 @@ plugin up at the next process restart.
 
 ### 4. (Optional) Add launch-target plumbing
 
-If your backend needs SSH-launched sessions, the
-`SshLaunchTargetConfig` in
-[`server_config.py`](../backend/src/waypoint/server_config.py) carries
-`supported_backends` lists and `remote_command_for_backend`. Both are
-keyed by the plugin's `id`, so new entries land without surgery.
+If your backend needs SSH-launched sessions, two pieces are involved:
+
+1. [`server_config.py`](../backend/src/waypoint/server_config.py)
+   stays plugin-agnostic — it owns `SshLaunchTargetConfig` (the
+   `supported_backends` list, `build_remote_exec_args`, and the
+   per-backend remote-binary fields like `claude_bin` / `codex_bin`).
+2. Backend-specific remote-launch builders live next to the plugin in
+   `backends/<id>/remote.py` — see
+   [`backends/codex/remote.py`](../backend/src/waypoint/backends/codex/remote.py)
+   and
+   [`backends/claude_code/remote.py`](../backend/src/waypoint/backends/claude_code/remote.py).
+   The plugin's `remote_executable(launch_target)` method tells the
+   tmux fallback which binary to invoke remotely.
 
 ### 5. Test it
 

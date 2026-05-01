@@ -72,6 +72,12 @@ class TmuxPlugin:
     def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
         return True
 
+    def remote_executable(self, launch_target: SshLaunchTargetConfig) -> str:
+        # Tmux is the *wrapper*, not the wrapped binary — the runtime
+        # only calls remote_executable on the inner backend, never on
+        # the tmux plugin itself.
+        return ""
+
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

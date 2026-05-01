@@ -731,8 +731,8 @@ class SessionRuntime:
         launch_target: SshLaunchTargetConfig | None = None,
         cwd: str | None = None,
     ) -> list[str]:
+        plugin = self.registry.get(backend)
         if launch_target is None:
-            plugin = self.registry.get(backend)
             executable = plugin.capabilities.cli_binary
             if executable is None:
                 raise HTTPException(
@@ -740,9 +740,15 @@ class SessionRuntime:
                     detail=f"backend {backend} has no CLI binary configured",
                 )
             return [executable, *args]
+        executable = plugin.remote_executable(launch_target)
+        if not executable:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"backend {backend} has no remote binary configured",
+            )
         return list(
-            launch_target.remote_command_for_backend(
-                backend, args, cwd or launch_target.default_cwd
+            launch_target.build_remote_exec_args(
+                [executable, *args], cwd or launch_target.default_cwd
             )
         )
 

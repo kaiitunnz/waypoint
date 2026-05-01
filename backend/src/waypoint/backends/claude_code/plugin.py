@@ -31,6 +31,7 @@ from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_PERMISSION_MODE_SPECS,
     CLAUDE_PERMISSION_MODES,
 )
+from waypoint.backends.claude_code.remote import build_remote_claude_launch_factory
 from waypoint.backends.claude_code.runtime_hook import ensure_claude_hook_bundle
 from waypoint.backends.claude_code.threads import (
     ClaudeThreadInfo,
@@ -49,10 +50,7 @@ from waypoint.schemas import (
     SessionStatus,
     SessionTransport,
 )
-from waypoint.server_config import (
-    SshLaunchTargetConfig,
-    build_remote_claude_launch_factory,
-)
+from waypoint.server_config import SshLaunchTargetConfig
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
@@ -125,6 +123,9 @@ class ClaudeCodePlugin:
         # runtime.claude=None and the runtime falls through to the tmux
         # plugin so the user still gets a session.
         return runtime.claude is not None
+
+    def remote_executable(self, launch_target: SshLaunchTargetConfig) -> str:
+        return launch_target.claude_bin
 
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord

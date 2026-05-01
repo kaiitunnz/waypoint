@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
     from waypoint.runtime import SessionRuntime
+    from waypoint.server_config import SshLaunchTargetConfig
 
 
 @runtime_checkable
@@ -195,6 +196,19 @@ class BackendPlugin(Protocol):
         succeeded. The runtime falls back to the tmux plugin when the
         answer is False, preserving the ``backend == "claude_code"``
         fallback path without naming a specific backend.
+        """
+        ...
+
+    def remote_executable(self, launch_target: "SshLaunchTargetConfig") -> str:
+        """Return the absolute or PATH-resolvable binary name for this
+        backend on a given SSH launch target.
+
+        Used by the tmux fallback when wrapping a remote ``claude`` /
+        ``codex`` invocation. Plugins typically read the per-backend
+        override field on the launch target (``claude_bin``,
+        ``codex_bin``) so users can pin a remote install path. Wrapper
+        plugins that never get launched themselves (tmux) can return an
+        empty string — the runtime only calls this on the inner backend.
         """
         ...
 

@@ -50,12 +50,18 @@ def _register_entry_point_plugins(registry: BackendRegistry) -> None:
         log.exception("failed to enumerate %s entry points", ENTRY_POINT_GROUP)
         return
     for ep in discovered:
+        # Both ``ep.load()`` (import) and the subsequent factory call
+        # (e.g. ``build_plugin()``) live under the same guard: a broken
+        # external plugin must never take the runtime down regardless
+        # of which step it fails at. Construction-time errors —
+        # PluginConfig subclass exploding, hook bundle failing, etc. —
+        # surface here too.
         try:
             loaded = ep.load()
+            plugin = loaded() if callable(loaded) else loaded
         except Exception:  # noqa: BLE001
             log.exception("failed to load waypoint backend plugin %s", ep.name)
             continue
-        plugin = loaded() if callable(loaded) else loaded
         if not isinstance(plugin, BackendPlugin):
             log.error(
                 "waypoint backend plugin %s did not produce a BackendPlugin "

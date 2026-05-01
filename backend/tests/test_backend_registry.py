@@ -256,3 +256,38 @@ def test_entry_point_plugin_loader_failure_is_logged_not_raised(
     assert "broken" not in registry.backends()
     assert {"claude_code", "codex", "tmux"}.issubset(registry.backends())
     assert any("broken" in record.message for record in caplog.records)
+
+
+def test_entry_point_plugin_factory_failure_is_logged_not_raised(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The factory call after ``ep.load()`` (e.g. ``build_plugin()``)
+    must be guarded too. If the factory raises during plugin
+    construction — invalid config, missing remote dependency, etc. —
+    the bootstrap logs and skips the plugin instead of taking the
+    runtime down."""
+    from waypoint.backends import bootstrap
+
+    def boom_factory() -> Any:
+        raise RuntimeError("plugin construction blew up")
+
+    class FactoryEntryPoint:
+        name = "exploding-factory"
+
+        def load(self) -> Any:
+            # ``ep.load()`` succeeds (importing the module is fine);
+            # the failure is in the callable it returns.
+            return boom_factory
+
+    def fake_entry_points(*, group: str) -> list[FactoryEntryPoint]:
+        if group == bootstrap.ENTRY_POINT_GROUP:
+            return [FactoryEntryPoint()]
+        return []
+
+    monkeypatch.setattr(bootstrap, "entry_points", fake_entry_points)
+    reset_registry_for_tests()
+    with caplog.at_level("ERROR", logger="waypoint.backends.bootstrap"):
+        registry = get_registry()
+    assert "exploding-factory" not in registry.backends()
+    assert {"claude_code", "codex", "tmux"}.issubset(registry.backends())
+    assert any("exploding-factory" in record.message for record in caplog.records)

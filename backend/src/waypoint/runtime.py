@@ -13,6 +13,7 @@ from typing import Any
 from codex_app_server.client import AppServerClient
 from fastapi import HTTPException, status
 
+from waypoint.backends import BackendRegistry, get_registry
 from waypoint.claude_cli import ClaudeCliAdapter, ClaudeCliError
 from waypoint.claude_runtime import ClaudeHookBundle
 from waypoint.claude_threads import (
@@ -56,12 +57,7 @@ from waypoint.server_config import (
 )
 from waypoint.storage import Storage
 from waypoint.tmux import TmuxAdapter, TmuxError
-from waypoint.transports import (
-    ClaudeTransport,
-    CodexTransport,
-    TmuxTransport,
-    TransportAdapter,
-)
+from waypoint.transports import TransportAdapter
 
 log = logging.getLogger("waypoint.runtime")
 
@@ -112,6 +108,7 @@ class SessionRuntime:
         settings: Settings,
         storage: Storage,
         claude_hook: "ClaudeHookBundle | None" = None,
+        registry: BackendRegistry | None = None,
     ) -> None:
         self.settings = settings
         self.storage = storage
@@ -131,15 +128,15 @@ class SessionRuntime:
         )
         self.monitor_tasks: dict[str, asyncio.Task[None]] = {}
         self.file_offsets: dict[str, int] = {}
-        self._transports: dict[SessionTransport, TransportAdapter] = {
-            SessionTransport.CODEX_APP_SERVER: CodexTransport(self),
-            SessionTransport.CLAUDE_CLI: ClaudeTransport(self),
-            SessionTransport.TMUX: TmuxTransport(self),
+        self.registry = registry or get_registry()
+        self._transports: dict[str, TransportAdapter] = {
+            plugin.transport_id: plugin.transport_view(self)
+            for plugin in self.registry.all()
         }
         self.scheduler = Scheduler(self)
 
     def transport_for(self, session: SessionRecord) -> TransportAdapter:
-        return self._transports[session.transport]
+        return self._transports[session.transport.value]
 
     def _build_claude_adapter(self) -> ClaudeCliAdapter | None:
         if self.claude_hook is None:

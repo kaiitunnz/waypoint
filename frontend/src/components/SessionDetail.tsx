@@ -70,18 +70,16 @@ const EFFORT_LABEL: Record<string, string> = {
   max: "Max",
 };
 
-export type ConnectionState = "connecting" | "open" | "reconnecting";
-
 interface SessionDetailProps {
   host: string;
   token: string;
   sessionId: string;
   onAuthFailure?: () => void;
-  onConnectionChange?: (state: ConnectionState) => void;
 }
 
 type ViewMode = "chat" | "terminal";
 type FilterMode = "important" | "all";
+type ConnectionState = "connecting" | "open" | "reconnecting";
 
 // The composer sticks to the viewport bottom; floating scroll affordances
 // read `--composer-height` to sit just above it. The fallback keeps things
@@ -94,13 +92,7 @@ const SHORTCUT_IS_MAC =
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 
-export function SessionDetail({
-  host,
-  token,
-  sessionId,
-  onAuthFailure,
-  onConnectionChange,
-}: SessionDetailProps) {
+export function SessionDetail({ host, token, sessionId, onAuthFailure }: SessionDetailProps) {
   const router = useRouter();
   const catalog = useBackendCatalog(host || null, token || null, null);
   const [session, setSession] = useState<SessionRecord | null>(null);
@@ -137,10 +129,6 @@ export function SessionDetail({
     onAuthFailure?.();
     router.replace("/");
   }, [onAuthFailure, router]);
-
-  useEffect(() => {
-    onConnectionChange?.(connection);
-  }, [connection, onConnectionChange]);
 
   const refreshSnapshot = useCallback(async () => {
     setSnapshotLoading(true);
@@ -886,6 +874,7 @@ export function SessionDetail({
         canDelete={sessionExited}
         canResume={canResume}
         canTerminate={Boolean(session && !sessionExited)}
+        connection={connection}
         disabled={composerDisabled}
         dormant={dormantReattach}
         placeholder={composerPlaceholder}
@@ -931,6 +920,7 @@ interface ReplyComposerProps {
   canDelete: boolean;
   canResume: boolean;
   canTerminate: boolean;
+  connection: ConnectionState;
   disabled: boolean;
   dormant: boolean;
   placeholder: string;
@@ -965,6 +955,7 @@ const ReplyComposer = memo(function ReplyComposer({
   canDelete,
   canResume,
   canTerminate,
+  connection,
   disabled,
   dormant,
   placeholder,
@@ -1358,6 +1349,18 @@ const ReplyComposer = memo(function ReplyComposer({
             <span className="composer-activity-spinner" aria-hidden />
           </div>
         ) : null}
+        <span
+          className={`composer-connection ${connection}`}
+          title={`Backend socket ${connection}`}
+          role="status"
+          aria-live="polite"
+        >
+          {connection === "open"
+            ? "live"
+            : connection === "reconnecting"
+              ? "reconnecting"
+              : "connecting"}
+        </span>
         <span className="composer-shortcut" aria-hidden>
           <kbd>{shortcutKey}</kbd>
           <span>+</span>

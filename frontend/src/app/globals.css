@@ -2011,8 +2011,46 @@ details.tool-disclosure[open] .tool-glyph.todo {
   min-width: 0;
 }
 
-.composer-toprow .composer-shortcut {
+/* The connection chip claims the spare space; the shortcut hint sits flush
+ * to its right with no extra gap. On mobile the shortcut is hidden, and
+ * the chip alone right-anchors. */
+.composer-toprow .composer-connection {
   margin-left: auto;
+}
+
+.composer-connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: rgba(8, 11, 16, 0.45);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex: 0 0 auto;
+}
+
+.composer-connection::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted-soft);
+}
+
+.composer-connection.open::before {
+  background: #5ed29c;
+  box-shadow: 0 0 0 3px rgba(94, 210, 156, 0.16);
+}
+
+.composer-connection.connecting::before,
+.composer-connection.reconnecting::before {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px rgba(217, 154, 74, 0.18);
 }
 
 .composer-activity {

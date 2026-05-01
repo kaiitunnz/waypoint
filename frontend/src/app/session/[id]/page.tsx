@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { ConnectionState, SessionDetail } from "@/components/SessionDetail";
+import { SessionDetail } from "@/components/SessionDetail";
 import { clearToken, readHost, readToken } from "@/lib/store";
 
 export default function SessionPage() {
@@ -14,7 +14,6 @@ export default function SessionPage() {
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
   const [sessionId, setSessionId] = useState("");
-  const [connection, setConnection] = useState<ConnectionState>("connecting");
 
   useEffect(() => {
     setSessionId(params.id);
@@ -22,22 +21,11 @@ export default function SessionPage() {
     setToken(readToken());
   }, [params]);
 
-  // Stable across renders so SessionDetail's WS effect doesn't tear down
-  // and reconnect every time `connection` changes — the prop flows into
-  // its handleAuthFailure useCallback, which is a dep of the socket
-  // useEffect.
   const handleAuthFailure = useCallback(() => {
     clearToken();
     setToken("");
     router.replace("/");
   }, [router]);
-
-  const connectionLabel =
-    connection === "open"
-      ? "live"
-      : connection === "reconnecting"
-        ? "reconnecting"
-        : "connecting";
 
   return (
     <main className="page-shell has-composer">
@@ -51,19 +39,9 @@ export default function SessionPage() {
             <h1 className="app-bar-title">Live transcript</h1>
           </div>
         </div>
-        <div className="app-bar-meta">
-          {host && token && sessionId ? (
-            <span
-              className={`app-bar-status ${connection}`}
-              title={`Backend socket ${connection}`}
-            >
-              {connectionLabel}
-            </span>
-          ) : null}
-          <Link className="back-link" href="/">
-            ← all sessions
-          </Link>
-        </div>
+        <Link className="back-link" href="/">
+          ← all sessions
+        </Link>
       </header>
       {host && token && sessionId ? (
         <SessionDetail
@@ -71,7 +49,6 @@ export default function SessionPage() {
           token={token}
           sessionId={sessionId}
           onAuthFailure={handleAuthFailure}
-          onConnectionChange={setConnection}
         />
       ) : null}
     </main>

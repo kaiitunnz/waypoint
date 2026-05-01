@@ -2,11 +2,13 @@
 
 Owns the per-backend invariants that the runtime previously hard-coded:
 permission-mode catalogue, model catalogue, capability flags, transport
-adapter wiring, and the per-control inline-application logic. The
-runtime dispatches to ``apply_*`` and ``list_models`` so it stays
-generic over plugins.
+adapter wiring, lifecycle (start/restore/import), control surface
+(set_model/effort/permission_mode), thread enumeration, and the
+system-note formatters. The runtime delegates by id; backend literals
+no longer leak into runtime.py.
 """
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, status
@@ -23,11 +25,15 @@ from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_PERMISSION_MODE_SPECS,
     CLAUDE_PERMISSION_MODES,
 )
-from waypoint.schemas import SessionRecord
+from waypoint.schemas import SessionRecord, SessionStatus
+from waypoint.server_config import SshLaunchTargetConfig
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
+
+
+log = logging.getLogger("waypoint.backends.claude_code")
 
 
 class ClaudeCodePlugin:
@@ -167,6 +173,107 @@ class ClaudeCodePlugin:
 
     def effort_swap_message(self, effort: str | None) -> str:
         return _claude_effort_swap_message(effort)
+
+    async def restore_session(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        if runtime.claude is None:
+            runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
+            await runtime._record_system_event(
+                session.id,
+                "Claude adapter unavailable; cannot restore",
+                status=SessionStatus.ERROR,
+            )
+            return
+        if not session.thread_id:
+            runtime.storage.update_session(session.id, status=SessionStatus.EXITED)
+            await runtime._record_system_event(
+                session.id,
+                "Claude session has no claude_session_id; marking exited",
+                status=SessionStatus.EXITED,
+            )
+            return
+        if (
+            session.launch_target_id
+            and runtime._find_launch_target(session.launch_target_id) is None
+        ):
+            runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
+            await runtime._record_system_event(
+                session.id,
+                f"Claude session launch target {session.launch_target_id} is no longer configured",
+                status=SessionStatus.ERROR,
+            )
+            return
+        try:
+            await runtime.claude.restore_session(
+                session.id,
+                session.cwd,
+                session.thread_id,
+                runtime._claude_launch_factory(session.launch_target_id),
+                permission_mode=session.permission_mode,
+                model=session.model,
+                effort=session.effort,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.exception(
+                "claude restore failed",
+                extra={
+                    "session_id": session.id,
+                    "claude_session_id": session.thread_id,
+                },
+            )
+            runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
+            await runtime._record_system_event(
+                session.id,
+                f"Claude session restore failed: {exc}",
+                status=SessionStatus.ERROR,
+            )
+            return
+        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+        await runtime._record_system_event(
+            session.id,
+            self.format_restore_message(runtime, session.cwd, session.launch_target_id),
+            status=SessionStatus.IDLE,
+        )
+
+    def format_start_message(
+        self,
+        claude_session_id: str,
+        cwd: str | None,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> str:
+        if launch_target is not None:
+            return (
+                f"Claude session started via SSH target {launch_target.name} "
+                f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd}) ({claude_session_id})"
+            )
+        return f"Claude session started ({claude_session_id})"
+
+    def format_restore_message(
+        self,
+        runtime: "SessionRuntime",
+        cwd: str | None,
+        launch_target_id: str | None,
+    ) -> str:
+        launch_target = runtime._find_launch_target(launch_target_id)
+        if launch_target is not None:
+            return (
+                f"Claude session restored via SSH target {launch_target.name} "
+                f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd})"
+            )
+        return "Claude session restored from previous backend process"
+
+    def format_import_message(
+        self,
+        cwd: str,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> str:
+        if launch_target is not None:
+            return (
+                f"Imported stored Claude thread via SSH target {launch_target.name} "
+                f"on {launch_target.ssh_destination} ({cwd})"
+            )
+        return f"Imported stored Claude thread ({cwd})"
 
 
 def _claude_effort_swap_message(effort: str | None) -> str:

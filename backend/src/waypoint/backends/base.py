@@ -87,3 +87,9 @@ class BackendPlugin(Protocol):
     ) -> dict[str, Any]:
         """Return the model catalogue payload served by ``/api/backends/{id}/models``."""
         ...
+
+    async def restore_session(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        """Restore a previously-running session after a runtime restart."""
+        ...

@@ -8,6 +8,7 @@ captures: ``model_source=LIVE_RPC`` (models come from the App Server's
 Codex-only today; it surfaces here as a registered slash command.
 """
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, status
@@ -21,11 +22,14 @@ from waypoint.backends.codex.permission_modes import (
     CODEX_PERMISSION_MODE_SPECS,
     CODEX_PERMISSION_PRESETS,
 )
-from waypoint.schemas import SessionRecord
+from waypoint.schemas import SessionRecord, SessionStatus
+from waypoint.server_config import SshLaunchTargetConfig
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
+
+log = logging.getLogger("waypoint.backends.codex")
 
 
 class CodexPlugin:
@@ -111,6 +115,98 @@ class CodexPlugin:
 
     def effort_swap_message(self, effort: str | None) -> str:
         return ""  # never published; apply_effort returns False
+
+    async def restore_session(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        if not session.thread_id:
+            runtime.storage.update_session(session.id, status=SessionStatus.EXITED)
+            await runtime._record_system_event(
+                session.id,
+                "Codex session has no thread id; marking exited",
+                status=SessionStatus.EXITED,
+            )
+            return
+        if (
+            session.launch_target_id
+            and runtime._find_launch_target(session.launch_target_id) is None
+        ):
+            runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
+            await runtime._record_system_event(
+                session.id,
+                f"Codex session launch target {session.launch_target_id} is no longer configured",
+                status=SessionStatus.ERROR,
+            )
+            return
+        try:
+            await runtime.codex.restore_session(
+                session.id,
+                session.cwd,
+                session.thread_id,
+                runtime._codex_client_factory(session.launch_target_id),
+                model=session.model,
+                effort=session.effort,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.exception(
+                "codex restore failed",
+                extra={
+                    "session_id": session.id,
+                    "thread_id": session.thread_id,
+                    "cwd": session.cwd,
+                },
+            )
+            runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
+            await runtime._record_system_event(
+                session.id,
+                f"Codex session restore failed: {exc}",
+                status=SessionStatus.ERROR,
+            )
+            return
+        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+        await runtime._record_system_event(
+            session.id,
+            self.format_restore_message(runtime, session.cwd, session.launch_target_id),
+            status=SessionStatus.IDLE,
+        )
+
+    def format_start_message(
+        self,
+        cwd: str | None,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> str:
+        if launch_target is not None:
+            return (
+                f"Codex app-server session started via SSH target {launch_target.name} "
+                f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd})"
+            )
+        return "Codex app-server session started"
+
+    def format_restore_message(
+        self,
+        runtime: "SessionRuntime",
+        cwd: str | None,
+        launch_target_id: str | None,
+    ) -> str:
+        launch_target = runtime._find_launch_target(launch_target_id)
+        if launch_target is not None:
+            return (
+                f"Codex session restored via SSH target {launch_target.name} "
+                f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd})"
+            )
+        return "Codex session restored from previous backend process"
+
+    def format_import_message(
+        self,
+        cwd: str,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> str:
+        if launch_target is not None:
+            return (
+                f"Imported stored Codex thread via SSH target {launch_target.name} "
+                f"on {launch_target.ssh_destination} ({cwd})"
+            )
+        return f"Imported stored Codex thread ({cwd})"
 
     async def list_models(
         self,

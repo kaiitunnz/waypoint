@@ -136,6 +136,9 @@ def test_registry_rejects_duplicate_id() -> None:
         ) -> dict[str, Any]:
             return {}
 
+        async def restore_session(self, runtime: Any, session: Any) -> None:
+            return None
+
     registry.register(Stub())
     with pytest.raises(ValueError):
         registry.register(Stub())

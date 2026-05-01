@@ -153,126 +153,9 @@ class SessionRuntime:
         for session in self.storage.list_sessions():
             if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
                 continue
-            if session.transport == SessionTransport.CODEX_APP_SERVER:
-                await self._restore_codex_session(session)
-                continue
-            if session.transport == SessionTransport.CLAUDE_CLI:
-                await self._restore_claude_session(session)
-                continue
-            self._ensure_monitor(session.id)
+            plugin = self.registry.plugin_for(session)
+            await plugin.restore_session(self, session)
         await self.scheduler.start()
-
-    async def _restore_claude_session(self, session: SessionRecord) -> None:
-        if self.claude is None:
-            self.storage.update_session(session.id, status=SessionStatus.ERROR)
-            await self._record_system_event(
-                session.id,
-                "Claude adapter unavailable; cannot restore",
-                status=SessionStatus.ERROR,
-            )
-            return
-        if not session.thread_id:
-            self.storage.update_session(session.id, status=SessionStatus.EXITED)
-            await self._record_system_event(
-                session.id,
-                "Claude session has no claude_session_id; marking exited",
-                status=SessionStatus.EXITED,
-            )
-            return
-        if (
-            session.launch_target_id
-            and self._find_launch_target(session.launch_target_id) is None
-        ):
-            self.storage.update_session(session.id, status=SessionStatus.ERROR)
-            await self._record_system_event(
-                session.id,
-                f"Claude session launch target {session.launch_target_id} is no longer configured",
-                status=SessionStatus.ERROR,
-            )
-            return
-        try:
-            await self.claude.restore_session(
-                session.id,
-                session.cwd,
-                session.thread_id,
-                self._claude_launch_factory(session.launch_target_id),
-                permission_mode=session.permission_mode,
-                model=session.model,
-                effort=session.effort,
-            )
-        except Exception as exc:  # noqa: BLE001
-            log.exception(
-                "claude restore failed",
-                extra={
-                    "session_id": session.id,
-                    "claude_session_id": session.thread_id,
-                },
-            )
-            self.storage.update_session(session.id, status=SessionStatus.ERROR)
-            await self._record_system_event(
-                session.id,
-                f"Claude session restore failed: {exc}",
-                status=SessionStatus.ERROR,
-            )
-            return
-        self.storage.update_session(session.id, status=SessionStatus.IDLE)
-        await self._record_system_event(
-            session.id,
-            self._claude_restore_message(session.cwd, session.launch_target_id),
-            status=SessionStatus.IDLE,
-        )
-
-    async def _restore_codex_session(self, session: SessionRecord) -> None:
-        if not session.thread_id:
-            self.storage.update_session(session.id, status=SessionStatus.EXITED)
-            await self._record_system_event(
-                session.id,
-                "Codex session has no thread id; marking exited",
-                status=SessionStatus.EXITED,
-            )
-            return
-        if (
-            session.launch_target_id
-            and self._find_launch_target(session.launch_target_id) is None
-        ):
-            self.storage.update_session(session.id, status=SessionStatus.ERROR)
-            await self._record_system_event(
-                session.id,
-                f"Codex session launch target {session.launch_target_id} is no longer configured",
-                status=SessionStatus.ERROR,
-            )
-            return
-        try:
-            await self.codex.restore_session(
-                session.id,
-                session.cwd,
-                session.thread_id,
-                self._codex_client_factory(session.launch_target_id),
-                model=session.model,
-                effort=session.effort,
-            )
-        except Exception as exc:  # noqa: BLE001
-            log.exception(
-                "codex restore failed",
-                extra={
-                    "session_id": session.id,
-                    "thread_id": session.thread_id,
-                    "cwd": session.cwd,
-                },
-            )
-            self.storage.update_session(session.id, status=SessionStatus.ERROR)
-            await self._record_system_event(
-                session.id,
-                f"Codex session restore failed: {exc}",
-                status=SessionStatus.ERROR,
-            )
-            return
-        self.storage.update_session(session.id, status=SessionStatus.IDLE)
-        await self._record_system_event(
-            session.id,
-            self._codex_restore_message(session.cwd, session.launch_target_id),
-            status=SessionStatus.IDLE,
-        )
 
     async def stop(self) -> None:
         await self.scheduler.stop()
@@ -407,9 +290,10 @@ class SessionRuntime:
                 detail=f"failed to import codex thread: {exc}",
             ) from exc
         self.storage.update_session(session.id, status=SessionStatus.IDLE)
+        plugin = self.registry.get(Backend.CODEX)
         await self._record_system_event(
             session.id,
-            self._codex_import_message(cwd, launch_target),
+            plugin.format_import_message(cwd, launch_target),  # type: ignore[attr-defined]
             status=SessionStatus.IDLE,
             metadata={"imported_thread_id": thread.id},
         )
@@ -547,9 +431,10 @@ class SessionRuntime:
         if launch_target is not None and self.claude_thread_enumerator is not None:
             self.claude_thread_enumerator.invalidate(launch_target.id)
         self.storage.update_session(session.id, status=SessionStatus.IDLE)
+        plugin = self.registry.get(Backend.CLAUDE_CODE)
         await self._record_system_event(
             session.id,
-            self._claude_import_message(cwd, launch_target),
+            plugin.format_import_message(cwd, launch_target),  # type: ignore[attr-defined]
             status=SessionStatus.IDLE,
             metadata={"imported_thread_id": info.id},
         )
@@ -637,9 +522,10 @@ class SessionRuntime:
             self.storage.update_session(
                 session.id, thread_id=thread_id, status=SessionStatus.IDLE
             )
+            plugin = self.registry.get(Backend.CODEX)
             await self._record_system_event(
                 session.id,
-                self._codex_start_message(request.cwd, launch_target),
+                plugin.format_start_message(request.cwd, launch_target),  # type: ignore[attr-defined]
                 status=SessionStatus.IDLE,
             )
             return self.get_session(session.id)
@@ -684,9 +570,10 @@ class SessionRuntime:
                     status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
                 ) from exc
             self.storage.update_session(session.id, status=SessionStatus.IDLE)
+            plugin = self.registry.get(Backend.CLAUDE_CODE)
             await self._record_system_event(
                 session.id,
-                self._claude_start_message(
+                plugin.format_start_message(  # type: ignore[attr-defined]
                     claude_session_id, request.cwd, launch_target
                 ),
                 status=SessionStatus.IDLE,
@@ -726,9 +613,12 @@ class SessionRuntime:
             pid=target.pane_pid,
         )
         self.storage.create_session(session)
+        tmux_plugin = self.registry.get("tmux")
         await self._record_system_event(
             session.id,
-            self._managed_start_message(request.backend, launch_target, request.cwd),
+            tmux_plugin.format_start_message(  # type: ignore[attr-defined]
+                request.backend, launch_target, request.cwd
+            ),
         )
         self._ensure_monitor(session.id)
         return self.get_session(session.id)
@@ -837,18 +727,18 @@ class SessionRuntime:
         # subprocess + background tasks. terminate_session is a no-op when
         # the session id is not tracked, so this is safe for clean EXITED
         # paths too.
-        if session.transport == SessionTransport.CLAUDE_CLI:
-            if self.claude is not None:
-                await self.claude.terminate_session(session.id)
-            await self._restore_claude_session(session)
-        elif session.transport == SessionTransport.CODEX_APP_SERVER:
-            await self.codex.terminate_session(session.id)
-            await self._restore_codex_session(session)
-        else:
+        plugin = self.registry.plugin_for(session)
+        if not plugin.capabilities.is_structured:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="this session cannot be reattached after exit",
             )
+        if session.transport == SessionTransport.CLAUDE_CLI:
+            if self.claude is not None:
+                await self.claude.terminate_session(session.id)
+        elif session.transport == SessionTransport.CODEX_APP_SERVER:
+            await self.codex.terminate_session(session.id)
+        await plugin.restore_session(self, session)
         # _restore_*_session swallows failures (it tags the session ERROR or
         # EXITED and emits a system_note instead of raising). Re-read storage
         # so the caller sees the post-restore status, and translate any
@@ -1189,77 +1079,6 @@ class SessionRuntime:
         session = self.get_session(session_id)
         return self.transport_for(session).terminal_snapshot(session)
 
-    def _codex_start_message(
-        self, cwd: str | None, launch_target: SshLaunchTargetConfig | None
-    ) -> str:
-        if launch_target is not None:
-            return (
-                f"Codex app-server session started via SSH target {launch_target.name} "
-                f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd})"
-            )
-        return "Codex app-server session started"
-
-    def _codex_restore_message(
-        self, cwd: str | None, launch_target_id: str | None = None
-    ) -> str:
-        launch_target = self._find_launch_target(launch_target_id)
-        if launch_target is not None:
-            return (
-                f"Codex session restored via SSH target {launch_target.name} "
-                f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd})"
-            )
-        return "Codex session restored from previous backend process"
-
-    def _codex_import_message(
-        self, cwd: str, launch_target: SshLaunchTargetConfig | None
-    ) -> str:
-        if launch_target is not None:
-            return (
-                f"Imported stored Codex thread via SSH target {launch_target.name} "
-                f"on {launch_target.ssh_destination} ({cwd})"
-            )
-        return f"Imported stored Codex thread ({cwd})"
-
-    def _claude_start_message(
-        self,
-        claude_session_id: str,
-        cwd: str | None,
-        launch_target: SshLaunchTargetConfig | None,
-    ) -> str:
-        if launch_target is not None:
-            return (
-                f"Claude session started via SSH target {launch_target.name} "
-                f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd}) ({claude_session_id})"
-            )
-        return f"Claude session started ({claude_session_id})"
-
-    def _claude_restore_message(
-        self, cwd: str | None, launch_target_id: str | None = None
-    ) -> str:
-        launch_target = self._find_launch_target(launch_target_id)
-        if launch_target is not None:
-            return (
-                f"Claude session restored via SSH target {launch_target.name} "
-                f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd})"
-            )
-        return "Claude session restored from previous backend process"
-
-    def _claude_import_message(
-        self, cwd: str, launch_target: SshLaunchTargetConfig | None
-    ) -> str:
-        if launch_target is not None:
-            return (
-                f"Imported stored Claude thread via SSH target {launch_target.name} "
-                f"on {launch_target.ssh_destination} ({cwd})"
-            )
-        return f"Imported stored Claude thread ({cwd})"
-
-    @staticmethod
-    def _claude_effort_swap_message(effort: str | None) -> str:
-        if effort:
-            return f"Restarted Claude session with --effort {effort}"
-        return "Restarted Claude session with default effort"
-
     def launch_target_summaries(self) -> list[dict[str, Any]]:
         summaries: list[dict[str, Any]] = []
         for target in self.ssh_targets.values():
@@ -1447,19 +1266,6 @@ class SessionRuntime:
             hook_script_path=self.claude_hook.hook_script_path,
             hook_secret=self.claude_hook.secret,
             local_backend_port=self.settings.port,
-        )
-
-    def _managed_start_message(
-        self,
-        backend: str,
-        launch_target: SshLaunchTargetConfig | None,
-        cwd: str | None,
-    ) -> str:
-        if launch_target is None:
-            return f"Managed session started for {backend}"
-        return (
-            f"Managed session started for {backend} via SSH target {launch_target.name} "
-            f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd})"
         )
 
     async def _record_user_event(

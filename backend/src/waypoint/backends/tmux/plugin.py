@@ -15,6 +15,7 @@ from fastapi import HTTPException, status
 
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
 from waypoint.schemas import SessionRecord
+from waypoint.server_config import SshLaunchTargetConfig
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
@@ -90,6 +91,26 @@ class TmuxPlugin:
             "default_effort": None,
             "supports_free_text": False,
         }
+
+    async def restore_session(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        # Tmux sessions are restored by re-attaching the pane monitor;
+        # there's no protocol round-trip to make here.
+        runtime._ensure_monitor(session.id)
+
+    def format_start_message(
+        self,
+        backend_label: str,
+        launch_target: SshLaunchTargetConfig | None,
+        cwd: str | None,
+    ) -> str:
+        if launch_target is None:
+            return f"Managed session started for {backend_label}"
+        return (
+            f"Managed session started for {backend_label} via SSH target {launch_target.name} "
+            f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd})"
+        )
 
 
 def build_plugin() -> TmuxPlugin:

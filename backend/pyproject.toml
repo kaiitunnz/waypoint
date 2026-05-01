@@ -60,6 +60,10 @@ ignore = [
   "E501",  # long lines — black handles wrapping; long string literals stay
 ]
 
+[tool.codespell]
+ignore-words-list = "pres"
+skip = "*/package-lock.json,*.lock,*.png,*.jsonl,*.log"
+
 [tool.mypy]
 python_version = "3.12"
 files = ["src", "tests"]

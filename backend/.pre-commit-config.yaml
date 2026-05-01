@@ -19,15 +19,7 @@ repos:
     rev: v2.4.2
     hooks:
       - id: codespell
-        exclude: |
-          (?x)^(
-            .*/package-lock\.json|
-            .*\.lock|
-            uv\.lock|
-            .*\.png|
-            .*\.jsonl|
-            .*\.log
-          )$
+        args: ["--toml=backend/pyproject.toml"]
 
   - repo: local
     hooks:

@@ -1,8 +1,12 @@
 import asyncio
 import codecs
+import errno
 import json
 import logging
+import os
 import shutil
+import signal
+import socket
 import time
 from collections.abc import Callable
 from contextlib import suppress
@@ -31,6 +35,21 @@ EmitEvent = Callable[
 
 class OpenCodeError(RuntimeError):
     pass
+
+
+def _port_in_use(host: str, port: int) -> bool:
+    """Probe whether *host:port* is already bound (orphaned OpenCode etc.)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        # SO_REUSEADDR keeps us from getting a false positive on a
+        # TIME_WAIT socket left behind by the previous OpenCode boot.
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+        except OSError as exc:
+            if exc.errno in {errno.EADDRINUSE, errno.EACCES}:
+                return True
+            raise
+    return False
 
 
 @dataclass
@@ -76,7 +95,19 @@ class OpenCodeAdapter:
         binary = self._binary or shutil.which("opencode")
         if binary is None:
             raise OpenCodeError("opencode binary not found on PATH")
+        # Refuse to start if something is already listening on the port —
+        # otherwise our `_wait_for_server` loop happily adopts whoever
+        # answers /config (typically an orphan from a previous backend
+        # crash), and that stale process never sees auth.json updates.
+        if _port_in_use(self._host, self._port):
+            raise OpenCodeError(
+                f"opencode port {self._host}:{self._port} is already in use; "
+                f"kill the orphan process before restarting"
+            )
         log.info("starting opencode server on %s:%d", self._host, self._port)
+        # Put the child in its own session so a SIGKILL of the backend
+        # leaves OpenCode reachable via os.killpg() — and so SIGINT in
+        # the foreground terminal doesn't leak into the subprocess.
         self._server_process = await asyncio.create_subprocess_exec(
             binary,
             "serve",
@@ -84,6 +115,7 @@ class OpenCodeAdapter:
             f"--port={self._port}",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
         self._http = aiohttp.ClientSession()
         try:
@@ -92,12 +124,30 @@ class OpenCodeAdapter:
             log.error("failed to start opencode server: %s", exc)
             await self._http.close()
             self._http = None
-            if self._server_process.returncode is None:
-                self._server_process.terminate()
+            self._terminate_server_process()
             raise OpenCodeError(f"failed to start opencode server: {exc}") from exc
         self._started = True
         self._sse_task = asyncio.create_task(self._listen_events())
         log.info("opencode server started successfully")
+
+    def _terminate_server_process(self) -> None:
+        """Kill the OpenCode subprocess and any of its descendants.
+
+        With start_new_session=True the spawned process is a group leader
+        (PGID == PID), so killpg reliably reaps anything OpenCode itself
+        forked. Falls back to terminating the leader if the group is
+        already gone (mid-shutdown race).
+        """
+        proc = self._server_process
+        if proc is None or proc.returncode is not None:
+            return
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            with suppress(ProcessLookupError):
+                proc.terminate()
 
     async def _wait_for_server(self) -> None:
         client = self._require_http()
@@ -593,11 +643,12 @@ class OpenCodeAdapter:
             await self._http.close()
             self._http = None
         if self._server_process is not None:
-            self._server_process.terminate()
+            self._terminate_server_process()
             try:
                 await asyncio.wait_for(self._server_process.wait(), timeout=5)
             except TimeoutError:
-                self._server_process.kill()
+                with suppress(ProcessLookupError):
+                    os.killpg(self._server_process.pid, signal.SIGKILL)
             self._server_process = None
         self._sessions.clear()
         self._remote_sessions.clear()

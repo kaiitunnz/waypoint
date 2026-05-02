@@ -622,6 +622,22 @@ class ClaudeCliAdapter:
                     if _is_plan_file_path(path):
                         state.last_plan_path = path
                 return auto
+
+            # Inject the saved plan text into ExitPlanMode so the frontend can
+            # render it inside the approval card.
+            if tool_name == "ExitPlanMode" and state.last_plan_path:
+                if tool_input_dict is None:
+                    tool_input_dict = {}
+                    payload["tool_input"] = tool_input_dict
+                try:
+                    plan_text = Path(state.last_plan_path).read_text(encoding="utf-8")
+                    tool_input_dict["plan"] = plan_text
+                except Exception as exc:
+                    log.warning(
+                        "failed to read plan file for ExitPlanMode approval card",
+                        extra={"path": state.last_plan_path, "error": str(exc)},
+                    )
+
             if tool_use_id in state.pending:
                 # Hook was retried for the same tool call. Reuse the existing future.
                 pending = state.pending[tool_use_id]
@@ -652,16 +668,24 @@ class ClaudeCliAdapter:
                         },
                         SessionStatus.WAITING_INPUT,
                     )
+        timeout = 3600.0 if tool_name == "AskUserQuestion" else DEFAULT_TIMEOUT_SECONDS
         try:
-            decision = await asyncio.wait_for(
-                pending.future, timeout=DEFAULT_TIMEOUT_SECONDS
-            )
+            decision = await asyncio.wait_for(pending.future, timeout=timeout)
         except TimeoutError:
             decision = {
                 "permissionDecision": "deny",
                 "permissionDecisionReason": "Waypoint approval timed out",
             }
             state.pending.pop(tool_use_id, None)
+
+            # Emit a system note so the frontend knows to dequeue the approval card
+            await self._emit_event(
+                waypoint_session_id,
+                EventKind.SYSTEM_NOTE,
+                "Approval timed out",
+                {"status": SessionStatus.RUNNING},
+                SessionStatus.RUNNING,
+            )
         return decision
 
     def has_pending_approval(self, session_id: str) -> bool:

@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from waypoint.backends.opencode.adapter import (
@@ -104,3 +106,49 @@ def test_tag_part_type_propagates_reasoning_to_subsequent_deltas() -> None:
     assert reasoning_delta["_waypoint_part_type"] == "reasoning"
     assert text_delta["_waypoint_part_type"] == "text"
     assert "_waypoint_part_type" not in untracked_delta
+
+
+def test_resolve_state_for_part_delta_without_session_id() -> None:
+    adapter = _build_adapter()
+    state = OpenCodeSessionState(
+        session_id="local-1",
+        cwd="/tmp",
+        opencode_session_id="ses_1",
+    )
+    adapter._register_session(state)
+    adapter._tag_part_type(
+        state,
+        "message.part.updated",
+        {"sessionID": "ses_1", "part": {"id": "p_text", "type": "text"}},
+    )
+
+    resolved = adapter._resolve_state_for_event(
+        "message.part.delta",
+        {"partID": "p_text", "field": "text", "delta": "answer"},
+    )
+
+    assert resolved is state
+
+
+@pytest.mark.asyncio
+async def test_listen_events_flushes_on_blank_sse_separator() -> None:
+    adapter = _build_adapter()
+    seen: list[dict[str, object]] = []
+
+    class _FakeClient:
+        async def stream_events(self, path: str):
+            assert path == "/event"
+            yield 'data: {"type":"server.connected","properties":{"sessionID":"ses_1"}}\n'
+            yield "\n"
+            await asyncio.sleep(1)
+
+    async def _dispatch(event: dict[str, object]) -> None:
+        seen.append(event)
+        raise asyncio.CancelledError
+
+    adapter._client = _FakeClient()  # type: ignore[assignment]
+    adapter._dispatch_event = _dispatch  # type: ignore[method-assign]
+
+    await adapter._listen_events()
+
+    assert seen == [{"type": "server.connected", "properties": {"sessionID": "ses_1"}}]

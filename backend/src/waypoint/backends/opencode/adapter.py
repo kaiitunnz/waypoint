@@ -101,6 +101,7 @@ class OpenCodeAdapter:
         self._workdir = workdir
         self._sessions: dict[str, OpenCodeSessionState] = {}
         self._remote_sessions: dict[str, str] = {}
+        self._part_sessions: dict[str, str] = {}
 
         self._server_process: asyncio.subprocess.Process | None = None
         self._sse_task: asyncio.Task[None] | None = None
@@ -266,7 +267,8 @@ class OpenCodeAdapter:
             while True:
                 try:
                     buffer: list[str] = []
-                    async for line in client.stream_events("/event"):
+                    async for raw_line in client.stream_events("/event"):
+                        line = raw_line.rstrip("\r\n")
                         if not line:
                             payload = self._decode_sse_payload(buffer)
                             buffer.clear()
@@ -306,15 +308,12 @@ class OpenCodeAdapter:
         properties = event.get("properties", {})
         if not isinstance(properties, dict):
             return
-        remote_session_id = self._extract_session_id(properties)
-        if not remote_session_id:
-            return
-        session_id = self._remote_sessions.get(remote_session_id)
-        if not session_id:
-            return
-        state = self._sessions.get(session_id)
+        state = self._resolve_state_for_event(event_type, properties)
         if state is None:
             return
+        session_id = state.session_id
+        if "sessionID" not in properties:
+            properties = {**properties, "sessionID": state.opencode_session_id}
         self._update_pending_state(state, event_type, properties)
         properties = self._tag_part_type(state, event_type, properties)
 
@@ -349,6 +348,28 @@ class OpenCodeAdapter:
             metadata,
             metadata.get("status", SessionStatus.RUNNING),
         )
+
+    def _resolve_state_for_event(
+        self,
+        event_type: str | None,
+        properties: dict[str, Any],
+    ) -> OpenCodeSessionState | None:
+        remote_session_id = self._extract_session_id(properties)
+        if remote_session_id:
+            session_id = self._remote_sessions.get(remote_session_id)
+            if session_id:
+                return self._sessions.get(session_id)
+
+        # SSE deltas may arrive keyed only by partID while the stream stays
+        # open; fall back to the last known part->session mapping so output
+        # still routes to the right transcript.
+        if event_type and event_type.startswith("message.part."):
+            part_id = properties.get("partID")
+            if isinstance(part_id, str):
+                session_id = self._part_sessions.get(part_id)
+                if session_id:
+                    return self._sessions.get(session_id)
+        return None
 
     def _extract_session_id(self, value: Any) -> str | None:
         if isinstance(value, dict):
@@ -438,6 +459,7 @@ class OpenCodeAdapter:
                 part_type = part.get("type")
                 if isinstance(part_id, str) and isinstance(part_type, str):
                     state.part_types[part_id] = part_type
+                    self._part_sessions[part_id] = state.session_id
             return properties
         if event_type == "message.part.delta":
             part_id = properties.get("partID")
@@ -555,9 +577,9 @@ class OpenCodeAdapter:
             ]
         }
         if model is not None:
-            if state.effort:
-                model["variant"] = state.effort
             payload["model"] = model
+        if state.effort:
+            payload["variant"] = state.effort
         if state.agent:
             payload["agent"] = state.agent
 
@@ -759,6 +781,9 @@ class OpenCodeAdapter:
         state.closing = True
         state.pending_permission_ids.clear()
         state.pending_question_ids.clear()
+        for part_id, owner in list(self._part_sessions.items()):
+            if owner == session_id:
+                self._part_sessions.pop(part_id, None)
         await self._emit_event(
             session_id,
             EventKind.SYSTEM_NOTE,
@@ -787,6 +812,7 @@ class OpenCodeAdapter:
             self._server_process = None
         self._sessions.clear()
         self._remote_sessions.clear()
+        self._part_sessions.clear()
         self._started = False
 
     def terminal_snapshot(self, session_id: str) -> str:

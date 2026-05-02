@@ -1758,7 +1758,7 @@ function findPendingApproval(events: EventRecord[]): EventRecord | null {
       queue.push(event);
     } else if (
       event.kind === "system_note" &&
-      /Approval response sent/i.test(event.text)
+      /(Approval response sent|Approval timed out)/i.test(event.text)
     ) {
       queue.shift();
     }
@@ -1779,7 +1779,7 @@ function isImportantEvent(event: EventRecord): boolean {
       if (typeof event.metadata?.builtin_command === "string") {
         return true;
       }
-      return /(approval response|attached|started|terminated|interrupt|resume|failed|error|exited|compact)/i.test(event.text);
+      return /(approval response|approval timed out|attached|started|terminated|interrupt|resume|failed|error|exited|compact)/i.test(event.text);
     case "raw_terminal_chunk":
       return false;
     default:

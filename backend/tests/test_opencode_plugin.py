@@ -51,7 +51,8 @@ def test_serialize_question_answers_falls_back_to_raw_answer() -> None:
     [
         (None, None),
         ("", None),
-        ("ask", None),
+        ("default", None),
+        ("ask", [{"permission": "*", "pattern": "*", "action": "ask"}]),
         ("allow", [{"permission": "*", "pattern": "*", "action": "allow"}]),
         ("deny", [{"permission": "*", "pattern": "*", "action": "deny"}]),
     ],
@@ -67,6 +68,9 @@ def test_validate_permission_mode_accepts_known_actions() -> None:
 
     assert plugin.validate_permission_mode(None) is None
     assert plugin.validate_permission_mode("") is None
+    # The runtime substitutes "default" when no mode was chosen — treat it
+    # as a no-op so OpenCode's session create doesn't see action=default.
+    assert plugin.validate_permission_mode("default") is None
     assert plugin.validate_permission_mode("ask") == "ask"
     assert plugin.validate_permission_mode("allow") == "allow"
     assert plugin.validate_permission_mode("deny") == "deny"

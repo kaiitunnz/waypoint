@@ -793,7 +793,7 @@ function AskUserQuestionCard({
                         [index]: e.target.value,
                       }))
                     }
-                    placeholder="Add a note for this question (optional)…"
+                    placeholder="Type your own answer or add a note here…"
                     rows={2}
                     disabled={submitting}
                   />
@@ -813,7 +813,7 @@ function AskUserQuestionCard({
                   onClick={() => toggleNote(index)}
                   disabled={submitting}
                 >
-                  + Add note
+                  + Other / Custom response
                 </button>
               )
             ) : null}

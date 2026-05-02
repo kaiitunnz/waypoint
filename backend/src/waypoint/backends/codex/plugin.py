@@ -374,14 +374,12 @@ class CodexPlugin:
         runtime: "SessionRuntime",
         launch_target_id: str | None,
         operation: Callable[[AppServerClient], Awaitable[Any]],
-        *,
-        cwd: str | None = None,
     ) -> Any:
         default_cwd = self.client_cwd(runtime, launch_target_id)
         client_factory: ClientFactory = (
             self.client_factory(runtime, launch_target_id) or default_client_factory
         )
-        client = client_factory(cwd or default_cwd, _deny_approval)
+        client = client_factory(default_cwd, _deny_approval)
         try:
             await asyncio.to_thread(client.start)
             await asyncio.to_thread(client.initialize)

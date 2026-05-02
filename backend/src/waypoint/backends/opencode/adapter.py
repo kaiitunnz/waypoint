@@ -1,5 +1,4 @@
 import asyncio
-import codecs
 import errno
 import json
 import logging
@@ -11,11 +10,20 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
-import aiohttp
-
+from waypoint.backends.opencode.client import (
+    LocalOpenCodeClient,
+    OpenCodeHttpClient,
+    RemoteOpenCodeClient,
+)
 from waypoint.backends.opencode.normalize import map_event
+from waypoint.backends.opencode.remote import (
+    REMOTE_SERVE_SCRIPT,
+    build_remote_serve_args,
+)
+from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import EventKind, SessionStatus
 
 log = logging.getLogger("waypoint.opencode")
@@ -66,7 +74,11 @@ class OpenCodeSessionState:
     model: str | None = None
     agent: str | None = None
     effort: str | None = None
+    pre_plan_mode: str | None = None
     closing: bool = False
+
+
+AgentChangedCallback = Callable[[str, str | None, str | None], Any]
 
 
 class OpenCodeAdapter:
@@ -76,38 +88,49 @@ class OpenCodeAdapter:
         binary: str | None = None,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
+        launch_target: SshLaunchTargetConfig | None = None,
+        on_agent_changed: AgentChangedCallback | None = None,
+        workdir: str | None = None,
     ) -> None:
         self._emit_event = emit_event
         self._binary = binary
         self._host = host
         self._port = port
+        self._launch_target = launch_target
+        self._on_agent_changed = on_agent_changed
+        self._workdir = workdir
         self._sessions: dict[str, OpenCodeSessionState] = {}
         self._remote_sessions: dict[str, str] = {}
-        self._base_url = f"http://{host}:{port}"
+
         self._server_process: asyncio.subprocess.Process | None = None
         self._sse_task: asyncio.Task[None] | None = None
-        self._http: aiohttp.ClientSession | None = None
+        self._client: OpenCodeHttpClient | None = None
         self._started = False
 
     async def start(self) -> None:
         if self._started:
             return
+
+        if self._launch_target is not None:
+            await self._start_remote()
+        else:
+            await self._start_local()
+
+        self._started = True
+        self._sse_task = asyncio.create_task(self._listen_events())
+        log.info("opencode server started successfully")
+
+    async def _start_local(self) -> None:
         binary = self._binary or shutil.which("opencode")
         if binary is None:
             raise OpenCodeError("opencode binary not found on PATH")
-        # Refuse to start if something is already listening on the port —
-        # otherwise our `_wait_for_server` loop happily adopts whoever
-        # answers /config (typically an orphan from a previous backend
-        # crash), and that stale process never sees auth.json updates.
+        cwd = str(Path(self._workdir).expanduser()) if self._workdir else None
         if _port_in_use(self._host, self._port):
             raise OpenCodeError(
                 f"opencode port {self._host}:{self._port} is already in use; "
                 f"kill the orphan process before restarting"
             )
-        log.info("starting opencode server on %s:%d", self._host, self._port)
-        # Put the child in its own session so a SIGKILL of the backend
-        # leaves OpenCode reachable via os.killpg() — and so SIGINT in
-        # the foreground terminal doesn't leak into the subprocess.
+        log.info("starting local opencode server on %s:%d", self._host, self._port)
         self._server_process = await asyncio.create_subprocess_exec(
             binary,
             "serve",
@@ -116,31 +139,101 @@ class OpenCodeAdapter:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
+            cwd=cwd,
         )
-        self._http = aiohttp.ClientSession()
+        self._client = LocalOpenCodeClient(f"http://{self._host}:{self._port}")
         try:
             await self._wait_for_server()
         except Exception as exc:
-            log.error("failed to start opencode server: %s", exc)
-            await self._http.close()
-            self._http = None
+            log.error("failed to start local opencode server: %s", exc)
+            await self._client.close()
+            self._client = None
             self._terminate_server_process()
             raise OpenCodeError(f"failed to start opencode server: {exc}") from exc
-        self._started = True
-        self._sse_task = asyncio.create_task(self._listen_events())
-        log.info("opencode server started successfully")
+
+    async def _start_remote(self) -> None:
+        assert self._launch_target is not None
+        binary = (
+            self._launch_target.remote_bin_for("opencode", "opencode") or "opencode"
+        )
+        args = build_remote_serve_args(self._launch_target, binary, self._workdir)
+        log.info(
+            "starting remote opencode server on %s", self._launch_target.ssh_destination
+        )
+
+        self._server_process = await asyncio.create_subprocess_exec(
+            *args,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        assert self._server_process.stdin is not None
+        assert self._server_process.stdout is not None
+
+        # Write script to stdin and close it later when shutting down
+        self._server_process.stdin.write(REMOTE_SERVE_SCRIPT.encode("utf-8"))
+        await self._server_process.stdin.drain()
+
+        # Wait for the port sentinel
+        remote_port = None
+        start_time = time.monotonic()
+        while time.monotonic() - start_time < 30:
+            if self._server_process.returncode is not None:
+                stderr = (
+                    await self._server_process.stderr.read()
+                    if self._server_process.stderr
+                    else b""
+                )
+                raise OpenCodeError(
+                    f"remote opencode script exited unexpectedly: {stderr.decode(errors='replace')}"
+                )
+
+            try:
+                line_bytes = await asyncio.wait_for(
+                    self._server_process.stdout.readline(), timeout=0.5
+                )
+                if not line_bytes:
+                    continue
+                line = line_bytes.decode("utf-8").strip()
+                if line.startswith("__WP_PORT__="):
+                    remote_port = int(line.split("=")[1])
+                    break
+            except TimeoutError:
+                continue
+
+        if remote_port is None:
+            self._terminate_server_process()
+            raise OpenCodeError("timeout waiting for remote opencode server port")
+
+        log.info("remote opencode bound to port %d", remote_port)
+        self._client = RemoteOpenCodeClient(
+            self._launch_target, remote_port, self._workdir
+        )
+        try:
+            await self._wait_for_server()
+        except Exception as exc:
+            log.error("failed to start remote opencode server: %s", exc)
+            await self._client.close()
+            self._client = None
+            self._terminate_server_process()
+            raise OpenCodeError(
+                f"failed to start remote opencode server: {exc}"
+            ) from exc
 
     def _terminate_server_process(self) -> None:
-        """Kill the OpenCode subprocess and any of its descendants.
-
-        With start_new_session=True the spawned process is a group leader
-        (PGID == PID), so killpg reliably reaps anything OpenCode itself
-        forked. Falls back to terminating the leader if the group is
-        already gone (mid-shutdown race).
-        """
+        """Kill the OpenCode subprocess and any of its descendants."""
         proc = self._server_process
         if proc is None or proc.returncode is not None:
             return
+
+        if self._launch_target is not None:
+            # For remote, closing stdin breaks the `read` in the bash script
+            # causing it to kill opencode and exit
+            if proc.stdin is not None:
+                proc.stdin.close()
+            return
+
         try:
             os.killpg(proc.pid, signal.SIGTERM)
         except ProcessLookupError:
@@ -150,66 +243,47 @@ class OpenCodeAdapter:
                 proc.terminate()
 
     async def _wait_for_server(self) -> None:
-        client = self._require_http()
+        client = self._require_client()
         deadline = time.monotonic() + 30
         while True:
             if time.monotonic() >= deadline:
                 raise OpenCodeError("timeout waiting for opencode server")
             try:
-                async with client.get(f"{self._base_url}/config") as resp:
-                    if resp.status == 200:
-                        return
+                await client.get("/config")
+                return
             except Exception:
                 pass
             await asyncio.sleep(0.5)
 
-    def _require_http(self) -> aiohttp.ClientSession:
-        if self._http is None:
-            raise OpenCodeError("opencode http session not initialized")
-        return self._http
+    def _require_client(self) -> OpenCodeHttpClient:
+        if self._client is None:
+            raise OpenCodeError("opencode http client not initialized")
+        return self._client
 
     async def _listen_events(self) -> None:
-        client = self._require_http()
+        client = self._require_client()
         try:
             while True:
                 try:
-                    async with client.get(f"{self._base_url}/event") as resp:
-                        resp.raise_for_status()
-                        buffer: list[str] = []
-                        leftover = ""
-                        decoder = codecs.getincrementaldecoder("utf-8")()
-                        while True:
-                            chunk = await resp.content.read(8192)
-                            if not chunk:
-                                break
-                            data = leftover + decoder.decode(chunk)
-                            lines = data.split("\n")
-                            leftover = lines[-1]
-                            for line in lines[:-1]:
-                                line = line.rstrip("\r")
-                                if not line:
-                                    payload = self._decode_sse_payload(buffer)
-                                    buffer.clear()
-                                    if payload is not None:
-                                        await self._dispatch_event(payload)
-                                    continue
-                                if line.startswith(":"):
-                                    continue
-                                if line.startswith("data:"):
-                                    buffer.append(line[5:].lstrip())
+                    buffer: list[str] = []
+                    async for line in client.stream_events("/event"):
+                        if not line:
+                            payload = self._decode_sse_payload(buffer)
+                            buffer.clear()
+                            if payload is not None:
+                                await self._dispatch_event(payload)
+                            continue
+                        if line.startswith(":"):
+                            continue
+                        if line.startswith("data:"):
+                            buffer.append(line[5:].lstrip())
 
-                        # Handle last bit of decoder state
-                        data = leftover + decoder.decode(b"", final=True)
-                        if data:
-                            for line in data.split("\n"):
-                                line = line.rstrip("\r")
-                                if line and line.startswith("data:"):
-                                    buffer.append(line[5:].lstrip())
+                    # Handle last bit of decoder state
+                    payload = self._decode_sse_payload(buffer)
+                    buffer.clear()
+                    if payload is not None:
+                        await self._dispatch_event(payload)
 
-                        payload = self._decode_sse_payload(buffer)
-                        buffer.clear()
-                        if payload is not None:
-                            await self._dispatch_event(payload)
                 except asyncio.CancelledError:
                     raise
                 except Exception:
@@ -248,6 +322,26 @@ class OpenCodeAdapter:
         if not text and not metadata.get("payload"):
             return
 
+        if event_type == "question.asked":
+            for q in properties.get("questions", []):
+                q_text = q.get("question", "")
+                if q_text.startswith("Plan at ") and " is complete." in q_text:
+                    path = q_text[len("Plan at ") : q_text.find(" is complete.")]
+                    try:
+                        client = self._require_client()
+                        resp = await client.get("/file/content", params={"path": path})
+                        content = resp.get("content")
+                        if content:
+                            await self._emit_event(
+                                session_id,
+                                EventKind.AGENT_OUTPUT,
+                                f"## Plan\n{content}",
+                                {"status": SessionStatus.RUNNING},
+                                SessionStatus.RUNNING,
+                            )
+                    except Exception as exc:
+                        log.warning("failed to fetch plan file content: %s", exc)
+
         await self._emit_event(
             session_id,
             kind,
@@ -279,6 +373,17 @@ class OpenCodeAdapter:
         event_type: str | None,
         properties: dict[str, Any],
     ) -> None:
+        if event_type == "message.updated":
+            info = properties.get("info")
+            if isinstance(info, dict):
+                agent = info.get("agent")
+                if isinstance(agent, str) and agent != state.agent:
+                    old_agent = state.agent
+                    state.agent = agent
+                    if self._on_agent_changed:
+                        self._on_agent_changed(state.session_id, old_agent, agent)
+            return
+
         if event_type == "permission.asked":
             permission_id = properties.get("id")
             if (
@@ -384,25 +489,26 @@ class OpenCodeAdapter:
         title: str,
         permission: list[dict[str, str]] | None = None,
     ) -> str:
-        client = self._require_http()
+        client = self._require_client()
         payload: dict[str, Any] = {"title": title}
         if permission:
             payload["permission"] = permission
-        async with client.post(
-            f"{self._base_url}/session",
-            json=payload,
-            params={"directory": directory} if directory else {},
-        ) as resp:
-            if resp.status != 200:
-                body = await resp.text()
-                log.error("failed to create session: %s - %s", resp.status, body)
-                raise OpenCodeError(f"failed to create session: {resp.status} - {body}")
-            data = await resp.json()
-            session_id = data.get("id", "")
-            if not session_id or not session_id.startswith("ses"):
-                log.error("invalid session ID returned: %s", data)
-                raise OpenCodeError(f"invalid session ID returned: {session_id}")
-            return session_id
+
+        try:
+            data = await client.post(
+                "/session",
+                json_data=payload,
+                params={"directory": directory} if directory else None,
+            )
+        except Exception as exc:
+            log.error("failed to create session: %s", exc)
+            raise OpenCodeError(f"failed to create session: {exc}") from exc
+
+        session_id = data.get("id", "")
+        if not session_id or not session_id.startswith("ses"):
+            log.error("invalid session ID returned: %s", data)
+            raise OpenCodeError(f"invalid session ID returned: {session_id}")
+        return session_id
 
     async def restore_session(
         self,
@@ -439,7 +545,7 @@ class OpenCodeAdapter:
         if state is None:
             raise OpenCodeError(f"session not found: {session_id}")
         model = self._split_model_ref(state.model)
-        client = self._require_http()
+        client = self._require_client()
         payload: dict[str, Any] = {
             "parts": [
                 {
@@ -454,16 +560,13 @@ class OpenCodeAdapter:
             payload["model"] = model
         if state.agent:
             payload["agent"] = state.agent
-        # /message blocks until the entire response streams; using
-        # /prompt_async lets the POST return immediately so the composer
-        # can flush, while OpenCode delivers the turn over SSE.
-        async with client.post(
-            f"{self._base_url}/session/{state.opencode_session_id}/prompt_async",
-            json=payload,
-        ) as resp:
-            if resp.status not in {200, 204}:
-                body = await resp.text()
-                raise OpenCodeError(f"failed to send message: {resp.status} - {body}")
+
+        try:
+            await client.post(
+                f"/session/{state.opencode_session_id}/prompt_async", json_data=payload
+            )
+        except Exception as exc:
+            raise OpenCodeError(f"failed to send message: {exc}") from exc
 
     def _split_model_ref(self, model: str | None) -> dict[str, str] | None:
         selected = model or DEFAULT_MODEL
@@ -478,8 +581,11 @@ class OpenCodeAdapter:
         state = self._sessions.get(session_id)
         if state is None:
             return
-        client = self._require_http()
-        await client.post(f"{self._base_url}/session/{state.opencode_session_id}/abort")
+        client = self._require_client()
+        try:
+            await client.post(f"/session/{state.opencode_session_id}/abort")
+        except Exception:
+            pass
 
     async def respond_to_permission(self, session_id: str, decision: str) -> bool:
         state = self._sessions.get(session_id)
@@ -489,13 +595,14 @@ class OpenCodeAdapter:
             return False
         reply = self._map_decision_to_reply(decision)
         permission_id = state.pending_permission_ids[0]
-        client = self._require_http()
-        async with client.post(
-            f"{self._base_url}/session/{state.opencode_session_id}/permissions/{permission_id}",
-            json={"reply": reply},
-        ) as resp:
-            if resp.status != 200:
-                return False
+        client = self._require_client()
+        try:
+            await client.post(
+                f"/session/{state.opencode_session_id}/permissions/{permission_id}",
+                json_data={"reply": reply},
+            )
+        except Exception:
+            return False
         state.pending_permission_ids.pop(0)
         return True
 
@@ -532,18 +639,35 @@ class OpenCodeAdapter:
         state.effort = effort
         return True
 
+    async def set_agent(self, session_id: str, agent: str | None) -> bool:
+        state = self._sessions.get(session_id)
+        if state is None:
+            return False
+        state.agent = agent
+        return True
+
+    async def set_pre_plan_mode(self, session_id: str, mode: str | None) -> bool:
+        state = self._sessions.get(session_id)
+        if state is None:
+            return False
+        state.pre_plan_mode = mode
+        return True
+
     async def set_session_permission(
         self, session_id: str, permission: list[dict[str, str]]
     ) -> bool:
         state = self._sessions.get(session_id)
         if state is None:
             return False
-        client = self._require_http()
-        async with client.patch(
-            f"{self._base_url}/session/{state.opencode_session_id}",
-            json={"permission": permission},
-        ) as resp:
-            return resp.status == 200
+        client = self._require_client()
+        try:
+            await client.patch(
+                f"/session/{state.opencode_session_id}",
+                json_data={"permission": permission},
+            )
+            return True
+        except Exception:
+            return False
 
     async def compact_session(self, session_id: str) -> None:
         state = self._sessions.get(session_id)
@@ -557,54 +681,47 @@ class OpenCodeAdapter:
             "modelID": model["modelID"],
             "auto": False,
         }
-        client = self._require_http()
-        async with client.post(
-            f"{self._base_url}/session/{state.opencode_session_id}/summarize",
-            json=payload,
-        ) as resp:
-            if resp.status != 200:
-                body = await resp.text()
-                raise OpenCodeError(
-                    f"failed to compact session: {resp.status} - {body}"
-                )
+        client = self._require_client()
+        try:
+            await client.post(
+                f"/session/{state.opencode_session_id}/summarize",
+                json_data=payload,
+            )
+        except Exception as exc:
+            raise OpenCodeError(f"failed to compact session: {exc}") from exc
 
     async def list_sessions(self, directory: str | None = None) -> list[dict[str, Any]]:
         if not self._started:
             await self.start()
-        client = self._require_http()
-        params = {"directory": directory} if directory else {}
-        async with client.get(
-            f"{self._base_url}/session",
-            params=params,
-        ) as resp:
-            if resp.status != 200:
-                return []
-            return await resp.json()
+        client = self._require_client()
+        params = {"directory": directory} if directory else None
+        try:
+            return await client.get("/session", params=params)
+        except Exception:
+            return []
 
     async def get_session(self, session_id: str) -> dict[str, Any] | None:
-        client = self._require_http()
-        async with client.get(
-            f"{self._base_url}/session/{session_id}",
-        ) as resp:
-            if resp.status != 200:
-                return None
-            return await resp.json()
+        client = self._require_client()
+        try:
+            return await client.get(f"/session/{session_id}")
+        except Exception:
+            return None
 
     async def list_providers(self) -> dict[str, Any]:
         if not self._started:
             await self.start()
-        client = self._require_http()
-        async with client.get(f"{self._base_url}/provider") as resp:
-            if resp.status != 200:
-                return {"all": [], "default": {}, "connected": []}
-            return await resp.json()
+        client = self._require_client()
+        try:
+            return await client.get("/provider")
+        except Exception:
+            return {"all": [], "default": {}, "connected": []}
 
     async def list_questions(self) -> list[dict[str, Any]]:
-        client = self._require_http()
-        async with client.get(f"{self._base_url}/question") as resp:
-            if resp.status != 200:
-                return []
-            return await resp.json()
+        client = self._require_client()
+        try:
+            return await client.get("/question")
+        except Exception:
+            return []
 
     async def answer_question(
         self,
@@ -615,13 +732,14 @@ class OpenCodeAdapter:
         state = self._sessions.get(session_id)
         if state is None:
             return False
-        client = self._require_http()
-        async with client.post(
-            f"{self._base_url}/question/{request_id}/reply",
-            json={"answers": answers},
-        ) as resp:
-            if resp.status != 200:
-                return False
+        client = self._require_client()
+        try:
+            await client.post(
+                f"/question/{request_id}/reply",
+                json_data={"answers": answers},
+            )
+        except Exception:
+            return False
         state.pending_question_ids = [
             item for item in state.pending_question_ids if item != request_id
         ]
@@ -656,9 +774,9 @@ class OpenCodeAdapter:
             with suppress(asyncio.CancelledError):
                 await self._sse_task
             self._sse_task = None
-        if self._http is not None:
-            await self._http.close()
-            self._http = None
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
         if self._server_process is not None:
             self._terminate_server_process()
             try:
@@ -684,5 +802,6 @@ def build_adapter(
     binary: str | None = None,
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
+    workdir: str | None = None,
 ) -> OpenCodeAdapter:
-    return OpenCodeAdapter(emit_event, binary, host, port)
+    return OpenCodeAdapter(emit_event, binary, host, port, workdir=workdir)

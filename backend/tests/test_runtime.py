@@ -1264,8 +1264,8 @@ async def test_list_backend_models_returns_curated_claude_list(tmp_path) -> None
     assert "opus" in ids and "sonnet" in ids and "haiku" in ids
     # Default falls back to the entry flagged is_default in the curated list
     # when no plugin_configs.claude_code.default_model_id override is present.
-    assert response["default_model_id"] == "sonnet"
-    assert response["default_model_label"] == "Sonnet 4.6"
+    assert response["default_model_id"] == "opus[1m]"
+    assert response["default_model_label"] == "Opus 4.7 (1M context)"
 
 
 @pytest.mark.asyncio

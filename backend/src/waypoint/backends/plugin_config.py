@@ -23,13 +23,13 @@ class PluginConfig(BaseModel):
     """Base class for per-plugin global config blocks.
 
     Carries fields the runtime consumes uniformly across plugins
-    (``default_model`` / ``default_effort``, ``local_bin``); plugin-specific
+    (``default_model_id`` / ``default_effort``, ``local_bin``); plugin-specific
     fields (e.g. Claude's static model catalogue) live on the subclass.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    default_model: str | None = None
+    default_model_id: str | None = None
     default_effort: str | None = None
     # Path or PATH-resolvable name of the plugin's CLI binary on the
     # local host. ``None`` means "fall back to the plugin's

@@ -139,7 +139,8 @@ class TmuxPlugin:
         return {
             "backend": self.id,
             "models": [],
-            "default_model": None,
+            "default_model_id": None,
+            "default_model_label": None,
             "default_effort": None,
             "supports_free_text": False,
         }

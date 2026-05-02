@@ -85,11 +85,11 @@ def test_load_settings_parses_plugin_configs(
             [
                 "plugin_configs:",
                 "  codex:",
-                "    default_model: gpt-5",
+                "    default_model_id: gpt-5",
                 "    default_effort: high",
                 "    local_bin: /opt/codex/bin/codex",
                 "  claude_code:",
-                "    default_model: opus",
+                "    default_model_id: opus",
                 "    models:",
                 "      - id: opus",
                 "        label: Opus 4.7",
@@ -102,12 +102,12 @@ def test_load_settings_parses_plugin_configs(
     monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
     settings = load_settings()
     codex_config = settings.plugin_config("codex")
-    assert codex_config.default_model == "gpt-5"
+    assert codex_config.default_model_id == "gpt-5"
     assert codex_config.default_effort == "high"
     assert codex_config.local_bin == "/opt/codex/bin/codex"
     claude_config = settings.plugin_config("claude_code")
     assert isinstance(claude_config, ClaudeCodePluginConfig)
-    assert claude_config.default_model == "opus"
+    assert claude_config.default_model_id == "opus"
     assert claude_config.local_bin is None
     assert [model.id for model in claude_config.models] == ["opus"]
 
@@ -117,7 +117,7 @@ def test_load_settings_rejects_unknown_plugin_id(
 ) -> None:
     config_file = tmp_path / "waypoint.yaml"
     config_file.write_text(
-        "plugin_configs:\n  not_a_plugin:\n    default_model: gpt-5\n",
+        "plugin_configs:\n  not_a_plugin:\n    default_model_id: gpt-5\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(settings_module, "DEFAULT_CONFIG_PATH", config_file)

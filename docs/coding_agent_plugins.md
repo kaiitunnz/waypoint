@@ -181,7 +181,7 @@ async def import_thread(self, runtime, request) -> SessionRecord: ...
 ```
 
 `list_models` returns the same payload shape `/api/backends/{id}/models`
-serves to the frontend (`{models, default_model, default_effort,
+serves to the frontend (`{models, default_model_id, default_model_label, default_effort,
 supports_free_text}`). `list_threads` returns plugin-specific summary
 objects; the API serialises via `model_dump`.
 

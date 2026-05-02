@@ -307,18 +307,28 @@ class ClaudeCodePlugin:
         include_hidden: bool = False,
     ) -> dict[str, Any]:
         config = self._config(runtime)
-        default_model = config.default_model
+        default_model = config.default_model_id
         default_effort = config.default_effort
         options = [opt.model_dump(mode="json") for opt in config.models]
+        default_model_id: str | None = None
         if default_model is None:
             for opt in config.models:
                 if opt.is_default:
-                    default_model = opt.id
+                    default_model_id = opt.id
+                    break
+        else:
+            default_model_id = default_model
+        default_model_label: str | None = None
+        if default_model_id:
+            for opt in config.models:
+                if opt.id == default_model_id:
+                    default_model_label = opt.label
                     break
         return {
             "backend": self.id,
             "models": options,
-            "default_model": default_model,
+            "default_model_id": default_model_id,
+            "default_model_label": default_model_label,
             "default_effort": default_effort,
             "supports_free_text": True,
         }

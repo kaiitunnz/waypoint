@@ -169,7 +169,8 @@ export interface BackendModelOption {
 export interface BackendModelListResponse {
   backend: Backend;
   models: BackendModelOption[];
-  default_model?: string | null;
+  default_model_id?: string | null;
+  default_model_label?: string | null;
   default_effort?: string | null;
   supports_free_text?: boolean;
 }

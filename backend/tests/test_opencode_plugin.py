@@ -156,6 +156,41 @@ def test_flatten_provider_models_skips_invalid_and_deprecated() -> None:
     ]
 
 
+def test_flatten_provider_models_filters_unconnected_providers() -> None:
+    plugin = OpenCodePlugin()
+    payload = {
+        "connected": ["opencode"],
+        "all": [
+            {
+                "id": "opencode",
+                "name": "OpenCode",
+                "models": {
+                    "minimax-m2.5-free": {"name": "MiniMax", "status": "active"}
+                },
+            },
+            {
+                "id": "openrouter",
+                "name": "OpenRouter",
+                "models": {
+                    "minimax/minimax-m2.5:free": {
+                        "name": "MiniMax Free",
+                        "status": "active",
+                    },
+                },
+            },
+        ],
+    }
+
+    flattened = plugin._flatten_provider_models(payload, include_hidden=False)
+
+    # Only the connected provider's models are surfaced — listing OpenRouter
+    # without an API key would let the user pick a model that the runtime
+    # rejects with "Model not found" once a prompt is sent.
+    assert flattened == [
+        {"id": "opencode/minimax-m2.5-free", "label": "OpenCode · MiniMax"},
+    ]
+
+
 def test_flatten_provider_models_includes_deprecated_when_requested() -> None:
     plugin = OpenCodePlugin()
     payload = {

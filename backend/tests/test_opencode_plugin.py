@@ -182,7 +182,10 @@ def test_select_default_model_prefers_user_default_when_available() -> None:
         {"id": "anthropic/claude-sonnet-4-6", "label": "Sonnet"},
     ]
 
-    assert plugin._select_default_model(models, providers={}) == DEFAULT_OPENCODE_MODEL
+    assert plugin._select_default_model(models, providers={}) == (
+        DEFAULT_OPENCODE_MODEL,
+        "MiniMax",
+    )
 
 
 def test_select_default_model_falls_back_to_provider_defaults() -> None:
@@ -190,8 +193,9 @@ def test_select_default_model_falls_back_to_provider_defaults() -> None:
     models = [{"id": "anthropic/claude-sonnet-4-6", "label": "Sonnet"}]
     providers = {"default": {"anthropic": "claude-sonnet-4-6", "missing": "x"}}
 
-    assert (
-        plugin._select_default_model(models, providers) == "anthropic/claude-sonnet-4-6"
+    assert plugin._select_default_model(models, providers) == (
+        "anthropic/claude-sonnet-4-6",
+        "Sonnet",
     )
 
 
@@ -199,7 +203,7 @@ def test_select_default_model_falls_back_to_first_available() -> None:
     plugin = OpenCodePlugin()
     models = [{"id": "anthropic/claude-sonnet-4-6", "label": "Sonnet"}]
 
-    assert (
-        plugin._select_default_model(models, providers={})
-        == "anthropic/claude-sonnet-4-6"
+    assert plugin._select_default_model(models, providers={}) == (
+        "anthropic/claude-sonnet-4-6",
+        "Sonnet",
     )

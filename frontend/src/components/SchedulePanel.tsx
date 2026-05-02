@@ -11,9 +11,11 @@ import {
   permissionModeLabel,
   permissionModesFor,
 } from "@/lib/backends";
+import { fetchBackendModels } from "@/lib/api";
 import {
   Backend,
   BackendModelListResponse,
+  BackendModelOption,
   ScheduleCreateRequest,
   ScheduledSession,
 } from "@/lib/types";
@@ -61,6 +63,7 @@ export function SchedulePanel({
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const [modelInfo, setModelInfo] = useState<BackendModelListResponse | null>(null);
+  const [modelsByBackend, setModelsByBackend] = useState<Record<string, BackendModelOption[]>>({});
   const [mode, setMode] = useState<Mode>("delay");
   const [delayMinutes, setDelayMinutes] = useState("15");
   const [scheduledAt, setScheduledAt] = useState(defaultScheduledAt());
@@ -104,6 +107,27 @@ export function SchedulePanel({
       setEffort("");
     }
   }, [effort, effortOptions]);
+
+  useEffect(() => {
+    const modelCatalogs = new Map(
+      schedules.map((schedule) => [
+        scheduleModelCacheKey(schedule.backend, schedule.launch_target_id ?? null),
+        {
+          backend: schedule.backend,
+          launchTargetId: schedule.launch_target_id ?? null,
+        },
+      ]),
+    );
+    for (const [cacheKey, target] of modelCatalogs) {
+      if (!modelsByBackend[cacheKey]) {
+        fetchBackendModels(host, token, target.backend, { launchTargetId: target.launchTargetId })
+          .then((response) => {
+            setModelsByBackend((prev) => ({ ...prev, [cacheKey]: response.models }));
+          })
+          .catch(() => {});
+      }
+    }
+  }, [host, token, schedules, modelsByBackend]);
 
   const handleModelsLoaded = useCallback((response: BackendModelListResponse) => {
     setModelInfo(response);
@@ -224,6 +248,7 @@ export function SchedulePanel({
             onModelsLoaded={handleModelsLoaded}
             disabled={busy}
             label="Model"
+            defaultModelLabel={modelInfo?.default_model_label ?? null}
           />
           <EffortPicker
             options={effortOptions}
@@ -292,6 +317,7 @@ export function SchedulePanel({
               schedule={schedule}
               onCancel={onCancel}
               catalog={catalog}
+              modelsByBackend={modelsByBackend}
             />
           ))}
         </div>
@@ -315,6 +341,7 @@ export function SchedulePanel({
               schedule={schedule}
               onCancel={onCancel}
               catalog={catalog}
+              modelsByBackend={modelsByBackend}
             />
           ))}
         </div>
@@ -327,14 +354,20 @@ function ScheduleRow({
   schedule,
   onCancel,
   catalog,
+  modelsByBackend,
 }: {
   schedule: ScheduledSession;
   onCancel: (id: string) => Promise<void>;
   catalog: BackendCatalog;
+  modelsByBackend: Record<string, BackendModelOption[]>;
 }) {
   const when = new Date(schedule.scheduled_at);
   const formatted = when.toLocaleString();
   const relative = formatRelative(when);
+  const modelCacheKey = scheduleModelCacheKey(
+    schedule.backend,
+    schedule.launch_target_id ?? null,
+  );
   const modeLabel = permissionModeLabel(
     schedule.backend,
     schedule.permission_mode,
@@ -352,7 +385,7 @@ function ScheduleRow({
         ) : null}
         {schedule.model ? (
           <span className="badge model" title={`Model: ${schedule.model}`}>
-            {schedule.model}
+            {modelsByBackend[modelCacheKey]?.find((opt) => opt.id === schedule.model)?.label ?? schedule.model}
           </span>
         ) : null}
         {schedule.effort ? (
@@ -391,6 +424,10 @@ function ScheduleRow({
       </div>
     </article>
   );
+}
+
+function scheduleModelCacheKey(backend: Backend, launchTargetId: string | null): string {
+  return `${backend}::${launchTargetId ?? "local"}`;
 }
 
 function formatRelative(target: Date): string {

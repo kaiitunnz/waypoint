@@ -1263,21 +1263,23 @@ async def test_list_backend_models_returns_curated_claude_list(tmp_path) -> None
     # Mirrors DEFAULT_CLAUDE_MODELS in backends/claude_code/models.py.
     assert "opus" in ids and "sonnet" in ids and "haiku" in ids
     # Default falls back to the entry flagged is_default in the curated list
-    # when no plugin_configs.claude_code.default_model override is present.
-    assert response["default_model"] == "sonnet"
+    # when no plugin_configs.claude_code.default_model_id override is present.
+    assert response["default_model_id"] == "sonnet"
+    assert response["default_model_label"] == "Sonnet 4.6"
 
 
 @pytest.mark.asyncio
 async def test_list_backend_models_honours_default_models_override(tmp_path) -> None:
     settings = Settings(
         data_dir=tmp_path / "data",
-        plugin_configs={"claude_code": {"default_model": "opus"}},
+        plugin_configs={"claude_code": {"default_model_id": "opus"}},
     )
     settings.ensure_dirs()
     storage = Storage(settings.database_path)
     runtime = SessionRuntime(settings, storage)
     response = await runtime.list_backend_models("claude_code")
-    assert response["default_model"] == "opus"
+    assert response["default_model_id"] == "opus"
+    assert response["default_model_label"] == "Opus 4.7"
 
 
 def _seed_session_with_events(

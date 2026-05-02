@@ -242,11 +242,14 @@ class OpenCodePlugin:
                 detail=f"failed to list opencode providers: {exc}",
             ) from exc
         models = self._flatten_provider_models(providers, include_hidden=include_hidden)
-        default_model = self._select_default_model(models, providers)
+        default_model_id, default_model_label = self._select_default_model(
+            models, providers
+        )
         return {
             "backend": self.id,
             "models": models,
-            "default_model": default_model,
+            "default_model_id": default_model_id,
+            "default_model_label": default_model_label,
             "default_effort": None,
             "supports_free_text": True,
         }
@@ -286,20 +289,29 @@ class OpenCodePlugin:
         self,
         models: list[dict[str, str]],
         providers: dict[str, Any],
-    ) -> str:
+    ) -> tuple[str, str | None]:
         available = {entry["id"] for entry in models}
+        default_id: str | None = None
         if DEFAULT_OPENCODE_MODEL in available:
-            return DEFAULT_OPENCODE_MODEL
-        defaults = providers.get("default") or {}
-        if isinstance(defaults, dict):
-            for provider_id, model_id in defaults.items():
-                if isinstance(provider_id, str) and isinstance(model_id, str):
-                    candidate = f"{provider_id}/{model_id}"
-                    if candidate in available:
-                        return candidate
-        if models:
-            return models[0]["id"]
-        return DEFAULT_OPENCODE_MODEL
+            default_id = DEFAULT_OPENCODE_MODEL
+        else:
+            defaults = providers.get("default") or {}
+            if isinstance(defaults, dict):
+                for provider_id, model_id in defaults.items():
+                    if isinstance(provider_id, str) and isinstance(model_id, str):
+                        candidate = f"{provider_id}/{model_id}"
+                        if candidate in available:
+                            default_id = candidate
+                            break
+            if default_id is None and models:
+                default_id = models[0]["id"]
+        if default_id is None:
+            default_id = DEFAULT_OPENCODE_MODEL
+
+        for model in models:
+            if model["id"] == default_id:
+                return default_id, model["label"]
+        return default_id, None
 
     async def maybe_handle_input(
         self,

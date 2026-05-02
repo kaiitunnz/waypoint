@@ -108,6 +108,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [showScrollToTop, setShowScrollToTop] = useState(false);
   const [modeBusy, setModeBusy] = useState(false);
   const [modelOptions, setModelOptions] = useState<BackendModelOption[]>([]);
+  const [defaultModelLabel, setDefaultModelLabel] = useState<string | null>(null);
+  const [defaultEffort, setDefaultEffort] = useState<string | null>(null);
   const [modelBusy, setModelBusy] = useState(false);
   const [effortBusy, setEffortBusy] = useState(false);
   const [hasOlderEvents, setHasOlderEvents] = useState(false);
@@ -198,6 +200,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       .then((response) => {
         if (cancelled) return;
         setModelOptions(response.models);
+        setDefaultModelLabel(response.default_model_label ?? null);
+        setDefaultEffort(response.default_effort ?? null);
       })
       .catch((modelsError) => {
         if (cancelled) return;
@@ -208,6 +212,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         // Discovery failure is non-fatal: the picker just falls back to
         // showing whatever model the session already has.
         setModelOptions([]);
+        setDefaultModelLabel(null);
+        setDefaultEffort(null);
       });
     return () => {
       cancelled = true;
@@ -688,7 +694,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         </div>
       ) : null}
       {session ? (
-        <SessionHeader session={session} connection={connection} />
+        <SessionHeader session={session} connection={connection} modelOptions={modelOptions} />
       ) : null}
       {usageSummary ? <UsageCard summary={usageSummary} /> : null}
       <div className="session-toolbar">
@@ -850,6 +856,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         modeBusy={modeBusy}
         modelBusy={modelBusy}
         modelOptions={modelOptions}
+        defaultModelLabel={defaultModelLabel}
+        defaultEffort={defaultEffort}
         currentModel={session?.model ?? null}
         currentEffort={session?.effort ?? null}
         effortBusy={effortBusy}
@@ -894,6 +902,8 @@ interface ReplyComposerProps {
   modeBusy: boolean;
   modelBusy: boolean;
   modelOptions: BackendModelOption[];
+  defaultModelLabel: string | null;
+  defaultEffort: string | null;
   currentModel: string | null;
   currentEffort: string | null;
   effortBusy: boolean;
@@ -928,6 +938,8 @@ const ReplyComposer = memo(function ReplyComposer({
   modeBusy,
   modelBusy,
   modelOptions,
+  defaultModelLabel,
+  defaultEffort,
   currentModel,
   currentEffort,
   effortBusy,
@@ -1191,7 +1203,7 @@ const ReplyComposer = memo(function ReplyComposer({
     }
     if (hasModelPicker) {
       const matched = modelEntries.find((option) => option.id === (currentModel ?? ""));
-      parts.push(matched?.label ?? (currentModel || "Default"));
+       parts.push(matched?.label ?? (currentModel || (defaultModelLabel ? `Default (${defaultModelLabel})` : "Default")));
     }
     if (hasEffortPicker) {
       parts.push(currentEffort ? EFFORT_LABEL[currentEffort] ?? currentEffort : "Default");
@@ -1253,7 +1265,7 @@ const ReplyComposer = memo(function ReplyComposer({
                       onChange={(event) => void onModelChange(event.target.value)}
                       disabled={modelBusy || disabled}
                     >
-                      <option value="">Default</option>
+                       <option value="">{defaultModelLabel ? `Default (${defaultModelLabel})` : "Default"}</option>
                       {modelEntries.map((option) => (
                         <option key={option.id} value={option.id}>
                           {option.label}
@@ -1270,7 +1282,11 @@ const ReplyComposer = memo(function ReplyComposer({
                       onChange={(event) => handleEffortSelect(event.target.value)}
                       disabled={effortBusy || disabled}
                     >
-                      <option value="">Default</option>
+                      <option value="">
+                        {defaultEffort
+                          ? `Default (${EFFORT_LABEL[defaultEffort] ?? defaultEffort})`
+                          : "Default"}
+                      </option>
                       {effortOptions.map((option) => (
                         <option key={option} value={option}>
                           {EFFORT_LABEL[option] ?? option}
@@ -1744,9 +1760,11 @@ interface UsageSummary {
 function SessionHeader({
   session,
   connection,
+  modelOptions,
 }: {
   session: SessionRecord;
   connection: ConnectionState;
+  modelOptions: BackendModelOption[];
 }) {
   const cwdSegments = formatCwdSegments(session.cwd);
   const target = session.launch_target_id ?? null;
@@ -1788,7 +1806,7 @@ function SessionHeader({
         </span>
         {session.model ? (
           <span className="badge model" title={`Model: ${session.model}`}>
-            {session.model}
+            {modelOptions.find((opt) => opt.id === session.model)?.label ?? session.model}
           </span>
         ) : null}
         {session.effort ? (

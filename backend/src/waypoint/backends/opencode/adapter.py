@@ -1,4 +1,5 @@
 import asyncio
+import codecs
 import json
 import logging
 import shutil
@@ -125,18 +126,36 @@ class OpenCodeAdapter:
                     async with client.get(f"{self._base_url}/event") as resp:
                         resp.raise_for_status()
                         buffer: list[str] = []
-                        async for raw_line in resp.content:
-                            line = raw_line.decode("utf-8").rstrip("\r\n")
-                            if not line:
-                                payload = self._decode_sse_payload(buffer)
-                                buffer.clear()
-                                if payload is not None:
-                                    await self._dispatch_event(payload)
-                                continue
-                            if line.startswith(":"):
-                                continue
-                            if line.startswith("data:"):
-                                buffer.append(line[5:].lstrip())
+                        leftover = ""
+                        decoder = codecs.getincrementaldecoder("utf-8")()
+                        while True:
+                            chunk = await resp.content.read(8192)
+                            if not chunk:
+                                break
+                            data = leftover + decoder.decode(chunk)
+                            lines = data.split("\n")
+                            leftover = lines[-1]
+                            for line in lines[:-1]:
+                                line = line.rstrip("\r")
+                                if not line:
+                                    payload = self._decode_sse_payload(buffer)
+                                    buffer.clear()
+                                    if payload is not None:
+                                        await self._dispatch_event(payload)
+                                    continue
+                                if line.startswith(":"):
+                                    continue
+                                if line.startswith("data:"):
+                                    buffer.append(line[5:].lstrip())
+
+                        # Handle last bit of decoder state
+                        data = leftover + decoder.decode(b"", final=True)
+                        if data:
+                            for line in data.split("\n"):
+                                line = line.rstrip("\r")
+                                if line and line.startswith("data:"):
+                                    buffer.append(line[5:].lstrip())
+
                         payload = self._decode_sse_payload(buffer)
                         buffer.clear()
                         if payload is not None:

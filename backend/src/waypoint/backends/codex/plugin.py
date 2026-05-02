@@ -633,7 +633,7 @@ class CodexPlugin:
         include_hidden: bool = False,
     ) -> dict[str, Any]:
         config = self._config(runtime)
-        default_model = config.default_model
+        default_model = config.default_model_id
         default_effort = config.default_effort
         cwd = self.client_cwd(runtime, launch_target_id)
         try:
@@ -672,10 +672,17 @@ class CodexPlugin:
             )
             if default_model is None and entry.is_default:
                 default_model = entry.model
+        default_model_label: str | None = None
+        if default_model:
+            for model in models:
+                if model.get("id") == default_model:
+                    default_model_label = model.get("label")
+                    break
         return {
             "backend": self.id,
             "models": models,
-            "default_model": default_model,
+            "default_model_id": default_model,
+            "default_model_label": default_model_label,
             "default_effort": default_effort,
             "supports_free_text": True,
         }

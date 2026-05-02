@@ -177,7 +177,7 @@ class SessionRuntime:
         # CLI uses its own default instead of waypoint forcing one. Same
         # precedence applies to reasoning effort.
         plugin_config = self.settings.plugin_config(request.backend)
-        resolved_model = request.model or plugin_config.default_model
+        resolved_model = request.model or plugin_config.default_model_id
         resolved_effort = request.effort or plugin_config.default_effort
         # Pick the plugin that owns the session lifecycle: structured
         # backends launch their own protocol process; if the requested

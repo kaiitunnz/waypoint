@@ -180,6 +180,7 @@ export function LaunchPanel({
           onAuthFailure={onAuthFailure}
           onModelsLoaded={handleModelsLoaded}
           disabled={formBusy}
+          defaultModelLabel={modelInfo?.default_model_label ?? null}
         />
         <EffortPicker
           options={effortOptions}

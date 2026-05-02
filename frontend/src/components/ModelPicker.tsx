@@ -21,6 +21,7 @@ interface ModelPickerProps {
   disabled?: boolean;
   label?: string;
   hint?: string;
+  defaultModelLabel?: string | null;
 }
 
 export function ModelPicker({
@@ -35,6 +36,7 @@ export function ModelPicker({
   disabled,
   label = "Model",
   hint,
+  defaultModelLabel,
 }: ModelPickerProps) {
   const [options, setOptions] = useState<BackendModelOption[]>([]);
 
@@ -83,7 +85,7 @@ export function ModelPicker({
         onChange={(event) => onChange(event.target.value)}
         disabled={disabled}
       >
-        <option value="">Default</option>
+         <option value="">{defaultModelLabel ? `Default (${defaultModelLabel})` : "Default"}</option>
         {entries.map((option) => (
           <option key={option.id} value={option.id}>
             {option.label}

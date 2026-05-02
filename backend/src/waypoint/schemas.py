@@ -192,7 +192,10 @@ class BackendModelOption(BaseModel):
 class BackendModelListResponse(BaseModel):
     backend: BackendId
     models: list[BackendModelOption] = Field(default_factory=list)
-    default_model: str | None = None
+    # The literal model ID to use in requests.
+    default_model_id: str | None = None
+    # The human-friendly label for the default model.
+    default_model_label: str | None = None
     supports_free_text: bool = False
     # Backend-wide default effort (used when no model-specific default
     # applies); falls back to None to mean "let the runtime pick".

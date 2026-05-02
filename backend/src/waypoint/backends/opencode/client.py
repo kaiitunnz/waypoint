@@ -34,7 +34,9 @@ class LocalOpenCodeClient:
 
     def _require_session(self) -> aiohttp.ClientSession:
         if self._session is None:
-            self._session = aiohttp.ClientSession()
+            self._session = aiohttp.ClientSession(
+                max_line_size=16 * 1024, max_field_size=16 * 1024
+            )
         return self._session
 
     async def get(self, path: str, params: dict[str, str] | None = None) -> Any:

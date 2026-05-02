@@ -352,6 +352,7 @@ class OpenCodeAdapter:
         cwd: str,
         model: str | None = None,
         agent: str | None = None,
+        effort: str | None = None,
         title: str = "New Session",
         permission: list[dict[str, str]] | None = None,
     ) -> str:
@@ -365,6 +366,7 @@ class OpenCodeAdapter:
             opencode_session_id=real_session_id,
             model=model,
             agent=agent,
+            effort=effort,
         )
         self._register_session(state)
         await self._emit_event(
@@ -409,6 +411,7 @@ class OpenCodeAdapter:
         opencode_session_id: str,
         model: str | None = None,
         agent: str | None = None,
+        effort: str | None = None,
     ) -> None:
         if not self._started:
             await self.start()
@@ -425,6 +428,7 @@ class OpenCodeAdapter:
             opencode_session_id=opencode_session_id,
             model=model,
             agent=agent,
+            effort=effort,
         )
         self._register_session(state)
         # The plugin records the user-facing restore/import note; the adapter
@@ -445,6 +449,8 @@ class OpenCodeAdapter:
             ]
         }
         if model is not None:
+            if state.effort:
+                model["variant"] = state.effort
             payload["model"] = model
         if state.agent:
             payload["agent"] = state.agent
@@ -517,6 +523,13 @@ class OpenCodeAdapter:
         if state is None:
             return False
         state.model = model
+        return True
+
+    async def set_effort(self, session_id: str, effort: str | None) -> bool:
+        state = self._sessions.get(session_id)
+        if state is None:
+            return False
+        state.effort = effort
         return True
 
     async def set_session_permission(

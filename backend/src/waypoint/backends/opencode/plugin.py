@@ -34,6 +34,11 @@ DEFAULT_OPENCODE_MODEL = "opencode/minimax-m2.5-free"
 
 OPENCODE_PERMISSION_MODES = (
     PermissionModeSpec(
+        id="default",
+        label="Default",
+        description="Use OpenCode's built-in defaults (no rule attached)",
+    ),
+    PermissionModeSpec(
         id="ask", label="Ask", description="Ask for permission on every action"
     ),
     PermissionModeSpec(
@@ -159,8 +164,14 @@ class OpenCodePlugin:
         pass
 
     def validate_permission_mode(self, mode: str | None) -> str | None:
-        if mode is None or mode == "" or mode == "default":
+        if mode is None or mode == "":
             return None
+        # "default" is a real, user-selectable mode for OpenCode — it clears
+        # any attached ruleset so the upstream defaults apply. We pass it
+        # through so set_permission_mode round-trips it (the runtime rejects
+        # `None`), and apply_permission_mode handles it via _ruleset_for_mode.
+        if mode == "default":
+            return "default"
         if mode not in OPENCODE_PERMISSION_ACTIONS:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

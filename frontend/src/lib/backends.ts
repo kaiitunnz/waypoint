@@ -43,15 +43,20 @@ const FALLBACK_LABELS: Record<string, string> = {
 const FALLBACK_TRANSPORT_LABELS: Record<string, string> = {
   codex_app_server: "codex app server",
   claude_cli: "claude cli",
+  opencode_http: "opencode",
   tmux: "tmux",
 };
 
 // Hand-mirrored from the backend's BackendCapabilities defaults so
 // catalog-less callers (early bootstrap, lib helpers) still get the
-// right answer for the two built-ins. New backends MUST be reachable
-// via the live catalog — these fallbacks only cover today's known
+// right answer for the built-ins. New backends MUST be reachable via
+// the live catalog — these fallbacks only cover today's known
 // transports.
-const FALLBACK_STRUCTURED = new Set(["codex_app_server", "claude_cli"]);
+const FALLBACK_STRUCTURED = new Set([
+  "codex_app_server",
+  "claude_cli",
+  "opencode_http",
+]);
 const FALLBACK_RESUMABLE = new Set(["tmux"]);
 
 const FALLBACK_PERMISSION_MODES: Record<string, BackendPermissionMode[]> = {

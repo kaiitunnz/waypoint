@@ -1458,6 +1458,14 @@ details.tool-disclosure[open] .tool-glyph.todo {
  * conversation than a uniform stream of identical panels.
  * ──────────────────────────────────────────────────────────────────────── */
 
+/* Pin the implicit column to the container width so a single child with
+ * wide intrinsic content (e.g. an OpenCode markdown table that doesn't
+ * honor word-break) can't expand grid-auto-columns past the viewport and
+ * drag justify-self: end items off-screen with it. */
+.transcript-stack {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .transcript.codex.user_input {
   justify-self: end;
   width: fit-content;

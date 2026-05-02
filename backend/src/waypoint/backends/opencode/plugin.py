@@ -98,7 +98,7 @@ class OpenCodePlugin:
         effort_levels=(),
         model_source=ModelSource.LIVE_RPC,
         slash_commands=OPENCODE_SLASH_COMMANDS,
-        badges={"glyph": "O", "color": "#22c55e"},
+        badges={"glyph": "O", "color": "#cbd5e1"},
         cli_binary="opencode",
         target_aliases=("opencode",),
     )

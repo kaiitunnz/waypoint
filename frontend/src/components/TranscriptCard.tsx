@@ -258,18 +258,30 @@ function ReasoningDisclosure({
   event: EventRecord;
   agentLabel: string;
 }) {
-  // Reasoning is the model's scratchpad — render it dimmed so the final
-  // answer below stays the dominant element, but always expanded so the
-  // user reads the chain of thought without an extra click.
+  // Reasoning is the model's scratchpad — collapsed by default with a
+  // single-line preview so the transcript stays scannable, expandable
+  // when the user wants the full chain of thought. The mechanism is
+  // backend-agnostic: any plugin emitting metadata.item_kind="reasoning"
+  // gets this treatment.
+  const preview = reasoningPreview(event.text);
   return (
-    <article className="panel transcript codex agent_output reasoning-disclosure">
-      <div className="transcript-role">
-        <span className="badge agent reasoning">{agentLabel} thinking</span>
-        <span className="role-time">{formatTime(event.ts)}</span>
-      </div>
+    <details className="panel transcript codex agent_output reasoning-disclosure">
+      <summary className="transcript-summary">
+        <div className="transcript-role">
+          <span className="badge agent reasoning">{agentLabel} thinking</span>
+          <span className="role-time">{formatTime(event.ts)}</span>
+        </div>
+        {preview ? <p className="transcript-preview">{preview}</p> : null}
+      </summary>
       <MarkdownMessage text={event.text} />
-    </article>
+    </details>
   );
+}
+
+function reasoningPreview(text: string, max = 140): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= max) return collapsed;
+  return `${collapsed.slice(0, max - 1).trimEnd()}…`;
 }
 
 interface ToolBadge {

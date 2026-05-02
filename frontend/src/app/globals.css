@@ -1163,10 +1163,12 @@ pre {
   border-color: rgba(200, 169, 106, 0.22);
 }
 
+/* OpenCode's identity is monochrome — use a brighter slate than --muted so
+ * the badge isn't mistaken for a grayed-out / disabled state. */
 .badge.opencode {
-  background: rgba(34, 197, 94, 0.12);
-  color: #4ade80;
-  border-color: rgba(34, 197, 94, 0.26);
+  background: rgba(203, 213, 225, 0.16);
+  color: #cbd5e1;
+  border-color: rgba(203, 213, 225, 0.32);
 }
 
 .badge.neutral {
@@ -1190,9 +1192,9 @@ pre {
 }
 
 .badge.transport.opencode_http {
-  background: rgba(34, 197, 94, 0.1);
-  color: #4ade80;
-  border-color: rgba(34, 197, 94, 0.24);
+  background: rgba(203, 213, 225, 0.12);
+  color: #cbd5e1;
+  border-color: rgba(203, 213, 225, 0.28);
 }
 
 .badge.fidelity.heuristic {
@@ -1844,8 +1846,8 @@ details.tool-disclosure[open] .tool-glyph.todo {
   font-style: italic;
 }
 
-/* Reasoning is the model's scratchpad — dim it so it doesn't compete with
- * the actual answer below, but keep it always visible. */
+/* Reasoning is the model's scratchpad — collapsed by default with a
+ * single-line preview, dimmed so the actual answer stays dominant. */
 .transcript.codex.agent_output.reasoning-disclosure {
   background: transparent;
   border-color: var(--line);
@@ -1853,7 +1855,16 @@ details.tool-disclosure[open] .tool-glyph.todo {
   opacity: 0.85;
 }
 
+.transcript.codex.agent_output.reasoning-disclosure[open] {
+  opacity: 1;
+}
+
+.transcript.codex.agent_output.reasoning-disclosure > .transcript-summary {
+  padding-right: 30px;
+}
+
 .transcript.codex.agent_output.reasoning-disclosure .markdown-message {
+  margin-top: 8px;
   font-size: 0.92em;
   color: var(--muted);
 }

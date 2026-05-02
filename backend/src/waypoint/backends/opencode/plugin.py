@@ -53,7 +53,9 @@ OPENCODE_SLASH_COMMANDS = (
 
 
 def _ruleset_for_mode(mode: str | None) -> list[dict[str, str]] | None:
-    if mode is None or mode == "" or mode == "ask":
+    # The runtime substitutes "default" when no mode is selected; that means
+    # "let OpenCode decide" — don't send a permission key at all.
+    if mode not in OPENCODE_PERMISSION_ACTIONS:
         return None
     return [{"permission": "*", "pattern": "*", "action": mode}]
 
@@ -157,7 +159,7 @@ class OpenCodePlugin:
         pass
 
     def validate_permission_mode(self, mode: str | None) -> str | None:
-        if mode is None or mode == "":
+        if mode is None or mode == "" or mode == "default":
             return None
         if mode not in OPENCODE_PERMISSION_ACTIONS:
             raise HTTPException(

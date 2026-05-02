@@ -270,15 +270,22 @@ class SessionRuntime:
             handled = await plugin.maybe_handle_input(self, session, request)
             if handled is not None:
                 return handled
-        await transport.send_input(session, request.text)
-        # Flip status to RUNNING before recording the event. _record_user_event
-        # broadcasts a session_state snapshot derived from storage; if the
-        # update lands after the broadcast, the snapshot still says "idle" and
-        # the frontend's busy-state derivation lags until the agent's first
-        # output triggers another broadcast (visibly delayed for Claude, which
-        # emits nothing between stdin write and first content).
+        # Flip status and record the user event before send_input so the
+        # broadcast snapshot carries status=RUNNING (Claude lags otherwise —
+        # nothing comes back between stdin write and first content) and so
+        # the user message keeps the lowest sequence number for the turn.
+        # OpenCode's POST returns only after the server has already pushed
+        # SSE events; recording the user event afterward would land it last
+        # in the transcript. Revert on send failure so the UI doesn't show
+        # a stuck "running" state for an unsent message.
+        previous_status = session.status
         updated = self.storage.update_session(session.id, status=SessionStatus.RUNNING)
         await self._record_user_event(session.id, request.text, submit=request.submit)
+        try:
+            await transport.send_input(session, request.text)
+        except Exception:
+            self.storage.update_session(session.id, status=previous_status)
+            raise
         return updated
 
     async def interrupt(self, session_id: str) -> SessionRecord:

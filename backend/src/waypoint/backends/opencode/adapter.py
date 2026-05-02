@@ -39,6 +39,10 @@ class OpenCodeSessionState:
     opencode_session_id: str
     pending_permission_ids: list[str] = field(default_factory=list)
     pending_question_ids: list[str] = field(default_factory=list)
+    # partID -> part type (text|reasoning|tool|step-start|step-finish).
+    # Populated on message.part.updated *-start, consulted to tag
+    # message.part.delta events whose payload only carries field="text".
+    part_types: dict[str, str] = field(default_factory=dict)
     model: str | None = None
     agent: str | None = None
     effort: str | None = None
@@ -169,6 +173,7 @@ class OpenCodeAdapter:
         if state is None:
             return
         self._update_pending_state(state, event_type, properties)
+        properties = self._tag_part_type(state, event_type, properties)
 
         kind, text, metadata = map_event(event_type, properties)
         if not text and not metadata.get("payload"):
@@ -241,6 +246,32 @@ class OpenCodeAdapter:
                 state.pending_question_ids = [
                     item for item in state.pending_question_ids if item != request_id
                 ]
+
+    def _tag_part_type(
+        self,
+        state: OpenCodeSessionState,
+        event_type: str | None,
+        properties: dict[str, Any],
+    ) -> dict[str, Any]:
+        # message.part.updated arrives on each *-start before any deltas, so
+        # by the time deltas land we know whether the part is reasoning or
+        # text. message.part.delta only carries field="text" for both, so we
+        # decorate it with the recorded type for downstream rendering.
+        if event_type == "message.part.updated":
+            part = properties.get("part")
+            if isinstance(part, dict):
+                part_id = part.get("id")
+                part_type = part.get("type")
+                if isinstance(part_id, str) and isinstance(part_type, str):
+                    state.part_types[part_id] = part_type
+            return properties
+        if event_type == "message.part.delta":
+            part_id = properties.get("partID")
+            if isinstance(part_id, str):
+                part_type = state.part_types.get(part_id)
+                if part_type:
+                    return {**properties, "_waypoint_part_type": part_type}
+        return properties
 
     def _register_session(self, state: OpenCodeSessionState) -> None:
         self._sessions[state.session_id] = state
@@ -348,8 +379,11 @@ class OpenCodeAdapter:
             payload["model"] = model
         if state.agent:
             payload["agent"] = state.agent
+        # /message blocks until the entire response streams; using
+        # /prompt_async lets the POST return immediately so the composer
+        # can flush, while OpenCode delivers the turn over SSE.
         async with client.post(
-            f"{self._base_url}/session/{state.opencode_session_id}/message",
+            f"{self._base_url}/session/{state.opencode_session_id}/prompt_async",
             json=payload,
         ) as resp:
             if resp.status not in {200, 204}:

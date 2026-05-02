@@ -107,19 +107,21 @@ class OpenCodeAdapter:
         self._sse_task: asyncio.Task[None] | None = None
         self._client: OpenCodeHttpClient | None = None
         self._started = False
+        self._start_lock = asyncio.Lock()
 
     async def start(self) -> None:
         if self._started:
             return
-
-        if self._launch_target is not None:
-            await self._start_remote()
-        else:
-            await self._start_local()
-
-        self._started = True
-        self._sse_task = asyncio.create_task(self._listen_events())
-        log.info("opencode server started successfully")
+        async with self._start_lock:
+            if self._started:
+                return
+            if self._launch_target is not None:
+                await self._start_remote()
+            else:
+                await self._start_local()
+            self._started = True
+            self._sse_task = asyncio.create_task(self._listen_events())
+            log.info("opencode server started successfully")
 
     async def _start_local(self) -> None:
         binary = self._binary or shutil.which("opencode")

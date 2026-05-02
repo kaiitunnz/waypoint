@@ -117,23 +117,29 @@ class _StubPlugin:
 
 def test_default_registry_has_legacy_plugins() -> None:
     registry = get_registry()
-    assert registry.backends() == {"claude_code", "codex", "tmux"}
-    assert registry.transports() == {"claude_cli", "codex_app_server", "tmux"}
+    assert registry.backends() == {"claude_code", "codex", "opencode", "tmux"}
+    assert registry.transports() == {
+        "claude_cli",
+        "codex_app_server",
+        "opencode_http",
+        "tmux",
+    }
 
 
 def test_registry_lookup_by_transport() -> None:
     registry = get_registry()
     assert registry.for_transport("claude_cli").id == "claude_code"
     assert registry.for_transport("codex_app_server").id == "codex"
+    assert registry.for_transport("opencode_http").id == "opencode"
     assert registry.for_transport("tmux").id == "tmux"
 
 
 def test_registry_get_unknown_raises() -> None:
     registry = get_registry()
     with pytest.raises(KeyError):
-        registry.get("opencode")
+        registry.get("unknown_backend")
     with pytest.raises(KeyError):
-        registry.for_transport("opencode_ws")
+        registry.for_transport("unknown_transport")
 
 
 def test_registry_capability_descriptors() -> None:
@@ -158,7 +164,7 @@ def test_schema_field_rejects_unknown_backend() -> None:
     with pt.raises(Exception):  # noqa: B017 — pydantic raises ValidationError
         SessionRecord(
             id="x",
-            backend="opencode",  # not registered
+            backend="unknown_backend",  # not registered
             source=SessionSource.MANAGED,
             title="t",
             cwd="/",

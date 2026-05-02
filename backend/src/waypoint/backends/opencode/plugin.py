@@ -120,6 +120,7 @@ class OpenCodePlugin:
     def __init__(self) -> None:
         self._adapters: dict[tuple[str | None, str], OpenCodeAdapter] = {}
         self._lock = asyncio.Lock()
+        self._pending_tasks: set[asyncio.Task[Any]] = set()
 
     def _default_cwd(
         self, runtime: "SessionRuntime", launch_target_id: str | None
@@ -258,7 +259,11 @@ class OpenCodePlugin:
                     )
 
             def _on_agent_changed(sid: str, old: str | None, new: str | None) -> None:
-                asyncio.create_task(self._handle_agent_changed(runtime, sid, old, new))
+                task = asyncio.create_task(
+                    self._handle_agent_changed(runtime, sid, old, new)
+                )
+                self._pending_tasks.add(task)
+                task.add_done_callback(self._pending_tasks.discard)
 
             adapter = OpenCodeAdapter(
                 emit_event=runtime._emit_adapter_event,
@@ -278,6 +283,9 @@ class OpenCodePlugin:
         log.info("setting up opencode plugin")
 
     async def shutdown(self, runtime: "SessionRuntime") -> None:
+        for task in list(self._pending_tasks):
+            task.cancel()
+        self._pending_tasks.clear()
         for adapter in list(self._adapters.values()):
             await adapter.shutdown()
         self._adapters.clear()
@@ -300,7 +308,13 @@ class OpenCodePlugin:
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        pass
+        adapter = self._adapters.get(
+            self._adapter_key(runtime, session.launch_target_id, session.cwd)
+        )
+        if adapter is not None:
+            task = asyncio.create_task(adapter.terminate_session(session.id))
+            self._pending_tasks.add(task)
+            task.add_done_callback(self._pending_tasks.discard)
 
     def register_routes(self, app: FastAPI, context: Any) -> None:
         pass

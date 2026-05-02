@@ -27,7 +27,7 @@ interface ResumeThreadPanelProps {
   targetLabel: string | null;
   supportedBackends: Backend[];
   preferredBackend: Backend;
-  onImportThread: (backend: Backend, threadId: string) => Promise<void>;
+  onImportThread: (backend: Backend, threadId: string, cwd: string) => Promise<void>;
   catalog?: BackendCatalog;
 }
 
@@ -162,7 +162,7 @@ export function ResumeThreadPanel({
   async function handleImport(thread: UnifiedThread) {
     setImportingId(thread.id);
     try {
-      await onImportThread(thread.backend, thread.id);
+      await onImportThread(thread.backend, thread.id, thread.cwd);
     } finally {
       setImportingId(null);
     }

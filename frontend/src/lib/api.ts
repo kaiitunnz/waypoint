@@ -56,11 +56,11 @@ export async function fetchBackendThreads<T = unknown>(
   host: string,
   token: string,
   backend: string,
-  launchTargetId?: string,
+  options: { launchTargetId?: string | null } = {},
 ): Promise<T[]> {
   const params = new URLSearchParams();
-  if (launchTargetId) {
-    params.set("launch_target_id", launchTargetId);
+  if (options.launchTargetId) {
+    params.set("launch_target_id", options.launchTargetId);
   }
   const suffix = params.size ? `?${params.toString()}` : "";
   const response = await fetch(
@@ -276,7 +276,10 @@ export async function fetchBackendModels(
   host: string,
   token: string,
   backend: Backend,
-  options: { launchTargetId?: string | null; includeHidden?: boolean } = {},
+  options: {
+    launchTargetId?: string | null;
+    includeHidden?: boolean;
+  } = {},
 ): Promise<BackendModelListResponse> {
   const params = new URLSearchParams();
   if (options.launchTargetId) {

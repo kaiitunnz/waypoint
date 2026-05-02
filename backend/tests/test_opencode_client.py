@@ -37,37 +37,60 @@ class _FakeProcess:
         self.returncode = -9
 
 
-@pytest.mark.asyncio
-async def test_stream_events_raises_when_stream_ends(
-    monkeypatch: pytest.MonkeyPatch,
+def _make_fake_subprocess(
+    monkeypatch: pytest.MonkeyPatch, process: _FakeProcess
 ) -> None:
-    fake_process = _FakeProcess()
-    observed_args: list[tuple[Any, ...]] = []
-
-    async def fake_create_subprocess_exec(*args, **kwargs):
-        observed_args.append(args)
-        return fake_process
-
     monkeypatch.setattr(
         "waypoint.backends.opencode.client.asyncio.create_subprocess_exec",
-        fake_create_subprocess_exec,
+        lambda *args, **kwargs: _coro(process),
     )
     monkeypatch.setattr(
         "waypoint.launch_targets._resolve_local_binary",
         lambda binary: binary,
     )
 
+
+async def _coro(value: Any) -> Any:
+    return value
+
+
+@pytest.mark.asyncio
+async def test_stream_events_clean_exit_does_not_raise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_process = _FakeProcess()  # returncode=0
+    _make_fake_subprocess(monkeypatch, fake_process)
+
     target = SshLaunchTargetConfig(
-        id="ssh-1",
-        name="Remote",
-        ssh_destination="user@example.com",
+        id="ssh-1", name="Remote", ssh_destination="user@example.com"
     )
     client = RemoteOpenCodeClient(target, 4096)
 
     events: list[str] = []
-    with pytest.raises(RuntimeError, match="sse stream ended with code 0"):
-        async for line in client.stream_events("/event"):
-            events.append(line)
+    async for line in client.stream_events("/event"):
+        events.append(line)
 
     assert events == ['data: {"ok": true}\n', "\n"]
-    assert observed_args
+
+
+@pytest.mark.asyncio
+async def test_stream_events_raises_on_nonzero_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_process = _FakeProcess()
+    fake_process.returncode = 1
+
+    async def _wait() -> int:
+        return 1
+
+    fake_process.wait = _wait  # type: ignore[method-assign]
+    _make_fake_subprocess(monkeypatch, fake_process)
+
+    target = SshLaunchTargetConfig(
+        id="ssh-1", name="Remote", ssh_destination="user@example.com"
+    )
+    client = RemoteOpenCodeClient(target, 4096)
+
+    with pytest.raises(RuntimeError, match="sse stream ended with code 1"):
+        async for _ in client.stream_events("/event"):
+            pass

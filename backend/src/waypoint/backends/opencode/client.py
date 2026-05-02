@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+import shlex
+import urllib.parse
 from collections.abc import AsyncGenerator
 from contextlib import suppress
 from typing import Any, Protocol
@@ -10,6 +12,8 @@ import aiohttp
 from waypoint.launch_targets import SshLaunchTargetConfig
 
 log = logging.getLogger("waypoint.opencode.client")
+
+_CURL_SENTINEL = "__WP_JSON__"
 
 
 class OpenCodeHttpClient(Protocol):
@@ -104,8 +108,6 @@ class RemoteOpenCodeClient:
     ) -> Any:
         url = f"{self.base_url}{path}"
         if params:
-            import urllib.parse
-
             url += "?" + urllib.parse.urlencode(params)
 
         curl_args = ["curl", "-s", "-X", method]
@@ -119,7 +121,13 @@ class RemoteOpenCodeClient:
 
         curl_args.append(url)
 
-        args = self.target.build_remote_exec_args(curl_args, self.cwd)
+        # Echo the sentinel before curl so the Python consumer can discard
+        # any rcfile noise that bash -ilc may have written ahead of the
+        # actual response (same pattern as claude_thread_enumerator.sh).
+        sentinel_cmd = f"echo {_CURL_SENTINEL} && {shlex.join(curl_args)}"
+        args = self.target.build_remote_exec_args(
+            ["bash", "-c", sentinel_cmd], self.cwd
+        )
 
         proc = await asyncio.create_subprocess_exec(
             *args,
@@ -134,7 +142,13 @@ class RemoteOpenCodeClient:
             err_text = stderr.decode(errors="replace").strip()
             raise RuntimeError(f"curl failed ({proc.returncode}): {err_text}")
 
-        out_text = stdout.decode("utf-8").strip()
+        stdout_str = stdout.decode("utf-8")
+        marker = f"{_CURL_SENTINEL}\n"
+        if marker in stdout_str:
+            out_text = stdout_str[stdout_str.index(marker) + len(marker) :].strip()
+        else:
+            out_text = stdout_str.strip()
+
         if not out_text:
             return {}
 
@@ -173,7 +187,8 @@ class RemoteOpenCodeClient:
             yield line.decode("utf-8")
 
         returncode = await self._sse_process.wait()
-        raise RuntimeError(f"sse stream ended with code {returncode}")
+        if returncode != 0:
+            raise RuntimeError(f"sse stream ended with code {returncode}")
 
     async def close(self) -> None:
         if self._sse_process is not None:

@@ -23,11 +23,22 @@ for i in {1..50}; do
     sleep 0.1
 done
 
+_kill_proc() {
+    local pid=$1
+    kill "$pid" 2>/dev/null || return
+    local i
+    for i in {1..20}; do
+        sleep 0.1
+        kill -0 "$pid" 2>/dev/null || return
+    done
+    kill -9 "$pid" 2>/dev/null || true
+}
+
 if [ -z "$PORT" ]; then
     echo "Failed to start opencode serve:" >&2
     cat "$LOG" >&2
     rm -f "$LOG"
-    kill -9 "$PID" 2>/dev/null || true
+    _kill_proc "$PID"
     exit 1
 fi
 
@@ -35,4 +46,4 @@ rm -f "$LOG"
 
 read -r _ || true
 
-kill -9 "$PID" 2>/dev/null || true
+_kill_proc "$PID"

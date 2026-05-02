@@ -428,6 +428,73 @@ async def test_handle_input_status_forwards_to_codex(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_handle_input_records_user_event_before_send(tmp_path) -> None:
+    # OpenCode's HTTP POST returns only after SSE has already pushed turn
+    # events; if send_input ran first, the user message would land last in
+    # the transcript. The contract: the user_event is in storage by the time
+    # the transport sees the input.
+    runtime, storage, settings = make_runtime(tmp_path)
+
+    class OrderingAdapter(FakeStructuredAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.events_at_send: list[EventKind] = []
+
+        async def send_input(
+            self,
+            session_id: str,
+            text: str,
+            turn_params: dict[str, Any] | None = None,
+        ) -> None:
+            self.events_at_send = [
+                event.kind for event in storage.list_events(session_id)
+            ]
+            await super().send_input(session_id, text, turn_params)
+
+    fake = OrderingAdapter()
+    _codex_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(settings)
+    storage.create_session(session)
+
+    await runtime.handle_input("sess", SessionInputRequest(text="hello"))
+
+    assert fake.events_at_send == [EventKind.USER_INPUT]
+    assert fake.inputs == [("sess", "hello")]
+
+
+@pytest.mark.asyncio
+async def test_handle_input_reverts_status_when_send_fails(tmp_path) -> None:
+    # The status flip happens before send_input now; if the transport raises,
+    # the runtime must roll the status back so the UI doesn't show "running"
+    # for an unsent message.
+    runtime, storage, settings = make_runtime(tmp_path)
+
+    class FailingAdapter(FakeStructuredAdapter):
+        async def send_input(
+            self,
+            session_id: str,
+            text: str,
+            turn_params: dict[str, Any] | None = None,
+        ) -> None:
+            raise RuntimeError("network down")
+
+    fake = FailingAdapter()
+    _codex_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(settings)
+    storage.create_session(session)
+    initial_status = session.status
+
+    # The codex transport wraps adapter errors in HTTPException; we just
+    # care that the runtime propagates rather than swallowing it.
+    with pytest.raises(Exception, match="network down"):
+        await runtime.handle_input("sess", SessionInputRequest(text="hello"))
+
+    reloaded = storage.get_session("sess")
+    assert reloaded is not None
+    assert reloaded.status == initial_status
+
+
+@pytest.mark.asyncio
 async def test_handle_input_permissions_forwards_to_claude_cli(tmp_path) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
     fake = FakeStructuredAdapter(pending=True)

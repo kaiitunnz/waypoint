@@ -556,6 +556,8 @@ class OpenCodeAdapter:
                 )
 
     async def list_sessions(self, directory: str | None = None) -> list[dict[str, Any]]:
+        if not self._started:
+            await self.start()
         client = self._require_http()
         params = {"directory": directory} if directory else {}
         async with client.get(
@@ -576,6 +578,8 @@ class OpenCodeAdapter:
             return await resp.json()
 
     async def list_providers(self) -> dict[str, Any]:
+        if not self._started:
+            await self.start()
         client = self._require_http()
         async with client.get(f"{self._base_url}/provider") as resp:
             if resp.status != 200:

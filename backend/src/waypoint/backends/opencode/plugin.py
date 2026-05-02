@@ -583,11 +583,8 @@ class OpenCodePlugin:
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
-        await runtime._record_system_event(
-            session.id,
-            "OpenCode session started",
-            status=SessionStatus.IDLE,
-        )
+        # The adapter already emits "OpenCode session started ({session_id})"
+        # with the remote id; re-recording here would duplicate the note.
         return runtime.get_session(session.id)
 
     def _serialize_question_answers(

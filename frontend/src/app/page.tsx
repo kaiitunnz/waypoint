@@ -306,7 +306,9 @@ export default function HomePage() {
         host,
         token,
         id,
-        activeLaunchTargetId || undefined,
+        {
+          launchTargetId: activeLaunchTargetId || undefined,
+        },
       )
         .then((threads) => {
           if (!active) {
@@ -337,7 +339,13 @@ export default function HomePage() {
     return () => {
       active = false;
     };
-  }, [activeLaunchTargetId, host, launchTargets, discoveryBackendsKey, token]);
+  }, [
+    activeLaunchTargetId,
+    host,
+    launchTargets,
+    discoveryBackendsKey,
+    token,
+  ]);
 
   async function handleLogin(nextHost: string, password: string) {
     const nextToken = await login(nextHost, password);
@@ -409,11 +417,16 @@ export default function HomePage() {
     }
   }
 
-  async function handleImportThread(backend: Backend, threadId: string) {
+  async function handleImportThread(
+    backend: Backend,
+    threadId: string,
+    cwd: string,
+  ) {
     try {
       const payload = {
         thread_id: threadId,
         launch_target_id: activeLaunchTargetId || null,
+        cwd,
       };
       const session = await importBackendThread(host, token, backend, payload);
       setSessions((current) => [

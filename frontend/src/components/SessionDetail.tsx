@@ -218,7 +218,14 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     return () => {
       cancelled = true;
     };
-  }, [host, token, session?.backend, session?.launch_target_id, handleAuthFailure, session]);
+  }, [
+    host,
+    token,
+    session?.backend,
+    session?.launch_target_id,
+    handleAuthFailure,
+    session,
+  ]);
 
   const handleModelChange = useCallback(
     async (nextModel: string) => {

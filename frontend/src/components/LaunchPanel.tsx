@@ -41,7 +41,11 @@ interface LaunchPanelProps {
     effort: string | null,
   ) => Promise<void>;
   onAttach: (target: string, backendHint: Backend) => Promise<void>;
-  onImportThread: (backend: Backend, threadId: string) => Promise<void>;
+  onImportThread: (
+    backend: Backend,
+    threadId: string,
+    cwd: string,
+  ) => Promise<void>;
   onAuthFailure?: () => void;
 }
 

@@ -22,14 +22,26 @@ def map_event(
             return (EventKind.SYSTEM_NOTE, "", {})
         if properties.get("field") != "text":
             return (EventKind.SYSTEM_NOTE, "", {})
-        metadata = {
-            "method": "message.part.delta.text",
+        # The adapter decorates delta payloads with the part type recorded
+        # from the preceding message.part.updated *-start. Reasoning parts
+        # share field="text" with regular text, so without this hint the
+        # frontend can't tell scratchpad from final answer.
+        part_type = properties.get("_waypoint_part_type")
+        method = (
+            "message.part.delta.reasoning"
+            if part_type == "reasoning"
+            else "message.part.delta.text"
+        )
+        metadata: dict[str, Any] = {
+            "method": method,
             "payload": properties,
             "status": SessionStatus.RUNNING,
         }
         part_id = properties.get("partID")
         if isinstance(part_id, str) and part_id:
             metadata["item_id"] = part_id
+        if part_type == "reasoning":
+            metadata["item_kind"] = "reasoning"
         return (EventKind.AGENT_OUTPUT, delta, metadata)
 
     if event_type == "message.part.updated":

@@ -110,6 +110,28 @@ def test_message_part_delta_streams_agent_output() -> None:
     assert text == "hello"
     assert metadata["item_id"] == "part_1"
     assert metadata["status"] == SessionStatus.RUNNING
+    assert "item_kind" not in metadata
+
+
+def test_message_part_delta_marks_reasoning_when_tagged() -> None:
+    # The adapter decorates delta payloads with the part type recorded from
+    # the preceding *-start; reasoning must be distinguishable from text so
+    # the frontend can render the scratchpad as a collapsed disclosure.
+    kind, text, metadata = map_event(
+        "message.part.delta",
+        {
+            "sessionID": "ses_1",
+            "partID": "part_1",
+            "field": "text",
+            "delta": "the user is asking…",
+            "_waypoint_part_type": "reasoning",
+        },
+    )
+
+    assert kind == EventKind.AGENT_OUTPUT
+    assert text == "the user is asking…"
+    assert metadata["item_kind"] == "reasoning"
+    assert metadata["method"] == "message.part.delta.reasoning"
 
 
 def test_message_part_delta_ignores_non_text_fields() -> None:

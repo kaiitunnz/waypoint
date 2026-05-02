@@ -43,7 +43,7 @@ const FALLBACK_LABELS: Record<string, string> = {
 const FALLBACK_TRANSPORT_LABELS: Record<string, string> = {
   codex_app_server: "codex app server",
   claude_cli: "claude cli",
-  opencode_http: "opencode",
+  opencode_http: "opencode http",
   tmux: "tmux",
 };
 

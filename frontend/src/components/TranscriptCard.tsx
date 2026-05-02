@@ -258,19 +258,17 @@ function ReasoningDisclosure({
   event: EventRecord;
   agentLabel: string;
 }) {
-  // Reasoning is the model's scratchpad — collapse it by default so the
-  // final answer underneath stays the dominant element. The user can still
-  // expand to inspect the chain of thought.
+  // Reasoning is the model's scratchpad — render it dimmed so the final
+  // answer below stays the dominant element, but always expanded so the
+  // user reads the chain of thought without an extra click.
   return (
-    <details className="panel transcript codex agent_output reasoning-disclosure">
-      <summary className="transcript-summary">
-        <div className="transcript-role">
-          <span className="badge agent reasoning">{agentLabel} thinking</span>
-          <span className="role-time">{formatTime(event.ts)}</span>
-        </div>
-      </summary>
+    <article className="panel transcript codex agent_output reasoning-disclosure">
+      <div className="transcript-role">
+        <span className="badge agent reasoning">{agentLabel} thinking</span>
+        <span className="role-time">{formatTime(event.ts)}</span>
+      </div>
       <MarkdownMessage text={event.text} />
-    </details>
+    </article>
   );
 }
 

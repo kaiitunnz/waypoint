@@ -199,3 +199,67 @@ def test_unknown_event_returns_empty_system_note() -> None:
     assert kind == EventKind.SYSTEM_NOTE
     assert text == ""
     assert metadata == {}
+
+
+def test_message_updated_is_suppressed_to_avoid_duplicate_user_input() -> None:
+    # Runtime._record_user_event already records the user message; re-emitting
+    # message.updated for role=user would surface a second user_input entry.
+    kind, text, metadata = map_event(
+        "message.updated",
+        {"sessionID": "ses_1", "info": {"role": "user"}},
+    )
+
+    assert kind == EventKind.SYSTEM_NOTE
+    assert text == ""
+    assert metadata == {}
+
+
+def test_message_updated_assistant_is_suppressed_to_avoid_duplicate_output() -> None:
+    # Assistant text is streamed via message.part.delta; the message.updated
+    # snapshot would re-append the full body and double the transcript entry.
+    kind, text, metadata = map_event(
+        "message.updated",
+        {"sessionID": "ses_1", "info": {"role": "assistant", "finish": "stop"}},
+    )
+
+    assert kind == EventKind.SYSTEM_NOTE
+    assert text == ""
+    assert metadata == {}
+
+
+def test_message_part_updated_text_is_suppressed_when_streamed() -> None:
+    kind, text, metadata = map_event(
+        "message.part.updated",
+        {
+            "sessionID": "ses_1",
+            "part": {
+                "id": "p1",
+                "sessionID": "ses_1",
+                "type": "text",
+                "text": "the full body would duplicate the streamed deltas",
+            },
+        },
+    )
+
+    assert kind == EventKind.SYSTEM_NOTE
+    assert text == ""
+    assert metadata == {}
+
+
+def test_message_part_updated_reasoning_is_suppressed_when_streamed() -> None:
+    kind, text, metadata = map_event(
+        "message.part.updated",
+        {
+            "sessionID": "ses_1",
+            "part": {
+                "id": "p1",
+                "sessionID": "ses_1",
+                "type": "reasoning",
+                "text": "scratchpad already streamed via deltas",
+            },
+        },
+    )
+
+    assert kind == EventKind.SYSTEM_NOTE
+    assert text == ""
+    assert metadata == {}

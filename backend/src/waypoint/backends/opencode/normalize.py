@@ -11,30 +11,10 @@ def map_event(
     if event_type is None:
         return (EventKind.SYSTEM_NOTE, "", {})
 
-    if event_type == "message.updated":
-        message = properties.get("info", {})
-        role = message.get("role")
-        if role == "user":
-            text = _format_user_message(message)
-            return (
-                EventKind.USER_INPUT,
-                text,
-                {
-                    "method": "message.updated.user",
-                    "payload": properties,
-                    "status": SessionStatus.RUNNING,
-                },
-            )
-        elif role == "assistant":
-            return (
-                EventKind.AGENT_OUTPUT,
-                _format_assistant_message(message),
-                {
-                    "method": "message.updated.assistant",
-                    "payload": properties,
-                    "status": SessionStatus.RUNNING,
-                },
-            )
+    # message.updated is intentionally not surfaced: runtime._record_user_event
+    # already records user input when send_input is called, and assistant text
+    # is streamed via message.part.delta below. Re-emitting here would duplicate
+    # both user and assistant entries in the transcript.
 
     if event_type == "message.part.delta":
         delta = properties.get("delta", "")
@@ -56,37 +36,14 @@ def map_event(
         part = properties.get("part", {})
         part_type = part.get("type")
         session_id = part.get("sessionID") or properties.get("sessionID", "")
-        if part_type == "text":
-            text = part.get("text", "")
-            metadata = {
-                "method": "message.part.updated.text",
-                "payload": properties,
-                "status": SessionStatus.RUNNING,
-            }
-            part_id = part.get("id")
-            if isinstance(part_id, str) and part_id:
-                metadata["item_id"] = part_id
-            return (
-                EventKind.AGENT_OUTPUT,
-                text,
-                metadata,
-            )
+        # text and reasoning parts are already streamed via message.part.delta;
+        # the final part.updated snapshot would re-append the full body and
+        # double the transcript entry. Tool calls and step boundaries are not
+        # streamed, so they still surface here.
+        if part_type == "text" or part_type == "reasoning":
+            return (EventKind.SYSTEM_NOTE, "", {})
         elif part_type == "tool":
             return _map_tool_event(part, session_id)
-        elif part_type == "reasoning":
-            metadata = {
-                "method": "message.part.updated.reasoning",
-                "payload": properties,
-                "status": SessionStatus.RUNNING,
-            }
-            part_id = part.get("id")
-            if isinstance(part_id, str) and part_id:
-                metadata["item_id"] = part_id
-            return (
-                EventKind.AGENT_OUTPUT,
-                part.get("text", ""),
-                metadata,
-            )
         elif part_type == "step-start":
             return (
                 EventKind.SYSTEM_NOTE,
@@ -423,32 +380,6 @@ def _map_tool_event(
         )
 
     return (EventKind.SYSTEM_NOTE, "", {})
-
-
-def _format_user_message(message: dict[str, Any]) -> str:
-    content = message.get("summary", {})
-    if content:
-        title = content.get("title", "")
-        body = content.get("body", "")
-        if title:
-            return f"{title}\n{body}" if body else title
-    return "User message"
-
-
-def _format_assistant_message(message: dict[str, Any]) -> str:
-    finish = message.get("finish")
-    if finish:
-        return f"Done: {finish}"
-    cost = message.get("cost", 0)
-    tokens = message.get("tokens", {})
-    if cost or tokens:
-        parts = []
-        if cost:
-            parts.append(f"${cost:.4f}")
-        if tokens.get("output"):
-            parts.append(f"{tokens['output']} tokens")
-        return " · ".join(parts)
-    return "Assistant message"
 
 
 def format_event_text(event_type: str, properties: dict[str, Any]) -> str:

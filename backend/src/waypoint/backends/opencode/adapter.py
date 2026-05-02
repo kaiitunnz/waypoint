@@ -327,13 +327,8 @@ class OpenCodeAdapter:
             agent=agent,
         )
         self._register_session(state)
-        await self._emit_event(
-            session_id,
-            EventKind.SYSTEM_NOTE,
-            "OpenCode session restored",
-            {"status": SessionStatus.IDLE},
-            SessionStatus.IDLE,
-        )
+        # The plugin records the user-facing restore/import note; the adapter
+        # stays silent here so the transcript only shows one entry.
 
     async def send_input(self, session_id: str, text: str) -> None:
         state = self._sessions.get(session_id)

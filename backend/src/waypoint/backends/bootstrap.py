@@ -21,6 +21,7 @@ from importlib.metadata import entry_points
 from waypoint.backends.base import BackendPlugin
 from waypoint.backends.claude_code.plugin import ClaudeCodePlugin
 from waypoint.backends.codex.plugin import CodexPlugin
+from waypoint.backends.opencode.plugin import OpenCodePlugin
 from waypoint.backends.registry import BackendRegistry
 from waypoint.backends.tmux.plugin import TmuxPlugin
 
@@ -33,6 +34,7 @@ def build_default_registry() -> BackendRegistry:
     registry = BackendRegistry()
     registry.register(ClaudeCodePlugin())
     registry.register(CodexPlugin())
+    registry.register(OpenCodePlugin())
     registry.register(TmuxPlugin())
     _register_entry_point_plugins(registry)
     return registry

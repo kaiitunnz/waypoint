@@ -47,6 +47,7 @@ import {
 } from "@/components/TranscriptCard";
 import {
   BackendModelOption,
+  BackendPermissionMode,
   EventRecord,
   SessionEnvelope,
   SessionRecord,
@@ -835,7 +836,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         </div>
       ) : null}
       <ReplyComposer
-        backend={session?.backend ?? null}
+        permissionModeOptions={
+          session ? permissionModesFor(session.backend, catalog) : []
+        }
         canDelete={sessionExited}
         canResume={canResume}
         canTerminate={Boolean(session && !sessionExited)}
@@ -880,7 +883,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
 
 interface ReplyComposerProps {
   agentBusy: boolean;
-  backend: SessionRecord["backend"] | null;
+  permissionModeOptions: readonly BackendPermissionMode[];
   canDelete: boolean;
   canResume: boolean;
   canTerminate: boolean;
@@ -914,7 +917,7 @@ interface ReplyComposerProps {
 
 const ReplyComposer = memo(function ReplyComposer({
   agentBusy,
-  backend,
+  permissionModeOptions,
   canDelete,
   canResume,
   canTerminate,
@@ -1120,7 +1123,7 @@ const ReplyComposer = memo(function ReplyComposer({
     void handleSend();
   }
 
-  const modeOptions = backend ? permissionModesFor(backend) : [];
+  const modeOptions = permissionModeOptions;
   // Refresh is always available, so the overflow menu is always present.
   const hasOverflow = true;
   const shortcutKey = SHORTCUT_IS_MAC ? "⌘" : "Ctrl";

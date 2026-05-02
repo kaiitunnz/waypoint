@@ -104,7 +104,9 @@ class _StubPlugin:
         return None
 
     async def list_threads(
-        self, runtime: Any, launch_target_id: str | None = None
+        self,
+        runtime: Any,
+        launch_target_id: str | None = None,
     ) -> list[Any]:
         return []
 

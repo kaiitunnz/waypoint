@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -18,6 +19,7 @@ from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConf
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
+    EventKind,
     SessionCreateRequest,
     SessionRecord,
     SessionSource,
@@ -45,6 +47,11 @@ OPENCODE_PERMISSION_MODES = (
         id="allow", label="Allow", description="Automatically approve actions"
     ),
     PermissionModeSpec(id="deny", label="Deny", description="Deny all actions"),
+    PermissionModeSpec(
+        id="plan",
+        label="Plan",
+        description="Draft and save an architecture plan before coding",
+    ),
 )
 OPENCODE_PERMISSION_ACTIONS = {"ask", "allow", "deny"}
 
@@ -71,6 +78,8 @@ class OpenCodePluginConfig(PluginConfig):
 
 class OpenCodeThreadImportRequest(BaseModel):
     thread_id: str
+    launch_target_id: str | None = None
+    cwd: str | None = None
 
 
 class OpenCodeThreadSummary(BaseModel):
@@ -109,16 +118,156 @@ class OpenCodePlugin:
     )
 
     def __init__(self) -> None:
-        self._adapter: OpenCodeAdapter | None = None
+        self._adapters: dict[tuple[str | None, str], OpenCodeAdapter] = {}
         self._lock = asyncio.Lock()
 
-    def _require_adapter(self) -> OpenCodeAdapter:
-        if self._adapter is None:
+    def _default_cwd(
+        self, runtime: "SessionRuntime", launch_target_id: str | None
+    ) -> str:
+        if launch_target_id is not None:
+            launch_target = runtime._find_launch_target(launch_target_id)
+            if launch_target is not None:
+                return launch_target.default_cwd
+        return str(Path(runtime.settings.default_cwd).expanduser())
+
+    def _adapter_cwd(
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None,
+        cwd: str | None,
+    ) -> str:
+        chosen = cwd or self._default_cwd(runtime, launch_target_id)
+        if launch_target_id is None:
+            chosen = str(Path(chosen).expanduser())
+        return os.path.normpath(chosen)
+
+    def _adapter_key(
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None,
+        cwd: str | None,
+    ) -> tuple[str | None, str]:
+        return launch_target_id, self._adapter_cwd(runtime, launch_target_id, cwd)
+
+    def _find_adapter_for_launch_target(
+        self, launch_target_id: str | None
+    ) -> OpenCodeAdapter | None:
+        for (adapter_launch_target_id, _), adapter in self._adapters.items():
+            if adapter_launch_target_id == launch_target_id:
+                return adapter
+        return None
+
+    def _adapters_for_launch_target(
+        self, launch_target_id: str | None
+    ) -> list[OpenCodeAdapter]:
+        return [
+            adapter
+            for (adapter_launch_target_id, _), adapter in self._adapters.items()
+            if adapter_launch_target_id == launch_target_id
+        ]
+
+    def _require_adapter(
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None = None,
+        cwd: str | None = None,
+    ) -> OpenCodeAdapter:
+        adapter = self._adapters.get(self._adapter_key(runtime, launch_target_id, cwd))
+        if adapter is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="opencode adapter not initialized",
+                detail=(
+                    "opencode adapter for target "
+                    f"{launch_target_id} and cwd {cwd} not initialized"
+                ),
             )
-        return self._adapter
+        return adapter
+
+    async def _handle_agent_changed(
+        self,
+        runtime: "SessionRuntime",
+        session_id: str,
+        old_agent: str | None,
+        new_agent: str | None,
+    ) -> None:
+        # If OpenCode automatically switched from the plan agent back to the build agent
+        # (e.g. after the user approved the plan via a question.replied event), we must
+        # sync Waypoint's permission_mode state so the UI drops out of plan mode.
+        if old_agent == "plan" and new_agent != "plan":
+            session = runtime.get_session(session_id)
+            if session.permission_mode == "plan":
+                try:
+                    adapter = self._require_adapter(
+                        runtime, session.launch_target_id, session.cwd
+                    )
+                    state = adapter._sessions.get(session.id)
+                    target_mode = (
+                        state.pre_plan_mode
+                        if state and state.pre_plan_mode
+                        else "default"
+                    )
+                except Exception:
+                    target_mode = "default"
+
+                if target_mode == "plan":
+                    target_mode = "default"
+
+                runtime.storage.update_session(session_id, permission_mode=target_mode)
+
+                # Emit system note so transcript shows that plan mode exited
+                await runtime._emit_adapter_event(
+                    session_id,
+                    EventKind.SYSTEM_NOTE,
+                    "Exited plan mode",
+                    {"status": SessionStatus.RUNNING},
+                    SessionStatus.RUNNING,
+                )
+
+                from waypoint.schemas import SessionEnvelope
+
+                await runtime.broadcast.publish(
+                    SessionEnvelope(
+                        type="session_list_update",
+                        payload={
+                            "sessions": [
+                                item.model_dump(mode="json")
+                                for item in runtime.list_sessions()
+                            ]
+                        },
+                    )
+                )
+
+    async def _get_or_create_adapter(
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None,
+        cwd: str | None,
+    ) -> OpenCodeAdapter:
+        async with self._lock:
+            key = self._adapter_key(runtime, launch_target_id, cwd)
+            if key in self._adapters:
+                return self._adapters[key]
+
+            launch_target = None
+            if launch_target_id is not None:
+                launch_target = runtime._find_launch_target(launch_target_id)
+                if launch_target is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"unknown launch target: {launch_target_id}",
+                    )
+
+            def _on_agent_changed(sid: str, old: str | None, new: str | None) -> None:
+                asyncio.create_task(self._handle_agent_changed(runtime, sid, old, new))
+
+            adapter = OpenCodeAdapter(
+                emit_event=runtime._emit_adapter_event,
+                launch_target=launch_target,
+                on_agent_changed=_on_agent_changed,
+                workdir=key[1],
+            )
+            self._adapters[key] = adapter
+            return adapter
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
         from waypoint.backends.opencode.transport import OpenCodeTransport
@@ -127,33 +276,26 @@ class OpenCodePlugin:
 
     def setup(self, runtime: "SessionRuntime") -> None:
         log.info("setting up opencode plugin")
-        self._adapter = OpenCodeAdapter(
-            emit_event=runtime._emit_adapter_event,
-        )
 
     async def shutdown(self, runtime: "SessionRuntime") -> None:
-        if self._adapter is not None:
-            await self._adapter.shutdown()
-            self._adapter = None
+        for adapter in list(self._adapters.values()):
+            await adapter.shutdown()
+        self._adapters.clear()
 
     def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
-        return self._adapter is not None
+        return True
 
     def remote_executable(self, launch_target: SshLaunchTargetConfig) -> str:
         return launch_target.remote_bin_for(self.id, self.capabilities.cli_binary) or ""
 
-    def _ensure_local_only(self, launch_target_id: str | None) -> None:
-        if launch_target_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="opencode SSH launch targets are not supported yet",
-            )
-
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        if self._adapter is not None:
-            await self._adapter.terminate_session(session.id)
+        adapter = self._adapters.get(
+            self._adapter_key(runtime, session.launch_target_id, session.cwd)
+        )
+        if adapter is not None:
+            await adapter.terminate_session(session.id)
 
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -172,12 +314,14 @@ class OpenCodePlugin:
         # `None`), and apply_permission_mode handles it via _ruleset_for_mode.
         if mode == "default":
             return "default"
+        if mode == "plan":
+            return "plan"
         if mode not in OPENCODE_PERMISSION_ACTIONS:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
                     f"unsupported opencode permission mode: {mode}; "
-                    f"expected one of {', '.join(sorted(OPENCODE_PERMISSION_ACTIONS))}"
+                    f"expected one of {', '.join(sorted(OPENCODE_PERMISSION_ACTIONS))} or plan"
                 ),
             )
         return mode
@@ -185,8 +329,19 @@ class OpenCodePlugin:
     async def apply_permission_mode(
         self, runtime: "SessionRuntime", session: SessionRecord, mode: str
     ) -> None:
-        adapter = self._require_adapter()
-        ruleset = _ruleset_for_mode(mode) or []
+        adapter = self._require_adapter(runtime, session.launch_target_id, session.cwd)
+
+        if mode == "plan":
+            if session.permission_mode != "plan":
+                await adapter.set_pre_plan_mode(session.id, session.permission_mode)
+            await adapter.set_agent(session.id, "plan")
+            # OpenCode's plan agent applies its own permissions natively,
+            # so we drop to default ruleset for the session
+            ruleset = _ruleset_for_mode("default") or []
+        else:
+            await adapter.set_agent(session.id, None)
+            ruleset = _ruleset_for_mode(mode) or []
+
         success = await adapter.set_session_permission(session.id, ruleset)
         if not success:
             raise HTTPException(
@@ -202,7 +357,7 @@ class OpenCodePlugin:
     ) -> None:
         if model is None:
             return
-        adapter = self._require_adapter()
+        adapter = self._require_adapter(runtime, session.launch_target_id, session.cwd)
         success = await adapter.set_model(session.id, model)
         if not success:
             raise HTTPException(
@@ -216,7 +371,7 @@ class OpenCodePlugin:
         session: SessionRecord,
         effort: str | None,
     ) -> bool:
-        adapter = self._require_adapter()
+        adapter = self._require_adapter(runtime, session.launch_target_id, session.cwd)
         success = await adapter.set_effort(session.id, effort)
         if not success:
             raise HTTPException(
@@ -234,27 +389,61 @@ class OpenCodePlugin:
         launch_target_id: str | None = None,
         include_hidden: bool = False,
     ) -> dict[str, Any]:
-        self._ensure_local_only(launch_target_id)
-        adapter = self._require_adapter()
-        try:
-            providers = await adapter.list_providers()
-        except OpenCodeError as exc:
+        adapters = list(reversed(self._adapters_for_launch_target(launch_target_id)))
+        if not adapters:
+            adapters = [
+                await self._get_or_create_adapter(runtime, launch_target_id, None)
+            ]
+
+        last_error: Exception | None = None
+        fallback: tuple[list[dict[str, Any]], dict[str, Any]] | None = None
+        for adapter in adapters:
+            try:
+                providers = await adapter.list_providers()
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                continue
+            models = self._flatten_provider_models(
+                providers, include_hidden=include_hidden
+            )
+            if models:
+                default_model_id, default_model_label = self._select_default_model(
+                    models, providers
+                )
+                return {
+                    "backend": self.id,
+                    "models": models,
+                    "default_model_id": default_model_id,
+                    "default_model_label": default_model_label,
+                    "default_effort": None,
+                    "supports_free_text": True,
+                }
+            fallback = (models, providers)
+
+        if fallback is not None:
+            models, providers = fallback
+            default_model_id, default_model_label = self._select_default_model(
+                models, providers
+            )
+            return {
+                "backend": self.id,
+                "models": models,
+                "default_model_id": default_model_id,
+                "default_model_label": default_model_label,
+                "default_effort": None,
+                "supports_free_text": True,
+            }
+
+        if last_error is not None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"failed to list opencode providers: {exc}",
-            ) from exc
-        models = self._flatten_provider_models(providers, include_hidden=include_hidden)
-        default_model_id, default_model_label = self._select_default_model(
-            models, providers
+                detail=f"failed to list opencode providers: {last_error}",
+            ) from last_error
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="failed to list opencode providers: no adapters available",
         )
-        return {
-            "backend": self.id,
-            "models": models,
-            "default_model_id": default_model_id,
-            "default_model_label": default_model_label,
-            "default_effort": None,
-            "supports_free_text": True,
-        }
 
     def _flatten_provider_models(
         self,
@@ -350,7 +539,7 @@ class OpenCodePlugin:
         if not text.startswith("/"):
             return None
 
-        adapter = self._require_adapter()
+        adapter = self._require_adapter(runtime, session.launch_target_id, session.cwd)
         rest = text[1:].split(maxsplit=1)
         command = rest[0] if rest else ""
 
@@ -386,7 +575,7 @@ class OpenCodePlugin:
         tool_use_id: str | None,
         answers: list[dict[str, Any]] | None,
     ) -> SessionRecord:
-        adapter = self._require_adapter()
+        adapter = self._require_adapter(runtime, session.launch_target_id, session.cwd)
         request_id = tool_use_id or adapter.current_question_id(session.id)
         if not request_id:
             raise HTTPException(
@@ -427,11 +616,15 @@ class OpenCodePlugin:
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        if self._adapter is None:
+        try:
+            adapter = await self._get_or_create_adapter(
+                runtime, session.launch_target_id, session.cwd
+            )
+        except Exception as exc:
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
             await runtime._record_system_event(
                 session.id,
-                "OpenCode adapter unavailable; cannot restore",
+                f"OpenCode adapter unavailable; cannot restore: {exc}",
                 status=SessionStatus.ERROR,
             )
             return
@@ -445,7 +638,7 @@ class OpenCodePlugin:
             )
             return
         try:
-            await self._adapter.restore_session(
+            await adapter.restore_session(
                 session.id,
                 session.cwd,
                 opencode_session_id,
@@ -473,42 +666,61 @@ class OpenCodePlugin:
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
     ) -> list[OpenCodeThreadSummary]:
-        self._ensure_local_only(launch_target_id)
-        adapter = self._require_adapter()
-        sessions = await adapter.list_sessions()
+        adapters = self._adapters_for_launch_target(launch_target_id)
+        if not adapters:
+            adapters = [
+                await self._get_or_create_adapter(runtime, launch_target_id, None)
+            ]
         imported = {
             (s.transport_state.get("opencode_session_id"), s.launch_target_id)
             for s in runtime.storage.list_sessions()
             if s.backend == self.id
         }
         result = []
-        for sess in sessions:
-            sess_id = sess.get("id")
-            if not sess_id:
-                continue
-            if (sess_id, launch_target_id) in imported:
-                continue
-            time_data = sess.get("time", {})
-            result.append(
-                OpenCodeThreadSummary(
-                    id=sess_id,
-                    title=sess.get("title", "Untitled"),
-                    directory=sess.get("directory"),
-                    created_at=time_data.get("created"),
-                    updated_at=time_data.get("updated"),
+        seen: set[str] = set()
+        for adapter in adapters:
+            sessions = await adapter.list_sessions()
+            for sess in sessions:
+                sess_id = sess.get("id")
+                if not sess_id or sess_id in seen:
+                    continue
+                seen.add(sess_id)
+                if (sess_id, launch_target_id) in imported:
+                    continue
+                time_data = sess.get("time", {})
+                result.append(
+                    OpenCodeThreadSummary(
+                        id=sess_id,
+                        title=sess.get("title", "Untitled"),
+                        directory=sess.get("directory"),
+                        created_at=time_data.get("created"),
+                        updated_at=time_data.get("updated"),
+                    )
                 )
-            )
+        result.sort(
+            key=lambda thread: (
+                thread.updated_at if thread.updated_at is not None else -1,
+                thread.created_at if thread.created_at is not None else -1,
+                thread.id,
+            ),
+            reverse=True,
+        )
         return result
 
     async def import_thread(
         self, runtime: "SessionRuntime", request: OpenCodeThreadImportRequest
     ) -> SessionRecord:
-        adapter = self._require_adapter()
+        launch_target_id = getattr(request, "launch_target_id", None)
+        requested_cwd = getattr(request, "cwd", None)
+        adapter = await self._get_or_create_adapter(
+            runtime, launch_target_id, requested_cwd
+        )
         opencode_session_id = request.thread_id
         for s in runtime.storage.list_sessions():
             if (
                 s.backend == self.id
                 and s.transport_state.get("opencode_session_id") == opencode_session_id
+                and s.launch_target_id == launch_target_id
             ):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -520,7 +732,7 @@ class OpenCodePlugin:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="session not found in OpenCode",
             )
-        cwd = sess.get("directory", ".")
+        cwd = sess.get("directory", requested_cwd or ".")
         session_id = runtime._generate_session_id(self.id)
         session_dir = runtime._session_dir(session_id)
         raw_log = session_dir / "raw.log"
@@ -534,7 +746,7 @@ class OpenCodePlugin:
             transport=self.transport_id,
             title=sess.get("title", "Imported session"),
             cwd=cwd,
-            launch_target_id=None,
+            launch_target_id=launch_target_id,
             repo_name=None,
             branch=None,
             status=SessionStatus.STARTING,
@@ -582,16 +794,16 @@ class OpenCodePlugin:
         resolved_model: str | None,
         resolved_effort: str | None,
     ) -> SessionRecord:
-        if launch_target is not None:
+        launch_target_id = launch_target.id if launch_target else None
+        try:
+            adapter = await self._get_or_create_adapter(
+                runtime, launch_target_id, request.cwd
+            )
+        except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="opencode SSH launch targets are not supported yet",
-            )
-        if self._adapter is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="opencode adapter not configured",
-            )
+                detail=f"opencode adapter not configured: {exc}",
+            ) from exc
         raw_log.touch(exist_ok=True)
         now = datetime.now(UTC)
         session = SessionRecord(
@@ -616,14 +828,21 @@ class OpenCodePlugin:
             effort=resolved_effort,
         )
         runtime.storage.create_session(session)
+
+        agent = "plan" if permission_mode == "plan" else None
+        mapped_permission = _ruleset_for_mode(
+            "default" if permission_mode == "plan" else permission_mode
+        )
+
         try:
-            opencode_session_id = await self._adapter.start_session(
+            opencode_session_id = await adapter.start_session(
                 session_id,
                 request.cwd,
                 model=resolved_model,
                 effort=resolved_effort,
+                agent=agent,
                 title=title,
-                permission=_ruleset_for_mode(permission_mode),
+                permission=mapped_permission,
             )
             session.transport_state = {"opencode_session_id": opencode_session_id}
             runtime.storage.update_session(

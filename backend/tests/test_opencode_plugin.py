@@ -1,4 +1,4 @@
-from pathlib import Path
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -10,8 +10,8 @@ from waypoint.backends.opencode.plugin import (
     OpenCodePlugin,
     _ruleset_for_mode,
 )
-from waypoint.launch_targets import SshLaunchTargetConfig
-from waypoint.schemas import SessionCreateRequest
+from waypoint.backends.opencode.transport import OpenCodeTransport
+from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
 
 
 def test_serialize_question_answers_preserves_choices_and_notes() -> None:
@@ -83,42 +83,6 @@ def test_validate_permission_mode_rejects_legacy_auto() -> None:
         HTTPException, match="unsupported opencode permission mode: auto"
     ):
         plugin.validate_permission_mode("auto")
-
-
-@pytest.mark.asyncio
-async def test_list_models_rejects_remote_launch_targets() -> None:
-    plugin = OpenCodePlugin()
-
-    with pytest.raises(HTTPException, match="SSH launch targets are not supported yet"):
-        await plugin.list_models(
-            runtime=cast(Any, object()),
-            launch_target_id="ssh-1",
-        )
-
-
-@pytest.mark.asyncio
-async def test_create_session_rejects_remote_launch_targets() -> None:
-    plugin = OpenCodePlugin()
-    request = SessionCreateRequest(
-        backend="opencode",
-        cwd="/tmp/project",
-        launch_target_id="ssh-1",
-    )
-
-    with pytest.raises(HTTPException, match="SSH launch targets are not supported yet"):
-        await plugin.create_session(
-            runtime=cast(Any, object()),
-            request=request,
-            session_id="opencode-test",
-            launch_target=cast(SshLaunchTargetConfig, SimpleNamespace(id="ssh-1")),
-            title="Test",
-            raw_log=Path("/tmp/raw.log"),
-            structured_log=Path("/tmp/events.jsonl"),
-            git_meta=cast(Any, SimpleNamespace(repo_name=None, branch=None)),
-            permission_mode=None,
-            resolved_model=None,
-            resolved_effort=None,
-        )
 
 
 def test_flatten_provider_models_skips_invalid_and_deprecated() -> None:
@@ -264,3 +228,432 @@ def test_select_default_model_falls_back_to_first_available() -> None:
         "anthropic/claude-sonnet-4-6",
         "Sonnet",
     )
+
+
+class _FakeAdapter:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, tuple[object, ...]]] = []
+
+    async def send_input(self, session_id: str, text: str) -> None:
+        self.calls.append(("send_input", session_id, (text,)))
+
+    async def interrupt(self, session_id: str) -> None:
+        self.calls.append(("interrupt", session_id, ()))
+
+    async def terminate_session(self, session_id: str) -> bool:
+        self.calls.append(("terminate_session", session_id, ()))
+        return True
+
+    async def respond_to_permission(self, session_id: str, decision: str) -> bool:
+        self.calls.append(("respond_to_permission", session_id, (decision,)))
+        return True
+
+    def has_pending_approval(self, session_id: str) -> bool:
+        self.calls.append(("has_pending_approval", session_id, ()))
+        return True
+
+    def terminal_snapshot(self, session_id: str) -> str:
+        self.calls.append(("terminal_snapshot", session_id, ()))
+        return "snapshot"
+
+
+@pytest.mark.asyncio
+async def test_transport_routes_calls_by_session_launch_target() -> None:
+    plugin = OpenCodePlugin()
+    default_adapter = _FakeAdapter()
+    remote_adapter = _FakeAdapter()
+    plugin._adapters = cast(
+        Any,
+        {
+            (None, "/tmp"): default_adapter,
+            ("ssh-1", "/tmp"): remote_adapter,
+        },
+    )
+
+    transport = OpenCodeTransport(runtime=object(), plugin=plugin)  # type: ignore[arg-type]
+    remote_session = SessionRecord(
+        id="sess-remote",
+        backend="opencode",
+        source=SessionSource.MANAGED,
+        transport=plugin.transport_id,
+        title="Remote",
+        cwd="/tmp",
+        launch_target_id="ssh-1",
+        repo_name=None,
+        branch=None,
+        status=SessionStatus.IDLE,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        last_event_at=datetime.now(UTC),
+        raw_log_path="",
+        structured_log_path="",
+        transport_state={},
+        permission_mode=None,
+    )
+
+    await transport.send_input(remote_session, "hello")
+    assert remote_adapter.calls == [("send_input", "sess-remote", ("hello",))]
+    assert default_adapter.calls == []
+
+    await transport.interrupt(remote_session)
+    await transport.terminate(remote_session)
+    assert remote_adapter.calls[1:] == [
+        ("interrupt", "sess-remote", ()),
+        ("terminate_session", "sess-remote", ()),
+    ]
+
+    handled = await transport.respond_to_approval(remote_session, "approve", None)
+    assert handled is True
+    assert remote_adapter.calls[-1] == (
+        "respond_to_permission",
+        "sess-remote",
+        ("approve",),
+    )
+    assert transport.has_pending_approval(remote_session) is True
+    assert transport.terminal_snapshot(remote_session) == "snapshot"
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_adapter_keys_by_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = OpenCodePlugin()
+
+    class FakeAdapter:
+        def __init__(
+            self,
+            emit_event,
+            launch_target=None,
+            on_agent_changed=None,
+            workdir=None,
+        ) -> None:
+            self.workdir = workdir
+
+    runtime: Any = SimpleNamespace(
+        settings=SimpleNamespace(default_cwd="~/"),
+        _find_launch_target=lambda _launch_target_id: SimpleNamespace(
+            default_cwd="~/project"
+        ),
+        _emit_adapter_event=lambda *args, **kwargs: None,
+    )
+
+    monkeypatch.setattr(
+        "waypoint.backends.opencode.plugin.OpenCodeAdapter", FakeAdapter
+    )
+    adapter_one = cast(
+        Any, await plugin._get_or_create_adapter(runtime, "ssh-1", "/tmp/a")
+    )
+    adapter_two = cast(
+        Any, await plugin._get_or_create_adapter(runtime, "ssh-1", "/tmp/a")
+    )
+    adapter_three = cast(
+        Any, await plugin._get_or_create_adapter(runtime, "ssh-1", "/tmp/b")
+    )
+
+    assert adapter_one is adapter_two
+    assert adapter_one is not adapter_three
+    assert adapter_one.workdir == "/tmp/a"
+    assert adapter_three.workdir == "/tmp/b"
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_adapter_normalizes_equivalent_cwds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = OpenCodePlugin()
+
+    class FakeAdapter:
+        def __init__(
+            self,
+            emit_event,
+            launch_target=None,
+            on_agent_changed=None,
+            workdir=None,
+        ) -> None:
+            self.workdir = workdir
+
+    runtime: Any = SimpleNamespace(
+        settings=SimpleNamespace(default_cwd="~/"),
+        _find_launch_target=lambda _launch_target_id: None,
+        _emit_adapter_event=lambda *args, **kwargs: None,
+    )
+
+    monkeypatch.setattr(
+        "waypoint.backends.opencode.plugin.OpenCodeAdapter", FakeAdapter
+    )
+    adapter_one = cast(
+        Any, await plugin._get_or_create_adapter(runtime, None, "/tmp/a/")
+    )
+    adapter_two = cast(
+        Any, await plugin._get_or_create_adapter(runtime, None, "/tmp/a")
+    )
+
+    assert adapter_one is adapter_two
+    assert adapter_one.workdir == "/tmp/a"
+
+
+@pytest.mark.asyncio
+async def test_list_models_uses_target_adapter_independent_of_cwd() -> None:
+    plugin = OpenCodePlugin()
+
+    class FakeAdapter:
+        def __init__(self, providers: dict[str, object]) -> None:
+            self._providers = providers
+            self.called = False
+
+        async def list_providers(self) -> dict[str, object]:
+            self.called = True
+            return self._providers
+
+    stale_adapter = FakeAdapter({"all": [], "default": {}, "connected": []})
+    healthy_adapter = FakeAdapter(
+        {
+            "all": [
+                {
+                    "id": "opencode",
+                    "name": "OpenCode",
+                    "models": {
+                        "minimax-m2.5-free": {
+                            "name": "MiniMax",
+                            "status": "active",
+                        }
+                    },
+                }
+            ],
+            "default": {"opencode": "minimax-m2.5-free"},
+            "connected": ["opencode"],
+        }
+    )
+    plugin._adapters = cast(
+        Any,
+        {
+            ("ssh-1", "/repo-a"): stale_adapter,
+            ("ssh-1", "/repo-b"): healthy_adapter,
+        },
+    )
+
+    async def fail_get_or_create_adapter(*args, **kwargs):
+        raise AssertionError("list_models should reuse an existing target adapter")
+
+    plugin._get_or_create_adapter = fail_get_or_create_adapter  # type: ignore[method-assign]
+
+    runtime: Any = SimpleNamespace(storage=SimpleNamespace())
+
+    result = await plugin.list_models(
+        runtime,
+        launch_target_id="ssh-1",
+    )
+
+    assert healthy_adapter.called is True
+    assert stale_adapter.called is False
+    assert result["default_model_id"] == "opencode/minimax-m2.5-free"
+
+
+@pytest.mark.asyncio
+async def test_list_threads_ignores_cwd_and_dedupes_by_launch_target() -> None:
+    plugin = OpenCodePlugin()
+
+    class FakeAdapter:
+        def __init__(self, sessions: list[dict[str, object]]) -> None:
+            self._sessions = sessions
+
+        async def list_sessions(self) -> list[dict[str, object]]:
+            return list(self._sessions)
+
+    plugin._adapters = cast(
+        Any,
+        {
+            ("ssh-1", "/repo-a"): FakeAdapter(
+                [
+                    {
+                        "id": "ses_1",
+                        "title": "Imported candidate",
+                        "directory": "/repo-a",
+                        "time": {"created": 11, "updated": 22},
+                    }
+                ]
+            ),
+            ("ssh-1", "/repo-b"): FakeAdapter(
+                [
+                    {
+                        "id": "ses_1",
+                        "title": "Duplicate from another worktree",
+                        "directory": "/repo-b",
+                        "time": {"created": 33, "updated": 44},
+                    },
+                    {
+                        "id": "ses_2",
+                        "title": "Fresh candidate",
+                        "directory": "/repo-b",
+                        "time": {"created": 55, "updated": 66},
+                    },
+                ]
+            ),
+        },
+    )
+
+    async def fail_get_or_create_adapter(*args, **kwargs):
+        raise AssertionError("list_threads should reuse an existing target adapter")
+
+    plugin._get_or_create_adapter = fail_get_or_create_adapter  # type: ignore[method-assign]
+
+    imported = SessionRecord(
+        id="waypoint-1",
+        backend="opencode",
+        source=SessionSource.MANAGED,
+        transport=plugin.transport_id,
+        title="Imported",
+        cwd="/repo-b",
+        launch_target_id="ssh-1",
+        repo_name=None,
+        branch=None,
+        status=SessionStatus.IDLE,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        last_event_at=datetime.now(UTC),
+        raw_log_path="",
+        structured_log_path="",
+        transport_state={"opencode_session_id": "ses_1"},
+        permission_mode=None,
+    )
+
+    runtime: Any = SimpleNamespace(
+        storage=SimpleNamespace(list_sessions=lambda: [imported]),
+    )
+
+    threads = await plugin.list_threads(runtime, launch_target_id="ssh-1")
+
+    assert [thread.model_dump(mode="json") for thread in threads] == [
+        {
+            "id": "ses_2",
+            "title": "Fresh candidate",
+            "directory": "/repo-b",
+            "created_at": 55,
+            "updated_at": 66,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_threads_sorts_by_updated_at_after_merging_adapters() -> None:
+    plugin = OpenCodePlugin()
+
+    class FakeAdapter:
+        def __init__(self, sessions: list[dict[str, object]]) -> None:
+            self._sessions = sessions
+
+        async def list_sessions(self) -> list[dict[str, object]]:
+            return list(self._sessions)
+
+    plugin._adapters = cast(
+        Any,
+        {
+            ("ssh-1", "/repo-a"): FakeAdapter(
+                [
+                    {
+                        "id": "ses_a",
+                        "title": "Older candidate",
+                        "directory": "/repo-a",
+                        "time": {"created": 11, "updated": 22},
+                    }
+                ]
+            ),
+            ("ssh-1", "/repo-b"): FakeAdapter(
+                [
+                    {
+                        "id": "ses_b",
+                        "title": "Newer candidate",
+                        "directory": "/repo-b",
+                        "time": {"created": 33, "updated": 44},
+                    }
+                ]
+            ),
+        },
+    )
+
+    runtime: Any = SimpleNamespace(storage=SimpleNamespace(list_sessions=lambda: []))
+
+    threads = await plugin.list_threads(runtime, launch_target_id="ssh-1")
+
+    assert [thread.id for thread in threads] == ["ses_b", "ses_a"]
+
+
+@pytest.mark.asyncio
+async def test_import_thread_preserves_launch_target_id() -> None:
+    plugin = OpenCodePlugin()
+
+    class FakeAdapter:
+        async def get_session(self, session_id: str) -> dict[str, object] | None:
+            return {
+                "id": session_id,
+                "title": "Imported",
+                "directory": "/repo",
+            }
+
+        async def restore_session(
+            self,
+            session_id: str,
+            cwd: str,
+            opencode_session_id: str,
+            model: str | None = None,
+            agent: str | None = None,
+            effort: str | None = None,
+        ) -> None:
+            return None
+
+    fake_adapter = FakeAdapter()
+
+    async def fake_get_or_create_adapter(runtime, launch_target_id, cwd):
+        assert launch_target_id == "ssh-1"
+        assert cwd == "/repo"
+        return fake_adapter
+
+    plugin._get_or_create_adapter = fake_get_or_create_adapter  # type: ignore[method-assign]
+
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.sessions: list[SessionRecord] = []
+
+        def list_sessions(self) -> list[SessionRecord]:
+            return list(self.sessions)
+
+        def create_session(self, session: SessionRecord) -> None:
+            self.sessions.append(session)
+
+        def update_session(self, session_id: str, **kwargs) -> SessionRecord:
+            session = self.sessions[-1]
+            for key, value in kwargs.items():
+                setattr(session, key, value)
+            return session
+
+    class FakeRuntime:
+        def __init__(self) -> None:
+            self.storage = FakeStorage()
+
+        def _generate_session_id(self, backend_id: str) -> str:
+            return f"{backend_id}-1"
+
+        def _session_dir(self, session_id: str):
+            from pathlib import Path
+
+            path = Path("/tmp") / session_id
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+
+        async def _record_system_event(self, *args, **kwargs) -> None:
+            return None
+
+        def get_session(self, session_id: str) -> SessionRecord:
+            return self.storage.sessions[-1]
+
+    runtime: Any = FakeRuntime()
+    request = type(
+        "Req",
+        (),
+        {"thread_id": "ses_1", "launch_target_id": "ssh-1", "cwd": "/repo"},
+    )()
+
+    result = await plugin.import_thread(runtime, request)
+
+    assert result.launch_target_id == "ssh-1"
+    assert result.cwd == "/repo"

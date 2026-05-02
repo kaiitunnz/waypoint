@@ -260,12 +260,29 @@ class OpenCodePlugin:
         *,
         include_hidden: bool,
     ) -> list[dict[str, str]]:
+        # `/provider` returns every provider in the models.dev manifest, but
+        # OpenCode only resolves models from providers it has actually
+        # *connected* (env API key, stored auth, or auto-loaded). Listing
+        # the rest leads the user into picking a model that the runtime
+        # rejects with "Model not found" mid-prompt. Filter when the key
+        # is present; if it's missing entirely (older server payloads or
+        # tests), fall back to listing everything.
+        raw_connected = providers.get("connected")
+        connected: set[str] | None
+        if isinstance(raw_connected, list):
+            connected = {
+                item for item in raw_connected if isinstance(item, str) and item
+            }
+        else:
+            connected = None
         flattened: list[dict[str, str]] = []
         for provider in providers.get("all", []) or []:
             if not isinstance(provider, dict):
                 continue
             provider_id = provider.get("id")
             if not isinstance(provider_id, str) or not provider_id:
+                continue
+            if connected is not None and provider_id not in connected:
                 continue
             provider_label = provider.get("name") or provider_id
             for model_id, model in (provider.get("models") or {}).items():

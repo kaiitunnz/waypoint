@@ -151,8 +151,18 @@ def test_flatten_provider_models_skips_invalid_and_deprecated() -> None:
     flattened = plugin._flatten_provider_models(payload, include_hidden=False)
 
     assert flattened == [
-        {"id": "anthropic/claude-sonnet-4-6", "label": "Anthropic · claude-sonnet-4-6"},
-        {"id": "opencode/minimax-m2.5-free", "label": "OpenCode · MiniMax M2.5 Free"},
+        {
+            "id": "anthropic/claude-sonnet-4-6",
+            "label": "Anthropic · claude-sonnet-4-6",
+            "supported_efforts": [],
+            "default_effort": None,
+        },
+        {
+            "id": "opencode/minimax-m2.5-free",
+            "label": "OpenCode · MiniMax M2.5 Free",
+            "supported_efforts": [],
+            "default_effort": None,
+        },
     ]
 
 
@@ -187,7 +197,12 @@ def test_flatten_provider_models_filters_unconnected_providers() -> None:
     # without an API key would let the user pick a model that the runtime
     # rejects with "Model not found" once a prompt is sent.
     assert flattened == [
-        {"id": "opencode/minimax-m2.5-free", "label": "OpenCode · MiniMax"},
+        {
+            "id": "opencode/minimax-m2.5-free",
+            "label": "OpenCode · MiniMax",
+            "supported_efforts": [],
+            "default_effort": None,
+        },
     ]
 
 
@@ -207,7 +222,14 @@ def test_flatten_provider_models_includes_deprecated_when_requested() -> None:
 
     flattened = plugin._flatten_provider_models(payload, include_hidden=True)
 
-    assert flattened == [{"id": "opencode/old-model", "label": "OpenCode · Old"}]
+    assert flattened == [
+        {
+            "id": "opencode/old-model",
+            "label": "OpenCode · Old",
+            "supported_efforts": [],
+            "default_effort": None,
+        }
+    ]
 
 
 def test_select_default_model_prefers_user_default_when_available() -> None:

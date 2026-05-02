@@ -93,7 +93,7 @@ class OpenCodePlugin:
         is_structured=True,
         supports_resume=False,
         supports_set_model_inline=True,
-        supports_set_effort_inline=False,
+        supports_set_effort_inline=True,
         supports_set_effort_with_restart=False,
         supports_set_permission_mode_inline=True,
         supports_thread_discovery=True,
@@ -216,15 +216,17 @@ class OpenCodePlugin:
         session: SessionRecord,
         effort: str | None,
     ) -> bool:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="opencode does not support runtime effort changes",
-        )
+        adapter = self._require_adapter()
+        success = await adapter.set_effort(session.id, effort)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"failed to set effort to {effort}",
+            )
+        return False
 
     def effort_swap_message(self, effort: str | None) -> str:
-        if effort:
-            return f"Restarted OpenCode session with effort {effort}"
-        return "Restarted OpenCode session with default effort"
+        return ""
 
     async def list_models(
         self,
@@ -259,7 +261,7 @@ class OpenCodePlugin:
         providers: dict[str, Any],
         *,
         include_hidden: bool,
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, Any]]:
         # `/provider` returns every provider in the models.dev manifest, but
         # OpenCode only resolves models from providers it has actually
         # *connected* (env API key, stored auth, or auto-loaded). Listing
@@ -275,7 +277,7 @@ class OpenCodePlugin:
             }
         else:
             connected = None
-        flattened: list[dict[str, str]] = []
+        flattened: list[dict[str, Any]] = []
         for provider in providers.get("all", []) or []:
             if not isinstance(provider, dict):
                 continue
@@ -293,10 +295,18 @@ class OpenCodePlugin:
                 if not include_hidden and model.get("status") == "deprecated":
                     continue
                 model_label = model.get("name") or model_id
+
+                supported_efforts = []
+                variants = model.get("variants")
+                if isinstance(variants, dict):
+                    supported_efforts = list(variants.keys())
+
                 flattened.append(
                     {
                         "id": f"{provider_id}/{model_id}",
                         "label": f"{provider_label} · {model_label}",
+                        "supported_efforts": supported_efforts,
+                        "default_effort": None,
                     }
                 )
         flattened.sort(key=lambda entry: entry["id"])
@@ -304,7 +314,7 @@ class OpenCodePlugin:
 
     def _select_default_model(
         self,
-        models: list[dict[str, str]],
+        models: list[dict[str, Any]],
         providers: dict[str, Any],
     ) -> tuple[str, str | None]:
         available = {entry["id"] for entry in models}
@@ -440,6 +450,7 @@ class OpenCodePlugin:
                 session.cwd,
                 opencode_session_id,
                 model=session.model,
+                effort=session.effort,
             )
         except Exception as exc:
             log.exception("opencode restore failed", extra={"session_id": session.id})
@@ -610,6 +621,7 @@ class OpenCodePlugin:
                 session_id,
                 request.cwd,
                 model=resolved_model,
+                effort=resolved_effort,
                 title=title,
                 permission=_ruleset_for_mode(permission_mode),
             )

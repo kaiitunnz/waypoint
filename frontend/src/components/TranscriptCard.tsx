@@ -189,6 +189,9 @@ function CodexCard({
       );
     }
     case "agent_output":
+      if (event.metadata?.item_kind === "reasoning") {
+        return <ReasoningDisclosure event={event} agentLabel={agentLabel} />;
+      }
       return (
         <article className="panel transcript codex agent_output">
           <div className="transcript-role">
@@ -245,6 +248,29 @@ function SystemRule({ event }: { event: EventRecord }) {
         </span>
       </span>
     </div>
+  );
+}
+
+function ReasoningDisclosure({
+  event,
+  agentLabel,
+}: {
+  event: EventRecord;
+  agentLabel: string;
+}) {
+  // Reasoning is the model's scratchpad — collapse it by default so the
+  // final answer underneath stays the dominant element. The user can still
+  // expand to inspect the chain of thought.
+  return (
+    <details className="panel transcript codex agent_output reasoning-disclosure">
+      <summary className="transcript-summary">
+        <div className="transcript-role">
+          <span className="badge agent reasoning">{agentLabel} thinking</span>
+          <span className="role-time">{formatTime(event.ts)}</span>
+        </div>
+      </summary>
+      <MarkdownMessage text={event.text} />
+    </details>
   );
 }
 

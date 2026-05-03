@@ -571,6 +571,11 @@ class SessionRuntime:
                 session.id,
                 f"Approval response sent: {request.decision}",
                 status=SessionStatus.RUNNING,
+                metadata=(
+                    {"approval_id": request.approval_id}
+                    if request.approval_id
+                    else None
+                ),
             )
             plugin = self.registry.plugin_for(session)
             await plugin.post_approval(self, session)

@@ -1132,6 +1132,17 @@ const ReplyComposer = memo(function ReplyComposer({
     if (event.nativeEvent.isComposing) {
       return;
     }
+    if (event.key === "Tab" && event.shiftKey) {
+      event.preventDefault();
+      if (permissionModeOptions.length > 0 && !modeBusy) {
+        const currentIndex = permissionModeOptions.findIndex(
+          (opt) => opt.id === (permissionMode ?? "")
+        );
+        const nextIndex = (currentIndex + 1) % permissionModeOptions.length;
+        void onModeChange(permissionModeOptions[nextIndex].id);
+      }
+      return;
+    }
     if (suggestionsOpen) {
       if (
         event.key === "Tab" ||

@@ -791,6 +791,15 @@ class OpenCodePlugin:
         command = rest[0] if rest else ""
 
         if command == "compact":
+            await runtime._record_user_event(
+                session.id, text, submit=getattr(request, "submit", True)
+            )
+            await runtime._record_system_event(
+                session.id,
+                "Compacting session...",
+                status=SessionStatus.RUNNING,
+                metadata={"builtin_command": "/compact"},
+            )
             try:
                 await adapter.compact_session(session.id)
             except OpenCodeError as exc:
@@ -798,11 +807,6 @@ class OpenCodePlugin:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=str(exc),
                 ) from exc
-            await runtime._record_system_event(
-                session.id,
-                "Compacting session...",
-                status=SessionStatus.RUNNING,
-            )
             return runtime.get_session(session.id)
 
         return None

@@ -44,6 +44,7 @@ import { MarkdownMessage } from "@/components/MarkdownMessage";
 import {
   AskAnswerEntry,
   CopyMessageButton,
+  PendingUserInputCard,
   TranscriptCard,
   ToolPair,
 } from "@/components/TranscriptCard";
@@ -124,6 +125,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   // re-fetch every earlier delta of the same logical message. We compute
   // this from the raw payload before coalescing.
   const [oldestRawSequence, setOldestRawSequence] = useState<number | null>(null);
+  const [optimisticMessages, setOptimisticMessages] = useState<
+    { tempId: string; text: string; ts: string; confirmed: boolean }[]
+  >([]);
   const sectionRef = useRef<HTMLElement | null>(null);
   const nearBottomRef = useRef(true);
   const pendingEventsRef = useRef<EventRecord[]>([]);
@@ -298,6 +302,25 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       return;
     }
     pendingEventsRef.current = [];
+    const confirmedUserTexts = pending
+      .filter((e) => e.kind === "user_input")
+      .map((e) => e.text);
+    if (confirmedUserTexts.length > 0) {
+      setOptimisticMessages((prev) => {
+        let next = prev;
+        for (const text of confirmedUserTexts) {
+          const idx = next.findIndex((m) => !m.confirmed && m.text === text);
+          if (idx !== -1) {
+            next = [
+              ...next.slice(0, idx),
+              { ...next[idx], confirmed: true },
+              ...next.slice(idx + 1),
+            ];
+          }
+        }
+        return next;
+      });
+    }
     startTransition(() => {
       setEvents((current) =>
         pending.reduce<EventRecord[]>((acc, event) => mergeEvents(acc, event), current),
@@ -558,6 +581,20 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }, [handleAuthFailure, host, token, sessionId]);
 
+  const onSendWithOptimistic = useCallback(
+    async (text: string) => {
+      const tempId = Math.random().toString(36).slice(2);
+      const ts = new Date().toISOString();
+      setOptimisticMessages((prev) => [...prev, { tempId, text, ts, confirmed: false }]);
+      try {
+        return await submitInput(text);
+      } finally {
+        setOptimisticMessages((prev) => prev.filter((m) => m.tempId !== tempId));
+      }
+    },
+    [submitInput],
+  );
+
   const submitAskAnswer = useCallback(
     async (
       answer: string,
@@ -672,7 +709,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const agentBusy = session ? isAgentBusy(session, connection) : false;
   const visibleEvents = filterMode === "all" ? renderedEvents : renderedEvents.filter(isImportantEvent);
   const hiddenEventCount = renderedEvents.length - visibleEvents.length;
-  const transcriptItems = buildTranscriptItems(visibleEvents);
+  const transcriptEvents =
+    optimisticMessages.length > 0
+      ? filterOptimisticTranscriptEvents(visibleEvents, optimisticMessages)
+      : visibleEvents;
+  const transcriptItems = buildTranscriptItems(transcriptEvents);
   const usageSummary = extractUsageSummary(events);
   // Session has stopped its backend process (clean shutdown or crash).
   const sessionExited = Boolean(
@@ -816,7 +857,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                   />
                 ),
               )
-            : session
+            : session && optimisticMessages.length === 0
               ? (
                 <TranscriptEmpty
                   status={session.status}
@@ -826,6 +867,16 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                 />
               )
               : null}
+          {session
+            ? optimisticMessages.map((msg) => (
+              <PendingUserInputCard
+                  key={msg.tempId}
+                  text={msg.text}
+                  ts={msg.ts}
+                  confirmed={msg.confirmed}
+                />
+              ))
+            : null}
         </section>
       ) : (
         <section className="panel terminal stack">
@@ -946,7 +997,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         onRefresh={refresh}
         onReattach={reattach}
         onResume={resumeSession}
-        onSend={submitInput}
+        onSend={onSendWithOptimistic}
         onTerminate={terminate}
       />
     </section>
@@ -1150,15 +1201,17 @@ const ReplyComposer = memo(function ReplyComposer({
   }
 
   async function handleSend() {
-    if (!draft.trim()) {
+    const text = draft.trim();
+    if (!text) {
       return;
     }
     setSending(true);
+    setDraft("");
+    setSuggestionsDismissed(false);
     try {
-      const sent = await onSend(draft);
-      if (sent) {
-        setDraft("");
-        setSuggestionsDismissed(false);
+      const sent = await onSend(text);
+      if (!sent) {
+        setDraft(text);
       }
     } finally {
       setSending(false);
@@ -1771,6 +1824,33 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
     item.pair.sequence = Math.max(item.pair.sequence, event.sequence);
   }
   return result;
+}
+
+function filterOptimisticTranscriptEvents(
+  events: EventRecord[],
+  optimisticMessages: { text: string }[],
+): EventRecord[] {
+  const pendingCounts = new Map<string, number>();
+  for (const message of optimisticMessages) {
+    pendingCounts.set(message.text, (pendingCounts.get(message.text) ?? 0) + 1);
+  }
+  if (pendingCounts.size === 0) {
+    return events;
+  }
+  const filtered: EventRecord[] = [];
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.kind === "user_input") {
+      const pendingCount = pendingCounts.get(event.text) ?? 0;
+      if (pendingCount > 0) {
+        pendingCounts.set(event.text, pendingCount - 1);
+        continue;
+      }
+    }
+    filtered.push(event);
+  }
+  filtered.reverse();
+  return filtered;
 }
 
 function isToolResultDelta(event: EventRecord): boolean {

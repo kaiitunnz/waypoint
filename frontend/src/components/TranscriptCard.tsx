@@ -101,6 +101,28 @@ export interface AskAnswerEntry {
   notes?: string;
 }
 
+export function PendingUserInputCard({
+  text,
+  ts,
+  confirmed = false,
+}: {
+  text: string;
+  ts: string;
+  confirmed?: boolean;
+}) {
+  return (
+    <article
+      className={`panel transcript codex user_input${confirmed ? " pending-optimistic persisted" : " pending-optimistic"}`}
+    >
+      <div className="transcript-role">
+        <span className="badge user">you</span>
+        <span className="role-time">{formatTime(ts)}</span>
+      </div>
+      <MarkdownMessage text={text} />
+    </article>
+  );
+}
+
 interface TranscriptCardProps {
   event: EventRecord;
   transport: SessionTransport;

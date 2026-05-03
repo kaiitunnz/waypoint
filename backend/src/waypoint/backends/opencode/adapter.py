@@ -814,7 +814,9 @@ class OpenCodeAdapter:
             return False
         reply = self._map_decision_to_reply(decision)
 
-        if approval_id and approval_id in state.pending_permission_ids:
+        if approval_id:
+            if approval_id not in state.pending_permission_ids:
+                return False
             permission_id = approval_id
         else:
             permission_id = state.pending_permission_ids[0]
@@ -827,7 +829,7 @@ class OpenCodeAdapter:
             await client.post(f"/permission/{permission_id}/reply", json_data=payload)
         except Exception:
             return False
-        state.pending_permission_ids.pop(0)
+        state.pending_permission_ids.remove(permission_id)
         return True
 
     def _map_decision_to_reply(self, decision: str) -> str:

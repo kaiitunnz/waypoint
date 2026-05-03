@@ -508,10 +508,12 @@ class ClaudeCliAdapter:
             return False
 
         pending: ClaudePendingApproval | None
-        if approval_id and approval_id in state.pending:
+        if approval_id:
+            if approval_id not in state.pending:
+                return False
             pending = state.pending[approval_id]
         else:
-            # Resolve oldest pending first if no ID is specified, or if ID isn't found.
+            # Resolve oldest pending first if no ID is specified
             approval_id, pending = next(iter(state.pending.items()))
 
         mapped = self._map_decision(decision)

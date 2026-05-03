@@ -96,6 +96,7 @@ class ClaudeCodePlugin:
         supports_thread_discovery=True,
         supports_thread_import=True,
         supports_slash_compact=False,
+        supports_approval_note=True,
         permission_modes=CLAUDE_PERMISSION_MODE_SPECS,
         effort_levels=CLAUDE_EFFORT_LEVELS,
         model_source=ModelSource.STATIC,

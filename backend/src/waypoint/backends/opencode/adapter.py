@@ -800,7 +800,9 @@ class OpenCodeAdapter:
         except Exception:
             pass
 
-    async def respond_to_permission(self, session_id: str, decision: str) -> bool:
+    async def respond_to_permission(
+        self, session_id: str, decision: str, text: str | None = None
+    ) -> bool:
         state = self._sessions.get(session_id)
         if state is None:
             return False
@@ -810,10 +812,10 @@ class OpenCodeAdapter:
         permission_id = state.pending_permission_ids[0]
         client = self._require_client()
         try:
-            await client.post(
-                f"/session/{state.opencode_session_id}/permissions/{permission_id}",
-                json_data={"reply": reply},
-            )
+            payload: dict[str, Any] = {"reply": reply}
+            if text is not None:
+                payload["message"] = text
+            await client.post(f"/permission/{permission_id}/reply", json_data=payload)
         except Exception:
             return False
         state.pending_permission_ids.pop(0)

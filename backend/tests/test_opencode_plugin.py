@@ -245,7 +245,9 @@ class _FakeAdapter:
         self.calls.append(("terminate_session", session_id, ()))
         return True
 
-    async def respond_to_permission(self, session_id: str, decision: str) -> bool:
+    async def respond_to_permission(
+        self, session_id: str, decision: str, text: str | None = None
+    ) -> bool:
         self.calls.append(("respond_to_permission", session_id, (decision,)))
         return True
 

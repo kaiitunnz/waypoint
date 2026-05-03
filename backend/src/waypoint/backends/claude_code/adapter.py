@@ -64,12 +64,12 @@ def _auto_approve_for_mode(
     if mode in CLAUDE_AUTO_APPROVE_MODES:
         return {
             "permissionDecision": "allow",
-            "permissionDecisionReason": f"auto-approved by Waypoint mode={mode}",
+            "permissionDecisionReason": f"auto-approved by mode={mode}",
         }
     if mode == "acceptEdits" and tool_name in CLAUDE_ACCEPT_EDITS_TOOLS:
         return {
             "permissionDecision": "allow",
-            "permissionDecisionReason": "auto-approved by Waypoint mode=acceptEdits",
+            "permissionDecisionReason": "auto-approved by mode=acceptEdits",
         }
     if mode == "plan" and tool_name == "Write" and tool_input is not None:
         path = str(tool_input.get("file_path") or "")
@@ -77,7 +77,7 @@ def _auto_approve_for_mode(
             return {
                 "permissionDecision": "allow",
                 "permissionDecisionReason": (
-                    "Plan-file write auto-approved by Waypoint plan mode"
+                    "Plan-file write auto-approved by plan mode"
                 ),
             }
     return None
@@ -496,7 +496,9 @@ class ClaudeCliAdapter:
             for entry in state.pending.values()
         )
 
-    async def respond_to_approval(self, session_id: str, decision: str) -> bool:
+    async def respond_to_approval(
+        self, session_id: str, decision: str, text: str | None = None
+    ) -> bool:
         state = self._sessions.get(session_id)
         if state is None or not state.pending:
             return False
@@ -512,16 +514,15 @@ class ClaudeCliAdapter:
         # mirroring what the TUI does after the dialog returns.
         if tool_name == "ExitPlanMode":
             response = await self._exit_plan_mode_response(
-                state, mapped, pending.payload
+                state, mapped, pending.payload, text
             )
         else:
+            reason = "approved by user" if mapped == "allow" else "denied by user"
+            if text:
+                reason = f"{reason}\n\nUser note:\n{text}"
             response = {
                 "permissionDecision": mapped,
-                "permissionDecisionReason": (
-                    "approved by Waypoint user"
-                    if mapped == "allow"
-                    else "denied by Waypoint user"
-                ),
+                "permissionDecisionReason": reason,
             }
         if not pending.future.done():
             pending.future.set_result(response)
@@ -533,6 +534,7 @@ class ClaudeCliAdapter:
         state: ClaudeSessionState,
         mapped: str,
         payload: dict[str, Any],
+        note: str | None = None,
     ) -> dict[str, str]:
         # Phrasing mirrors the Claude binary's own ExitPlanMode tool_result so
         # the model sees the same approval/decline shape it was tuned for —
@@ -567,18 +569,26 @@ class ClaudeCliAdapter:
             if plan.strip():
                 lines.append("## Approved Plan:")
                 lines.append(plan)
+            if note:
+                lines.append("\nUser note:")
+                lines.append(note)
             state.last_plan_path = None
             state.last_plan_content = None
             return {
                 "permissionDecision": "deny",
                 "permissionDecisionReason": "\n".join(lines),
             }
+
+        reason = (
+            "User declined your plan. Revise the plan based on any "
+            "feedback or wait for further direction."
+        )
+        if note:
+            reason = f"{reason}\n\nUser note:\n{note}"
+
         return {
             "permissionDecision": "deny",
-            "permissionDecisionReason": (
-                "User declined your plan. Revise the plan based on any "
-                "feedback or wait for further direction."
-            ),
+            "permissionDecisionReason": reason,
         }
 
     async def await_approval(self, payload: dict[str, Any]) -> dict[str, str]:
@@ -684,7 +694,7 @@ class ClaudeCliAdapter:
         except TimeoutError:
             decision = {
                 "permissionDecision": "deny",
-                "permissionDecisionReason": "Waypoint approval timed out",
+                "permissionDecisionReason": "approval timed out",
             }
             state.pending.pop(tool_use_id, None)
 

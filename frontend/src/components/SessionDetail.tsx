@@ -645,9 +645,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }, [handleAuthFailure, host, router, token, sessionId]);
 
-  async function submitApproval(decision: string) {
+  async function submitApproval(decision: string, text?: string) {
     try {
-      await approveSession(host, token, sessionId, decision);
+      await approveSession(host, token, sessionId, decision, text);
     } catch (approvalError) {
       if (isAuthError(approvalError)) {
         handleAuthFailure();
@@ -1789,7 +1789,7 @@ function isImportantEvent(event: EventRecord): boolean {
 
 interface ApprovalCardProps {
   event: EventRecord;
-  onDecide: (decision: string) => void | Promise<void>;
+  onDecide: (decision: string, text?: string) => void | Promise<void>;
 }
 
 interface UsageSummary {
@@ -2025,6 +2025,14 @@ function ApprovalCard({ event, onDecide }: ApprovalCardProps) {
       ? (event.metadata.tool_input as Record<string, unknown>)
       : null;
   const copyText = approvalCopyText(event.text, toolName, toolInput);
+
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteText, setNoteText] = useState("");
+
+  const handleDecide = (decision: string) => {
+    void onDecide(decision, noteText.trim() || undefined);
+  };
+
   return (
     <section className="panel approval">
       <div className="session-row">
@@ -2036,17 +2044,45 @@ function ApprovalCard({ event, onDecide }: ApprovalCardProps) {
         toolName={toolName}
         toolInput={toolInput}
       />
+      {noteOpen ? (
+        <div className="ask-question-note" style={{ margin: "0 12px" }}>
+          <textarea
+            className="ask-question-note-input"
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value)}
+            placeholder="Add a note to your approval or decline…"
+            rows={2}
+          />
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => setNoteOpen(false)}
+          >
+            Hide note
+          </button>
+        </div>
+      ) : (
+        <div style={{ margin: "0 12px" }}>
+          <button
+            type="button"
+            className="link-button ask-question-note-toggle"
+            onClick={() => setNoteOpen(true)}
+          >
+            + Add note
+          </button>
+        </div>
+      )}
       <div className="action-row">
-        <button className="primary" onClick={() => void onDecide("accept")} type="button">
+        <button className="primary" onClick={() => handleDecide("accept")} type="button">
           Approve
         </button>
-        <button className="secondary" onClick={() => void onDecide("acceptForSession")} type="button">
+        <button className="secondary" onClick={() => handleDecide("acceptForSession")} type="button">
           Approve for session
         </button>
-        <button className="secondary" onClick={() => void onDecide("decline")} type="button">
+        <button className="secondary" onClick={() => handleDecide("decline")} type="button">
           Decline
         </button>
-        <button className="secondary" onClick={() => void onDecide("cancel")} type="button">
+        <button className="secondary" onClick={() => handleDecide("cancel")} type="button">
           Cancel
         </button>
       </div>

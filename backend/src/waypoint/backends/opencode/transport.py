@@ -45,7 +45,7 @@ class OpenCodeTransport(TransportAdapter):
         adapter = await self._plugin._get_or_create_adapter(
             self._runtime, session.launch_target_id, session.cwd
         )
-        return await adapter.respond_to_permission(session.id, decision)
+        return await adapter.respond_to_permission(session.id, decision, text)
 
     def has_pending_approval(self, session: SessionRecord) -> bool:
         # Pure introspection — must not provoke an SSH server start on a

@@ -23,7 +23,7 @@ Use this convention when opening issues:
 ## Layout
 
 - `backend/` — FastAPI daemon, tmux/session runtime, auth, persistence
-- `backend/src/waypoint/backends/` — one package per coding agent (`claude_code/`, `codex/`, `tmux/`); see [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the plugin contract and extension recipe
+- `backend/src/waypoint/backends/` — one package per coding agent (`claude_code/`, `codex/`, `opencode/`, `tmux/`); see [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the plugin contract and extension recipe
 - `frontend/` — Next.js PWA client
 - `3rdparty/codex/` — pinned Codex submodule used for the local app-server SDK
 
@@ -36,6 +36,7 @@ Waypoint speaks to Claude Code and Codex through wire formats that change betwee
 | Claude Code | `2.1.123`         | `claude -p --input-format=stream-json --output-format=stream-json`   | Relies on `--include-hook-events`, the `system/status`/`compact_boundary` events, and `--session-id`/`--resume`. |
 | Codex CLI   | `0.125.0`         | `codex app-server --listen stdio://`                                 | Driven via the vendored Python SDK in `3rdparty/codex/sdk/python` (`thread_*` / `turn_*` RPCs). |
 | Codex SDK   | `0.116.0a1`       | `3rdparty/codex/` submodule pin                                      | Bumped together with Codex CLI; track via `git submodule update --remote 3rdparty/codex`.   |
+| OpenCode   | `1.14.30`        | `opencode serve` with REST + SSE API                             | HTTP-based; discovers models from `/provider`. |
 
 To extend this matrix:
 
@@ -45,7 +46,7 @@ To extend this matrix:
    - Codex: `backend/src/waypoint/backends/codex/normalize.py::map_notification` and the SDK calls in `backends/codex/adapter.py::CodexAppServerAdapter`.
 3. If a bump breaks an event shape, prefer adding a branch in the relevant `normalize.py` over hard-pinning — the goal is for the matrix to grow, not to fork on version.
 
-Adding a brand-new coding agent (OpenCode, Aider, …) is its own flow — the runtime, API, and frontend dispatch by plugin id, so a new backend is "implement [`BackendPlugin`](backend/src/waypoint/backends/base.py) and register it." See [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the contract, capability descriptor, and a step-by-step recipe.
+Adding a brand-new coding agent (Aider, …) is its own flow — the runtime, API, and frontend dispatch by plugin id, so a new backend is "implement [`BackendPlugin`](backend/src/waypoint/backends/base.py) and register it." See [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the contract, capability descriptor, and a step-by-step recipe.
 
 ## Quick start
 

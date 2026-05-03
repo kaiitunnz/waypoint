@@ -1,6 +1,6 @@
 # Coding-agent backend plugins
 
-Waypoint orchestrates coding agents — Claude Code, Codex, future ones —
+Waypoint orchestrates coding agents — Claude Code, Codex, OpenCode, future ones —
 through a plugin registry. The runtime, API, storage, and frontend
 catalog all dispatch by plugin id; adding a new backend means writing a
 plugin module, not editing the core. This doc covers the design, the
@@ -51,6 +51,13 @@ backend/src/waypoint/
     │   ├── transport.py
     │   ├── normalize.py      ← notification → EventEnvelope helpers
     │   └── permission_modes.py
+    ├── opencode/
+    │   ├── plugin.py
+    │   ├── adapter.py        ← REST + SSE driver
+    │   ├── transport.py
+    │   ├── normalize.py      ← SSE event → EventEnvelope helpers
+    │   ├── client.py         ← HTTP wrapper
+    │   └── remote.py         ← SSH launcher
     └── tmux/
         ├── plugin.py
         ├── adapter.py

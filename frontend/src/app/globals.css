@@ -1952,6 +1952,49 @@ details.tool-disclosure[open] .tool-glyph.todo {
   overflow-x: auto;
 }
 
+.approval-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.approval-pager-label {
+  font-size: 0.76rem;
+  font-family: var(--font-mono);
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  min-width: 3.2em;
+  text-align: center;
+}
+
+.approval-pager-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.approval-pager-btn:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.approval-pager-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .transcript pre {
   line-height: 1.55;
   overflow-wrap: anywhere;

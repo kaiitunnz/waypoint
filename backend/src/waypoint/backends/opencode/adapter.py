@@ -31,6 +31,7 @@ DEFAULT_TIMEOUT_SECONDS = 60.0
 DEFAULT_MODEL = "opencode/minimax-m2.5-free"
 
 PERMISSION_REPLIES = {"once", "always", "reject"}
+_MAX_SSE_FAILURES = 10
 
 EmitEvent = Callable[
     [str, EventKind, str, dict[str, Any], SessionStatus],
@@ -261,8 +262,44 @@ class OpenCodeAdapter:
             raise OpenCodeError("opencode http client not initialized")
         return self._client
 
+    async def _on_server_died(self) -> None:
+        active_sessions = [
+            state for state in self._sessions.values() if not state.closing
+        ]
+
+        for state in active_sessions:
+            try:
+                await self._emit_event(
+                    state.session_id,
+                    EventKind.SYSTEM_NOTE,
+                    "OpenCode server disconnected — connection lost",
+                    {"status": SessionStatus.ERROR},
+                    SessionStatus.ERROR,
+                )
+            except Exception:
+                log.exception(
+                    "failed to emit error event for session %s", state.session_id
+                )
+
+        self._sessions.clear()
+        self._remote_sessions.clear()
+        self._part_sessions.clear()
+
+        if self._client is not None:
+            try:
+                await self._client.close()
+            except Exception:
+                log.exception("error closing opencode http client on server death")
+            self._client = None
+
+        self._terminate_server_process()
+        self._server_process = None
+        self._started = False
+        log.info("opencode adapter reset after server death; ready for restart")
+
     async def _listen_events(self) -> None:
         client = self._require_client()
+        consecutive_failures = 0
         try:
             while True:
                 try:
@@ -286,10 +323,31 @@ class OpenCodeAdapter:
                     if payload is not None:
                         await self._dispatch_event(payload)
 
+                    # Clean EOF — reset so transient blips don't accumulate.
+                    consecutive_failures = 0
+
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    log.exception("sse connection failed, retrying in 1s")
+                    consecutive_failures += 1
+                    proc_dead = (
+                        self._server_process is not None
+                        and self._server_process.returncode is not None
+                    )
+                    if proc_dead or consecutive_failures >= _MAX_SSE_FAILURES:
+                        log.error(
+                            "sse connection failed %d time(s) consecutively%s — "
+                            "treating opencode server as dead",
+                            consecutive_failures,
+                            " (process exited)" if proc_dead else "",
+                        )
+                        await self._on_server_died()
+                        return
+                    log.exception(
+                        "sse connection failed, retrying in 1s " "(%d/%d consecutive)",
+                        consecutive_failures,
+                        _MAX_SSE_FAILURES,
+                    )
                     await asyncio.sleep(1)
         except asyncio.CancelledError:
             pass

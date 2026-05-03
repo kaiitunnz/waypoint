@@ -320,7 +320,9 @@ class CodexAppServerAdapter:
             with suppress(Exception):
                 await asyncio.to_thread(client.close)
 
-    async def respond_to_approval(self, session_id: str, decision: str) -> bool:
+    async def respond_to_approval(
+        self, session_id: str, decision: str, text: str | None = None
+    ) -> bool:
         state = self._require_session(session_id)
         pending = state.pending_approval
         if pending is None:

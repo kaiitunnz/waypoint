@@ -62,7 +62,7 @@ class CodexTransport(TransportAdapter):
     async def respond_to_approval(
         self, session: SessionRecord, decision: str, text: str | None
     ) -> bool:
-        return await self.adapter.respond_to_approval(session.id, decision)
+        return await self.adapter.respond_to_approval(session.id, decision, text)
 
     def has_pending_approval(self, session: SessionRecord) -> bool:
         return self.adapter.has_pending_approval(session.id)

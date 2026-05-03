@@ -351,7 +351,7 @@ async def test_await_approval_auto_allows_in_auto_mode() -> None:
 
     assert decision == {
         "permissionDecision": "allow",
-        "permissionDecisionReason": "auto-approved by Waypoint mode=auto",
+        "permissionDecisionReason": "auto-approved by mode=auto",
     }
     # Auto-approved hooks should never surface an approval card.
     assert not any(item[1] == EventKind.APPROVAL_REQUEST for item in emitted)

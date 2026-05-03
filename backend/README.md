@@ -1,8 +1,8 @@
 # Waypoint Backend
 
-FastAPI daemon for managing and observing Claude Code and Codex sessions.
+FastAPI daemon for managing and observing Claude Code, Codex, and OpenCode sessions.
 
-Managed Codex sessions use the local Codex App Server SDK from `../3rdparty/codex/sdk/python`. Claude and attached sessions still use tmux.
+Managed Codex sessions use the local Codex App Server SDK from `../3rdparty/codex/sdk/python`. Claude and OpenCode sessions use their native APIs.
 
 ## Development
 

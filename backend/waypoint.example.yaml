@@ -30,6 +30,10 @@ plugin_configs:
     #   - id: opus
     #     label: Opus 4.7
     #     is_default: true
+  opencode:
+    # default_model_id: anthropic/claude-sonnet-4-6
+    # default_effort: high
+    # local_bin: /opt/codex/bin/opencode
 
 ssh_targets:
   - id: devbox
@@ -58,6 +62,8 @@ ssh_targets:
           - model_reasoning_effort="high"      # codex --config K=V
       claude_code:
         # remote_bin: /opt/claude/bin/claude
+      opencode:
+        # remote_bin: /opt/codex/bin/opencode
     default_cwd: "~"
     # Default `bash -ilc` (interactive + login) sources the full rcfile chain
     # so PATH from `.bashrc` (nvm/cargo/pyenv/etc.) is available. Switch to

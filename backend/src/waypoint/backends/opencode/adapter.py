@@ -19,10 +19,7 @@ from waypoint.backends.opencode.client import (
     RemoteOpenCodeClient,
 )
 from waypoint.backends.opencode.normalize import map_event
-from waypoint.backends.opencode.remote import (
-    REMOTE_SERVE_SCRIPT,
-    build_remote_serve_args,
-)
+from waypoint.backends.opencode.remote import build_remote_serve_args
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import EventKind, SessionStatus
 
@@ -173,10 +170,6 @@ class OpenCodeAdapter:
 
         assert self._server_process.stdin is not None
         assert self._server_process.stdout is not None
-
-        # Write script to stdin and close it later when shutting down
-        self._server_process.stdin.write(REMOTE_SERVE_SCRIPT.encode("utf-8"))
-        await self._server_process.stdin.drain()
 
         # Wait for the port sentinel
         remote_port = None

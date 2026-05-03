@@ -1,4 +1,3 @@
-import shlex
 from pathlib import Path
 
 from waypoint.launch_targets import SshLaunchTargetConfig
@@ -15,5 +14,5 @@ def build_remote_serve_args(
     opencode_bin: str,
     cwd: str | None = None,
 ) -> tuple[str, ...]:
-    cmd = ["bash", "-s", shlex.quote(opencode_bin)]
+    cmd = ["bash", "-c", REMOTE_SERVE_SCRIPT, opencode_bin]
     return target.build_remote_exec_args(cmd, cwd)

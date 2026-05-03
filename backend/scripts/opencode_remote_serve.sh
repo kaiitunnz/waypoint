@@ -42,6 +42,15 @@ if [ -z "$PORT" ]; then
     exit 1
 fi
 
+# Verify opencode is still alive after announcing its port.
+sleep 0.3
+if ! kill -0 "$PID" 2>/dev/null; then
+    echo "opencode exited immediately after binding port ${PORT}:" >&2
+    cat "$LOG" >&2
+    rm -f "$LOG"
+    exit 1
+fi
+
 rm -f "$LOG"
 
 read -r _ || true

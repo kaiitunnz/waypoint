@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import shlex
 import urllib.parse
 from collections.abc import AsyncGenerator
 from contextlib import suppress
@@ -12,8 +11,6 @@ import aiohttp
 from waypoint.launch_targets import SshLaunchTargetConfig
 
 log = logging.getLogger("waypoint.opencode.client")
-
-_CURL_SENTINEL = "__WP_JSON__"
 
 
 class OpenCodeHttpClient(Protocol):
@@ -121,13 +118,7 @@ class RemoteOpenCodeClient:
 
         curl_args.append(url)
 
-        # Echo the sentinel before curl so the Python consumer can discard
-        # any rcfile noise that bash -ilc may have written ahead of the
-        # actual response (same pattern as claude_thread_enumerator.sh).
-        sentinel_cmd = f"echo {_CURL_SENTINEL} && {shlex.join(curl_args)}"
-        args = self.target.build_remote_exec_args(
-            ["bash", "-c", sentinel_cmd], self.cwd
-        )
+        args = self.target.build_remote_exec_args(curl_args, self.cwd)
 
         proc = await asyncio.create_subprocess_exec(
             *args,
@@ -142,12 +133,7 @@ class RemoteOpenCodeClient:
             err_text = stderr.decode(errors="replace").strip()
             raise RuntimeError(f"curl failed ({proc.returncode}): {err_text}")
 
-        stdout_str = stdout.decode("utf-8")
-        marker = f"{_CURL_SENTINEL}\n"
-        if marker in stdout_str:
-            out_text = stdout_str[stdout_str.index(marker) + len(marker) :].strip()
-        else:
-            out_text = stdout_str.strip()
+        out_text = stdout.decode("utf-8").strip()
 
         if not out_text:
             return {}

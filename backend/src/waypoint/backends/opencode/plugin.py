@@ -64,6 +64,20 @@ OPENCODE_SLASH_COMMANDS = (
     SlashCommandSpec(name="new", description="Start a new session"),
 )
 
+OPENCODE_REASONING_EFFORTS = (
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "extra high",
+    "max",
+)
+OPENCODE_REASONING_EFFORT_LEVELS = dict(
+    (level.lower(), i) for i, level in enumerate(OPENCODE_REASONING_EFFORTS)
+)
+
 
 def _normalize_remote_cwd(cwd: str) -> str:
     # Stale session.cwd values can carry an embedded `/~/` (the result of an
@@ -695,10 +709,22 @@ class OpenCodePlugin:
     def _flatten_provider_models(
         self,
         providers: dict[str, Any],
-        *,
         include_hidden: bool,
     ) -> list[dict[str, Any]]:
-        # `/provider` returns every provider in the models.dev manifest, but
+        def _sort_efforts(efforts: list[str]) -> None:
+            def _key(e: str) -> tuple[int, Any]:
+                levels = OPENCODE_REASONING_EFFORT_LEVELS
+                e_lower = e.lower()
+                if e_lower in levels:
+                    return (levels[e_lower], e)
+                base_unknown_level = len(levels)
+                try:
+                    return (base_unknown_level, float(e))
+                except ValueError:
+                    return (base_unknown_level + 1, e_lower)
+
+            efforts.sort(key=_key)
+
         # OpenCode only resolves models from providers it has actually
         # *connected* (env API key, stored auth, or auto-loaded). Listing
         # the rest leads the user into picking a model that the runtime
@@ -736,6 +762,7 @@ class OpenCodePlugin:
                 variants = model.get("variants")
                 if isinstance(variants, dict):
                     supported_efforts = list(variants.keys())
+                    _sort_efforts(supported_efforts)
 
                 flattened.append(
                     {

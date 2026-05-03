@@ -715,7 +715,7 @@ class ClaudeCliAdapter:
                 waypoint_session_id,
                 EventKind.SYSTEM_NOTE,
                 "Approval timed out",
-                {"status": SessionStatus.RUNNING},
+                {"status": SessionStatus.RUNNING, "approval_id": tool_use_id},
                 SessionStatus.RUNNING,
             )
         return decision

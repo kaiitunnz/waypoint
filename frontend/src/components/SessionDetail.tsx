@@ -1765,7 +1765,13 @@ function findPendingApproval(events: EventRecord[]): EventRecord | null {
       event.kind === "system_note" &&
       /(Approval response sent|Approval timed out)/i.test(event.text)
     ) {
-      queue.shift();
+      const approvalId = event.metadata?.approval_id;
+      if (typeof approvalId === "string") {
+        const index = queue.findIndex((e) => e.metadata?.approval_id === approvalId);
+        if (index !== -1) queue.splice(index, 1);
+      } else {
+        queue.shift();
+      }
     }
   }
   return queue[0] ?? null;

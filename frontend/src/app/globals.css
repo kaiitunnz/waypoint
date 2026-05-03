@@ -1505,6 +1505,49 @@ details.tool-disclosure[open] .tool-glyph.todo {
   box-shadow: var(--shadow-soft), inset -2px 0 0 rgba(143, 179, 214, 0.32);
 }
 
+.transcript.codex.user_input.pending-optimistic {
+  opacity: 0.5;
+}
+
+.transcript.codex.user_input.pending-optimistic.persisted {
+  opacity: 1;
+}
+
+.transcript.codex.user_input.pending-optimistic.persisted::after {
+  content: "";
+  position: absolute;
+  top: 10px;
+  right: 0;
+  width: 4px;
+  height: calc(100% - 20px);
+  border-radius: 999px 0 0 999px;
+  background: linear-gradient(
+    180deg,
+    rgba(143, 179, 214, 0.15),
+    rgba(143, 179, 214, 0.72),
+    rgba(143, 179, 214, 0.15)
+  );
+  box-shadow: 0 0 0 1px rgba(143, 179, 214, 0.14), 0 0 18px rgba(143, 179, 214, 0.28);
+  animation: transcript-persisted-edge 5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes transcript-persisted-edge {
+  0%,
+  100% {
+    opacity: 0.28;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transcript.codex.user_input.pending-optimistic.persisted::after {
+    animation: none;
+  }
+}
+
 .transcript.codex.user_input.ask-answer-summary {
   width: 100%;
   max-width: min(92%, 760px);

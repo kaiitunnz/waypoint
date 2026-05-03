@@ -18,12 +18,12 @@ CLAUDE_PERMISSION_MODES: tuple[str, ...] = (
 )
 
 CLAUDE_PERMISSION_MODE_SPECS: tuple[PermissionModeSpec, ...] = (
-    PermissionModeSpec("default", "Default"),
-    PermissionModeSpec("plan", "Plan"),
-    PermissionModeSpec("acceptEdits", "Accept edits"),
-    PermissionModeSpec("auto", "Auto"),
-    PermissionModeSpec("bypassPermissions", "Bypass"),
-    PermissionModeSpec("dontAsk", "Don't ask"),
+    PermissionModeSpec(id="default", label="Default"),
+    PermissionModeSpec(id="plan", label="Plan"),
+    PermissionModeSpec(id="acceptEdits", label="Accept edits"),
+    PermissionModeSpec(id="auto", label="Auto"),
+    PermissionModeSpec(id="bypassPermissions", label="Bypass"),
+    PermissionModeSpec(id="dontAsk", label="Don't ask"),
 )
 
 # Modes that bypass Waypoint's PreToolUse approval card entirely.

@@ -1,5 +1,6 @@
-from dataclasses import dataclass, field
 from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelSource(StrEnum):
@@ -8,22 +9,23 @@ class ModelSource(StrEnum):
     NONE = "none"
 
 
-@dataclass(frozen=True)
-class PermissionModeSpec:
+class _FrozenModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+
+class PermissionModeSpec(_FrozenModel):
     id: str
     label: str
     description: str | None = None
     requires_session_restart: bool = False
 
 
-@dataclass(frozen=True)
-class SlashCommandSpec:
+class SlashCommandSpec(_FrozenModel):
     name: str
     description: str | None = None
 
 
-@dataclass(frozen=True)
-class BackendCapabilities:
+class BackendCapabilities(_FrozenModel):
     is_structured: bool
     supports_resume: bool
     supports_terminate: bool = True
@@ -45,7 +47,7 @@ class BackendCapabilities:
     model_source: ModelSource = ModelSource.NONE
     slash_commands: tuple[SlashCommandSpec, ...] = ()
     approval_decisions: tuple[str, ...] = ("approve", "decline")
-    badges: dict[str, str] = field(default_factory=dict)
+    badges: dict[str, str] = Field(default_factory=dict, exclude=True)
     # CLI binary used when this backend is launched in attached-tmux
     # fallback mode. ``None`` means the plugin doesn't ship a CLI
     # entry-point and can't be paired with the tmux transport.
@@ -60,4 +62,4 @@ class BackendCapabilities:
     # opts out via ``is_available_for_managed_launch=False``. Exactly
     # one registered plugin should set this to ``True``; today only
     # the tmux fallback does.
-    is_fallback_for_managed_launch: bool = False
+    is_fallback_for_managed_launch: bool = Field(default=False, exclude=True)

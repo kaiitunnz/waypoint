@@ -28,9 +28,9 @@ CODEX_PERMISSION_PRESETS: dict[str, dict[str, Any]] = {
 }
 
 CODEX_PERMISSION_MODE_SPECS: tuple[PermissionModeSpec, ...] = (
-    PermissionModeSpec("default", "Default"),
-    PermissionModeSpec("auto_review", "Auto review"),
-    PermissionModeSpec("full_access", "Full access"),
+    PermissionModeSpec(id="default", label="Default"),
+    PermissionModeSpec(id="auto_review", label="Auto review"),
+    PermissionModeSpec(id="full_access", label="Full access"),
 )
 
 

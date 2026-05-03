@@ -785,30 +785,6 @@ pre {
   opacity: 1;
 }
 
-.connection-banner {
-  text-align: center;
-  font-size: 0.82rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-family: var(--font-mono);
-  padding: 6px 12px;
-  border: 1px dashed;
-  border-radius: var(--radius-pill);
-  overflow-wrap: anywhere;
-}
-
-.connection-banner.connecting {
-  color: var(--warn);
-  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
-  background: color-mix(in srgb, var(--warn) 8%, transparent);
-}
-
-.connection-banner.reconnecting {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
-  background: color-mix(in srgb, var(--danger) 8%, transparent);
-}
-
 .error-banner {
   display: flex;
   align-items: flex-start;

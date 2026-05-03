@@ -639,11 +639,6 @@ export default function HomePage() {
           {host ? <span className="muted">{host}</span> : null}
         </div>
       </header>
-      {token && connection !== "open" && connection !== "idle" ? (
-        <p className={`connection-banner ${connection}`} role="status">
-          {connection === "connecting" ? "Connecting…" : "Reconnecting…"}
-        </p>
-      ) : null}
       {error ? (
         <div className="error-banner" role="alert">
           <span>{error}</span>

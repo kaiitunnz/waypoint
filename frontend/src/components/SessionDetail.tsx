@@ -114,6 +114,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [defaultEffort, setDefaultEffort] = useState<string | null>(null);
   const [modelBusy, setModelBusy] = useState(false);
   const [effortBusy, setEffortBusy] = useState(false);
+  const [approvalPageIndex, setApprovalPageIndex] = useState(0);
   const [hasOlderEvents, setHasOlderEvents] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   // Tracks the smallest raw sequence ever received from the server. Distinct
@@ -658,10 +659,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }
 
-  const pendingApproval =
-    session && supportsStructuredApproval(session.transport) && session.status === "waiting_input"
-      ? findPendingApproval(events)
-      : null;
+  const pendingApprovals =
+    session && supportsStructuredApproval(session.transport)
+      ? findPendingApprovals(events)
+      : [];
+  const approvalCount = pendingApprovals.length;
+  const safeApprovalPage = approvalCount > 0 ? Math.min(approvalPageIndex, approvalCount - 1) : 0;
+  const pendingApproval = pendingApprovals[safeApprovalPage] ?? null;
   const agentBusy = session ? isAgentBusy(session, connection) : false;
   const visibleEvents = filterMode === "all" ? renderedEvents : renderedEvents.filter(isImportantEvent);
   const hiddenEventCount = renderedEvents.length - visibleEvents.length;
@@ -836,11 +840,38 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         </section>
       )}
       {pendingApproval ? (
-        <ApprovalCard
-          event={pendingApproval}
-          onDecide={submitApproval}
-          supportsNote={session ? supportsApprovalNote(session.backend, catalog) : false}
-        />
+        <>
+          {approvalCount > 1 ? (
+            <div className="approval-pager">
+              <button
+                type="button"
+                className="approval-pager-btn"
+                onClick={() => setApprovalPageIndex((i) => Math.max(0, i - 1))}
+                disabled={safeApprovalPage === 0}
+                aria-label="Previous approval"
+              >
+                ‹
+              </button>
+              <span className="approval-pager-label">
+                {safeApprovalPage + 1} / {approvalCount}
+              </span>
+              <button
+                type="button"
+                className="approval-pager-btn"
+                onClick={() => setApprovalPageIndex((i) => Math.min(approvalCount - 1, i + 1))}
+                disabled={safeApprovalPage === approvalCount - 1}
+                aria-label="Next approval"
+              >
+                ›
+              </button>
+            </div>
+          ) : null}
+          <ApprovalCard
+            event={pendingApproval}
+            onDecide={submitApproval}
+            supportsNote={session ? supportsApprovalNote(session.backend, catalog) : false}
+          />
+        </>
       ) : null}
       {view === "chat" && showScrollToBottom ? (
         <div className="scroll-latest-floater" aria-hidden={false}>
@@ -1760,14 +1791,10 @@ function isAgentBusy(
   return connection === "open" && session.status === "running";
 }
 
-function findPendingApproval(events: EventRecord[]): EventRecord | null {
+function findPendingApprovals(events: EventRecord[]): EventRecord[] {
   // Track approvals as a queue: every approval_request enqueues, every
-  // "Approval response sent" system note dequeues the oldest. The Claude
-  // adapter resolves pending futures in the same order (`next(iter(state.pending))`),
-  // so the UI must show the same head-of-queue entry. The previous
-  // walk-from-newest-and-bail-on-system-note logic hid the card whenever
-  // Claude fired multiple gated tools in parallel — the user accepted the
-  // first one and the rest stayed silently pending.
+  // "Approval response sent" / "Approval timed out" system note dequeues
+  // its matching entry (by approval_id, falling back to oldest-first).
   const queue: EventRecord[] = [];
   for (const event of events) {
     if (event.kind === "approval_request") {
@@ -1785,7 +1812,7 @@ function findPendingApproval(events: EventRecord[]): EventRecord | null {
       }
     }
   }
-  return queue[0] ?? null;
+  return queue;
 }
 
 function isImportantEvent(event: EventRecord): boolean {

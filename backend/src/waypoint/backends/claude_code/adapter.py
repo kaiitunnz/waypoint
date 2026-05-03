@@ -183,6 +183,7 @@ class ClaudeSessionState:
     # acceptEdits before opening a plan don't get bumped down to default.
     pre_plan_mode: str | None = None
     last_plan_path: str | None = None
+    last_plan_content: str | None = None
     closing: bool = False
     model: str | None = None
     # Reasoning effort. Claude's CLI accepts `--effort <level>` at launch
@@ -567,6 +568,7 @@ class ClaudeCliAdapter:
                 lines.append("## Approved Plan:")
                 lines.append(plan)
             state.last_plan_path = None
+            state.last_plan_content = None
             return {
                 "permissionDecision": "deny",
                 "permissionDecisionReason": "\n".join(lines),
@@ -621,6 +623,9 @@ class ClaudeCliAdapter:
                     path = str(tool_input_dict.get("file_path") or "")
                     if _is_plan_file_path(path):
                         state.last_plan_path = path
+                        content = tool_input_dict.get("content")
+                        if isinstance(content, str):
+                            state.last_plan_content = content
                 return auto
 
             # Inject the saved plan text into ExitPlanMode so the frontend can
@@ -629,14 +634,19 @@ class ClaudeCliAdapter:
                 if tool_input_dict is None:
                     tool_input_dict = {}
                     payload["tool_input"] = tool_input_dict
-                try:
-                    plan_text = Path(state.last_plan_path).read_text(encoding="utf-8")
-                    tool_input_dict["plan"] = plan_text
-                except Exception as exc:
-                    log.warning(
-                        "failed to read plan file for ExitPlanMode approval card",
-                        extra={"path": state.last_plan_path, "error": str(exc)},
-                    )
+                if state.last_plan_content is not None:
+                    tool_input_dict["plan"] = state.last_plan_content
+                else:
+                    try:
+                        plan_text = Path(state.last_plan_path).read_text(
+                            encoding="utf-8"
+                        )
+                        tool_input_dict["plan"] = plan_text
+                    except Exception as exc:
+                        log.warning(
+                            "failed to read plan file for ExitPlanMode approval card",
+                            extra={"path": state.last_plan_path, "error": str(exc)},
+                        )
 
             if tool_use_id in state.pending:
                 # Hook was retried for the same tool call. Reuse the existing future.

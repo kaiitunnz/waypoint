@@ -71,7 +71,11 @@ def _auto_approve_for_mode(
             "permissionDecision": "allow",
             "permissionDecisionReason": "auto-approved by mode=acceptEdits",
         }
-    if mode == "plan" and tool_name == "Write" and tool_input is not None:
+    if (
+        mode == "plan"
+        and tool_name in ("Write", "Edit", "MultiEdit")
+        and tool_input is not None
+    ):
         path = str(tool_input.get("file_path") or "")
         if _is_plan_file_path(path):
             return {
@@ -88,6 +92,32 @@ def _auto_approve_for_mode(
 # does — surfacing an approval card for it duplicates the ExitPlanMode card
 # the user already sees. Detect the canonical location (with /private/var
 # realpath quirks on macOS) so we can pass it through silently.
+def _apply_plan_edit(content: str, tool_name: str, tool_input: dict[str, Any]) -> str:
+    """Return `content` with the Edit/MultiEdit patch applied in-memory.
+
+    Used to keep `last_plan_content` current without reading the file from
+    disk — which would fail for remote Claude Code sessions where the plan
+    lives on the SSH target, not the Waypoint host.
+    """
+    if tool_name == "Edit":
+        old = str(tool_input.get("old_string") or "")
+        new = str(tool_input.get("new_string") or "")
+        count = None if bool(tool_input.get("replace_all", False)) else 1
+        return (
+            content.replace(old, new)
+            if count is None
+            else content.replace(old, new, count)
+        )
+    if tool_name == "MultiEdit":
+        for edit in tool_input.get("edits") or []:
+            if not isinstance(edit, dict):
+                continue
+            old = str(edit.get("old_string") or "")
+            new = str(edit.get("new_string") or "")
+            content = content.replace(old, new, 1)
+    return content
+
+
 def _is_plan_file_path(path: str) -> bool:
     if not path:
         return False
@@ -141,6 +171,7 @@ GATED_TOOLS = (
 GATED_TOOLS_REGEX = "^(?:" + "|".join(GATED_TOOLS) + ")$"
 
 DEFAULT_TIMEOUT_SECONDS = 300.0
+HOOK_TIMEOUT_SECONDS = DEFAULT_TIMEOUT_SECONDS + 60
 
 STDERR_TAIL_LINES = 50
 
@@ -639,15 +670,20 @@ class ClaudeCliAdapter:
                 # to Claude in the same shape the binary's TUI uses.
                 if (
                     state.permission_mode == "plan"
-                    and tool_name == "Write"
+                    and tool_name in ("Write", "Edit", "MultiEdit")
                     and tool_input_dict is not None
                 ):
                     path = str(tool_input_dict.get("file_path") or "")
                     if _is_plan_file_path(path):
                         state.last_plan_path = path
-                        content = tool_input_dict.get("content")
-                        if isinstance(content, str):
-                            state.last_plan_content = content
+                        if tool_name == "Write":
+                            content = tool_input_dict.get("content")
+                            if isinstance(content, str):
+                                state.last_plan_content = content
+                        elif isinstance(state.last_plan_content, str):
+                            state.last_plan_content = _apply_plan_edit(
+                                state.last_plan_content, tool_name, tool_input_dict
+                            )
                 return auto
 
             # Inject the saved plan text into ExitPlanMode so the frontend can
@@ -694,7 +730,7 @@ class ClaudeCliAdapter:
                         {
                             "tool_name": payload.get("tool_name"),
                             "tool_input": payload.get("tool_input"),
-                            "tool_use_id": tool_use_id,
+                            "approval_id": tool_use_id,
                             "method": "PreToolUse",
                             "status": SessionStatus.WAITING_INPUT,
                         },
@@ -876,6 +912,7 @@ class ClaudeCliAdapter:
             "WAYPOINT_HOOK_URL": self._hook_url,
             "WAYPOINT_HOOK_SECRET": self._hook_secret,
             "WAYPOINT_SESSION_ID": session_id,
+            "WAYPOINT_HOOK_TIMEOUT": str(int(HOOK_TIMEOUT_SECONDS)),
         }
         return ClaudeLaunchSpec(
             args=args,

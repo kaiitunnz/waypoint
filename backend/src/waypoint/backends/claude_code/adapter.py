@@ -497,13 +497,23 @@ class ClaudeCliAdapter:
         )
 
     async def respond_to_approval(
-        self, session_id: str, decision: str, text: str | None = None
+        self,
+        session_id: str,
+        decision: str,
+        text: str | None = None,
+        approval_id: str | None = None,
     ) -> bool:
         state = self._sessions.get(session_id)
         if state is None or not state.pending:
             return False
-        # Resolve oldest pending first.
-        tool_use_id, pending = next(iter(state.pending.items()))
+
+        pending: ClaudePendingApproval | None
+        if approval_id and approval_id in state.pending:
+            pending = state.pending[approval_id]
+        else:
+            # Resolve oldest pending first if no ID is specified, or if ID isn't found.
+            approval_id, pending = next(iter(state.pending.items()))
+
         mapped = self._map_decision(decision)
         tool_name = pending.payload.get("tool_name")
         # ExitPlanMode is special: in `-p` mode the binary's tool echoes the
@@ -526,7 +536,7 @@ class ClaudeCliAdapter:
             }
         if not pending.future.done():
             pending.future.set_result(response)
-        state.pending.pop(tool_use_id, None)
+        state.pending.pop(approval_id, None)
         return True
 
     async def _exit_plan_mode_response(

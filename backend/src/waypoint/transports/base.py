@@ -29,7 +29,11 @@ class TransportAdapter(ABC):
 
     @abstractmethod
     async def respond_to_approval(
-        self, session: SessionRecord, decision: str, text: str | None
+        self,
+        session: SessionRecord,
+        decision: str,
+        text: str | None,
+        approval_id: str | None = None,
     ) -> bool: ...
 
     @abstractmethod

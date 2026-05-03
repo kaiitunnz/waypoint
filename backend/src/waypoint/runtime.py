@@ -554,7 +554,7 @@ class SessionRuntime:
         transport = self.transport_for(session)
         if transport.is_structured:
             handled = await transport.respond_to_approval(
-                session, request.decision, request.text
+                session, request.decision, request.text, request.approval_id
             )
             if not handled:
                 raise HTTPException(

@@ -53,7 +53,11 @@ class FakeStructuredAdapter:
         return self.pending
 
     async def respond_to_approval(
-        self, session_id: str, decision: str, text: str | None = None
+        self,
+        session_id: str,
+        decision: str,
+        text: str | None = None,
+        approval_id: str | None = None,
     ) -> bool:
         self.approval_calls.append((session_id, decision))
         return True

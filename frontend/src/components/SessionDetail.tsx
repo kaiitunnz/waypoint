@@ -646,9 +646,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }, [handleAuthFailure, host, router, token, sessionId]);
 
-  async function submitApproval(decision: string, text?: string) {
+  async function submitApproval(decision: string, text?: string, approvalId?: string) {
     try {
-      await approveSession(host, token, sessionId, decision, text);
+      await approveSession(host, token, sessionId, decision, text, approvalId);
     } catch (approvalError) {
       if (isAuthError(approvalError)) {
         handleAuthFailure();
@@ -1794,7 +1794,7 @@ function isImportantEvent(event: EventRecord): boolean {
 
 interface ApprovalCardProps {
   event: EventRecord;
-  onDecide: (decision: string, text?: string) => void | Promise<void>;
+  onDecide: (decision: string, text?: string, approvalId?: string) => void | Promise<void>;
   supportsNote?: boolean;
 }
 
@@ -2036,7 +2036,8 @@ function ApprovalCard({ event, onDecide, supportsNote = false }: ApprovalCardPro
   const [noteText, setNoteText] = useState("");
 
   const handleDecide = (decision: string) => {
-    void onDecide(decision, noteText.trim() || undefined);
+    const approvalId = typeof event.metadata?.approval_id === "string" ? event.metadata.approval_id as string : undefined;
+    void onDecide(decision, noteText.trim() || undefined, approvalId);
   };
 
   return (

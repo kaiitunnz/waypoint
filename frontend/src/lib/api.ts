@@ -372,6 +372,7 @@ export async function approveSession(
   sessionId: string,
   decision: string,
   text?: string,
+  approvalId?: string,
 ): Promise<void> {
   const response = await fetch(`${host}/api/sessions/${sessionId}/approve`, {
     method: "POST",
@@ -379,7 +380,7 @@ export async function approveSession(
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ decision, text }),
+    body: JSON.stringify({ decision, text, approval_id: approvalId }),
   });
   await ensureOk(response, "failed to send approval");
 }

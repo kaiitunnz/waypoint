@@ -801,7 +801,11 @@ class OpenCodeAdapter:
             pass
 
     async def respond_to_permission(
-        self, session_id: str, decision: str, text: str | None = None
+        self,
+        session_id: str,
+        decision: str,
+        text: str | None = None,
+        approval_id: str | None = None,
     ) -> bool:
         state = self._sessions.get(session_id)
         if state is None:
@@ -809,7 +813,12 @@ class OpenCodeAdapter:
         if not state.pending_permission_ids:
             return False
         reply = self._map_decision_to_reply(decision)
-        permission_id = state.pending_permission_ids[0]
+
+        if approval_id and approval_id in state.pending_permission_ids:
+            permission_id = approval_id
+        else:
+            permission_id = state.pending_permission_ids[0]
+
         client = self._require_client()
         try:
             payload: dict[str, Any] = {"reply": reply}

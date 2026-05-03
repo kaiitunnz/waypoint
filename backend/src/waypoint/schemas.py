@@ -162,6 +162,7 @@ class SessionInputRequest(BaseModel):
 class SessionApprovalRequest(BaseModel):
     decision: str
     text: str | None = None
+    approval_id: str | None = None
 
 
 class SessionPermissionModeRequest(BaseModel):

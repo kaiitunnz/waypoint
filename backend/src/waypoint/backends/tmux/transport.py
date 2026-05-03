@@ -64,7 +64,11 @@ class TmuxTransport(TransportAdapter):
                 await monitor
 
     async def respond_to_approval(
-        self, session: SessionRecord, decision: str, text: str | None
+        self,
+        session: SessionRecord,
+        decision: str,
+        text: str | None,
+        approval_id: str | None = None,
     ) -> bool:
         normalized = decision.strip().lower()
         mapped = "y" if normalized in {"approve", "yes", "y"} else "n"

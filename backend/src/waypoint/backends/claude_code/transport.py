@@ -53,10 +53,16 @@ class ClaudeTransport(TransportAdapter):
         await adapter.terminate_session(session.id)
 
     async def respond_to_approval(
-        self, session: SessionRecord, decision: str, text: str | None
+        self,
+        session: SessionRecord,
+        decision: str,
+        text: str | None,
+        approval_id: str | None = None,
     ) -> bool:
         adapter = self._require_adapter()
-        return await adapter.respond_to_approval(session.id, decision, text)
+        return await adapter.respond_to_approval(
+            session.id, decision, text, approval_id
+        )
 
     def has_pending_approval(self, session: SessionRecord) -> bool:
         if self.adapter is None:

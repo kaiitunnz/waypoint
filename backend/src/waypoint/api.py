@@ -55,40 +55,7 @@ def _backend_descriptors(registry: BackendRegistry) -> list[dict[str, Any]]:
                 "transport_id": plugin.transport_id,
                 "label": plugin.label,
                 "badges": dict(caps.badges),
-                "capabilities": {
-                    "is_structured": caps.is_structured,
-                    "supports_resume": caps.supports_resume,
-                    "supports_terminate": caps.supports_terminate,
-                    "supports_set_model_inline": caps.supports_set_model_inline,
-                    "supports_set_effort_inline": caps.supports_set_effort_inline,
-                    "supports_set_effort_with_restart": (
-                        caps.supports_set_effort_with_restart
-                    ),
-                    "supports_set_permission_mode_inline": (
-                        caps.supports_set_permission_mode_inline
-                    ),
-                    "supports_thread_discovery": caps.supports_thread_discovery,
-                    "supports_thread_import": caps.supports_thread_import,
-                    "supports_slash_compact": caps.supports_slash_compact,
-                    "model_source": caps.model_source.value,
-                    "approval_decisions": list(caps.approval_decisions),
-                    "effort_levels": list(caps.effort_levels),
-                    "permission_modes": [
-                        {
-                            "id": spec.id,
-                            "label": spec.label,
-                            "description": spec.description,
-                            "requires_session_restart": spec.requires_session_restart,
-                        }
-                        for spec in caps.permission_modes
-                    ],
-                    "slash_commands": [
-                        {"name": cmd.name, "description": cmd.description}
-                        for cmd in caps.slash_commands
-                    ],
-                    "cli_binary": caps.cli_binary,
-                    "target_aliases": list(caps.target_aliases),
-                },
+                "capabilities": caps.model_dump(mode="json"),
             }
         )
     return payload

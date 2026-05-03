@@ -97,7 +97,9 @@ class CodexPlugin:
         permission_modes=CODEX_PERMISSION_MODE_SPECS,
         effort_levels=(),  # discovered per-model from `model/list`
         model_source=ModelSource.LIVE_RPC,
-        slash_commands=(SlashCommandSpec("compact", "Compact the current thread"),),
+        slash_commands=(
+            SlashCommandSpec(name="compact", description="Compact the current thread"),
+        ),
         badges={"glyph": "X", "color": "#34d399"},
         cli_binary="codex",
         target_aliases=("codex",),

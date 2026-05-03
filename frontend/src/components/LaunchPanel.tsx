@@ -79,22 +79,28 @@ export function LaunchPanel({
     setBackend(defaultBackend);
   }, [defaultBackend]);
 
-  // Reset effort whenever the backend changes — supported levels can shift
+  // Reset effort and model whenever the backend changes — supported levels can shift
   // and an "xhigh" carried over from one backend would be invalid on the
-  // next.
+  // next. Also, models are entirely different per backend.
   useEffect(() => {
     setEffort("");
+    setModel("");
     setModelInfo(null);
   }, [backend, launchTargetId]);
 
   const effortOptions = useMemo(() => {
     if (!modelInfo) return [];
-    if (model) {
-      const opt = modelInfo.models.find((entry) => entry.id === model);
-      return opt?.supported_efforts ?? [];
+    
+    const resolvedModelId = model || modelInfo.default_model_id;
+    if (resolvedModelId) {
+      const opt = modelInfo.models.find((entry) => entry.id === resolvedModelId);
+      if (opt) {
+        return opt.supported_efforts ?? [];
+      }
     }
-    // No explicit model picked — show the union of every supported level so
-    // the picker still works against the backend's default model.
+    
+    // No explicit model picked and no default_model_id found — show the union
+    // of every supported level so the picker still works against the backend's default model.
     const union = new Set<string>();
     for (const entry of modelInfo.models) {
       for (const level of entry.supported_efforts ?? []) {

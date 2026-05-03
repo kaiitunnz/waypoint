@@ -84,15 +84,21 @@ export function SchedulePanel({
   }, [permissionOptions, permissionMode]);
   useEffect(() => {
     setEffort("");
+    setModel("");
     setModelInfo(null);
   }, [backend, launchTargetId]);
 
   const effortOptions = useMemo(() => {
     if (!modelInfo) return [];
-    if (model) {
-      const opt = modelInfo.models.find((entry) => entry.id === model);
-      return opt?.supported_efforts ?? [];
+    
+    const resolvedModelId = model || modelInfo.default_model_id;
+    if (resolvedModelId) {
+      const opt = modelInfo.models.find((entry) => entry.id === resolvedModelId);
+      if (opt) {
+        return opt.supported_efforts ?? [];
+      }
     }
+    
     const union = new Set<string>();
     for (const entry of modelInfo.models) {
       for (const level of entry.supported_efforts ?? []) {

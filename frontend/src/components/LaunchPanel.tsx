@@ -75,8 +75,18 @@ export function LaunchPanel({
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [formBusy, setFormBusy] = useState(false);
 
+  const handleBackendChange = useCallback((nextBackend: Backend) => {
+    setBackend(nextBackend);
+    setModel("");
+    setEffort("");
+    setModelInfo(null);
+  }, []);
+
   useEffect(() => {
     setBackend(defaultBackend);
+    setModel("");
+    setEffort("");
+    setModelInfo(null);
   }, [defaultBackend]);
 
   // Reset effort and model whenever the backend changes — supported levels can shift
@@ -162,7 +172,7 @@ export function LaunchPanel({
         </div>
         <label className="field">
           <span>Backend</span>
-          <select value={backend} onChange={(event) => setBackend(event.target.value as Backend)}>
+          <select value={backend} onChange={(event) => handleBackendChange(event.target.value as Backend)}>
             {supportedBackends.map((id) => (
               <option key={id} value={id}>
                 {catalog.byId(id)?.label ?? humaniseBackend(id)}
@@ -181,6 +191,7 @@ export function LaunchPanel({
           <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Optional" />
         </label>
         <ModelPicker
+          key={`${backend}:${launchTargetId ?? "local"}`}
           host={host}
           token={token}
           backend={backend}
@@ -213,7 +224,7 @@ export function LaunchPanel({
         </label>
         <label className="field">
           <span>Backend hint</span>
-          <select value={backend} onChange={(event) => setBackend(event.target.value as Backend)}>
+          <select value={backend} onChange={(event) => handleBackendChange(event.target.value as Backend)}>
             {supportedBackends.map((id) => (
               <option key={id} value={id}>
                 {catalog.byId(id)?.label ?? humaniseBackend(id)}

@@ -244,6 +244,7 @@ export function SchedulePanel({
             </label>
           ) : null}
           <ModelPicker
+            key={`${backend}:${launchTargetId ?? "local"}`}
             host={host}
             token={token}
             backend={backend}

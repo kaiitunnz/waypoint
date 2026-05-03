@@ -26,7 +26,7 @@ from waypoint.schemas import EventKind, SessionStatus
 log = logging.getLogger("waypoint.opencode")
 
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 4096
+DEFAULT_PORT = 0
 DEFAULT_TIMEOUT_SECONDS = 60.0
 DEFAULT_MODEL = "opencode/minimax-m2.5-free"
 
@@ -125,7 +125,12 @@ class OpenCodeAdapter:
         if binary is None:
             raise OpenCodeError("opencode binary not found on PATH")
         cwd = str(Path(self._workdir).expanduser()) if self._workdir else None
-        if _port_in_use(self._host, self._port):
+
+        if self._port == 0:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind((self._host, 0))
+                self._port = sock.getsockname()[1]
+        elif _port_in_use(self._host, self._port):
             raise OpenCodeError(
                 f"opencode port {self._host}:{self._port} is already in use; "
                 f"kill the orphan process before restarting"

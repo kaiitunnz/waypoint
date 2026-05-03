@@ -93,6 +93,7 @@ class CodexPlugin:
         supports_thread_discovery=True,
         supports_thread_import=True,
         supports_slash_compact=True,
+        supports_approval_note=False,
         permission_modes=CODEX_PERMISSION_MODE_SPECS,
         effort_levels=(),  # discovered per-model from `model/list`
         model_source=ModelSource.LIVE_RPC,

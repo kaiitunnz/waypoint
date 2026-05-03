@@ -32,6 +32,7 @@ import {
   fidelityFor,
   humaniseBackend,
   permissionModesFor,
+  supportsApprovalNote,
   supportsResume,
   supportsStructuredApproval,
   transportLabel,
@@ -835,7 +836,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         </section>
       )}
       {pendingApproval ? (
-        <ApprovalCard event={pendingApproval} onDecide={submitApproval} />
+        <ApprovalCard
+          event={pendingApproval}
+          onDecide={submitApproval}
+          supportsNote={session ? supportsApprovalNote(session.backend, catalog) : false}
+        />
       ) : null}
       {view === "chat" && showScrollToBottom ? (
         <div className="scroll-latest-floater" aria-hidden={false}>
@@ -1790,6 +1795,7 @@ function isImportantEvent(event: EventRecord): boolean {
 interface ApprovalCardProps {
   event: EventRecord;
   onDecide: (decision: string, text?: string) => void | Promise<void>;
+  supportsNote?: boolean;
 }
 
 interface UsageSummary {
@@ -2016,7 +2022,7 @@ function UsageCard({ summary }: { summary: UsageSummary }) {
   );
 }
 
-function ApprovalCard({ event, onDecide }: ApprovalCardProps) {
+function ApprovalCard({ event, onDecide, supportsNote = false }: ApprovalCardProps) {
   const toolName = normalizeToolName(
     typeof event.metadata.tool_name === "string" ? event.metadata.tool_name : null
   );
@@ -2044,34 +2050,36 @@ function ApprovalCard({ event, onDecide }: ApprovalCardProps) {
         toolName={toolName}
         toolInput={toolInput}
       />
-      {noteOpen ? (
-        <div className="ask-question-note" style={{ margin: "0 12px" }}>
-          <textarea
-            className="ask-question-note-input"
-            value={noteText}
-            onChange={(e) => setNoteText(e.target.value)}
-            placeholder="Add a note to your approval or decline…"
-            rows={2}
-          />
-          <button
-            type="button"
-            className="link-button"
-            onClick={() => setNoteOpen(false)}
-          >
-            Hide note
-          </button>
-        </div>
-      ) : (
-        <div style={{ margin: "0 12px" }}>
-          <button
-            type="button"
-            className="link-button ask-question-note-toggle"
-            onClick={() => setNoteOpen(true)}
-          >
-            + Add note
-          </button>
-        </div>
-      )}
+      {supportsNote ? (
+        noteOpen ? (
+          <div className="ask-question-note" style={{ margin: "0 12px" }}>
+            <textarea
+              className="ask-question-note-input"
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              placeholder="Add a note to your approval or decline…"
+              rows={2}
+            />
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => setNoteOpen(false)}
+            >
+              Hide note
+            </button>
+          </div>
+        ) : (
+          <div style={{ margin: "0 12px" }}>
+            <button
+              type="button"
+              className="link-button ask-question-note-toggle"
+              onClick={() => setNoteOpen(true)}
+            >
+              + Add note
+            </button>
+          </div>
+        )
+      ) : null}
       <div className="action-row">
         <button className="primary" onClick={() => handleDecide("accept")} type="button">
           Approve

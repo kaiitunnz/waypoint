@@ -39,6 +39,7 @@ class BackendCapabilities:
     supports_thread_discovery: bool = False
     supports_thread_import: bool = False
     supports_slash_compact: bool = False
+    supports_approval_note: bool = False
     permission_modes: tuple[PermissionModeSpec, ...] = ()
     effort_levels: tuple[str, ...] = ()
     model_source: ModelSource = ModelSource.NONE

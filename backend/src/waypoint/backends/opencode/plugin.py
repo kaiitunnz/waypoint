@@ -122,6 +122,7 @@ class OpenCodePlugin:
         supports_thread_discovery=True,
         supports_thread_import=True,
         supports_slash_compact=True,
+        supports_approval_note=True,
         permission_modes=OPENCODE_PERMISSION_MODES,
         effort_levels=(),
         model_source=ModelSource.LIVE_RPC,

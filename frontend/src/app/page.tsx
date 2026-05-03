@@ -639,6 +639,17 @@ export default function HomePage() {
           {host ? <span className="muted">{host}</span> : null}
         </div>
       </header>
+      {token && connection !== "open" && connection !== "idle" ? (
+        <p className={`connection-banner ${connection}`} role="status">
+          {connection === "connecting" ? "Connecting…" : "Reconnecting…"}
+        </p>
+      ) : null}
+      {error ? (
+        <div className="error-banner" role="alert">
+          <span>{error}</span>
+          <button className="error-banner-dismiss" onClick={() => setError("")} aria-label="Dismiss">×</button>
+        </div>
+      ) : null}
       {!token ? <LoginForm defaultHost={host} onSubmit={handleLogin} /> : null}
       {token ? (
         <BackendSwitcher
@@ -686,12 +697,6 @@ export default function HomePage() {
           onClearHistory={handleClearScheduleHistory}
           onAuthFailure={() => resetAuthState("Session expired. Log in again.")}
         />
-      ) : null}
-      {error ? <p className="error">{error}</p> : null}
-      {token && connection !== "open" && connection !== "idle" ? (
-        <p className="connection-banner muted">
-          {connection === "connecting" ? "Connecting…" : "Reconnecting…"}
-        </p>
       ) : null}
       {token ? (
         <SessionList

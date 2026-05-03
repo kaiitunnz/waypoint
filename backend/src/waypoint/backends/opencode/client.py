@@ -130,7 +130,13 @@ class RemoteOpenCodeClient:
         stdout, stderr = await proc.communicate(input=input_data)
 
         if proc.returncode != 0:
-            err_text = stderr.decode(errors="replace").strip()
+            err_lines = [
+                line
+                for line in stderr.decode(errors="replace").strip().splitlines()
+                if "cannot set terminal process group" not in line
+                and "no job control in this shell" not in line
+            ]
+            err_text = "\n".join(err_lines).strip()
             raise RuntimeError(f"curl failed ({proc.returncode}): {err_text}")
 
         out_text = stdout.decode("utf-8").strip()

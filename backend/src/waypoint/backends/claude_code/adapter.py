@@ -141,7 +141,7 @@ EmitEvent = Callable[
     Coroutine[Any, Any, None],
 ]
 LaunchFactory = Callable[
-    [str, str, str, bool, str, str | None, str | None],
+    [str, str, str, bool, str, str | None, str | None, list[str]],
     "ClaudeLaunchSpec",
 ]
 
@@ -222,6 +222,10 @@ class ClaudeSessionState:
     # this value at runtime requires terminating and respawning the process
     # with `--resume <claude_session_id>` and the new flag.
     effort: str | None = None
+    # Extra CLI flags appended verbatim after all Waypoint-managed flags.
+    # Carried across set_effort respawns so user-supplied args survive
+    # mid-session effort changes.
+    custom_args: list[str] = field(default_factory=list)
     # Captures the launch_factory used to spawn this session so set_effort
     # can respawn through the same factory (local vs. remote SSH) without
     # re-resolving target config.
@@ -260,6 +264,7 @@ class ClaudeCliAdapter:
         permission_mode: str | None = None,
         model: str | None = None,
         effort: str | None = None,
+        custom_args: list[str] | None = None,
     ) -> str:
         state = await self._spawn(
             session_id,
@@ -270,6 +275,7 @@ class ClaudeCliAdapter:
             permission_mode=permission_mode,
             model=model,
             effort=effort,
+            custom_args=custom_args or [],
         )
         return state.claude_session_id
 
@@ -282,6 +288,7 @@ class ClaudeCliAdapter:
         permission_mode: str | None = None,
         model: str | None = None,
         effort: str | None = None,
+        custom_args: list[str] | None = None,
     ) -> None:
         await self._spawn(
             session_id,
@@ -292,6 +299,7 @@ class ClaudeCliAdapter:
             permission_mode=permission_mode,
             model=model,
             effort=effort,
+            custom_args=custom_args or [],
         )
 
     async def set_permission_mode(self, session_id: str, mode: str) -> None:
@@ -357,6 +365,7 @@ class ClaudeCliAdapter:
         claude_session_id = previous.claude_session_id
         permission_mode = previous.permission_mode
         model = previous.model
+        custom_args = previous.custom_args
         launch_factory = previous.launch_factory
         await self.terminate_session(session_id)
         await self._spawn(
@@ -368,6 +377,7 @@ class ClaudeCliAdapter:
             permission_mode=permission_mode,
             model=model,
             effort=effort or None,
+            custom_args=custom_args,
         )
 
     def session_effort(self, session_id: str) -> str | None:
@@ -831,19 +841,35 @@ class ClaudeCliAdapter:
         permission_mode: str | None = None,
         model: str | None = None,
         effort: str | None = None,
+        custom_args: list[str] | None = None,
     ) -> ClaudeSessionState:
         resolved_mode = (
             permission_mode if permission_mode in CLAUDE_PERMISSION_MODES else "default"
         )
         cli_mode = claude_cli_mode_for(resolved_mode)
+        effective_custom_args = custom_args or []
         launch_factory = launch_factory_override or self._launch_factory
         if launch_factory is None:
             spec = self._build_local_launch_spec(
-                session_id, cwd, claude_session_id, resume, cli_mode, model, effort
+                session_id,
+                cwd,
+                claude_session_id,
+                resume,
+                cli_mode,
+                model,
+                effort,
+                effective_custom_args,
             )
         else:
             spec = launch_factory(
-                session_id, cwd, claude_session_id, resume, cli_mode, model, effort
+                session_id,
+                cwd,
+                claude_session_id,
+                resume,
+                cli_mode,
+                model,
+                effort,
+                effective_custom_args,
             )
         process = await asyncio.create_subprocess_exec(
             *spec.args,
@@ -865,6 +891,7 @@ class ClaudeCliAdapter:
             permission_mode=resolved_mode,
             model=model,
             effort=effort or None,
+            custom_args=list(effective_custom_args),
             launch_factory=launch_factory,
         )
         state.stdout_task = asyncio.create_task(self._read_stdout(state))
@@ -882,6 +909,7 @@ class ClaudeCliAdapter:
         cli_mode: str,
         model: str | None = None,
         effort: str | None = None,
+        custom_args: list[str] | None = None,
     ) -> ClaudeLaunchSpec:
         binary = self._binary or shutil.which("claude")
         if binary is None:
@@ -907,6 +935,8 @@ class ClaudeCliAdapter:
             args.extend(["--resume", claude_session_id])
         else:
             args.extend(["--session-id", claude_session_id])
+        if custom_args:
+            args.extend(custom_args)
         env = {
             **os.environ,
             "WAYPOINT_HOOK_URL": self._hook_url,

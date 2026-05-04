@@ -93,6 +93,7 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         permission_mode: str | None = None,
         model: str | None = None,
         effort: str | None = None,
+        custom_args: list[str] | None = None,
     ) -> None:
         self.restore_calls.append(
             (
@@ -119,6 +120,7 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         permission_mode: str | None = None,
         model: str | None = None,
         effort: str | None = None,
+        custom_args: list[str] | None = None,
     ) -> str:
         self.start_calls.append(
             (
@@ -181,6 +183,7 @@ class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
         client_factory_override: Any = None,
         model: str | None = None,
         effort: str | None = None,
+        custom_args: list[str] | None = None,
     ) -> None:
         self.restore_calls.append(
             (session_id, cwd, thread_id, client_factory_override, model, effort)
@@ -349,6 +352,7 @@ async def test_reattach_terminates_before_restoring_codex(tmp_path) -> None:
             client_factory_override: Any = None,
             model: str | None = None,
             effort: str | None = None,
+            custom_args: list[str] | None = None,
         ) -> None:
             self._log.append(f"restore:{session_id}")
             await super().restore_session(

@@ -97,6 +97,7 @@ class ClaudeCodePlugin:
         supports_thread_import=True,
         supports_slash_compact=False,
         supports_approval_note=True,
+        supports_custom_cli_args=True,
         permission_modes=CLAUDE_PERMISSION_MODE_SPECS,
         effort_levels=CLAUDE_EFFORT_LEVELS,
         model_source=ModelSource.STATIC,
@@ -460,6 +461,7 @@ class ClaudeCodePlugin:
                 permission_mode=session.permission_mode,
                 model=session.model,
                 effort=session.effort,
+                custom_args=list(session.args),
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(
@@ -637,6 +639,7 @@ class ClaudeCodePlugin:
             permission_mode=permission_mode,
             model=resolved_model,
             effort=resolved_effort,
+            args=list(request.args),
         )
         runtime.storage.create_session(session)
         try:
@@ -648,6 +651,7 @@ class ClaudeCodePlugin:
                 permission_mode=session.permission_mode,
                 model=session.model,
                 effort=session.effort,
+                custom_args=list(session.args),
             )
         except (ClaudeCliError, FileNotFoundError, OSError) as exc:
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)

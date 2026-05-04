@@ -103,6 +103,7 @@ class OpenCodeAdapter:
         on_agent_changed: AgentChangedCallback | None = None,
         on_server_died: ServerDiedCallback | None = None,
         workdir: str | None = None,
+        extra_args: tuple[str, ...] = (),
     ) -> None:
         self._emit_event = emit_event
         self._binary = binary
@@ -112,6 +113,7 @@ class OpenCodeAdapter:
         self._on_agent_changed = on_agent_changed
         self._on_server_died_callback = on_server_died
         self._workdir = workdir
+        self._extra_args = extra_args
         self._sessions: dict[str, OpenCodeSessionState] = {}
         self._remote_sessions: dict[str, str] = {}
         self._part_sessions: dict[str, str] = {}
@@ -153,6 +155,7 @@ class OpenCodeAdapter:
             "serve",
             f"--hostname={self._host}",
             f"--port={self._port}",
+            *self._extra_args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
@@ -208,7 +211,9 @@ class OpenCodeAdapter:
         binary = (
             self._launch_target.remote_bin_for("opencode", "opencode") or "opencode"
         )
-        args = build_remote_serve_args(self._launch_target, binary, self._workdir)
+        args = build_remote_serve_args(
+            self._launch_target, binary, self._workdir, self._extra_args
+        )
         log.info(
             "starting remote opencode server on %s", self._launch_target.ssh_destination
         )

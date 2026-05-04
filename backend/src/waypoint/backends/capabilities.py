@@ -51,6 +51,7 @@ class BackendCapabilities(_FrozenModel):
     # CLI binary used when this backend is launched in attached-tmux
     # fallback mode. ``None`` means the plugin doesn't ship a CLI
     # entry-point and can't be paired with the tmux transport.
+    supports_custom_cli_args: bool = False
     cli_binary: str | None = None
     # Substrings (case-insensitive) used to infer a backend from a tmux
     # target name when the user attaches to an existing pane without

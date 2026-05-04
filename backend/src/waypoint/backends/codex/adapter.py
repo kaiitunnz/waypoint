@@ -48,6 +48,44 @@ def default_client_factory(
     )
 
 
+def _apply_config_overrides(
+    base: ClientFactory | None,
+    config_overrides: tuple[str, ...],
+) -> ClientFactory | None:
+    """Wrap *base* so it injects *config_overrides* into local Codex launches.
+
+    Remote factories use ``launch_args_override`` (the entire SSH command),
+    so they already carry config overrides built at factory-construction time;
+    for those, the override tuples are injected in ``build_remote_codex_client_factory``
+    before this function is ever called.  The local path (``base is None``)
+    creates an ``AppServerConfig`` directly and can accept ``config_overrides``.
+    """
+    if not config_overrides:
+        return base
+    if base is not None:
+        # Remote factory — overrides were baked in at construction; return as-is.
+        return base
+
+    def _local_with_overrides(
+        cwd: str, approval_handler: ApprovalCallback
+    ) -> AppServerClient:
+        codex_bin = shutil.which("codex")
+        if codex_bin is None:
+            raise RuntimeError("codex binary not found on PATH")
+        return AppServerClient(
+            config=AppServerConfig(
+                codex_bin=codex_bin,
+                cwd=cwd,
+                client_name="waypoint",
+                client_title="Waypoint",
+                config_overrides=config_overrides,
+            ),
+            approval_handler=approval_handler,
+        )
+
+    return _local_with_overrides
+
+
 @dataclass
 class PendingApproval:
     method: str
@@ -96,11 +134,15 @@ class CodexAppServerAdapter:
         client_factory_override: ClientFactory | None = None,
         model: str | None = None,
         effort: str | None = None,
+        custom_args: list[str] | None = None,
     ) -> str:
+        effective_factory = _apply_config_overrides(
+            client_factory_override, tuple(custom_args or [])
+        )
         state = await self._spawn_session(
             session_id,
             cwd,
-            client_factory_override=client_factory_override,
+            client_factory_override=effective_factory,
             model=model,
             effort=effort,
         )
@@ -125,12 +167,16 @@ class CodexAppServerAdapter:
         client_factory_override: ClientFactory | None = None,
         model: str | None = None,
         effort: str | None = None,
+        custom_args: list[str] | None = None,
     ) -> None:
+        effective_factory = _apply_config_overrides(
+            client_factory_override, tuple(custom_args or [])
+        )
         state = await self._spawn_session(
             session_id,
             cwd,
             thread_id=thread_id,
-            client_factory_override=client_factory_override,
+            client_factory_override=effective_factory,
             model=model,
             effort=effort,
         )

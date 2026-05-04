@@ -40,6 +40,7 @@ def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
         "plan",
         None,
         None,
+        [],
     )
 
     assert launch.cwd is None
@@ -108,6 +109,7 @@ def test_remote_claude_launch_factory_appends_model_flag(
         "default",
         "opus",
         None,
+        [],
     )
     assert "--model opus" in launch.args[6]
 

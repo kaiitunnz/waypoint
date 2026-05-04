@@ -94,6 +94,7 @@ class CodexPlugin:
         supports_thread_import=True,
         supports_slash_compact=True,
         supports_approval_note=False,
+        supports_custom_cli_args=True,
         permission_modes=CODEX_PERMISSION_MODE_SPECS,
         effort_levels=(),  # discovered per-model from `model/list`
         model_source=ModelSource.LIVE_RPC,
@@ -289,9 +290,12 @@ class CodexPlugin:
                 session.id,
                 session.cwd,
                 thread_id,
-                self.client_factory(runtime, session.launch_target_id),
+                self.client_factory(
+                    runtime, session.launch_target_id, custom_args=list(session.args)
+                ),
                 model=session.model,
                 effort=session.effort,
+                custom_args=list(session.args),
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(
@@ -362,12 +366,18 @@ class CodexPlugin:
         return config
 
     def client_factory(
-        self, runtime: "SessionRuntime", launch_target_id: str | None
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None,
+        custom_args: list[str] | None = None,
     ) -> ClientFactory | None:
         launch_target = runtime._find_launch_target(launch_target_id)
         if launch_target is None:
             return None
-        return build_remote_codex_client_factory(launch_target)
+        return build_remote_codex_client_factory(
+            launch_target,
+            extra_config_overrides=tuple(custom_args or []),
+        )
 
     def client_cwd(
         self, runtime: "SessionRuntime", launch_target_id: str | None
@@ -521,15 +531,19 @@ class CodexPlugin:
             permission_mode=permission_mode,
             model=resolved_model,
             effort=resolved_effort,
+            args=list(request.args),
         )
         runtime.storage.create_session(session)
         try:
             thread_id = await self._require_adapter().start_session(
                 session_id,
                 request.cwd,
-                self.client_factory(runtime, session.launch_target_id),
+                self.client_factory(
+                    runtime, session.launch_target_id, custom_args=list(request.args)
+                ),
                 model=resolved_model,
                 effort=resolved_effort,
+                custom_args=list(request.args),
             )
         except Exception:
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)

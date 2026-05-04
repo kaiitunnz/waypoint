@@ -18,13 +18,19 @@ class OpenCodeTransport(TransportAdapter):
 
     async def send_input(self, session: SessionRecord, text: str) -> None:
         adapter = await self._plugin._get_or_create_adapter(
-            self._runtime, session.launch_target_id, session.cwd
+            self._runtime,
+            session.launch_target_id,
+            session.cwd,
+            tuple(session.args),
         )
         await adapter.send_input(session.id, text)
 
     async def interrupt(self, session: SessionRecord) -> None:
         adapter = await self._plugin._get_or_create_adapter(
-            self._runtime, session.launch_target_id, session.cwd
+            self._runtime,
+            session.launch_target_id,
+            session.cwd,
+            tuple(session.args),
         )
         await adapter.interrupt(session.id)
 
@@ -44,7 +50,10 @@ class OpenCodeTransport(TransportAdapter):
         approval_id: str | None = None,
     ) -> bool:
         adapter = await self._plugin._get_or_create_adapter(
-            self._runtime, session.launch_target_id, session.cwd
+            self._runtime,
+            session.launch_target_id,
+            session.cwd,
+            tuple(session.args),
         )
         return await adapter.respond_to_permission(
             session.id, decision, text, approval_id
@@ -56,7 +65,10 @@ class OpenCodeTransport(TransportAdapter):
         # poll). Treat "no adapter" as "no pending approval".
         adapter = self._plugin._adapters.get(
             self._plugin._adapter_key(
-                self._runtime, session.launch_target_id, session.cwd
+                self._runtime,
+                session.launch_target_id,
+                session.cwd,
+                tuple(session.args),
             )
         )
         if adapter is None:
@@ -66,7 +78,10 @@ class OpenCodeTransport(TransportAdapter):
     def terminal_snapshot(self, session: SessionRecord) -> str:
         adapter = self._plugin._adapters.get(
             self._plugin._adapter_key(
-                self._runtime, session.launch_target_id, session.cwd
+                self._runtime,
+                session.launch_target_id,
+                session.cwd,
+                tuple(session.args),
             )
         )
         if adapter is None:

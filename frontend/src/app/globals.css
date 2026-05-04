@@ -679,6 +679,7 @@ pre {
 
 .primary:disabled {
   filter: grayscale(0.6);
+  color: rgba(29, 20, 8, 0.45);
   cursor: default;
   transform: none;
 }
@@ -3663,4 +3664,416 @@ details.tool-disclosure[open] .tool-glyph.todo {
     min-height: 88px;
     font-size: 0.88rem !important;
   }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * Light theme
+ * :root establishes the dark default. These selectors override tokens and
+ * patch components that hard-code dark RGBA values instead of CSS variables.
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+html[data-theme="light"] {
+  background-color: var(--bg-deep);
+
+  --bg-base:       #f4f1eb;
+  --bg-deep:       #ede9e0;
+  --bg-card:       rgba(255, 253, 247, 0.88);
+  --bg-card-soft:  rgba(248, 244, 236, 0.78);
+  --bg-input:      rgba(255, 252, 245, 0.90);
+  --line:          rgba(90, 78, 58, 0.13);
+  --line-strong:   rgba(90, 78, 58, 0.26);
+  --text:          #1c1914;
+  --text-strong:   #0e0c09;
+  --muted:         #6e6356;
+  --muted-soft:    #a09380;
+  --accent:        #b8820e;
+  --accent-strong: #d49a14;
+  --accent-cool:   #2f6f9e;
+  --danger:        #b83038;
+  --warn:          #aa6618;
+  --success:       #257a50;
+  --todo-glyph:    #7040b0;
+  --shadow:        0 24px 60px rgba(60, 45, 20, 0.10);
+  --shadow-soft:   0 6px 18px rgba(60, 45, 20, 0.08);
+}
+
+/* ── Page canvas ── */
+html[data-theme="light"] body {
+  background:
+    linear-gradient(180deg, #f7f4ee 0%, #f4f0e8 60%, #efe9d8 100%);
+  background-color: var(--bg-deep);
+}
+
+html[data-theme="light"] body::before {
+  background:
+    radial-gradient(900px 480px at 12% -8%, rgba(200, 169, 106, 0.14), transparent 60%),
+    radial-gradient(820px 540px at 110% 8%,  rgba(59, 123, 168, 0.09),  transparent 65%);
+}
+
+/* ── App bar ── */
+html[data-theme="light"] .app-bar {
+  background: linear-gradient(180deg, rgba(244, 241, 235, 0.94), rgba(237, 233, 224, 0.90));
+}
+
+/* ── Session header ── */
+html[data-theme="light"] .session-header {
+  background:
+    radial-gradient(180% 100% at 0% 0%, rgba(166, 122, 34, 0.07), transparent 60%),
+    linear-gradient(180deg, rgba(248, 245, 238, 0.92), rgba(240, 236, 226, 0.88));
+}
+
+/* ── Buttons ── */
+html[data-theme="light"] .secondary {
+  background: rgba(220, 210, 190, 0.70);
+}
+
+html[data-theme="light"] .secondary:hover:not(:disabled) {
+  background: rgba(205, 194, 170, 0.90);
+}
+
+/* ── Import thread list ── */
+html[data-theme="light"] .import-thread-list {
+  background: linear-gradient(180deg, rgba(248, 244, 236, 0.80), rgba(240, 236, 226, 0.60));
+}
+
+html[data-theme="light"] .import-thread-row:hover {
+  background: rgba(220, 210, 190, 0.42);
+}
+
+/* ── Composer ── */
+html[data-theme="light"] .composer {
+  background: linear-gradient(180deg, rgba(248, 245, 238, 0.96), rgba(240, 236, 226, 0.98));
+  box-shadow:
+    0 -10px 30px rgba(90, 70, 30, 0.08),
+    0 0 0 1px rgba(166, 122, 34, 0.06) inset;
+}
+
+html[data-theme="light"] .composer::before {
+  background: linear-gradient(
+    180deg,
+    rgba(244, 241, 235, 0) 0%,
+    rgba(244, 241, 235, 0.70) 100%
+  );
+}
+
+html[data-theme="light"] .composer-tune-popover {
+  background: rgba(252, 249, 242, 0.98);
+  box-shadow: 0 12px 32px rgba(60, 45, 20, 0.15);
+}
+
+html[data-theme="light"] .composer-tune-field select {
+  background: rgba(235, 230, 218, 0.85);
+  color: var(--accent);
+}
+
+html[data-theme="light"] .composer-overflow-trigger:hover:not(:disabled) {
+  background: rgba(220, 210, 190, 0.60);
+}
+
+html[data-theme="light"] .composer-overflow-trigger.open {
+  background: rgba(215, 204, 182, 0.80);
+}
+
+html[data-theme="light"] .composer-overflow-menu {
+  background: rgba(252, 249, 242, 0.98);
+  box-shadow: 0 12px 32px rgba(60, 45, 20, 0.15);
+}
+
+html[data-theme="light"] .composer-overflow-item {
+  background: rgba(220, 210, 190, 0.45);
+}
+
+html[data-theme="light"] .composer-overflow-item:hover:not(:disabled) {
+  background: rgba(205, 194, 170, 0.85);
+}
+
+html[data-theme="light"] .composer-overflow-item.danger {
+  background: rgba(184, 48, 56, 0.08);
+}
+
+html[data-theme="light"] .composer-overflow-item.danger:hover:not(:disabled) {
+  background: rgba(184, 48, 56, 0.16);
+}
+
+/* ── Scroll pills ── */
+html[data-theme="light"] .scroll-top-pill {
+  background:
+    radial-gradient(circle at 30% 25%, rgba(59, 123, 168, 0.12), transparent 60%),
+    linear-gradient(180deg, rgba(248, 245, 238, 0.96), rgba(232, 228, 216, 0.96));
+  box-shadow:
+    0 14px 32px rgba(60, 45, 20, 0.18),
+    0 4px 10px rgba(60, 45, 20, 0.10),
+    0 0 0 1px rgba(59, 123, 168, 0.18),
+    0 0 24px rgba(59, 123, 168, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.70);
+}
+
+html[data-theme="light"] .scroll-top-pill:hover {
+  box-shadow:
+    0 18px 38px rgba(60, 45, 20, 0.22),
+    0 6px 14px rgba(60, 45, 20, 0.12),
+    0 0 0 1px rgba(59, 123, 168, 0.32),
+    0 0 32px rgba(59, 123, 168, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.80);
+}
+
+html[data-theme="light"] .scroll-top-pill:active {
+  box-shadow:
+    0 6px 16px rgba(60, 45, 20, 0.12),
+    0 0 0 1px rgba(59, 123, 168, 0.32),
+    0 0 18px rgba(59, 123, 168, 0.08);
+}
+
+html[data-theme="light"] .scroll-latest-pill {
+  background: rgba(248, 245, 238, 0.96);
+  box-shadow: 0 12px 28px rgba(60, 45, 20, 0.12);
+}
+
+/* ── Ask question options ── */
+html[data-theme="light"] .ask-user-question {
+  background: linear-gradient(180deg, rgba(230, 238, 252, 0.80), rgba(220, 230, 248, 0.65));
+}
+
+html[data-theme="light"] .ask-option {
+  background: rgba(240, 236, 226, 0.65);
+}
+
+html[data-theme="light"] .ask-option:hover:not(:disabled) {
+  background: rgba(220, 210, 190, 0.70);
+}
+
+/* ── Advanced / CLI args section ── (overrides in later block) */
+html[data-theme="light"] .advanced-toggle:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+/* ── Theme toggle button ── */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-card-soft);
+  color: var(--muted);
+  font-size: 1rem;
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease;
+  flex-shrink: 0;
+  backdrop-filter: blur(8px);
+}
+
+.theme-toggle:hover {
+  color: var(--text-strong);
+  border-color: var(--accent);
+  background: var(--bg-card);
+}
+
+/* ── Primary button — pastel sandy gold matches the creamy palette ── */
+html[data-theme="light"] .primary {
+  background: linear-gradient(180deg, #e0bb73, #c8a96a);
+  border-color: rgba(180, 155, 90, 0.55);
+}
+
+/* ── Backend badges — boost opacity so they read on ivory ── */
+html[data-theme="light"] .badge.codex {
+  background: rgba(47, 111, 158, 0.12);
+  border-color: rgba(47, 111, 158, 0.32);
+}
+
+html[data-theme="light"] .badge.claude_code {
+  background: rgba(184, 130, 14, 0.12);
+  border-color: rgba(184, 130, 14, 0.30);
+}
+
+html[data-theme="light"] .badge.opencode {
+  background: rgba(110, 99, 86, 0.12);
+  color: var(--muted);
+  border-color: rgba(110, 99, 86, 0.28);
+}
+
+html[data-theme="light"] .badge.neutral,
+html[data-theme="light"] .badge.transport.tmux {
+  background: rgba(110, 99, 86, 0.10);
+}
+
+/* ── Advanced textarea (uses !important in base) ── */
+html[data-theme="light"] .advanced-args-field textarea {
+  background: rgba(235, 230, 218, 0.90) !important;
+  border-color: rgba(90, 78, 58, 0.20) !important;
+  color: var(--text-strong);
+}
+
+html[data-theme="light"] .advanced-args-field textarea:focus {
+  border-color: rgba(184, 130, 14, 0.45) !important;
+  box-shadow: 0 0 0 3px rgba(184, 130, 14, 0.09) !important;
+}
+
+html[data-theme="light"] .advanced-args-field textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+/* ── Import thread footer ── */
+html[data-theme="light"] .import-thread-footer {
+  background: rgba(220, 210, 190, 0.45);
+}
+
+html[data-theme="light"] .import-thread-chip {
+  background: rgba(47, 111, 158, 0.10);
+  border-color: rgba(47, 111, 158, 0.24);
+}
+
+/* ── Session pulse (live status chip) ── */
+html[data-theme="light"] .session-pulse {
+  background: rgba(240, 236, 226, 0.80);
+}
+
+/* ── Composer textarea ── */
+html[data-theme="light"] .composer-textarea {
+  background: rgba(248, 245, 238, 0.92);
+}
+
+/* ── Composer connection pill ── */
+html[data-theme="light"] .composer-connection {
+  background: rgba(235, 230, 218, 0.75);
+}
+
+/* ── Composer tune trigger (model / effort picker) ── */
+html[data-theme="light"] .composer-tune-trigger {
+  background: rgba(235, 230, 218, 0.75);
+}
+
+html[data-theme="light"] .composer-tune-trigger:hover:not(:disabled) {
+  background: rgba(220, 210, 190, 0.80);
+}
+
+html[data-theme="light"] .composer-tune-trigger.open {
+  background: rgba(210, 198, 174, 0.90);
+}
+
+/* ── Keyboard shortcut hint (⌘↵) ── */
+html[data-theme="light"] .composer-shortcut kbd {
+  background: rgba(235, 230, 218, 0.85);
+}
+
+/* ── Tool call bubbles (Codex) ── */
+html[data-theme="light"] .transcript.codex.tool_call:not(.ask-user-question),
+html[data-theme="light"] .transcript.codex.tool_result,
+html[data-theme="light"] .transcript.codex.tool_pair {
+  background: rgba(235, 230, 218, 0.55);
+  border-color: rgba(90, 78, 58, 0.14);
+}
+
+html[data-theme="light"] .transcript.codex.tool_call:not(.ask-user-question):hover,
+html[data-theme="light"] .transcript.codex.tool_result:hover,
+html[data-theme="light"] .transcript.codex.tool_pair:hover {
+  background: rgba(220, 210, 190, 0.65);
+  border-color: rgba(90, 78, 58, 0.22);
+}
+
+html[data-theme="light"] details.tool-disclosure[open] {
+  background: rgba(220, 210, 190, 0.55);
+}
+
+/* ── User input bubble — warm cream, gold inset, no jarring blue ── */
+html[data-theme="light"] .transcript.codex.user_input {
+  background: linear-gradient(180deg, rgba(242, 234, 216, 0.90), rgba(232, 222, 200, 0.86));
+  border-color: rgba(90, 78, 58, 0.22);
+  box-shadow: var(--shadow-soft), inset -2px 0 0 rgba(184, 130, 14, 0.32);
+}
+
+/* ── Approval plan / shell code block ── */
+html[data-theme="light"] .approval-plan {
+  background: rgba(235, 230, 218, 0.60);
+  border-left-color: rgba(184, 130, 14, 0.40);
+}
+
+html[data-theme="light"] .approval-shell {
+  background: rgba(228, 222, 208, 0.70);
+}
+
+/* ── Transcript empty state ── */
+html[data-theme="light"] .transcript-empty {
+  background: rgba(235, 230, 218, 0.45);
+}
+
+/* ── Segmented controls (Chat/Terminal, All/Important) ── */
+html[data-theme="light"] .segmented {
+  background: rgba(222, 213, 196, 0.55);
+}
+
+html[data-theme="light"] .segmented-item.active {
+  background: linear-gradient(180deg, rgba(184, 130, 14, 0.20), rgba(184, 130, 14, 0.11));
+  box-shadow: inset 0 0 0 1px rgba(184, 130, 14, 0.30);
+}
+
+html[data-theme="light"] .segmented-quiet .segmented-item.active {
+  background: rgba(47, 111, 158, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(47, 111, 158, 0.30);
+}
+
+/* ── Tool call pre output — hardcoded light-grey text colors ── */
+html[data-theme="light"] .transcript.codex.tool_call pre.shell,
+html[data-theme="light"] .transcript.codex.tool_result pre.output,
+html[data-theme="light"] .tool-pair-body pre.shell,
+html[data-theme="light"] .tool-pair-body pre.output {
+  color: var(--text);
+}
+
+/* ── Advanced section ── */
+html[data-theme="light"] .advanced-section {
+  background: rgba(222, 213, 198, 0.65);
+}
+
+html[data-theme="light"] .advanced-toggle {
+  color: var(--muted);
+}
+
+html[data-theme="light"] .advanced-section.open .advanced-toggle {
+  color: var(--accent);
+}
+
+html[data-theme="light"] .advanced-args-field span {
+  color: var(--muted);
+}
+
+html[data-theme="light"] .advanced-warning {
+  color: var(--warn);
+  opacity: 1;
+}
+
+/* ── Transport / fidelity badges ── */
+html[data-theme="light"] .badge.transport.opencode_http {
+  background: rgba(90, 100, 120, 0.10);
+  color: var(--muted);
+  border-color: rgba(90, 100, 120, 0.26);
+}
+
+html[data-theme="light"] .badge.transport.codex_app_server,
+html[data-theme="light"] .badge.transport.claude_cli,
+html[data-theme="light"] .badge.fidelity.structured {
+  background: rgba(184, 130, 14, 0.12);
+  border-color: rgba(184, 130, 14, 0.30);
+}
+
+html[data-theme="light"] .badge.fidelity.heuristic {
+  background: rgba(170, 102, 24, 0.12);
+  border-color: rgba(170, 102, 24, 0.26);
+}
+
+/* ── User bubble send-pending animation — remap blue glow to gold ── */
+html[data-theme="light"] .transcript.codex.user_input.pending-optimistic.persisted::after {
+  background: linear-gradient(
+    180deg,
+    rgba(184, 130, 14, 0.12),
+    rgba(184, 130, 14, 0.65),
+    rgba(184, 130, 14, 0.12)
+  );
+  box-shadow: 0 0 0 1px rgba(184, 130, 14, 0.12), 0 0 18px rgba(184, 130, 14, 0.20);
 }

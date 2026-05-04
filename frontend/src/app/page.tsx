@@ -9,6 +9,7 @@ import { LaunchPanel } from "@/components/LaunchPanel";
 import { LoginForm } from "@/components/LoginForm";
 import { SchedulePanel } from "@/components/SchedulePanel";
 import { SessionList } from "@/components/SessionList";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   attachTmux,
   cancelSchedule as cancelScheduleRequest,
@@ -640,6 +641,7 @@ export default function HomePage() {
         <div className="app-bar-meta">
           <span className={`app-bar-status ${connection}`}>{connectionLabel}</span>
           {host ? <span className="muted">{host}</span> : null}
+          <ThemeToggle />
         </div>
       </header>
       {error ? (

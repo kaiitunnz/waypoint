@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 
+import { ThemeProvider } from "@/lib/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,15 +17,26 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  // Match the body gradient so the iOS / Safari overscroll area renders
-  // the same dark colour instead of revealing the default white.
-  themeColor: "#06080b",
 };
+
+// Runs synchronously before any paint so there is no flash of wrong theme.
+// ThemeProvider then takes over and keeps the attribute in sync at runtime.
+const antiFlashScript = `(function(){
+  var t=localStorage.getItem('waypoint-theme');
+  var d=document.documentElement;
+  if(t==='light'||t==='dark'){d.dataset.theme=t;}
+  else if(window.matchMedia('(prefers-color-scheme: light)').matches){d.dataset.theme='light';}
+})();`;
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: antiFlashScript }} />
+      </head>
+      <body>
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
     </html>
   );
 }

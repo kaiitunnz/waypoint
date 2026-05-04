@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { SessionDetail } from "@/components/SessionDetail";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { clearToken, readHost, readToken } from "@/lib/store";
 
 export default function SessionPage() {
@@ -39,9 +40,12 @@ export default function SessionPage() {
             <h1 className="app-bar-title">Live transcript</h1>
           </div>
         </div>
-        <Link className="back-link" href="/">
-          ← all sessions
-        </Link>
+        <div className="app-bar-meta">
+          <Link className="back-link" href="/">
+            ← all sessions
+          </Link>
+          <ThemeToggle />
+        </div>
       </header>
       {host && token && sessionId ? (
         <SessionDetail

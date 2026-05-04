@@ -4002,6 +4002,10 @@ html[data-theme="light"] .approval-shell {
   background: rgba(228, 222, 208, 0.70);
 }
 
+html[data-theme="light"] .terminal {
+  background: rgba(228, 222, 208, 0.70);
+}
+
 /* ── Transcript empty state ── */
 html[data-theme="light"] .transcript-empty {
   background: rgba(235, 230, 218, 0.45);

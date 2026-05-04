@@ -230,10 +230,14 @@ class OpenCodeAdapter:
             return
 
         if self._launch_target is not None:
-            # For remote, closing stdin breaks the `read` in the bash script
-            # causing it to kill opencode and exit
+            # Close stdin so the remote bash script's `read` returns and it
+            # kills opencode gracefully. Also terminate the local SSH process
+            # directly so it dies even if it never finished connecting (e.g.
+            # firewall drop) and the stdin signal never reaches the remote.
             if proc.stdin is not None:
                 proc.stdin.close()
+            with suppress(ProcessLookupError):
+                proc.terminate()
             return
 
         try:

@@ -291,11 +291,17 @@ class CodexPlugin:
                 session.cwd,
                 thread_id,
                 self.client_factory(
-                    runtime, session.launch_target_id, custom_args=list(session.args)
+                    runtime,
+                    session.launch_target_id,
+                    custom_args=self._effective_args(
+                        runtime, session.launch_target_id, session.args
+                    ),
                 ),
                 model=session.model,
                 effort=session.effort,
-                custom_args=list(session.args),
+                custom_args=self._effective_args(
+                    runtime, session.launch_target_id, session.args
+                ),
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(
@@ -364,6 +370,21 @@ class CodexPlugin:
         config = runtime.settings.plugin_config(self.id)
         assert isinstance(config, CodexPluginConfig)
         return config
+
+    def _effective_args(
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None,
+        custom_args: list[str],
+    ) -> list[str]:
+        if launch_target_id:
+            launch_target = runtime._find_launch_target(launch_target_id)
+            if launch_target:
+                target_config = launch_target.plugin_config(self.id)
+                if target_config:
+                    return target_config.cli_args + custom_args
+            return list(custom_args)
+        return self._config(runtime).cli_args + custom_args
 
     def client_factory(
         self,
@@ -539,11 +560,17 @@ class CodexPlugin:
                 session_id,
                 request.cwd,
                 self.client_factory(
-                    runtime, session.launch_target_id, custom_args=list(request.args)
+                    runtime,
+                    session.launch_target_id,
+                    custom_args=self._effective_args(
+                        runtime, session.launch_target_id, request.args
+                    ),
                 ),
                 model=resolved_model,
                 effort=resolved_effort,
-                custom_args=list(request.args),
+                custom_args=self._effective_args(
+                    runtime, session.launch_target_id, request.args
+                ),
             )
         except Exception:
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)

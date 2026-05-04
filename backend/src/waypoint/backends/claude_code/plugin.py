@@ -231,6 +231,21 @@ class ClaudeCodePlugin:
         assert isinstance(config, ClaudeCodePluginConfig)
         return config
 
+    def _effective_args(
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None,
+        custom_args: list[str],
+    ) -> list[str]:
+        if launch_target_id:
+            launch_target = runtime._find_launch_target(launch_target_id)
+            if launch_target:
+                target_config = launch_target.plugin_config(self.id)
+                if target_config:
+                    return target_config.cli_args + custom_args
+            return list(custom_args)
+        return self._config(runtime).cli_args + custom_args
+
     def static_model_options(self, runtime: "SessionRuntime") -> list[Any]:
         # Plugin config carries the (configurable) Claude model catalogue.
         # Deployments patch the list via ``plugin_configs.claude_code.models``
@@ -461,7 +476,9 @@ class ClaudeCodePlugin:
                 permission_mode=session.permission_mode,
                 model=session.model,
                 effort=session.effort,
-                custom_args=list(session.args),
+                custom_args=self._effective_args(
+                    runtime, session.launch_target_id, session.args
+                ),
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(
@@ -639,7 +656,7 @@ class ClaudeCodePlugin:
             permission_mode=permission_mode,
             model=resolved_model,
             effort=resolved_effort,
-            args=list(request.args),
+            args=request.args,
         )
         runtime.storage.create_session(session)
         try:
@@ -651,7 +668,9 @@ class ClaudeCodePlugin:
                 permission_mode=session.permission_mode,
                 model=session.model,
                 effort=session.effort,
-                custom_args=list(session.args),
+                custom_args=self._effective_args(
+                    runtime, session.launch_target_id, session.args
+                ),
             )
         except (ClaudeCliError, FileNotFoundError, OSError) as exc:
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)

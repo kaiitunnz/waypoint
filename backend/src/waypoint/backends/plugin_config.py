@@ -16,7 +16,7 @@ the registry-aware validators on ``Settings`` and
 errors surface at startup rather than first runtime access.
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PluginConfig(BaseModel):
@@ -36,6 +36,8 @@ class PluginConfig(BaseModel):
     # ``capabilities.cli_binary``" so a default install Just Works.
     # The SSH-target counterpart is ``PluginLaunchTargetConfig.remote_bin``.
     local_bin: str | None = None
+    # Additional CLI arguments to pass to the agent binary when launched locally.
+    cli_args: list[str] = Field(default_factory=list)
 
 
 class PluginLaunchTargetConfig(BaseModel):
@@ -53,3 +55,5 @@ class PluginLaunchTargetConfig(BaseModel):
     # remote host. ``None`` means "fall back to the plugin's
     # ``capabilities.cli_binary``" so a default install Just Works.
     remote_bin: str | None = None
+    # Additional CLI arguments to pass to the agent binary on this specific target.
+    cli_args: list[str] = Field(default_factory=list)

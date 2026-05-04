@@ -277,7 +277,16 @@ async def test_transport_routes_calls_by_session_launch_target() -> None:
         },
     )
 
-    transport = OpenCodeTransport(runtime=object(), plugin=plugin)  # type: ignore[arg-type]
+    fake_runtime = cast(
+        Any,
+        SimpleNamespace(
+            _find_launch_target=lambda _id: None,
+            settings=SimpleNamespace(
+                plugin_config=lambda _id: SimpleNamespace(cli_args=[])
+            ),
+        ),
+    )
+    transport = OpenCodeTransport(runtime=fake_runtime, plugin=plugin)
     remote_session = SessionRecord(
         id="sess-remote",
         backend="opencode",

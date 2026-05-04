@@ -22,10 +22,14 @@ plugin_configs:
     # default_model_id: gpt-5
     # default_effort: high
     # local_bin: /opt/codex/bin/codex   # path on the local host; falls back to `codex`
+    # cli_args:
+    #   - "--verbose"
   claude_code:
     # default_model_id: opus
     # default_effort: high
     # local_bin: /opt/claude/bin/claude
+    # cli_args:
+    #   - "--dangerously-skip-permissions"
     # models:
     #   - id: opus
     #     label: Opus 4.7
@@ -34,6 +38,8 @@ plugin_configs:
     # default_model_id: anthropic/claude-sonnet-4-6
     # default_effort: high
     # local_bin: /opt/codex/bin/opencode
+    # cli_args:
+    #   - "--max-iterations=50"
 
 ssh_targets:
   - id: devbox
@@ -58,12 +64,18 @@ ssh_targets:
     plugin_configs:
       codex:
         # remote_bin: /opt/codex/bin/codex     # path on the remote host
+        # cli_args:
+        #   - "--verbose"
         config_overrides:
           - model_reasoning_effort="high"      # codex --config K=V
       claude_code:
         # remote_bin: /opt/claude/bin/claude
+        # cli_args:
+        #   - "--dangerously-skip-permissions"
       opencode:
         # remote_bin: /opt/codex/bin/opencode
+        # cli_args:
+        #   - "--max-iterations=50"
     default_cwd: "~"
     # Default `bash -ilc` (interactive + login) sources the full rcfile chain
     # so PATH from `.bashrc` (nvm/cargo/pyenv/etc.) is available. Switch to

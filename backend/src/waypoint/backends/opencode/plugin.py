@@ -170,6 +170,26 @@ class OpenCodePlugin:
         self._pending_tasks: set[asyncio.Task[Any]] = set()
         self._shutting_down = False
 
+    def _config(self, runtime: "SessionRuntime") -> OpenCodePluginConfig:
+        config = runtime.settings.plugin_config(self.id)
+        assert isinstance(config, OpenCodePluginConfig)
+        return config
+
+    def _effective_args(
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None,
+        custom_args: list[str],
+    ) -> list[str]:
+        if launch_target_id:
+            launch_target = runtime._find_launch_target(launch_target_id)
+            if launch_target:
+                target_config = launch_target.plugin_config(self.id)
+                if target_config:
+                    return target_config.cli_args + custom_args
+            return list(custom_args)
+        return self._config(runtime).cli_args + custom_args
+
     def _default_cwd(
         self, runtime: "SessionRuntime", launch_target_id: str | None
     ) -> str:
@@ -260,7 +280,11 @@ class OpenCodePlugin:
                         runtime,
                         session.launch_target_id,
                         session.cwd,
-                        custom_args=tuple(session.args),
+                        custom_args=tuple(
+                            self._effective_args(
+                                runtime, session.launch_target_id, session.args
+                            )
+                        ),
                     )
                     target_mode = adapter.get_pre_plan_mode(session.id) or "default"
                 except HTTPException:
@@ -525,7 +549,9 @@ class OpenCodePlugin:
             runtime,
             session.launch_target_id,
             session.cwd,
-            tuple(session.args),
+            tuple(
+                self._effective_args(runtime, session.launch_target_id, session.args)
+            ),
         )
         # Drop this session from any in-flight reconnect-loop target set so
         # an explicit terminate can't be silently undone by a later loop
@@ -552,7 +578,9 @@ class OpenCodePlugin:
             runtime,
             session.launch_target_id,
             session.cwd,
-            tuple(session.args),
+            tuple(
+                self._effective_args(runtime, session.launch_target_id, session.args)
+            ),
         )
         health = self._health.get(key)
         if health is not None:
@@ -571,7 +599,11 @@ class OpenCodePlugin:
                 runtime,
                 session.launch_target_id,
                 session.cwd,
-                tuple(session.args),
+                tuple(
+                    self._effective_args(
+                        runtime, session.launch_target_id, session.args
+                    )
+                ),
             )
         )
         if adapter is not None:
@@ -607,7 +639,12 @@ class OpenCodePlugin:
         self, runtime: "SessionRuntime", session: SessionRecord, mode: str
     ) -> None:
         adapter = self._require_adapter(
-            runtime, session.launch_target_id, session.cwd, tuple(session.args)
+            runtime,
+            session.launch_target_id,
+            session.cwd,
+            tuple(
+                self._effective_args(runtime, session.launch_target_id, session.args)
+            ),
         )
 
         if mode == "plan":
@@ -657,7 +694,12 @@ class OpenCodePlugin:
         if model is None:
             return
         adapter = self._require_adapter(
-            runtime, session.launch_target_id, session.cwd, tuple(session.args)
+            runtime,
+            session.launch_target_id,
+            session.cwd,
+            tuple(
+                self._effective_args(runtime, session.launch_target_id, session.args)
+            ),
         )
         success = await adapter.set_model(session.id, model)
         if not success:
@@ -673,7 +715,12 @@ class OpenCodePlugin:
         effort: str | None,
     ) -> bool:
         adapter = self._require_adapter(
-            runtime, session.launch_target_id, session.cwd, tuple(session.args)
+            runtime,
+            session.launch_target_id,
+            session.cwd,
+            tuple(
+                self._effective_args(runtime, session.launch_target_id, session.args)
+            ),
         )
         success = await adapter.set_effort(session.id, effort)
         if not success:
@@ -859,7 +906,12 @@ class OpenCodePlugin:
             return None
 
         adapter = self._require_adapter(
-            runtime, session.launch_target_id, session.cwd, tuple(session.args)
+            runtime,
+            session.launch_target_id,
+            session.cwd,
+            tuple(
+                self._effective_args(runtime, session.launch_target_id, session.args)
+            ),
         )
         rest = text[1:].split(maxsplit=1)
         command = rest[0] if rest else ""
@@ -894,7 +946,12 @@ class OpenCodePlugin:
         answers: list[dict[str, Any]] | None,
     ) -> SessionRecord:
         adapter = self._require_adapter(
-            runtime, session.launch_target_id, session.cwd, tuple(session.args)
+            runtime,
+            session.launch_target_id,
+            session.cwd,
+            tuple(
+                self._effective_args(runtime, session.launch_target_id, session.args)
+            ),
         )
         request_id = tool_use_id or adapter.current_question_id(session.id)
         if not request_id:
@@ -940,14 +997,20 @@ class OpenCodePlugin:
             runtime,
             session.launch_target_id,
             session.cwd,
-            tuple(session.args),
+            tuple(
+                self._effective_args(runtime, session.launch_target_id, session.args)
+            ),
         )
         try:
             adapter = await self._get_or_create_adapter(
                 runtime,
                 session.launch_target_id,
                 session.cwd,
-                custom_args=tuple(session.args),
+                custom_args=tuple(
+                    self._effective_args(
+                        runtime, session.launch_target_id, session.args
+                    )
+                ),
             )
         except Exception as exc:
             self._health_for(key).record_failure()
@@ -1160,7 +1223,13 @@ class OpenCodePlugin:
                 runtime,
                 launch_target_id,
                 request.cwd,
-                custom_args=tuple(request.args),
+                custom_args=tuple(
+                    self._effective_args(
+                        runtime,
+                        launch_target.id if launch_target else None,
+                        request.args,
+                    )
+                ),
             )
         except Exception as exc:
             raise HTTPException(
@@ -1189,7 +1258,7 @@ class OpenCodePlugin:
             permission_mode=permission_mode,
             model=resolved_model,
             effort=resolved_effort,
-            args=list(request.args),
+            args=request.args,
         )
         runtime.storage.create_session(session)
 

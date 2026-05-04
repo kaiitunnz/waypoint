@@ -16,12 +16,19 @@ class OpenCodeTransport(TransportAdapter):
         self._runtime = runtime
         self._plugin = plugin
 
+    def _effective_args(self, session: SessionRecord) -> tuple[str, ...]:
+        return tuple(
+            self._plugin._effective_args(
+                self._runtime, session.launch_target_id, session.args
+            )
+        )
+
     async def send_input(self, session: SessionRecord, text: str) -> None:
         adapter = await self._plugin._get_or_create_adapter(
             self._runtime,
             session.launch_target_id,
             session.cwd,
-            tuple(session.args),
+            self._effective_args(session),
         )
         await adapter.send_input(session.id, text)
 
@@ -30,7 +37,7 @@ class OpenCodeTransport(TransportAdapter):
             self._runtime,
             session.launch_target_id,
             session.cwd,
-            tuple(session.args),
+            self._effective_args(session),
         )
         await adapter.interrupt(session.id)
 
@@ -53,7 +60,7 @@ class OpenCodeTransport(TransportAdapter):
             self._runtime,
             session.launch_target_id,
             session.cwd,
-            tuple(session.args),
+            self._effective_args(session),
         )
         return await adapter.respond_to_permission(
             session.id, decision, text, approval_id
@@ -68,7 +75,7 @@ class OpenCodeTransport(TransportAdapter):
                 self._runtime,
                 session.launch_target_id,
                 session.cwd,
-                tuple(session.args),
+                self._effective_args(session),
             )
         )
         if adapter is None:
@@ -81,7 +88,7 @@ class OpenCodeTransport(TransportAdapter):
                 self._runtime,
                 session.launch_target_id,
                 session.cwd,
-                tuple(session.args),
+                self._effective_args(session),
             )
         )
         if adapter is None:

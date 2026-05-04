@@ -95,6 +95,7 @@ class SessionRuntime:
             target.id: target for target in self.settings.ssh_targets if target.enabled
         }
         self.monitor_tasks: dict[str, asyncio.Task[None]] = {}
+        self._restore_tasks: set[asyncio.Task[None]] = set()
         self.file_offsets: dict[str, int] = {}
         self.registry = registry or get_registry()
         self._transports: dict[str, TransportAdapter] = {
@@ -113,7 +114,12 @@ class SessionRuntime:
             if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
                 continue
             plugin = self.registry.plugin_for(session)
-            await plugin.restore_session(self, session)
+            task = asyncio.create_task(
+                plugin.restore_session(self, session),
+                name=f"restore-{session.id}",
+            )
+            self._restore_tasks.add(task)
+            task.add_done_callback(self._restore_tasks.discard)
         await self.scheduler.start()
 
     async def stop(self) -> None:
@@ -124,6 +130,13 @@ class SessionRuntime:
             with suppress(asyncio.CancelledError):
                 await task
         self.monitor_tasks.clear()
+        restore_tasks = list(self._restore_tasks)
+        for task in restore_tasks:
+            task.cancel()
+        for task in restore_tasks:
+            with suppress(asyncio.CancelledError):
+                await task
+        self._restore_tasks.clear()
         for plugin in self.registry.all():
             await plugin.shutdown(self)
         self.storage.close()

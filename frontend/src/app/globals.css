@@ -3934,6 +3934,10 @@ html[data-theme="light"] .session-pulse {
   background: rgba(240, 236, 226, 0.80);
 }
 
+html[data-theme="light"] .session-pulse.open.dim {
+  background: rgba(240, 236, 226, 0.80);
+}
+
 /* ── Composer textarea ── */
 html[data-theme="light"] .composer-textarea {
   background: rgba(248, 245, 238, 0.92);

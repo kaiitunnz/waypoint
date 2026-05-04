@@ -2,6 +2,7 @@ import { memo, useCallback, useState } from "react";
 
 import { fidelityFor, transportLabel } from "@/lib/backends";
 import { EventRecord, SessionTransport } from "@/lib/types";
+import { normalizeToolName } from "@/lib/events";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 
 function legacyCopy(text: string): boolean {
@@ -330,7 +331,7 @@ function readToolName(event: EventRecord): string | null {
   const meta = event.metadata as Record<string, unknown> | undefined;
   if (!meta) return null;
   if (typeof meta.tool_name === "string" && meta.tool_name) {
-    return meta.tool_name;
+    return normalizeToolName(meta.tool_name);
   }
   return null;
 }
@@ -563,7 +564,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function parseAskUserQuestion(event: EventRecord): AskUserQuestion[] | null {
-  if ((event.metadata?.tool_name as string | undefined) !== "AskUserQuestion") {
+  if (readToolName(event) !== "AskUserQuestion") {
     return null;
   }
   const payload = event.metadata?.payload as { input?: unknown } | undefined;

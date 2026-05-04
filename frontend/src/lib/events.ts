@@ -69,6 +69,39 @@ function readStringArray(
   return undefined;
 }
 
+const NORMALIZED_TOOL_NAMES: Record<string, string> = {
+  bash: "Bash",
+  read: "Read",
+  edit: "Edit",
+  multiedit: "MultiEdit",
+  write: "Write",
+  grep: "Grep",
+  glob: "Glob",
+  webfetch: "WebFetch",
+  websearch: "WebSearch",
+  task: "Task",
+  agent: "Agent",
+  todowrite: "TodoWrite",
+  askuserquestion: "AskUserQuestion",
+  question: "AskUserQuestion",
+};
+
+export function normalizeToolName(name: string | null | undefined): string | null {
+  if (!name) return null;
+  let normalized = name;
+  if (normalized.startsWith("default_api:")) {
+    normalized = normalized.slice("default_api:".length);
+  }
+  const lower = normalized.toLowerCase();
+  if (lower in NORMALIZED_TOOL_NAMES) {
+    return NORMALIZED_TOOL_NAMES[lower];
+  }
+  if (name.startsWith("default_api:") && normalized.length > 0) {
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  }
+  return normalized;
+}
+
 export function parseEvent(event: EventRecord): EventEnvelope {
   const metadata = event.metadata ?? {};
   const versionRaw = metadata.version;

@@ -38,6 +38,7 @@ import {
   useBackendCatalog,
 } from "@/lib/backends";
 import { clearToken } from "@/lib/store";
+import { normalizeToolName } from "@/lib/events";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import {
   AskAnswerEntry,
@@ -1975,10 +1976,9 @@ function UsageCard({ summary }: { summary: UsageSummary }) {
 }
 
 function ApprovalCard({ event, onDecide }: ApprovalCardProps) {
-  const toolName =
-    typeof event.metadata.tool_name === "string"
-      ? (event.metadata.tool_name as string)
-      : null;
+  const toolName = normalizeToolName(
+    typeof event.metadata.tool_name === "string" ? event.metadata.tool_name : null
+  );
   const toolInput =
     event.metadata.tool_input && typeof event.metadata.tool_input === "object"
       ? (event.metadata.tool_input as Record<string, unknown>)

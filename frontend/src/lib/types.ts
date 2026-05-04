@@ -84,6 +84,7 @@ export interface BackendCapabilities {
   supports_thread_import: boolean;
   supports_slash_compact: boolean;
   supports_approval_note: boolean;
+  supports_custom_cli_args: boolean;
   model_source: "static" | "live_rpc" | "none";
   approval_decisions: string[];
   effort_levels: string[];

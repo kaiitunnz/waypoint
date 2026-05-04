@@ -362,6 +362,7 @@ export default function HomePage() {
     title: string,
     model: string | null,
     effort: string | null,
+    args: string[] = [],
   ) {
     try {
       const session = await createSession(host, token, {
@@ -370,7 +371,7 @@ export default function HomePage() {
         launch_target_id: activeLaunchTargetId || null,
         title: title || null,
         source_mode: "managed",
-        args: [],
+        args,
         model,
         effort,
       });

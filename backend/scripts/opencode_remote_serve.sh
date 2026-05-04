@@ -19,11 +19,12 @@ _kill_proc() {
     kill -9 "$pid" 2>/dev/null || true
 }
 
-# Invoked via `bash -c SCRIPT BIN [CWD]`, which assigns BIN to $0 (the
-# script-name slot) and CWD to $1. Reading $0 here honors a configured
-# remote_bin path.
+# Invoked via `bash -c SCRIPT BIN CWD [ARGS…]`. $0=BIN, $1=CWD, and the
+# remaining positionals (after we shift CWD off) are extra `opencode serve`
+# flags forwarded via $@. Reading $0 here honors a configured remote_bin.
 OPENCODE_BIN=${0:-opencode}
 TARGET_CWD=${1:-}
+shift || true
 LOG=$(mktemp)
 PID=""
 
@@ -54,7 +55,7 @@ if [ -n "$TARGET_CWD" ]; then
     cd "$TARGET_CWD"
 fi
 
-"$OPENCODE_BIN" serve --hostname=127.0.0.1 --port=0 >"$LOG" 2>&1 &
+"$OPENCODE_BIN" serve --hostname=127.0.0.1 --port=0 "$@" >"$LOG" 2>&1 &
 PID=$!
 
 PORT=""

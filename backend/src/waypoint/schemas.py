@@ -90,6 +90,7 @@ class SessionRecord(BaseModel):
     permission_mode: str | None = None
     model: str | None = None
     effort: str | None = None
+    args: list[str] = Field(default_factory=list)
 
 
 class EventRecord(BaseModel):

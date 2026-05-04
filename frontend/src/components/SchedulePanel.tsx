@@ -62,6 +62,8 @@ export function SchedulePanel({
   const [permissionMode, setPermissionMode] = useState<string>("default");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
+  const [customArgsText, setCustomArgsText] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [modelInfo, setModelInfo] = useState<BackendModelListResponse | null>(null);
   const [modelsByBackend, setModelsByBackend] = useState<Record<string, BackendModelOption[]>>({});
   const [mode, setMode] = useState<Mode>("delay");
@@ -74,6 +76,8 @@ export function SchedulePanel({
     () => permissionModesFor(backend, catalog),
     [backend, catalog],
   );
+
+  const supportsCustomArgs = catalog.byId(backend)?.capabilities.supports_custom_cli_args ?? false;
 
   useEffect(() => setBackend(defaultBackend), [defaultBackend]);
   useEffect(() => setCwd(defaultCwd), [defaultCwd]);
@@ -142,6 +146,10 @@ export function SchedulePanel({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    const args = customArgsText
+      .split("\n")
+      .map((a) => a.trim())
+      .filter(Boolean);
     const payload: ScheduleCreateRequest = {
       backend,
       cwd,
@@ -150,7 +158,7 @@ export function SchedulePanel({
       permission_mode: permissionMode || null,
       model: model.trim() || null,
       effort: effort.trim() || null,
-      args: [],
+      args,
     };
     if (mode === "delay") {
       const minutes = Number.parseFloat(delayMinutes);
@@ -264,6 +272,44 @@ export function SchedulePanel({
             disabled={busy}
           />
         </div>
+        {supportsCustomArgs ? (
+          <div className={`advanced-section${showAdvanced ? " open" : ""}`}>
+            <button
+              type="button"
+              className="advanced-toggle"
+              onClick={() => setShowAdvanced((v) => !v)}
+              aria-expanded={showAdvanced}
+            >
+              <svg className="advanced-toggle-gear" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <path d="M6 7.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" fill="currentColor" opacity="0.9"/>
+                <path fillRule="evenodd" clipRule="evenodd" d="M4.95.75h2.1l.3 1.2a3.75 3.75 0 0 1 .87.5l1.17-.39.75 1.3-1 .77v.87l1 .76-.75 1.3-1.17-.39a3.75 3.75 0 0 1-.87.5l-.3 1.2H4.95l-.3-1.2a3.75 3.75 0 0 1-.87-.5l-1.17.39-.75-1.3 1-.76V5.1l-1-.77.75-1.3 1.17.39a3.75 3.75 0 0 1 .87-.5l.3-1.17ZM6 4.125A1.875 1.875 0 1 0 6 7.876 1.875 1.875 0 0 0 6 4.124Z" fill="currentColor" opacity="0.55"/>
+              </svg>
+              <span className="advanced-toggle-label">Advanced</span>
+              <span className="advanced-toggle-chevron" aria-hidden="true" />
+            </button>
+            <div className="advanced-body">
+              <div className="advanced-body-inner">
+                <label className="field advanced-args-field">
+                  <span>Custom CLI args</span>
+                  <textarea
+                    rows={3}
+                    value={customArgsText}
+                    onChange={(e) => setCustomArgsText(e.target.value)}
+                    placeholder={"One flag per line, e.g.\n--dangerously-skip-permissions"}
+                    disabled={busy}
+                    spellCheck={false}
+                    autoCapitalize="none"
+                    autoComplete="off"
+                    autoCorrect="off"
+                  />
+                </label>
+                <p className="advanced-warning">
+                  Passed directly to the CLI binary — use with caution.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
         <label className="field">
           <span>Initial prompt</span>
           <textarea

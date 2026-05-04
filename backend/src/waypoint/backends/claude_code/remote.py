@@ -45,6 +45,7 @@ def build_remote_claude_launch_factory(
         cli_mode: str,
         model: str | None = None,
         effort: str | None = None,
+        custom_args: list[str] | None = None,
     ) -> ClaudeLaunchSpec:
         cwd = cwd or target.default_cwd
         reverse_port = _random_reverse_tunnel_port()
@@ -89,6 +90,8 @@ def build_remote_claude_launch_factory(
             claude_args.extend(["--resume", claude_session_id])
         else:
             claude_args.extend(["--session-id", claude_session_id])
+        if custom_args:
+            claude_args.extend(custom_args)
         remote_command = _build_remote_claude_command(
             target=target,
             cwd=cwd,

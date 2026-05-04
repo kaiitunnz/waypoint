@@ -272,8 +272,8 @@ async def test_transport_routes_calls_by_session_launch_target() -> None:
     plugin._adapters = cast(
         Any,
         {
-            (None, "/tmp"): default_adapter,
-            ("ssh-1", "/tmp"): remote_adapter,
+            (None, "/tmp", ()): default_adapter,
+            ("ssh-1", "/tmp", ()): remote_adapter,
         },
     )
 
@@ -334,6 +334,7 @@ async def test_get_or_create_adapter_keys_by_cwd(
             on_agent_changed=None,
             on_server_died=None,
             workdir=None,
+            extra_args=(),
         ) -> None:
             self.workdir = workdir
 
@@ -378,6 +379,7 @@ async def test_get_or_create_adapter_normalizes_equivalent_cwds(
             on_agent_changed=None,
             on_server_died=None,
             workdir=None,
+            extra_args=(),
         ) -> None:
             self.workdir = workdir
 
@@ -613,7 +615,7 @@ async def test_import_thread_preserves_launch_target_id() -> None:
     fake_adapter = FakeAdapter()
 
     async def fake_get_or_create_adapter(
-        runtime, launch_target_id, cwd, *, user_initiated=False
+        runtime, launch_target_id, cwd, custom_args=(), *, user_initiated=False
     ):
         assert launch_target_id == "ssh-1"
         assert cwd == "/repo"
@@ -700,7 +702,7 @@ async def test_import_thread_keys_adapter_by_session_directory() -> None:
     cwds_seen: list[str | None] = []
 
     async def fake_get_or_create_adapter(
-        runtime, launch_target_id, cwd, *, user_initiated=False
+        runtime, launch_target_id, cwd, custom_args=(), *, user_initiated=False
     ):
         cwds_seen.append(cwd)
         return fake_adapter

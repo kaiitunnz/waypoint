@@ -3440,3 +3440,227 @@ details.tool-disclosure[open] .tool-glyph.todo {
     height: 32px;
   }
 }
+
+/* ─── Advanced / CLI-args disclosure widget ────────────────────────────────── */
+
+.advanced-section {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  overflow: hidden;
+  background: rgba(10, 13, 18, 0.5);
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.advanced-section.open {
+  border-color: rgba(200, 169, 106, 0.22);
+  box-shadow: 0 0 0 1px rgba(200, 169, 106, 0.07) inset;
+}
+
+/* ── Toggle row ── */
+.advanced-toggle {
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  background: transparent;
+  color: var(--muted-soft);
+  font-size: 0.73rem;
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease;
+  cursor: pointer;
+  border: none;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.advanced-toggle:hover {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.advanced-section.open .advanced-toggle {
+  color: var(--accent);
+  border-bottom: 1px solid rgba(200, 169, 106, 0.15);
+}
+
+/* Gear icon */
+.advanced-toggle-gear {
+  flex-shrink: 0;
+  color: currentColor;
+  transition: transform 400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.advanced-section.open .advanced-toggle-gear {
+  transform: rotate(60deg);
+  color: var(--accent);
+}
+
+.advanced-toggle-label {
+  flex: 1;
+}
+
+/* Animated chevron — two pseudo-element line segments */
+.advanced-toggle-chevron {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.advanced-toggle-chevron::before,
+.advanced-toggle-chevron::after {
+  content: "";
+  position: absolute;
+  width: 5.5px;
+  height: 1.5px;
+  background: currentColor;
+  border-radius: 1px;
+  top: 50%;
+  transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.advanced-toggle-chevron::before {
+  right: 50%;
+  margin-right: -0.5px;
+  transform: translateY(-50%) rotate(-45deg);
+  transform-origin: right center;
+}
+
+.advanced-toggle-chevron::after {
+  left: 50%;
+  margin-left: -0.5px;
+  transform: translateY(-50%) rotate(45deg);
+  transform-origin: left center;
+}
+
+.advanced-section.open .advanced-toggle-chevron::before {
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.advanced-section.open .advanced-toggle-chevron::after {
+  transform: translateY(-50%) rotate(-45deg);
+}
+
+/* ── Animated body ── */
+.advanced-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.advanced-section.open .advanced-body {
+  grid-template-rows: 1fr;
+}
+
+.advanced-body-inner {
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  gap: 10px;
+  padding: 0 14px;
+  transition: padding 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.advanced-section.open .advanced-body-inner {
+  padding: 14px 14px;
+}
+
+/* ── Terminal-style textarea ── */
+.advanced-args-field span {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  color: var(--muted-soft);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.advanced-args-field span::before {
+  content: "$";
+  color: var(--accent);
+  font-size: 0.78rem;
+  opacity: 0.7;
+}
+
+.advanced-args-field textarea {
+  font-family: var(--font-mono) !important;
+  font-size: 0.82rem !important;
+  line-height: 1.7;
+  resize: vertical;
+  min-height: 72px;
+  background: rgba(6, 8, 12, 0.8) !important;
+  color: var(--text-strong);
+  border: 1px solid rgba(100, 118, 148, 0.2) !important;
+  letter-spacing: 0.02em;
+  caret-color: var(--accent);
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.advanced-args-field textarea:focus {
+  border-color: rgba(200, 169, 106, 0.45) !important;
+  box-shadow: 0 0 0 3px rgba(200, 169, 106, 0.09) !important;
+  outline: none;
+}
+
+.advanced-args-field textarea:disabled {
+  opacity: 0.5;
+}
+
+.advanced-args-field textarea::placeholder {
+  color: var(--muted-soft);
+  opacity: 0.55;
+  font-style: italic;
+}
+
+/* ── Warning line ── */
+.advanced-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: rgba(217, 154, 74, 0.7);
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  letter-spacing: 0.03em;
+  line-height: 1.55;
+}
+
+.advanced-warning::before {
+  content: "⚠";
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  opacity: 0.85;
+  line-height: 1.55;
+}
+
+/* ── Mobile ── */
+@media (max-width: 720px) {
+  .advanced-toggle {
+    min-height: 46px;
+    padding: 0 16px;
+  }
+
+  .advanced-body-inner {
+    padding: 0 16px;
+  }
+
+  .advanced-section.open .advanced-body-inner {
+    padding: 16px 16px;
+  }
+
+  .advanced-args-field textarea {
+    min-height: 88px;
+    font-size: 0.88rem !important;
+  }
+}

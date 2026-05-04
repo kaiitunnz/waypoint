@@ -137,6 +137,7 @@ class OpenCodePlugin:
         supports_thread_import=True,
         supports_slash_compact=True,
         supports_approval_note=True,
+        supports_custom_cli_args=True,
         permission_modes=OPENCODE_PERMISSION_MODES,
         effort_levels=(),
         model_source=ModelSource.LIVE_RPC,
@@ -147,16 +148,24 @@ class OpenCodePlugin:
     )
 
     def __init__(self) -> None:
-        self._adapters: dict[tuple[str | None, str], OpenCodeAdapter] = {}
+        # Adapter key is (launch_target_id, normalized_cwd, extra_args).
+        # Sessions with distinct custom_cli_args get their own server process.
+        self._adapters: dict[
+            tuple[str | None, str, tuple[str, ...]], OpenCodeAdapter
+        ] = {}
         # Per-adapter health (cooldown after death + circuit breaker after
         # repeated launch failures). Keyed identically to ``_adapters`` so
         # one entry survives adapter object replacement.
-        self._health: dict[tuple[str | None, str], AdapterHealth] = {}
+        self._health: dict[tuple[str | None, str, tuple[str, ...]], AdapterHealth] = {}
         # Reconnect tasks keyed on adapter key so a single launch_target
         # never has more than one reconnect loop running concurrently.
-        self._reconnect_tasks: dict[tuple[str | None, str], asyncio.Task[None]] = {}
+        self._reconnect_tasks: dict[
+            tuple[str | None, str, tuple[str, ...]], asyncio.Task[None]
+        ] = {}
         # Sessions tracked by the reconnect loop per adapter key.
-        self._reconnect_targets: dict[tuple[str | None, str], set[str]] = {}
+        self._reconnect_targets: dict[
+            tuple[str | None, str, tuple[str, ...]], set[str]
+        ] = {}
         self._lock = asyncio.Lock()
         self._pending_tasks: set[asyncio.Task[Any]] = set()
         self._shutting_down = False
@@ -188,14 +197,19 @@ class OpenCodePlugin:
         runtime: "SessionRuntime",
         launch_target_id: str | None,
         cwd: str | None,
-    ) -> tuple[str | None, str]:
-        return launch_target_id, self._adapter_cwd(runtime, launch_target_id, cwd)
+        custom_args: tuple[str, ...] = (),
+    ) -> tuple[str | None, str, tuple[str, ...]]:
+        return (
+            launch_target_id,
+            self._adapter_cwd(runtime, launch_target_id, cwd),
+            custom_args,
+        )
 
     def _find_adapter_for_launch_target(
         self, launch_target_id: str | None
     ) -> OpenCodeAdapter | None:
-        for (adapter_launch_target_id, _), adapter in self._adapters.items():
-            if adapter_launch_target_id == launch_target_id:
+        for key, adapter in self._adapters.items():
+            if key[0] == launch_target_id:
                 return adapter
         return None
 
@@ -204,8 +218,8 @@ class OpenCodePlugin:
     ) -> list[OpenCodeAdapter]:
         return [
             adapter
-            for (adapter_launch_target_id, _), adapter in self._adapters.items()
-            if adapter_launch_target_id == launch_target_id
+            for key, adapter in self._adapters.items()
+            if key[0] == launch_target_id
         ]
 
     def _require_adapter(
@@ -213,8 +227,11 @@ class OpenCodePlugin:
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
         cwd: str | None = None,
+        custom_args: tuple[str, ...] = (),
     ) -> OpenCodeAdapter:
-        adapter = self._adapters.get(self._adapter_key(runtime, launch_target_id, cwd))
+        adapter = self._adapters.get(
+            self._adapter_key(runtime, launch_target_id, cwd, custom_args)
+        )
         if adapter is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -240,7 +257,10 @@ class OpenCodePlugin:
             if session.permission_mode == "plan":
                 try:
                     adapter = self._require_adapter(
-                        runtime, session.launch_target_id, session.cwd
+                        runtime,
+                        session.launch_target_id,
+                        session.cwd,
+                        custom_args=tuple(session.args),
                     )
                     target_mode = adapter.get_pre_plan_mode(session.id) or "default"
                 except HTTPException:
@@ -277,7 +297,9 @@ class OpenCodePlugin:
                     )
                 )
 
-    def _health_for(self, key: tuple[str | None, str]) -> AdapterHealth:
+    def _health_for(
+        self, key: tuple[str | None, str, tuple[str, ...]]
+    ) -> AdapterHealth:
         if key not in self._health:
             self._health[key] = AdapterHealth()
         return self._health[key]
@@ -287,11 +309,12 @@ class OpenCodePlugin:
         runtime: "SessionRuntime",
         launch_target_id: str | None,
         cwd: str | None,
+        custom_args: tuple[str, ...] = (),
         *,
         user_initiated: bool = False,
     ) -> OpenCodeAdapter:
         async with self._lock:
-            key = self._adapter_key(runtime, launch_target_id, cwd)
+            key = self._adapter_key(runtime, launch_target_id, cwd, custom_args)
             if key in self._adapters:
                 return self._adapters[key]
 
@@ -330,6 +353,7 @@ class OpenCodePlugin:
                 on_agent_changed=_on_agent_changed,
                 on_server_died=_on_server_died,
                 workdir=key[1],
+                extra_args=custom_args,
             )
             self._adapters[key] = adapter
             return adapter
@@ -337,7 +361,7 @@ class OpenCodePlugin:
     def _handle_server_died(
         self,
         runtime: "SessionRuntime",
-        key: tuple[str | None, str],
+        key: tuple[str | None, str, tuple[str, ...]],
         active_session_ids: list[str],
     ) -> None:
         # Synchronous bridge from the adapter's `_on_server_died` into the
@@ -353,7 +377,7 @@ class OpenCodePlugin:
     def _ensure_reconnect_task(
         self,
         runtime: "SessionRuntime",
-        key: tuple[str | None, str],
+        key: tuple[str | None, str, tuple[str, ...]],
     ) -> None:
         existing = self._reconnect_tasks.get(key)
         if existing is not None and not existing.done():
@@ -370,7 +394,7 @@ class OpenCodePlugin:
     async def _reconnect_loop(
         self,
         runtime: "SessionRuntime",
-        key: tuple[str | None, str],
+        key: tuple[str | None, str, tuple[str, ...]],
     ) -> None:
         # Capped exponential backoff that loops forever until either every
         # tracked session is gone (user deleted them) or the plugin is
@@ -393,7 +417,7 @@ class OpenCodePlugin:
                 # really touching SSH. The gate exists to fail-fast
                 # passive HTTP callers, not the loop.
                 adapter = await self._get_or_create_adapter(
-                    runtime, key[0], key[1] or None, user_initiated=True
+                    runtime, key[0], key[1] or None, key[2], user_initiated=True
                 )
                 await adapter.start()
                 health = self._health_for(key)
@@ -425,7 +449,7 @@ class OpenCodePlugin:
     async def _restore_after_reconnect(
         self,
         runtime: "SessionRuntime",
-        key: tuple[str | None, str],
+        key: tuple[str | None, str, tuple[str, ...]],
     ) -> None:
         targets = list(self._reconnect_targets.get(key, set()))
         for session_id in targets:
@@ -497,7 +521,12 @@ class OpenCodePlugin:
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        key = self._adapter_key(runtime, session.launch_target_id, session.cwd)
+        key = self._adapter_key(
+            runtime,
+            session.launch_target_id,
+            session.cwd,
+            tuple(session.args),
+        )
         # Drop this session from any in-flight reconnect-loop target set so
         # an explicit terminate can't be silently undone by a later loop
         # tick resurrecting it.
@@ -519,7 +548,12 @@ class OpenCodePlugin:
         # observing. Also re-arms a fresh reconnect attempt: cancel any
         # active loop so the next `_get_or_create_adapter` call drives
         # the SSH spinup synchronously instead of racing the loop.
-        key = self._adapter_key(runtime, session.launch_target_id, session.cwd)
+        key = self._adapter_key(
+            runtime,
+            session.launch_target_id,
+            session.cwd,
+            tuple(session.args),
+        )
         health = self._health.get(key)
         if health is not None:
             health.record_success()
@@ -533,7 +567,12 @@ class OpenCodePlugin:
         if self._shutting_down:
             return
         adapter = self._adapters.get(
-            self._adapter_key(runtime, session.launch_target_id, session.cwd)
+            self._adapter_key(
+                runtime,
+                session.launch_target_id,
+                session.cwd,
+                tuple(session.args),
+            )
         )
         if adapter is not None:
             task = asyncio.create_task(adapter.terminate_session(session.id))
@@ -567,7 +606,9 @@ class OpenCodePlugin:
     async def apply_permission_mode(
         self, runtime: "SessionRuntime", session: SessionRecord, mode: str
     ) -> None:
-        adapter = self._require_adapter(runtime, session.launch_target_id, session.cwd)
+        adapter = self._require_adapter(
+            runtime, session.launch_target_id, session.cwd, tuple(session.args)
+        )
 
         if mode == "plan":
             pre_plan_mode = (
@@ -615,7 +656,9 @@ class OpenCodePlugin:
     ) -> None:
         if model is None:
             return
-        adapter = self._require_adapter(runtime, session.launch_target_id, session.cwd)
+        adapter = self._require_adapter(
+            runtime, session.launch_target_id, session.cwd, tuple(session.args)
+        )
         success = await adapter.set_model(session.id, model)
         if not success:
             raise HTTPException(
@@ -629,7 +672,9 @@ class OpenCodePlugin:
         session: SessionRecord,
         effort: str | None,
     ) -> bool:
-        adapter = self._require_adapter(runtime, session.launch_target_id, session.cwd)
+        adapter = self._require_adapter(
+            runtime, session.launch_target_id, session.cwd, tuple(session.args)
+        )
         success = await adapter.set_effort(session.id, effort)
         if not success:
             raise HTTPException(
@@ -813,7 +858,9 @@ class OpenCodePlugin:
         if not text.startswith("/"):
             return None
 
-        adapter = self._require_adapter(runtime, session.launch_target_id, session.cwd)
+        adapter = self._require_adapter(
+            runtime, session.launch_target_id, session.cwd, tuple(session.args)
+        )
         rest = text[1:].split(maxsplit=1)
         command = rest[0] if rest else ""
 
@@ -846,7 +893,9 @@ class OpenCodePlugin:
         tool_use_id: str | None,
         answers: list[dict[str, Any]] | None,
     ) -> SessionRecord:
-        adapter = self._require_adapter(runtime, session.launch_target_id, session.cwd)
+        adapter = self._require_adapter(
+            runtime, session.launch_target_id, session.cwd, tuple(session.args)
+        )
         request_id = tool_use_id or adapter.current_question_id(session.id)
         if not request_id:
             raise HTTPException(
@@ -887,10 +936,18 @@ class OpenCodePlugin:
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        key = self._adapter_key(runtime, session.launch_target_id, session.cwd)
+        key = self._adapter_key(
+            runtime,
+            session.launch_target_id,
+            session.cwd,
+            tuple(session.args),
+        )
         try:
             adapter = await self._get_or_create_adapter(
-                runtime, session.launch_target_id, session.cwd
+                runtime,
+                session.launch_target_id,
+                session.cwd,
+                custom_args=tuple(session.args),
             )
         except Exception as exc:
             self._health_for(key).record_failure()
@@ -1100,7 +1157,10 @@ class OpenCodePlugin:
         launch_target_id = launch_target.id if launch_target else None
         try:
             adapter = await self._get_or_create_adapter(
-                runtime, launch_target_id, request.cwd
+                runtime,
+                launch_target_id,
+                request.cwd,
+                custom_args=tuple(request.args),
             )
         except Exception as exc:
             raise HTTPException(
@@ -1129,6 +1189,7 @@ class OpenCodePlugin:
             permission_mode=permission_mode,
             model=resolved_model,
             effort=resolved_effort,
+            args=list(request.args),
         )
         runtime.storage.create_session(session)
 

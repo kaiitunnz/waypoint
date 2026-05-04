@@ -116,7 +116,8 @@ class Storage:
                 pinned_at TEXT,
                 permission_mode TEXT,
                 model TEXT,
-                effort TEXT
+                effort TEXT,
+                args TEXT NOT NULL DEFAULT '[]'
             );
 
             CREATE TABLE IF NOT EXISTS events (
@@ -155,6 +156,7 @@ class Storage:
         self._ensure_column("scheduled_sessions", "permission_mode", "TEXT")
         self._ensure_column("scheduled_sessions", "model", "TEXT")
         self._ensure_column("scheduled_sessions", "effort", "TEXT")
+        self._ensure_column("sessions", "args", "TEXT NOT NULL DEFAULT '[]'")
         self.connection.commit()
 
     @_synchronized
@@ -169,8 +171,8 @@ class Storage:
                 id, backend, source, transport, title, cwd, launch_target_id,
                 repo_name, branch, status, created_at, updated_at, last_event_at,
                 raw_log_path, structured_log_path, transport_state, pinned_at,
-                permission_mode, model, effort
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                permission_mode, model, effort, args
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -193,6 +195,7 @@ class Storage:
                 session.permission_mode,
                 session.model,
                 session.effort,
+                json.dumps(list(session.args)),
             ),
         )
         self.connection.commit()
@@ -555,6 +558,12 @@ class Storage:
         except json.JSONDecodeError:
             decoded = {}
         payload["transport_state"] = decoded if isinstance(decoded, dict) else {}
+        raw_args = payload.get("args") or "[]"
+        try:
+            parsed_args = json.loads(raw_args)
+        except json.JSONDecodeError:
+            parsed_args = []
+        payload["args"] = parsed_args if isinstance(parsed_args, list) else []
         return SessionRecord.model_validate(payload)
 
     def _schedule_from_row(self, row: sqlite3.Row) -> ScheduledSessionRecord:

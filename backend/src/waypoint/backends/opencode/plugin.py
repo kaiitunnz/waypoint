@@ -354,11 +354,16 @@ class OpenCodePlugin:
             if not targets:
                 return
             try:
-                # User-initiated path bypasses cooldown via the dedicated
-                # entry point; the loop itself respects health to avoid
-                # hammering an unhealthy host.
+                # The loop is the dedicated retry mechanism — its own
+                # backoff schedule already paces attempts, so it must
+                # bypass the cooldown/quarantine gate. Without this,
+                # `record_death()` having just fired means the very
+                # first iteration is gated as a "failure", inflating
+                # `consecutive_failures` toward quarantine without ever
+                # really touching SSH. The gate exists to fail-fast
+                # passive HTTP callers, not the loop.
                 adapter = await self._get_or_create_adapter(
-                    runtime, key[0], key[1] or None
+                    runtime, key[0], key[1] or None, user_initiated=True
                 )
                 await adapter.start()
                 health = self._health_for(key)

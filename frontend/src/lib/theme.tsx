@@ -1,6 +1,14 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 type Theme = "light" | "dark";
 
@@ -8,11 +16,39 @@ const STORAGE_KEY = "waypoint-theme";
 const LIGHT_THEME_COLOR = "#f4f1eb";
 const DARK_THEME_COLOR = "#06080b";
 
+function readStoredTheme(): Theme | null {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored === "light" || stored === "dark") return stored;
+  } catch {
+    // localStorage may throw in private mode / locked-down environments.
+  }
+  return null;
+}
+
+function writeStoredTheme(theme: Theme) {
+  try {
+    localStorage.setItem(STORAGE_KEY, theme);
+  } catch {
+    // Best-effort; persistence simply won't survive a reload.
+  }
+}
+
 function resolveInitialTheme(): Theme {
-  if (typeof window === "undefined") return "dark";
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored === "light" || stored === "dark") return stored;
-  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  if (typeof document !== "undefined") {
+    // The inline anti-flash script in layout.tsx has already resolved this
+    // synchronously and applied it to <html>; mirror it so React's first
+    // render matches the DOM and consumers (e.g. ThemeToggle) don't show a
+    // mismatched icon for one frame.
+    const dataset = document.documentElement.dataset.theme;
+    if (dataset === "light" || dataset === "dark") return dataset;
+  }
+  if (typeof window !== "undefined") {
+    const stored = readStoredTheme();
+    if (stored) return stored;
+    if (window.matchMedia("(prefers-color-scheme: light)").matches) return "light";
+  }
+  return "dark";
 }
 
 function applyTheme(theme: Theme) {
@@ -41,32 +77,36 @@ export function useTheme() {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>("dark");
+  const [theme, setTheme] = useState<Theme>(resolveInitialTheme);
 
   useEffect(() => {
-    const initial = resolveInitialTheme();
-    setTheme(initial);
-    applyTheme(initial);
+    applyTheme(theme);
+  }, [theme]);
 
+  useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: light)");
     const onMqChange = (e: MediaQueryListEvent) => {
-      if (localStorage.getItem(STORAGE_KEY)) return;
-      const next: Theme = e.matches ? "light" : "dark";
-      setTheme(next);
-      applyTheme(next);
+      if (readStoredTheme()) return;
+      setTheme(e.matches ? "light" : "dark");
     };
     mq.addEventListener("change", onMqChange);
     return () => mq.removeEventListener("change", onMqChange);
   }, []);
 
+  // Read latest via ref so the updater stays pure (no side effects
+  // inside setState — strict mode would otherwise persist twice in dev).
+  const themeRef = useRef(theme);
+  useEffect(() => {
+    themeRef.current = theme;
+  }, [theme]);
+
   const toggle = useCallback(() => {
-    setTheme((prev) => {
-      const next: Theme = prev === "dark" ? "light" : "dark";
-      localStorage.setItem(STORAGE_KEY, next);
-      applyTheme(next);
-      return next;
-    });
+    const next: Theme = themeRef.current === "dark" ? "light" : "dark";
+    writeStoredTheme(next);
+    setTheme(next);
   }, []);
 
-  return <ThemeContext.Provider value={{ theme, toggle }}>{children}</ThemeContext.Provider>;
+  const value = useMemo<ThemeContextValue>(() => ({ theme, toggle }), [theme, toggle]);
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

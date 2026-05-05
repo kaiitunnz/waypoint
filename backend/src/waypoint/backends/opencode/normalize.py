@@ -175,21 +175,24 @@ def map_event(
         text = f"{tool_name}: {permission.get('permission', 'Permission request')}"
         patterns = permission.get("patterns", [])
         if isinstance(patterns, list) and patterns:
-            text += f" ({patterns[0]})"
+            rendered = ", ".join(p for p in patterns if isinstance(p, str) and p)
+            if rendered:
+                text += f" ({rendered})"
         return (
             EventKind.APPROVAL_REQUEST,
             text,
             {
                 "method": "permission.asked",
                 "payload": properties,
-                "permission_id": permission.get("id"),
+                # Single canonical id for the frontend (events.ts reads
+                # `approval.approval_id`). Older duplicate `permission_id`
+                # and top-level `approval_id` keys were never consumed.
                 "approval": {
                     "approval_id": permission.get("id"),
                     "tool_name": tool_name,
                     "tool_input": tool_input,
                     "decisions": ["approve", "acceptForSession", "decline"],
                 },
-                "approval_id": permission.get("id"),
                 "tool_name": tool_name,
                 "tool_input": tool_input,
                 "status": SessionStatus.WAITING_INPUT,

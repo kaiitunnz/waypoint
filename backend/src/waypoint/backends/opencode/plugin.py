@@ -202,13 +202,8 @@ class OpenCodePlugin:
                     adapter = self._require_adapter(
                         runtime, session.launch_target_id, session.cwd
                     )
-                    state = adapter._sessions.get(session.id)
-                    target_mode = (
-                        state.pre_plan_mode
-                        if state and state.pre_plan_mode
-                        else "default"
-                    )
-                except Exception:
+                    target_mode = adapter.get_pre_plan_mode(session.id) or "default"
+                except HTTPException:
                     target_mode = "default"
 
                 if target_mode == "plan":

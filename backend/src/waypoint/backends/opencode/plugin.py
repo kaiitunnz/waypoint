@@ -121,6 +121,7 @@ class OpenCodePlugin:
         self._adapters: dict[tuple[str | None, str], OpenCodeAdapter] = {}
         self._lock = asyncio.Lock()
         self._pending_tasks: set[asyncio.Task[Any]] = set()
+        self._shutting_down = False
 
     def _default_cwd(
         self, runtime: "SessionRuntime", launch_target_id: str | None
@@ -264,6 +265,8 @@ class OpenCodePlugin:
                     )
 
             def _on_agent_changed(sid: str, old: str | None, new: str | None) -> None:
+                if self._shutting_down:
+                    return
                 task = asyncio.create_task(
                     self._handle_agent_changed(runtime, sid, old, new)
                 )
@@ -288,9 +291,15 @@ class OpenCodePlugin:
         log.info("setting up opencode plugin")
 
     async def shutdown(self, runtime: "SessionRuntime") -> None:
-        for task in list(self._pending_tasks):
-            task.cancel()
+        self._shutting_down = True
+        pending = list(self._pending_tasks)
         self._pending_tasks.clear()
+        for task in pending:
+            task.cancel()
+        if pending:
+            # Await the cancelled tasks so a late wake-up cannot fire after
+            # the adapter (and its storage handle) is gone.
+            await asyncio.gather(*pending, return_exceptions=True)
         for adapter in list(self._adapters.values()):
             await adapter.shutdown()
         self._adapters.clear()
@@ -313,6 +322,8 @@ class OpenCodePlugin:
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
+        if self._shutting_down:
+            return
         adapter = self._adapters.get(
             self._adapter_key(runtime, session.launch_target_id, session.cwd)
         )

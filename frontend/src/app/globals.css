@@ -3197,6 +3197,20 @@ details.tool-disclosure[open] .tool-glyph.todo {
   flex-grow: 1;
 }
 
+.inline-title-input {
+  flex-grow: 1;
+  background: var(--bg-card);
+  color: var(--text-strong);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  outline: none;
+  min-width: 0;
+}
+
 .edit-title-btn {
   font-size: 1rem;
   padding: 0 4px;

@@ -172,7 +172,7 @@ class SessionApprovalRequest(BaseModel):
 
 
 class SessionTitleRequest(BaseModel):
-    title: str
+    title: str = Field(..., min_length=1, max_length=500)
 
 
 class SessionPermissionModeRequest(BaseModel):

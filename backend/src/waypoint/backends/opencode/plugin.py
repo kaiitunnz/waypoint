@@ -21,6 +21,7 @@ from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
     EventKind,
     SessionCreateRequest,
+    SessionEnvelope,
     SessionRecord,
     SessionSource,
     SessionStatus,
@@ -59,7 +60,6 @@ OPENCODE_SLASH_COMMANDS = (
     SlashCommandSpec(
         name="compact", description="Compact the session to reduce context"
     ),
-    SlashCommandSpec(name="resume", description="Resume a previous session"),
     SlashCommandSpec(name="new", description="Start a new session"),
 )
 
@@ -224,8 +224,6 @@ class OpenCodePlugin:
                     {"status": SessionStatus.RUNNING},
                     SessionStatus.RUNNING,
                 )
-
-                from waypoint.schemas import SessionEnvelope
 
                 await runtime.broadcast.publish(
                     SessionEnvelope(
@@ -423,9 +421,12 @@ class OpenCodePlugin:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"failed to set effort to {effort}",
             )
+        # OpenCode applies effort inline on the next prompt — no restart needed.
         return False
 
     def effort_swap_message(self, effort: str | None) -> str:
+        # Never published — apply_effort returns False so the runtime skips
+        # the announcement path entirely.
         return ""
 
     async def list_models(
@@ -599,13 +600,6 @@ class OpenCodePlugin:
             await runtime._record_system_event(
                 session.id,
                 "Compacting session...",
-                status=SessionStatus.RUNNING,
-            )
-            return runtime.get_session(session.id)
-        elif command == "resume":
-            await runtime._record_system_event(
-                session.id,
-                "Resuming session...",
                 status=SessionStatus.RUNNING,
             )
             return runtime.get_session(session.id)

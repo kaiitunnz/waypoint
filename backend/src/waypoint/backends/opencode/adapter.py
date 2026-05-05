@@ -28,7 +28,6 @@ log = logging.getLogger("waypoint.opencode")
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 0
 DEFAULT_TIMEOUT_SECONDS = 60.0
-DEFAULT_MODEL = "opencode/minimax-m2.5-free"
 
 PERMISSION_REPLIES = {"once", "always", "reject"}
 # OpenCode's reply schema is strictly {once|always|reject}. Waypoint and the
@@ -744,10 +743,9 @@ class OpenCodeAdapter:
             raise OpenCodeError(f"failed to send message: {exc}") from exc
 
     def _split_model_ref(self, model: str | None) -> dict[str, str] | None:
-        selected = model or DEFAULT_MODEL
-        if "/" not in selected:
+        if not model or "/" not in model:
             return None
-        provider_id, model_id = selected.split("/", 1)
+        provider_id, model_id = model.split("/", 1)
         if not provider_id or not model_id:
             return None
         return {"providerID": provider_id, "modelID": model_id}
@@ -837,6 +835,14 @@ class OpenCodeAdapter:
         if state is None:
             raise OpenCodeError(f"session not found: {session_id}")
         model = self._split_model_ref(state.model)
+        if model is None:
+            # Sessions created without an explicit model still have a model
+            # attached server-side; re-fetch and use whatever it reports.
+            sess = await self.get_session(state.opencode_session_id)
+            if isinstance(sess, dict):
+                sess_model = sess.get("model")
+                if isinstance(sess_model, str):
+                    model = self._split_model_ref(sess_model)
         if model is None:
             raise OpenCodeError("unable to resolve model for compaction")
         payload = {

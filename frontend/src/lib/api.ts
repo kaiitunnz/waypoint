@@ -206,7 +206,7 @@ export async function postAction(
   host: string,
   token: string,
   sessionId: string,
-  action: "interrupt" | "resume" | "terminate",
+  action: "interrupt" | "resume" | "terminate" | "reattach",
 ): Promise<void> {
   const response = await fetch(`${host}/api/sessions/${sessionId}/${action}`, {
     method: "POST",

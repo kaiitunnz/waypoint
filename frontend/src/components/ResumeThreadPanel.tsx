@@ -6,6 +6,8 @@ import type { BackendCatalog } from "@/lib/backends";
 import { humaniseBackend } from "@/lib/backends";
 import { Backend } from "@/lib/types";
 
+import { SearchInput } from "./SearchInput";
+
 // Shared shape for the per-row data the panel displays. Codex and
 // Claude thread summaries happen to be identical today; declaring it
 // here keeps the panel structurally typed instead of branching on the
@@ -116,6 +118,9 @@ export function ResumeThreadPanel({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_DESKTOP);
   const [importingId, setImportingId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+
+  const isExpanded = expanded || query.trim().length > 0;
 
   // Tighter pagination on phones — 5 rows fits without forcing a long
   // scroll inside an already-cramped viewport.
@@ -139,19 +144,33 @@ export function ResumeThreadPanel({
   }, [dualBackend, filterTouched, preferredBackend, supportedBackends]);
 
   const filteredThreads = useMemo(() => {
-    if (filter === "all") return allThreads;
-    return allThreads.filter((t) => t.backend === filter);
-  }, [allThreads, filter]);
+    let list = filter === "all" ? allThreads : allThreads.filter((t) => t.backend === filter);
+    
+    if (query.trim() !== "") {
+      const q = query.toLowerCase();
+      list = list.filter((t) => {
+        return (
+          t.title.toLowerCase().includes(q) ||
+          t.cwd.toLowerCase().includes(q) ||
+          (t.repo_name?.toLowerCase() || "").includes(q) ||
+          (t.branch?.toLowerCase() || "").includes(q) ||
+          (t.preview?.toLowerCase() || "").includes(q)
+        );
+      });
+    }
+    
+    return list;
+  }, [allThreads, filter, query]);
 
   // Page reset whenever the filter, thread set, or page size changes
   // underneath us (e.g. rotating phone landscape ⇄ portrait).
   useEffect(() => {
     setPage(1);
-  }, [filter, filteredThreads.length, pageSize]);
+  }, [filter, filteredThreads.length, pageSize, query]);
 
   const totalPages = Math.max(1, Math.ceil(filteredThreads.length / pageSize));
   const pageStart = (page - 1) * pageSize;
-  const visibleThreads = expanded
+  const visibleThreads = isExpanded
     ? filteredThreads.slice(pageStart, pageStart + pageSize)
     : filteredThreads.slice(0, COLLAPSED_VISIBLE);
 
@@ -203,13 +222,22 @@ export function ResumeThreadPanel({
         ) : null}
       </div>
 
+      <SearchInput
+        className="thread-panel-search"
+        value={query}
+        onChange={setQuery}
+        placeholder="Filter threads..."
+      />
+
       {loading ? (
         <p className="muted resume-panel-loading">Loading stored threads…</p>
       ) : null}
 
       {!loading && filteredThreads.length === 0 ? (
         <p className="muted resume-panel-empty">
-          {emptyHintFor(filter, dualBackend, targetLabel)}
+          {query.trim().length > 0
+            ? "No threads match your search."
+            : emptyHintFor(filter, dualBackend, targetLabel)}
         </p>
       ) : null}
 

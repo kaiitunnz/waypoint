@@ -214,6 +214,11 @@ class OpenCodePlugin:
                     target_mode = "default"
 
                 runtime.storage.update_session(session_id, permission_mode=target_mode)
+                # Drop the persisted plan-agent footprint so a later restore
+                # doesn't re-enter plan mode.
+                self._persist_transport_state(
+                    runtime, session, agent=None, pre_plan_mode=None
+                )
 
                 # Emit system note so transcript shows that plan mode exited
                 await runtime._emit_adapter_event(
@@ -346,15 +351,25 @@ class OpenCodePlugin:
         adapter = self._require_adapter(runtime, session.launch_target_id, session.cwd)
 
         if mode == "plan":
-            if session.permission_mode != "plan":
-                await adapter.set_pre_plan_mode(session.id, session.permission_mode)
+            pre_plan_mode = (
+                session.permission_mode
+                if session.permission_mode != "plan"
+                else session.transport_state.get("pre_plan_mode")
+            )
+            await adapter.set_pre_plan_mode(session.id, pre_plan_mode)
             await adapter.set_agent(session.id, "plan")
             # OpenCode's plan agent applies its own permissions natively,
             # so we drop to default ruleset for the session
             ruleset = _ruleset_for_mode("default") or []
+            self._persist_transport_state(
+                runtime, session, agent="plan", pre_plan_mode=pre_plan_mode
+            )
         else:
             await adapter.set_agent(session.id, None)
             ruleset = _ruleset_for_mode(mode) or []
+            self._persist_transport_state(
+                runtime, session, agent=None, pre_plan_mode=None
+            )
 
         success = await adapter.set_session_permission(session.id, ruleset)
         if not success:
@@ -362,6 +377,16 @@ class OpenCodePlugin:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"failed to set permission mode to {mode}",
             )
+
+    def _persist_transport_state(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        **updates: Any,
+    ) -> None:
+        merged = {**session.transport_state, **updates}
+        session.transport_state = merged
+        runtime.storage.update_session(session.id, transport_state=merged)
 
     async def apply_model(
         self,
@@ -657,8 +682,12 @@ class OpenCodePlugin:
                 session.cwd,
                 opencode_session_id,
                 model=session.model,
+                agent=session.transport_state.get("agent"),
                 effort=session.effort,
             )
+            pre_plan_mode = session.transport_state.get("pre_plan_mode")
+            if pre_plan_mode is not None:
+                await adapter.set_pre_plan_mode(session.id, pre_plan_mode)
         except Exception as exc:
             log.exception("opencode restore failed", extra={"session_id": session.id})
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)

@@ -1,11 +1,10 @@
 import asyncio
-import errno
 import json
 import logging
 import os
+import re
 import shutil
 import signal
-import socket
 import time
 from collections.abc import Callable
 from contextlib import suppress
@@ -68,19 +67,7 @@ class OpenCodeError(RuntimeError):
     pass
 
 
-def _port_in_use(host: str, port: int) -> bool:
-    """Probe whether *host:port* is already bound (orphaned OpenCode etc.)."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        # SO_REUSEADDR keeps us from getting a false positive on a
-        # TIME_WAIT socket left behind by the previous OpenCode boot.
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            sock.bind((host, port))
-        except OSError as exc:
-            if exc.errno in {errno.EADDRINUSE, errno.EACCES}:
-                return True
-            raise
-    return False
+_LISTENING_LINE = re.compile(r"listening on http://[^:\s]+:(\d+)")
 
 
 @dataclass
@@ -152,16 +139,12 @@ class OpenCodeAdapter:
             raise OpenCodeError("opencode binary not found on PATH")
         cwd = str(Path(self._workdir).expanduser()) if self._workdir else None
 
-        if self._port == 0:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.bind((self._host, 0))
-                self._port = sock.getsockname()[1]
-        elif _port_in_use(self._host, self._port):
-            raise OpenCodeError(
-                f"opencode port {self._host}:{self._port} is already in use; "
-                f"kill the orphan process before restarting"
-            )
         log.info("starting local opencode server on %s:%d", self._host, self._port)
+        # Spawn directly with the requested port (0 = let the kernel pick) and
+        # parse the bound port from the server's "listening on" log line. The
+        # previous bind/close/spawn dance left a TOCTOU window where another
+        # process could grab the port between probe and spawn; here EADDRINUSE
+        # surfaces as the child exiting with stderr we re-raise.
         self._server_process = await asyncio.create_subprocess_exec(
             binary,
             "serve",
@@ -172,6 +155,22 @@ class OpenCodeAdapter:
             start_new_session=True,
             cwd=cwd,
         )
+
+        bound_port = await self._read_local_listening_port()
+        if bound_port is None:
+            stderr = b""
+            proc = self._server_process
+            if proc is not None and proc.stderr is not None:
+                with suppress(Exception):
+                    stderr = await asyncio.wait_for(proc.stderr.read(), timeout=1.0)
+            self._terminate_server_process()
+            await self._await_server_process_exit(timeout=2.0)
+            raise OpenCodeError(
+                f"opencode server failed to bind {self._host}:{self._port}: "
+                f"{stderr.decode(errors='replace').strip() or 'no listening line emitted'}"
+            )
+
+        self._port = bound_port
         self._client = LocalOpenCodeClient(f"http://{self._host}:{self._port}")
         try:
             await self._wait_for_server()
@@ -181,6 +180,25 @@ class OpenCodeAdapter:
             self._client = None
             self._terminate_server_process()
             raise OpenCodeError(f"failed to start opencode server: {exc}") from exc
+
+    async def _read_local_listening_port(self, timeout: float = 30.0) -> int | None:
+        proc = self._server_process
+        if proc is None or proc.stdout is None:
+            return None
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if proc.returncode is not None:
+                return None
+            try:
+                line_bytes = await asyncio.wait_for(proc.stdout.readline(), timeout=0.5)
+            except TimeoutError:
+                continue
+            if not line_bytes:
+                return None
+            match = _LISTENING_LINE.search(line_bytes.decode("utf-8", errors="replace"))
+            if match:
+                return int(match.group(1))
+        return None
 
     async def _start_remote(self) -> None:
         assert self._launch_target is not None
@@ -523,21 +541,22 @@ class OpenCodeAdapter:
                     return self._sessions.get(session_id)
         return None
 
-    def _extract_session_id(self, value: Any) -> str | None:
-        if isinstance(value, dict):
-            session_id = value.get("sessionID")
-            if isinstance(session_id, str) and session_id:
-                return session_id
-            for nested in value.values():
-                found = self._extract_session_id(nested)
-                if found:
-                    return found
+    def _extract_session_id(self, properties: Any) -> str | None:
+        # Only consult the known carriers OpenCode uses, in priority order.
+        # Recursing through arbitrary nested dicts/lists would let a stray
+        # field (e.g. an unrelated `sessionID` inside a tool's `metadata`)
+        # mis-route an event.
+        if not isinstance(properties, dict):
             return None
-        if isinstance(value, list):
-            for nested in value:
-                found = self._extract_session_id(nested)
-                if found:
-                    return found
+        direct = properties.get("sessionID")
+        if isinstance(direct, str) and direct:
+            return direct
+        for key in ("info", "part"):
+            nested = properties.get(key)
+            if isinstance(nested, dict):
+                nested_id = nested.get("sessionID")
+                if isinstance(nested_id, str) and nested_id:
+                    return nested_id
         return None
 
     def _update_pending_state(

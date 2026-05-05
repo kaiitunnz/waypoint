@@ -2168,6 +2168,12 @@ details.tool-disclosure[open] .tool-glyph.todo {
   z-index: 10;
 }
 
+@media (pointer: coarse) {
+  .composer-resize-handle {
+    display: none;
+  }
+}
+
 .composer::before {
   content: "";
   position: absolute;
@@ -3458,6 +3464,10 @@ details.tool-disclosure[open] .tool-glyph.todo {
   }
 
   .composer-shortcut {
+    display: none;
+  }
+
+  .composer-resize-handle {
     display: none;
   }
 

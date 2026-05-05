@@ -15,5 +15,9 @@ def build_remote_serve_args(
     opencode_bin: str,
     cwd: str | None = None,
 ) -> tuple[str, ...]:
-    cmd = ["bash", "-c", REMOTE_SERVE_SCRIPT, opencode_bin]
-    return with_ssh_keepalive(target.build_remote_exec_args(cmd, cwd))
+    # Pass cwd as a positional arg to the inner `bash -c SCRIPT BIN CWD` so
+    # the cd happens inside the clean (rcfile-free) subshell. Doing the cd
+    # in the outer `bash -ilc` is fragile when user rcfiles wrap `cd`
+    # (oh-my-bash plugins do) — see the comment in opencode_remote_serve.sh.
+    cmd = ["bash", "-c", REMOTE_SERVE_SCRIPT, opencode_bin, cwd or ""]
+    return with_ssh_keepalive(target.build_remote_exec_args(cmd, None))

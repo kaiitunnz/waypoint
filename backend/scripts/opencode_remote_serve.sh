@@ -19,9 +19,11 @@ _kill_proc() {
     kill -9 "$pid" 2>/dev/null || true
 }
 
-# Invoked via `bash -c SCRIPT BIN`, which assigns BIN to $0 (the script-name
-# slot), not $1. Reading $0 here honors a configured remote_bin path.
+# Invoked via `bash -c SCRIPT BIN [CWD]`, which assigns BIN to $0 (the
+# script-name slot) and CWD to $1. Reading $0 here honors a configured
+# remote_bin path.
 OPENCODE_BIN=${0:-opencode}
+TARGET_CWD=${1:-}
 LOG=$(mktemp)
 PID=""
 
@@ -29,6 +31,22 @@ PID=""
 # `read` returning, or a signal from SSH closing the channel) so we
 # never leave the server orphaned on the remote host.
 trap '_kill_proc "$PID"; rm -f "$LOG"' EXIT HUP INT TERM
+
+# Do our own cd here rather than letting the outer `bash -ilc 'cd ... &&
+# exec'` do it. The outer shell sources the user's rc files, and any
+# plugin that wraps `cd` (e.g. oh-my-bash's auto-ls / goto helpers) can
+# turn `cd ~/foo` into `cd "$BASE/~/foo"` — concatenating the literal
+# tilde with whatever the wrapper considers a base path. Doing the cd
+# in this clean `bash -c` subshell sidesteps those wrappers entirely;
+# we manually resolve a leading `~` to `$HOME` so the user can keep
+# tilde-prefixed default_cwd values.
+if [ -n "$TARGET_CWD" ]; then
+    case "$TARGET_CWD" in
+        "~") TARGET_CWD="$HOME" ;;
+        "~/"*) TARGET_CWD="$HOME/${TARGET_CWD#"~/"}" ;;
+    esac
+    cd "$TARGET_CWD"
+fi
 
 "$OPENCODE_BIN" serve --hostname=127.0.0.1 --port=0 >"$LOG" 2>&1 &
 PID=$!

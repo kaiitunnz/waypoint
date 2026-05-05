@@ -31,6 +31,7 @@ from waypoint.schemas import (
     SessionInputRequest,
     SessionModelRequest,
     SessionPermissionModeRequest,
+    SessionTitleRequest,
     TerminalSnapshot,
 )
 from waypoint.settings import Settings, load_settings
@@ -287,6 +288,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # graceful path won't complete.
         await context.runtime.delete(session_id, force=force)
         return {"deleted": session_id}
+
+    @app.patch("/api/sessions/{session_id}/title")
+    async def session_set_title(
+        session_id: str,
+        body: SessionTitleRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.set_title(session_id, body.title)
+        return {"session": session.model_dump(mode="json")}
 
     @app.post("/api/sessions/{session_id}/mode")
     async def session_set_mode(

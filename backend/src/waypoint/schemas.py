@@ -171,6 +171,10 @@ class SessionApprovalRequest(BaseModel):
     approval_id: str | None = None
 
 
+class SessionTitleRequest(BaseModel):
+    title: str
+
+
 class SessionPermissionModeRequest(BaseModel):
     mode: str
 

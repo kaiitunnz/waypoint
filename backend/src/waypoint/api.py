@@ -290,6 +290,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session = await context.runtime.resume(session_id)
         return {"session": session.model_dump(mode="json")}
 
+    @app.post("/api/sessions/{session_id}/reattach")
+    async def session_reattach(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        # Distinct from /resume (tmux's "wake up an idle pane"): /reattach
+        # re-establishes a structured backend's connection after EXITED/ERROR
+        # without requiring the user to send a message first.
+        session = await context.runtime.reattach(session_id)
+        return {"session": session.model_dump(mode="json")}
+
     @app.post("/api/sessions/{session_id}/terminate")
     async def session_terminate(
         session_id: str,
@@ -302,8 +313,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def session_delete(
         session_id: str,
         _: Annotated[str, Depends(token_dependency())],
+        force: Annotated[bool, Query()] = False,
     ) -> Any:
-        await context.runtime.delete(session_id)
+        # `force=true` skips terminate failures entirely — last-resort escape
+        # hatch when the adapter is wedged (SSH stuck, etc.) and the
+        # graceful path won't complete.
+        await context.runtime.delete(session_id, force=force)
         return {"deleted": session_id}
 
     @app.post("/api/sessions/{session_id}/mode")

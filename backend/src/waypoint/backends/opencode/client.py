@@ -8,6 +8,10 @@ from typing import Any, Protocol
 
 import aiohttp
 
+from waypoint.backends.opencode.connection_config import (
+    http_control_timeout,
+    with_ssh_keepalive,
+)
 from waypoint.launch_targets import SshLaunchTargetConfig
 
 log = logging.getLogger("waypoint.opencode.client")
@@ -16,9 +20,21 @@ log = logging.getLogger("waypoint.opencode.client")
 # exceed aiohttp's 64 KiB defaults. 256 KiB matches what OpenCode itself
 # tolerates upstream.
 _SSE_BUFFER_BYTES = 256 * 1024
-_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15)
 # SSE is intentionally long-lived; only bound the initial connect.
 _STREAM_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=None)
+# Long-running HTTP calls (summarize, prompt) are exempt from any
+# application-layer ceiling; the connect handshake still needs a bound so
+# a frozen DNS lookup or syn-loss doesn't wedge forever.
+_LONG_RUNNING_TIMEOUT = aiohttp.ClientTimeout(
+    total=None, sock_connect=10, sock_read=None
+)
+
+
+def _control_timeout() -> aiohttp.ClientTimeout:
+    seconds = http_control_timeout()
+    if seconds <= 0:
+        return aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=None)
+    return aiohttp.ClientTimeout(total=seconds)
 
 
 class OpenCodeHttpClient(Protocol):
@@ -28,6 +44,7 @@ class OpenCodeHttpClient(Protocol):
         path: str,
         json_data: dict[str, Any] | None = None,
         params: dict[str, str] | None = None,
+        long_running: bool = False,
     ) -> Any: ...
     async def patch(
         self, path: str, json_data: dict[str, Any] | None = None
@@ -47,7 +64,7 @@ class LocalOpenCodeClient:
                 max_line_size=_SSE_BUFFER_BYTES,
                 max_field_size=_SSE_BUFFER_BYTES,
                 read_bufsize=_SSE_BUFFER_BYTES,
-                timeout=_REQUEST_TIMEOUT,
+                timeout=_control_timeout(),
             )
         return self._session
 
@@ -62,10 +79,15 @@ class LocalOpenCodeClient:
         path: str,
         json_data: dict[str, Any] | None = None,
         params: dict[str, str] | None = None,
+        long_running: bool = False,
     ) -> Any:
         client = self._require_session()
+        timeout = _LONG_RUNNING_TIMEOUT if long_running else _control_timeout()
         async with client.post(
-            f"{self.base_url}{path}", json=json_data, params=params
+            f"{self.base_url}{path}",
+            json=json_data,
+            params=params,
+            timeout=timeout,
         ) as resp:
             resp.raise_for_status()
             if resp.status == 204:
@@ -116,12 +138,16 @@ class RemoteOpenCodeClient:
         self._sse_process: asyncio.subprocess.Process | None = None
         self._sse_stderr_task: asyncio.Task[None] | None = None
 
+    def _build_ssh_argv(self, command: list[str]) -> tuple[str, ...]:
+        return with_ssh_keepalive(self.target.build_remote_exec_args(command, self.cwd))
+
     async def _run_curl(
         self,
         method: str,
         path: str,
         json_data: dict[str, Any] | None,
         params: dict[str, str] | None,
+        long_running: bool = False,
     ) -> Any:
         url = f"{self.base_url}{path}"
         if params:
@@ -142,7 +168,7 @@ class RemoteOpenCodeClient:
 
         curl_args.append(url)
 
-        args = self.target.build_remote_exec_args(curl_args, self.cwd)
+        args = self._build_ssh_argv(curl_args)
 
         proc = await asyncio.create_subprocess_exec(
             *args,
@@ -151,7 +177,32 @@ class RemoteOpenCodeClient:
             stderr=asyncio.subprocess.PIPE,
         )
 
-        stdout, stderr = await proc.communicate(input=input_data)
+        # Long-running calls (summarize, etc.) skip the app-layer ceiling
+        # entirely; SSH ServerAlive surfaces a dead link as a clean exit.
+        # Tiny control-plane calls cap at HTTP_CONTROL_TIMEOUT as a
+        # belt-and-suspenders against truly stuck subprocesses.
+        timeout: float | None
+        if long_running:
+            timeout = None
+        else:
+            seconds = http_control_timeout()
+            timeout = float(seconds) if seconds > 0 else None
+
+        try:
+            if timeout is None:
+                stdout, stderr = await proc.communicate(input=input_data)
+            else:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(input=input_data), timeout=timeout
+                )
+        except TimeoutError:
+            with suppress(ProcessLookupError):
+                proc.kill()
+            with suppress(Exception):
+                await proc.wait()
+            raise RuntimeError(
+                f"curl exceeded control timeout ({timeout}s): {method} {url}"
+            ) from None
 
         if proc.returncode != 0:
             err_lines = [
@@ -186,8 +237,11 @@ class RemoteOpenCodeClient:
         path: str,
         json_data: dict[str, Any] | None = None,
         params: dict[str, str] | None = None,
+        long_running: bool = False,
     ) -> Any:
-        return await self._run_curl("POST", path, json_data, params)
+        return await self._run_curl(
+            "POST", path, json_data, params, long_running=long_running
+        )
 
     async def patch(self, path: str, json_data: dict[str, Any] | None = None) -> Any:
         return await self._run_curl("PATCH", path, json_data, None)
@@ -195,7 +249,7 @@ class RemoteOpenCodeClient:
     async def stream_events(self, path: str) -> AsyncGenerator[str, None]:
         url = f"{self.base_url}{path}"
         curl_args = ["curl", "-s", "-N", url]
-        args = self.target.build_remote_exec_args(curl_args, self.cwd)
+        args = self._build_ssh_argv(curl_args)
 
         # `limit=` raises the StreamReader's per-read cap so a single
         # tool.output frame larger than 64 KiB doesn't bring the SSE

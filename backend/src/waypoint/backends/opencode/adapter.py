@@ -89,6 +89,7 @@ class OpenCodeSessionState:
 
 
 AgentChangedCallback = Callable[[str, str | None, str | None], Any]
+ServerDiedCallback = Callable[[list[str]], Any]
 
 
 class OpenCodeAdapter:
@@ -100,6 +101,7 @@ class OpenCodeAdapter:
         port: int = DEFAULT_PORT,
         launch_target: SshLaunchTargetConfig | None = None,
         on_agent_changed: AgentChangedCallback | None = None,
+        on_server_died: ServerDiedCallback | None = None,
         workdir: str | None = None,
     ) -> None:
         self._emit_event = emit_event
@@ -108,6 +110,7 @@ class OpenCodeAdapter:
         self._port = port
         self._launch_target = launch_target
         self._on_agent_changed = on_agent_changed
+        self._on_server_died_callback = on_server_died
         self._workdir = workdir
         self._sessions: dict[str, OpenCodeSessionState] = {}
         self._remote_sessions: dict[str, str] = {}
@@ -343,6 +346,10 @@ class OpenCodeAdapter:
         active_sessions = [
             state for state in self._sessions.values() if not state.closing
         ]
+        # Snapshot ids before we clear `_sessions` so the plugin's
+        # auto-reconnect loop knows which sessions to restore once the
+        # remote comes back.
+        active_session_ids = [state.session_id for state in active_sessions]
 
         for state in active_sessions:
             try:
@@ -373,6 +380,14 @@ class OpenCodeAdapter:
         self._server_process = None
         self._started = False
         log.info("opencode adapter reset after server death; ready for restart")
+
+        if self._on_server_died_callback is not None:
+            try:
+                result = self._on_server_died_callback(active_session_ids)
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception:
+                log.exception("on_server_died callback failed")
 
     async def _listen_events(self) -> None:
         # OpenCode's /event stream does not support resume: events are emitted
@@ -755,8 +770,14 @@ class OpenCodeAdapter:
             payload["agent"] = state.agent
 
         try:
+            # `prompt_async` returns once the server has accepted the work —
+            # results stream back via SSE. The accept itself is cheap, but
+            # mark long_running so a slow-link burst of work tokens past
+            # the control timeout doesn't cause us to spuriously kill it.
             await client.post(
-                f"/session/{state.opencode_session_id}/prompt_async", json_data=payload
+                f"/session/{state.opencode_session_id}/prompt_async",
+                json_data=payload,
+                long_running=True,
             )
         except Exception as exc:
             raise OpenCodeError(f"failed to send message: {exc}") from exc
@@ -871,9 +892,12 @@ class OpenCodeAdapter:
         }
         client = self._require_client()
         try:
+            # Summarization can take minutes on large transcripts; let
+            # SSH/TCP keepalive be the only liveness signal.
             await client.post(
                 f"/session/{state.opencode_session_id}/summarize",
                 json_data=payload,
+                long_running=True,
             )
         except Exception as exc:
             raise OpenCodeError(f"failed to compact session: {exc}") from exc

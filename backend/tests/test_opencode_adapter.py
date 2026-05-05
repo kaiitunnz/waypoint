@@ -51,9 +51,10 @@ async def test_compact_session_refetches_model_when_unpinned() -> None:
             assert path == "/session/ses_1"
             return {"model": "opencode/auto-default"}
 
-        async def post(self, path, json_data=None, params=None):
+        async def post(self, path, json_data=None, params=None, long_running=False):
             posted["path"] = path
             posted["json_data"] = json_data
+            posted["long_running"] = long_running
             return {}
 
     adapter._client = _FakeClient()  # type: ignore[assignment]

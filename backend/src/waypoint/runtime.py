@@ -111,7 +111,12 @@ class SessionRuntime:
 
     async def start(self) -> None:
         for session in self.storage.list_sessions():
-            if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
+            # ERROR sessions get one passive restore attempt at boot — the
+            # plugin's restore_session is responsible for tagging them
+            # back to ERROR if reattach fails, which the auto-reconnect
+            # loop (or the user's /reattach button) can then retry.
+            # EXITED stays skipped: that's a terminal user choice.
+            if session.status == SessionStatus.EXITED:
                 continue
             plugin = self.registry.plugin_for(session)
             task = asyncio.create_task(
@@ -321,11 +326,26 @@ class SessionRuntime:
         session = self.get_session(session_id)
         if session.status == SessionStatus.EXITED:
             return session
-        await self.transport_for(session).terminate(session)
+        # Route through the plugin (not the transport) so a session whose
+        # adapter slot was never warmed in this process — e.g. an opencode
+        # session terminated while the user's active backend is codex —
+        # cleans up gracefully instead of 503'ing on `_require_adapter`.
+        # Plugin hooks already do soft `.get()` lookups and no-op when the
+        # adapter is missing.
+        plugin = self.registry.plugin_for(session)
+        await plugin.terminate_session(self, session)
         await self._record_system_event(
             session.id, "Session terminated", status=SessionStatus.EXITED
         )
         return self.storage.update_session(session.id, status=SessionStatus.EXITED)
+
+    async def reattach(self, session_id: str) -> SessionRecord:
+        # Explicit "reconnect this session" without sending a message.
+        # Promotes the existing _reattach_session helper to a first-class
+        # operation so the frontend can offer a button instead of forcing
+        # users to type into a session they want to revive.
+        session = self.get_session(session_id)
+        return await self._reattach_session(session)
 
     async def _reattach_session(self, session: SessionRecord) -> SessionRecord:
         # ERROR sessions reach this path while the prior adapter state may
@@ -342,6 +362,12 @@ class SessionRuntime:
                 detail="this session cannot be reattached after exit",
             )
         await plugin.terminate_session(self, session)
+        # User-initiated retry: bypass any per-target cooldown / circuit
+        # breaker so the click takes effect immediately. Plugins without
+        # this opt-in hook ignore the call.
+        clear_cooldown = getattr(plugin, "clear_health_for_user_retry", None)
+        if clear_cooldown is not None:
+            clear_cooldown(self, session)
         await plugin.restore_session(self, session)
         # _restore_*_session swallows failures (it tags the session ERROR or
         # EXITED and emits a system_note instead of raising). Re-read storage
@@ -356,10 +382,18 @@ class SessionRuntime:
             )
         return refreshed
 
-    async def delete(self, session_id: str) -> None:
+    async def delete(self, session_id: str, *, force: bool = False) -> None:
         session = self.get_session(session_id)
         if session.status != SessionStatus.EXITED:
-            await self.terminate(session_id)
+            if force:
+                # Last-resort path for sessions whose adapter is wedged
+                # (e.g. SSH stuck and the plugin's terminate path can't
+                # complete). Best-effort terminate, then drop the row no
+                # matter what.
+                with suppress(Exception):
+                    await self.terminate(session_id)
+            else:
+                await self.terminate(session_id)
         self.storage.delete_session(session_id)
         self.registry.plugin_for(session).on_session_deleted(self, session)
         await self.broadcast.publish(

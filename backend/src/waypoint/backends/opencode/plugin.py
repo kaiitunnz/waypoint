@@ -15,6 +15,7 @@ from waypoint.backends.capabilities import (
     SlashCommandSpec,
 )
 from waypoint.backends.opencode.adapter import OpenCodeAdapter, OpenCodeError
+from waypoint.backends.opencode.health import AdapterHealth
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
@@ -119,6 +120,15 @@ class OpenCodePlugin:
 
     def __init__(self) -> None:
         self._adapters: dict[tuple[str | None, str], OpenCodeAdapter] = {}
+        # Per-adapter health (cooldown after death + circuit breaker after
+        # repeated launch failures). Keyed identically to ``_adapters`` so
+        # one entry survives adapter object replacement.
+        self._health: dict[tuple[str | None, str], AdapterHealth] = {}
+        # Reconnect tasks keyed on adapter key so a single launch_target
+        # never has more than one reconnect loop running concurrently.
+        self._reconnect_tasks: dict[tuple[str | None, str], asyncio.Task[None]] = {}
+        # Sessions tracked by the reconnect loop per adapter key.
+        self._reconnect_targets: dict[tuple[str | None, str], set[str]] = {}
         self._lock = asyncio.Lock()
         self._pending_tasks: set[asyncio.Task[Any]] = set()
         self._shutting_down = False
@@ -237,16 +247,31 @@ class OpenCodePlugin:
                     )
                 )
 
+    def _health_for(self, key: tuple[str | None, str]) -> AdapterHealth:
+        if key not in self._health:
+            self._health[key] = AdapterHealth()
+        return self._health[key]
+
     async def _get_or_create_adapter(
         self,
         runtime: "SessionRuntime",
         launch_target_id: str | None,
         cwd: str | None,
+        *,
+        user_initiated: bool = False,
     ) -> OpenCodeAdapter:
         async with self._lock:
             key = self._adapter_key(runtime, launch_target_id, cwd)
             if key in self._adapters:
                 return self._adapters[key]
+
+            health = self._health_for(key)
+            allowed, reason = health.can_attempt(user_initiated=user_initiated)
+            if not allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=reason or "opencode adapter temporarily unavailable",
+                )
 
             launch_target = None
             if launch_target_id is not None:
@@ -266,14 +291,145 @@ class OpenCodePlugin:
                 self._pending_tasks.add(task)
                 task.add_done_callback(self._pending_tasks.discard)
 
+            def _on_server_died(active_session_ids: list[str]) -> None:
+                self._handle_server_died(runtime, key, active_session_ids)
+
             adapter = OpenCodeAdapter(
                 emit_event=runtime._emit_adapter_event,
                 launch_target=launch_target,
                 on_agent_changed=_on_agent_changed,
+                on_server_died=_on_server_died,
                 workdir=key[1],
             )
             self._adapters[key] = adapter
             return adapter
+
+    def _handle_server_died(
+        self,
+        runtime: "SessionRuntime",
+        key: tuple[str | None, str],
+        active_session_ids: list[str],
+    ) -> None:
+        # Synchronous bridge from the adapter's `_on_server_died` into the
+        # plugin's health + reconnect machinery. Keep this fast: it runs
+        # inside the adapter's teardown path.
+        if self._shutting_down:
+            return
+        self._health_for(key).record_death()
+        targets = self._reconnect_targets.setdefault(key, set())
+        targets.update(active_session_ids)
+        self._ensure_reconnect_task(runtime, key)
+
+    def _ensure_reconnect_task(
+        self,
+        runtime: "SessionRuntime",
+        key: tuple[str | None, str],
+    ) -> None:
+        existing = self._reconnect_tasks.get(key)
+        if existing is not None and not existing.done():
+            return
+        task = asyncio.create_task(
+            self._reconnect_loop(runtime, key),
+            name=f"opencode-reconnect-{key}",
+        )
+        self._reconnect_tasks[key] = task
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._pending_tasks.discard)
+        task.add_done_callback(lambda _t: self._reconnect_tasks.pop(key, None))
+
+    async def _reconnect_loop(
+        self,
+        runtime: "SessionRuntime",
+        key: tuple[str | None, str],
+    ) -> None:
+        # Capped exponential backoff that loops forever until either every
+        # tracked session is gone (user deleted them) or the plugin is
+        # shutting down. The cap is intentionally low (5 minutes) so a
+        # VPN coming back hours later still recovers within five minutes
+        # of the link healing.
+        backoff_schedule = [5, 10, 30, 60, 120, 300]
+        attempt = 0
+        while not self._shutting_down:
+            targets = self._reconnect_targets.get(key, set())
+            if not targets:
+                return
+            try:
+                # User-initiated path bypasses cooldown via the dedicated
+                # entry point; the loop itself respects health to avoid
+                # hammering an unhealthy host.
+                adapter = await self._get_or_create_adapter(
+                    runtime, key[0], key[1] or None
+                )
+                await adapter.start()
+                health = self._health_for(key)
+                health.record_success()
+            except Exception as exc:
+                self._health_for(key).record_failure()
+                wait = backoff_schedule[min(attempt, len(backoff_schedule) - 1)]
+                attempt += 1
+                log.warning(
+                    "opencode reconnect for %s failed (%s); retrying in %ds",
+                    key,
+                    exc,
+                    wait,
+                )
+                try:
+                    await asyncio.sleep(wait)
+                except asyncio.CancelledError:
+                    raise
+                continue
+
+            attempt = 0
+            await self._restore_after_reconnect(runtime, key)
+
+            # Successful pass: drain tracked targets and exit. If new
+            # deaths happen, `_handle_server_died` re-arms a fresh loop.
+            self._reconnect_targets.pop(key, None)
+            return
+
+    async def _restore_after_reconnect(
+        self,
+        runtime: "SessionRuntime",
+        key: tuple[str | None, str],
+    ) -> None:
+        targets = list(self._reconnect_targets.get(key, set()))
+        for session_id in targets:
+            session = runtime.storage.get_session(session_id)
+            if session is None:
+                self._reconnect_targets.get(key, set()).discard(session_id)
+                continue
+            adapter = self._adapters.get(key)
+            if adapter is None:
+                # Slot was wiped between loop start and here; bail and let
+                # the next death event re-arm the loop.
+                return
+            opencode_session_id = session.transport_state.get("opencode_session_id")
+            if not opencode_session_id:
+                self._reconnect_targets.get(key, set()).discard(session_id)
+                continue
+            try:
+                await adapter.restore_session(
+                    session.id,
+                    session.cwd,
+                    opencode_session_id,
+                    model=session.model,
+                    agent=session.transport_state.get("agent"),
+                    effort=session.effort,
+                )
+            except Exception as exc:
+                log.warning(
+                    "opencode resurrect of %s failed after reconnect: %s",
+                    session.id,
+                    exc,
+                )
+                # Leave session ERROR; user can retry via /reattach.
+                continue
+            runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+            await runtime._record_system_event(
+                session.id,
+                "OpenCode connection restored",
+                status=SessionStatus.IDLE,
+            )
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
         from waypoint.backends.opencode.transport import OpenCodeTransport
@@ -306,11 +462,35 @@ class OpenCodePlugin:
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        adapter = self._adapters.get(
-            self._adapter_key(runtime, session.launch_target_id, session.cwd)
-        )
+        key = self._adapter_key(runtime, session.launch_target_id, session.cwd)
+        # Drop this session from any in-flight reconnect-loop target set so
+        # an explicit terminate can't be silently undone by a later loop
+        # tick resurrecting it.
+        targets = self._reconnect_targets.get(key)
+        if targets is not None:
+            targets.discard(session.id)
+            if not targets:
+                self._reconnect_targets.pop(key, None)
+        adapter = self._adapters.get(key)
         if adapter is not None:
             await adapter.terminate_session(session.id)
+
+    def clear_health_for_user_retry(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        # Hook surfaced via getattr from `runtime._reattach_session`. Clears
+        # the cooldown / circuit breaker so the user-initiated reattach
+        # bypasses backoff that the auto-reconnect loop is already
+        # observing. Also re-arms a fresh reconnect attempt: cancel any
+        # active loop so the next `_get_or_create_adapter` call drives
+        # the SSH spinup synchronously instead of racing the loop.
+        key = self._adapter_key(runtime, session.launch_target_id, session.cwd)
+        health = self._health.get(key)
+        if health is not None:
+            health.record_success()
+        existing = self._reconnect_tasks.get(key)
+        if existing is not None and not existing.done():
+            existing.cancel()
 
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -655,11 +835,13 @@ class OpenCodePlugin:
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
+        key = self._adapter_key(runtime, session.launch_target_id, session.cwd)
         try:
             adapter = await self._get_or_create_adapter(
                 runtime, session.launch_target_id, session.cwd
             )
         except Exception as exc:
+            self._health_for(key).record_failure()
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
             await runtime._record_system_event(
                 session.id,
@@ -689,6 +871,7 @@ class OpenCodePlugin:
             if pre_plan_mode is not None:
                 await adapter.set_pre_plan_mode(session.id, pre_plan_mode)
         except Exception as exc:
+            self._health_for(key).record_failure()
             log.exception("opencode restore failed", extra={"session_id": session.id})
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
             await runtime._record_system_event(
@@ -697,6 +880,7 @@ class OpenCodePlugin:
                 status=SessionStatus.ERROR,
             )
             return
+        self._health_for(key).record_success()
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
         await runtime._record_system_event(
             session.id,

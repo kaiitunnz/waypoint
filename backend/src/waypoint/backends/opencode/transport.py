@@ -17,22 +17,24 @@ class OpenCodeTransport(TransportAdapter):
         self._plugin = plugin
 
     async def send_input(self, session: SessionRecord, text: str) -> None:
-        adapter = self._plugin._require_adapter(
+        adapter = await self._plugin._get_or_create_adapter(
             self._runtime, session.launch_target_id, session.cwd
         )
         await adapter.send_input(session.id, text)
 
     async def interrupt(self, session: SessionRecord) -> None:
-        adapter = self._plugin._require_adapter(
+        adapter = await self._plugin._get_or_create_adapter(
             self._runtime, session.launch_target_id, session.cwd
         )
         await adapter.interrupt(session.id)
 
     async def terminate(self, session: SessionRecord) -> None:
-        adapter = self._plugin._require_adapter(
-            self._runtime, session.launch_target_id, session.cwd
-        )
-        await adapter.terminate_session(session.id)
+        # Soft path: runtime.terminate dispatches via plugin.terminate_session
+        # so this method is effectively unreachable from the API. Keep it
+        # tolerant of a missing adapter for any direct callers (tests,
+        # internal cleanup) so a stale opencode session can always be
+        # disposed of without first spinning up an SSH server.
+        await self._plugin.terminate_session(self._runtime, session)
 
     async def respond_to_approval(
         self,
@@ -40,19 +42,30 @@ class OpenCodeTransport(TransportAdapter):
         decision: str,
         text: str | None,
     ) -> bool:
-        adapter = self._plugin._require_adapter(
+        adapter = await self._plugin._get_or_create_adapter(
             self._runtime, session.launch_target_id, session.cwd
         )
         return await adapter.respond_to_permission(session.id, decision)
 
     def has_pending_approval(self, session: SessionRecord) -> bool:
-        adapter = self._plugin._require_adapter(
-            self._runtime, session.launch_target_id, session.cwd
+        # Pure introspection — must not provoke an SSH server start on a
+        # session whose adapter happens to be missing (e.g. cross-backend
+        # poll). Treat "no adapter" as "no pending approval".
+        adapter = self._plugin._adapters.get(
+            self._plugin._adapter_key(
+                self._runtime, session.launch_target_id, session.cwd
+            )
         )
+        if adapter is None:
+            return False
         return adapter.has_pending_approval(session.id)
 
     def terminal_snapshot(self, session: SessionRecord) -> str:
-        adapter = self._plugin._require_adapter(
-            self._runtime, session.launch_target_id, session.cwd
+        adapter = self._plugin._adapters.get(
+            self._plugin._adapter_key(
+                self._runtime, session.launch_target_id, session.cwd
+            )
         )
+        if adapter is None:
+            return ""
         return adapter.terminal_snapshot(session.id)

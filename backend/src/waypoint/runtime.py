@@ -518,6 +518,23 @@ class SessionRuntime:
             include_hidden=include_hidden,
         )
 
+    async def set_title(self, session_id: str, title: str) -> SessionRecord:
+        session = self.get_session(session_id)
+        if session.title == title:
+            return session
+        updated = self.storage.update_session(session_id, title=title)
+        await self.broadcast.publish(
+            SessionEnvelope(
+                type="session_list_update",
+                payload={
+                    "sessions": [
+                        item.model_dump(mode="json") for item in self.list_sessions()
+                    ]
+                },
+            )
+        )
+        return updated
+
     async def set_pinned(self, session_id: str, pinned: bool) -> SessionRecord:
         session = self.get_session(session_id)
         pinned_at = datetime.now(UTC) if pinned else None

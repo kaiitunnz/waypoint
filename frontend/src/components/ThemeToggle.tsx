@@ -14,7 +14,7 @@ export function ThemeToggle() {
       aria-label={label}
       title={label}
     >
-      {icon}
+      <span aria-hidden="true">{icon}</span>
     </button>
   );
 }

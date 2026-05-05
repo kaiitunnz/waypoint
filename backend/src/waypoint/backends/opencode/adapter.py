@@ -401,7 +401,10 @@ class OpenCodeAdapter:
         if not isinstance(properties, dict):
             return
         state = self._resolve_state_for_event(event_type, properties)
-        if state is None:
+        if state is None or state.closing:
+            # Short-circuit on `closing` so a late SSE event can't re-add
+            # entries to `_part_sessions` after `terminate_session` cleared
+            # them but before its emit_event await returned.
             return
         session_id = state.session_id
         if "sessionID" not in properties:
@@ -866,11 +869,15 @@ class OpenCodeAdapter:
         return state.pending_question_ids[0]
 
     async def terminate_session(self, session_id: str) -> bool:
-        state = self._sessions.pop(session_id, None)
+        state = self._sessions.get(session_id)
         if state is None:
             return False
-        self._remote_sessions.pop(state.opencode_session_id, None)
+        # Flip `closing` before any of the mutations below so an in-flight
+        # `_dispatch_event` short-circuits and cannot re-populate state
+        # while we're tearing it down.
         state.closing = True
+        self._sessions.pop(session_id, None)
+        self._remote_sessions.pop(state.opencode_session_id, None)
         state.pending_permission_ids.clear()
         state.pending_question_ids.clear()
         for part_id, owner in list(self._part_sessions.items()):

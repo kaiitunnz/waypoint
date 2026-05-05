@@ -4141,3 +4141,58 @@ html[data-theme="light"] .transcript.codex.user_input.pending-optimistic.persist
   );
   box-shadow: 0 0 0 1px rgba(184, 130, 14, 0.12), 0 0 18px rgba(184, 130, 14, 0.20);
 }
+
+/* ─── Search Bar ─────────────────────────────────────────────────────────── */
+
+.search-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-bar input {
+  width: 100%;
+  padding: 6px 28px 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  background: rgba(10, 13, 18, 0.35);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+}
+
+.search-bar input:focus {
+  outline: none;
+  border-color: var(--line-strong);
+  background: rgba(10, 13, 18, 0.5);
+}
+
+html[data-theme="light"] .search-bar input {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+html[data-theme="light"] .search-bar input:focus {
+  background: #ffffff;
+}
+
+.search-bar .clear-btn {
+  position: absolute;
+  right: 6px;
+  padding: 0 4px;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.search-bar .clear-btn:hover {
+  color: var(--fg);
+}
+
+.session-list-search {
+  margin-bottom: 12px;
+}
+
+.thread-panel-search {
+  margin-top: 8px;
+}

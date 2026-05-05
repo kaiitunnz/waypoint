@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { MouseEvent, ReactNode, useEffect, useState } from "react";
+import { MouseEvent, ReactNode, useEffect, useMemo, useState } from "react";
 
 import { humaniseBackend, transportLabel } from "@/lib/backends";
 import { SessionRecord } from "@/lib/types";
+
+import { SearchInput } from "./SearchInput";
 
 interface SessionListProps {
   sessions: SessionRecord[];
@@ -28,6 +30,7 @@ export function SessionList({
   const [page, setPage] = useState(1);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
+  const [query, setQuery] = useState("");
 
   function handleDelete(event: MouseEvent<HTMLButtonElement>, sessionId: string) {
     event.preventDefault();
@@ -111,17 +114,51 @@ export function SessionList({
     void onDeleteExited();
   }
 
-  const pinnedSessions = sessions
-    .filter((session) => session.pinned_at)
-    .sort((a, b) => (b.pinned_at ?? "").localeCompare(a.pinned_at ?? ""));
-  const recentSessions = sessions.filter((session) => !session.pinned_at);
-  const exitedCount = sessions.filter((session) => session.status === "exited").length;
-  const activeCount = sessions.length - exitedCount;
-  const totalPages = Math.max(1, Math.ceil(recentSessions.length / PAGE_SIZE));
+  const {
+    pinnedSessions,
+    recentSessions,
+    flatSearchResults,
+    exitedCount,
+    activeCount,
+  } = useMemo(() => {
+    const exited = sessions.filter((session) => session.status === "exited").length;
+    const active = sessions.length - exited;
+
+    if (query.trim() === "") {
+      const pinned = sessions
+        .filter((session) => session.pinned_at)
+        .sort((a, b) => (b.pinned_at ?? "").localeCompare(a.pinned_at ?? ""));
+      const recent = sessions.filter((session) => !session.pinned_at);
+      return { pinnedSessions: pinned, recentSessions: recent, flatSearchResults: null, exitedCount: exited, activeCount: active };
+    }
+
+    const q = query.toLowerCase();
+    const matched = sessions.filter((session) => {
+      return (
+        session.title.toLowerCase().includes(q) ||
+        session.cwd.toLowerCase().includes(q) ||
+        (session.repo_name?.toLowerCase() || "").includes(q) ||
+        (session.branch?.toLowerCase() || "").includes(q)
+      );
+    });
+
+    matched.sort((a, b) => {
+      const aPinned = Boolean(a.pinned_at);
+      const bPinned = Boolean(b.pinned_at);
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+      return b.last_event_at.localeCompare(a.last_event_at);
+    });
+
+    return { pinnedSessions: [], recentSessions: [], flatSearchResults: matched, exitedCount: exited, activeCount: active };
+  }, [sessions, query]);
+
+  const listToPaginate = flatSearchResults !== null ? flatSearchResults : recentSessions;
+  const totalPages = Math.max(1, Math.ceil(listToPaginate.length / PAGE_SIZE));
 
   useEffect(() => {
     setPage((current) => Math.min(current, totalPages));
-  }, [totalPages]);
+  }, [totalPages, query]);
 
   if (!sessions.length) {
     return (
@@ -133,9 +170,9 @@ export function SessionList({
   }
 
   const pageStart = (page - 1) * PAGE_SIZE;
-  const visibleRecent = recentSessions.slice(pageStart, pageStart + PAGE_SIZE);
-  const showingFrom = recentSessions.length === 0 ? 0 : pageStart + 1;
-  const showingTo = Math.min(recentSessions.length, pageStart + PAGE_SIZE);
+  const visibleItems = listToPaginate.slice(pageStart, pageStart + PAGE_SIZE);
+  const showingFrom = listToPaginate.length === 0 ? 0 : pageStart + 1;
+  const showingTo = Math.min(listToPaginate.length, pageStart + PAGE_SIZE);
 
   function renderCard(session: SessionRecord): ReactNode {
     const pinned = Boolean(session.pinned_at);
@@ -251,56 +288,100 @@ export function SessionList({
         ) : null}
       </div>
 
-      {pinnedSessions.length > 0 ? (
-        <section className="session-section session-section-pinned">
-          <header className="session-section-header">
-            <h4>Pinned</h4>
-            <span className="meta">{pinnedSessions.length}</span>
-          </header>
-          <div className="stack">{pinnedSessions.map(renderCard)}</div>
-        </section>
-      ) : null}
+      <SearchInput
+        className="session-list-search"
+        value={query}
+        onChange={setQuery}
+        placeholder="Filter by title, repo, branch, or directory..."
+      />
 
-      <section className="session-section">
-        <header className="session-section-header">
-          <h4>Recent</h4>
-          <div className="action-row session-section-controls">
-            {recentSessions.length > 0 ? (
+      {flatSearchResults !== null ? (
+        <section className="session-section">
+          {flatSearchResults.length > 0 ? (
+            <div className="stack">{visibleItems.map(renderCard)}</div>
+          ) : (
+            <p className="muted" style={{ textAlign: "center", padding: "20px 0" }}>
+              No sessions match your search.
+            </p>
+          )}
+          {totalPages > 1 && flatSearchResults.length > 0 ? (
+            <div className="action-row pagination-controls" style={{ marginTop: "12px", justifyContent: "flex-end" }}>
+              <button
+                className="secondary"
+                type="button"
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={page === 1}
+              >
+                Previous
+              </button>
               <span className="meta">
-                {showingFrom}–{showingTo} of {recentSessions.length}
+                Page {page} of {totalPages}
               </span>
-            ) : null}
-            {totalPages > 1 ? (
-              <div className="action-row pagination-controls">
-                <button
-                  className="secondary"
-                  type="button"
-                  onClick={() => setPage((current) => Math.max(1, current - 1))}
-                  disabled={page === 1}
-                >
-                  Previous
-                </button>
-                <span className="meta">
-                  Page {page} of {totalPages}
-                </span>
-                <button
-                  className="secondary"
-                  type="button"
-                  onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-                  disabled={page === totalPages}
-                >
-                  Next
-                </button>
+              <button
+                className="secondary"
+                type="button"
+                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                disabled={page === totalPages}
+              >
+                Next
+              </button>
+            </div>
+          ) : null}
+        </section>
+      ) : (
+        <>
+          {pinnedSessions.length > 0 ? (
+            <section className="session-section session-section-pinned">
+              <header className="session-section-header">
+                <h4>Pinned</h4>
+                <span className="meta">{pinnedSessions.length}</span>
+              </header>
+              <div className="stack">{pinnedSessions.map(renderCard)}</div>
+            </section>
+          ) : null}
+
+          <section className="session-section">
+            <header className="session-section-header">
+              <h4>Recent</h4>
+              <div className="action-row session-section-controls">
+                {recentSessions.length > 0 ? (
+                  <span className="meta">
+                    {showingFrom}–{showingTo} of {recentSessions.length}
+                  </span>
+                ) : null}
+                {totalPages > 1 ? (
+                  <div className="action-row pagination-controls">
+                    <button
+                      className="secondary"
+                      type="button"
+                      onClick={() => setPage((current) => Math.max(1, current - 1))}
+                      disabled={page === 1}
+                    >
+                      Previous
+                    </button>
+                    <span className="meta">
+                      Page {page} of {totalPages}
+                    </span>
+                    <button
+                      className="secondary"
+                      type="button"
+                      onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                      disabled={page === totalPages}
+                    >
+                      Next
+                    </button>
+                  </div>
+                ) : null}
               </div>
-            ) : null}
-          </div>
-        </header>
-        {visibleRecent.length > 0 ? (
-          <div className="stack">{visibleRecent.map(renderCard)}</div>
-        ) : (
-          <p className="muted">All sessions are pinned.</p>
-        )}
-      </section>
+            </header>
+            {visibleItems.length > 0 ? (
+              <div className="stack">{visibleItems.map(renderCard)}</div>
+            ) : (
+              <p className="muted">All sessions are pinned.</p>
+            )}
+          </section>
+        </>
+      )}
     </section>
   );
 }

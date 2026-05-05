@@ -1110,6 +1110,7 @@ const ReplyComposer = memo(function ReplyComposer({
   // — staged here until the user confirms via the Apply button. `null` means
   // no pending change.
   const [pendingEffort, setPendingEffort] = useState<string | null>(null);
+  const [textareaHeight, setTextareaHeight] = useState<number | undefined>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composerRef = useRef<HTMLElement | null>(null);
   const overflowRef = useRef<HTMLDivElement | null>(null);
@@ -1211,6 +1212,28 @@ const ReplyComposer = memo(function ReplyComposer({
       window.removeEventListener("keydown", onKey);
     };
   }, [tuneOpen]);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = textareaRef.current?.getBoundingClientRect().height ?? 88;
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const deltaY = startY - moveEvent.clientY;
+      // 56px is the minimum height matching mobile view, 88px for desktop. 
+      // Using 56 as absolute minimum.
+      const newHeight = Math.max(56, startHeight + deltaY);
+      setTextareaHeight(newHeight);
+    };
+
+    const onPointerUp = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  };
 
   function applySuggestion(index: number) {
     const chosen = suggestions[index];
@@ -1371,6 +1394,12 @@ const ReplyComposer = memo(function ReplyComposer({
 
   return (
     <section className="composer" ref={composerRef}>
+      <div
+        className="composer-resize-handle"
+        onPointerDown={handlePointerDown}
+        title="Drag to resize composer"
+        aria-hidden="true"
+      />
       <div className="composer-toprow">
         {tuneVisible ? (
           <div className="composer-tune" ref={tuneRef}>
@@ -1507,6 +1536,7 @@ const ReplyComposer = memo(function ReplyComposer({
         <textarea
           ref={textareaRef}
           className="composer-textarea"
+          style={textareaHeight ? { height: textareaHeight } : undefined}
           rows={3}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}

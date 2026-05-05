@@ -2158,6 +2158,16 @@ details.tool-disclosure[open] .tool-glyph.todo {
   backdrop-filter: blur(22px) saturate(1.2);
 }
 
+.composer-resize-handle {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: ns-resize;
+  z-index: 10;
+}
+
 .composer::before {
   content: "";
   position: absolute;
@@ -2438,7 +2448,7 @@ details.tool-disclosure[open] .tool-glyph.todo {
 .composer-textarea {
   width: 100%;
   min-height: 88px;
-  resize: vertical;
+  resize: none;
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);

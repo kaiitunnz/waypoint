@@ -37,12 +37,18 @@ trap '_kill_proc "$PID"; rm -f "$LOG"' EXIT HUP INT TERM
 # plugin that wraps `cd` (e.g. oh-my-bash's auto-ls / goto helpers) can
 # turn `cd ~/foo` into `cd "$BASE/~/foo"` — concatenating the literal
 # tilde with whatever the wrapper considers a base path. Doing the cd
-# in this clean `bash -c` subshell sidesteps those wrappers entirely;
-# we manually resolve a leading `~` to `$HOME` so the user can keep
-# tilde-prefixed default_cwd values.
+# in this clean `bash -c` subshell sidesteps those wrappers entirely.
+#
+# Resolve tildes ourselves: bash only expands a *leading* `~`, so an
+# embedded `/~/` (which can show up in stale session.cwd values that
+# were once concatenated wrong) silently produces a non-existent path.
+# We re-anchor any path containing `/~/` at $HOME using the suffix
+# after the *last* `/~/`. The order of cases matters — `*/~/*` runs
+# before `~/*` so a path like `~/foo/~/bar` collapses cleanly.
 if [ -n "$TARGET_CWD" ]; then
     case "$TARGET_CWD" in
         "~") TARGET_CWD="$HOME" ;;
+        */~/*) TARGET_CWD="$HOME/${TARGET_CWD##*/~/}" ;;
         "~/"*) TARGET_CWD="$HOME/${TARGET_CWD#"~/"}" ;;
     esac
     cd "$TARGET_CWD"

@@ -911,7 +911,17 @@ class OpenCodePlugin:
         result = []
         seen: set[str] = set()
         for adapter in adapters:
-            sessions = await adapter.list_sessions()
+            # One bad adapter (e.g. an ERROR session restored at boot whose
+            # persisted cwd no longer resolves) must not take down thread
+            # discovery for the rest. Skip and log.
+            try:
+                sessions = await adapter.list_sessions()
+            except Exception:
+                log.exception(
+                    "opencode list_sessions failed for adapter; skipping",
+                    extra={"workdir": adapter._workdir},
+                )
+                continue
             for sess in sessions:
                 sess_id = sess.get("id")
                 if not sess_id or sess_id in seen:

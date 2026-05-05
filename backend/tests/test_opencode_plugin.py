@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -749,3 +750,40 @@ async def test_import_thread_keys_adapter_by_session_directory() -> None:
     # The final adapter lookup must be keyed by /repo/actual so future
     # _require_adapter calls (which key by session.cwd) hit a live adapter.
     assert "/repo/actual" in cwds_seen
+
+
+@pytest.mark.asyncio
+async def test_shutdown_drains_pending_tasks() -> None:
+    plugin = OpenCodePlugin()
+
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def _slow_callback() -> None:
+        started.set()
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    task = asyncio.create_task(_slow_callback())
+    plugin._pending_tasks.add(task)
+    task.add_done_callback(plugin._pending_tasks.discard)
+
+    await started.wait()
+
+    runtime: Any = SimpleNamespace()
+    await plugin.shutdown(runtime)
+
+    assert cancelled.is_set()
+    assert plugin._pending_tasks == set()
+    assert plugin._shutting_down is True
+
+
+def test_resume_slash_command_removed() -> None:
+    from waypoint.backends.opencode.plugin import OPENCODE_SLASH_COMMANDS
+
+    names = {cmd.name for cmd in OPENCODE_SLASH_COMMANDS}
+    assert "resume" not in names
+    assert "compact" in names

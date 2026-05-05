@@ -52,6 +52,10 @@ class BackendCapabilities(_FrozenModel):
     # fallback mode. ``None`` means the plugin doesn't ship a CLI
     # entry-point and can't be paired with the tmux transport.
     supports_custom_cli_args: bool = False
+    # Plugin exposes a separate ``config_overrides`` input alongside ``cli_args``
+    # whose entries are wrapped (e.g. as ``--config K=V`` for codex) rather than
+    # passed through as raw flags. Only codex sets this today.
+    supports_config_overrides: bool = False
     cli_binary: str | None = None
     # Substrings (case-insensitive) used to infer a backend from a tmux
     # target name when the user attaches to an existing pane without

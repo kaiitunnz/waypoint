@@ -62,8 +62,11 @@ class CodexPluginConfig(PluginConfig):
 
     Codex discovers its model catalogue at runtime via ``model/list``,
     so no static model list lives here — only the per-plugin defaults
-    inherited from :class:`PluginConfig`.
+    inherited from :class:`PluginConfig`. Adds ``config_overrides`` —
+    ``key=value`` strings forwarded to ``codex --config K=V``.
     """
+
+    config_overrides: list[str] = Field(default_factory=list)
 
 
 class CodexLaunchTargetConfig(PluginLaunchTargetConfig):
@@ -95,6 +98,7 @@ class CodexPlugin:
         supports_slash_compact=True,
         supports_approval_note=False,
         supports_custom_cli_args=True,
+        supports_config_overrides=True,
         permission_modes=CODEX_PERMISSION_MODE_SPECS,
         effort_levels=(),  # discovered per-model from `model/list`
         model_source=ModelSource.LIVE_RPC,
@@ -285,6 +289,12 @@ class CodexPlugin:
                 status=SessionStatus.ERROR,
             )
             return
+        effective_cli_args = self._effective_args(
+            runtime, session.launch_target_id, session.args
+        )
+        effective_config_overrides = self._effective_config_overrides(
+            runtime, session.launch_target_id, session.config_overrides
+        )
         try:
             await self._require_adapter().restore_session(
                 session.id,
@@ -293,15 +303,13 @@ class CodexPlugin:
                 self.client_factory(
                     runtime,
                     session.launch_target_id,
-                    custom_args=self._effective_args(
-                        runtime, session.launch_target_id, session.args
-                    ),
+                    custom_args=effective_cli_args,
+                    custom_config_overrides=effective_config_overrides,
                 ),
                 model=session.model,
                 effort=session.effort,
-                custom_args=self._effective_args(
-                    runtime, session.launch_target_id, session.args
-                ),
+                custom_args=effective_cli_args,
+                config_overrides=effective_config_overrides,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(
@@ -377,27 +385,48 @@ class CodexPlugin:
         launch_target_id: str | None,
         custom_args: list[str],
     ) -> list[str]:
+        """Yaml-derived raw cli_args (target if set, else global) + per-session args."""
         if launch_target_id:
             launch_target = runtime._find_launch_target(launch_target_id)
             if launch_target:
                 target_config = launch_target.plugin_config(self.id)
                 if target_config:
-                    return target_config.cli_args + custom_args
+                    return list(target_config.cli_args) + list(custom_args)
             return list(custom_args)
-        return self._config(runtime).cli_args + custom_args
+        return list(self._config(runtime).cli_args) + list(custom_args)
+
+    def _effective_config_overrides(
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None,
+        custom_overrides: list[str],
+    ) -> list[str]:
+        """Yaml-derived ``--config K=V`` overrides + per-session overrides."""
+        if launch_target_id:
+            launch_target = runtime._find_launch_target(launch_target_id)
+            if launch_target:
+                target_config = launch_target.plugin_config(self.id)
+                if target_config is not None and isinstance(
+                    target_config, CodexLaunchTargetConfig
+                ):
+                    return list(target_config.config_overrides) + list(custom_overrides)
+            return list(custom_overrides)
+        return list(self._config(runtime).config_overrides) + list(custom_overrides)
 
     def client_factory(
         self,
         runtime: "SessionRuntime",
         launch_target_id: str | None,
         custom_args: list[str] | None = None,
+        custom_config_overrides: list[str] | None = None,
     ) -> ClientFactory | None:
         launch_target = runtime._find_launch_target(launch_target_id)
         if launch_target is None:
             return None
         return build_remote_codex_client_factory(
             launch_target,
-            extra_config_overrides=tuple(custom_args or []),
+            cli_args=tuple(custom_args or ()),
+            config_overrides=tuple(custom_config_overrides or ()),
         )
 
     def client_cwd(
@@ -553,8 +582,15 @@ class CodexPlugin:
             model=resolved_model,
             effort=resolved_effort,
             args=list(request.args),
+            config_overrides=list(request.config_overrides),
         )
         runtime.storage.create_session(session)
+        effective_cli_args = self._effective_args(
+            runtime, session.launch_target_id, request.args
+        )
+        effective_config_overrides = self._effective_config_overrides(
+            runtime, session.launch_target_id, request.config_overrides
+        )
         try:
             thread_id = await self._require_adapter().start_session(
                 session_id,
@@ -562,15 +598,13 @@ class CodexPlugin:
                 self.client_factory(
                     runtime,
                     session.launch_target_id,
-                    custom_args=self._effective_args(
-                        runtime, session.launch_target_id, request.args
-                    ),
+                    custom_args=effective_cli_args,
+                    custom_config_overrides=effective_config_overrides,
                 ),
                 model=resolved_model,
                 effort=resolved_effort,
-                custom_args=self._effective_args(
-                    runtime, session.launch_target_id, request.args
-                ),
+                custom_args=effective_cli_args,
+                config_overrides=effective_config_overrides,
             )
         except Exception:
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
@@ -638,12 +672,26 @@ class CodexPlugin:
             permission_mode="default",
         )
         runtime.storage.create_session(session)
+        # Imported sessions start with no per-session args/config_overrides;
+        # the effective lists are just whatever the launch target's yaml
+        # specifies (`_effective_*` will fold those in).
+        effective_cli_args = self._effective_args(runtime, session.launch_target_id, [])
+        effective_config_overrides = self._effective_config_overrides(
+            runtime, session.launch_target_id, []
+        )
         try:
             await self._require_adapter().restore_session(
                 session.id,
                 session.cwd,
                 thread.id,
-                self.client_factory(runtime, session.launch_target_id),
+                self.client_factory(
+                    runtime,
+                    session.launch_target_id,
+                    custom_args=effective_cli_args,
+                    custom_config_overrides=effective_config_overrides,
+                ),
+                custom_args=effective_cli_args,
+                config_overrides=effective_config_overrides,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(

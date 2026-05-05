@@ -184,6 +184,7 @@ class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
         model: str | None = None,
         effort: str | None = None,
         custom_args: list[str] | None = None,
+        config_overrides: list[str] | None = None,
     ) -> None:
         self.restore_calls.append(
             (session_id, cwd, thread_id, client_factory_override, model, effort)
@@ -353,6 +354,7 @@ async def test_reattach_terminates_before_restoring_codex(tmp_path) -> None:
             model: str | None = None,
             effort: str | None = None,
             custom_args: list[str] | None = None,
+            config_overrides: list[str] | None = None,
         ) -> None:
             self._log.append(f"restore:{session_id}")
             await super().restore_session(
@@ -754,7 +756,7 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
     monkeypatch.setattr(
         codex_plugin,
         "client_factory",
-        lambda _runtime, launch_target_id: "remote-factory",
+        lambda _runtime, launch_target_id, **_kwargs: "remote-factory",
     )
 
     session = await runtime.registry.get("codex").import_thread(

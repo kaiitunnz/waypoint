@@ -91,6 +91,10 @@ class SessionRecord(BaseModel):
     model: str | None = None
     effort: str | None = None
     args: list[str] = Field(default_factory=list)
+    # Backend-specific structured overrides distinct from raw ``args``.
+    # Codex uses this for ``--config K=V`` entries; other backends ignore
+    # the field. Empty list = none.
+    config_overrides: list[str] = Field(default_factory=list)
 
 
 class EventRecord(BaseModel):
@@ -143,6 +147,7 @@ class SessionCreateRequest(BaseModel):
     launch_target_id: str | None = None
     title: str | None = None
     args: list[str] = Field(default_factory=list)
+    config_overrides: list[str] = Field(default_factory=list)
     source_mode: SessionSource = SessionSource.MANAGED
     permission_mode: str | None = None
     model: str | None = None
@@ -236,6 +241,7 @@ class ScheduledSessionRecord(BaseModel):
     launch_target_id: str | None = None
     title: str | None = None
     args: list[str] = Field(default_factory=list)
+    config_overrides: list[str] = Field(default_factory=list)
     initial_prompt: str | None = None
     permission_mode: str | None = None
     model: str | None = None
@@ -253,6 +259,7 @@ class ScheduleCreateRequest(BaseModel):
     launch_target_id: str | None = None
     title: str | None = None
     args: list[str] = Field(default_factory=list)
+    config_overrides: list[str] = Field(default_factory=list)
     initial_prompt: str | None = None
     permission_mode: str | None = None
     model: str | None = None

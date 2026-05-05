@@ -95,13 +95,16 @@ def test_map_decision_to_reply_rejects_unknown() -> None:
         adapter._map_decision_to_reply("surrender")
 
 
-def test_extract_session_id_recurses_into_nested_payload() -> None:
+def test_extract_session_id_consults_known_fields_only() -> None:
     adapter = _build_adapter()
 
     assert adapter._extract_session_id({"sessionID": "ses_1"}) == "ses_1"
     assert adapter._extract_session_id({"info": {"sessionID": "ses_2"}}) == "ses_2"
-    assert adapter._extract_session_id({"items": [{"sessionID": "ses_3"}]}) == "ses_3"
+    assert adapter._extract_session_id({"part": {"sessionID": "ses_3"}}) == "ses_3"
     assert adapter._extract_session_id({"unrelated": True}) is None
+    # An unrelated nested sessionID (e.g. inside tool metadata) must not
+    # mis-route the event.
+    assert adapter._extract_session_id({"metadata": {"sessionID": "ses_other"}}) is None
 
 
 def test_tag_part_type_propagates_reasoning_to_subsequent_deltas() -> None:

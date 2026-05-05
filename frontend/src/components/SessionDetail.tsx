@@ -690,7 +690,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
 
   const handleSetTitle = useCallback(
     async (title: string) => {
-      if (!session) return;
       try {
         const updated = await setSessionTitle(host, token, sessionId, title);
         setSession(updated);
@@ -702,7 +701,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         setError(titleError instanceof Error ? titleError.message : "failed to update title");
       }
     },
-    [host, token, sessionId, session, handleAuthFailure],
+    [host, token, sessionId, handleAuthFailure],
   );
 
   async function submitApproval(decision: string, text?: string, approvalId?: string) {
@@ -1980,13 +1979,29 @@ function SessionHeader({
   const cwdSegments = formatCwdSegments(session.cwd);
   const target = session.launch_target_id ?? null;
   const sourceLabel = session.source === "managed" ? "Managed" : "Attached";
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
 
-  function handleSetTitle(event: React.MouseEvent<HTMLButtonElement>) {
+  function startEditing(event: React.MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
-    if (!onSetTitle) return;
-    const newTitle = window.prompt("Rename session", session.title);
-    if (newTitle && newTitle.trim() && newTitle !== session.title) {
-      void onSetTitle(newTitle.trim());
+    setIsEditing(true);
+    setDraftTitle(session.title);
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setIsEditing(false);
+      setDraftTitle("");
+    } else if (event.key === "Enter") {
+      commitEditing();
+    }
+  }
+
+  function commitEditing() {
+    setIsEditing(false);
+    const newTitle = draftTitle.trim();
+    if (newTitle && newTitle !== session.title && onSetTitle) {
+      void onSetTitle(newTitle);
     }
   }
 
@@ -1994,18 +2009,32 @@ function SessionHeader({
     <header className="session-header">
       <div className="session-header-top">
         <div className="session-header-title-row">
-          <h2 className="session-header-title">{session.title}</h2>
-          {onSetTitle ? (
-            <button
-              className="link-button edit-title-btn"
-              type="button"
-              onClick={handleSetTitle}
-              title="Rename session"
-              aria-label="Rename session"
-            >
-              ✎
-            </button>
-          ) : null}
+          {isEditing ? (
+            <input
+              className="inline-title-input"
+              type="text"
+              value={draftTitle}
+              onChange={(e) => setDraftTitle(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onBlur={commitEditing}
+              autoFocus
+            />
+          ) : (
+            <>
+              <h2 className="session-header-title">{session.title}</h2>
+              {onSetTitle ? (
+                <button
+                  className="link-button edit-title-btn"
+                  type="button"
+                  onClick={startEditing}
+                  title="Rename session"
+                  aria-label="Rename session"
+                >
+                  ✎
+                </button>
+              ) : null}
+            </>
+          )}
         </div>
         <span
           className={`session-pulse ${connectionVariant(connection, session.status)}`}

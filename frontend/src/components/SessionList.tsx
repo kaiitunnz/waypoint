@@ -26,6 +26,8 @@ export function SessionList({
   onSetTitle,
 }: SessionListProps) {
   const [page, setPage] = useState(1);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState("");
 
   function handleDelete(event: MouseEvent<HTMLButtonElement>, sessionId: string) {
     event.preventDefault();
@@ -70,13 +72,33 @@ export function SessionList({
   ) {
     event.preventDefault();
     event.stopPropagation();
-    if (!onSetTitle) {
-      return;
+    setEditingSessionId(session.id);
+    setDraftTitle(session.title);
+  }
+
+  function handleDraftKeyDown(
+    event: React.KeyboardEvent<HTMLInputElement>,
+    session: SessionRecord,
+  ) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setEditingSessionId(null);
+      setDraftTitle("");
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      commitEditing(session);
     }
-    const newTitle = window.prompt("Rename session", session.title);
-    if (newTitle && newTitle.trim() && newTitle !== session.title) {
-      void onSetTitle(session.id, newTitle.trim());
+  }
+
+  function commitEditing(session: SessionRecord) {
+    const newTitle = draftTitle.trim();
+    if (newTitle && newTitle !== session.title && onSetTitle) {
+      void onSetTitle(session.id, newTitle);
     }
+    setEditingSessionId(null);
+    setDraftTitle("");
   }
 
   function handleDeleteExited() {
@@ -134,18 +156,36 @@ export function SessionList({
           </span>
         </div>
         <div className="session-card-title-row">
-          <h3 className="session-card-title">{session.title}</h3>
-          {onSetTitle ? (
-            <button
-              className="link-button edit-title-btn"
-              type="button"
-              onClick={(event) => handleSetTitle(event, session)}
-              title="Rename session"
-              aria-label="Rename session"
-            >
-              ✎
-            </button>
-          ) : null}
+          {editingSessionId === session.id ? (
+            <input
+              className="inline-title-input"
+              type="text"
+              value={draftTitle}
+              onChange={(e) => setDraftTitle(e.target.value)}
+              onKeyDown={(e) => handleDraftKeyDown(e, session)}
+              onBlur={() => commitEditing(session)}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              autoFocus
+            />
+          ) : (
+            <>
+              <h3 className="session-card-title">{session.title}</h3>
+              {onSetTitle ? (
+                <button
+                  className="link-button edit-title-btn"
+                  type="button"
+                  onClick={(event) => handleSetTitle(event, session)}
+                  title="Rename session"
+                  aria-label="Rename session"
+                >
+                  ✎
+                </button>
+              ) : null}
+            </>
+          )}
         </div>
         <p className="muted session-card-path">
           {session.cwd}

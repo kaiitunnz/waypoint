@@ -656,4 +656,96 @@ async def test_import_thread_preserves_launch_target_id() -> None:
     result = await plugin.import_thread(runtime, request)
 
     assert result.launch_target_id == "ssh-1"
-    assert result.cwd == "/repo"
+
+
+@pytest.mark.asyncio
+async def test_import_thread_keys_adapter_by_session_directory() -> None:
+    # When the user-supplied requested_cwd doesn't match the OpenCode
+    # session's actual directory, the adapter must be cached under the
+    # session's directory so subsequent _require_adapter(..., session.cwd)
+    # lookups find it.
+    plugin = OpenCodePlugin()
+
+    class FakeAdapter:
+        async def get_session(self, session_id: str) -> dict[str, object] | None:
+            return {
+                "id": session_id,
+                "title": "Imported",
+                "directory": "/repo/actual",
+            }
+
+        async def restore_session(
+            self,
+            session_id: str,
+            cwd: str,
+            opencode_session_id: str,
+            model: str | None = None,
+            agent: str | None = None,
+            effort: str | None = None,
+        ) -> None:
+            return None
+
+    fake_adapter = FakeAdapter()
+    cwds_seen: list[str | None] = []
+
+    async def fake_get_or_create_adapter(runtime, launch_target_id, cwd):
+        cwds_seen.append(cwd)
+        return fake_adapter
+
+    plugin._get_or_create_adapter = fake_get_or_create_adapter  # type: ignore[method-assign]
+
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.sessions: list[SessionRecord] = []
+
+        def list_sessions(self) -> list[SessionRecord]:
+            return list(self.sessions)
+
+        def create_session(self, session: SessionRecord) -> None:
+            self.sessions.append(session)
+
+        def update_session(self, session_id: str, **kwargs) -> SessionRecord:
+            session = self.sessions[-1]
+            for key, value in kwargs.items():
+                setattr(session, key, value)
+            return session
+
+    class FakeRuntime:
+        def __init__(self) -> None:
+            self.storage = FakeStorage()
+
+        def _generate_session_id(self, backend_id: str) -> str:
+            return f"{backend_id}-1"
+
+        def _session_dir(self, session_id: str):
+            from pathlib import Path
+
+            path = Path("/tmp") / session_id
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+
+        async def _record_system_event(self, *args, **kwargs) -> None:
+            return None
+
+        def get_session(self, session_id: str) -> SessionRecord:
+            return self.storage.sessions[-1]
+
+    runtime: Any = FakeRuntime()
+    request = type(
+        "Req",
+        (),
+        {
+            "thread_id": "ses_1",
+            "launch_target_id": "ssh-1",
+            "cwd": "/repo/requested",
+        },
+    )()
+
+    result = await plugin.import_thread(runtime, request)
+
+    # The persisted SessionRecord uses the session's actual directory,
+    # not the requested cwd.
+    assert result.cwd == "/repo/actual"
+    # The final adapter lookup must be keyed by /repo/actual so future
+    # _require_adapter calls (which key by session.cwd) hit a live adapter.
+    assert "/repo/actual" in cwds_seen

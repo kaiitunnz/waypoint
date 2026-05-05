@@ -726,9 +726,6 @@ class OpenCodePlugin:
     ) -> SessionRecord:
         launch_target_id = getattr(request, "launch_target_id", None)
         requested_cwd = getattr(request, "cwd", None)
-        adapter = await self._get_or_create_adapter(
-            runtime, launch_target_id, requested_cwd
-        )
         opencode_session_id = request.thread_id
         for s in runtime.storage.list_sessions():
             if (
@@ -740,13 +737,30 @@ class OpenCodePlugin:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="session already imported",
                 )
-        sess = await adapter.get_session(opencode_session_id)
+
+        # Fetch the session first so the adapter we cache and the
+        # SessionRecord we persist agree on cwd. The session already exists
+        # on the OpenCode server with whatever directory it was created in;
+        # keying the adapter by `requested_cwd` here would orphan it from
+        # later `_require_adapter(..., session.cwd)` lookups.
+        fetch_adapter = self._find_adapter_for_launch_target(launch_target_id)
+        if fetch_adapter is None:
+            fetch_adapter = await self._get_or_create_adapter(
+                runtime, launch_target_id, requested_cwd
+            )
+        sess = await fetch_adapter.get_session(opencode_session_id)
         if not sess:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="session not found in OpenCode",
             )
-        cwd = sess.get("directory", requested_cwd or ".")
+        raw_directory = sess.get("directory")
+        cwd = (
+            raw_directory
+            if isinstance(raw_directory, str) and raw_directory
+            else (requested_cwd or ".")
+        )
+        adapter = await self._get_or_create_adapter(runtime, launch_target_id, cwd)
         session_id = runtime._generate_session_id(self.id)
         session_dir = runtime._session_dir(session_id)
         raw_log = session_dir / "raw.log"

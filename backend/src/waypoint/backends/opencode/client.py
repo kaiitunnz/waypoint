@@ -127,7 +127,11 @@ class RemoteOpenCodeClient:
         if params:
             url += "?" + urllib.parse.urlencode(params)
 
-        curl_args = ["curl", "-s", "-X", method]
+        # `-w "\n%{http_code}"` appends a newline + numeric status after the
+        # response body so we can surface 4xx/5xx as failures (curl's own
+        # exit code is 0 for any HTTP response when `-f` is not set, and
+        # `-f` would swallow the response body we want to log).
+        curl_args = ["curl", "-s", "-X", method, "-w", "\\n%{http_code}"]
         if json_data is not None:
             curl_args.extend(["-H", "Content-Type: application/json"])
             # Pass data via stdin to avoid command line length limits or escaping issues
@@ -159,15 +163,20 @@ class RemoteOpenCodeClient:
             err_text = "\n".join(err_lines).strip()
             raise RuntimeError(f"curl failed ({proc.returncode}): {err_text}")
 
-        out_text = stdout.decode("utf-8").strip()
+        out_text = stdout.decode("utf-8")
+        body, status_code = _split_curl_status(out_text)
 
-        if not out_text:
+        if status_code >= 400:
+            raise OpenCodeHttpError(status_code, body, method, url)
+
+        body_text = body.strip()
+        if not body_text:
             return {}
 
         try:
-            return json.loads(out_text)
+            return json.loads(body_text)
         except json.JSONDecodeError as exc:
-            raise RuntimeError(f"invalid JSON response from curl: {out_text}") from exc
+            raise RuntimeError(f"invalid JSON response from curl: {body_text}") from exc
 
     async def get(self, path: str, params: dict[str, str] | None = None) -> Any:
         return await self._run_curl("GET", path, None, params)
@@ -244,6 +253,34 @@ class RemoteOpenCodeClient:
                 with suppress(ProcessLookupError):
                     self._sse_process.kill()
             self._sse_process = None
+
+
+class OpenCodeHttpError(RuntimeError):
+    """Raised when a remote OpenCode HTTP call returns a non-2xx response."""
+
+    def __init__(self, status: int, body: str, method: str, url: str) -> None:
+        snippet = body.strip()[:500]
+        super().__init__(f"{method} {url} returned HTTP {status}: {snippet}")
+        self.status = status
+        self.body = body
+
+
+def _split_curl_status(out_text: str) -> tuple[str, int]:
+    # The trailing status line is appended by `-w "\n%{http_code}"`. Anything
+    # before the final newline is the response body (which may itself contain
+    # newlines).
+    idx = out_text.rfind("\n")
+    if idx < 0:
+        status_text = out_text.strip()
+        body = ""
+    else:
+        status_text = out_text[idx + 1 :].strip()
+        body = out_text[:idx]
+    try:
+        status_code = int(status_text)
+    except ValueError:
+        status_code = 0
+    return body, status_code
 
 
 async def _drain_stream(reader: asyncio.StreamReader, label: str) -> None:

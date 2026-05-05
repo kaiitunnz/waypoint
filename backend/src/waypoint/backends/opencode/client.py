@@ -12,6 +12,14 @@ from waypoint.launch_targets import SshLaunchTargetConfig
 
 log = logging.getLogger("waypoint.opencode.client")
 
+# Large `tool.output` SSE frames (file diffs, multi-file searches) routinely
+# exceed aiohttp's 64 KiB defaults. 256 KiB matches what OpenCode itself
+# tolerates upstream.
+_SSE_BUFFER_BYTES = 256 * 1024
+_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15)
+# SSE is intentionally long-lived; only bound the initial connect.
+_STREAM_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=None)
+
 
 class OpenCodeHttpClient(Protocol):
     async def get(self, path: str, params: dict[str, str] | None = None) -> Any: ...
@@ -36,7 +44,10 @@ class LocalOpenCodeClient:
     def _require_session(self) -> aiohttp.ClientSession:
         if self._session is None:
             self._session = aiohttp.ClientSession(
-                max_line_size=16 * 1024, max_field_size=16 * 1024
+                max_line_size=_SSE_BUFFER_BYTES,
+                max_field_size=_SSE_BUFFER_BYTES,
+                read_bufsize=_SSE_BUFFER_BYTES,
+                timeout=_REQUEST_TIMEOUT,
             )
         return self._session
 
@@ -71,10 +82,18 @@ class LocalOpenCodeClient:
 
     async def stream_events(self, path: str) -> AsyncGenerator[str, None]:
         client = self._require_session()
-        async with client.get(f"{self.base_url}{path}") as resp:
+        async with client.get(
+            f"{self.base_url}{path}", timeout=_STREAM_TIMEOUT
+        ) as resp:
             resp.raise_for_status()
-            async for line in resp.content:
-                yield line.decode("utf-8")
+            buffer = b""
+            async for chunk in resp.content.iter_any():
+                buffer += chunk
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    yield (line + b"\n").decode("utf-8", errors="replace")
+            if buffer:
+                yield buffer.decode("utf-8", errors="replace")
 
     async def close(self) -> None:
         if self._session is not None:
@@ -95,6 +114,7 @@ class RemoteOpenCodeClient:
         self.base_url = f"http://127.0.0.1:{remote_port}"
         # For SSE streaming, we need a long-lived subprocess
         self._sse_process: asyncio.subprocess.Process | None = None
+        self._sse_stderr_task: asyncio.Task[None] | None = None
 
     async def _run_curl(
         self,
@@ -168,21 +188,53 @@ class RemoteOpenCodeClient:
         curl_args = ["curl", "-s", "-N", url]
         args = self.target.build_remote_exec_args(curl_args, self.cwd)
 
+        # `limit=` raises the StreamReader's per-read cap so a single
+        # tool.output frame larger than 64 KiB doesn't bring the SSE
+        # connection down with `LimitOverrunError`.
         self._sse_process = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            limit=_SSE_BUFFER_BYTES,
         )
 
         assert self._sse_process.stdout is not None
-        async for line in self._sse_process.stdout:
-            yield line.decode("utf-8")
+        assert self._sse_process.stderr is not None
+        self._sse_stderr_task = asyncio.create_task(
+            _drain_stream(self._sse_process.stderr, "opencode sse stderr")
+        )
+
+        try:
+            buffer = b""
+            while True:
+                chunk = await self._sse_process.stdout.read(_SSE_BUFFER_BYTES)
+                if not chunk:
+                    if buffer:
+                        yield buffer.decode("utf-8", errors="replace")
+                    break
+                buffer += chunk
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    yield (line + b"\n").decode("utf-8", errors="replace")
+        finally:
+            if self._sse_stderr_task is not None:
+                self._sse_stderr_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await self._sse_stderr_task
+                self._sse_stderr_task = None
 
         returncode = await self._sse_process.wait()
-        if returncode != 0:
+        # Negative returncodes mean the child was killed by a signal; that's
+        # the expected exit path when `close()` terminates the process.
+        if returncode > 0:
             raise RuntimeError(f"sse stream ended with code {returncode}")
 
     async def close(self) -> None:
+        if self._sse_stderr_task is not None:
+            self._sse_stderr_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._sse_stderr_task
+            self._sse_stderr_task = None
         if self._sse_process is not None:
             try:
                 self._sse_process.terminate()
@@ -192,3 +244,15 @@ class RemoteOpenCodeClient:
                 with suppress(ProcessLookupError):
                     self._sse_process.kill()
             self._sse_process = None
+
+
+async def _drain_stream(reader: asyncio.StreamReader, label: str) -> None:
+    try:
+        async for line in reader:
+            text = line.decode("utf-8", errors="replace").rstrip()
+            if text:
+                log.debug("%s: %s", label, text)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("error draining %s", label)

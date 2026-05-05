@@ -18,6 +18,11 @@ class _FakeStream:
             raise StopAsyncIteration
         return self._chunks.pop(0)
 
+    async def read(self, n: int) -> bytes:
+        if not self._chunks:
+            return b""
+        return self._chunks.pop(0)
+
 
 class _FakeProcess:
     def __init__(self) -> None:

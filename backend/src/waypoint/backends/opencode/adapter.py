@@ -172,6 +172,11 @@ class OpenCodeAdapter:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # New session so the local SSH client gets its own process group
+            # and we can `killpg` it as a backstop if `terminate()` isn't
+            # enough to bring the SSH child down (the remote bash trap kills
+            # the OpenCode server on its own once the SSH channel closes).
+            start_new_session=True,
         )
 
         assert self._server_process.stdin is not None
@@ -230,12 +235,14 @@ class OpenCodeAdapter:
             return
 
         if self._launch_target is not None:
-            # Close stdin so the remote bash script's `read` returns and it
-            # kills opencode gracefully. Also terminate the local SSH process
-            # directly so it dies even if it never finished connecting (e.g.
-            # firewall drop) and the stdin signal never reaches the remote.
+            # Close stdin so the remote bash script's `read` returns and the
+            # script's EXIT/HUP trap kills opencode. Also terminate the local
+            # SSH child directly so it dies even if it never finished
+            # connecting (e.g. firewall drop) and the stdin signal never
+            # reaches the remote.
             if proc.stdin is not None:
-                proc.stdin.close()
+                with suppress(Exception):
+                    proc.stdin.close()
             with suppress(ProcessLookupError):
                 proc.terminate()
             return
@@ -247,6 +254,29 @@ class OpenCodeAdapter:
         except PermissionError:
             with suppress(ProcessLookupError):
                 proc.terminate()
+
+    async def _await_server_process_exit(self, timeout: float = 5.0) -> None:
+        """Wait for the server process to exit, escalating to SIGKILL if needed."""
+        proc = self._server_process
+        if proc is None or proc.returncode is not None:
+            return
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=timeout)
+        except TimeoutError:
+            log.warning(
+                "opencode server process %d did not exit within %.1fs; killing",
+                proc.pid,
+                timeout,
+            )
+            if self._launch_target is not None:
+                # SSH child got its own process group via start_new_session.
+                with suppress(ProcessLookupError, PermissionError):
+                    os.killpg(proc.pid, signal.SIGKILL)
+            else:
+                with suppress(ProcessLookupError, PermissionError):
+                    os.killpg(proc.pid, signal.SIGKILL)
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(proc.wait(), timeout=2.0)
 
     async def _wait_for_server(self) -> None:
         client = self._require_client()
@@ -866,11 +896,7 @@ class OpenCodeAdapter:
             self._client = None
         if self._server_process is not None:
             self._terminate_server_process()
-            try:
-                await asyncio.wait_for(self._server_process.wait(), timeout=5)
-            except TimeoutError:
-                with suppress(ProcessLookupError):
-                    os.killpg(self._server_process.pid, signal.SIGKILL)
+            await self._await_server_process_exit()
             self._server_process = None
         self._sessions.clear()
         self._remote_sessions.clear()

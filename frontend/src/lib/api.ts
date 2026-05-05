@@ -297,6 +297,25 @@ export async function fetchBackendModels(
   return (await response.json()) as BackendModelListResponse;
 }
 
+export async function setSessionTitle(
+  host: string,
+  token: string,
+  sessionId: string,
+  title: string,
+): Promise<SessionRecord> {
+  const response = await fetch(`${host}/api/sessions/${sessionId}/title`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ title }),
+  });
+  await ensureOk(response, "failed to update session title");
+  const body = await response.json();
+  return body.session as SessionRecord;
+}
+
 export async function setSessionPinned(
   host: string,
   token: string,

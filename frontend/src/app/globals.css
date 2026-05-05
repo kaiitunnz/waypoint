@@ -3185,6 +3185,28 @@ details.tool-disclosure[open] .tool-glyph.todo {
   margin-left: auto;
 }
 
+.session-header-title-row,
+.session-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.session-card-title-row .session-card-title {
+  flex-grow: 1;
+}
+
+.edit-title-btn {
+  font-size: 1rem;
+  padding: 0 4px;
+  opacity: 0.6;
+}
+
+.edit-title-btn:hover {
+  opacity: 1;
+}
+
 .session-card-title,
 .session-card-path,
 .session-card-meta .meta {

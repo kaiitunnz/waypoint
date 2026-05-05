@@ -65,6 +65,19 @@ OPENCODE_SLASH_COMMANDS = (
 )
 
 
+def _normalize_remote_cwd(cwd: str) -> str:
+    # Stale session.cwd values can carry an embedded `/~/` (the result of an
+    # earlier path-concat bug). Bash on the remote only expands a *leading*
+    # tilde, so the embedded one becomes a literal directory component and
+    # every `cd` against the path fails. Re-anchor at the suffix following
+    # the last `/~/` and prepend `~/` so the leading tilde does the right
+    # thing on the remote shell.
+    if "/~/" in cwd:
+        suffix = cwd.rsplit("/~/", 1)[1]
+        return f"~/{suffix}"
+    return cwd
+
+
 def _ruleset_for_mode(mode: str | None) -> list[dict[str, str]] | None:
     # The runtime substitutes "default" when no mode is selected; that means
     # "let OpenCode decide" — don't send a permission key at all.
@@ -151,6 +164,8 @@ class OpenCodePlugin:
         chosen = cwd or self._default_cwd(runtime, launch_target_id)
         if launch_target_id is None:
             chosen = str(Path(chosen).expanduser())
+        else:
+            chosen = _normalize_remote_cwd(chosen)
         return os.path.normpath(chosen)
 
     def _adapter_key(

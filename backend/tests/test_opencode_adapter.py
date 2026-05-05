@@ -185,3 +185,34 @@ async def test_listen_events_flushes_on_blank_sse_separator() -> None:
     await adapter._listen_events()
 
     assert seen == [{"type": "server.connected", "properties": {"sessionID": "ses_1"}}]
+
+
+@pytest.mark.asyncio
+async def test_listen_events_treats_mid_session_eof_as_server_death() -> None:
+    # Once we've delivered any event, a clean EOF must promote to
+    # `_on_server_died` instead of silently retrying — OpenCode has no
+    # SSE resume so any reconnect would skip events.
+    adapter = _build_adapter()
+    seen: list[dict[str, object]] = []
+    died = asyncio.Event()
+
+    class _FakeClient:
+        async def stream_events(self, path: str):
+            yield 'data: {"type":"server.connected","properties":{"sessionID":"ses_1"}}\n'
+            yield "\n"
+            return
+
+    async def _dispatch(event: dict[str, object]) -> None:
+        seen.append(event)
+
+    async def _on_died() -> None:
+        died.set()
+
+    adapter._client = _FakeClient()  # type: ignore[assignment]
+    adapter._dispatch_event = _dispatch  # type: ignore[method-assign]
+    adapter._on_server_died = _on_died  # type: ignore[method-assign]
+
+    await asyncio.wait_for(adapter._listen_events(), timeout=2)
+
+    assert seen == [{"type": "server.connected", "properties": {"sessionID": "ses_1"}}]
+    assert died.is_set()

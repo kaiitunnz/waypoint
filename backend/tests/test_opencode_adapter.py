@@ -27,6 +27,45 @@ def test_split_model_ref_handles_missing_or_malformed() -> None:
     assert adapter._split_model_ref("flat") is None
     assert adapter._split_model_ref("/no-provider") is None
     assert adapter._split_model_ref("no-model/") is None
+    # No hardcoded fallback in the adapter — empty input returns None so the
+    # prompt-without-model path lets OpenCode pick its own default.
+    assert adapter._split_model_ref(None) is None
+    assert adapter._split_model_ref("") is None
+
+
+@pytest.mark.asyncio
+async def test_compact_session_refetches_model_when_unpinned() -> None:
+    adapter = _build_adapter()
+    state = OpenCodeSessionState(
+        session_id="local-1",
+        cwd="/tmp",
+        opencode_session_id="ses_1",
+        model=None,
+    )
+    adapter._register_session(state)
+
+    posted: dict[str, object] = {}
+
+    class _FakeClient:
+        async def get(self, path, params=None):
+            assert path == "/session/ses_1"
+            return {"model": "opencode/auto-default"}
+
+        async def post(self, path, json_data=None, params=None):
+            posted["path"] = path
+            posted["json_data"] = json_data
+            return {}
+
+    adapter._client = _FakeClient()  # type: ignore[assignment]
+
+    await adapter.compact_session("local-1")
+
+    assert posted["path"] == "/session/ses_1/summarize"
+    assert posted["json_data"] == {
+        "providerID": "opencode",
+        "modelID": "auto-default",
+        "auto": False,
+    }
 
 
 def test_map_decision_to_reply_accepts_native_replies() -> None:

@@ -131,6 +131,39 @@ def test_resolve_state_for_part_delta_without_session_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dispatch_event_short_circuits_on_closing_state() -> None:
+    adapter = _build_adapter()
+    state = OpenCodeSessionState(
+        session_id="local-1",
+        cwd="/tmp",
+        opencode_session_id="ses_1",
+    )
+    state.closing = True
+    adapter._register_session(state)
+
+    emitted: list[tuple[str, object]] = []
+
+    async def _emit(*args: object, **kwargs: object) -> None:
+        emitted.append(("emit", args))
+
+    adapter._emit_event = _emit
+
+    await adapter._dispatch_event(
+        {
+            "type": "message.part.updated",
+            "properties": {
+                "sessionID": "ses_1",
+                "part": {"id": "p1", "type": "text"},
+            },
+        }
+    )
+
+    assert emitted == []
+    # _tag_part_type should not have populated _part_sessions for a closing state
+    assert adapter._part_sessions == {}
+
+
+@pytest.mark.asyncio
 async def test_listen_events_flushes_on_blank_sse_separator() -> None:
     adapter = _build_adapter()
     seen: list[dict[str, object]] = []

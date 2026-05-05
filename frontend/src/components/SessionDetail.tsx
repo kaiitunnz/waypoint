@@ -600,6 +600,22 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }, [handleAuthFailure, host, token, sessionId]);
 
+  const reattach = useCallback(async () => {
+    try {
+      await postAction(host, token, sessionId, "reattach");
+    } catch (reattachError) {
+      if (isAuthError(reattachError)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(
+        reattachError instanceof Error
+          ? reattachError.message
+          : "failed to reconnect",
+      );
+    }
+  }, [handleAuthFailure, host, token, sessionId]);
+
   const terminate = useCallback(async () => {
     if (!window.confirm("Terminate this session? Any running command will be stopped.")) {
       return;
@@ -855,6 +871,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         }
         canDelete={sessionExited}
         canResume={canResume}
+        canReattach={dormantReattach}
         canTerminate={Boolean(session && !sessionExited)}
         connection={connection}
         disabled={composerDisabled}
@@ -889,6 +906,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         onModelChange={handleModelChange}
         onEffortChange={handleEffortChange}
         onRefresh={refresh}
+        onReattach={reattach}
         onResume={resumeSession}
         onSend={submitInput}
         onTerminate={terminate}
@@ -902,6 +920,7 @@ interface ReplyComposerProps {
   permissionModeOptions: readonly BackendPermissionMode[];
   canDelete: boolean;
   canResume: boolean;
+  canReattach: boolean;
   canTerminate: boolean;
   connection: ConnectionState;
   disabled: boolean;
@@ -928,6 +947,7 @@ interface ReplyComposerProps {
   onModelChange: (model: string) => void | Promise<void>;
   onEffortChange: (effort: string) => void | Promise<void>;
   onRefresh: () => void;
+  onReattach: () => void | Promise<void>;
   onResume: () => void | Promise<void>;
   onSend: (text: string) => Promise<boolean>;
   onTerminate: () => void | Promise<void>;
@@ -938,6 +958,7 @@ const ReplyComposer = memo(function ReplyComposer({
   permissionModeOptions,
   canDelete,
   canResume,
+  canReattach,
   canTerminate,
   connection,
   disabled,
@@ -960,6 +981,7 @@ const ReplyComposer = memo(function ReplyComposer({
   onModelChange,
   onEffortChange,
   onRefresh,
+  onReattach,
   onResume,
   onSend,
   onTerminate,
@@ -970,6 +992,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
+  const [reattaching, setReattaching] = useState(false);
   // Pending effort for backends that need a session restart to apply (Claude)
   // — staged here until the user confirms via the Apply button. `null` means
   // no pending change.
@@ -1450,6 +1473,26 @@ const ReplyComposer = memo(function ReplyComposer({
                     <span className="glyph">↻</span>
                     Refresh
                   </button>
+                  {canReattach ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="composer-overflow-item"
+                      disabled={reattaching}
+                      onClick={async () => {
+                        setOverflowOpen(false);
+                        setReattaching(true);
+                        try {
+                          await onReattach();
+                        } finally {
+                          setReattaching(false);
+                        }
+                      }}
+                    >
+                      <span className="glyph">↺</span>
+                      {reattaching ? "Reconnecting…" : "Reconnect session"}
+                    </button>
+                  ) : null}
                   {canTerminate ? (
                     <button
                       type="button"

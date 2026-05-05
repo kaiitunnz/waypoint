@@ -48,30 +48,48 @@ def default_client_factory(
     )
 
 
-def _apply_config_overrides(
+def _apply_codex_args(
     base: ClientFactory | None,
+    cli_args: tuple[str, ...],
     config_overrides: tuple[str, ...],
 ) -> ClientFactory | None:
-    """Wrap *base* so it injects *config_overrides* into local Codex launches.
+    """Wrap *base* so it injects *cli_args* / *config_overrides* into local launches.
 
     Remote factories use ``launch_args_override`` (the entire SSH command),
-    so they already carry config overrides built at factory-construction time;
-    for those, the override tuples are injected in ``build_remote_codex_client_factory``
-    before this function is ever called.  The local path (``base is None``)
-    creates an ``AppServerConfig`` directly and can accept ``config_overrides``.
+    so the lists were already baked in by ``build_remote_codex_client_factory``
+    before this function is called — return remote factories as-is.
+
+    Local launches normally use ``AppServerConfig`` (which only exposes a
+    ``config_overrides`` slot, not raw flags). When *cli_args* is non-empty
+    we have to fall back to ``launch_args_override`` and assemble the argv
+    ourselves so the raw flags reach codex; otherwise we use the simpler
+    ``config_overrides`` slot.
     """
-    if not config_overrides:
+    if not cli_args and not config_overrides:
         return base
     if base is not None:
-        # Remote factory — overrides were baked in at construction; return as-is.
+        # Remote factory — args were baked in at construction; return as-is.
         return base
 
-    def _local_with_overrides(
-        cwd: str, approval_handler: ApprovalCallback
-    ) -> AppServerClient:
+    def _local(cwd: str, approval_handler: ApprovalCallback) -> AppServerClient:
         codex_bin = shutil.which("codex")
         if codex_bin is None:
             raise RuntimeError("codex binary not found on PATH")
+        if cli_args:
+            argv: list[str] = [codex_bin]
+            argv.extend(cli_args)
+            for kv in config_overrides:
+                argv.extend(["--config", kv])
+            argv.extend(["app-server", "--listen", "stdio://"])
+            return AppServerClient(
+                config=AppServerConfig(
+                    launch_args_override=tuple(argv),
+                    cwd=cwd,
+                    client_name="waypoint",
+                    client_title="Waypoint",
+                ),
+                approval_handler=approval_handler,
+            )
         return AppServerClient(
             config=AppServerConfig(
                 codex_bin=codex_bin,
@@ -83,7 +101,7 @@ def _apply_config_overrides(
             approval_handler=approval_handler,
         )
 
-    return _local_with_overrides
+    return _local
 
 
 @dataclass
@@ -135,9 +153,12 @@ class CodexAppServerAdapter:
         model: str | None = None,
         effort: str | None = None,
         custom_args: list[str] | None = None,
+        config_overrides: list[str] | None = None,
     ) -> str:
-        effective_factory = _apply_config_overrides(
-            client_factory_override, tuple(custom_args or [])
+        effective_factory = _apply_codex_args(
+            client_factory_override,
+            tuple(custom_args or []),
+            tuple(config_overrides or []),
         )
         state = await self._spawn_session(
             session_id,
@@ -168,9 +189,12 @@ class CodexAppServerAdapter:
         model: str | None = None,
         effort: str | None = None,
         custom_args: list[str] | None = None,
+        config_overrides: list[str] | None = None,
     ) -> None:
-        effective_factory = _apply_config_overrides(
-            client_factory_override, tuple(custom_args or [])
+        effective_factory = _apply_codex_args(
+            client_factory_override,
+            tuple(custom_args or []),
+            tuple(config_overrides or []),
         )
         state = await self._spawn_session(
             session_id,

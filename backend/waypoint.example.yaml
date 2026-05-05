@@ -22,8 +22,10 @@ plugin_configs:
     # default_model_id: gpt-5
     # default_effort: high
     # local_bin: /opt/codex/bin/codex   # path on the local host; falls back to `codex`
-    # cli_args:
+    # cli_args:                              # raw flags for `codex …` before `app-server`
     #   - "--verbose"
+    # config_overrides:                      # codex-only; each entry → `codex --config K=V`
+    #   - 'model_reasoning_effort="high"'
   claude_code:
     # default_model_id: opus
     # default_effort: high
@@ -64,10 +66,10 @@ ssh_targets:
     plugin_configs:
       codex:
         # remote_bin: /opt/codex/bin/codex     # path on the remote host
-        # cli_args:
+        # cli_args:                            # raw flags before `app-server`
         #   - "--verbose"
-        config_overrides:
-          - model_reasoning_effort="high"      # codex --config K=V
+        config_overrides:                      # codex --config K=V
+          - model_reasoning_effort="high"
       claude_code:
         # remote_bin: /opt/claude/bin/claude
         # cli_args:

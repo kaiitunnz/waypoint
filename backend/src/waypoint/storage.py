@@ -117,7 +117,8 @@ class Storage:
                 permission_mode TEXT,
                 model TEXT,
                 effort TEXT,
-                args TEXT NOT NULL DEFAULT '[]'
+                args TEXT NOT NULL DEFAULT '[]',
+                config_overrides TEXT NOT NULL DEFAULT '[]'
             );
 
             CREATE TABLE IF NOT EXISTS events (
@@ -144,6 +145,7 @@ class Storage:
                 launch_target_id TEXT,
                 title TEXT,
                 args TEXT NOT NULL DEFAULT '[]',
+                config_overrides TEXT NOT NULL DEFAULT '[]',
                 initial_prompt TEXT,
                 permission_mode TEXT,
                 scheduled_at TEXT NOT NULL,
@@ -157,6 +159,12 @@ class Storage:
         self._ensure_column("scheduled_sessions", "model", "TEXT")
         self._ensure_column("scheduled_sessions", "effort", "TEXT")
         self._ensure_column("sessions", "args", "TEXT NOT NULL DEFAULT '[]'")
+        self._ensure_column(
+            "sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
+        )
+        self._ensure_column(
+            "scheduled_sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
+        )
         self.connection.commit()
 
     @_synchronized
@@ -171,8 +179,8 @@ class Storage:
                 id, backend, source, transport, title, cwd, launch_target_id,
                 repo_name, branch, status, created_at, updated_at, last_event_at,
                 raw_log_path, structured_log_path, transport_state, pinned_at,
-                permission_mode, model, effort, args
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                permission_mode, model, effort, args, config_overrides
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -196,6 +204,7 @@ class Storage:
                 session.model,
                 session.effort,
                 json.dumps(list(session.args)),
+                json.dumps(list(session.config_overrides)),
             ),
         )
         self.connection.commit()
@@ -445,10 +454,10 @@ class Storage:
         self.connection.execute(
             """
             INSERT INTO scheduled_sessions (
-                id, backend, cwd, launch_target_id, title, args,
+                id, backend, cwd, launch_target_id, title, args, config_overrides,
                 initial_prompt, permission_mode, model, effort, scheduled_at, created_at, status,
                 session_id, failure_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 schedule.id,
@@ -457,6 +466,7 @@ class Storage:
                 schedule.launch_target_id,
                 schedule.title,
                 json.dumps(list(schedule.args)),
+                json.dumps(list(schedule.config_overrides)),
                 schedule.initial_prompt,
                 schedule.permission_mode,
                 schedule.model,
@@ -564,6 +574,14 @@ class Storage:
         except json.JSONDecodeError:
             parsed_args = []
         payload["args"] = parsed_args if isinstance(parsed_args, list) else []
+        raw_overrides = payload.get("config_overrides") or "[]"
+        try:
+            parsed_overrides = json.loads(raw_overrides)
+        except json.JSONDecodeError:
+            parsed_overrides = []
+        payload["config_overrides"] = (
+            parsed_overrides if isinstance(parsed_overrides, list) else []
+        )
         return SessionRecord.model_validate(payload)
 
     def _schedule_from_row(self, row: sqlite3.Row) -> ScheduledSessionRecord:
@@ -577,6 +595,14 @@ class Storage:
         except json.JSONDecodeError:
             parsed_args = []
         payload["args"] = parsed_args if isinstance(parsed_args, list) else []
+        raw_overrides = payload.get("config_overrides") or "[]"
+        try:
+            parsed_overrides = json.loads(raw_overrides)
+        except json.JSONDecodeError:
+            parsed_overrides = []
+        payload["config_overrides"] = (
+            parsed_overrides if isinstance(parsed_overrides, list) else []
+        )
         return ScheduledSessionRecord.model_validate(payload)
 
     def _event_from_row(self, row: sqlite3.Row) -> EventRecord:

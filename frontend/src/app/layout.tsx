@@ -20,12 +20,21 @@ export const viewport: Viewport = {
 };
 
 // Runs synchronously before any paint so there is no flash of wrong theme.
-// ThemeProvider then takes over and keeps the attribute in sync at runtime.
+// Also emits <meta name="theme-color"> in the resolved color so iOS Safari's
+// rubber-band overscroll matches the page background on the very first frame —
+// ThemeProvider can't do this without a hydration-time flash.
 const antiFlashScript = `(function(){
-  var t=localStorage.getItem('waypoint-theme');
-  var d=document.documentElement;
-  if(t==='light'||t==='dark'){d.dataset.theme=t;}
-  else if(window.matchMedia('(prefers-color-scheme: light)').matches){d.dataset.theme='light';}
+  var theme='dark';
+  try{
+    var t=localStorage.getItem('waypoint-theme');
+    if(t==='light'||t==='dark'){theme=t;}
+    else if(window.matchMedia('(prefers-color-scheme: light)').matches){theme='light';}
+  }catch(e){}
+  document.documentElement.dataset.theme=theme;
+  var m=document.createElement('meta');
+  m.name='theme-color';
+  m.content=theme==='light'?'#f4f1eb':'#06080b';
+  document.head.appendChild(m);
 })();`;
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

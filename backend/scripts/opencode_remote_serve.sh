@@ -7,7 +7,9 @@ set -e
 # The script blocks on stdin; when the SSH session closes, stdin breaks and
 # the OpenCode server is terminated so we do not leave orphaned processes.
 
-OPENCODE_BIN=${1:-opencode}
+# Invoked via `bash -c SCRIPT BIN`, which assigns BIN to $0 (the script-name
+# slot), not $1. Reading $0 here honors a configured remote_bin path.
+OPENCODE_BIN=${0:-opencode}
 LOG=$(mktemp)
 
 "$OPENCODE_BIN" serve --hostname=127.0.0.1 --port=0 >"$LOG" 2>&1 &

@@ -85,6 +85,7 @@ export interface BackendCapabilities {
   supports_slash_compact: boolean;
   supports_approval_note: boolean;
   supports_custom_cli_args: boolean;
+  supports_config_overrides: boolean;
   model_source: "static" | "live_rpc" | "none";
   approval_decisions: string[];
   effort_levels: string[];
@@ -133,6 +134,7 @@ export interface ScheduledSession {
   launch_target_id?: string | null;
   title?: string | null;
   args: string[];
+  config_overrides?: string[];
   initial_prompt?: string | null;
   permission_mode?: string | null;
   model?: string | null;
@@ -150,6 +152,7 @@ export interface ScheduleCreateRequest {
   launch_target_id?: string | null;
   title?: string | null;
   args?: string[];
+  config_overrides?: string[];
   initial_prompt?: string | null;
   permission_mode?: string | null;
   model?: string | null;

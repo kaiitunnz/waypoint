@@ -363,6 +363,7 @@ export default function HomePage() {
     model: string | null,
     effort: string | null,
     args: string[] = [],
+    configOverrides: string[] = [],
   ) {
     try {
       const session = await createSession(host, token, {
@@ -372,6 +373,7 @@ export default function HomePage() {
         title: title || null,
         source_mode: "managed",
         args,
+        config_overrides: configOverrides,
         model,
         effort,
       });

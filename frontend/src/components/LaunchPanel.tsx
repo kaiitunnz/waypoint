@@ -40,6 +40,7 @@ interface LaunchPanelProps {
     model: string | null,
     effort: string | null,
     args: string[],
+    configOverrides: string[],
   ) => Promise<void>;
   onAttach: (target: string, backendHint: Backend) => Promise<void>;
   onImportThread: (
@@ -73,12 +74,16 @@ export function LaunchPanel({
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const [customArgsText, setCustomArgsText] = useState("");
+  const [configOverridesText, setConfigOverridesText] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [modelInfo, setModelInfo] = useState<BackendModelListResponse | null>(null);
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [formBusy, setFormBusy] = useState(false);
 
-  const supportsCustomArgs = catalog.byId(backend)?.capabilities.supports_custom_cli_args ?? false;
+  const capabilities = catalog.byId(backend)?.capabilities;
+  const supportsCustomArgs = capabilities?.supports_custom_cli_args ?? false;
+  const supportsConfigOverrides = capabilities?.supports_config_overrides ?? false;
+  const showAdvancedSection = supportsCustomArgs || supportsConfigOverrides;
 
   const handleBackendChange = useCallback((nextBackend: Backend) => {
     setBackend(nextBackend);
@@ -144,10 +149,12 @@ export function LaunchPanel({
     event.preventDefault();
     setFormBusy(true);
     try {
-      const args = customArgsText
-        .split("\n")
-        .map((a) => a.trim())
-        .filter(Boolean);
+      const args = supportsCustomArgs
+        ? customArgsText.split("\n").map((a) => a.trim()).filter(Boolean)
+        : [];
+      const configOverrides = supportsConfigOverrides
+        ? configOverridesText.split("\n").map((a) => a.trim()).filter(Boolean)
+        : [];
       await onCreate(
         backend,
         cwd,
@@ -155,6 +162,7 @@ export function LaunchPanel({
         model.trim() || null,
         effort.trim() || null,
         args,
+        configOverrides,
       );
       setTitle("");
     } finally {
@@ -219,7 +227,7 @@ export function LaunchPanel({
           onChange={setEffort}
           disabled={formBusy}
         />
-        {supportsCustomArgs ? (
+        {showAdvancedSection ? (
           <div className={`advanced-section${showAdvanced ? " open" : ""}`}>
             <button
               type="button"
@@ -236,20 +244,38 @@ export function LaunchPanel({
             </button>
             <div className="advanced-body">
               <div className="advanced-body-inner">
-                <label className="field advanced-args-field">
-                  <span>Custom CLI args</span>
-                  <textarea
-                    rows={3}
-                    value={customArgsText}
-                    onChange={(e) => setCustomArgsText(e.target.value)}
-                    placeholder={"One flag per line, e.g.\n--dangerously-skip-permissions"}
-                    disabled={formBusy}
-                    spellCheck={false}
-                    autoCapitalize="none"
-                    autoComplete="off"
-                    autoCorrect="off"
-                  />
-                </label>
+                {supportsCustomArgs ? (
+                  <label className="field advanced-args-field">
+                    <span>Custom CLI args</span>
+                    <textarea
+                      rows={3}
+                      value={customArgsText}
+                      onChange={(e) => setCustomArgsText(e.target.value)}
+                      placeholder={"One flag per line, e.g.\n--dangerously-skip-permissions"}
+                      disabled={formBusy}
+                      spellCheck={false}
+                      autoCapitalize="none"
+                      autoComplete="off"
+                      autoCorrect="off"
+                    />
+                  </label>
+                ) : null}
+                {supportsConfigOverrides ? (
+                  <label className="field advanced-args-field">
+                    <span>Config overrides (key=value)</span>
+                    <textarea
+                      rows={3}
+                      value={configOverridesText}
+                      onChange={(e) => setConfigOverridesText(e.target.value)}
+                      placeholder={"One per line, e.g.\nmodel_reasoning_effort=\"high\""}
+                      disabled={formBusy}
+                      spellCheck={false}
+                      autoCapitalize="none"
+                      autoComplete="off"
+                      autoCorrect="off"
+                    />
+                  </label>
+                ) : null}
                 <p className="advanced-warning">
                   Passed directly to the CLI binary — use with caution.
                 </p>

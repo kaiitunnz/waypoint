@@ -63,6 +63,7 @@ export function SchedulePanel({
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const [customArgsText, setCustomArgsText] = useState("");
+  const [configOverridesText, setConfigOverridesText] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [modelInfo, setModelInfo] = useState<BackendModelListResponse | null>(null);
   const [modelsByBackend, setModelsByBackend] = useState<Record<string, BackendModelOption[]>>({});
@@ -77,7 +78,10 @@ export function SchedulePanel({
     [backend, catalog],
   );
 
-  const supportsCustomArgs = catalog.byId(backend)?.capabilities.supports_custom_cli_args ?? false;
+  const capabilities = catalog.byId(backend)?.capabilities;
+  const supportsCustomArgs = capabilities?.supports_custom_cli_args ?? false;
+  const supportsConfigOverrides = capabilities?.supports_config_overrides ?? false;
+  const showAdvancedSection = supportsCustomArgs || supportsConfigOverrides;
 
   useEffect(() => setBackend(defaultBackend), [defaultBackend]);
   useEffect(() => setCwd(defaultCwd), [defaultCwd]);
@@ -146,10 +150,12 @@ export function SchedulePanel({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    const args = customArgsText
-      .split("\n")
-      .map((a) => a.trim())
-      .filter(Boolean);
+    const args = supportsCustomArgs
+      ? customArgsText.split("\n").map((a) => a.trim()).filter(Boolean)
+      : [];
+    const configOverrides = supportsConfigOverrides
+      ? configOverridesText.split("\n").map((a) => a.trim()).filter(Boolean)
+      : [];
     const payload: ScheduleCreateRequest = {
       backend,
       cwd,
@@ -159,6 +165,7 @@ export function SchedulePanel({
       model: model.trim() || null,
       effort: effort.trim() || null,
       args,
+      config_overrides: configOverrides,
     };
     if (mode === "delay") {
       const minutes = Number.parseFloat(delayMinutes);
@@ -272,7 +279,7 @@ export function SchedulePanel({
             disabled={busy}
           />
         </div>
-        {supportsCustomArgs ? (
+        {showAdvancedSection ? (
           <div className={`advanced-section${showAdvanced ? " open" : ""}`}>
             <button
               type="button"
@@ -289,20 +296,38 @@ export function SchedulePanel({
             </button>
             <div className="advanced-body">
               <div className="advanced-body-inner">
-                <label className="field advanced-args-field">
-                  <span>Custom CLI args</span>
-                  <textarea
-                    rows={3}
-                    value={customArgsText}
-                    onChange={(e) => setCustomArgsText(e.target.value)}
-                    placeholder={"One flag per line, e.g.\n--dangerously-skip-permissions"}
-                    disabled={busy}
-                    spellCheck={false}
-                    autoCapitalize="none"
-                    autoComplete="off"
-                    autoCorrect="off"
-                  />
-                </label>
+                {supportsCustomArgs ? (
+                  <label className="field advanced-args-field">
+                    <span>Custom CLI args</span>
+                    <textarea
+                      rows={3}
+                      value={customArgsText}
+                      onChange={(e) => setCustomArgsText(e.target.value)}
+                      placeholder={"One flag per line, e.g.\n--dangerously-skip-permissions"}
+                      disabled={busy}
+                      spellCheck={false}
+                      autoCapitalize="none"
+                      autoComplete="off"
+                      autoCorrect="off"
+                    />
+                  </label>
+                ) : null}
+                {supportsConfigOverrides ? (
+                  <label className="field advanced-args-field">
+                    <span>Config overrides (key=value)</span>
+                    <textarea
+                      rows={3}
+                      value={configOverridesText}
+                      onChange={(e) => setConfigOverridesText(e.target.value)}
+                      placeholder={"One per line, e.g.\nmodel_reasoning_effort=\"high\""}
+                      disabled={busy}
+                      spellCheck={false}
+                      autoCapitalize="none"
+                      autoComplete="off"
+                      autoCorrect="off"
+                    />
+                  </label>
+                ) : null}
                 <p className="advanced-warning">
                   Passed directly to the CLI binary — use with caution.
                 </p>

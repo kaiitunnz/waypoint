@@ -12,6 +12,7 @@ interface SessionListProps {
   onDeleteExited?: () => void | Promise<void>;
   onTerminate?: (sessionId: string) => void | Promise<void>;
   onSetPinned?: (sessionId: string, pinned: boolean) => void | Promise<void>;
+  onSetTitle?: (sessionId: string, title: string) => void | Promise<void>;
 }
 
 const PAGE_SIZE = 10;
@@ -22,6 +23,7 @@ export function SessionList({
   onDeleteExited,
   onTerminate,
   onSetPinned,
+  onSetTitle,
 }: SessionListProps) {
   const [page, setPage] = useState(1);
 
@@ -60,6 +62,21 @@ export function SessionList({
       return;
     }
     void onSetPinned(sessionId, pinned);
+  }
+
+  function handleSetTitle(
+    event: MouseEvent<HTMLButtonElement>,
+    session: SessionRecord,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!onSetTitle) {
+      return;
+    }
+    const newTitle = window.prompt("Rename session", session.title);
+    if (newTitle && newTitle.trim() && newTitle !== session.title) {
+      void onSetTitle(session.id, newTitle.trim());
+    }
   }
 
   function handleDeleteExited() {
@@ -116,7 +133,20 @@ export function SessionList({
             {session.status.replace("_", " ")}
           </span>
         </div>
-        <h3 className="session-card-title">{session.title}</h3>
+        <div className="session-card-title-row">
+          <h3 className="session-card-title">{session.title}</h3>
+          {onSetTitle ? (
+            <button
+              className="link-button edit-title-btn"
+              type="button"
+              onClick={(event) => handleSetTitle(event, session)}
+              title="Rename session"
+              aria-label="Rename session"
+            >
+              ✎
+            </button>
+          ) : null}
+        </div>
         <p className="muted session-card-path">
           {session.cwd}
         </p>

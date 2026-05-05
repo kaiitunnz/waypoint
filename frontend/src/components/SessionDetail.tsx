@@ -27,6 +27,7 @@ import {
   setSessionEffort,
   setSessionModel,
   setSessionPermissionMode,
+  setSessionTitle,
 } from "@/lib/api";
 import {
   fidelityFor,
@@ -687,6 +688,23 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }, [handleAuthFailure, host, router, token, sessionId]);
 
+  const handleSetTitle = useCallback(
+    async (title: string) => {
+      if (!session) return;
+      try {
+        const updated = await setSessionTitle(host, token, sessionId, title);
+        setSession(updated);
+      } catch (titleError) {
+        if (isAuthError(titleError)) {
+          handleAuthFailure();
+          return;
+        }
+        setError(titleError instanceof Error ? titleError.message : "failed to update title");
+      }
+    },
+    [host, token, sessionId, session, handleAuthFailure],
+  );
+
   async function submitApproval(decision: string, text?: string, approvalId?: string) {
     try {
       await approveSession(host, token, sessionId, decision, text, approvalId);
@@ -765,7 +783,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         </div>
       ) : null}
       {session ? (
-        <SessionHeader session={session} connection={connection} modelOptions={modelOptions} />
+        <SessionHeader 
+          session={session} 
+          connection={connection} 
+          modelOptions={modelOptions} 
+          onSetTitle={handleSetTitle}
+        />
       ) : null}
       {usageSummary ? <UsageCard summary={usageSummary} /> : null}
       <div className="session-toolbar">
@@ -1947,18 +1970,43 @@ function SessionHeader({
   session,
   connection,
   modelOptions,
+  onSetTitle,
 }: {
   session: SessionRecord;
   connection: ConnectionState;
   modelOptions: BackendModelOption[];
+  onSetTitle?: (title: string) => void | Promise<void>;
 }) {
   const cwdSegments = formatCwdSegments(session.cwd);
   const target = session.launch_target_id ?? null;
   const sourceLabel = session.source === "managed" ? "Managed" : "Attached";
+
+  function handleSetTitle(event: React.MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    if (!onSetTitle) return;
+    const newTitle = window.prompt("Rename session", session.title);
+    if (newTitle && newTitle.trim() && newTitle !== session.title) {
+      void onSetTitle(newTitle.trim());
+    }
+  }
+
   return (
     <header className="session-header">
       <div className="session-header-top">
-        <h2 className="session-header-title">{session.title}</h2>
+        <div className="session-header-title-row">
+          <h2 className="session-header-title">{session.title}</h2>
+          {onSetTitle ? (
+            <button
+              className="link-button edit-title-btn"
+              type="button"
+              onClick={handleSetTitle}
+              title="Rename session"
+              aria-label="Rename session"
+            >
+              ✎
+            </button>
+          ) : null}
+        </div>
         <span
           className={`session-pulse ${connectionVariant(connection, session.status)}`}
           title={connectionTitle(connection, session.status)}

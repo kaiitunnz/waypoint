@@ -27,6 +27,7 @@ import {
   login,
   postAction,
   setSessionPinned,
+  setSessionTitle,
 } from "@/lib/api";
 import { useBackendCatalog } from "@/lib/backends";
 import {
@@ -575,6 +576,23 @@ export default function HomePage() {
     }
   }
 
+  async function handleSetTitle(sessionId: string, title: string) {
+    try {
+      const updated = await setSessionTitle(host, token, sessionId, title);
+      setSessions((current) =>
+        current.map((session) => (session.id === sessionId ? updated : session)),
+      );
+    } catch (titleError) {
+      if (isAuthError(titleError)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      setError(
+        titleError instanceof Error ? titleError.message : "failed to update title",
+      );
+    }
+  }
+
   async function handleDeleteExited() {
     const exitedIds = sessions
       .filter((session) => session.status === "exited")
@@ -705,6 +723,7 @@ export default function HomePage() {
           onDeleteExited={handleDeleteExited}
           onTerminate={handleTerminate}
           onSetPinned={handleSetPinned}
+          onSetTitle={handleSetTitle}
         />
       ) : null}
     </main>

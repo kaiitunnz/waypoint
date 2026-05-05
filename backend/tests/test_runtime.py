@@ -1202,6 +1202,77 @@ async def test_approve_syncs_storage_when_adapter_flips_mode(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_approve_keeps_waiting_input_until_queue_drains(tmp_path) -> None:
+    """Multi-approval queue contract: while another approval is still
+    pending the session must stay WAITING_INPUT (so the pager UI keeps
+    rendering) and the system_note must carry the responded approval_id
+    so the frontend can dequeue precisely that card. Status flips to
+    RUNNING only once the queue fully drains.
+    """
+    runtime, storage, settings = make_runtime(tmp_path)
+
+    class QueueFake(FakeClaudeAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.pending_ids: list[str] = ["approval-a", "approval-b"]
+            self.responded: list[tuple[str, str | None, str | None]] = []
+
+        def has_pending_approval(self, session_id: str) -> bool:
+            return bool(self.pending_ids)
+
+        async def respond_to_approval(
+            self,
+            session_id: str,
+            decision: str,
+            text: str | None = None,
+            approval_id: str | None = None,
+        ) -> bool:
+            self.responded.append((decision, text, approval_id))
+            target = approval_id or self.pending_ids[0]
+            if target not in self.pending_ids:
+                return False
+            self.pending_ids.remove(target)
+            return True
+
+    fake = QueueFake()
+    _claude_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend="claude_code",
+        transport="claude_cli",
+        status=SessionStatus.WAITING_INPUT,
+    )
+    storage.create_session(session)
+
+    first = await runtime.approve(
+        "claude-sess",
+        SessionApprovalRequest(decision="accept", approval_id="approval-a"),
+    )
+    assert first.status == SessionStatus.WAITING_INPUT
+
+    second = await runtime.approve(
+        "claude-sess",
+        SessionApprovalRequest(decision="accept", approval_id="approval-b"),
+    )
+    assert second.status == SessionStatus.RUNNING
+
+    notes = [
+        e
+        for e in storage.list_events("claude-sess")
+        if e.kind == EventKind.SYSTEM_NOTE and "Approval response sent" in e.text
+    ]
+    assert [n.metadata.get("approval_id") for n in notes] == [
+        "approval-a",
+        "approval-b",
+    ]
+    assert fake.responded == [
+        ("accept", None, "approval-a"),
+        ("accept", None, "approval-b"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_set_permission_mode_claude_rejects_unknown_mode(tmp_path) -> None:
     from fastapi import HTTPException
 

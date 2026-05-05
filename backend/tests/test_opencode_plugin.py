@@ -326,6 +326,7 @@ async def test_get_or_create_adapter_keys_by_cwd(
             emit_event,
             launch_target=None,
             on_agent_changed=None,
+            on_server_died=None,
             workdir=None,
         ) -> None:
             self.workdir = workdir
@@ -369,6 +370,7 @@ async def test_get_or_create_adapter_normalizes_equivalent_cwds(
             emit_event,
             launch_target=None,
             on_agent_changed=None,
+            on_server_died=None,
             workdir=None,
         ) -> None:
             self.workdir = workdir
@@ -604,7 +606,9 @@ async def test_import_thread_preserves_launch_target_id() -> None:
 
     fake_adapter = FakeAdapter()
 
-    async def fake_get_or_create_adapter(runtime, launch_target_id, cwd):
+    async def fake_get_or_create_adapter(
+        runtime, launch_target_id, cwd, *, user_initiated=False
+    ):
         assert launch_target_id == "ssh-1"
         assert cwd == "/repo"
         return fake_adapter
@@ -689,7 +693,9 @@ async def test_import_thread_keys_adapter_by_session_directory() -> None:
     fake_adapter = FakeAdapter()
     cwds_seen: list[str | None] = []
 
-    async def fake_get_or_create_adapter(runtime, launch_target_id, cwd):
+    async def fake_get_or_create_adapter(
+        runtime, launch_target_id, cwd, *, user_initiated=False
+    ):
         cwds_seen.append(cwd)
         return fake_adapter
 

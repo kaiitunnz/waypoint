@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from waypoint.backends.opencode.connection_config import with_ssh_keepalive
 from waypoint.launch_targets import SshLaunchTargetConfig
 
 _REMOTE_SERVE_SCRIPT_PATH = (
@@ -15,4 +16,4 @@ def build_remote_serve_args(
     cwd: str | None = None,
 ) -> tuple[str, ...]:
     cmd = ["bash", "-c", REMOTE_SERVE_SCRIPT, opencode_bin]
-    return target.build_remote_exec_args(cmd, cwd)
+    return with_ssh_keepalive(target.build_remote_exec_args(cmd, cwd))

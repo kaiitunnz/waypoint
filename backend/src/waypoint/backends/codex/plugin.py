@@ -140,7 +140,12 @@ class CodexPlugin:
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        await self._require_adapter().terminate_session(session.id)
+        # Soft path: runtime.terminate routes through here, so a session
+        # whose adapter setup never completed (or was torn down during
+        # shutdown) must still be disposable. Mirrors the opencode and
+        # claude_code behaviour.
+        if self.adapter is not None:
+            await self.adapter.terminate_session(session.id)
 
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord

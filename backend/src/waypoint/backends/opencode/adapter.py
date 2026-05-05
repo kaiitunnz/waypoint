@@ -332,11 +332,21 @@ class OpenCodeAdapter:
         log.info("opencode adapter reset after server death; ready for restart")
 
     async def _listen_events(self) -> None:
-        client = self._require_client()
+        # OpenCode's /event stream does not support resume: events are emitted
+        # with `id: undefined`, so a reconnect cannot pick up where it left
+        # off. That means any mid-session disconnect is unrecoverable — events
+        # generated while the connection was down would be silently dropped.
+        # The retry budget below is therefore only spent on *pre-first-event*
+        # failures (server still warming up). Once we've delivered at least
+        # one event, any error or clean EOF promotes straight to
+        # `_on_server_died`, which surfaces the disconnect to the user
+        # instead of pretending the transcript is still live.
         consecutive_failures = 0
+        delivered_any = False
         try:
             while True:
                 try:
+                    client = self._require_client()
                     buffer: list[str] = []
                     async for raw_line in client.stream_events("/event"):
                         line = raw_line.rstrip("\r\n")
@@ -345,40 +355,62 @@ class OpenCodeAdapter:
                             buffer.clear()
                             if payload is not None:
                                 await self._dispatch_event(payload)
+                                delivered_any = True
                             continue
                         if line.startswith(":"):
                             continue
                         if line.startswith("data:"):
                             buffer.append(line[5:].lstrip())
 
-                    # Handle last bit of decoder state
+                    # Handle last bit of decoder state on clean EOF.
                     payload = self._decode_sse_payload(buffer)
-                    buffer.clear()
                     if payload is not None:
                         await self._dispatch_event(payload)
+                        delivered_any = True
 
-                    # Clean EOF — reset so transient blips don't accumulate.
-                    consecutive_failures = 0
+                    if delivered_any:
+                        log.warning(
+                            "opencode sse stream closed mid-session — treating as server death"
+                        )
+                        await self._on_server_died()
+                        return
+
+                    consecutive_failures += 1
+                    if consecutive_failures >= _MAX_SSE_FAILURES:
+                        log.error(
+                            "opencode sse closed %d times before delivering any event — "
+                            "treating server as dead",
+                            consecutive_failures,
+                        )
+                        await self._on_server_died()
+                        return
+                    await asyncio.sleep(1)
 
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    consecutive_failures += 1
                     proc_dead = (
                         self._server_process is not None
                         and self._server_process.returncode is not None
                     )
-                    if proc_dead or consecutive_failures >= _MAX_SSE_FAILURES:
+                    if delivered_any or proc_dead:
+                        log.exception(
+                            "opencode sse failed%s — treating server as dead",
+                            " (process exited)" if proc_dead else " mid-session",
+                        )
+                        await self._on_server_died()
+                        return
+                    consecutive_failures += 1
+                    if consecutive_failures >= _MAX_SSE_FAILURES:
                         log.error(
-                            "sse connection failed %d time(s) consecutively%s — "
-                            "treating opencode server as dead",
+                            "opencode sse failed %d times before any event — "
+                            "treating server as dead",
                             consecutive_failures,
-                            " (process exited)" if proc_dead else "",
                         )
                         await self._on_server_died()
                         return
                     log.exception(
-                        "sse connection failed, retrying in 1s " "(%d/%d consecutive)",
+                        "opencode sse connection failed, retrying in 1s (%d/%d)",
                         consecutive_failures,
                         _MAX_SSE_FAILURES,
                     )

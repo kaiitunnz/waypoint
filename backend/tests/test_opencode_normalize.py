@@ -20,7 +20,7 @@ def test_permission_asked_maps_to_approval_request() -> None:
     assert kind == EventKind.APPROVAL_REQUEST
     assert text == "Bash: bash (npm test)"
     assert metadata["status"] == SessionStatus.WAITING_INPUT
-    assert metadata["approval_id"] == "perm_1"
+    assert metadata["approval"]["approval_id"] == "perm_1"
     assert metadata["tool_name"] == "Bash"
     assert metadata["tool_input"] == {"tool": "Bash", "command": "npm test"}
     assert metadata["approval"]["decisions"] == [
@@ -28,6 +28,24 @@ def test_permission_asked_maps_to_approval_request() -> None:
         "acceptForSession",
         "decline",
     ]
+    # Older duplicate keys should be gone now that the frontend reads
+    # `approval.approval_id` exclusively.
+    assert "approval_id" not in metadata
+    assert "permission_id" not in metadata
+
+
+def test_permission_asked_renders_all_patterns() -> None:
+    _, text, _ = map_event(
+        "permission.asked",
+        {
+            "id": "perm_2",
+            "permission": "bash",
+            "patterns": ["npm test", "npm build"],
+            "metadata": {"tool": "Bash"},
+        },
+    )
+
+    assert text == "Bash: bash (npm test, npm build)"
 
 
 def test_question_asked_maps_to_ask_user_question_tool_call() -> None:

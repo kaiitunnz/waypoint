@@ -31,7 +31,33 @@ DEFAULT_TIMEOUT_SECONDS = 60.0
 DEFAULT_MODEL = "opencode/minimax-m2.5-free"
 
 PERMISSION_REPLIES = {"once", "always", "reject"}
+# OpenCode's reply schema is strictly {once|always|reject}. Waypoint and the
+# frontend speak a richer alias vocabulary (e.g. capability descriptors
+# advertise camelCase decisions). Normalizing through this single map keeps
+# the translation explicit instead of relying on case-folding rescues.
+_DECISION_ALIASES: dict[str, str] = {
+    "once": "once",
+    "always": "always",
+    "reject": "reject",
+    "approve": "once",
+    "accept": "once",
+    "acceptforsession": "always",
+    "yes": "once",
+    "decline": "reject",
+    "deny": "reject",
+    "cancel": "reject",
+    "no": "reject",
+}
 _MAX_SSE_FAILURES = 10
+
+
+def _normalize_decision(decision: str) -> str:
+    key = decision.strip().lower().replace("-", "").replace("_", "")
+    reply = _DECISION_ALIASES.get(key)
+    if reply is None:
+        raise OpenCodeError(f"unsupported permission decision: {decision}")
+    return reply
+
 
 EmitEvent = Callable[
     [str, EventKind, str, dict[str, Any], SessionStatus],
@@ -756,23 +782,7 @@ class OpenCodeAdapter:
         return True
 
     def _map_decision_to_reply(self, decision: str) -> str:
-        # Waypoint's runtime sends approval decisions using shared aliases;
-        # OpenCode's reply schema is strictly {once|always|reject}.
-        normalized = decision.lower()
-        if normalized in PERMISSION_REPLIES:
-            return normalized
-        aliases = {
-            "approve": "once",
-            "accept": "once",
-            "yes": "once",
-            "acceptforsession": "always",
-            "decline": "reject",
-            "deny": "reject",
-            "cancel": "reject",
-        }
-        if normalized in aliases:
-            return aliases[normalized]
-        raise OpenCodeError(f"unsupported permission decision: {decision}")
+        return _normalize_decision(decision)
 
     async def set_model(self, session_id: str, model: str) -> bool:
         state = self._sessions.get(session_id)
@@ -801,6 +811,10 @@ class OpenCodeAdapter:
             return False
         state.pre_plan_mode = mode
         return True
+
+    def get_pre_plan_mode(self, session_id: str) -> str | None:
+        state = self._sessions.get(session_id)
+        return state.pre_plan_mode if state is not None else None
 
     async def set_session_permission(
         self, session_id: str, permission: list[dict[str, str]]

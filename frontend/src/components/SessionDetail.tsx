@@ -16,11 +16,13 @@ import {
   answerAskQuestion,
   approveSession,
   connectSessionSocket,
+  createSession,
   deleteSession as deleteSessionRequest,
   fetchBackendModels,
   fetchEvents,
   fetchSession,
   fetchTerminalSnapshot,
+  forkSession,
   isAuthError,
   postAction,
   sendInput,
@@ -66,6 +68,8 @@ const SLASH_COMMANDS: ReadonlyArray<{ command: string; description: string }> = 
   { command: "/status", description: "Forward to the agent's status" },
   { command: "/permissions", description: "Forward to the agent's permissions" },
   { command: "/compact", description: "Compact context to reclaim tokens" },
+  { command: "/new", description: "Start a new session with the same settings" },
+  { command: "/fork", description: "Fork this session into a new branch" },
 ];
 
 const EFFORT_LABEL: Record<string, string> = {
@@ -584,6 +588,56 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     if (!text.trim()) {
       return false;
     }
+    
+    if (text.startsWith("/new")) {
+      if (!session) return false;
+      const trailing = text.slice(4).trim();
+      try {
+        const created = await createSession(host, token, {
+          backend: session.backend,
+          cwd: session.cwd,
+          launch_target_id: session.launch_target_id,
+          model: session.model,
+          effort: session.effort,
+          permission_mode: session.permission_mode,
+          args: session.args,
+          config_overrides: session.config_overrides,
+        });
+        if (trailing) {
+          await sendInput(host, token, created.id, trailing);
+        }
+        router.push(`/session/${created.id}`);
+        return true;
+      } catch (e) {
+        if (isAuthError(e)) {
+          handleAuthFailure();
+          return false;
+        }
+        setError(e instanceof Error ? e.message : "failed to create session");
+        return false;
+      }
+    }
+
+    if (text.startsWith("/fork")) {
+      if (!session) return false;
+      const trailing = text.slice(5).trim();
+      try {
+        const forked = await forkSession(host, token, sessionId);
+        if (trailing) {
+          await sendInput(host, token, forked.id, trailing);
+        }
+        router.push(`/session/${forked.id}`);
+        return true;
+      } catch (e) {
+        if (isAuthError(e)) {
+          handleAuthFailure();
+          return false;
+        }
+        setError(e instanceof Error ? e.message : "failed to fork session");
+        return false;
+      }
+    }
+
     try {
       await sendInput(host, token, sessionId, text);
       return true;
@@ -595,7 +649,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       setError(sendError instanceof Error ? sendError.message : "failed to send input");
       return false;
     }
-  }, [handleAuthFailure, host, token, sessionId]);
+  }, [handleAuthFailure, host, token, sessionId, session, router]);
 
   const onSendWithOptimistic = useCallback(
     async (text: string) => {

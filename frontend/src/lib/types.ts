@@ -48,6 +48,8 @@ export interface SessionRecord {
   permission_mode?: string | null;
   model?: string | null;
   effort?: string | null;
+  args: string[];
+  config_overrides: string[];
 }
 
 export interface EventRecord {

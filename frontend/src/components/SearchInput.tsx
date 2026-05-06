@@ -58,6 +58,20 @@ export function SearchInput({
     setTooltipOpen(true);
   }
 
+  function toggleTooltip(e?: React.MouseEvent | React.TouchEvent) {
+    if (e && e.type === "touchstart") {
+      // Prevent touchstart from also firing mouseenter/click right away
+      e.preventDefault();
+    }
+    cancelClose();
+    if (tooltipOpen) {
+      setTooltipOpen(false);
+    } else {
+      updatePosition();
+      setTooltipOpen(true);
+    }
+  }
+
   function scheduleClose() {
     cancelClose();
     closeTimerRef.current = window.setTimeout(() => {
@@ -162,6 +176,8 @@ export function SearchInput({
         tabIndex={0}
         onMouseEnter={openTooltip}
         onMouseLeave={scheduleClose}
+        onClick={toggleTooltip}
+        onTouchStart={toggleTooltip}
         onFocus={openTooltip}
         onBlur={scheduleClose}
       >

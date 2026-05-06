@@ -134,7 +134,7 @@ export function SessionList({
     }
 
     const terms = parseQuery(query.trim());
-    const defaultFields = ["title", "cwd", "repo_name", "branch", "backend"];
+    const defaultFields = ["title", "cwd", "repo_name", "branch", "backend", "search_status"];
 
     const matched = sessions.filter((session) => {
       return matchesQuery(session, terms, defaultFields);

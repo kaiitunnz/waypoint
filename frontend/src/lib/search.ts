@@ -14,6 +14,8 @@ const ALIASES: Record<string, string> = {
   path: "cwd",
   app: "backend",
   agent: "backend",
+  state: "search_status",
+  status: "search_status",
 };
 
 export function parseQuery(query: string): ParsedQuery {
@@ -82,6 +84,11 @@ export function parseQuery(query: string): ParsedQuery {
 export function matchesQuery(item: any, groups: ParsedQuery, defaultFields: string[]): boolean {
   if (groups.length === 0) return true;
   
+  // Inject a virtual field for status searching so "active" can match any non-exited status.
+  const searchItem = item.status
+    ? { ...item, search_status: item.status !== "exited" ? `${item.status} active` : item.status }
+    : item;
+  
   for (const group of groups) {
     let groupMatched = true;
     for (const term of group) {
@@ -89,7 +96,7 @@ export function matchesQuery(item: any, groups: ParsedQuery, defaultFields: stri
       
       let termMatched = false;
       for (const field of fieldsToSearch) {
-        const itemValue = item[field];
+        const itemValue = searchItem[field];
         if (itemValue == null) continue;
         
         const strValue = String(itemValue);

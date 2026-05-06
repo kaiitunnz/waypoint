@@ -304,6 +304,27 @@ class Storage:
         return event.model_copy(update={"id": int(last_id)})
 
     @_synchronized
+    def clone_events(self, source_session_id: str, target_session_id: str) -> int:
+        """Bulk-copy all events from source to target, reassigning session_id.
+
+        Returns the number of rows inserted.
+        """
+        self.connection.execute(
+            """
+            INSERT INTO events (session_id, ts, kind, text, metadata, sequence)
+            SELECT ?, ts, kind, text, metadata, sequence
+            FROM events
+            WHERE session_id = ?
+            ORDER BY sequence ASC, id ASC
+            """,
+            (target_session_id, source_session_id),
+        )
+        self.connection.commit()
+        return self.connection.execute(
+            "SELECT COUNT(*) FROM events WHERE session_id = ?", (target_session_id,)
+        ).fetchone()[0]
+
+    @_synchronized
     def list_events(
         self,
         session_id: str,

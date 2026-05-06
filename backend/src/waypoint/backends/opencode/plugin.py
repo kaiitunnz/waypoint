@@ -1067,27 +1067,24 @@ class OpenCodePlugin:
         session: SessionRecord,
         new_session_id: str,
         title: str,
-        raw_log: Any,
-        structured_log: Any,
+        raw_log: Path,
+        structured_log: Path,
     ) -> SessionRecord:
+        effective_args = tuple(
+            self._effective_args(runtime, session.launch_target_id, session.args)
+        )
         key = self._adapter_key(
             runtime,
             session.launch_target_id,
             session.cwd,
-            tuple(
-                self._effective_args(runtime, session.launch_target_id, session.args)
-            ),
+            effective_args,
         )
         try:
             adapter = await self._get_or_create_adapter(
                 runtime,
                 session.launch_target_id,
                 session.cwd,
-                custom_args=tuple(
-                    self._effective_args(
-                        runtime, session.launch_target_id, session.args
-                    )
-                ),
+                custom_args=effective_args,
             )
         except Exception as exc:
             self._health_for(key).record_failure()
@@ -1103,13 +1100,14 @@ class OpenCodePlugin:
                 detail="OpenCode session has no opencode_session_id to fork from",
             )
 
+        agent = session.transport_state.get("agent")
         try:
             new_opencode_session_id = await adapter.fork_session(
                 new_session_id,
                 session.cwd,
                 opencode_session_id,
                 model=session.model,
-                agent=session.transport_state.get("agent"),
+                agent=agent,
                 effort=session.effort,
             )
             pre_plan_mode = session.transport_state.get("pre_plan_mode")
@@ -1126,6 +1124,11 @@ class OpenCodePlugin:
         self._health_for(key).record_success()
         now = datetime.now(UTC)
         raw_log.touch(exist_ok=True)
+        forked_transport_state: dict[str, Any] = {
+            "opencode_session_id": new_opencode_session_id,
+        }
+        if agent:
+            forked_transport_state["agent"] = agent
         new_session = SessionRecord(
             id=new_session_id,
             backend=self.id,
@@ -1142,7 +1145,7 @@ class OpenCodePlugin:
             last_event_at=now,
             raw_log_path=str(raw_log),
             structured_log_path=str(structured_log),
-            transport_state={"opencode_session_id": new_opencode_session_id},
+            transport_state=forked_transport_state,
             permission_mode=session.permission_mode,
             model=session.model,
             effort=session.effort,

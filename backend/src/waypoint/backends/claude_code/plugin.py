@@ -443,8 +443,8 @@ class ClaudeCodePlugin:
         session: SessionRecord,
         new_session_id: str,
         title: str,
-        raw_log: Any,
-        structured_log: Any,
+        raw_log: Path,
+        structured_log: Path,
     ) -> SessionRecord:
         if self.adapter is None:
             raise HTTPException(

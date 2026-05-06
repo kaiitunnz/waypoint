@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel
@@ -157,8 +158,8 @@ class BackendPlugin(Protocol):
         session: SessionRecord,
         new_session_id: str,
         title: str,
-        raw_log: Any,
-        structured_log: Any,
+        raw_log: Path,
+        structured_log: Path,
     ) -> SessionRecord:
         """Fork an existing session into a new branch."""
         ...

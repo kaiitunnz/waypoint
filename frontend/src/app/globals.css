@@ -4212,43 +4212,35 @@ html[data-theme="light"] .search-bar input:focus {
   cursor: help;
 }
 
-.search-bar .help-tooltip {
-  visibility: hidden;
-  opacity: 0;
-  position: absolute;
-  top: 100%;
-  right: 0;
-  margin-top: 8px;
+.help-tooltip {
   width: max-content;
   max-width: 320px;
   padding: 12px;
-  background: var(--bg);
-  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(6px) saturate(1.4);
+  -webkit-backdrop-filter: blur(6px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: var(--radius-sm);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   font-family: var(--font-mono);
   font-size: 0.75rem;
   color: var(--fg);
   z-index: 50;
-  transition: opacity 0.15s ease, visibility 0.15s ease;
 }
 
-html[data-theme="light"] .search-bar .help-tooltip {
+html[data-theme="light"] .help-tooltip {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.10);
 }
 
-.search-bar .help-icon:hover .help-tooltip {
-  visibility: visible;
-  opacity: 1;
-}
-
-.search-bar .help-tooltip p {
+.help-tooltip p {
   margin-top: 0;
   margin-bottom: 8px;
   color: var(--muted);
 }
 
-.search-bar .help-tooltip ul {
+.help-tooltip ul {
   list-style: none;
   padding: 0;
   margin: 0;
@@ -4257,13 +4249,13 @@ html[data-theme="light"] .search-bar .help-tooltip {
   gap: 6px;
 }
 
-.search-bar .help-tooltip li {
+.help-tooltip li {
   display: grid;
   grid-template-columns: 100px 1fr;
   gap: 8px;
 }
 
-.search-bar .help-tooltip code {
+.help-tooltip code {
   color: var(--fg);
 }
 

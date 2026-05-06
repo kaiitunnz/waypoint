@@ -1027,6 +1027,43 @@ pre {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  /* Blurred backdrop so transcript cards scrolling behind are masked. */
+  background: linear-gradient(180deg, rgba(10, 13, 18, 0.96), rgba(10, 13, 18, 0.88));
+  backdrop-filter: blur(14px) saturate(1.1);
+  margin-left: calc(-20px - env(safe-area-inset-left));
+  margin-right: calc(-20px - env(safe-area-inset-right));
+  padding: 10px calc(20px + env(safe-area-inset-right)) 10px calc(20px + env(safe-area-inset-left));
+  border-bottom: 1px solid rgba(120, 138, 168, 0.1);
+}
+
+.tool-run-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease, background-color 140ms ease;
+}
+
+.tool-run-toggle:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tool-run-toggle-glyph {
+  font-size: 0.85rem;
+  line-height: 1;
 }
 
 .segmented {

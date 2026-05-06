@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { BackendCatalog } from "@/lib/backends";
 import { humaniseBackend } from "@/lib/backends";
-import { matchesTerms, parseQuery } from "@/lib/search";
+import { matchesQuery, parseQuery } from "@/lib/search";
 import { Backend } from "@/lib/types";
 
 import { SearchInput } from "./SearchInput";
@@ -150,7 +150,7 @@ export function ResumeThreadPanel({
     if (query.trim() !== "") {
       const terms = parseQuery(query.trim());
       const defaultFields = ["title", "cwd", "repo_name", "branch", "preview", "backend"];
-      list = list.filter((t) => matchesTerms(t, terms, defaultFields));
+      list = list.filter((t) => matchesQuery(t, terms, defaultFields));
     }
     
     return list;
@@ -220,7 +220,7 @@ export function ResumeThreadPanel({
         className="thread-panel-search"
         value={query}
         onChange={setQuery}
-        placeholder="Filter threads..."
+        placeholder='Filter threads... (e.g. "title:bug AND branch:main")'
       />
 
       {loading ? (

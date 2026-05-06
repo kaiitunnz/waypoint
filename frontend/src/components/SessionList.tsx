@@ -4,7 +4,7 @@ import Link from "next/link";
 import { MouseEvent, ReactNode, useEffect, useMemo, useState } from "react";
 
 import { humaniseBackend, transportLabel } from "@/lib/backends";
-import { matchesTerms, parseQuery } from "@/lib/search";
+import { matchesQuery, parseQuery } from "@/lib/search";
 import { SessionRecord } from "@/lib/types";
 
 import { SearchInput } from "./SearchInput";
@@ -137,7 +137,7 @@ export function SessionList({
     const defaultFields = ["title", "cwd", "repo_name", "branch", "backend"];
 
     const matched = sessions.filter((session) => {
-      return matchesTerms(session, terms, defaultFields);
+      return matchesQuery(session, terms, defaultFields);
     });
 
     matched.sort((a, b) => {
@@ -290,7 +290,7 @@ export function SessionList({
         className="session-list-search"
         value={query}
         onChange={setQuery}
-        placeholder="Filter by title, repo, branch, or directory..."
+        placeholder='Search sessions... (e.g. "title:bug OR branch:main")'
       />
 
       {flatSearchResults !== null ? (

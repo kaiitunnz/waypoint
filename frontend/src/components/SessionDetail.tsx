@@ -2049,7 +2049,7 @@ function isToolResultDelta(event: EventRecord): boolean {
 }
 
 function isTodoListEvent(event: EventRecord): boolean {
-  return event.metadata?.item_type === "todo_list";
+  return event.metadata?.item_type === "todo_list" || readToolName(event) === "TodoWrite";
 }
 
 function isAgentBusy(

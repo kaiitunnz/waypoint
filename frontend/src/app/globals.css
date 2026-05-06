@@ -1039,6 +1039,27 @@ pre {
   border-bottom: 1px solid rgba(120, 138, 168, 0.1);
 }
 
+.session-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 520px) {
+  .session-toolbar {
+    row-gap: 8px;
+  }
+
+  .session-toolbar-right {
+    flex: 1 0 100%;
+    justify-content: space-between;
+  }
+
+  .tool-run-toggle-label {
+    display: none;
+  }
+}
+
 .tool-run-toggle {
   display: inline-flex;
   align-items: center;

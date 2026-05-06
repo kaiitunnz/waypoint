@@ -828,7 +828,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           </button>
         </div>
         {view === "chat" ? (
-          <>
+          <div className="session-toolbar-right">
             <div className="segmented segmented-quiet" role="radiogroup" aria-label="Event filter">
               <button
                 type="button"
@@ -864,7 +864,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                 <span className="tool-run-toggle-label">{toolRunsExpanded ? "collapse" : "expand"}</span>
               </button>
             ) : null}
-          </>
+          </div>
         ) : null}
       </div>
       {view === "chat" ? (

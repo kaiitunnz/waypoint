@@ -2627,6 +2627,12 @@ details.tool-disclosure[open] .tool-glyph.todo {
   cursor: default;
 }
 
+.composer-overflow-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--line);
+}
+
 /* "Back to top" mirror of the latest-pill — same floating-pill language but
  * lighter and icon-only, since jumping to the top is a less-frequent need.
  * Sticks to the top edge of the section so the user can hop back without

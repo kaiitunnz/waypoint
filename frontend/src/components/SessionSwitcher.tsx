@@ -333,7 +333,12 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
           {filteredSessions.recent.length > 0 ? (
             <div className="session-switcher-section">
               <div className="session-switcher-header">
-                Recent <span>{filteredSessions.totalRecent}</span>
+                Recent
+                <span>
+                  {(page - 1) * PAGE_SIZE + 1}–
+                  {Math.min(page * PAGE_SIZE, filteredSessions.totalRecent)} of{" "}
+                  {filteredSessions.totalRecent}
+                </span>
               </div>
               {filteredSessions.recent.map((s, i) => renderRow(s, filteredSessions.pinned.length + i))}
               {filteredSessions.totalPages > 1 ? (

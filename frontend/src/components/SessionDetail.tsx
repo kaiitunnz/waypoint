@@ -1707,7 +1707,7 @@ const ReplyComposer = memo(function ReplyComposer({
                     <span className="glyph">⇄</span>
                     Switch session…
                   </button>
-                  <div className="composer-overflow-separator" style={{ height: 1, background: "var(--line)", margin: "4px 0" }} />
+                  <div className="composer-overflow-separator" />
                   {canTerminate ? (
                     <button
                       type="button"

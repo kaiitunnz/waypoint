@@ -18,6 +18,12 @@ interface SessionSwitcherProps {
   onClose: () => void;
 }
 
+const PAGE_SIZE = 8;
+// Window after a keypress during which mouse-hover updates to the
+// active row are ignored, so list scroll under a stationary cursor
+// doesn't snap the selection back.
+const MOUSE_AFTER_KEY_SUPPRESS_MS = 300;
+
 function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr);
   const now = new Date();
@@ -50,6 +56,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
   const [page, setPage] = useState(1);
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
+  const lastKeyTimeRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -116,7 +123,6 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
     recent.sort((a, b) => b.last_event_at.localeCompare(a.last_event_at));
     pinned.sort((a, b) => b.last_event_at.localeCompare(a.last_event_at));
 
-    const PAGE_SIZE = 8;
     const totalPages = Math.ceil(recent.length / PAGE_SIZE) || 1;
     const cappedRecent = recent.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
     
@@ -147,12 +153,37 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
       onClose();
       return;
     }
-    
+
+    const navKeys = ["ArrowDown", "ArrowUp", "Home", "End"];
+    if (navKeys.includes(e.key)) {
+      lastKeyTimeRef.current = Date.now();
+    }
+
+    const pinnedCount = filteredSessions.pinned.length;
+    const totalPages = filteredSessions.totalPages;
+
     if (e.key === "ArrowDown") {
       e.preventDefault();
+      if (flatItems.length === 0) return;
+      // At the last visible row with more pages remaining, advance the
+      // page and land on the first recent item of the new page.
+      if (activeIndex === flatItems.length - 1 && page < totalPages) {
+        setPage(page + 1);
+        setActiveIndex(pinnedCount);
+        return;
+      }
       setActiveIndex((i) => (i + 1) % flatItems.length);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
+      if (flatItems.length === 0) return;
+      // At the first recent row with more pages preceding, step back a
+      // page and land on the last recent item of the previous page
+      // (which is always full since only the last page can be partial).
+      if (activeIndex === pinnedCount && page > 1) {
+        setPage(page - 1);
+        setActiveIndex(pinnedCount + PAGE_SIZE - 1);
+        return;
+      }
       setActiveIndex((i) => (i - 1 + flatItems.length) % flatItems.length);
     } else if (e.key === "Home") {
       e.preventDefault();
@@ -168,7 +199,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
         router.push(`/session/${target.id}`);
       }
     }
-  }, [flatItems, activeIndex, onClose, router]);
+  }, [flatItems, activeIndex, onClose, router, filteredSessions.pinned.length, filteredSessions.totalPages, page]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown, { capture: true });
@@ -210,7 +241,8 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
           onClose();
           router.push(`/session/${s.id}`);
         }}
-        onPointerMove={() => {
+        onMouseEnter={() => {
+          if (Date.now() - lastKeyTimeRef.current < MOUSE_AFTER_KEY_SUPPRESS_MS) return;
           if (activeIndex !== idx) setActiveIndex(idx);
         }}
       >

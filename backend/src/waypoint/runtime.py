@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import secrets
+import shutil
 from collections import defaultdict
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -239,6 +240,15 @@ class SessionRuntime:
         session_dir = self._session_dir(new_session_id)
         raw_log = session_dir / "raw.log"
         structured_log = session_dir / "events.jsonl"
+
+        # Seed the forked session's log files from the parent so the transcript
+        # is pre-populated at the fork point rather than starting blank.
+        for src, dst in [
+            (Path(session.raw_log_path), raw_log),
+            (Path(session.structured_log_path), structured_log),
+        ]:
+            if src.exists():
+                shutil.copy2(src, dst)
 
         # Add branch/fork suffix to the original title if it doesn't already have one
         base_title = session.title or session.id

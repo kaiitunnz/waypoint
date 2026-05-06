@@ -4284,7 +4284,8 @@ html[data-theme="light"] .help-tooltip {
 .session-switcher-modal {
   width: 100%;
   max-width: min(520px, calc(100vw - 32px));
-  max-height: calc(100vh - 64px);
+  max-height: calc(100% - 64px);
+  min-height: 0;
   background: rgba(14, 17, 24, 0.96);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
@@ -4475,6 +4476,7 @@ html[data-theme="light"] .help-tooltip {
   
   .session-switcher-modal {
     max-width: 100%;
+    max-height: calc(100dvh - 24px);
     border-radius: var(--radius) var(--radius) 0 0;
     border-bottom: none;
     border-left: none;

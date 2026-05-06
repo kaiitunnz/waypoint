@@ -51,6 +51,7 @@ function formatCwdSegments(cwd: string): string[] {
 
 export function SessionSwitcher({ host, token, currentSession, onAuthFailure, onClose }: SessionSwitcherProps) {
   const router = useRouter();
+  const toggleHint = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform) ? "⌘K" : "Ctrl+K";
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -371,7 +372,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
         </div>
 
         <div className="session-switcher-footer">
-          ↑↓ navigate · ↵ open · esc close
+          ↑↓ navigate · ↵ open · {toggleHint} toggle · esc close
         </div>
       </div>
     </div>

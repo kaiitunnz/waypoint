@@ -9,6 +9,7 @@ interface SearchInputProps {
   placeholder?: string;
   className?: string;
   showStatusExample?: boolean;
+  autoFocus?: boolean;
 }
 
 export function SearchInput({
@@ -17,6 +18,7 @@ export function SearchInput({
   placeholder,
   className = "",
   showStatusExample = true,
+  autoFocus = false,
 }: SearchInputProps) {
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const [tooltipPos, setTooltipPos] = useState<{ top: number; right: number } | null>(null);
@@ -139,6 +141,7 @@ export function SearchInput({
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           aria-label={placeholder || "Search"}
+          autoFocus={autoFocus}
         />
         {value !== "" ? (
           <button

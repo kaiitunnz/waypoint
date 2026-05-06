@@ -90,6 +90,7 @@ type ConnectionState = "connecting" | "open" | "reconnecting";
 // read `--composer-height` to sit just above it. The fallback keeps things
 // sensible for the very first paint before the observer fires.
 const COMPOSER_HEIGHT_FALLBACK = 220;
+const COMPOSER_HEIGHT_STORAGE_KEY = "waypoint-composer-height";
 const SHORTCUT_IS_MAC =
   typeof navigator !== "undefined" &&
   /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
@@ -1110,7 +1111,13 @@ const ReplyComposer = memo(function ReplyComposer({
   // — staged here until the user confirms via the Apply button. `null` means
   // no pending change.
   const [pendingEffort, setPendingEffort] = useState<string | null>(null);
-  const [textareaHeight, setTextareaHeight] = useState<number | undefined>(undefined);
+  const [textareaHeight, setTextareaHeight] = useState<number | undefined>(() => {
+    if (typeof window === "undefined") return undefined;
+    const stored = window.localStorage.getItem(COMPOSER_HEIGHT_STORAGE_KEY);
+    if (!stored) return undefined;
+    const parsed = Number.parseInt(stored, 10);
+    return Number.isFinite(parsed) && parsed >= 56 ? parsed : undefined;
+  });
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composerRef = useRef<HTMLElement | null>(null);
   const overflowRef = useRef<HTMLDivElement | null>(null);
@@ -1220,10 +1227,12 @@ const ReplyComposer = memo(function ReplyComposer({
     handle.setPointerCapture(pointerId);
     const startY = e.clientY;
     const startHeight = textareaRef.current?.getBoundingClientRect().height ?? 88;
+    let latestHeight = startHeight;
 
     const onPointerMove = (moveEvent: PointerEvent) => {
       const deltaY = startY - moveEvent.clientY;
       const newHeight = Math.max(56, startHeight + deltaY);
+      latestHeight = newHeight;
       setTextareaHeight(newHeight);
     };
 
@@ -1231,6 +1240,14 @@ const ReplyComposer = memo(function ReplyComposer({
       handle.releasePointerCapture(pointerId);
       handle.removeEventListener("pointermove", onPointerMove);
       handle.removeEventListener("pointerup", onPointerUp);
+      try {
+        window.localStorage.setItem(
+          COMPOSER_HEIGHT_STORAGE_KEY,
+          String(Math.round(latestHeight)),
+        );
+      } catch {
+        // localStorage unavailable (private mode, quota); skip persistence.
+      }
     };
 
     handle.addEventListener("pointermove", onPointerMove);

@@ -59,6 +59,16 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
   const listRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const lastKeyTimeRef = useRef(0);
+  // Resolved synchronously on first render so SearchInput's autoFocus
+  // prop is correct on mount (avoids the keyboard popping up on iOS).
+  const [isMobile] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(max-width: 600px)").matches,
+  );
+  // Tracks the visible viewport on mobile via visualViewport — iOS
+  // Safari's 100dvh doesn't shrink for the on-screen keyboard or
+  // always exclude the bottom URL bar with viewportFit: cover, so we
+  // size the sheet from JS instead.
+  const [mobileViewportHeight, setMobileViewportHeight] = useState<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -250,6 +260,26 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
     };
   }, []);
 
+  // Track visualViewport.height on mobile so the bottom-sheet always
+  // matches the actual visible area (URL bar showing/hiding, keyboard
+  // up/down).
+  useEffect(() => {
+    if (!isMobile) return;
+    const vv = window.visualViewport;
+    if (!vv) {
+      setMobileViewportHeight(window.innerHeight);
+      return;
+    }
+    const update = () => setMobileViewportHeight(vv.height);
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, [isMobile]);
+
   // Restore focus to whatever was focused before the modal opened
   // (typically the ⋯ trigger when opened from the overflow menu).
   useEffect(() => {
@@ -296,7 +326,21 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
     <div className="session-switcher-backdrop" onPointerDown={(e) => {
       if (e.target === e.currentTarget) onClose();
     }}>
-      <div className="session-switcher-modal" role="dialog" aria-modal="true" aria-label="Switch session" ref={modalRef}>
+      <div
+        className="session-switcher-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Switch session"
+        ref={modalRef}
+        style={
+          isMobile && mobileViewportHeight !== null
+            ? {
+                height: `${mobileViewportHeight - 24}px`,
+                maxHeight: `${mobileViewportHeight - 24}px`,
+              }
+            : undefined
+        }
+      >
         <div className="session-switcher-search">
           <SearchInput 
             value={query}
@@ -306,7 +350,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
               setActiveIndex(0);
             }}
             placeholder="Search sessions..."
-            autoFocus
+            autoFocus={!isMobile}
             showStatusExample={false}
           />
         </div>

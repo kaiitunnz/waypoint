@@ -241,8 +241,7 @@ class SessionRuntime:
         raw_log = session_dir / "raw.log"
         structured_log = session_dir / "events.jsonl"
 
-        # Seed the forked session's log files from the parent so the transcript
-        # is pre-populated at the fork point rather than starting blank.
+        # Seed the forked session's log files from the parent.
         for src, dst in [
             (Path(session.raw_log_path), raw_log),
             (Path(session.structured_log_path), structured_log),

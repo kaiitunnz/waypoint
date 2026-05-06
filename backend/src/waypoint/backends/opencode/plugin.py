@@ -1153,6 +1153,7 @@ class OpenCodePlugin:
             config_overrides=session.config_overrides,
         )
         runtime.storage.create_session(new_session)
+        runtime.storage.clone_events(session.id, new_session_id)
         await runtime._record_system_event(
             new_session_id,
             f"OpenCode session forked from {session.title or session.id}",

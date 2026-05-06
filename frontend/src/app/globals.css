@@ -4224,7 +4224,7 @@ html[data-theme="light"] .search-bar input:focus {
   font-family: var(--font-mono);
   font-size: 0.75rem;
   color: var(--fg);
-  z-index: 50;
+  z-index: 200;
 }
 
 html[data-theme="light"] .help-tooltip {
@@ -4429,6 +4429,34 @@ html[data-theme="light"] .help-tooltip {
   text-align: center;
 }
 
+.session-switcher-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 8px 16px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.session-switcher-pagination button {
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: rgba(28, 33, 44, 0.45);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+.session-switcher-pagination button:hover:not(:disabled) {
+  background: rgba(28, 33, 44, 0.85);
+  border-color: var(--line-strong);
+}
+.session-switcher-pagination button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .session-switcher-empty {
   padding: 24px 16px;
   text-align: center;
@@ -4462,6 +4490,12 @@ html[data-theme="light"] .session-switcher-modal {
 }
 html[data-theme="light"] .session-switcher-footer {
   background: rgba(240, 236, 226, 0.6);
+}
+html[data-theme="light"] .session-switcher-pagination button {
+  background: rgba(220, 210, 190, 0.45);
+}
+html[data-theme="light"] .session-switcher-pagination button:hover:not(:disabled) {
+  background: rgba(205, 194, 170, 0.85);
 }
 html[data-theme="light"] .session-switcher-row:hover {
   background: rgba(0, 0, 0, 0.02);

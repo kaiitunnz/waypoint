@@ -1975,25 +1975,39 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
   let currentRun: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] = [];
 
   for (const item of result) {
-    const isTool =
-      item.kind === "pair" ||
-      (item.kind === "single" && (item.event.kind === "tool_call" || item.event.kind === "tool_result"));
-    if (isTool) {
+    const isToolEvent = (event: EventRecord) =>
+      event.kind === "tool_call" || event.kind === "tool_result";
+    
+    let isTool = false;
+    let isTodo = false;
+
+    if (item.kind === "pair") {
+      isTool = true;
+      if ((item.pair.call && isTodoListEvent(item.pair.call)) ||
+          (item.pair.result && isTodoListEvent(item.pair.result))) {
+        isTodo = true;
+      }
+    } else if (item.kind === "single") {
+      if (isToolEvent(item.event)) {
+        isTool = true;
+        if (isTodoListEvent(item.event)) {
+          isTodo = true;
+        }
+      }
+    }
+
+    if (isTool && !isTodo) {
       currentRun.push(item);
     } else {
-      if (currentRun.length >= 2) {
+      if (currentRun.length >= 1) {
         grouped.push({ kind: "tool_run", items: currentRun });
-      } else {
-        grouped.push(...currentRun);
       }
       currentRun = [];
       grouped.push(item);
     }
   }
-  if (currentRun.length >= 2) {
+  if (currentRun.length >= 1) {
     grouped.push({ kind: "tool_run", items: currentRun });
-  } else {
-    grouped.push(...currentRun);
   }
 
   return grouped;

@@ -111,8 +111,8 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
     recent.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
     pinned.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
 
-    // Cap recent to 8 if no query
-    const cappedRecent = query ? recent : recent.slice(0, 8);
+    // Cap recent to 8 if no query, 20 if querying
+    const cappedRecent = query ? recent.slice(0, 20) : recent.slice(0, 8);
     
     return {
       pinned,
@@ -187,11 +187,11 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
   }, []);
 
   const renderRow = (s: SessionRecord, idx: number) => {
-    const isSelected = flatItems.indexOf(s) === idx;
+    const isSelected = activeIndex === idx;
     const cwdSegments = formatCwdSegments(s.cwd);
-    const leaf = cwdSegments[cwdSegments.length - 1];
-    const branchInfo = typeof s.transport_state?.thread_id === "string" ? s.transport_state.thread_id : "";
-    const breadcrumb = [humaniseBackend(s.backend), leaf, branchInfo].filter(Boolean).join(" ▸ ");
+    const workspace = s.repo_name || cwdSegments[cwdSegments.length - 1];
+    const target = s.launch_target_id || "Local";
+    const breadcrumb = [humaniseBackend(s.backend), target, workspace].filter(Boolean).join(" ▸ ");
     
     return (
       <button 
@@ -202,7 +202,9 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
           onClose();
           router.push(`/sessions/${s.id}`);
         }}
-        onPointerEnter={() => setActiveIndex(idx)}
+        onPointerMove={() => {
+          if (activeIndex !== idx) setActiveIndex(idx);
+        }}
       >
         <div className={`session-switcher-rail ${s.status}`} />
         <div className="session-switcher-body">

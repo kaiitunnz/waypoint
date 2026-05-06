@@ -56,6 +56,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
   const [page, setPage] = useState(1);
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
   const lastKeyTimeRef = useRef(0);
 
   useEffect(() => {
@@ -154,6 +155,29 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
       return;
     }
 
+    if (e.key === "Tab") {
+      const root = modalRef.current;
+      if (!root) return;
+      const focusable = root.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !root.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !root.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
+      return;
+    }
+
     const navKeys = ["ArrowDown", "ArrowUp", "Home", "End"];
     if (navKeys.includes(e.key)) {
       lastKeyTimeRef.current = Date.now();
@@ -225,6 +249,17 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
     };
   }, []);
 
+  // Restore focus to whatever was focused before the modal opened
+  // (typically the ⋯ trigger when opened from the overflow menu).
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    return () => {
+      if (previous && typeof previous.focus === "function") {
+        previous.focus();
+      }
+    };
+  }, []);
+
   const renderRow = (s: SessionRecord, idx: number) => {
     const isSelected = activeIndex === idx;
     const cwdSegments = formatCwdSegments(s.cwd);
@@ -260,7 +295,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
     <div className="session-switcher-backdrop" onPointerDown={(e) => {
       if (e.target === e.currentTarget) onClose();
     }}>
-      <div className="session-switcher-modal" role="dialog" aria-modal="true" aria-label="Switch session">
+      <div className="session-switcher-modal" role="dialog" aria-modal="true" aria-label="Switch session" ref={modalRef}>
         <div className="session-switcher-search">
           <SearchInput 
             value={query}

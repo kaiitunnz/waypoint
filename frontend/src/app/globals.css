@@ -4270,7 +4270,10 @@ html[data-theme="light"] .help-tooltip {
 
 .session-switcher-backdrop {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100dvh;
   z-index: 100;
   display: flex;
   align-items: center;
@@ -4284,7 +4287,7 @@ html[data-theme="light"] .help-tooltip {
 .session-switcher-modal {
   width: 100%;
   max-width: min(520px, calc(100vw - 32px));
-  max-height: calc(100% - 64px);
+  max-height: calc(100dvh - 64px);
   min-height: 0;
   background: rgba(14, 17, 24, 0.96);
   border: 1px solid var(--line-strong);

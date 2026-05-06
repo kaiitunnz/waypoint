@@ -718,7 +718,7 @@ class OpenCodeAdapter:
             raise OpenCodeError(f"failed to create session: {exc}") from exc
 
         session_id = data.get("id", "")
-        if not session_id or not session_id.startswith("ses"):
+        if not session_id:
             log.error("invalid session ID returned: %s", data)
             raise OpenCodeError(f"invalid session ID returned: {session_id}")
         return session_id
@@ -745,7 +745,7 @@ class OpenCodeAdapter:
             raise OpenCodeError(f"failed to fork session: {exc}") from exc
 
         new_real_session_id = data.get("id", "")
-        if not new_real_session_id or not new_real_session_id.startswith("ses"):
+        if not new_real_session_id:
             log.error("invalid session ID returned on fork: %s", data)
             raise OpenCodeError(
                 f"invalid session ID returned on fork: {new_real_session_id}"

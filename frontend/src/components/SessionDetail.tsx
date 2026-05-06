@@ -1766,7 +1766,7 @@ const ReplyComposer = memo(function ReplyComposer({
                       onClick={() => { onToggleToolRuns(); setOverflowOpen(false); }}
                     >
                       <span className="glyph">{toolRunsExpanded ? "⊟" : "⊞"}</span>
-                      {toolRunsExpanded ? "Collapse tool runs" : "Expand tool runs"}
+                      {toolRunsExpanded ? "Collapse tools" : "Expand tools"}
                     </button>
                   ) : null}
                   <div className="composer-overflow-separator" />

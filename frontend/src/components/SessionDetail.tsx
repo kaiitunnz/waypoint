@@ -1215,24 +1215,26 @@ const ReplyComposer = memo(function ReplyComposer({
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
+    const handle = e.currentTarget;
+    const pointerId = e.pointerId;
+    handle.setPointerCapture(pointerId);
     const startY = e.clientY;
     const startHeight = textareaRef.current?.getBoundingClientRect().height ?? 88;
 
     const onPointerMove = (moveEvent: PointerEvent) => {
       const deltaY = startY - moveEvent.clientY;
-      // 56px is the minimum height matching mobile view, 88px for desktop. 
-      // Using 56 as absolute minimum.
       const newHeight = Math.max(56, startHeight + deltaY);
       setTextareaHeight(newHeight);
     };
 
     const onPointerUp = () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
+      handle.releasePointerCapture(pointerId);
+      handle.removeEventListener("pointermove", onPointerMove);
+      handle.removeEventListener("pointerup", onPointerUp);
     };
 
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
+    handle.addEventListener("pointermove", onPointerMove);
+    handle.addEventListener("pointerup", onPointerUp);
   };
 
   function applySuggestion(index: number) {

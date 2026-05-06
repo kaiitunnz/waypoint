@@ -4198,7 +4198,6 @@ html[data-theme="light"] .search-bar input:focus {
 }
 
 .search-bar .help-icon {
-  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;

@@ -1971,38 +1971,54 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
     item.pair.sequence = Math.max(item.pair.sequence, event.sequence);
   }
 
+  // Classify each item so the grouping loop is easy to reason about.
+  // "content"  → user messages, agent text, approvals, todos, ask-questions:
+  //              always breaks (and terminates) the current tool run.
+  // "tool"     → ordinary tool call/result pairs/singles: join the run.
+  // "absorbed" → system_note / status_update lifecycle noise: silently join
+  //              the active run (rendered as quiet separators when expanded),
+  //              or fall through as standalone if no run is active yet.
+  function classifyItem(item: Extract<TranscriptItem, { kind: "single" | "pair" }>): "content" | "tool" | "absorbed" {
+    if (item.kind === "pair") {
+      const { call, result } = item.pair;
+      const isSpecial = (e: EventRecord | null) =>
+        e !== null && (isTodoListEvent(e) || readToolName(e) === "AskUserQuestion");
+      return isSpecial(call) || isSpecial(result) ? "content" : "tool";
+    }
+    const { event } = item;
+    switch (event.kind) {
+      case "user_input":
+      case "agent_output":
+      case "approval_request":
+        return "content";
+      case "tool_call":
+      case "tool_result":
+        return isTodoListEvent(event) || readToolName(event) === "AskUserQuestion"
+          ? "content"
+          : "tool";
+      default:
+        return "absorbed";
+    }
+  }
+
   const grouped: TranscriptItem[] = [];
   let currentRun: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] = [];
 
   for (const item of result) {
-    const isToolEvent = (event: EventRecord) =>
-      event.kind === "tool_call" || event.kind === "tool_result";
-    
-    let isTool = false;
-    let isTodo = false;
-
-    if (item.kind === "pair") {
-      isTool = true;
-      if ((item.pair.call && isTodoListEvent(item.pair.call)) ||
-          (item.pair.result && isTodoListEvent(item.pair.result))) {
-        isTodo = true;
-      }
-    } else if (item.kind === "single") {
-      if (isToolEvent(item.event)) {
-        isTool = true;
-        if (isTodoListEvent(item.event)) {
-          isTodo = true;
-        }
-      }
-    }
-
-    if (isTool && !isTodo) {
+    const cls = classifyItem(item);
+    if (cls === "tool") {
       currentRun.push(item);
+    } else if (cls === "absorbed") {
+      if (currentRun.length > 0) {
+        currentRun.push(item);
+      } else {
+        grouped.push(item);
+      }
     } else {
       if (currentRun.length >= 1) {
         grouped.push({ kind: "tool_run", items: currentRun });
+        currentRun = [];
       }
-      currentRun = [];
       grouped.push(item);
     }
   }

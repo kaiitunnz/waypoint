@@ -221,6 +221,7 @@ export function ResumeThreadPanel({
         value={query}
         onChange={setQuery}
         placeholder='Filter threads... (e.g. "title:bug AND branch:main")'
+        showStatusExample={false}
       />
 
       {loading ? (

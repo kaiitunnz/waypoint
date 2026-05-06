@@ -530,6 +530,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   }, [view, refreshSnapshot]);
 
   useEffect(() => {
+    if (!session) return;
+    const prev = document.title;
+    document.title = `${humaniseBackend(session.backend)} · ${session.title}`;
+    return () => { document.title = prev; };
+  }, [session]);
+
+  useEffect(() => {
     if (view !== "chat") {
       setShowScrollToBottom(false);
       setShowScrollToTop(false);

@@ -1948,40 +1948,160 @@ details.tool-disclosure[open] .tool-glyph.todo {
   color: var(--muted);
 }
 
-/* Tool runs group contiguous tool invocations — collapsed to keep transcript
- * scannable, presenting a summary pill like "Ran 5 commands • Edited 2 files" */
-.transcript.tool-call-run {
-  background: rgba(151, 162, 179, 0.05);
-  border-color: rgba(151, 162, 179, 0.15);
-  box-shadow: none;
-  border-radius: var(--radius-md);
-  margin-top: 6px;
-  margin-bottom: 6px;
+/* ─── Tool-run groups ──────────────────────────────────────────────────────
+ * Contiguous tool invocations are collapsed into a compact "process log" row.
+ * Deliberately NOT inheriting from panel/transcript/agent_output — this is a
+ * distinct element type that reads as infrastructure, not conversation.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+.tool-call-run {
+  position: relative;
+  background: rgba(8, 11, 16, 0.35);
+  border: 1px solid rgba(120, 138, 168, 0.1);
+  border-radius: var(--radius-sm);
+  margin: 3px 0;
+  overflow: hidden;
+  transition: border-color 160ms ease, background-color 160ms ease;
 }
 
-.transcript.tool-call-run > .transcript-summary {
-  padding-right: 30px;
+/* Left accent bar: a tri-colour gradient signalling "mixed tool work". */
+.tool-call-run::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(
+    to bottom,
+    rgba(94, 210, 156, 0.55),
+    rgba(200, 169, 106, 0.45),
+    rgba(143, 179, 214, 0.45)
+  );
 }
 
-.transcript.tool-call-run > .transcript-summary .transcript-role .badge.reasoning {
-  background: transparent;
-  border-color: transparent;
-  padding-left: 0;
+.tool-call-run[open] {
+  border-color: rgba(120, 138, 168, 0.17);
+  background: rgba(10, 13, 20, 0.5);
 }
 
-.transcript.tool-call-run > .transcript-summary .transcript-preview {
+.tool-call-run-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 36px 6px 14px;
+  cursor: pointer;
+  list-style: none;
+  position: relative;
+  user-select: none;
+  min-width: 0;
+}
+
+.tool-call-run-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-call-run-summary::after {
+  content: "▸";
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%) rotate(0deg);
+  color: var(--muted-soft);
+  font-size: 0.6rem;
+  line-height: 1;
+  transition: transform 160ms ease, color 160ms ease;
+}
+
+.tool-call-run[open] > .tool-call-run-summary::after {
+  transform: translateY(-50%) rotate(90deg);
+  color: var(--accent-cool);
+}
+
+.tool-run-chips {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.tool-run-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px 2px 7px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: 0.71rem;
+  letter-spacing: 0.03em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.tool-run-chip.bash {
+  background: rgba(94, 210, 156, 0.08);
+  border-color: rgba(94, 210, 156, 0.18);
+  color: var(--success);
+}
+
+.tool-run-chip.edit {
+  background: rgba(200, 169, 106, 0.08);
+  border-color: rgba(200, 169, 106, 0.18);
+  color: var(--accent);
+}
+
+.tool-run-chip.read {
+  background: rgba(143, 179, 214, 0.08);
+  border-color: rgba(143, 179, 214, 0.18);
+  color: var(--accent-cool);
+}
+
+.tool-run-chip.other {
+  background: rgba(151, 162, 179, 0.06);
+  border-color: rgba(151, 162, 179, 0.14);
   color: var(--muted);
-  font-size: 0.85em;
-  letter-spacing: 0.02em;
+}
+
+.tool-run-glyph {
+  font-weight: 600;
+}
+
+.tool-run-label {
+  letter-spacing: 0.05em;
+  opacity: 0.85;
+}
+
+.tool-run-count {
+  opacity: 0.6;
+}
+
+.tool-run-total {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted-soft);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding-right: 2px;
 }
 
 .tool-call-run-children {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px dashed rgba(151, 162, 179, 0.15);
+  gap: 6px;
+  padding: 8px 8px 10px 12px;
+  border-top: 1px solid rgba(120, 138, 168, 0.08);
+}
+
+/* Tool cards inside a run group: strip the default side margin so they sit
+ * flush with the group container's own padding. */
+.tool-call-run-children .transcript.codex.tool_call,
+.tool-call-run-children .transcript.codex.tool_result,
+.tool-call-run-children .transcript.codex.tool_pair {
+  margin: 0;
+  max-width: 100%;
 }
 
 .badge.tool {

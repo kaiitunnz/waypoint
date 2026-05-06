@@ -577,13 +577,12 @@ export default function HomePage() {
   }
 
   async function handleSetTitle(sessionId: string, title: string) {
-    let previous: SessionRecord | undefined;
-    setSessions((current) => {
-      previous = current.find((session) => session.id === sessionId);
-      return current.map((session) =>
+    const previous = sessions.find((session) => session.id === sessionId);
+    setSessions((current) =>
+      current.map((session) =>
         session.id === sessionId ? { ...session, title } : session,
-      );
-    });
+      ),
+    );
     try {
       const updated = await setSessionTitle(host, token, sessionId, title);
       setSessions((current) =>
@@ -591,9 +590,8 @@ export default function HomePage() {
       );
     } catch (titleError) {
       if (previous) {
-        const original = previous;
         setSessions((current) =>
-          current.map((session) => (session.id === sessionId ? original : session)),
+          current.map((session) => (session.id === sessionId ? previous : session)),
         );
       }
       if (isAuthError(titleError)) {

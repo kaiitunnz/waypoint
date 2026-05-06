@@ -8,9 +8,16 @@ interface SearchInputProps {
   onChange: (value: string) => void;
   placeholder?: string;
   className?: string;
+  showStatusExample?: boolean;
 }
 
-export function SearchInput({ value, onChange, placeholder, className = "" }: SearchInputProps) {
+export function SearchInput({
+  value,
+  onChange,
+  placeholder,
+  className = "",
+  showStatusExample = true,
+}: SearchInputProps) {
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const [tooltipPos, setTooltipPos] = useState<{ top: number; right: number } | null>(null);
   const iconRef = useRef<HTMLDivElement | null>(null);
@@ -98,10 +105,12 @@ export function SearchInput({ value, onChange, placeholder, className = "" }: Se
                 <code>agent:opencode</code>
                 <span>Filter by backend</span>
               </li>
-              <li>
-                <code>status:active</code>
-                <span>Filter by session state</span>
-              </li>
+              {showStatusExample ? (
+                <li>
+                  <code>status:active</code>
+                  <span>Filter by session state</span>
+                </li>
+              ) : null}
               <li>
                 <code>&quot;exact phrase&quot;</code>
                 <span>Match exact phrase</span>

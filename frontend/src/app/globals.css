@@ -4265,3 +4265,200 @@ html[data-theme="light"] .help-tooltip {
 .thread-panel-search {
   margin-top: 8px;
 }
+
+/* ─── Session Switcher ───────────────────────────────────────────────────── */
+
+.session-switcher-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  padding: 16px;
+}
+
+.session-switcher-modal {
+  width: 100%;
+  max-width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  background: rgba(14, 17, 24, 0.96);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.session-switcher-search {
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.session-switcher-search input {
+  background: rgba(8, 11, 16, 0.5);
+}
+
+.session-switcher-list {
+  overflow-y: auto;
+  padding: 10px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.session-switcher-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.session-switcher-header {
+  padding: 0 16px 6px;
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.session-switcher-header span {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted-soft);
+}
+
+.session-switcher-row,
+.session-switcher-here {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 16px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  width: 100%;
+  transition: background-color 100ms ease;
+  cursor: pointer;
+}
+
+.session-switcher-here {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.session-switcher-row.selected {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.session-switcher-rail {
+  width: 3px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--muted-soft);
+}
+.session-switcher-rail.running,
+.session-switcher-rail.waiting_input {
+  background: var(--accent-cool);
+}
+.session-switcher-rail.idle {
+  background: var(--success);
+}
+.session-switcher-rail.error,
+.session-switcher-rail.interrupted {
+  background: var(--warn);
+}
+.session-switcher-rail.exited {
+  background: var(--muted);
+  opacity: 0.5;
+}
+
+.session-switcher-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.session-switcher-title {
+  font-weight: 500;
+  color: var(--text-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.92rem;
+}
+
+.session-switcher-breadcrumb {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-switcher-time {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted-soft);
+  white-space: nowrap;
+}
+
+.session-switcher-footer {
+  padding: 8px 16px;
+  border-top: 1px solid var(--line);
+  background: rgba(8, 11, 16, 0.4);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--muted-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+
+.session-switcher-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+@media (max-width: 600px) {
+  .session-switcher-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+  
+  .session-switcher-modal {
+    max-width: 100%;
+    border-radius: var(--radius) var(--radius) 0 0;
+    border-bottom: none;
+    border-left: none;
+    border-right: none;
+  }
+  
+  .session-switcher-footer {
+    display: none;
+  }
+}
+
+html[data-theme="light"] .session-switcher-modal {
+  background: rgba(252, 249, 242, 0.98);
+  box-shadow: 0 16px 48px rgba(60, 45, 20, 0.2);
+}
+html[data-theme="light"] .session-switcher-footer {
+  background: rgba(240, 236, 226, 0.6);
+}
+html[data-theme="light"] .session-switcher-row.selected {
+  background: rgba(0, 0, 0, 0.04);
+}

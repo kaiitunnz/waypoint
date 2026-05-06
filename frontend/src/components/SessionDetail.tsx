@@ -49,6 +49,7 @@ import {
   TranscriptCard,
   ToolPair,
 } from "@/components/TranscriptCard";
+import { SessionSwitcher } from "@/components/SessionSwitcher";
 import {
   BackendModelOption,
   BackendPermissionMode,
@@ -124,6 +125,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [approvalPageIndex, setApprovalPageIndex] = useState(0);
   const [hasOlderEvents, setHasOlderEvents] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   // Tracks the smallest raw sequence ever received from the server. Distinct
   // from `events[0].sequence` because `mergeEvents` advances a coalesced
   // item's sequence to the *last* delta — using that as a cursor would
@@ -979,6 +981,15 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           </button>
         </div>
       ) : null}
+      {switcherOpen ? (
+        <SessionSwitcher
+          host={host}
+          token={token}
+          currentSession={session}
+          onAuthFailure={handleAuthFailure}
+          onClose={() => setSwitcherOpen(false)}
+        />
+      ) : null}
       <ReplyComposer
         permissionModeOptions={
           session ? permissionModesFor(session.backend, catalog) : []
@@ -1023,6 +1034,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         onRefresh={refresh}
         onReattach={reattach}
         onResume={resumeSession}
+        onSwitchSession={() => setSwitcherOpen(true)}
         onSend={onSendWithOptimistic}
         onTerminate={terminate}
       />
@@ -1065,6 +1077,7 @@ interface ReplyComposerProps {
   onRefresh: () => void;
   onReattach: () => void | Promise<void>;
   onResume: () => void | Promise<void>;
+  onSwitchSession: () => void;
   onSend: (text: string) => Promise<boolean>;
   onTerminate: () => void | Promise<void>;
 }
@@ -1100,6 +1113,7 @@ const ReplyComposer = memo(function ReplyComposer({
   onRefresh,
   onReattach,
   onResume,
+  onSwitchSession,
   onSend,
   onTerminate,
 }: ReplyComposerProps) {
@@ -1684,6 +1698,19 @@ const ReplyComposer = memo(function ReplyComposer({
                       {reattaching ? "Reconnecting…" : "Reconnect session"}
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="composer-overflow-item"
+                    onClick={() => {
+                      setOverflowOpen(false);
+                      onSwitchSession();
+                    }}
+                  >
+                    <span className="glyph">⇄</span>
+                    Switch session…
+                  </button>
+                  <div className="composer-overflow-separator" style={{ height: 1, background: "var(--line)", margin: "4px 0" }} />
                   {canTerminate ? (
                     <button
                       type="button"

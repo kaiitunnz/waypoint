@@ -4482,16 +4482,23 @@ html[data-theme="light"] .help-tooltip {
     align-items: flex-end;
     padding: 0;
   }
-  
+
+  /* Definite height (not max-height) so the flex column has a fixed
+   * parent size for `flex: 1; min-height: 0` to size the list
+   * against — iOS Safari otherwise grows the modal to content height
+   * and the list never gains its own scroll. Subtract the bottom
+   * safe-area inset so the modal doesn't sit under the iOS home
+   * indicator (viewportFit: cover puts dvh under it). */
   .session-switcher-modal {
     max-width: 100%;
-    max-height: calc(100dvh - 24px);
+    height: calc(100dvh - 24px - env(safe-area-inset-bottom));
+    max-height: calc(100dvh - 24px - env(safe-area-inset-bottom));
     border-radius: var(--radius) var(--radius) 0 0;
     border-bottom: none;
     border-left: none;
     border-right: none;
   }
-  
+
   .session-switcher-footer {
     display: none;
   }

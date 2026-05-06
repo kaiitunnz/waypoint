@@ -155,8 +155,12 @@ export function SessionList({
   const totalPages = Math.max(1, Math.ceil(listToPaginate.length / PAGE_SIZE));
 
   useEffect(() => {
+    setPage(1);
+  }, [query]);
+
+  useEffect(() => {
     setPage((current) => Math.min(current, totalPages));
-  }, [totalPages, query]);
+  }, [totalPages]);
 
   if (!sessions.length) {
     return (

@@ -67,8 +67,8 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
   // Tracks the visible viewport on mobile via visualViewport — iOS
   // Safari's 100dvh doesn't shrink for the on-screen keyboard or
   // always exclude the bottom URL bar with viewportFit: cover, so we
-  // size the sheet from JS instead.
-  const [mobileViewportHeight, setMobileViewportHeight] = useState<number | null>(null);
+  // size and position the sheet from JS instead.
+  const [mobileVV, setMobileVV] = useState<{ height: number; offsetTop: number } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -260,17 +260,16 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
     };
   }, []);
 
-  // Track visualViewport.height on mobile so the bottom-sheet always
-  // matches the actual visible area (URL bar showing/hiding, keyboard
-  // up/down).
+  // Track visualViewport on mobile so the bottom-sheet always matches
+  // the actual visible area (URL bar collapse, keyboard show/hide).
   useEffect(() => {
     if (!isMobile) return;
     const vv = window.visualViewport;
     if (!vv) {
-      setMobileViewportHeight(window.innerHeight);
+      setMobileVV({ height: window.innerHeight, offsetTop: 0 });
       return;
     }
-    const update = () => setMobileViewportHeight(vv.height);
+    const update = () => setMobileVV({ height: vv.height, offsetTop: vv.offsetTop });
     update();
     vv.addEventListener("resize", update);
     vv.addEventListener("scroll", update);
@@ -333,10 +332,20 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
         aria-label="Switch session"
         ref={modalRef}
         style={
-          isMobile && mobileViewportHeight !== null
+          isMobile && mobileVV !== null
             ? {
-                height: `${mobileViewportHeight - 24}px`,
-                maxHeight: `${mobileViewportHeight - 24}px`,
+                // Pin to the visualViewport directly — flex `align-items:
+                // flex-end` against the backdrop would put us behind the
+                // bottom URL bar on iOS Safari (viewportFit: cover puts
+                // the layout viewport under it).
+                position: "fixed",
+                left: 0,
+                right: 0,
+                top: `${mobileVV.offsetTop + 24}px`,
+                height: `calc(${mobileVV.height}px - 24px - env(safe-area-inset-bottom))`,
+                maxHeight: `calc(${mobileVV.height}px - 24px - env(safe-area-inset-bottom))`,
+                width: "100%",
+                maxWidth: "100%",
               }
             : undefined
         }

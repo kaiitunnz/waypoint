@@ -1245,10 +1245,15 @@ const ReplyComposer = memo(function ReplyComposer({
       setTextareaHeight(newHeight);
     };
 
-    const onPointerUp = () => {
-      handle.releasePointerCapture(pointerId);
+    const finishDrag = () => {
+      try {
+        handle.releasePointerCapture(pointerId);
+      } catch {
+        // Capture may already be released (e.g. on pointercancel).
+      }
       handle.removeEventListener("pointermove", onPointerMove);
-      handle.removeEventListener("pointerup", onPointerUp);
+      handle.removeEventListener("pointerup", finishDrag);
+      handle.removeEventListener("pointercancel", finishDrag);
       try {
         window.localStorage.setItem(
           COMPOSER_HEIGHT_STORAGE_KEY,
@@ -1260,7 +1265,8 @@ const ReplyComposer = memo(function ReplyComposer({
     };
 
     handle.addEventListener("pointermove", onPointerMove);
-    handle.addEventListener("pointerup", onPointerUp);
+    handle.addEventListener("pointerup", finishDrag);
+    handle.addEventListener("pointercancel", finishDrag);
   };
 
   function applySuggestion(index: number) {

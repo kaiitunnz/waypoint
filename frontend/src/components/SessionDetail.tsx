@@ -91,6 +91,9 @@ type ConnectionState = "connecting" | "open" | "reconnecting";
 // sensible for the very first paint before the observer fires.
 const COMPOSER_HEIGHT_FALLBACK = 220;
 const COMPOSER_HEIGHT_STORAGE_KEY = "waypoint-composer-height";
+// Mirrors the mobile min-height in globals.css so the resized desktop
+// composer can never shrink below what mobile already enforces.
+const COMPOSER_MIN_HEIGHT = 56;
 const SHORTCUT_IS_MAC =
   typeof navigator !== "undefined" &&
   /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
@@ -1120,7 +1123,7 @@ const ReplyComposer = memo(function ReplyComposer({
     const stored = window.localStorage.getItem(COMPOSER_HEIGHT_STORAGE_KEY);
     if (!stored) return;
     const parsed = Number.parseInt(stored, 10);
-    if (Number.isFinite(parsed) && parsed >= 56) {
+    if (Number.isFinite(parsed) && parsed >= COMPOSER_MIN_HEIGHT) {
       setTextareaHeight(parsed);
     }
   }, []);
@@ -1237,7 +1240,7 @@ const ReplyComposer = memo(function ReplyComposer({
 
     const onPointerMove = (moveEvent: PointerEvent) => {
       const deltaY = startY - moveEvent.clientY;
-      const newHeight = Math.max(56, startHeight + deltaY);
+      const newHeight = Math.max(COMPOSER_MIN_HEIGHT, startHeight + deltaY);
       latestHeight = newHeight;
       setTextareaHeight(newHeight);
     };

@@ -1948,6 +1948,42 @@ details.tool-disclosure[open] .tool-glyph.todo {
   color: var(--muted);
 }
 
+/* Tool runs group contiguous tool invocations — collapsed to keep transcript
+ * scannable, presenting a summary pill like "Ran 5 commands • Edited 2 files" */
+.transcript.tool-call-run {
+  background: rgba(151, 162, 179, 0.05);
+  border-color: rgba(151, 162, 179, 0.15);
+  box-shadow: none;
+  border-radius: var(--radius-md);
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.transcript.tool-call-run > .transcript-summary {
+  padding-right: 30px;
+}
+
+.transcript.tool-call-run > .transcript-summary .transcript-role .badge.reasoning {
+  background: transparent;
+  border-color: transparent;
+  padding-left: 0;
+}
+
+.transcript.tool-call-run > .transcript-summary .transcript-preview {
+  color: var(--muted);
+  font-size: 0.85em;
+  letter-spacing: 0.02em;
+}
+
+.tool-call-run-children {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(151, 162, 179, 0.15);
+}
+
 .badge.tool {
   background: rgba(217, 154, 74, 0.12);
   color: var(--warn);

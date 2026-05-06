@@ -48,6 +48,8 @@ import {
   PendingUserInputCard,
   TranscriptCard,
   ToolPair,
+  ToolCallRunGroup,
+  readToolName,
 } from "@/components/TranscriptCard";
 import { useSwitcher } from "@/components/SwitcherProvider";
 import {
@@ -873,8 +875,42 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
             </p>
           ) : null}
           {session && transcriptItems.length > 0
-            ? transcriptItems.map((item) =>
-                item.kind === "pair" ? (
+            ? transcriptItems.map((item, index) => {
+                if (item.kind === "tool_run") {
+                  const toolNames = item.items
+                    .map((child) => {
+                      const event = child.kind === "pair" ? child.pair.call ?? child.pair.result : child.event;
+                      return event ? readToolName(event) : null;
+                    })
+                    .filter((name): name is string => name !== null);
+                  return (
+                    <ToolCallRunGroup
+                      key={`run-${index}`}
+                      toolNames={toolNames}
+                      filterMode={filterMode}
+                    >
+                      {item.items.map((child) =>
+                        child.kind === "pair" ? (
+                          <TranscriptCard
+                            event={child.pair.call ?? child.pair.result ?? child.event}
+                            pair={child.pair}
+                            transport={session.transport}
+                            onAnswerAskQuestion={submitAskAnswer}
+                            key={`pair-${child.pair.itemId}`}
+                          />
+                        ) : (
+                          <TranscriptCard
+                            event={child.event}
+                            transport={session.transport}
+                            onAnswerAskQuestion={submitAskAnswer}
+                            key={`${child.event.sequence}-${child.event.id ?? "local"}`}
+                          />
+                        ),
+                      )}
+                    </ToolCallRunGroup>
+                  );
+                }
+                return item.kind === "pair" ? (
                   <TranscriptCard
                     event={item.pair.call ?? item.pair.result ?? item.event}
                     pair={item.pair}
@@ -889,8 +925,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                     onAnswerAskQuestion={submitAskAnswer}
                     key={`${item.event.sequence}-${item.event.id ?? "local"}`}
                   />
-                ),
-              )
+                );
+              })
             : session && optimisticMessages.length === 0
               ? (
                 <TranscriptEmpty
@@ -1893,10 +1929,11 @@ function mergeEventText(existing: EventRecord, incoming: EventRecord): string {
 
 type TranscriptItem =
   | { kind: "single"; event: EventRecord }
-  | { kind: "pair"; event: EventRecord; pair: ToolPair };
+  | { kind: "pair"; event: EventRecord; pair: ToolPair }
+  | { kind: "tool_run"; items: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] };
 
 function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
-  const result: TranscriptItem[] = [];
+  const result: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] = [];
   const pairIndex = new Map<string, number>();
   for (const event of events) {
     if (event.kind !== "tool_call" && event.kind !== "tool_result") {
@@ -1933,7 +1970,33 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
     item.pair.ts = event.ts;
     item.pair.sequence = Math.max(item.pair.sequence, event.sequence);
   }
-  return result;
+
+  const grouped: TranscriptItem[] = [];
+  let currentRun: (Extract<TranscriptItem, { kind: "single" | "pair" }>)[] = [];
+
+  for (const item of result) {
+    const isTool =
+      item.kind === "pair" ||
+      (item.kind === "single" && (item.event.kind === "tool_call" || item.event.kind === "tool_result"));
+    if (isTool) {
+      currentRun.push(item);
+    } else {
+      if (currentRun.length >= 2) {
+        grouped.push({ kind: "tool_run", items: currentRun });
+      } else {
+        grouped.push(...currentRun);
+      }
+      currentRun = [];
+      grouped.push(item);
+    }
+  }
+  if (currentRun.length >= 2) {
+    grouped.push({ kind: "tool_run", items: currentRun });
+  } else {
+    grouped.push(...currentRun);
+  }
+
+  return grouped;
 }
 
 function filterOptimisticTranscriptEvents(

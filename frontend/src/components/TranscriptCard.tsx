@@ -349,13 +349,57 @@ function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
   }
 }
 
-function readToolName(event: EventRecord): string | null {
+export function readToolName(event: EventRecord): string | null {
   const meta = event.metadata as Record<string, unknown> | undefined;
   if (!meta) return null;
   if (typeof meta.tool_name === "string" && meta.tool_name) {
     return normalizeToolName(meta.tool_name);
   }
   return null;
+}
+
+export function ToolCallRunGroup({
+  toolNames,
+  filterMode,
+  children,
+}: {
+  toolNames: string[];
+  filterMode: string;
+  children: React.ReactNode;
+}) {
+  const count = toolNames.length;
+  let bashCount = 0;
+  let editCount = 0;
+  let readCount = 0;
+  let otherCount = 0;
+  for (const name of toolNames) {
+    if (name === "Bash") bashCount++;
+    else if (name === "Edit" || name === "MultiEdit" || name === "Write") editCount++;
+    else if (name === "Read" || name === "Grep" || name === "Glob") readCount++;
+    else otherCount++;
+  }
+
+  const parts = [];
+  if (bashCount > 0) parts.push(`Ran ${bashCount} command${bashCount > 1 ? "s" : ""}`);
+  if (editCount > 0) parts.push(`Edited ${editCount} file${editCount > 1 ? "s" : ""}`);
+  if (readCount > 0) parts.push(`Read ${readCount} file${readCount > 1 ? "s" : ""}`);
+  if (otherCount > 0) parts.push(`Used ${otherCount} other tool${otherCount > 1 ? "s" : ""}`);
+
+  const summary = parts.length > 0 ? parts.join(" • ") : `Used ${count} tools`;
+
+  return (
+    <details className="panel transcript codex agent_output tool-call-run" open={filterMode === "all"}>
+      <summary className="transcript-summary">
+        <div className="transcript-role">
+          <span className="badge agent reasoning">Tool Run</span>
+        </div>
+        <p className="transcript-preview">{summary}</p>
+      </summary>
+      <div className="tool-call-run-children">
+        {children}
+      </div>
+    </details>
+  );
 }
 
 function ToolDisclosure({

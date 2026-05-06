@@ -21,7 +21,7 @@ Coding-agent backends live in `backend/src/waypoint/backends/<id>/` (currently `
 `./scripts/waypoint.sh` (run from the repo root) is the canonical way to manage the running stack. Use it whenever the user asks to deploy, bring up, tear down, restart, or check on the app:
 - Deploy / bring up: `./scripts/waypoint.sh start`.
 - Teardown: `./scripts/waypoint.sh stop`.
-- Apply code changes: `./scripts/waypoint.sh restart` — neither half runs with hot reload, so a manual restart is always required after backend or frontend edits, including type-check or lint changes that look invisible.
+- Apply code changes: `./scripts/waypoint.sh restart [backend|frontend]` — DO NOT RUN `./scripts/waypoint.sh restart` OR `./scripts/waypoint.sh restart backend` WITHOUT EXPLICIT VERBAL PERMISSION FROM THE USER. `./scripts/waypoint.sh restart frontend` can be run safely when the frontend code is updated.
 - Check state during testing: `./scripts/waypoint.sh status` for health, `./scripts/waypoint.sh logs [backend|frontend]` for output. Restart before re-testing if you have changed code since the last `start`.
 Override ports or paths inline with `WAYPOINT_STACK_BACKEND_PORT`, `WAYPOINT_STACK_FRONTEND_PORT`, `WAYPOINT_STACK_CONFIG`, or `WAYPOINT_STACK_BACKEND_DATA_DIR` rather than editing the script.
 

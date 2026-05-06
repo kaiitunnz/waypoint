@@ -4,6 +4,9 @@ export interface SearchTerm {
   value: string | RegExp;
 }
 
+export type SearchGroup = SearchTerm[]; // AND terms
+export type ParsedQuery = SearchGroup[]; // OR groups
+
 const ALIASES: Record<string, string> = {
   repo: "repo_name",
   dir: "cwd",
@@ -13,16 +16,10 @@ const ALIASES: Record<string, string> = {
   agent: "backend",
 };
 
-export function parseQuery(query: string): SearchTerm[] {
-  const terms: SearchTerm[] = [];
-  // Match field:value, field:"value", field:/regex/, value, "value", /regex/
-  // Breakdown:
-  // (?:([a-zA-Z0-9_]+):)? -> Optional field name followed by a colon
-  // ( ... ) -> The value portion
-  // \/(?:\\\/|[^/])+\/[a-z]* -> Regex literal (e.g. /foo/i), supporting escaped slashes
-  // "[^"]*" -> Double quoted string
-  // '[^']*' -> Single quoted string
-  // [^\s]+ -> Anything else (fallback to standard string)
+export function parseQuery(query: string): ParsedQuery {
+  const groups: ParsedQuery = [];
+  let currentGroup: SearchGroup = [];
+
   const regex = /(?:([a-zA-Z0-9_]+):)?(\/(?:\\\/|[^/])+\/[a-z]*|"[^"]*"|'[^']*'|[^\s]+)/g;
   
   let match;
@@ -33,6 +30,22 @@ export function parseQuery(query: string): SearchTerm[] {
     }
     
     const rawValue = match[2];
+    
+    // Explicit OR / AND logic
+    if (!field) {
+      const upperVal = rawValue.toUpperCase();
+      if (upperVal === "OR") {
+        if (currentGroup.length > 0) {
+          groups.push(currentGroup);
+          currentGroup = [];
+        }
+        continue;
+      }
+      if (upperVal === "AND") {
+        continue; // implicitly AND, so just skip
+      }
+    }
+
     let isRegex = false;
     let value: string | RegExp = rawValue;
 
@@ -56,38 +69,52 @@ export function parseQuery(query: string): SearchTerm[] {
       value = rawValue.toLowerCase();
     }
 
-    terms.push({ field, isRegex, value });
+    currentGroup.push({ field, isRegex, value });
   }
-  return terms;
+  
+  if (currentGroup.length > 0) {
+    groups.push(currentGroup);
+  }
+  return groups;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function matchesTerms(item: any, terms: SearchTerm[], defaultFields: string[]): boolean {
-  if (terms.length === 0) return true;
+export function matchesQuery(item: any, groups: ParsedQuery, defaultFields: string[]): boolean {
+  if (groups.length === 0) return true;
   
-  for (const term of terms) {
-    const fieldsToSearch = term.field ? [term.field] : defaultFields;
-    
-    let termMatched = false;
-    for (const field of fieldsToSearch) {
-      const itemValue = item[field];
-      if (itemValue == null) continue;
+  for (const group of groups) {
+    let groupMatched = true;
+    for (const term of group) {
+      const fieldsToSearch = term.field ? [term.field] : defaultFields;
       
-      const strValue = String(itemValue);
-      if (term.isRegex) {
-        if ((term.value as RegExp).test(strValue)) {
-          termMatched = true;
-          break;
+      let termMatched = false;
+      for (const field of fieldsToSearch) {
+        const itemValue = item[field];
+        if (itemValue == null) continue;
+        
+        const strValue = String(itemValue);
+        if (term.isRegex) {
+          if ((term.value as RegExp).test(strValue)) {
+            termMatched = true;
+            break;
+          }
+        } else {
+          if (strValue.toLowerCase().includes(term.value as string)) {
+            termMatched = true;
+            break;
+          }
         }
-      } else {
-        if (strValue.toLowerCase().includes(term.value as string)) {
-          termMatched = true;
-          break;
-        }
+      }
+      
+      if (!termMatched) {
+        groupMatched = false;
+        break;
       }
     }
     
-    if (!termMatched) return false;
+    // If ANY group fully matched (OR logic), the item matches
+    if (groupMatched) return true;
   }
-  return true;
+  
+  return false;
 }

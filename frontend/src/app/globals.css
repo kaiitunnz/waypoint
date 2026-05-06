@@ -4148,6 +4148,12 @@ html[data-theme="light"] .transcript.codex.user_input.pending-optimistic.persist
   position: relative;
   display: flex;
   align-items: center;
+  gap: 8px;
+}
+
+.search-bar .input-wrapper {
+  position: relative;
+  flex: 1 1 auto;
 }
 
 .search-bar input {
@@ -4178,6 +4184,8 @@ html[data-theme="light"] .search-bar input:focus {
 .search-bar .clear-btn {
   position: absolute;
   right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
   padding: 0 4px;
   font-size: 1.1rem;
   line-height: 1;
@@ -4186,6 +4194,76 @@ html[data-theme="light"] .search-bar input:focus {
 }
 
 .search-bar .clear-btn:hover {
+  color: var(--fg);
+}
+
+.search-bar .help-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--line);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: help;
+}
+
+.search-bar .help-tooltip {
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  width: max-content;
+  max-width: 320px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--fg);
+  z-index: 50;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+}
+
+html[data-theme="light"] .search-bar .help-tooltip {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.search-bar .help-icon:hover .help-tooltip {
+  visibility: visible;
+  opacity: 1;
+}
+
+.search-bar .help-tooltip p {
+  margin-top: 0;
+  margin-bottom: 8px;
+  color: var(--muted);
+}
+
+.search-bar .help-tooltip ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.search-bar .help-tooltip li {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 8px;
+}
+
+.search-bar .help-tooltip code {
   color: var(--fg);
 }
 

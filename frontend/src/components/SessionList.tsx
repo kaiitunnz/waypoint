@@ -184,9 +184,11 @@ export function SessionList({
           <span className={`badge ${session.backend}`}>
             {humaniseBackend(session.backend)}
           </span>
-          <span className={`badge transport ${session.transport}`}>
-            {transportLabel(session.transport)}
-          </span>
+          {process.env.NEXT_PUBLIC_SHOW_TRANSPORT_BADGE === "1" ? (
+            <span className={`badge transport ${session.transport}`}>
+              {transportLabel(session.transport)}
+            </span>
+          ) : null}
           {session.launch_target_id ? (
             <span className="badge neutral">{session.launch_target_id}</span>
           ) : null}

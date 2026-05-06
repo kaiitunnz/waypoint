@@ -4355,8 +4355,12 @@ html[data-theme="light"] .help-tooltip {
   opacity: 0.6;
 }
 
+.session-switcher-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .session-switcher-row.selected {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .session-switcher-rail {
@@ -4459,6 +4463,9 @@ html[data-theme="light"] .session-switcher-modal {
 html[data-theme="light"] .session-switcher-footer {
   background: rgba(240, 236, 226, 0.6);
 }
+html[data-theme="light"] .session-switcher-row:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
 html[data-theme="light"] .session-switcher-row.selected {
-  background: rgba(0, 0, 0, 0.04);
+  background: rgba(0, 0, 0, 0.06);
 }

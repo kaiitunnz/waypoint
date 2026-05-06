@@ -33,6 +33,8 @@ export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch
   const [customHost, setCustomHost] = useState(host);
   const [probe, setProbe] = useState<ProbeStatus>("idle");
   const probeAbortRef = useRef<AbortController | null>(null);
+  const onAuthFailureRef = useRef(onAuthFailure);
+  useEffect(() => { onAuthFailureRef.current = onAuthFailure; });
 
   const pageHost = typeof window === "undefined" ? "localhost" : window.location.hostname || "localhost";
 
@@ -67,14 +69,14 @@ export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch
       .then((fetched) => setSnapshot(fetched))
       .catch((error) => {
         if (isAuthError(error)) {
-          onAuthFailure?.();
+          onAuthFailureRef.current?.();
           return;
         }
         setSnapshot({ available: false, error: "discovery failed", peers: [] });
       })
       .finally(() => setSnapshotLoading(false));
     return () => controller.abort();
-  }, [open, host, token, onAuthFailure]);
+  }, [open, host, token]);
 
   useEffect(() => {
     if (!open) {

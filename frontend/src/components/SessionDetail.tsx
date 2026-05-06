@@ -1111,13 +1111,19 @@ const ReplyComposer = memo(function ReplyComposer({
   // — staged here until the user confirms via the Apply button. `null` means
   // no pending change.
   const [pendingEffort, setPendingEffort] = useState<string | null>(null);
-  const [textareaHeight, setTextareaHeight] = useState<number | undefined>(() => {
-    if (typeof window === "undefined") return undefined;
+  const [textareaHeight, setTextareaHeight] = useState<number | undefined>(undefined);
+
+  // Rehydrate from localStorage post-mount so SSR and client first-render
+  // produce identical markup (no inline height) and React doesn't warn
+  // about a hydration mismatch.
+  useEffect(() => {
     const stored = window.localStorage.getItem(COMPOSER_HEIGHT_STORAGE_KEY);
-    if (!stored) return undefined;
+    if (!stored) return;
     const parsed = Number.parseInt(stored, 10);
-    return Number.isFinite(parsed) && parsed >= 56 ? parsed : undefined;
-  });
+    if (Number.isFinite(parsed) && parsed >= 56) {
+      setTextareaHeight(parsed);
+    }
+  }, []);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composerRef = useRef<HTMLElement | null>(null);
   const overflowRef = useRef<HTMLDivElement | null>(null);

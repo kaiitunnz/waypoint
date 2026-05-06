@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 
+import { SwitcherProvider } from "@/components/SwitcherProvider";
 import { ThemeProvider } from "@/lib/theme";
 import "./globals.css";
 
@@ -44,7 +45,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <script dangerouslySetInnerHTML={{ __html: antiFlashScript }} />
       </head>
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <SwitcherProvider>{children}</SwitcherProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

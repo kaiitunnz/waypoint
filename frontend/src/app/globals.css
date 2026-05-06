@@ -1027,37 +1027,6 @@ pre {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  position: sticky;
-  top: 0;
-  z-index: 4;
-  /* Blurred backdrop so transcript cards scrolling behind are masked. */
-  background: linear-gradient(180deg, rgba(10, 13, 18, 0.96), rgba(10, 13, 18, 0.88));
-  backdrop-filter: blur(14px) saturate(1.1);
-  margin-left: calc(-20px - env(safe-area-inset-left));
-  margin-right: calc(-20px - env(safe-area-inset-right));
-  padding: 10px calc(20px + env(safe-area-inset-right)) 10px calc(20px + env(safe-area-inset-left));
-  border-bottom: 1px solid rgba(120, 138, 168, 0.1);
-}
-
-.session-toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-@media (max-width: 520px) {
-  .session-toolbar {
-    row-gap: 8px;
-  }
-
-  .session-toolbar-right {
-    flex: 1 0 100%;
-    justify-content: space-between;
-  }
-
-  .tool-run-toggle-label {
-    display: none;
-  }
 }
 
 .tool-run-toggle {

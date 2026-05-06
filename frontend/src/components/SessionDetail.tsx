@@ -828,42 +828,25 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           </button>
         </div>
         {view === "chat" ? (
-          <div className="session-toolbar-right">
-            <div className="segmented segmented-quiet" role="radiogroup" aria-label="Event filter">
-              <button
-                type="button"
-                role="radio"
-                aria-checked={filterMode === "important"}
-                className={`segmented-item ${filterMode === "important" ? "active" : ""}`}
-                onClick={() => { setFilterMode("important"); setToolRunsExpanded(false); }}
-              >
-                Important
-              </button>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={filterMode === "all"}
-                className={`segmented-item ${filterMode === "all" ? "active" : ""}`}
-                onClick={() => { setFilterMode("all"); setToolRunsExpanded(true); }}
-              >
-                All events
-              </button>
-            </div>
-            {hasToolRuns ? (
-              <button
-                type="button"
-                className="tool-run-toggle"
-                onClick={() => {
-                  const next = !toolRunsExpanded;
-                  document.querySelectorAll<HTMLDetailsElement>("details.tool-call-run").forEach((el) => { el.open = next; });
-                  setToolRunsExpanded(next);
-                }}
-                title={toolRunsExpanded ? "Collapse all tool runs" : "Expand all tool runs"}
-              >
-                <span className="tool-run-toggle-glyph">{toolRunsExpanded ? "⊟" : "⊞"}</span>
-                <span className="tool-run-toggle-label">{toolRunsExpanded ? "collapse" : "expand"}</span>
-              </button>
-            ) : null}
+          <div className="segmented segmented-quiet" role="radiogroup" aria-label="Event filter">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={filterMode === "important"}
+              className={`segmented-item ${filterMode === "important" ? "active" : ""}`}
+              onClick={() => { setFilterMode("important"); setToolRunsExpanded(false); }}
+            >
+              Important
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={filterMode === "all"}
+              className={`segmented-item ${filterMode === "all" ? "active" : ""}`}
+              onClick={() => { setFilterMode("all"); setToolRunsExpanded(true); }}
+            >
+              All events
+            </button>
           </div>
         ) : null}
       </div>
@@ -906,7 +889,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                     <ToolCallRunGroup
                       key={`run-${index}`}
                       toolNames={toolNames}
-                      filterMode={filterMode}
+                      initiallyOpen={toolRunsExpanded || filterMode === "all"}
                     >
                       {item.items.map((child) =>
                         child.kind === "pair" ? (
@@ -1078,6 +1061,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                 ?.capabilities.supports_set_effort_with_restart,
           )
         }
+        hasToolRuns={hasToolRuns}
+        toolRunsExpanded={toolRunsExpanded}
+        onToggleToolRuns={() => {
+          const next = !toolRunsExpanded;
+          document.querySelectorAll<HTMLDetailsElement>("details.tool-call-run").forEach((el) => { el.open = next; });
+          setToolRunsExpanded(next);
+        }}
         onDelete={removeFromList}
         onInterrupt={interruptSession}
         onModeChange={handlePermissionModeChange}
@@ -1097,6 +1087,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
 interface ReplyComposerProps {
   agentBusy: boolean;
   permissionModeOptions: readonly BackendPermissionMode[];
+  hasToolRuns: boolean;
+  toolRunsExpanded: boolean;
+  onToggleToolRuns: () => void;
   canDelete: boolean;
   canResume: boolean;
   canReattach: boolean;
@@ -1157,6 +1150,9 @@ const ReplyComposer = memo(function ReplyComposer({
   permissionMode,
   transport,
   effortRequiresConfirm,
+  hasToolRuns,
+  toolRunsExpanded,
+  onToggleToolRuns,
   onDelete,
   onInterrupt,
   onModeChange,
@@ -1762,6 +1758,17 @@ const ReplyComposer = memo(function ReplyComposer({
                     <span className="glyph">⇄</span>
                     Switch session…
                   </button>
+                  {hasToolRuns ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="composer-overflow-item"
+                      onClick={() => { onToggleToolRuns(); setOverflowOpen(false); }}
+                    >
+                      <span className="glyph">{toolRunsExpanded ? "⊟" : "⊞"}</span>
+                      {toolRunsExpanded ? "Collapse tool runs" : "Expand tool runs"}
+                    </button>
+                  ) : null}
                   <div className="composer-overflow-separator" />
                   {canTerminate ? (
                     <button

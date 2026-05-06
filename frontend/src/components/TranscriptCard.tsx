@@ -360,11 +360,11 @@ export function readToolName(event: EventRecord): string | null {
 
 export function ToolCallRunGroup({
   toolNames,
-  filterMode,
+  initiallyOpen,
   children,
 }: {
   toolNames: string[];
-  filterMode: string;
+  initiallyOpen: boolean;
   children: React.ReactNode;
 }) {
   const count = toolNames.length;
@@ -380,7 +380,7 @@ export function ToolCallRunGroup({
   }
 
   return (
-    <details className="tool-call-run" open={filterMode === "all"}>
+    <details className="tool-call-run" open={initiallyOpen}>
       <summary className="tool-call-run-summary">
         <div className="tool-run-chips">
           {bashCount > 0 && (

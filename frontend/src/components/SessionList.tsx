@@ -4,6 +4,7 @@ import Link from "next/link";
 import { MouseEvent, ReactNode, useEffect, useMemo, useState } from "react";
 
 import { humaniseBackend, transportLabel } from "@/lib/backends";
+import { matchesTerms, parseQuery } from "@/lib/search";
 import { SessionRecord } from "@/lib/types";
 
 import { SearchInput } from "./SearchInput";
@@ -132,14 +133,11 @@ export function SessionList({
       return { pinnedSessions: pinned, recentSessions: recent, flatSearchResults: null, exitedCount: exited, activeCount: active };
     }
 
-    const q = query.toLowerCase();
+    const terms = parseQuery(query.trim());
+    const defaultFields = ["title", "cwd", "repo_name", "branch", "backend"];
+
     const matched = sessions.filter((session) => {
-      return (
-        session.title.toLowerCase().includes(q) ||
-        session.cwd.toLowerCase().includes(q) ||
-        (session.repo_name?.toLowerCase() || "").includes(q) ||
-        (session.branch?.toLowerCase() || "").includes(q)
-      );
+      return matchesTerms(session, terms, defaultFields);
     });
 
     matched.sort((a, b) => {

@@ -415,6 +415,18 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     window.location.reload();
   }, []);
 
+  // Add global shortcut for the switcher
+  useEffect(() => {
+    function handleGlobalKeyDown(event: globalThis.KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key === "k") {
+        event.preventDefault();
+        setSwitcherOpen((open) => !open);
+      }
+    }
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, []);
+
   useEffect(() => {
     let active = true;
     async function load() {

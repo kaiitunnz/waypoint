@@ -577,12 +577,25 @@ export default function HomePage() {
   }
 
   async function handleSetTitle(sessionId: string, title: string) {
+    let previous: SessionRecord | undefined;
+    setSessions((current) => {
+      previous = current.find((session) => session.id === sessionId);
+      return current.map((session) =>
+        session.id === sessionId ? { ...session, title } : session,
+      );
+    });
     try {
       const updated = await setSessionTitle(host, token, sessionId, title);
       setSessions((current) =>
         current.map((session) => (session.id === sessionId ? updated : session)),
       );
     } catch (titleError) {
+      if (previous) {
+        const original = previous;
+        setSessions((current) =>
+          current.map((session) => (session.id === sessionId ? original : session)),
+        );
+      }
       if (isAuthError(titleError)) {
         resetAuthState("Session expired. Log in again.");
         return;

@@ -146,13 +146,13 @@ export function ResumeThreadPanel({
 
   const filteredThreads = useMemo(() => {
     let list = filter === "all" ? allThreads : allThreads.filter((t) => t.backend === filter);
-    
+
     if (query.trim() !== "") {
       const terms = parseQuery(query.trim());
       const defaultFields = ["title", "cwd", "repo_name", "branch", "preview", "backend"];
       list = list.filter((t) => matchesQuery(t, terms, defaultFields));
     }
-    
+
     return list;
   }, [allThreads, filter, query]);
 

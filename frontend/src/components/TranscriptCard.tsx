@@ -379,21 +379,40 @@ export function ToolCallRunGroup({
     else otherCount++;
   }
 
-  const parts = [];
-  if (bashCount > 0) parts.push(`Ran ${bashCount} command${bashCount > 1 ? "s" : ""}`);
-  if (editCount > 0) parts.push(`Edited ${editCount} file${editCount > 1 ? "s" : ""}`);
-  if (readCount > 0) parts.push(`Read ${readCount} file${readCount > 1 ? "s" : ""}`);
-  if (otherCount > 0) parts.push(`Used ${otherCount} other tool${otherCount > 1 ? "s" : ""}`);
-
-  const summary = parts.length > 0 ? parts.join(" • ") : `Used ${count} tools`;
-
   return (
-    <details className="panel transcript codex agent_output tool-call-run" open={filterMode === "all"}>
-      <summary className="transcript-summary">
-        <div className="transcript-role">
-          <span className="badge agent reasoning">Tool Run</span>
+    <details className="tool-call-run" open={filterMode === "all"}>
+      <summary className="tool-call-run-summary">
+        <div className="tool-run-chips">
+          {bashCount > 0 && (
+            <span className="tool-run-chip bash">
+              <span className="tool-run-glyph">›_</span>
+              <span className="tool-run-label">bash</span>
+              <span className="tool-run-count">×{bashCount}</span>
+            </span>
+          )}
+          {editCount > 0 && (
+            <span className="tool-run-chip edit">
+              <span className="tool-run-glyph">✎</span>
+              <span className="tool-run-label">edit</span>
+              <span className="tool-run-count">×{editCount}</span>
+            </span>
+          )}
+          {readCount > 0 && (
+            <span className="tool-run-chip read">
+              <span className="tool-run-glyph">▤</span>
+              <span className="tool-run-label">read</span>
+              <span className="tool-run-count">×{readCount}</span>
+            </span>
+          )}
+          {otherCount > 0 && (
+            <span className="tool-run-chip other">
+              <span className="tool-run-glyph">✦</span>
+              <span className="tool-run-label">other</span>
+              <span className="tool-run-count">×{otherCount}</span>
+            </span>
+          )}
         </div>
-        <p className="transcript-preview">{summary}</p>
+        <span className="tool-run-total">{count} call{count !== 1 ? "s" : ""}</span>
       </summary>
       <div className="tool-call-run-children">
         {children}

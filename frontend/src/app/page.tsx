@@ -591,7 +591,11 @@ export default function HomePage() {
     } catch (titleError) {
       if (previous) {
         setSessions((current) =>
-          current.map((session) => (session.id === sessionId ? previous : session)),
+          current.map((session) =>
+            // Only revert if our optimistic title is still the current one;
+            // a newer rename or a WS update may have superseded it.
+            session.id === sessionId && session.title === title ? previous : session,
+          ),
         );
       }
       if (isAuthError(titleError)) {

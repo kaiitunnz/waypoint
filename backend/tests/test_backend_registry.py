@@ -113,6 +113,17 @@ class _StubPlugin:
     async def import_thread(self, runtime: Any, request: Any) -> Any:
         raise NotImplementedError
 
+    async def fork_session(
+        self,
+        runtime: Any,
+        session: Any,
+        new_session_id: str,
+        title: str,
+        raw_log: Any,
+        structured_log: Any,
+    ) -> Any:
+        raise NotImplementedError
+
     async def create_session(self, runtime: Any, request: Any, **kwargs: Any) -> Any:
         raise NotImplementedError
 

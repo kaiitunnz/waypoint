@@ -723,6 +723,52 @@ class OpenCodeAdapter:
             raise OpenCodeError(f"invalid session ID returned: {session_id}")
         return session_id
 
+    async def fork_session(
+        self,
+        session_id: str,
+        cwd: str,
+        opencode_session_id: str,
+        model: str | None = None,
+        agent: str | None = None,
+        effort: str | None = None,
+    ) -> str:
+        if not self._started:
+            await self.start()
+
+        client = self._require_client()
+        try:
+            data = await client.post(
+                f"/session/{opencode_session_id}/fork", json_data={}
+            )
+        except Exception as exc:
+            log.error("failed to fork session: %s", exc)
+            raise OpenCodeError(f"failed to fork session: {exc}") from exc
+
+        new_real_session_id = data.get("id", "")
+        if not new_real_session_id or not new_real_session_id.startswith("ses"):
+            log.error("invalid session ID returned on fork: %s", data)
+            raise OpenCodeError(
+                f"invalid session ID returned on fork: {new_real_session_id}"
+            )
+
+        state = OpenCodeSessionState(
+            session_id=session_id,
+            cwd=cwd,
+            opencode_session_id=new_real_session_id,
+            model=model,
+            agent=agent,
+            effort=effort,
+        )
+        self._register_session(state)
+        await self._emit_event(
+            session_id,
+            EventKind.SYSTEM_NOTE,
+            f"OpenCode session forked ({new_real_session_id})",
+            {"status": SessionStatus.IDLE},
+            SessionStatus.IDLE,
+        )
+        return new_real_session_id
+
     async def restore_session(
         self,
         session_id: str,

@@ -226,6 +226,48 @@ class SessionRuntime:
             resolved_effort=resolved_effort,
         )
 
+    async def fork_session(self, session_id: str) -> SessionRecord:
+        session = self.get_session(session_id)
+        plugin = self.registry.plugin_for(session)
+        if not plugin.capabilities.supports_fork:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Backend {session.backend} does not support forking",
+            )
+
+        new_session_id = self._generate_session_id(session.backend)
+        session_dir = self._session_dir(new_session_id)
+        raw_log = session_dir / "raw.log"
+        structured_log = session_dir / "events.jsonl"
+
+        # Add branch/fork suffix to the original title if it doesn't already have one
+        base_title = session.title or session.id
+        match = re.match(r"^(.+) \(fork #(\d+)\)$", base_title)
+        if match:
+            new_title = f"{match.group(1)} (fork #{int(match.group(2)) + 1})"
+        else:
+            new_title = f"{base_title} (fork #1)"
+
+        new_session = await plugin.fork_session(
+            self,
+            session,
+            new_session_id,
+            new_title,
+            raw_log,
+            structured_log,
+        )
+        await self.broadcast.publish(
+            SessionEnvelope(
+                type="session_list_update",
+                payload={
+                    "sessions": [
+                        item.model_dump(mode="json") for item in self.list_sessions()
+                    ]
+                },
+            )
+        )
+        return new_session
+
     async def attach_tmux(self, request: SessionAttachRequest) -> SessionRecord:
         try:
             target = await self.tmux.describe_target(request.tmux_target)

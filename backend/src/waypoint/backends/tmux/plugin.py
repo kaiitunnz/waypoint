@@ -185,20 +185,26 @@ class TmuxPlugin:
     async def import_thread(
         self, runtime: "SessionRuntime", request: Any
     ) -> SessionRecord:
-        _unsupported("thread import")
+        raise NotImplementedError
 
-    def format_start_message(
+    async def fork_session(
         self,
-        backend_label: str,
-        launch_target: SshLaunchTargetConfig | None,
-        cwd: str | None,
-    ) -> str:
-        if launch_target is None:
-            return f"Managed session started for {backend_label}"
-        return (
-            f"Managed session started for {backend_label} via SSH target {launch_target.name} "
-            f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd})"
-        )
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        new_session_id: str,
+        title: str,
+        raw_log: Any,
+        structured_log: Any,
+    ) -> SessionRecord:
+        raise NotImplementedError
+
+    def format_start_message(self, backend: str, launch_target: Any, cwd: str) -> str:
+        if launch_target is not None:
+            return (
+                f"{backend} session started via SSH target {launch_target.name} "
+                f"on {launch_target.ssh_destination} ({cwd or launch_target.default_cwd})"
+            )
+        return f"{backend} session started"
 
     async def create_session(
         self,

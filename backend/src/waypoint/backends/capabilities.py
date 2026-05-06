@@ -40,6 +40,7 @@ class BackendCapabilities(_FrozenModel):
     supports_set_permission_mode_inline: bool = False
     supports_thread_discovery: bool = False
     supports_thread_import: bool = False
+    supports_fork: bool = False
     supports_slash_compact: bool = False
     supports_approval_note: bool = False
     permission_modes: tuple[PermissionModeSpec, ...] = ()

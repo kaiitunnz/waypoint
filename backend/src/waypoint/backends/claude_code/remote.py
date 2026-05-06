@@ -46,6 +46,7 @@ def build_remote_claude_launch_factory(
         model: str | None = None,
         effort: str | None = None,
         custom_args: list[str] | None = None,
+        fork_from_claude_session_id: str | None = None,
     ) -> ClaudeLaunchSpec:
         cwd = cwd or target.default_cwd
         reverse_port = _random_reverse_tunnel_port()
@@ -86,7 +87,17 @@ def build_remote_claude_launch_factory(
             claude_args.extend(["--model", model])
         if effort:
             claude_args.extend(["--effort", effort])
-        if resume:
+        if fork_from_claude_session_id:
+            claude_args.extend(
+                [
+                    "--resume",
+                    fork_from_claude_session_id,
+                    "--fork-session",
+                    "--session-id",
+                    claude_session_id,
+                ]
+            )
+        elif resume:
             claude_args.extend(["--resume", claude_session_id])
         else:
             claude_args.extend(["--session-id", claude_session_id])

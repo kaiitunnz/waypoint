@@ -229,6 +229,40 @@ class CodexAppServerAdapter:
         )
         await self._call_client(state, state.client.thread_resume, thread_id)
 
+    async def fork_session(
+        self,
+        session_id: str,
+        cwd: str,
+        thread_id: str,
+        client_factory_override: ClientFactory | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+        custom_args: list[str] | None = None,
+        config_overrides: list[str] | None = None,
+    ) -> str:
+        effective_factory = _apply_codex_args(
+            client_factory_override,
+            tuple(custom_args or []),
+            tuple(config_overrides or []),
+        )
+        state = await self._spawn_session(
+            session_id,
+            cwd,
+            client_factory_override=effective_factory,
+            model=model,
+            effort=effort,
+        )
+        fork_params: dict[str, Any] = {}
+        if model:
+            fork_params["model"] = model
+        if effort:
+            fork_params["config"] = {"model_reasoning_effort": effort}
+        forked = await self._call_client(
+            state, state.client.thread_fork, thread_id, fork_params
+        )
+        state.thread_id = forked.thread.id
+        return state.thread_id
+
     async def _spawn_session(
         self,
         session_id: str,

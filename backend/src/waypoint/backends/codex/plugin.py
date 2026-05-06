@@ -266,6 +266,101 @@ class CodexPlugin:
         )
         return runtime.storage.update_session(session.id, status=SessionStatus.RUNNING)
 
+    async def fork_session(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        new_session_id: str,
+        title: str,
+        raw_log: Any,
+        structured_log: Any,
+    ) -> SessionRecord:
+        thread_id = session.transport_state.get("thread_id")
+        if not thread_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="codex session has no thread id to fork from",
+            )
+
+        if (
+            session.launch_target_id
+            and runtime._find_launch_target(session.launch_target_id) is None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"codex session launch target {session.launch_target_id} is no longer configured",
+            )
+
+        effective_cli_args = self._effective_args(
+            runtime, session.launch_target_id, session.args
+        )
+        effective_config_overrides = self._effective_config_overrides(
+            runtime, session.launch_target_id, session.config_overrides
+        )
+
+        try:
+            new_thread_id = await self._require_adapter().fork_session(
+                new_session_id,
+                session.cwd,
+                thread_id,
+                self.client_factory(
+                    runtime,
+                    session.launch_target_id,
+                    custom_args=effective_cli_args,
+                    custom_config_overrides=effective_config_overrides,
+                ),
+                model=session.model,
+                effort=session.effort,
+                custom_args=effective_cli_args,
+                config_overrides=effective_config_overrides,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.exception(
+                "codex fork failed",
+                extra={
+                    "session_id": session.id,
+                    "thread_id": thread_id,
+                    "cwd": session.cwd,
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+
+        now = datetime.now(UTC)
+        raw_log.touch(exist_ok=True)
+        new_session = SessionRecord(
+            id=new_session_id,
+            backend=self.id,
+            source=SessionSource.MANAGED,
+            transport=self.transport_id,
+            title=title,
+            cwd=session.cwd,
+            launch_target_id=session.launch_target_id,
+            repo_name=session.repo_name,
+            branch=session.branch,
+            status=SessionStatus.IDLE,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            raw_log_path=str(raw_log),
+            structured_log_path=str(structured_log),
+            transport_state={"thread_id": new_thread_id},
+            permission_mode=session.permission_mode,
+            model=session.model,
+            effort=session.effort,
+            args=session.args,
+            config_overrides=session.config_overrides,
+        )
+        runtime.storage.create_session(new_session)
+        await runtime._record_system_event(
+            new_session_id,
+            self.format_restore_message(runtime, session.cwd, session.launch_target_id)
+            + f" (forked from {session.title or session.id})",
+            status=SessionStatus.IDLE,
+        )
+        return runtime.get_session(new_session_id)
+
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

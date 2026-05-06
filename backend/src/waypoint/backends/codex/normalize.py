@@ -113,6 +113,28 @@ def _format_item_started(
             f"MCP {item.get('server', '')}:{item.get('tool', '')}",
             SessionStatus.RUNNING,
         )
+    if item_type == "dynamicToolCall":
+        tool = item.get("tool", "")
+        ns = item.get("namespace", "")
+        label = f"{ns}:{tool}" if ns else str(tool)
+        return (
+            EventKind.TOOL_CALL,
+            label or "dynamic tool call",
+            SessionStatus.RUNNING,
+        )
+    if item_type == "webSearch":
+        return (
+            EventKind.TOOL_CALL,
+            str(item.get("query", "web search")),
+            SessionStatus.RUNNING,
+        )
+    if item_type == "collabAgentToolCall":
+        tool = item.get("tool", "")
+        return (
+            EventKind.TOOL_CALL,
+            str(tool) if tool else "collab agent tool call",
+            SessionStatus.RUNNING,
+        )
     if item_type == "plan":
         return EventKind.SYSTEM_NOTE, item.get("text", ""), SessionStatus.RUNNING
     if item_type == "agentMessage":
@@ -176,6 +198,28 @@ def _format_item_completed(
         return (
             EventKind.TOOL_RESULT,
             format_todo_list(item),
+            SessionStatus.RUNNING,
+        )
+    if item_type == "dynamicToolCall":
+        tool = item.get("tool", "")
+        ns = item.get("namespace", "")
+        label = f"{ns}:{tool}" if ns else str(tool)
+        return (
+            EventKind.TOOL_RESULT,
+            label or "dynamic tool call",
+            SessionStatus.RUNNING,
+        )
+    if item_type == "webSearch":
+        return (
+            EventKind.TOOL_RESULT,
+            str(item.get("query", "web search")),
+            SessionStatus.RUNNING,
+        )
+    if item_type == "collabAgentToolCall":
+        tool = item.get("tool", "")
+        return (
+            EventKind.TOOL_RESULT,
+            str(tool) if tool else "collab agent tool call",
             SessionStatus.RUNNING,
         )
     return (

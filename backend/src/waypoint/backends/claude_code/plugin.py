@@ -519,6 +519,7 @@ class ClaudeCodePlugin:
             config_overrides=session.config_overrides,
         )
         runtime.storage.create_session(new_session)
+        runtime.storage.clone_events(session.id, new_session_id)
         await runtime._record_system_event(
             new_session_id,
             self.format_restore_message(runtime, session.cwd, session.launch_target_id)

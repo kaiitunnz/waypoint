@@ -49,7 +49,7 @@ import {
   TranscriptCard,
   ToolPair,
 } from "@/components/TranscriptCard";
-import { SessionSwitcher } from "@/components/SessionSwitcher";
+import { useSwitcher } from "@/components/SwitcherProvider";
 import {
   BackendModelOption,
   BackendPermissionMode,
@@ -125,7 +125,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [approvalPageIndex, setApprovalPageIndex] = useState(0);
   const [hasOlderEvents, setHasOlderEvents] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const { openSwitcher, setCurrentSession } = useSwitcher();
   // Tracks the smallest raw sequence ever received from the server. Distinct
   // from `events[0].sequence` because `mergeEvents` advances a coalesced
   // item's sequence to the *last* delta — using that as a cursor would
@@ -415,17 +415,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     window.location.reload();
   }, []);
 
-  // Add global shortcut for the switcher
+  // Publish the current session so the global switcher can mark it.
   useEffect(() => {
-    function handleGlobalKeyDown(event: globalThis.KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key === "k") {
-        event.preventDefault();
-        setSwitcherOpen((open) => !open);
-      }
-    }
-    window.addEventListener("keydown", handleGlobalKeyDown);
-    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
-  }, []);
+    setCurrentSession(session);
+    return () => setCurrentSession(null);
+  }, [session, setCurrentSession]);
 
   useEffect(() => {
     let active = true;
@@ -993,15 +987,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           </button>
         </div>
       ) : null}
-      {switcherOpen ? (
-        <SessionSwitcher
-          host={host}
-          token={token}
-          currentSession={session}
-          onAuthFailure={handleAuthFailure}
-          onClose={() => setSwitcherOpen(false)}
-        />
-      ) : null}
       <ReplyComposer
         permissionModeOptions={
           session ? permissionModesFor(session.backend, catalog) : []
@@ -1046,7 +1031,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         onRefresh={refresh}
         onReattach={reattach}
         onResume={resumeSession}
-        onSwitchSession={() => setSwitcherOpen(true)}
+        onSwitchSession={openSwitcher}
         onSend={onSendWithOptimistic}
         onTerminate={terminate}
       />

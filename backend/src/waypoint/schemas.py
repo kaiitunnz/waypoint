@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import BaseModel, BeforeValidator, Field, StringConstraints
 
 
 def _validate_backend_id(value: Any) -> str:
@@ -172,7 +172,10 @@ class SessionApprovalRequest(BaseModel):
 
 
 class SessionTitleRequest(BaseModel):
-    title: str = Field(..., min_length=1, max_length=500)
+    title: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=500),
+    ]
 
 
 class SessionPermissionModeRequest(BaseModel):

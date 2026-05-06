@@ -24,6 +24,7 @@ export function SearchInput({
   const [tooltipPos, setTooltipPos] = useState<{ top: number; right: number } | null>(null);
   const iconRef = useRef<HTMLDivElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
+  const isTouchRef = useRef(false);
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Escape") {
@@ -53,16 +54,13 @@ export function SearchInput({
   }
 
   function openTooltip() {
+    if (isTouchRef.current) return;
     cancelClose();
     updatePosition();
     setTooltipOpen(true);
   }
 
-  function toggleTooltip(e?: React.MouseEvent | React.TouchEvent) {
-    if (e && e.type === "touchstart") {
-      // Prevent touchstart from also firing mouseenter/click right away
-      e.preventDefault();
-    }
+  function toggleTooltip() {
     cancelClose();
     if (tooltipOpen) {
       setTooltipOpen(false);
@@ -174,10 +172,11 @@ export function SearchInput({
         ref={iconRef}
         aria-label="Search syntax help"
         tabIndex={0}
+        onTouchStart={() => { isTouchRef.current = true; }}
+        onMouseMove={() => { isTouchRef.current = false; }}
         onMouseEnter={openTooltip}
         onMouseLeave={scheduleClose}
         onClick={toggleTooltip}
-        onTouchStart={toggleTooltip}
         onFocus={openTooltip}
         onBlur={scheduleClose}
       >

@@ -162,6 +162,23 @@ export async function createSession(
   return body.session as SessionRecord;
 }
 
+export async function forkSession(
+  host: string,
+  token: string,
+  sessionId: string,
+): Promise<SessionRecord> {
+  const response = await fetch(`${host}/api/sessions/${sessionId}/fork`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+  await ensureOk(response, "failed to fork session");
+  const body = await response.json();
+  return body.session as SessionRecord;
+}
+
 export async function attachTmux(
   host: string,
   token: string,

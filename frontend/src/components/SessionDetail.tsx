@@ -113,6 +113,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [view, setView] = useState<ViewMode>("chat");
   const [filterMode, setFilterMode] = useState<FilterMode>("important");
+  const [toolRunsExpanded, setToolRunsExpanded] = useState(false);
   const [error, setError] = useState("");
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -745,6 +746,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       ? filterOptimisticTranscriptEvents(visibleEvents, optimisticMessages)
       : visibleEvents;
   const transcriptItems = buildTranscriptItems(transcriptEvents);
+  const hasToolRuns = transcriptItems.some((item) => item.kind === "tool_run");
   const usageSummary = extractUsageSummary(events);
   // Session has stopped its backend process (clean shutdown or crash).
   const sessionExited = Boolean(
@@ -826,26 +828,43 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           </button>
         </div>
         {view === "chat" ? (
-          <div className="segmented segmented-quiet" role="radiogroup" aria-label="Event filter">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={filterMode === "important"}
-              className={`segmented-item ${filterMode === "important" ? "active" : ""}`}
-              onClick={() => setFilterMode("important")}
-            >
-              Important
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={filterMode === "all"}
-              className={`segmented-item ${filterMode === "all" ? "active" : ""}`}
-              onClick={() => setFilterMode("all")}
-            >
-              All events
-            </button>
-          </div>
+          <>
+            <div className="segmented segmented-quiet" role="radiogroup" aria-label="Event filter">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={filterMode === "important"}
+                className={`segmented-item ${filterMode === "important" ? "active" : ""}`}
+                onClick={() => { setFilterMode("important"); setToolRunsExpanded(false); }}
+              >
+                Important
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={filterMode === "all"}
+                className={`segmented-item ${filterMode === "all" ? "active" : ""}`}
+                onClick={() => { setFilterMode("all"); setToolRunsExpanded(true); }}
+              >
+                All events
+              </button>
+            </div>
+            {hasToolRuns ? (
+              <button
+                type="button"
+                className="tool-run-toggle"
+                onClick={() => {
+                  const next = !toolRunsExpanded;
+                  document.querySelectorAll<HTMLDetailsElement>("details.tool-call-run").forEach((el) => { el.open = next; });
+                  setToolRunsExpanded(next);
+                }}
+                title={toolRunsExpanded ? "Collapse all tool runs" : "Expand all tool runs"}
+              >
+                <span className="tool-run-toggle-glyph">{toolRunsExpanded ? "⊟" : "⊞"}</span>
+                <span className="tool-run-toggle-label">{toolRunsExpanded ? "collapse" : "expand"}</span>
+              </button>
+            ) : null}
+          </>
         ) : null}
       </div>
       {view === "chat" ? (

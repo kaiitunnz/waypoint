@@ -472,6 +472,10 @@ export default function HomePage() {
     setError(message);
   }
 
+  function handleAuthFailure() {
+    resetAuthState("Session expired. Log in again.");
+  }
+
   async function handleCreateSchedule(payload: ScheduleCreateRequest) {
     try {
       const created = await createScheduleRequest(host, token, {
@@ -691,7 +695,7 @@ export default function HomePage() {
           launchTargets={launchTargets}
           targetId={activeLaunchTargetId}
           onSwitch={handleSwitchBackend}
-          onAuthFailure={() => resetAuthState("Session expired. Log in again.")}
+          onAuthFailure={handleAuthFailure}
         />
       ) : null}
       {token ? (
@@ -710,7 +714,7 @@ export default function HomePage() {
           onAttach={handleAttach}
           onCreate={handleCreate}
           onImportThread={handleImportThread}
-          onAuthFailure={() => resetAuthState("Session expired. Log in again.")}
+          onAuthFailure={handleAuthFailure}
         />
       ) : null}
       {token ? (
@@ -728,7 +732,7 @@ export default function HomePage() {
           onCreate={handleCreateSchedule}
           onCancel={handleCancelSchedule}
           onClearHistory={handleClearScheduleHistory}
-          onAuthFailure={() => resetAuthState("Session expired. Log in again.")}
+          onAuthFailure={handleAuthFailure}
         />
       ) : null}
       {token ? (

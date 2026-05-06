@@ -37,6 +37,7 @@ export interface BackendCatalog {
 const FALLBACK_LABELS: Record<string, string> = {
   claude_code: "Claude Code",
   codex: "Codex",
+  opencode: "OpenCode",
   tmux: "Tmux",
 };
 

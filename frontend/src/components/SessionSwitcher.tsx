@@ -73,6 +73,10 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
       host,
       token,
       (message: SessionEnvelope) => {
+        if (message.type === "session_list_update") {
+          setSessions(message.payload.sessions as SessionRecord[]);
+          return;
+        }
         if (message.type === "session_state") {
           const updated = message.payload.session as SessionRecord;
           setSessions((current) => {
@@ -102,15 +106,15 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
   const filteredSessions = useMemo(() => {
     let list = sessions.filter((s) => s.id !== currentSession?.id);
     const parsed = parseQuery(query);
-    if (parsed) {
-      list = list.filter((s) => matchesQuery(s, parsed, ["title", "cwd", "backend", "repo_name", "status"]));
-    }
+    list = list.filter((s) =>
+      matchesQuery(s, parsed, ["title", "cwd", "repo_name", "branch", "backend", "search_status"]),
+    );
 
     const pinned = list.filter((s) => s.pinned_at != null);
     const recent = list.filter((s) => s.pinned_at == null);
 
-    recent.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-    pinned.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    recent.sort((a, b) => b.last_event_at.localeCompare(a.last_event_at));
+    pinned.sort((a, b) => b.last_event_at.localeCompare(a.last_event_at));
 
     const PAGE_SIZE = 8;
     const totalPages = Math.ceil(recent.length / PAGE_SIZE) || 1;
@@ -215,7 +219,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
           <div className="session-switcher-title">{s.title || "Untitled Session"}</div>
           <div className="session-switcher-breadcrumb">{breadcrumb}</div>
         </div>
-        <div className="session-switcher-time">{formatRelativeTime(s.updated_at)}</div>
+        <div className="session-switcher-time">{formatRelativeTime(s.last_event_at)}</div>
       </button>
     );
   };

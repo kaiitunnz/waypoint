@@ -47,6 +47,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
   const router = useRouter();
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -111,14 +112,17 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
     recent.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
     pinned.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
 
-    // Cap recent to 8 if no query, 20 if querying
-    const cappedRecent = query ? recent.slice(0, 20) : recent.slice(0, 8);
+    const PAGE_SIZE = 8;
+    const totalPages = Math.ceil(recent.length / PAGE_SIZE) || 1;
+    const cappedRecent = recent.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
     
     return {
       pinned,
-      recent: cappedRecent
+      recent: cappedRecent,
+      totalPages,
+      totalRecent: recent.length
     };
-  }, [sessions, query, currentSession?.id]);
+  }, [sessions, query, currentSession?.id, page]);
 
   const flatItems = useMemo(() => {
     return [...filteredSessions.pinned, ...filteredSessions.recent];
@@ -157,7 +161,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
       const target = flatItems[activeIndex];
       if (target) {
         onClose();
-        router.push(`/sessions/${target.id}`);
+        router.push(`/session/${target.id}`);
       }
     }
   }, [flatItems, activeIndex, onClose, router]);
@@ -200,7 +204,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
         className={`session-switcher-row ${isSelected ? 'selected' : ''}`}
         onClick={() => {
           onClose();
-          router.push(`/sessions/${s.id}`);
+          router.push(`/session/${s.id}`);
         }}
         onPointerMove={() => {
           if (activeIndex !== idx) setActiveIndex(idx);
@@ -226,6 +230,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
             value={query}
             onChange={(val) => {
               setQuery(val);
+              setPage(1);
               setActiveIndex(0);
             }}
             placeholder="Search sessions..."
@@ -257,9 +262,28 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
           {filteredSessions.recent.length > 0 ? (
             <div className="session-switcher-section">
               <div className="session-switcher-header">
-                Recent <span>{!query && sessions.length > 8 ? `8+` : filteredSessions.recent.length}</span>
+                Recent <span>{filteredSessions.totalRecent}</span>
               </div>
               {filteredSessions.recent.map((s, i) => renderRow(s, filteredSessions.pinned.length + i))}
+              {filteredSessions.totalPages > 1 ? (
+                <div className="session-switcher-pagination">
+                  <button 
+                    type="button" 
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                  >
+                    Previous
+                  </button>
+                  <span>Page {page} of {filteredSessions.totalPages}</span>
+                  <button 
+                    type="button" 
+                    onClick={() => setPage(p => Math.min(filteredSessions.totalPages, p + 1))}
+                    disabled={page === filteredSessions.totalPages}
+                  >
+                    Next
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
 

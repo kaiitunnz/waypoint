@@ -67,8 +67,13 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
   // Tracks the visible viewport on mobile via visualViewport — iOS
   // Safari's 100dvh doesn't shrink for the on-screen keyboard or
   // always exclude the bottom URL bar with viewportFit: cover, so we
-  // size and position the sheet from JS instead.
-  const [mobileVV, setMobileVV] = useState<{ height: number; offsetTop: number } | null>(null);
+  // size and position the modal from JS instead.
+  const [mobileVV, setMobileVV] = useState<{
+    height: number;
+    width: number;
+    offsetTop: number;
+    offsetLeft: number;
+  } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -260,16 +265,27 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
     };
   }, []);
 
-  // Track visualViewport on mobile so the bottom-sheet always matches
-  // the actual visible area (URL bar collapse, keyboard show/hide).
+  // Track visualViewport on mobile so the modal always matches the
+  // actual visible area (URL bar collapse, keyboard show/hide).
   useEffect(() => {
     if (!isMobile) return;
     const vv = window.visualViewport;
     if (!vv) {
-      setMobileVV({ height: window.innerHeight, offsetTop: 0 });
+      setMobileVV({
+        height: window.innerHeight,
+        width: window.innerWidth,
+        offsetTop: 0,
+        offsetLeft: 0,
+      });
       return;
     }
-    const update = () => setMobileVV({ height: vv.height, offsetTop: vv.offsetTop });
+    const update = () =>
+      setMobileVV({
+        height: vv.height,
+        width: vv.width,
+        offsetTop: vv.offsetTop,
+        offsetLeft: vv.offsetLeft,
+      });
     update();
     vv.addEventListener("resize", update);
     vv.addEventListener("scroll", update);
@@ -334,18 +350,18 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
         style={
           isMobile && mobileVV !== null
             ? {
-                // Pin to the visualViewport directly — flex `align-items:
-                // flex-end` against the backdrop would put us behind the
-                // bottom URL bar on iOS Safari (viewportFit: cover puts
-                // the layout viewport under it).
+                // Pin to the visualViewport directly — flex centering
+                // against the backdrop aligns to the layout viewport,
+                // which extends behind the bottom URL bar on iOS
+                // Safari (viewportFit: cover puts dvh under it).
+                // 90% wide × 70% tall, centered in the visible area.
                 position: "fixed",
-                left: 0,
-                right: 0,
-                top: `${mobileVV.offsetTop + 24}px`,
-                height: `calc(${mobileVV.height}px - 24px - env(safe-area-inset-bottom))`,
-                maxHeight: `calc(${mobileVV.height}px - 24px - env(safe-area-inset-bottom))`,
-                width: "100%",
-                maxWidth: "100%",
+                width: `${mobileVV.width * 0.9}px`,
+                height: `${mobileVV.height * 0.7}px`,
+                maxWidth: `${mobileVV.width * 0.9}px`,
+                maxHeight: `${mobileVV.height * 0.7}px`,
+                top: `${mobileVV.offsetTop + mobileVV.height * 0.15}px`,
+                left: `${mobileVV.offsetLeft + mobileVV.width * 0.05}px`,
               }
             : undefined
         }

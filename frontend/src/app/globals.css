@@ -2104,6 +2104,18 @@ details.tool-disclosure[open] .tool-glyph.todo {
   max-width: 100%;
 }
 
+/* system-rule inside a run group: suppress the decorative left/right gradient
+ * lines — they look odd at this width. Keep just the text. */
+.tool-call-run-children .system-rule {
+  grid-template-columns: auto;
+  padding: 1px 0;
+}
+
+.tool-call-run-children .system-rule::before,
+.tool-call-run-children .system-rule::after {
+  display: none;
+}
+
 .badge.tool {
   background: rgba(217, 154, 74, 0.12);
   color: var(--warn);

@@ -14,6 +14,7 @@ BACKEND_PORT=""
 BACKEND_CONFIG=""
 BACKEND_DATA_DIR=""
 FRONTEND_PORT=""
+FRONTEND_DEV=""
 START_TIMEOUT=""
 UV_CACHE_DIR=""
 
@@ -28,7 +29,7 @@ Commands:
   pwd             Print the repository root
   start           Start backend and frontend in the background
   stop            Stop backend and frontend
-  restart         Restart backend and frontend
+  restart [service] Restart backend, frontend, or both
   status          Show PID, port, and health for both services
   logs [service]  Tail logs for backend, frontend, or both
 
@@ -66,6 +67,7 @@ init_config() {
   BACKEND_CONFIG="${WAYPOINT_STACK_CONFIG:-${BACKEND_DIR}/waypoint.yaml}"
   BACKEND_DATA_DIR="${WAYPOINT_STACK_BACKEND_DATA_DIR:-${STATE_DIR}/backend-data}"
   FRONTEND_PORT="${WAYPOINT_STACK_FRONTEND_PORT:-3000}"
+  FRONTEND_DEV="${WAYPOINT_STACK_FRONTEND_DEV:-0}"
   START_TIMEOUT="${WAYPOINT_STACK_START_TIMEOUT:-30}"
   UV_CACHE_DIR="${WAYPOINT_STACK_UV_CACHE_DIR:-${STATE_DIR}/uv-cache}"
 
@@ -320,23 +322,33 @@ start_frontend() {
 
   : >"$(started_marker_for frontend)"
   : >"${FRONTEND_LOG}"
-  if frontend_build_is_fresh; then
-    echo "frontend build up to date, skipping rebuild"
-  else
-    echo "building frontend"
+
+  if [[ "${FRONTEND_DEV}" == "1" ]]; then
+    echo "starting frontend in development mode on 0.0.0.0:${FRONTEND_PORT}"
     (
       cd "${FRONTEND_DIR}"
-      env PORT="${FRONTEND_PORT}" npm run build >>"${FRONTEND_LOG}" 2>&1
+      env PORT="${FRONTEND_PORT}" npm run dev >>"${FRONTEND_LOG}" 2>&1 &
+      echo $! >"$(pid_file_for frontend)"
     )
-    record_frontend_build_ref
-  fi
+  else
+    if frontend_build_is_fresh; then
+      echo "frontend build up to date, skipping rebuild"
+    else
+      echo "building frontend"
+      (
+        cd "${FRONTEND_DIR}"
+        env PORT="${FRONTEND_PORT}" npm run build >>"${FRONTEND_LOG}" 2>&1
+      )
+      record_frontend_build_ref
+    fi
 
-  echo "starting frontend on 0.0.0.0:${FRONTEND_PORT}"
-  (
-    cd "${FRONTEND_DIR}"
-    nohup env PORT="${FRONTEND_PORT}" npm run start >>"${FRONTEND_LOG}" 2>&1 &
-    echo $! >"$(pid_file_for frontend)"
-  )
+    echo "starting frontend on 0.0.0.0:${FRONTEND_PORT}"
+    (
+      cd "${FRONTEND_DIR}"
+      nohup env PORT="${FRONTEND_PORT}" npm run start >>"${FRONTEND_LOG}" 2>&1 &
+      echo $! >"$(pid_file_for frontend)"
+    )
+  fi
 
   if ! wait_for_http "frontend" "http://127.0.0.1:${FRONTEND_PORT}" "$(read_pid frontend)"; then
     echo "frontend failed to become healthy" >&2
@@ -547,8 +559,27 @@ stop_stack() {
 }
 
 restart_stack() {
-  stop_stack
-  start_stack
+  local target="${1:-all}"
+  case "${target}" in
+    backend)
+      stop_service "backend"
+      start_backend
+      status_stack
+      ;;
+    frontend)
+      stop_service "frontend"
+      start_frontend
+      status_stack
+      ;;
+    all)
+      stop_stack
+      start_stack
+      ;;
+    *)
+      echo "unknown service: ${target}" >&2
+      exit 1
+      ;;
+  esac
 }
 
 status_stack() {
@@ -572,7 +603,7 @@ main() {
       stop_stack
       ;;
     restart)
-      restart_stack
+      restart_stack "${2:-all}"
       ;;
     status)
       status_stack

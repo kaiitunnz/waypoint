@@ -258,6 +258,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session = await context.runtime.resume(session_id)
         return {"session": session.model_dump(mode="json")}
 
+    @app.post("/api/sessions/{session_id}/fork")
+    async def session_fork(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.fork_session(session_id)
+        return {"session": session.model_dump(mode="json")}
+
     @app.post("/api/sessions/{session_id}/reattach")
     async def session_reattach(
         session_id: str,

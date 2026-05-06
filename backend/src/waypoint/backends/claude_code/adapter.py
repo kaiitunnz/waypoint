@@ -141,7 +141,7 @@ EmitEvent = Callable[
     Coroutine[Any, Any, None],
 ]
 LaunchFactory = Callable[
-    [str, str, str, bool, str, str | None, str | None, list[str]],
+    [str, str, str, bool, str, str | None, str | None, list[str], str | None],
     "ClaudeLaunchSpec",
 ]
 
@@ -265,6 +265,7 @@ class ClaudeCliAdapter:
         model: str | None = None,
         effort: str | None = None,
         custom_args: list[str] | None = None,
+        fork_from_claude_session_id: str | None = None,
     ) -> str:
         state = await self._spawn(
             session_id,
@@ -276,6 +277,7 @@ class ClaudeCliAdapter:
             model=model,
             effort=effort,
             custom_args=custom_args or [],
+            fork_from_claude_session_id=fork_from_claude_session_id,
         )
         return state.claude_session_id
 
@@ -842,6 +844,7 @@ class ClaudeCliAdapter:
         model: str | None = None,
         effort: str | None = None,
         custom_args: list[str] | None = None,
+        fork_from_claude_session_id: str | None = None,
     ) -> ClaudeSessionState:
         resolved_mode = (
             permission_mode if permission_mode in CLAUDE_PERMISSION_MODES else "default"
@@ -859,6 +862,7 @@ class ClaudeCliAdapter:
                 model,
                 effort,
                 effective_custom_args,
+                fork_from_claude_session_id,
             )
         else:
             spec = launch_factory(
@@ -870,6 +874,7 @@ class ClaudeCliAdapter:
                 model,
                 effort,
                 effective_custom_args,
+                fork_from_claude_session_id,
             )
         process = await asyncio.create_subprocess_exec(
             *spec.args,
@@ -910,6 +915,7 @@ class ClaudeCliAdapter:
         model: str | None = None,
         effort: str | None = None,
         custom_args: list[str] | None = None,
+        fork_from_claude_session_id: str | None = None,
     ) -> ClaudeLaunchSpec:
         binary = self._binary or shutil.which("claude")
         if binary is None:
@@ -931,7 +937,17 @@ class ClaudeCliAdapter:
             args.extend(["--model", model])
         if effort:
             args.extend(["--effort", effort])
-        if resume:
+        if fork_from_claude_session_id:
+            args.extend(
+                [
+                    "--resume",
+                    fork_from_claude_session_id,
+                    "--fork-session",
+                    "--session-id",
+                    claude_session_id,
+                ]
+            )
+        elif resume:
             args.extend(["--resume", claude_session_id])
         else:
             args.extend(["--session-id", claude_session_id])

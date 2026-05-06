@@ -151,6 +151,18 @@ class BackendPlugin(Protocol):
         """Spawn a new session for this backend."""
         ...
 
+    async def fork_session(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        new_session_id: str,
+        title: str,
+        raw_log: Any,
+        structured_log: Any,
+    ) -> SessionRecord:
+        """Fork an existing session into a new branch."""
+        ...
+
     async def maybe_handle_input(
         self,
         runtime: "SessionRuntime",

@@ -95,6 +95,7 @@ class ClaudeCodePlugin:
         supports_set_permission_mode_inline=True,
         supports_thread_discovery=True,
         supports_thread_import=True,
+        supports_fork=True,
         supports_slash_compact=False,
         supports_approval_note=True,
         supports_custom_cli_args=True,
@@ -435,6 +436,96 @@ class ClaudeCodePlugin:
                 },
             )
         )
+
+    async def fork_session(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        new_session_id: str,
+        title: str,
+        raw_log: Any,
+        structured_log: Any,
+    ) -> SessionRecord:
+        if self.adapter is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="claude adapter is not initialized",
+            )
+        thread_id = session.transport_state.get("thread_id")
+        if not thread_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="claude session has no thread id to fork from",
+            )
+        if (
+            session.launch_target_id
+            and runtime._find_launch_target(session.launch_target_id) is None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"claude session launch target {session.launch_target_id} is no longer configured",
+            )
+
+        new_claude_session_id = self.generate_session_id()
+        try:
+            await self.adapter.start_session(
+                new_session_id,
+                session.cwd,
+                new_claude_session_id,
+                self.launch_factory(runtime, session.launch_target_id),
+                permission_mode=session.permission_mode,
+                model=session.model,
+                effort=session.effort,
+                custom_args=self._effective_args(
+                    runtime, session.launch_target_id, session.args
+                ),
+                fork_from_claude_session_id=thread_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.exception(
+                "claude fork failed",
+                extra={
+                    "session_id": session.id,
+                    "claude_session_id": thread_id,
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+
+        now = datetime.now(UTC)
+        raw_log.touch(exist_ok=True)
+        new_session = SessionRecord(
+            id=new_session_id,
+            backend=self.id,
+            source=SessionSource.MANAGED,
+            transport=self.transport_id,
+            title=title,
+            cwd=session.cwd,
+            launch_target_id=session.launch_target_id,
+            repo_name=session.repo_name,
+            branch=session.branch,
+            status=SessionStatus.IDLE,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            raw_log_path=str(raw_log),
+            structured_log_path=str(structured_log),
+            transport_state={"thread_id": new_claude_session_id},
+            permission_mode=session.permission_mode,
+            model=session.model,
+            effort=session.effort,
+            args=session.args,
+            config_overrides=session.config_overrides,
+        )
+        runtime.storage.create_session(new_session)
+        await runtime._record_system_event(
+            new_session_id,
+            self.format_restore_message(runtime, session.cwd, session.launch_target_id)
+            + f" (forked from {session.title or session.id})",
+            status=SessionStatus.IDLE,
+        )
+        return runtime.get_session(new_session_id)
 
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord

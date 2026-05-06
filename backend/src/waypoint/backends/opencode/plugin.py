@@ -135,6 +135,7 @@ class OpenCodePlugin:
         supports_set_permission_mode_inline=True,
         supports_thread_discovery=True,
         supports_thread_import=True,
+        supports_fork=True,
         supports_slash_compact=True,
         supports_approval_note=True,
         supports_custom_cli_args=True,
@@ -1059,6 +1060,102 @@ class OpenCodePlugin:
             "OpenCode session restored from previous backend process",
             status=SessionStatus.IDLE,
         )
+
+    async def fork_session(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        new_session_id: str,
+        title: str,
+        raw_log: Any,
+        structured_log: Any,
+    ) -> SessionRecord:
+        key = self._adapter_key(
+            runtime,
+            session.launch_target_id,
+            session.cwd,
+            tuple(
+                self._effective_args(runtime, session.launch_target_id, session.args)
+            ),
+        )
+        try:
+            adapter = await self._get_or_create_adapter(
+                runtime,
+                session.launch_target_id,
+                session.cwd,
+                custom_args=tuple(
+                    self._effective_args(
+                        runtime, session.launch_target_id, session.args
+                    )
+                ),
+            )
+        except Exception as exc:
+            self._health_for(key).record_failure()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"OpenCode adapter unavailable; cannot fork: {exc}",
+            ) from exc
+
+        opencode_session_id = session.transport_state.get("opencode_session_id")
+        if not opencode_session_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OpenCode session has no opencode_session_id to fork from",
+            )
+
+        try:
+            new_opencode_session_id = await adapter.fork_session(
+                new_session_id,
+                session.cwd,
+                opencode_session_id,
+                model=session.model,
+                agent=session.transport_state.get("agent"),
+                effort=session.effort,
+            )
+            pre_plan_mode = session.transport_state.get("pre_plan_mode")
+            if pre_plan_mode is not None:
+                await adapter.set_pre_plan_mode(new_session_id, pre_plan_mode)
+        except Exception as exc:
+            self._health_for(key).record_failure()
+            log.exception("opencode fork failed", extra={"session_id": session.id})
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"OpenCode session fork failed: {exc}",
+            ) from exc
+
+        self._health_for(key).record_success()
+        now = datetime.now(UTC)
+        raw_log.touch(exist_ok=True)
+        new_session = SessionRecord(
+            id=new_session_id,
+            backend=self.id,
+            source=SessionSource.MANAGED,
+            transport=self.transport_id,
+            title=title,
+            cwd=session.cwd,
+            launch_target_id=session.launch_target_id,
+            repo_name=session.repo_name,
+            branch=session.branch,
+            status=SessionStatus.IDLE,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            raw_log_path=str(raw_log),
+            structured_log_path=str(structured_log),
+            transport_state={"opencode_session_id": new_opencode_session_id},
+            permission_mode=session.permission_mode,
+            model=session.model,
+            effort=session.effort,
+            args=session.args,
+            config_overrides=session.config_overrides,
+        )
+        runtime.storage.create_session(new_session)
+        await runtime._record_system_event(
+            new_session_id,
+            f"OpenCode session forked from {session.title or session.id}",
+            status=SessionStatus.IDLE,
+        )
+        return runtime.get_session(new_session_id)
 
     async def list_threads(
         self,

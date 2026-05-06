@@ -760,13 +760,6 @@ class OpenCodeAdapter:
             effort=effort,
         )
         self._register_session(state)
-        await self._emit_event(
-            session_id,
-            EventKind.SYSTEM_NOTE,
-            f"OpenCode session forked ({new_real_session_id})",
-            {"status": SessionStatus.IDLE},
-            SessionStatus.IDLE,
-        )
         return new_real_session_id
 
     async def restore_session(

@@ -3,7 +3,7 @@ port: 8787
 password: change-me
 default_backend: codex
 default_cwd: ~/
-data_dir: ~/Library/Application Support/Waypoint
+data_dir: ~/.waypoint/data
 cors_origins: []
 # cors_allow_origin_regex: ^https?://(localhost|127\.0\.0\.1|100\.\d{1,3}\.\d{1,3}\.\d{1,3})(:\d+)?$
 # chat_page_messages: 20  # latest N *logical* chat messages per page.

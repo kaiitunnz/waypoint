@@ -6,11 +6,11 @@ from typing import Any
 import pytest
 
 from waypoint.backends.claude_code.adapter import (
-    DEFAULT_TIMEOUT_SECONDS,
     ClaudeCliAdapter,
     ClaudeSessionState,
     claude_cli_mode_for,
 )
+from waypoint.backends.claude_code.plugin import ClaudeCodePluginConfig
 from waypoint.schemas import EventKind, SessionStatus
 
 
@@ -74,6 +74,7 @@ def _make_adapter(
         hook_settings_path=Path("/tmp/waypoint-test-settings.json"),
         hook_secret="test-secret",
         hook_url="http://127.0.0.1:8787",
+        default_hook_timeout_seconds=3600,
     )
 
 
@@ -232,8 +233,9 @@ def test_map_decision_table() -> None:
     assert adapter._map_decision("anything-else") == "deny"
 
 
-def test_default_timeout_is_finite() -> None:
-    assert 0 < DEFAULT_TIMEOUT_SECONDS < 24 * 3600
+def test_hook_timeout_default_is_finite() -> None:
+    config = ClaudeCodePluginConfig()
+    assert 0 < config.hook_timeout_seconds < 24 * 3600
 
 
 @pytest.mark.asyncio

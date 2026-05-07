@@ -34,6 +34,7 @@ def build_remote_claude_launch_factory(
     hook_script_path: Path,
     hook_secret: str,
     local_backend_port: int,
+    hook_timeout_seconds: int,
 ) -> LaunchFactory:
     hook_script = hook_script_path.read_text(encoding="utf-8")
 
@@ -112,6 +113,7 @@ def build_remote_claude_launch_factory(
             hook_secret=hook_secret,
             hook_url=f"http://127.0.0.1:{reverse_port}",
             session_id=session_id,
+            hook_timeout_seconds=hook_timeout_seconds,
         )
         args = [
             _resolve_local_binary(target.ssh_bin),
@@ -162,6 +164,7 @@ def _build_remote_claude_command(
     hook_secret: str,
     hook_url: str,
     session_id: str,
+    hook_timeout_seconds: int,
 ) -> str:
     launch_line = [
         f"cd {quote_remote_path(cwd)}",
@@ -174,6 +177,7 @@ def _build_remote_claude_command(
         "WAYPOINT_HOOK_URL": hook_url,
         "WAYPOINT_HOOK_SECRET": hook_secret,
         "WAYPOINT_SESSION_ID": session_id,
+        "WAYPOINT_HOOK_TIMEOUT": str(hook_timeout_seconds),
     }
     for key, value in sorted(combined_env.items()):
         launch_line.append(shlex.quote(f"{key}={value}"))

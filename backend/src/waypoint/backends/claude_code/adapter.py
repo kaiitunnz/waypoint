@@ -170,8 +170,6 @@ GATED_TOOLS = (
 )
 GATED_TOOLS_REGEX = "^(?:" + "|".join(GATED_TOOLS) + ")$"
 
-DEFAULT_TIMEOUT_SECONDS = 300.0
-HOOK_TIMEOUT_SECONDS = DEFAULT_TIMEOUT_SECONDS + 60
 
 STDERR_TAIL_LINES = 50
 
@@ -243,6 +241,7 @@ class ClaudeCliAdapter:
         hook_settings_path: Path,
         hook_secret: str,
         hook_url: str,
+        default_hook_timeout_seconds: int,
         binary: str | None = None,
         launch_factory: LaunchFactory | None = None,
     ) -> None:
@@ -250,6 +249,7 @@ class ClaudeCliAdapter:
         self._hook_settings_path = hook_settings_path
         self._hook_secret = hook_secret
         self._hook_url = hook_url
+        self._default_hook_timeout_seconds = default_hook_timeout_seconds
         self._binary = binary
         self._launch_factory = launch_factory
         self._sessions: dict[str, ClaudeSessionState] = {}
@@ -748,25 +748,13 @@ class ClaudeCliAdapter:
                         },
                         SessionStatus.WAITING_INPUT,
                     )
-        timeout = 3600.0 if tool_name == "AskUserQuestion" else DEFAULT_TIMEOUT_SECONDS
-        try:
-            decision = await asyncio.wait_for(pending.future, timeout=timeout)
-        except TimeoutError:
-            decision = {
-                "permissionDecision": "deny",
-                "permissionDecisionReason": "approval timed out",
-            }
-            state.pending.pop(tool_use_id, None)
-
-            # Emit a system note so the frontend knows to dequeue the approval card
-            await self._emit_event(
-                waypoint_session_id,
-                EventKind.SYSTEM_NOTE,
-                "Approval timed out",
-                {"status": SessionStatus.RUNNING, "approval_id": tool_use_id},
-                SessionStatus.RUNNING,
-            )
-        return decision
+        # No deadline on user response. The future is resolved by
+        # respond_to_approval / respond_to_ask_question, or cancelled
+        # via terminate_session if the session ends. The hook script's
+        # own urlopen timeout (WAYPOINT_HOOK_TIMEOUT, sourced from
+        # ClaudeCodePluginConfig.hook_timeout_seconds) is the only
+        # network-liveness ceiling.
+        return await pending.future
 
     def has_pending_approval(self, session_id: str) -> bool:
         state = self._sessions.get(session_id)
@@ -958,7 +946,7 @@ class ClaudeCliAdapter:
             "WAYPOINT_HOOK_URL": self._hook_url,
             "WAYPOINT_HOOK_SECRET": self._hook_secret,
             "WAYPOINT_SESSION_ID": session_id,
-            "WAYPOINT_HOOK_TIMEOUT": str(int(HOOK_TIMEOUT_SECONDS)),
+            "WAYPOINT_HOOK_TIMEOUT": str(self._default_hook_timeout_seconds),
         }
         return ClaudeLaunchSpec(
             args=args,

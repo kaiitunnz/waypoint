@@ -77,6 +77,22 @@ class ClaudeCodePluginConfig(PluginConfig):
     models: list[BackendModelOption] = Field(
         default_factory=lambda: list(DEFAULT_CLAUDE_MODELS)
     )
+    # Network-failure ceiling (seconds) for the PreToolUse hook's HTTP
+    # request — *not* a deadline on user response time, which is
+    # unbounded. Sized as the upper bound for "the SSH reverse tunnel
+    # is wedged, give up and let Claude defer to its policy". Per-target
+    # overrides live on ``ClaudeCodeLaunchTargetConfig``.
+    hook_timeout_seconds: int = Field(default=3600, ge=1)
+
+
+class ClaudeCodeLaunchTargetConfig(PluginLaunchTargetConfig):
+    """Per-target overrides for Claude Code on an SSH launch target.
+
+    ``hook_timeout_seconds=None`` (the default) falls through to the
+    plugin-global ``ClaudeCodePluginConfig.hook_timeout_seconds``.
+    """
+
+    hook_timeout_seconds: int | None = Field(default=None, ge=1)
 
 
 class ClaudeCodePlugin:
@@ -85,7 +101,7 @@ class ClaudeCodePlugin:
     label = "Claude Code"
     import_request_schema: type[BaseModel] | None = ClaudeThreadImportRequest
     config_schema: type[PluginConfig] = ClaudeCodePluginConfig
-    launch_target_schema: type[PluginLaunchTargetConfig] = PluginLaunchTargetConfig
+    launch_target_schema: type[PluginLaunchTargetConfig] = ClaudeCodeLaunchTargetConfig
     capabilities = BackendCapabilities(
         is_structured=True,
         supports_resume=False,
@@ -142,6 +158,7 @@ class ClaudeCodePlugin:
             hook_settings_path=hook.settings_path,
             hook_secret=hook.secret,
             hook_url=hook_url,
+            default_hook_timeout_seconds=self._config(runtime).hook_timeout_seconds,
         )
         self.thread_enumerator = RemoteClaudeThreadEnumerator(
             hook.thread_enumerator_path
@@ -246,6 +263,24 @@ class ClaudeCodePlugin:
                     return target_config.cli_args + custom_args
             return list(custom_args)
         return self._config(runtime).cli_args + custom_args
+
+    def _resolve_hook_timeout(
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None,
+    ) -> int:
+        plugin_default = self._config(runtime).hook_timeout_seconds
+        if not launch_target_id:
+            return plugin_default
+        launch_target = runtime._find_launch_target(launch_target_id)
+        if launch_target is None:
+            return plugin_default
+        target_config = launch_target.plugin_config(self.id)
+        if isinstance(target_config, ClaudeCodeLaunchTargetConfig):
+            override = target_config.hook_timeout_seconds
+            if override is not None:
+                return override
+        return plugin_default
 
     def static_model_options(self, runtime: "SessionRuntime") -> list[Any]:
         # Plugin config carries the (configurable) Claude model catalogue.
@@ -644,6 +679,7 @@ class ClaudeCodePlugin:
             hook_script_path=self.hook.hook_script_path,
             hook_secret=self.hook.secret,
             local_backend_port=runtime.settings.port,
+            hook_timeout_seconds=self._resolve_hook_timeout(runtime, launch_target_id),
         )
 
     def generate_session_id(self) -> str:

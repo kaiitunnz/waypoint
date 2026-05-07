@@ -31,6 +31,7 @@ def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
         hook_script_path=hook_script,
         hook_secret="secret-123",
         local_backend_port=8787,
+        hook_timeout_seconds=3600,
     )
     launch = factory(
         "claude-sess",
@@ -70,6 +71,7 @@ def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
     assert "WAYPOINT_HOOK_URL=http://127.0.0.1:21234" in remote_command
     assert "WAYPOINT_HOOK_SECRET=secret-123" in remote_command
     assert "WAYPOINT_SESSION_ID=claude-sess" in remote_command
+    assert "WAYPOINT_HOOK_TIMEOUT=3600" in remote_command
     assert "OPENAI_API_KEY=sk-test" in remote_command
     assert "/opt/claude/bin/claude -p" in remote_command
     assert "--resume claude-uuid" in remote_command
@@ -101,6 +103,7 @@ def test_remote_claude_launch_factory_appends_model_flag(
         hook_script_path=hook_script,
         hook_secret="secret-123",
         local_backend_port=8787,
+        hook_timeout_seconds=3600,
     )
     launch = factory(
         "claude-sess",

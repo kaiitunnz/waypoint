@@ -47,15 +47,24 @@ def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
 
     assert launch.cwd is None
     assert launch.env is None
-    assert launch.args[:6] == [
+    # SSH-layer liveness probes (~3 min detection floor) sit immediately
+    # after the binary, before user ssh_args, so first-value-wins keeps
+    # them authoritative against any user override.
+    assert launch.args[:12] == [
         "/usr/bin/ssh",
+        "-o",
+        "ConnectTimeout=15",
+        "-o",
+        "ServerAliveInterval=30",
+        "-o",
+        "ServerAliveCountMax=6",
         "-o",
         "ExitOnForwardFailure=yes",
         "-R",
         "21234:127.0.0.1:8787",
         "dev@example.com",
     ]
-    remote_command = launch.args[6]
+    remote_command = launch.args[12]
     assert 'WAYPOINT_DIR="$HOME/.waypoint/claude/claude-sess"' in remote_command
     assert 'mkdir -p "$WAYPOINT_DIR"' in remote_command
     assert "claude_pretool_hook.py" in remote_command
@@ -116,7 +125,7 @@ def test_remote_claude_launch_factory_appends_model_flag(
         [],
         None,
     )
-    assert "--model opus" in launch.args[6]
+    assert "--model opus" in launch.args[12]
 
 
 def test_build_remote_thread_enumeration_args_wraps_in_bash_and_passes_env(

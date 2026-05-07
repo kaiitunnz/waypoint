@@ -27,6 +27,25 @@ CLAUDE_DEFAULT_BIN = "claude"
 # absolute path of the hook script after `$HOME` is resolved.
 HOOK_PATH_PLACEHOLDER = "__WAYPOINT_HOOK_PATH__"
 
+# SSH-layer liveness probes for the reverse tunnel that carries the
+# PreToolUse hook's HTTP request. ``ServerAliveInterval=30`` +
+# ``ServerAliveCountMax=6`` means a wedged tunnel collapses into a
+# clean ssh exit within ~3 minutes; the runtime then drives normal
+# session teardown and resolves any pending approvals as
+# ``"session terminated"``. Without this floor a half-open TCP socket
+# inside the tunnel could leave Claude parked for hours waiting on a
+# hook reply that will never arrive. Inserted immediately after the
+# ssh binary so user-supplied ``ssh_args`` cannot accidentally relax
+# them (ssh first-value-wins).
+SSH_KEEPALIVE_ARGS: tuple[str, ...] = (
+    "-o",
+    "ConnectTimeout=15",
+    "-o",
+    "ServerAliveInterval=30",
+    "-o",
+    "ServerAliveCountMax=6",
+)
+
 
 def build_remote_claude_launch_factory(
     target: SshLaunchTargetConfig,
@@ -117,6 +136,7 @@ def build_remote_claude_launch_factory(
         )
         args = [
             _resolve_local_binary(target.ssh_bin),
+            *SSH_KEEPALIVE_ARGS,
             *target.ssh_args,
             "-o",
             "ExitOnForwardFailure=yes",

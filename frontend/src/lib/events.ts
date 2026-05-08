@@ -31,6 +31,27 @@ export interface EventEnvelopeApproval {
   decisions?: string[];
 }
 
+export interface EventDiffPreviewFile {
+  path: string;
+  oldPath?: string | null;
+  changeType: "add" | "delete" | "update" | "move" | "unknown";
+  diff: string;
+  additions: number;
+  deletions: number;
+  truncated: boolean;
+  binary: boolean;
+  unavailableReason?: string | null;
+}
+
+export interface EventDiffPreview {
+  schemaVersion: 1;
+  phase: "proposed" | "applied" | "aggregate";
+  files: EventDiffPreviewFile[];
+  totalAdditions: number;
+  totalDeletions: number;
+  truncated: boolean;
+}
+
 export interface EventEnvelope {
   version: number | null;
   kind: EventRecord["kind"];
@@ -38,6 +59,7 @@ export interface EventEnvelope {
   status?: string | null;
   item?: EventEnvelopeItem;
   approval?: EventEnvelopeApproval;
+  diffPreview?: EventDiffPreview | null;
   // Untyped passthrough for fields not yet promoted to the schema.
   extra: Record<string, unknown>;
 }
@@ -67,6 +89,62 @@ function readStringArray(
     return value.filter((entry): entry is string => typeof entry === "string");
   }
   return undefined;
+}
+
+function readNumber(metadata: Record<string, unknown>, key: string): number {
+  const value = metadata[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function readBoolean(metadata: Record<string, unknown>, key: string): boolean {
+  return metadata[key] === true;
+}
+
+function readDiffPreview(metadata: Record<string, unknown>): EventDiffPreview | null {
+  const raw = readRecord(metadata, "diff_preview");
+  if (!raw) return null;
+  const filesRaw = raw.files;
+  if (!Array.isArray(filesRaw)) return null;
+  const files = filesRaw
+    .filter((entry): entry is Record<string, unknown> =>
+      Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
+    )
+    .map((entry) => ({
+      path: readString(entry, "path") ?? "changes",
+      oldPath: readString(entry, "old_path"),
+      changeType: readChangeType(entry.change_type),
+      diff: readString(entry, "diff") ?? "",
+      additions: readNumber(entry, "additions"),
+      deletions: readNumber(entry, "deletions"),
+      truncated: readBoolean(entry, "truncated"),
+      binary: readBoolean(entry, "binary"),
+      unavailableReason: readString(entry, "unavailable_reason"),
+    }));
+  if (!files.length) return null;
+  return {
+    schemaVersion: 1,
+    phase: readDiffPhase(raw.phase),
+    files,
+    totalAdditions: readNumber(raw, "total_additions"),
+    totalDeletions: readNumber(raw, "total_deletions"),
+    truncated: readBoolean(raw, "truncated"),
+  };
+}
+
+function readDiffPhase(value: unknown): EventDiffPreview["phase"] {
+  return value === "applied" || value === "aggregate" || value === "proposed"
+    ? value
+    : "proposed";
+}
+
+function readChangeType(value: unknown): EventDiffPreviewFile["changeType"] {
+  return value === "add" ||
+    value === "delete" ||
+    value === "update" ||
+    value === "move" ||
+    value === "unknown"
+    ? value
+    : "unknown";
 }
 
 const NORMALIZED_TOOL_NAMES: Record<string, string> = {
@@ -134,6 +212,7 @@ export function parseEvent(event: EventRecord): EventEnvelope {
     status: readString(metadata, "status"),
     item,
     approval,
+    diffPreview: readDiffPreview(metadata),
     extra: { ...metadata },
   };
 }

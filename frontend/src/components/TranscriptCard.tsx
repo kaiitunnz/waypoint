@@ -2,7 +2,8 @@ import { memo, useCallback, useState } from "react";
 
 import { fidelityFor, transportLabel } from "@/lib/backends";
 import { EventRecord, SessionTransport } from "@/lib/types";
-import { normalizeToolName } from "@/lib/events";
+import { normalizeToolName, parseEvent } from "@/lib/events";
+import { DiffPreview } from "@/components/DiffPreview";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 
 function legacyCopy(text: string): boolean {
@@ -262,6 +263,21 @@ function CodexCard({
 }
 
 function SystemRule({ event }: { event: EventRecord }) {
+  const diffPreview = parseEvent(event).diffPreview;
+  if (diffPreview) {
+    return (
+      <details className="panel transcript codex system diff-system-card">
+        <summary className="transcript-summary">
+          <div className="transcript-role">
+            <span className="badge neutral">changes</span>
+            <span className="role-time">{formatTime(event.ts)}</span>
+          </div>
+          <p className="transcript-preview">{event.text}</p>
+        </summary>
+        <DiffPreview preview={diffPreview} />
+      </details>
+    );
+  }
   return (
     <div className="system-rule" role="note">
       <span className="system-rule-body">
@@ -431,6 +447,7 @@ function ToolDisclosure({
   const tool = toolBadgeFor(readToolName(event));
   const preview = previewForToolEvent(event, tool.label);
   const kindLabel = event.kind === "tool_call" ? "call" : "result";
+  const diffPreview = parseEvent(event).diffPreview;
   return (
     <details className={`panel transcript codex ${event.kind} tool-disclosure`}>
       <summary className="transcript-summary">
@@ -444,7 +461,11 @@ function ToolDisclosure({
         </div>
         {preview ? <p className="transcript-preview">{preview}</p> : null}
       </summary>
-      <pre className={bodyClassName}>{event.text}</pre>
+      {diffPreview ? (
+        <DiffPreview preview={diffPreview} />
+      ) : (
+        <pre className={bodyClassName}>{event.text}</pre>
+      )}
     </details>
   );
 }
@@ -478,6 +499,9 @@ function ToolPairCard({
   }
   const status = result ? "complete" : "pending";
   const tool = toolBadgeFor(readToolName(call ?? result ?? ({} as EventRecord)));
+  const diffPreview =
+    (result ? parseEvent(result).diffPreview : null) ||
+    (call ? parseEvent(call).diffPreview : null);
   const summary =
     (call ? previewForToolEvent(call, tool.label) : null) ||
     (result ? previewForToolEvent(result, tool.label) : null) ||
@@ -496,21 +520,27 @@ function ToolPairCard({
         {summary ? <p className="transcript-preview">{summary}</p> : null}
       </summary>
       <div className="tool-pair-body">
-        {call ? (
-          <div className="tool-pair-section">
-            <p className="tool-pair-label">call</p>
-            <pre className="shell">{call.text}</pre>
-          </div>
-        ) : null}
-        {result ? (
-          <div className="tool-pair-section">
-            <p className="tool-pair-label">result</p>
-            <pre className="output">{result.text}</pre>
-          </div>
+        {diffPreview ? (
+          <DiffPreview preview={diffPreview} />
         ) : (
-          <div className="tool-pair-section">
-            <p className="tool-pair-label muted">awaiting result…</p>
-          </div>
+          <>
+            {call ? (
+              <div className="tool-pair-section">
+                <p className="tool-pair-label">call</p>
+                <pre className="shell">{call.text}</pre>
+              </div>
+            ) : null}
+            {result ? (
+              <div className="tool-pair-section">
+                <p className="tool-pair-label">result</p>
+                <pre className="output">{result.text}</pre>
+              </div>
+            ) : (
+              <div className="tool-pair-section">
+                <p className="tool-pair-label muted">awaiting result…</p>
+              </div>
+            )}
+          </>
         )}
       </div>
     </details>

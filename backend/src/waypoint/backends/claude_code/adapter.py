@@ -1154,6 +1154,7 @@ class ClaudeCliAdapter:
                     "method": "rate_limit_event",
                     "payload": event,
                     "status": SessionStatus.RUNNING,
+                    "refresh_completions": True,
                 },
                 SessionStatus.RUNNING,
             )

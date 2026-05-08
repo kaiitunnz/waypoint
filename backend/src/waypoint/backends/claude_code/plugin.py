@@ -410,7 +410,9 @@ class ClaudeCodePlugin:
     ) -> list[CommandCompletion]:
         if trigger != "/":
             return []
-        runtime_commands = _session_slash_commands(self.adapter, session.id)
+        runtime_commands = _session_slash_commands(
+            self.adapter, session.id
+        ) or _stored_slash_commands(runtime, session.id)
         completions = (
             []
             if _commands_include_name(runtime_commands, "status")
@@ -456,8 +458,11 @@ class ClaudeCodePlugin:
         request: Any,
     ) -> SessionRecord | None:
         command = _first_slash_command(getattr(request, "text", ""))
-        if command == "/status" and not _claude_runtime_has_command(
-            self.adapter, session.id, "status"
+        runtime_commands = _session_slash_commands(
+            self.adapter, session.id
+        ) or _stored_slash_commands(runtime, session.id)
+        if command == "/status" and not _commands_include_name(
+            runtime_commands, "status"
         ):
             await runtime._record_user_event(
                 session.id,
@@ -1092,10 +1097,20 @@ def _session_slash_commands(
     return commands if isinstance(commands, tuple) else tuple(commands or ())
 
 
-def _claude_runtime_has_command(
-    adapter: ClaudeCliAdapter | None, session_id: str, name: str
-) -> bool:
-    return _commands_include_name(_session_slash_commands(adapter, session_id), name)
+def _stored_slash_commands(
+    runtime: "SessionRuntime", session_id: str
+) -> tuple[str, ...]:
+    for event in reversed(runtime.storage.list_events(session_id)):
+        if event.metadata.get("method") != "system.init":
+            continue
+        payload = event.metadata.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        commands = payload.get("slash_commands")
+        if not isinstance(commands, list):
+            continue
+        return tuple(command for command in commands if isinstance(command, str))
+    return ()
 
 
 def _commands_include_name(commands: tuple[str, ...], name: str) -> bool:

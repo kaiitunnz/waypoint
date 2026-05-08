@@ -517,7 +517,7 @@ async def test_handle_input_rejects_reattach_when_thread_id_missing(tmp_path) ->
 
 
 @pytest.mark.asyncio
-async def test_handle_input_status_forwards_to_codex(tmp_path) -> None:
+async def test_handle_input_status_renders_codex_status(tmp_path) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
     fake = FakeStructuredAdapter()
     _codex_plugin(runtime).adapter = cast(Any, fake)
@@ -526,12 +526,17 @@ async def test_handle_input_status_forwards_to_codex(tmp_path) -> None:
 
     await runtime.handle_input("sess", SessionInputRequest(text="/status"))
 
-    # Codex's app-server has no Waypoint-side renderer — `/status` flows to
-    # the agent so the underlying backend can decide how to respond.
-    assert fake.inputs == [("sess", "/status")]
+    assert fake.inputs == []
     events = storage.list_events("sess")
-    assert [event.kind for event in events] == [EventKind.USER_INPUT]
+    assert [event.kind for event in events] == [
+        EventKind.USER_INPUT,
+        EventKind.SYSTEM_NOTE,
+    ]
     assert events[0].text == "/status"
+    assert events[0].metadata["status"] == "idle"
+    assert "Codex session status" in events[1].text
+    assert "- Status: idle" in events[1].text
+    assert events[1].metadata["builtin_command"] == "/status"
 
 
 @pytest.mark.asyncio

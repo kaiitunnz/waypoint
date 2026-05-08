@@ -84,7 +84,7 @@ const LOCAL_SLASH_COMPLETIONS: ReadonlyArray<CommandCompletion> = [
     trigger: "/",
     replacement: "/status ",
     name: "status",
-    description: "Forward to the agent's status",
+    description: "Show session status",
     kind: "command",
     source: "legacy_static",
     dispatch: "plain_text",

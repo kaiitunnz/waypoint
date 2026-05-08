@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
@@ -315,6 +316,46 @@ async def test_list_command_completions_uses_codex_skills(tmp_path) -> None:
     assert [item.name for item in completions] == ["humanizer"]
     assert completions[0].replacement == "$humanizer "
     assert completions[0].dispatch == CompletionDispatch.STRUCTURED_SKILL
+
+
+@pytest.mark.asyncio
+async def test_get_command_completions_returns_cache_while_refreshing(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+
+    class FakeAdapter:
+        async def list_skills(
+            self, session_id: str, *, force_reload: bool = False
+        ) -> list[dict[str, Any]]:
+            assert session_id == "sess"
+            assert force_reload is True
+            return [
+                {
+                    "name": "humanizer",
+                    "description": "Humanize prose",
+                    "path": "/tmp/SKILL.md",
+                }
+            ]
+
+    _codex_plugin(runtime).adapter = cast(Any, FakeAdapter())
+    session = make_session(settings)
+    storage.create_session(session)
+
+    completions, refreshing = await runtime.get_command_completions(
+        session.id, trigger="$", prefix="$hum"
+    )
+
+    assert completions == []
+    assert refreshing is True
+    await asyncio.gather(*runtime._completion_refresh_tasks.values())
+
+    completions, refreshing = await runtime.get_command_completions(
+        session.id, trigger="$", prefix="$hum"
+    )
+
+    assert [item.name for item in completions] == ["humanizer"]
+    assert refreshing is False
 
 
 @pytest.mark.asyncio

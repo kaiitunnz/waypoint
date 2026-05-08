@@ -101,6 +101,7 @@ class SessionInputItem(BaseModel):
 
 class SessionCompletionsResponse(BaseModel):
     completions: list[CommandCompletion] = Field(default_factory=list)
+    refreshing: bool = False
 
 
 class SessionRecord(BaseModel):

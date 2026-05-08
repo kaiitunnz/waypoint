@@ -220,13 +220,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         prefix: Annotated[str, Query(max_length=256)] = "",
         force_refresh: Annotated[bool, Query()] = False,
     ) -> SessionCompletionsResponse:
-        completions = await context.runtime.list_command_completions(
+        completions, refreshing = await context.runtime.get_command_completions(
             session_id,
             trigger=trigger,
             prefix=prefix,
             force_refresh=force_refresh,
         )
-        return SessionCompletionsResponse(completions=completions)
+        return SessionCompletionsResponse(
+            completions=completions,
+            refreshing=refreshing,
+        )
 
     @app.post("/api/sessions/{session_id}/input")
     async def session_input(

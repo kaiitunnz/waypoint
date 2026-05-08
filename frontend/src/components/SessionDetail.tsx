@@ -21,7 +21,7 @@ import {
   fetchBackendModels,
   fetchEvents,
   fetchSession,
-  fetchSessionCompletions,
+  fetchSessionCompletionsResponse,
   fetchTerminalSnapshot,
   forkSession,
   isAuthError,
@@ -135,6 +135,7 @@ const LOCAL_SLASH_COMPLETIONS: ReadonlyArray<CommandCompletion> = [
     metadata: {},
   },
 ];
+const COMPLETION_REFRESH_POLL_MS = 750;
 
 function completionCommand(entry: CommandCompletion): string {
   return `${entry.trigger}${entry.name}`;
@@ -1386,23 +1387,43 @@ const ReplyComposer = memo(function ReplyComposer({
       return;
     }
     const controller = new AbortController();
-    fetchSessionCompletions(
-      host,
-      token,
-      sessionId,
-      completionTrigger,
-      completionHead,
-      false,
-      controller.signal,
-    )
-      .then(setBackendCompletions)
-      .catch((error) => {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-        setBackendCompletions([]);
-      });
-    return () => controller.abort();
+    let pollTimer: number | null = null;
+    const loadCompletions = () => {
+      fetchSessionCompletionsResponse(
+        host,
+        token,
+        sessionId,
+        completionTrigger,
+        completionHead,
+        false,
+        controller.signal,
+      )
+        .then((payload) => {
+          if (controller.signal.aborted) {
+            return;
+          }
+          setBackendCompletions(payload.completions);
+          if (payload.refreshing) {
+            pollTimer = window.setTimeout(
+              loadCompletions,
+              COMPLETION_REFRESH_POLL_MS,
+            );
+          }
+        })
+        .catch((error) => {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
+          setBackendCompletions([]);
+        });
+    };
+    loadCompletions();
+    return () => {
+      controller.abort();
+      if (pollTimer !== null) {
+        window.clearTimeout(pollTimer);
+      }
+    };
   }, [host, token, sessionId, supportsSlash, completionTrigger, completionHead]);
 
   useEffect(() => {

@@ -8,11 +8,13 @@ from collections import defaultdict
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 from fastapi import HTTPException, status
 
 from waypoint.backends import BackendRegistry, get_registry
+from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
 from waypoint.backends.tmux.normalize import TerminalNormalizer
 from waypoint.git_meta import resolve_git_meta
@@ -37,10 +39,12 @@ from waypoint.storage import Storage
 from waypoint.transports import TransportAdapter
 
 TMUX_TRANSPORT_ID = "tmux"
+COMPLETION_REFRESH_INTERVAL_SECONDS = 30.0
 
 log = logging.getLogger("waypoint.runtime")
 
 SAFE_NAME = re.compile(r"[^a-zA-Z0-9_-]+")
+CompletionCacheKey = tuple[str, str]
 
 
 class BroadcastHub:
@@ -98,6 +102,11 @@ class SessionRuntime:
         }
         self.monitor_tasks: dict[str, asyncio.Task[None]] = {}
         self._restore_tasks: set[asyncio.Task[None]] = set()
+        self._completion_cache: dict[CompletionCacheKey, list[CommandCompletion]] = {}
+        self._completion_cache_updated_at: dict[CompletionCacheKey, float] = {}
+        self._completion_refresh_tasks: dict[
+            CompletionCacheKey, asyncio.Task[list[CommandCompletion]]
+        ] = {}
         self.file_offsets: dict[str, int] = {}
         self.registry = registry or get_registry()
         self._transports: dict[str, TransportAdapter] = {
@@ -122,7 +131,7 @@ class SessionRuntime:
                 continue
             plugin = self.registry.plugin_for(session)
             task = asyncio.create_task(
-                plugin.restore_session(self, session),
+                self._restore_session_and_warm_completions(plugin, session),
                 name=f"restore-{session.id}",
             )
             self._restore_tasks.add(task)
@@ -144,6 +153,13 @@ class SessionRuntime:
             with suppress(asyncio.CancelledError):
                 await task
         self._restore_tasks.clear()
+        completion_tasks = list(self._completion_refresh_tasks.values())
+        self._completion_refresh_tasks.clear()
+        for completion_task in completion_tasks:
+            completion_task.cancel()
+        for completion_task in completion_tasks:
+            with suppress(asyncio.CancelledError):
+                await completion_task
         for plugin in self.registry.all():
             await plugin.shutdown(self)
         self.storage.close()
@@ -214,7 +230,7 @@ class SessionRuntime:
             fallback = self.registry.fallback_for_managed_launch()
             if fallback is not None:
                 plugin = fallback
-        return await plugin.create_session(
+        session = await plugin.create_session(
             self,
             request,
             session_id=session_id,
@@ -227,6 +243,8 @@ class SessionRuntime:
             resolved_model=resolved_model,
             resolved_effort=resolved_effort,
         )
+        self._warm_command_completions(session)
+        return session
 
     async def fork_session(self, session_id: str) -> SessionRecord:
         session = self.get_session(session_id)
@@ -266,6 +284,7 @@ class SessionRuntime:
             raw_log,
             structured_log,
         )
+        self._warm_command_completions(new_session)
         await self.broadcast.publish(
             SessionEnvelope(
                 type="session_list_update",
@@ -366,15 +385,164 @@ class SessionRuntime:
         prefix: str = "",
         force_refresh: bool = False,
     ) -> list[CommandCompletion]:
-        session = self.get_session(session_id)
-        plugin = self.registry.plugin_for(session)
-        return await plugin.list_command_completions(
-            self,
-            session,
+        completions, _refreshing = await self.get_command_completions(
+            session_id,
             trigger=trigger,
             prefix=prefix,
             force_refresh=force_refresh,
         )
+        return completions
+
+    async def get_command_completions(
+        self,
+        session_id: str,
+        *,
+        trigger: str = "/",
+        prefix: str = "",
+        force_refresh: bool = False,
+    ) -> tuple[list[CommandCompletion], bool]:
+        session = self.get_session(session_id)
+        plugin = self.registry.plugin_for(session)
+        key = (session.id, trigger)
+        if force_refresh:
+            completions = await self._refresh_command_completion_cache(
+                session,
+                trigger=trigger,
+                force_refresh=True,
+            )
+            return (
+                self._filter_command_completions(
+                    completions,
+                    trigger=trigger,
+                    prefix=prefix,
+                ),
+                False,
+            )
+
+        cached = self._completion_cache.get(key)
+        updated_at = self._completion_cache_updated_at.get(key, 0.0)
+        if (
+            cached is None
+            or monotonic() - updated_at >= COMPLETION_REFRESH_INTERVAL_SECONDS
+        ):
+            self._ensure_command_completion_refresh(session, trigger=trigger)
+
+        if cached is None:
+            cached = self._fallback_command_completions(
+                plugin,
+                trigger=trigger,
+                prefix=prefix,
+            )
+            return cached, key in self._completion_refresh_tasks
+
+        return (
+            self._filter_command_completions(cached, trigger=trigger, prefix=prefix),
+            key in self._completion_refresh_tasks,
+        )
+
+    async def _restore_session_and_warm_completions(
+        self, plugin: Any, session: SessionRecord
+    ) -> None:
+        await plugin.restore_session(self, session)
+        refreshed = self.storage.get_session(session.id)
+        if refreshed is not None:
+            self._warm_command_completions(refreshed)
+
+    def _warm_command_completions(self, session: SessionRecord) -> None:
+        # Remote discovery can involve SSH and user-specific shell startup.
+        # Keep automatic warming local; remote sessions still use the same
+        # stale-while-revalidate path when the user opens autocomplete.
+        if session.launch_target_id is not None:
+            return
+        try:
+            transport = self.transport_for(session)
+        except KeyError:
+            return
+        if not transport.is_structured:
+            return
+        for trigger in ("/", "$"):
+            self._ensure_command_completion_refresh(session, trigger=trigger)
+
+    def _ensure_command_completion_refresh(
+        self, session: SessionRecord, *, trigger: str
+    ) -> None:
+        key = (session.id, trigger)
+        task = self._completion_refresh_tasks.get(key)
+        if task is not None and not task.done():
+            return
+        task = asyncio.create_task(
+            self._refresh_command_completion_cache(
+                session,
+                trigger=trigger,
+                force_refresh=True,
+            ),
+            name=f"completion-refresh-{session.id}-{trigger}",
+        )
+        self._completion_refresh_tasks[key] = task
+
+        def _finish(completed: asyncio.Task[list[CommandCompletion]]) -> None:
+            self._completion_refresh_tasks.pop(key, None)
+            if completed.cancelled():
+                return
+            try:
+                completed.result()
+            except Exception:
+                log.exception(
+                    "failed to refresh command completions for session %s trigger %s",
+                    session.id,
+                    trigger,
+                )
+
+        task.add_done_callback(_finish)
+
+    async def _refresh_command_completion_cache(
+        self,
+        session: SessionRecord,
+        *,
+        trigger: str,
+        force_refresh: bool,
+    ) -> list[CommandCompletion]:
+        plugin = self.registry.plugin_for(session)
+        completions = await plugin.list_command_completions(
+            self,
+            session,
+            trigger=trigger,
+            prefix="",
+            force_refresh=force_refresh,
+        )
+        key = (session.id, trigger)
+        self._completion_cache[key] = completions
+        self._completion_cache_updated_at[key] = monotonic()
+        return completions
+
+    def _fallback_command_completions(
+        self,
+        plugin: Any,
+        *,
+        trigger: str,
+        prefix: str,
+    ) -> list[CommandCompletion]:
+        if trigger != "/":
+            return []
+        return static_slash_completions(plugin.id, plugin.capabilities, prefix=prefix)
+
+    def _filter_command_completions(
+        self,
+        completions: list[CommandCompletion],
+        *,
+        trigger: str,
+        prefix: str,
+    ) -> list[CommandCompletion]:
+        if not prefix:
+            return list(completions)
+        normalized_prefix = (
+            prefix if prefix.startswith(trigger) else f"{trigger}{prefix}"
+        )
+        return [
+            item
+            for item in completions
+            if f"{item.trigger}{item.name}".startswith(normalized_prefix)
+        ]
 
     async def interrupt(self, session_id: str) -> SessionRecord:
         session = self.get_session(session_id)

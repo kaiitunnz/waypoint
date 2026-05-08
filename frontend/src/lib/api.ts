@@ -10,6 +10,7 @@ import {
   MeResponse,
   ScheduleCreateRequest,
   ScheduledSession,
+  SessionCompletionsResponse,
   SessionCommandInvocation,
   SessionEnvelope,
   SessionRecord,
@@ -118,6 +119,27 @@ export async function fetchSessionCompletions(
   forceRefresh = false,
   signal?: AbortSignal,
 ): Promise<CommandCompletion[]> {
+  const payload = await fetchSessionCompletionsResponse(
+    host,
+    token,
+    sessionId,
+    trigger,
+    prefix,
+    forceRefresh,
+    signal,
+  );
+  return payload.completions;
+}
+
+export async function fetchSessionCompletionsResponse(
+  host: string,
+  token: string,
+  sessionId: string,
+  trigger: string,
+  prefix: string,
+  forceRefresh = false,
+  signal?: AbortSignal,
+): Promise<SessionCompletionsResponse> {
   const params = new URLSearchParams();
   params.set("trigger", trigger);
   if (prefix) {
@@ -135,8 +157,11 @@ export async function fetchSessionCompletions(
     },
   );
   await ensureOk(response, "failed to fetch command completions");
-  const payload = await response.json();
-  return (payload.completions ?? []) as CommandCompletion[];
+  const payload = (await response.json()) as Partial<SessionCompletionsResponse>;
+  return {
+    completions: payload.completions ?? [],
+    refreshing: payload.refreshing ?? false,
+  };
 }
 
 export async function fetchEvents(

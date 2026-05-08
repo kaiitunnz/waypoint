@@ -91,6 +91,59 @@ def test_session_diff_maps_to_aggregate_diff_preview() -> None:
     assert metadata["diff_preview"]["files"][0]["change_type"] == "update"
 
 
+def test_session_diff_maps_opencode_snapshot_file_diff_status() -> None:
+    kind, text, metadata = map_event(
+        "session.diff",
+        {
+            "diff": [
+                {
+                    "file": "new_app.py",
+                    "status": "added",
+                    "additions": 1,
+                    "deletions": 0,
+                    "patch": "--- /dev/null\n+++ b/new_app.py\n@@ -0,0 +1 @@\n+print('hi')\n",
+                }
+            ]
+        },
+    )
+
+    assert kind == EventKind.SYSTEM_NOTE
+    assert text == "Changes: +1 -0"
+    file = metadata["diff_preview"]["files"][0]
+    assert file["path"] == "new_app.py"
+    assert file["change_type"] == "add"
+    assert metadata["diff_preview"]["total_additions"] == 1
+    assert metadata["diff_preview"]["total_deletions"] == 0
+
+
+def test_session_diff_generates_preview_from_opencode_before_after() -> None:
+    kind, text, metadata = map_event(
+        "session.diff",
+        {
+            "diff": [
+                {
+                    "file": "app.py",
+                    "status": "modified",
+                    "additions": 1,
+                    "deletions": 1,
+                    "before": "old\n",
+                    "after": "new\n",
+                }
+            ]
+        },
+    )
+
+    assert kind == EventKind.SYSTEM_NOTE
+    assert text == "Changes: +1 -1"
+    file = metadata["diff_preview"]["files"][0]
+    assert file["path"] == "app.py"
+    assert file["change_type"] == "update"
+    assert "--- app.py" in file["diff"]
+    assert "+++ app.py" in file["diff"]
+    assert "-old" in file["diff"]
+    assert "+new" in file["diff"]
+
+
 def test_question_asked_maps_to_ask_user_question_tool_call() -> None:
     kind, text, metadata = map_event(
         "question.asked",

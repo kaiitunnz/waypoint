@@ -393,6 +393,25 @@ async def test_send_input_reports_dead_process_with_stderr_tail() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dispatch_system_init_records_runtime_slash_commands() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    await adapter._dispatch(
+        state,
+        {
+            "type": "system",
+            "subtype": "init",
+            "model": "claude-sonnet-4-5",
+            "slash_commands": ["clear", "compact", "usage"],
+            "session_id": "claude-uuid",
+        },
+    )
+
+    assert adapter.session_slash_commands("sess") == ("clear", "compact", "usage")
+
+
+@pytest.mark.asyncio
 async def test_dispatch_system_status_compacting_emits_running_note() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)

@@ -81,6 +81,7 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         self.modes: dict[str, str] = {}
         self.models: dict[str, str | None] = {}
         self.efforts: dict[str, str | None] = {}
+        self.slash_commands: dict[str, tuple[str, ...]] = {}
 
     async def terminate_session(self, session_id: str) -> bool:
         self.terminate_calls.append(session_id)
@@ -161,6 +162,9 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
 
     def session_effort(self, session_id: str) -> str | None:
         return self.efforts.get(session_id)
+
+    def session_slash_commands(self, session_id: str) -> tuple[str, ...]:
+        return self.slash_commands.get(session_id, ())
 
 
 class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
@@ -288,10 +292,13 @@ async def test_list_command_completions_uses_backend_static_slash_commands(
 
 
 @pytest.mark.asyncio
-async def test_list_command_completions_uses_claude_pass_through_commands(
+async def test_list_command_completions_uses_claude_runtime_commands(
     monkeypatch, tmp_path
 ) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    fake.slash_commands["claude-sess"] = ("clear", "compact", "usage")
+    _claude_plugin(runtime).adapter = cast(Any, fake)
 
     async def fake_dynamic_completions(**_kwargs: Any) -> list[Any]:
         return []
@@ -302,6 +309,7 @@ async def test_list_command_completions_uses_claude_pass_through_commands(
     )
     session = make_session(
         settings,
+        id="claude-sess",
         backend="claude_code",
         transport="claude_cli",
         thread_id="claude-thread",
@@ -309,12 +317,49 @@ async def test_list_command_completions_uses_claude_pass_through_commands(
     storage.create_session(session)
 
     completions = await runtime.list_command_completions(
-        session.id, trigger="/", prefix="/per"
+        session.id, trigger="/", prefix="/us", force_refresh=True
     )
 
-    assert [item.name for item in completions] == ["permissions"]
-    assert completions[0].replacement == "/permissions "
+    assert [item.name for item in completions] == ["usage"]
+    assert completions[0].replacement == "/usage "
     assert completions[0].dispatch == CompletionDispatch.PLAIN_TEXT
+    assert completions[0].source == "claude_builtin"
+
+
+@pytest.mark.asyncio
+async def test_list_command_completions_claude_omits_unreported_tui_commands(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    fake.slash_commands["claude-sess"] = ("clear", "compact", "usage")
+    _claude_plugin(runtime).adapter = cast(Any, fake)
+
+    async def fake_dynamic_completions(**_kwargs: Any) -> list[Any]:
+        return []
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.list_claude_command_completions",
+        fake_dynamic_completions,
+    )
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend="claude_code",
+        transport="claude_cli",
+        thread_id="claude-thread",
+    )
+    storage.create_session(session)
+
+    completions = await runtime.list_command_completions(
+        session.id, trigger="/", prefix="/", force_refresh=True
+    )
+
+    names = {item.name for item in completions}
+    assert "status" in names
+    assert "usage" in names
+    assert "permissions" not in names
+    assert "help" not in names
 
 
 @pytest.mark.asyncio
@@ -586,6 +631,58 @@ async def test_handle_input_status_renders_codex_status(tmp_path) -> None:
     assert "Codex session status" in events[1].text
     assert "- Status: idle" in events[1].text
     assert events[1].metadata["builtin_command"] == "/status"
+
+
+@pytest.mark.asyncio
+async def test_handle_input_status_renders_claude_waypoint_status(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    fake.slash_commands["claude-sess"] = ("clear", "compact", "usage")
+    _claude_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend="claude_code",
+        transport="claude_cli",
+        thread_id="claude-thread",
+        permission_mode="default",
+    )
+    storage.create_session(session)
+
+    await runtime.handle_input("claude-sess", SessionInputRequest(text="/status"))
+
+    assert fake.inputs == []
+    events = storage.list_events("claude-sess")
+    assert [event.kind for event in events] == [
+        EventKind.USER_INPUT,
+        EventKind.SYSTEM_NOTE,
+    ]
+    assert "Claude Code session status" in events[1].text
+    assert "- Runtime slash commands: /clear, /compact, /usage" in events[1].text
+    assert events[1].metadata["builtin_command"] == "/status"
+    assert events[1].metadata["source"] == "waypoint"
+
+
+@pytest.mark.asyncio
+async def test_handle_input_status_forwards_when_claude_reports_native_status(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    fake.slash_commands["claude-sess"] = ("status",)
+    _claude_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend="claude_code",
+        transport="claude_cli",
+        thread_id="claude-thread",
+    )
+    storage.create_session(session)
+
+    await runtime.handle_input("claude-sess", SessionInputRequest(text="/status"))
+
+    assert fake.inputs == [("claude-sess", "/status")]
 
 
 @pytest.mark.asyncio

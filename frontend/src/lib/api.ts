@@ -4,6 +4,7 @@ import {
   Backend,
   BackendDescriptor,
   BackendModelListResponse,
+  CommandCompletion,
   EventRecord,
   EventsPage,
   MeResponse,
@@ -105,6 +106,36 @@ export async function fetchSession(host: string, token: string, sessionId: strin
   await ensureOk(response, "failed to fetch session");
   const payload = await response.json();
   return payload.session as SessionRecord;
+}
+
+export async function fetchSessionCompletions(
+  host: string,
+  token: string,
+  sessionId: string,
+  trigger: string,
+  prefix: string,
+  forceRefresh = false,
+  signal?: AbortSignal,
+): Promise<CommandCompletion[]> {
+  const params = new URLSearchParams();
+  params.set("trigger", trigger);
+  if (prefix) {
+    params.set("prefix", prefix);
+  }
+  if (forceRefresh) {
+    params.set("force_refresh", "true");
+  }
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/completions?${params.toString()}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+      signal,
+    },
+  );
+  await ensureOk(response, "failed to fetch command completions");
+  const payload = await response.json();
+  return (payload.completions ?? []) as CommandCompletion[];
 }
 
 export async function fetchEvents(

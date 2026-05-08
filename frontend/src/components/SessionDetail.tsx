@@ -21,6 +21,7 @@ import {
   fetchBackendModels,
   fetchEvents,
   fetchSession,
+  fetchSessionCompletions,
   fetchTerminalSnapshot,
   forkSession,
   isAuthError,
@@ -58,20 +59,99 @@ import { useSwitcher } from "@/components/SwitcherProvider";
 import {
   BackendModelOption,
   BackendPermissionMode,
+  CommandCompletion,
   EventRecord,
   SessionEnvelope,
   SessionRecord,
   SessionTransport,
 } from "@/lib/types";
 
-const SLASH_COMMANDS: ReadonlyArray<{ command: string; description: string }> = [
-  { command: "/help", description: "Forward to the agent's built-in help" },
-  { command: "/status", description: "Forward to the agent's status" },
-  { command: "/permissions", description: "Forward to the agent's permissions" },
-  { command: "/compact", description: "Compact context to reclaim tokens" },
-  { command: "/new", description: "Start a new session with the same settings" },
-  { command: "/fork", description: "Fork this session into a new branch" },
+const LOCAL_SLASH_COMPLETIONS: ReadonlyArray<CommandCompletion> = [
+  {
+    id: "waypoint:legacy:help",
+    trigger: "/",
+    replacement: "/help ",
+    name: "help",
+    description: "Forward to the agent's built-in help",
+    kind: "command",
+    source: "legacy_static",
+    dispatch: "plain_text",
+    metadata: {},
+  },
+  {
+    id: "waypoint:legacy:status",
+    trigger: "/",
+    replacement: "/status ",
+    name: "status",
+    description: "Forward to the agent's status",
+    kind: "command",
+    source: "legacy_static",
+    dispatch: "plain_text",
+    metadata: {},
+  },
+  {
+    id: "waypoint:legacy:permissions",
+    trigger: "/",
+    replacement: "/permissions ",
+    name: "permissions",
+    description: "Forward to the agent's permissions",
+    kind: "command",
+    source: "legacy_static",
+    dispatch: "plain_text",
+    metadata: {},
+  },
+  {
+    id: "waypoint:legacy:compact",
+    trigger: "/",
+    replacement: "/compact ",
+    name: "compact",
+    description: "Compact context to reclaim tokens",
+    kind: "command",
+    source: "legacy_static",
+    dispatch: "plain_text",
+    metadata: {},
+  },
+  {
+    id: "waypoint:new",
+    trigger: "/",
+    replacement: "/new ",
+    name: "new",
+    description: "Start a new session with the same settings",
+    kind: "session_control",
+    source: "waypoint",
+    dispatch: "frontend_control",
+    metadata: {},
+  },
+  {
+    id: "waypoint:fork",
+    trigger: "/",
+    replacement: "/fork ",
+    name: "fork",
+    description: "Fork this session into a new branch",
+    kind: "session_control",
+    source: "waypoint",
+    dispatch: "frontend_control",
+    metadata: {},
+  },
 ];
+
+function completionCommand(entry: CommandCompletion): string {
+  return `${entry.trigger}${entry.name}`;
+}
+
+function mergeCompletions(
+  primary: ReadonlyArray<CommandCompletion>,
+  secondary: ReadonlyArray<CommandCompletion>,
+): CommandCompletion[] {
+  const merged = new Map<string, CommandCompletion>();
+  for (const entry of [...primary, ...secondary]) {
+    const key = `${entry.trigger}${entry.name}`;
+    if (!merged.has(key)) {
+      merged.set(key, entry);
+    }
+  }
+  return [...merged.values()];
+}
 
 const EFFORT_LABEL: Record<string, string> = {
   none: "None",
@@ -1088,6 +1168,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         </div>
       ) : null}
       <ReplyComposer
+        host={host}
+        token={token}
+        sessionId={sessionId}
         permissionModeOptions={
           session ? permissionModesFor(session.backend, catalog) : []
         }
@@ -1147,6 +1230,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
 }
 
 interface ReplyComposerProps {
+  host: string;
+  token: string;
+  sessionId: string;
   agentBusy: boolean;
   permissionModeOptions: readonly BackendPermissionMode[];
   hasToolRuns: boolean;
@@ -1190,6 +1276,9 @@ interface ReplyComposerProps {
 }
 
 const ReplyComposer = memo(function ReplyComposer({
+  host,
+  token,
+  sessionId,
   agentBusy,
   permissionModeOptions,
   canDelete,
@@ -1231,6 +1320,9 @@ const ReplyComposer = memo(function ReplyComposer({
   const [sending, setSending] = useState(false);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
+  const [backendCompletions, setBackendCompletions] = useState<
+    CommandCompletion[]
+  >([]);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
   const [reattaching, setReattaching] = useState(false);
@@ -1263,18 +1355,45 @@ const ReplyComposer = memo(function ReplyComposer({
   const supportsSlash =
     transport !== null && fidelityFor(transport) === "structured";
 
+  const slashHead = draft.split(/\s/, 1)[0];
   const suggestions = supportsSlash && !suggestionsDismissed
-    ? SLASH_COMMANDS.filter((entry) => {
-        const head = draft.split(/\s/, 1)[0];
-        return head.startsWith("/") && entry.command.startsWith(head);
-      })
+    ? mergeCompletions(LOCAL_SLASH_COMPLETIONS, backendCompletions).filter(
+        (entry) =>
+          slashHead.startsWith("/") &&
+          completionCommand(entry).startsWith(slashHead),
+      )
     : [];
   const suggestionsOpen = suggestions.length > 0 && /^\S+$/.test(draft);
   const activeIndex = Math.min(suggestionIndex, Math.max(0, suggestions.length - 1));
 
   useEffect(() => {
+    if (!supportsSlash || !slashHead.startsWith("/")) {
+      setBackendCompletions([]);
+      return;
+    }
+    const controller = new AbortController();
+    fetchSessionCompletions(
+      host,
+      token,
+      sessionId,
+      "/",
+      slashHead,
+      false,
+      controller.signal,
+    )
+      .then(setBackendCompletions)
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        setBackendCompletions([]);
+      });
+    return () => controller.abort();
+  }, [host, token, sessionId, supportsSlash, slashHead]);
+
+  useEffect(() => {
     setSuggestionIndex(0);
-  }, [draft]);
+  }, [slashHead]);
 
   useEffect(() => {
     if (!draft.startsWith("/")) {
@@ -1398,7 +1517,7 @@ const ReplyComposer = memo(function ReplyComposer({
     if (!chosen) {
       return;
     }
-    setDraft(chosen.command + " ");
+    setDraft(chosen.replacement);
     setSuggestionsDismissed(true);
     requestAnimationFrame(() => textareaRef.current?.focus());
   }
@@ -1706,7 +1825,7 @@ const ReplyComposer = memo(function ReplyComposer({
         {suggestionsOpen ? (
           <ul className="slash-suggestions" role="listbox">
             {suggestions.map((entry, index) => (
-              <li key={entry.command}>
+              <li key={entry.id}>
                 <button
                   type="button"
                   role="option"
@@ -1718,7 +1837,7 @@ const ReplyComposer = memo(function ReplyComposer({
                   }}
                   onMouseEnter={() => setSuggestionIndex(index)}
                 >
-                  <span className="slash-name">{entry.command}</span>
+                  <span className="slash-name">{completionCommand(entry)}</span>
                   <span className="slash-desc">{entry.description}</span>
                 </button>
               </li>

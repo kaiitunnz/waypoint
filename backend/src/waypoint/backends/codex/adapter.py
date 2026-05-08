@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from codex_app_server.client import AppServerClient, AppServerConfig
-from codex_app_server.generated.v2_all import ModelListResponse
+from codex_app_server.generated.v2_all import ModelListResponse, SkillsListResponse
 
 from waypoint.backends.codex.normalize import (
     diff_preview_for_approval,
@@ -365,6 +365,58 @@ class CodexAppServerAdapter:
         await self._call_client(
             state, state.client.turn_steer, state.thread_id, state.active_turn_id, text
         )
+
+    async def send_input_items(
+        self,
+        session_id: str,
+        items: list[dict[str, Any]],
+        turn_params: dict[str, Any] | None = None,
+    ) -> None:
+        state = self._require_session(session_id)
+        if state.active_turn_id is None:
+            merged = self._build_turn_params(state, turn_params)
+            if merged:
+                started = await self._call_client(
+                    state,
+                    state.client.turn_start,
+                    state.thread_id,
+                    items,
+                    merged,
+                )
+            else:
+                started = await self._call_client(
+                    state, state.client.turn_start, state.thread_id, items
+                )
+            state.active_turn_id = started.turn.id
+            state.stream_task = asyncio.create_task(
+                self._stream_turn(state, started.turn.id)
+            )
+            return
+        await self._call_client(
+            state, state.client.turn_steer, state.thread_id, state.active_turn_id, items
+        )
+
+    async def list_skills(
+        self,
+        session_id: str,
+        *,
+        force_reload: bool = False,
+    ) -> list[dict[str, Any]]:
+        state = self._require_session(session_id)
+        params: dict[str, Any] = {"cwds": [state.cwd], "forceReload": force_reload}
+        response = await self._call_client(
+            state,
+            lambda: state.client.request(
+                "skills/list",
+                params,
+                response_model=SkillsListResponse,
+            ),
+        )
+        skills: list[dict[str, Any]] = []
+        for entry in response.data:
+            for skill in entry.skills:
+                skills.append(skill.model_dump(mode="json", by_alias=True))
+        return skills
 
     def _build_turn_params(
         self,

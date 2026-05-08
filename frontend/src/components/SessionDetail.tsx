@@ -1361,19 +1361,27 @@ const ReplyComposer = memo(function ReplyComposer({
   const supportsSlash =
     transport !== null && fidelityFor(transport) === "structured";
 
-  const slashHead = draft.split(/\s/, 1)[0];
+  const completionHead = draft.split(/\s/, 1)[0];
+  const completionTrigger = completionHead.startsWith("/")
+    ? "/"
+    : completionHead.startsWith("$")
+      ? "$"
+      : null;
   const suggestions = supportsSlash && !suggestionsDismissed
-    ? mergeCompletions(LOCAL_SLASH_COMPLETIONS, backendCompletions).filter(
+    ? mergeCompletions(
+        completionTrigger === "/" ? LOCAL_SLASH_COMPLETIONS : [],
+        backendCompletions,
+      ).filter(
         (entry) =>
-          slashHead.startsWith("/") &&
-          completionCommand(entry).startsWith(slashHead),
+          completionTrigger !== null &&
+          completionCommand(entry).startsWith(completionHead),
       )
     : [];
   const suggestionsOpen = suggestions.length > 0 && /^\S+$/.test(draft);
   const activeIndex = Math.min(suggestionIndex, Math.max(0, suggestions.length - 1));
 
   useEffect(() => {
-    if (!supportsSlash || !slashHead.startsWith("/")) {
+    if (!supportsSlash || completionTrigger === null) {
       setBackendCompletions([]);
       return;
     }
@@ -1382,8 +1390,8 @@ const ReplyComposer = memo(function ReplyComposer({
       host,
       token,
       sessionId,
-      "/",
-      slashHead,
+      completionTrigger,
+      completionHead,
       false,
       controller.signal,
     )
@@ -1395,14 +1403,14 @@ const ReplyComposer = memo(function ReplyComposer({
         setBackendCompletions([]);
       });
     return () => controller.abort();
-  }, [host, token, sessionId, supportsSlash, slashHead]);
+  }, [host, token, sessionId, supportsSlash, completionTrigger, completionHead]);
 
   useEffect(() => {
     setSuggestionIndex(0);
-  }, [slashHead]);
+  }, [completionHead]);
 
   useEffect(() => {
-    if (!draft.startsWith("/")) {
+    if (!draft.startsWith("/") && !draft.startsWith("$")) {
       setSuggestionsDismissed(false);
     }
   }, [draft]);

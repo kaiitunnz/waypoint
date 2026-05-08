@@ -287,6 +287,37 @@ async def test_list_command_completions_uses_backend_static_slash_commands(
 
 
 @pytest.mark.asyncio
+async def test_list_command_completions_uses_codex_skills(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+
+    class FakeAdapter:
+        async def list_skills(
+            self, session_id: str, *, force_reload: bool = False
+        ) -> list[dict[str, Any]]:
+            assert session_id == "sess"
+            assert force_reload is True
+            return [
+                {
+                    "name": "humanizer",
+                    "description": "Humanize prose",
+                    "path": "/tmp/SKILL.md",
+                }
+            ]
+
+    _codex_plugin(runtime).adapter = cast(Any, FakeAdapter())
+    session = make_session(settings)
+    storage.create_session(session)
+
+    completions = await runtime.list_command_completions(
+        session.id, trigger="$", prefix="$hum", force_refresh=True
+    )
+
+    assert [item.name for item in completions] == ["humanizer"]
+    assert completions[0].replacement == "$humanizer "
+    assert completions[0].dispatch == CompletionDispatch.STRUCTURED_SKILL
+
+
+@pytest.mark.asyncio
 async def test_handle_input_reattaches_exited_codex_session(tmp_path) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
     fake = FakeCodexRuntimeAdapter()

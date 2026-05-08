@@ -488,6 +488,57 @@ async def test_streamed_tool_result_suppresses_duplicate_completed_event() -> No
     assert tool_results[0][2] == "line one\n"
 
 
+@pytest.mark.asyncio
+async def test_streamed_file_change_completed_preserves_diff_preview() -> None:
+    emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+
+    fake.notifications.put_nowait(
+        FakeNotification(
+            "item/fileChange/outputDelta",
+            {
+                "itemId": "file-1",
+                "delta": "Success. Updated the following files:\nM app.py\n",
+            },
+        )
+    )
+    fake.notifications.put_nowait(
+        FakeNotification(
+            "item/completed",
+            {
+                "item": {
+                    "id": "file-1",
+                    "type": "fileChange",
+                    "status": "completed",
+                    "changes": [
+                        {
+                            "path": "app.py",
+                            "kind": "update",
+                            "diff": "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-old\n+new\n",
+                        }
+                    ],
+                }
+            },
+        )
+    )
+    fake.notifications.put_nowait(
+        FakeNotification(
+            "turn/completed",
+            {"turn": {"id": "turn-1", "status": "completed"}},
+        )
+    )
+
+    await adapter.send_input("sess", "edit app.py")
+    state = adapter._sessions["sess"]
+    if state.stream_task is not None:
+        await state.stream_task
+
+    tool_results = [entry for entry in emitted if entry[1] == EventKind.TOOL_RESULT]
+    assert len(tool_results) == 2
+    assert tool_results[1][3]["diff_preview"]["files"][0]["path"] == "app.py"
+
+
 def test_map_notification_agent_message_delta() -> None:
     from waypoint.backends.codex.normalize import map_notification
 

@@ -560,6 +560,7 @@ class CodexAppServerAdapter:
                         kind == EventKind.TOOL_RESULT
                         and notification.method == "item/completed"
                         and item_id in state.streamed_tool_result_ids
+                        and diff_preview is None
                     ):
                         continue
                     await self._emit_event(

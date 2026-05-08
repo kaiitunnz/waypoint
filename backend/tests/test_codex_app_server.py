@@ -58,7 +58,7 @@ class FakeAppServerClient:
     def turn_start(
         self,
         thread_id: str,
-        text: str,
+        text: Any,
         params: dict[str, Any] | None = None,
     ) -> FakeTurnStartResponse:
         if params is None:
@@ -71,8 +71,39 @@ class FakeAppServerClient:
         self.calls.append(("model_list", (include_hidden,)))
         return SimpleNamespace(data=[], next_cursor=None)
 
-    def turn_steer(self, thread_id: str, turn_id: str, text: str) -> None:
+    def turn_steer(self, thread_id: str, turn_id: str, text: Any) -> None:
         self.calls.append(("turn_steer", (thread_id, turn_id, text)))
+
+    def request(
+        self,
+        method: str,
+        params: dict[str, Any],
+        *,
+        response_model,
+    ) -> Any:
+        self.calls.append(("request", (method, params)))
+        if method == "skills/list":
+            return response_model.model_validate(
+                {
+                    "data": [
+                        {
+                            "cwd": "/tmp/work",
+                            "errors": [],
+                            "skills": [
+                                {
+                                    "description": "Humanize prose",
+                                    "enabled": True,
+                                    "name": "humanizer",
+                                    "path": "/tmp/work/.codex/skills/humanizer/SKILL.md",
+                                    "scope": "repo",
+                                    "shortDescription": "Humanize",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            )
+        raise AssertionError(f"unexpected request: {method}")
 
     def turn_interrupt(self, thread_id: str, turn_id: str) -> None:
         self.calls.append(("turn_interrupt", (thread_id, turn_id)))
@@ -254,6 +285,52 @@ async def test_send_input_starts_then_steers_turn() -> None:
             await state.stream_task
         except (asyncio.CancelledError, Exception):
             pass
+
+
+@pytest.mark.asyncio
+async def test_list_skills_requests_current_session_cwd() -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+
+    skills = await adapter.list_skills("sess", force_reload=True)
+
+    assert fake.calls[-1] == (
+        "request",
+        ("skills/list", {"cwds": ["/tmp/work"], "forceReload": True}),
+    )
+    assert skills == [
+        {
+            "dependencies": None,
+            "description": "Humanize prose",
+            "enabled": True,
+            "interface": None,
+            "name": "humanizer",
+            "path": "/tmp/work/.codex/skills/humanizer/SKILL.md",
+            "scope": "repo",
+            "shortDescription": "Humanize",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_input_items_starts_structured_turn() -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    state = adapter._sessions["sess"]
+    items = [
+        {"type": "skill", "name": "humanizer", "path": "/tmp/SKILL.md"},
+        {"type": "text", "text": "please rewrite"},
+    ]
+
+    await adapter.send_input_items("sess", items)
+
+    assert ("turn_start", (state.thread_id, items)) in fake.calls
+    if state.stream_task is not None:
+        state.stream_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await state.stream_task
 
 
 @pytest.mark.asyncio

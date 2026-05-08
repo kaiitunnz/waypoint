@@ -45,6 +45,7 @@ from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
     CommandCompletion,
+    CompletionDispatch,
     SessionCreateRequest,
     SessionInputRequest,
     SessionRecord,
@@ -239,6 +240,42 @@ class CodexPlugin:
         session: SessionRecord,
         request: SessionInputRequest,
     ) -> SessionRecord | None:
+        invocation = request.command
+        if (
+            invocation is not None
+            and invocation.dispatch == CompletionDispatch.STRUCTURED_SKILL
+        ):
+            path = invocation.metadata.get("path")
+            if not isinstance(path, str) or not path:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="selected Codex skill is missing a SKILL.md path",
+                )
+            items: list[dict[str, Any]] = [
+                {"type": "skill", "name": invocation.name, "path": path}
+            ]
+            if invocation.arguments:
+                items.append({"type": "text", "text": invocation.arguments})
+            previous_status = session.status
+            updated = runtime.storage.update_session(
+                session.id, status=SessionStatus.RUNNING
+            )
+            await runtime._record_user_event(
+                session.id,
+                request.text,
+                submit=request.submit,
+                status=session.status,
+            )
+            try:
+                await self._require_adapter().send_input_items(session.id, items)
+            except Exception as exc:  # noqa: BLE001
+                runtime.storage.update_session(session.id, status=previous_status)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
+            return updated
+
         # Codex's app-server doesn't parse user text as control
         # commands — `/compact` only takes effect via the
         # thread/compact/start RPC. Every other slash command
@@ -889,9 +926,48 @@ class CodexPlugin:
         prefix: str = "",
         force_refresh: bool = False,
     ) -> list[CommandCompletion]:
-        if trigger != "/":
+        if trigger == "/":
+            return static_slash_completions(self.id, self.capabilities, prefix=prefix)
+        if trigger != "$":
             return []
-        return static_slash_completions(self.id, self.capabilities, prefix=prefix)
+        normalized_prefix = prefix if prefix.startswith("$") else f"${prefix}"
+        try:
+            skills = await self._require_adapter().list_skills(
+                session.id,
+                force_reload=force_refresh,
+            )
+        except Exception:
+            return []
+        completions: list[CommandCompletion] = []
+        seen: set[str] = set()
+        for skill in skills:
+            name = skill.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            command = f"${name}"
+            if normalized_prefix != "$" and not command.startswith(normalized_prefix):
+                continue
+            if command in seen:
+                continue
+            path = skill.get("path")
+            if not isinstance(path, str) or not path:
+                continue
+            description = skill.get("shortDescription") or skill.get("description")
+            completions.append(
+                CommandCompletion(
+                    id=f"{self.id}:skill:{name}",
+                    trigger="$",
+                    replacement=f"{command} ",
+                    name=name,
+                    description=description if isinstance(description, str) else None,
+                    kind="skill",
+                    source="codex_skill",
+                    dispatch=CompletionDispatch.STRUCTURED_SKILL,
+                    metadata={"path": path},
+                )
+            )
+            seen.add(command)
+        return completions
 
 
 def _deny_approval(_method: str, _params: dict[str, Any] | None) -> dict[str, Any]:

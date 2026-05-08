@@ -4070,9 +4070,12 @@ html[data-theme="light"] .ask-question-note-input {
   backdrop-filter: blur(10px);
   z-index: 20;
   display: grid;
+  align-content: start;
   gap: 2px;
-  max-height: 240px;
+  max-height: min(320px, 42vh);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 html[data-theme="light"] .slash-suggestions {

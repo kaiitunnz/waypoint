@@ -256,10 +256,33 @@ function CodexCard({
       return null;
     case "system_note":
     case "status_update":
+      if (event.metadata?.builtin_command === "/status") {
+        return <CommandStatusCard event={event} agentLabel={agentLabel} />;
+      }
       return <SystemRule event={event} />;
     default:
       return <HeuristicCard event={event} />;
   }
+}
+
+function CommandStatusCard({
+  event,
+  agentLabel,
+}: {
+  event: EventRecord;
+  agentLabel: string;
+}) {
+  return (
+    <article className="panel transcript codex command-status">
+      <div className="transcript-role">
+        <span className="badge neutral">/status</span>
+        <span className="role-time">{formatTime(event.ts)}</span>
+        <span className="muted">{agentLabel}</span>
+        <CopyMessageButton text={event.text} />
+      </div>
+      <MarkdownMessage text={event.text} />
+    </article>
+  );
 }
 
 function SystemRule({ event }: { event: EventRecord }) {

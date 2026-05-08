@@ -1308,6 +1308,8 @@ const ReplyComposer = memo(function ReplyComposer({
   }, []);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composerRef = useRef<HTMLElement | null>(null);
+  const suggestionsRef = useRef<HTMLUListElement | null>(null);
+  const suggestionItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const overflowRef = useRef<HTMLDivElement | null>(null);
   const tuneRef = useRef<HTMLDivElement | null>(null);
 
@@ -1385,6 +1387,22 @@ const ReplyComposer = memo(function ReplyComposer({
   useEffect(() => {
     setSuggestionIndex(0);
   }, [completionHead]);
+
+  useEffect(() => {
+    if (!suggestionsOpen) return;
+    const active = suggestionItemRefs.current[activeIndex];
+    const list = suggestionsRef.current;
+    if (!active || !list) return;
+    const activeTop = active.offsetTop;
+    const activeBottom = activeTop + active.offsetHeight;
+    const visibleTop = list.scrollTop;
+    const visibleBottom = visibleTop + list.clientHeight;
+    if (activeTop < visibleTop) {
+      list.scrollTop = activeTop;
+    } else if (activeBottom > visibleBottom) {
+      list.scrollTop = activeBottom - list.clientHeight;
+    }
+  }, [activeIndex, suggestionsOpen, suggestions.length]);
 
   useEffect(() => {
     if (!draft.startsWith("/") && !draft.startsWith("$")) {
@@ -1842,10 +1860,13 @@ const ReplyComposer = memo(function ReplyComposer({
           aria-label="Reply"
         />
         {suggestionsOpen ? (
-          <ul className="slash-suggestions" role="listbox">
+          <ul className="slash-suggestions" role="listbox" ref={suggestionsRef}>
             {suggestions.map((entry, index) => (
               <li key={entry.id}>
                 <button
+                  ref={(node) => {
+                    suggestionItemRefs.current[index] = node;
+                  }}
                   type="button"
                   role="option"
                   aria-selected={index === activeIndex}

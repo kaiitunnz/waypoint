@@ -3,6 +3,7 @@ from typing import Any
 
 from waypoint.backends.diff_preview import (
     DiffPhase,
+    DiffPreviewPayload,
     build_preview,
     files_from_opencode_diffs,
     files_from_unified_diff,
@@ -412,7 +413,7 @@ def _map_tool_event(
 
 def _diff_preview_from_opencode_properties(
     properties: dict[str, Any], phase: DiffPhase
-):
+) -> DiffPreviewPayload | None:
     files = files_from_opencode_diffs(properties.get("diff"))
     if files:
         return build_preview(phase, files)

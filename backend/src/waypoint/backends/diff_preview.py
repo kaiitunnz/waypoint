@@ -160,11 +160,14 @@ def files_from_codex_file_changes(changes: Any) -> list[DiffPreviewFile]:
             files.append(file_from_old_new(path, diff, "", "delete"))
         else:
             move_path = _move_path_from_change_kind(kind_raw)
+            change_type = (
+                _change_type_from_diff_text(diff) if kind == "unknown" else kind
+            )
             files.append(
                 file_from_unified_diff(
                     str(move_path or path),
                     diff,
-                    "move" if move_path else kind,
+                    "move" if move_path else change_type,
                     old_path=path if move_path else None,
                 )
             )
@@ -229,6 +232,8 @@ def files_from_opencode_diffs(diffs: Any) -> list[DiffPreviewFile]:
         change_type = _normalize_change_type(
             entry.get("type") or entry.get("kind") or entry.get("status")
         )
+        if change_type == "unknown" and isinstance(diff, str):
+            change_type = _change_type_from_diff_text(diff)
         if isinstance(diff, str) and diff:
             files.append(
                 file_from_unified_diff(
@@ -375,6 +380,18 @@ def _change_type_from_chunk(lines: list[str]) -> ChangeType:
     if old_path and new_path and old_path != new_path:
         return "move"
     return "update"
+
+
+def _change_type_from_diff_text(diff: str) -> ChangeType:
+    chunks = _split_unified_diff(diff)
+    if not chunks:
+        return "unknown"
+    change_types = {_change_type_from_chunk(chunk) for chunk in chunks}
+    if len(change_types) == 1:
+        return next(iter(change_types))
+    if change_types:
+        return "update"
+    return "unknown"
 
 
 def _limit_file(file: DiffPreviewFile, max_bytes: int) -> DiffPreviewFile:

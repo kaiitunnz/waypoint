@@ -624,6 +624,26 @@ def test_codex_file_change_preview_handles_add_and_delete_content() -> None:
     assert preview.files[1].deletions == 1
 
 
+def test_codex_file_change_preview_infers_type_from_unified_diff() -> None:
+    from waypoint.backends.codex.normalize import diff_preview_for_notification
+
+    preview = diff_preview_for_notification(
+        "item/fileChange/patchUpdated",
+        {
+            "itemId": "item_1",
+            "changes": [
+                {
+                    "path": "app.py",
+                    "diff": "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-old\n+new\n",
+                }
+            ],
+        },
+    )
+
+    assert preview is not None
+    assert preview.files[0].change_type == "update"
+
+
 def test_codex_apply_patch_approval_preview_handles_legacy_file_changes() -> None:
     from waypoint.backends.codex.normalize import diff_preview_for_approval
 

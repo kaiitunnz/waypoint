@@ -403,7 +403,7 @@ function fallbackDiffPreviewForFileEdit(
         {
           path,
           oldPath: null,
-          changeType: "unknown",
+          changeType: "update",
           diff: "",
           additions: 0,
           deletions: 0,

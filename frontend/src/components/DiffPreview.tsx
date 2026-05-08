@@ -25,11 +25,12 @@ export function DiffPreview({ preview }: { preview: EventDiffPreview }) {
 }
 
 function DiffPreviewFileView({ file }: { file: EventDiffPreviewFile }) {
+  const changeType = displayChangeType(file);
   return (
     <section className="diff-preview-file">
       <div className="diff-file-header">
-        <span className={`diff-change-type ${file.changeType}`}>
-          {file.changeType}
+        <span className={`diff-change-type ${changeType.className}`}>
+          {changeType.label}
         </span>
         <span className="diff-file-path" title={file.path}>
           {file.oldPath && file.oldPath !== file.path ? `${file.oldPath} -> ${file.path}` : file.path}
@@ -54,6 +55,42 @@ function DiffPreviewFileView({ file }: { file: EventDiffPreviewFile }) {
       {file.truncated ? <p className="diff-unavailable">Diff truncated.</p> : null}
     </section>
   );
+}
+
+function displayChangeType(file: EventDiffPreviewFile): {
+  className: EventDiffPreviewFile["changeType"];
+  label: string;
+} {
+  if (file.changeType !== "unknown") {
+    return { className: file.changeType, label: file.changeType };
+  }
+  const inferred = inferChangeType(file.diff);
+  if (inferred !== "unknown") {
+    return { className: inferred, label: inferred };
+  }
+  return { className: "update", label: "edit" };
+}
+
+function inferChangeType(diff: string): EventDiffPreviewFile["changeType"] {
+  const lines = diff.split("\n");
+  const oldPath = lines.find((line) => line.startsWith("--- "))?.slice(4).trim();
+  const newPath = lines.find((line) => line.startsWith("+++ "))?.slice(4).trim();
+  if (oldPath === "/dev/null") return "add";
+  if (newPath === "/dev/null") return "delete";
+  if (oldPath && newPath && cleanDiffPath(oldPath) !== cleanDiffPath(newPath)) {
+    return "move";
+  }
+  if (lines.some((line) => line.startsWith("+") || line.startsWith("-"))) {
+    return "update";
+  }
+  return "unknown";
+}
+
+function cleanDiffPath(path: string): string {
+  const withoutTimestamp = path.split("\t", 1)[0];
+  return withoutTimestamp.startsWith("a/") || withoutTimestamp.startsWith("b/")
+    ? withoutTimestamp.slice(2)
+    : withoutTimestamp;
 }
 
 function classForDiffLine(line: string): string {

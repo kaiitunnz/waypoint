@@ -25,6 +25,7 @@ from waypoint.schemas import (
     SessionAnswerQuestionRequest,
     SessionApprovalRequest,
     SessionAttachRequest,
+    SessionCompletionsResponse,
     SessionCreateRequest,
     SessionEffortRequest,
     SessionEnvelope,
@@ -207,6 +208,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         session = context.runtime.get_session(session_id)
         return {"session": session.model_dump(mode="json")}
+
+    @app.get(
+        "/api/sessions/{session_id}/completions",
+        response_model=SessionCompletionsResponse,
+    )
+    async def session_completions(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+        trigger: Annotated[str, Query(min_length=1, max_length=8)] = "/",
+        prefix: Annotated[str, Query(max_length=256)] = "",
+        force_refresh: Annotated[bool, Query()] = False,
+    ) -> SessionCompletionsResponse:
+        completions = await context.runtime.list_command_completions(
+            session_id,
+            trigger=trigger,
+            prefix=prefix,
+            force_refresh=force_refresh,
+        )
+        return SessionCompletionsResponse(completions=completions)
 
     @app.post("/api/sessions/{session_id}/input")
     async def session_input(

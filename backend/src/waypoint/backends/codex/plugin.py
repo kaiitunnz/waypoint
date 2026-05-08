@@ -39,10 +39,12 @@ from waypoint.backends.codex.schemas import (
     CodexThreadImportRequest,
     CodexThreadSummary,
 )
+from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
+    CommandCompletion,
     SessionCreateRequest,
     SessionInputRequest,
     SessionRecord,
@@ -877,6 +879,19 @@ class CodexPlugin:
             "default_effort": default_effort,
             "supports_free_text": True,
         }
+
+    async def list_command_completions(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        *,
+        trigger: str = "/",
+        prefix: str = "",
+        force_refresh: bool = False,
+    ) -> list[CommandCompletion]:
+        if trigger != "/":
+            return []
+        return static_slash_completions(self.id, self.capabilities, prefix=prefix)
 
 
 def _deny_approval(_method: str, _params: dict[str, Any] | None) -> dict[str, Any]:

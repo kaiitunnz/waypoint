@@ -1,7 +1,7 @@
 from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, Field, StringConstraints
 
@@ -62,6 +62,45 @@ class EventKind(StrEnum):
     STATUS_UPDATE = "status_update"
     SYSTEM_NOTE = "system_note"
     RAW_TERMINAL_CHUNK = "raw_terminal_chunk"
+
+
+class CompletionDispatch(StrEnum):
+    FRONTEND_CONTROL = "frontend_control"
+    PLAIN_TEXT = "plain_text"
+    BACKEND_COMMAND = "backend_command"
+    STRUCTURED_SKILL = "structured_skill"
+
+
+class CommandCompletion(BaseModel):
+    id: str
+    trigger: str
+    replacement: str
+    name: str
+    description: str | None = None
+    kind: str
+    source: str
+    dispatch: CompletionDispatch
+    argument_hint: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SessionCommandInvocation(BaseModel):
+    completion_id: str
+    name: str
+    arguments: str = ""
+    dispatch: CompletionDispatch
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SessionInputItem(BaseModel):
+    type: Literal["text", "skill", "mention"]
+    text: str | None = None
+    name: str | None = None
+    path: str | None = None
+
+
+class SessionCompletionsResponse(BaseModel):
+    completions: list[CommandCompletion] = Field(default_factory=list)
 
 
 class SessionRecord(BaseModel):
@@ -163,6 +202,8 @@ class SessionAttachRequest(BaseModel):
 class SessionInputRequest(BaseModel):
     text: str
     submit: bool = True
+    command: SessionCommandInvocation | None = None
+    items: list[SessionInputItem] | None = None
 
 
 class SessionApprovalRequest(BaseModel):

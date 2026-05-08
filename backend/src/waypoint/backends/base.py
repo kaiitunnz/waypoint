@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from waypoint.backends.capabilities import BackendCapabilities
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
-from waypoint.schemas import SessionRecord
+from waypoint.schemas import CommandCompletion, SessionRecord
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
@@ -107,6 +107,18 @@ class BackendPlugin(Protocol):
         include_hidden: bool = False,
     ) -> dict[str, Any]:
         """Return the model catalogue payload served by ``/api/backends/{id}/models``."""
+        ...
+
+    async def list_command_completions(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        *,
+        trigger: str = "/",
+        prefix: str = "",
+        force_refresh: bool = False,
+    ) -> list[CommandCompletion]:
+        """Return command or skill completions available in a session."""
         ...
 
     async def restore_session(

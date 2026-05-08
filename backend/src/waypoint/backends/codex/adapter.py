@@ -13,12 +13,15 @@ from codex_app_server.client import AppServerClient, AppServerConfig
 from codex_app_server.generated.v2_all import ModelListResponse
 
 from waypoint.backends.codex.normalize import (
+    diff_preview_for_approval,
+    diff_preview_for_notification,
     extract_item,
     extract_item_id,
     format_approval_text,
     map_notification,
     payload_to_dict,
 )
+from waypoint.backends.diff_preview import DiffPreviewPayload, preview_to_metadata
 from waypoint.schemas import EventKind, SessionStatus
 
 log = logging.getLogger("waypoint.codex")
@@ -147,6 +150,7 @@ class CodexSessionState:
     pending_approval: PendingApproval | None = None
     terminal_fragments: list[str] = field(default_factory=list)
     streamed_tool_result_ids: set[str] = field(default_factory=set)
+    file_diff_previews: dict[str, DiffPreviewPayload] = field(default_factory=dict)
     # Most recent model selection. Codex's protocol exposes model as a per-turn
     # override that persists, so we apply it on every turn_start to keep the
     # waypoint contract — "set once, apply going forward" — even across
@@ -282,6 +286,13 @@ class CodexAppServerAdapter:
             payload = params or {}
             pending = PendingApproval(method=method, params=payload)
             state.pending_approval = pending
+            item_id = payload.get("itemId")
+            cached_preview = (
+                state.file_diff_previews.get(item_id)
+                if isinstance(item_id, str)
+                else None
+            )
+            diff_preview = diff_preview_for_approval(method, payload, cached_preview)
             if self._loop is not None:
                 asyncio.run_coroutine_threadsafe(
                     self._emit_event(
@@ -292,6 +303,7 @@ class CodexAppServerAdapter:
                             "method": method,
                             "request": payload,
                             "status": SessionStatus.WAITING_INPUT,
+                            **preview_to_metadata(diff_preview),
                         },
                         SessionStatus.WAITING_INPUT,
                     ),
@@ -507,14 +519,20 @@ class CodexAppServerAdapter:
                 if kind is not None and text:
                     if notification.method == "item/commandExecution/outputDelta":
                         state.terminal_fragments.append(text)
+                    diff_preview = diff_preview_for_notification(
+                        notification.method, payload
+                    )
                     metadata: dict[str, Any] = {
                         "method": notification.method,
                         "payload": payload,
                         "status": status,
+                        **preview_to_metadata(diff_preview),
                     }
                     item_id = extract_item_id(payload)
                     if item_id is not None:
                         metadata["item_id"] = item_id
+                        if diff_preview is not None:
+                            state.file_diff_previews[item_id] = diff_preview
                     item = extract_item(payload) if "item" in payload else None
                     if isinstance(item, dict):
                         # Replace the wrapped {"root": {...}} form with the
@@ -555,6 +573,7 @@ class CodexAppServerAdapter:
                     state.active_turn_id = None
                     state.stream_task = None
                     state.streamed_tool_result_ids.clear()
+                    state.file_diff_previews.clear()
                     break
         except asyncio.CancelledError:
             raise
@@ -562,6 +581,7 @@ class CodexAppServerAdapter:
             state.active_turn_id = None
             state.stream_task = None
             state.streamed_tool_result_ids.clear()
+            state.file_diff_previews.clear()
             log.exception(
                 "codex stream failed",
                 extra={"session_id": state.session_id, "thread_id": state.thread_id},

@@ -1,6 +1,13 @@
 import json
 from typing import Any
 
+from waypoint.backends.diff_preview import (
+    DiffPhase,
+    build_preview,
+    files_from_opencode_diffs,
+    files_from_unified_diff,
+    preview_to_metadata,
+)
 from waypoint.schemas import EventKind, SessionStatus
 
 
@@ -172,6 +179,7 @@ def map_event(
         permission = properties
         tool_name = _permission_tool_name(permission)
         tool_input = _as_dict(permission.get("metadata")) or {}
+        preview = _diff_preview_from_opencode_properties(properties, "proposed")
         text = f"{tool_name}: {permission.get('permission', 'Permission request')}"
         patterns = permission.get("patterns", [])
         if isinstance(patterns, list) and patterns:
@@ -196,6 +204,7 @@ def map_event(
                 "tool_name": tool_name,
                 "tool_input": tool_input,
                 "status": SessionStatus.WAITING_INPUT,
+                **preview_to_metadata(preview),
             },
         )
 
@@ -268,6 +277,7 @@ def map_event(
 
     if event_type == "file.edited":
         file_path = properties.get("file", "")
+        preview = _diff_preview_from_opencode_properties(properties, "applied")
         return (
             EventKind.SYSTEM_NOTE,
             f"File edited: {file_path}",
@@ -275,6 +285,7 @@ def map_event(
                 "method": "file.edited",
                 "payload": properties,
                 "status": SessionStatus.RUNNING,
+                **preview_to_metadata(preview),
             },
         )
 
@@ -283,6 +294,7 @@ def map_event(
         if diffs:
             total_additions = sum(d.get("additions", 0) for d in diffs)
             total_deletions = sum(d.get("deletions", 0) for d in diffs)
+            preview = build_preview("aggregate", files_from_opencode_diffs(diffs))
             return (
                 EventKind.SYSTEM_NOTE,
                 f"Changes: +{total_additions} -{total_deletions}",
@@ -290,6 +302,7 @@ def map_event(
                     "method": "session.diff",
                     "payload": properties,
                     "status": SessionStatus.IDLE,
+                    **preview_to_metadata(preview),
                 },
             )
 
@@ -395,6 +408,27 @@ def _map_tool_event(
         )
 
     return (EventKind.SYSTEM_NOTE, "", {})
+
+
+def _diff_preview_from_opencode_properties(
+    properties: dict[str, Any], phase: DiffPhase
+):
+    files = files_from_opencode_diffs(properties.get("diff"))
+    if files:
+        return build_preview(phase, files)
+
+    metadata = _as_dict(properties.get("metadata")) or {}
+    for key in ("diff", "patch"):
+        value = metadata.get(key) or properties.get(key)
+        if isinstance(value, str) and value:
+            fallback = str(properties.get("file") or "changes")
+            return build_preview(phase, files_from_unified_diff(value, fallback))
+    for key in ("changes", "fileChanges", "files"):
+        value = metadata.get(key) or properties.get(key)
+        files = files_from_opencode_diffs(value)
+        if files:
+            return build_preview(phase, files)
+    return None
 
 
 def format_event_text(event_type: str, properties: dict[str, Any]) -> str:

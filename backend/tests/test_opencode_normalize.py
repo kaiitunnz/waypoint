@@ -48,6 +48,49 @@ def test_permission_asked_renders_all_patterns() -> None:
     assert text == "Bash: bash (npm test, npm build)"
 
 
+def test_permission_asked_carries_diff_preview_from_metadata_patch() -> None:
+    kind, _, metadata = map_event(
+        "permission.asked",
+        {
+            "id": "perm_3",
+            "permission": "edit",
+            "metadata": {
+                "tool": "Edit",
+                "diff": "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-old\n+new\n",
+            },
+        },
+    )
+
+    assert kind == EventKind.APPROVAL_REQUEST
+    assert metadata["diff_preview"]["phase"] == "proposed"
+    assert metadata["diff_preview"]["files"][0]["path"] == "app.py"
+    assert metadata["diff_preview"]["total_additions"] == 1
+    assert metadata["diff_preview"]["total_deletions"] == 1
+
+
+def test_session_diff_maps_to_aggregate_diff_preview() -> None:
+    kind, text, metadata = map_event(
+        "session.diff",
+        {
+            "diff": [
+                {
+                    "path": "app.py",
+                    "kind": "modified",
+                    "additions": 2,
+                    "deletions": 1,
+                    "diff": "--- a/app.py\n+++ b/app.py\n@@ -1 +1,2 @@\n-old\n+new\n+line\n",
+                }
+            ]
+        },
+    )
+
+    assert kind == EventKind.SYSTEM_NOTE
+    assert text == "Changes: +2 -1"
+    assert metadata["diff_preview"]["phase"] == "aggregate"
+    assert metadata["diff_preview"]["files"][0]["path"] == "app.py"
+    assert metadata["diff_preview"]["files"][0]["change_type"] == "update"
+
+
 def test_question_asked_maps_to_ask_user_question_tool_call() -> None:
     kind, text, metadata = map_event(
         "question.asked",

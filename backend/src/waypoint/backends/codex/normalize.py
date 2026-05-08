@@ -17,6 +17,13 @@ from typing import Any
 
 from codex_app_server.models import UnknownNotification
 
+from waypoint.backends.diff_preview import (
+    DiffPreviewPayload,
+    build_preview,
+    files_from_codex_file_changes,
+    files_from_codex_legacy_file_changes,
+    files_from_unified_diff,
+)
 from waypoint.schemas import EventKind, SessionStatus
 
 
@@ -42,6 +49,33 @@ def map_notification(
         return (
             EventKind.TOOL_RESULT,
             str(payload.get("delta", "")),
+            SessionStatus.RUNNING,
+        )
+    if method == "item/fileChange/patchUpdated":
+        changes = payload.get("changes", [])
+        paths = ", ".join(
+            str(change.get("path", ""))
+            for change in changes
+            if isinstance(change, dict) and change.get("path")
+        )
+        return (
+            EventKind.TOOL_RESULT,
+            f"File changes updated: {paths}".strip(),
+            SessionStatus.RUNNING,
+        )
+    if method == "turn/diff/updated":
+        diff = payload.get("diff")
+        additions = deletions = 0
+        if isinstance(diff, str):
+            preview = build_preview(
+                "aggregate", files_from_unified_diff(diff, "Turn changes")
+            )
+            if preview is not None:
+                additions = preview.total_additions
+                deletions = preview.total_deletions
+        return (
+            EventKind.SYSTEM_NOTE,
+            f"Turn changes: +{additions} -{deletions}",
             SessionStatus.RUNNING,
         )
     if method == "turn/started":
@@ -248,6 +282,46 @@ def extract_item(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(root, dict):
             return root
     return item if isinstance(item, dict) else {}
+
+
+def diff_preview_for_notification(
+    method: str, payload: dict[str, Any]
+) -> DiffPreviewPayload | None:
+    if method in {"item/started", "item/updated", "item/completed"}:
+        item = extract_item(payload)
+        if item.get("type") != "fileChange":
+            return None
+        if method == "item/completed":
+            return build_preview(
+                "applied", files_from_codex_file_changes(item.get("changes"))
+            )
+        return build_preview(
+            "proposed", files_from_codex_file_changes(item.get("changes"))
+        )
+    if method == "item/fileChange/patchUpdated":
+        return build_preview(
+            "proposed", files_from_codex_file_changes(payload.get("changes"))
+        )
+    if method == "turn/diff/updated":
+        diff = payload.get("diff")
+        if not isinstance(diff, str):
+            return None
+        return build_preview("aggregate", files_from_unified_diff(diff, "Turn changes"))
+    return None
+
+
+def diff_preview_for_approval(
+    method: str,
+    params: dict[str, Any],
+    cached: DiffPreviewPayload | None = None,
+) -> DiffPreviewPayload | None:
+    if method == "item/fileChange/requestApproval":
+        return cached
+    if method == "applyPatchApproval":
+        return build_preview(
+            "proposed", files_from_codex_legacy_file_changes(params.get("fileChanges"))
+        )
+    return None
 
 
 def format_todo_list(item: dict[str, Any]) -> str:

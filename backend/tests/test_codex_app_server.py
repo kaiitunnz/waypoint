@@ -511,6 +511,58 @@ def test_map_notification_command_execution_started() -> None:
     assert "ls -la" in text
 
 
+def test_map_notification_file_change_patch_updated_has_preview() -> None:
+    from waypoint.backends.codex.normalize import (
+        diff_preview_for_notification,
+        map_notification,
+    )
+
+    payload = {
+        "itemId": "item_1",
+        "changes": [
+            {
+                "path": "app.py",
+                "kind": "update",
+                "diff": "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-old\n+new\n",
+            }
+        ],
+    }
+
+    kind, text, status = map_notification("item/fileChange/patchUpdated", payload)
+    preview = diff_preview_for_notification("item/fileChange/patchUpdated", payload)
+
+    assert kind == EventKind.TOOL_RESULT
+    assert text == "File changes updated: app.py"
+    assert status == SessionStatus.RUNNING
+    assert preview is not None
+    assert preview.phase == "proposed"
+    assert preview.files[0].path == "app.py"
+    assert preview.total_additions == 1
+    assert preview.total_deletions == 1
+
+
+def test_codex_apply_patch_approval_preview_handles_legacy_file_changes() -> None:
+    from waypoint.backends.codex.normalize import diff_preview_for_approval
+
+    preview = diff_preview_for_approval(
+        "applyPatchApproval",
+        {
+            "fileChanges": {
+                "app.py": {
+                    "type": "update",
+                    "unified_diff": "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-old\n+new\n",
+                    "move_path": None,
+                }
+            }
+        },
+    )
+
+    assert preview is not None
+    assert preview.phase == "proposed"
+    assert preview.files[0].path == "app.py"
+    assert preview.files[0].change_type == "update"
+
+
 def test_map_notification_todo_list_updated() -> None:
     from waypoint.backends.codex.normalize import map_notification
 

@@ -208,9 +208,13 @@ def files_from_opencode_diffs(diffs: Any) -> list[DiffPreviewFile]:
         )
         old_path = entry.get("old_path") or entry.get("oldPath")
         diff = entry.get("diff") or entry.get("patch")
+        before = entry.get("before")
+        after = entry.get("after")
         additions = entry.get("additions")
         deletions = entry.get("deletions")
-        change_type = _normalize_change_type(entry.get("type") or entry.get("kind"))
+        change_type = _normalize_change_type(
+            entry.get("type") or entry.get("kind") or entry.get("status")
+        )
         if isinstance(diff, str) and diff:
             files.append(
                 file_from_unified_diff(
@@ -220,6 +224,26 @@ def files_from_opencode_diffs(diffs: Any) -> list[DiffPreviewFile]:
                     old_path=str(old_path) if isinstance(old_path, str) else None,
                     additions=additions if isinstance(additions, int) else None,
                     deletions=deletions if isinstance(deletions, int) else None,
+                )
+            )
+        elif isinstance(before, str) and isinstance(after, str):
+            file = file_from_old_new(
+                path=path,
+                old=before,
+                new=after,
+                change_type=change_type,
+                old_path=str(old_path) if isinstance(old_path, str) else None,
+            )
+            files.append(
+                file.model_copy(
+                    update={
+                        "additions": (
+                            additions if isinstance(additions, int) else file.additions
+                        ),
+                        "deletions": (
+                            deletions if isinstance(deletions, int) else file.deletions
+                        ),
+                    }
                 )
             )
         elif isinstance(additions, int) or isinstance(deletions, int):

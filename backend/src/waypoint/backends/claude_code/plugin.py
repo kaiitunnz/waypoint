@@ -46,11 +46,13 @@ from waypoint.backends.claude_code.threads import (
     list_local_claude_threads,
 )
 from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
+from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
     BackendModelOption,
+    CommandCompletion,
     SessionCreateRequest,
     SessionEnvelope,
     SessionRecord,
@@ -385,6 +387,19 @@ class ClaudeCodePlugin:
             "default_effort": default_effort,
             "supports_free_text": True,
         }
+
+    async def list_command_completions(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        *,
+        trigger: str = "/",
+        prefix: str = "",
+        force_refresh: bool = False,
+    ) -> list[CommandCompletion]:
+        if trigger != "/":
+            return []
+        return static_slash_completions(self.id, self.capabilities, prefix=prefix)
 
     def effort_swap_message(self, effort: str | None) -> str:
         return _claude_effort_swap_message(effort)

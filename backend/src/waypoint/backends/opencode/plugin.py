@@ -14,12 +14,14 @@ from waypoint.backends.capabilities import (
     PermissionModeSpec,
     SlashCommandSpec,
 )
+from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.opencode.adapter import OpenCodeAdapter, OpenCodeError
 from waypoint.backends.opencode.health import AdapterHealth
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
+    CommandCompletion,
     EventKind,
     SessionCreateRequest,
     SessionEnvelope,
@@ -798,6 +800,19 @@ class OpenCodePlugin:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="failed to list opencode providers: no adapters available",
         )
+
+    async def list_command_completions(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        *,
+        trigger: str = "/",
+        prefix: str = "",
+        force_refresh: bool = False,
+    ) -> list[CommandCompletion]:
+        if trigger != "/":
+            return []
+        return static_slash_completions(self.id, self.capabilities, prefix=prefix)
 
     def _flatten_provider_models(
         self,

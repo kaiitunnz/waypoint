@@ -19,6 +19,7 @@ from waypoint.git_meta import resolve_git_meta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.scheduler import Scheduler
 from waypoint.schemas import (
+    CommandCompletion,
     EventKind,
     EventRecord,
     EventsPageResponse,
@@ -356,6 +357,24 @@ class SessionRuntime:
             self.storage.update_session(session.id, status=previous_status)
             raise
         return updated
+
+    async def list_command_completions(
+        self,
+        session_id: str,
+        *,
+        trigger: str = "/",
+        prefix: str = "",
+        force_refresh: bool = False,
+    ) -> list[CommandCompletion]:
+        session = self.get_session(session_id)
+        plugin = self.registry.plugin_for(session)
+        return await plugin.list_command_completions(
+            self,
+            session,
+            trigger=trigger,
+            prefix=prefix,
+            force_refresh=force_refresh,
+        )
 
     async def interrupt(self, session_id: str) -> SessionRecord:
         session = self.get_session(session_id)

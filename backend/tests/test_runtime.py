@@ -10,6 +10,7 @@ from waypoint.backends.codex.schemas import CodexThreadImportRequest
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
+    CompletionDispatch,
     EventKind,
     EventRecord,
     SessionApprovalRequest,
@@ -261,6 +262,28 @@ def make_thread(**overrides: Any) -> Any:
         ephemeral=overrides.pop("ephemeral", False),
         git_info=git_info,
     )
+
+
+@pytest.mark.asyncio
+async def test_list_command_completions_uses_backend_static_slash_commands(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    session = make_session(
+        settings,
+        backend="opencode",
+        transport="opencode_http",
+        transport_state={"thread_id": "opencode-session"},
+    )
+    storage.create_session(session)
+
+    completions = await runtime.list_command_completions(
+        session.id, trigger="/", prefix="/co"
+    )
+
+    assert [item.name for item in completions] == ["compact"]
+    assert completions[0].replacement == "/compact "
+    assert completions[0].dispatch == CompletionDispatch.PLAIN_TEXT
 
 
 @pytest.mark.asyncio

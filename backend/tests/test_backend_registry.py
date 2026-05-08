@@ -75,6 +75,17 @@ class _StubPlugin:
     ) -> dict[str, Any]:
         return {}
 
+    async def list_command_completions(
+        self,
+        runtime: Any,
+        session: Any,
+        *,
+        trigger: str = "/",
+        prefix: str = "",
+        force_refresh: bool = False,
+    ) -> list[Any]:
+        return []
+
     async def restore_session(self, runtime: Any, session: Any) -> None:
         return None
 

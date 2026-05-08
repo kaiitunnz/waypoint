@@ -17,11 +17,13 @@ from fastapi import HTTPException, status
 from pydantic import BaseModel
 
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
+from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
+    CommandCompletion,
     SessionCreateRequest,
     SessionRecord,
     SessionSource,
@@ -144,6 +146,19 @@ class TmuxPlugin:
             "default_effort": None,
             "supports_free_text": False,
         }
+
+    async def list_command_completions(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        *,
+        trigger: str = "/",
+        prefix: str = "",
+        force_refresh: bool = False,
+    ) -> list[CommandCompletion]:
+        if trigger != "/":
+            return []
+        return static_slash_completions(self.id, self.capabilities, prefix=prefix)
 
     async def maybe_handle_input(
         self,

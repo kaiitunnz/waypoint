@@ -12,7 +12,37 @@ from waypoint.backends.opencode.plugin import (
     _ruleset_for_mode,
 )
 from waypoint.backends.opencode.transport import OpenCodeTransport
-from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
+from waypoint.schemas import (
+    CompletionDispatch,
+    SessionInputRequest,
+    SessionRecord,
+    SessionSource,
+    SessionStatus,
+)
+from waypoint.settings import Settings
+
+
+def _session(**overrides: Any) -> SessionRecord:
+    now = datetime.now(UTC)
+    return SessionRecord(
+        id=overrides.get("id", "sess"),
+        backend="opencode",
+        source=SessionSource.MANAGED,
+        transport="opencode_http",
+        title="Session",
+        cwd=overrides.get("cwd", "/repo"),
+        launch_target_id=overrides.get("launch_target_id"),
+        repo_name=None,
+        branch=None,
+        status=overrides.get("status", SessionStatus.IDLE),
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="",
+        structured_log_path="",
+        transport_state={},
+        permission_mode=None,
+    )
 
 
 def test_serialize_question_answers_preserves_choices_and_notes() -> None:
@@ -84,6 +114,91 @@ def test_validate_permission_mode_rejects_legacy_auto() -> None:
         HTTPException, match="unsupported opencode permission mode: auto"
     ):
         plugin.validate_permission_mode("auto")
+
+
+@pytest.mark.asyncio
+async def test_list_command_completions_reads_opencode_commands(tmp_path) -> None:
+    plugin = OpenCodePlugin()
+
+    class FakeAdapter:
+        async def list_commands(self, session_id: str) -> list[dict[str, object]]:
+            assert session_id == "sess"
+            return [
+                {"name": "review", "description": "Review changes"},
+                {"name": "skill-only", "source": "skill"},
+                {"name": "compact", "description": "Duplicate static command"},
+            ]
+
+    fake_adapter = FakeAdapter()
+    cast(Any, plugin)._require_adapter = lambda *args, **kwargs: fake_adapter
+    runtime: Any = SimpleNamespace(
+        settings=Settings(data_dir=tmp_path / "data"),
+        _find_launch_target=lambda _id: None,
+    )
+
+    completions = await plugin.list_command_completions(
+        runtime, _session(), trigger="/", prefix="/"
+    )
+
+    names = [item.name for item in completions]
+    assert names == ["compact", "new", "review"]
+    review = completions[-1]
+    assert review.dispatch == CompletionDispatch.BACKEND_COMMAND
+    assert review.replacement == "/review "
+    assert review.description == "Review changes"
+
+
+@pytest.mark.asyncio
+async def test_maybe_handle_input_routes_manual_opencode_command(tmp_path) -> None:
+    plugin = OpenCodePlugin()
+    session = _session()
+
+    class FakeAdapter:
+        def __init__(self) -> None:
+            self.executed: list[tuple[str, str, str]] = []
+
+        async def list_commands(self, session_id: str) -> list[dict[str, object]]:
+            assert session_id == "sess"
+            return [{"name": "review", "description": "Review changes"}]
+
+        async def execute_command(
+            self, session_id: str, command: str, arguments: str
+        ) -> None:
+            self.executed.append((session_id, command, arguments))
+
+    class FakeStorage:
+        def update_session(self, session_id: str, **kwargs: object) -> SessionRecord:
+            assert session_id == "sess"
+            for key, value in kwargs.items():
+                setattr(session, key, value)
+            return session
+
+    class FakeRuntime:
+        def __init__(self) -> None:
+            self.settings = Settings(data_dir=tmp_path / "data")
+            self.storage = FakeStorage()
+            self.user_events: list[tuple[str, str, bool]] = []
+
+        def _find_launch_target(self, launch_target_id: str | None) -> None:
+            return None
+
+        async def _record_user_event(
+            self, session_id: str, text: str, submit: bool = True, **kwargs: object
+        ) -> None:
+            self.user_events.append((session_id, text, submit))
+
+    fake_adapter = FakeAdapter()
+    cast(Any, plugin)._require_adapter = lambda *args, **kwargs: fake_adapter
+    runtime: Any = FakeRuntime()
+
+    result = await plugin.maybe_handle_input(
+        runtime, session, SessionInputRequest(text="/review auth flow")
+    )
+
+    assert result is session
+    assert result.status == SessionStatus.RUNNING
+    assert runtime.user_events == [("sess", "/review auth flow", True)]
+    assert fake_adapter.executed == [("sess", "review", "auth flow")]
 
 
 def test_flatten_provider_models_skips_invalid_and_deprecated() -> None:

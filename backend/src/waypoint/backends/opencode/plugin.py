@@ -22,6 +22,7 @@ from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
     CommandCompletion,
+    CompletionDispatch,
     EventKind,
     SessionCreateRequest,
     SessionEnvelope,
@@ -812,7 +813,57 @@ class OpenCodePlugin:
     ) -> list[CommandCompletion]:
         if trigger != "/":
             return []
-        return static_slash_completions(self.id, self.capabilities, prefix=prefix)
+        completions = static_slash_completions(
+            self.id, self.capabilities, prefix=prefix
+        )
+        try:
+            adapter = self._require_adapter(
+                runtime,
+                session.launch_target_id,
+                session.cwd,
+                tuple(
+                    self._effective_args(
+                        runtime, session.launch_target_id, session.args
+                    )
+                ),
+            )
+            commands = await adapter.list_commands(session.id)
+        except Exception:
+            return completions
+
+        normalized_prefix = prefix if prefix.startswith("/") else f"/{prefix}"
+        seen = {f"/{item.name}" for item in completions}
+        for item in commands:
+            if not isinstance(item, dict):
+                continue
+            if item.get("source") == "skill":
+                continue
+            name = item.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            command = f"/{name}"
+            if normalized_prefix != "/" and not command.startswith(normalized_prefix):
+                continue
+            if command in seen:
+                continue
+            description = item.get("description")
+            completions.append(
+                CommandCompletion(
+                    id=f"{self.id}:command:{name}",
+                    trigger="/",
+                    replacement=f"{command} ",
+                    name=name,
+                    description=description if isinstance(description, str) else None,
+                    kind="command",
+                    source="opencode_command",
+                    dispatch=CompletionDispatch.BACKEND_COMMAND,
+                    metadata={
+                        "source": item.get("source") or "command",
+                    },
+                )
+            )
+            seen.add(command)
+        return completions
 
     def _flatten_provider_models(
         self,
@@ -911,6 +962,32 @@ class OpenCodePlugin:
                 return default_id, model["label"]
         return default_id, None
 
+    async def _execute_command_input(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        adapter: OpenCodeAdapter,
+        *,
+        text: str,
+        command: str,
+        arguments: str,
+        submit: bool,
+    ) -> SessionRecord:
+        previous_status = session.status
+        updated = runtime.storage.update_session(
+            session.id, status=SessionStatus.RUNNING
+        )
+        await runtime._record_user_event(session.id, text, submit=submit)
+        try:
+            await adapter.execute_command(session.id, command, arguments)
+        except OpenCodeError as exc:
+            runtime.storage.update_session(session.id, status=previous_status)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+        return updated
+
     async def maybe_handle_input(
         self,
         runtime: "SessionRuntime",
@@ -931,6 +1008,7 @@ class OpenCodePlugin:
         )
         rest = text[1:].split(maxsplit=1)
         command = rest[0] if rest else ""
+        arguments = rest[1] if len(rest) > 1 else ""
 
         if command == "compact":
             await runtime._record_user_event(
@@ -950,6 +1028,42 @@ class OpenCodePlugin:
                     detail=str(exc),
                 ) from exc
             return runtime.get_session(session.id)
+
+        invocation = getattr(request, "command", None)
+        if (
+            invocation is not None
+            and invocation.dispatch == CompletionDispatch.BACKEND_COMMAND
+        ):
+            return await self._execute_command_input(
+                runtime,
+                session,
+                adapter,
+                text=text,
+                command=invocation.name,
+                arguments=invocation.arguments,
+                submit=getattr(request, "submit", True),
+            )
+
+        if command not in {"new", "fork"}:
+            try:
+                commands = await adapter.list_commands(session.id)
+            except OpenCodeError:
+                commands = []
+            if any(
+                isinstance(item, dict)
+                and item.get("source") != "skill"
+                and item.get("name") == command
+                for item in commands
+            ):
+                return await self._execute_command_input(
+                    runtime,
+                    session,
+                    adapter,
+                    text=text,
+                    command=command,
+                    arguments=arguments,
+                    submit=getattr(request, "submit", True),
+                )
 
         return None
 

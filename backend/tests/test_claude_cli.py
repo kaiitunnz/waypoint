@@ -245,8 +245,10 @@ async def test_await_approval_preserves_hook_diff_preview() -> None:
     await resolver()
     await decision_task
 
-    assert emitted[0][1] == EventKind.APPROVAL_REQUEST
+    assert emitted[0][1] == EventKind.TOOL_RESULT
     assert emitted[0][3]["diff_preview"]["files"][0]["path"] == "/tmp/app.py"
+    assert emitted[1][1] == EventKind.APPROVAL_REQUEST
+    assert emitted[1][3]["diff_preview"]["files"][0]["path"] == "/tmp/app.py"
 
 
 def test_claude_hook_builds_edit_diff_preview(tmp_path: Path) -> None:

@@ -198,6 +198,7 @@ class ClaudeSessionState:
     stderr_task: asyncio.Task[None]
     wait_task: asyncio.Task[None]
     pending: dict[str, ClaudePendingApproval] = field(default_factory=dict)
+    emitted_diff_preview_tool_ids: set[str] = field(default_factory=set)
     last_message_text: dict[str, str] = field(default_factory=dict)
     terminal_fragments: list[str] = field(default_factory=list)
     stderr_tail: deque[str] = field(
@@ -696,6 +697,7 @@ class ClaudeCliAdapter:
                             state.last_plan_content = _apply_plan_edit(
                                 state.last_plan_content, tool_name, tool_input_dict
                             )
+                await self._emit_tool_diff_preview(state, payload)
                 return auto
 
             # Inject the saved plan text into ExitPlanMode so the frontend can
@@ -729,6 +731,7 @@ class ClaudeCliAdapter:
                     tool_use_id=tool_use_id, payload=payload, future=future
                 )
                 state.pending[tool_use_id] = pending
+                await self._emit_tool_diff_preview(state, payload)
                 # AskUserQuestion's tool_call event already renders the
                 # question UI in the transcript via parseAskUserQuestion;
                 # emitting a separate APPROVAL_REQUEST card would show the
@@ -760,6 +763,35 @@ class ClaudeCliAdapter:
         # ClaudeCodePluginConfig.hook_timeout_seconds) is the only
         # network-liveness ceiling.
         return await pending.future
+
+    async def _emit_tool_diff_preview(
+        self, state: ClaudeSessionState, payload: dict[str, Any]
+    ) -> None:
+        tool_use_id = str(payload.get("tool_use_id") or "")
+        if not tool_use_id or tool_use_id in state.emitted_diff_preview_tool_ids:
+            return
+        diff_preview = payload.get("diff_preview")
+        if not isinstance(diff_preview, dict):
+            return
+        tool_name = str(payload.get("tool_name") or "tool")
+        if tool_name not in {"Edit", "Write", "MultiEdit"}:
+            return
+        state.emitted_diff_preview_tool_ids.add(tool_use_id)
+        await self._emit_event(
+            state.session_id,
+            EventKind.TOOL_RESULT,
+            f"{tool_name} diff preview",
+            {
+                "method": "PreToolUse.diff_preview",
+                "item_id": tool_use_id,
+                "tool_name": tool_name,
+                "tool_input": payload.get("tool_input"),
+                "tool_use_id": tool_use_id,
+                "diff_preview": diff_preview,
+                "status": SessionStatus.RUNNING,
+            },
+            SessionStatus.RUNNING,
+        )
 
     def has_pending_approval(self, session_id: str) -> bool:
         state = self._sessions.get(session_id)

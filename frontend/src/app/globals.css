@@ -4242,6 +4242,42 @@ html[data-theme="light"] details.tool-disclosure[open] {
   background: rgba(220, 210, 190, 0.55);
 }
 
+/* ── Tool call run group (collapsed/expanded wrapper) ── */
+html[data-theme="light"] .tool-call-run {
+  background: rgba(235, 230, 218, 0.50);
+  border-color: rgba(90, 78, 58, 0.12);
+}
+
+html[data-theme="light"] .tool-call-run[open] {
+  background: rgba(228, 222, 208, 0.65);
+  border-color: rgba(90, 78, 58, 0.16);
+}
+
+html[data-theme="light"] .tool-call-run-children {
+  border-top-color: rgba(90, 78, 58, 0.08);
+}
+
+/* Chip borders: remap dark-mode tints to light-mode semantic colors. */
+html[data-theme="light"] .tool-run-chip.bash {
+  background: rgba(37, 122, 80, 0.10);
+  border-color: rgba(37, 122, 80, 0.30);
+}
+
+html[data-theme="light"] .tool-run-chip.edit {
+  background: rgba(184, 130, 14, 0.14);
+  border-color: rgba(184, 130, 14, 0.48);
+}
+
+html[data-theme="light"] .tool-run-chip.read {
+  background: rgba(47, 111, 158, 0.10);
+  border-color: rgba(47, 111, 158, 0.30);
+}
+
+html[data-theme="light"] .tool-run-chip.other {
+  background: rgba(110, 99, 86, 0.10);
+  border-color: rgba(110, 99, 86, 0.26);
+}
+
 /* ── User input bubble — warm cream, gold inset, no jarring blue ── */
 html[data-theme="light"] .transcript.codex.user_input {
   background: linear-gradient(180deg, rgba(242, 234, 216, 0.90), rgba(232, 222, 200, 0.86));

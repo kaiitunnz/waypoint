@@ -108,6 +108,67 @@ def test_extract_session_id_consults_known_fields_only() -> None:
     assert adapter._extract_session_id({"metadata": {"sessionID": "ses_other"}}) is None
 
 
+@pytest.mark.asyncio
+async def test_list_commands_reads_server_command_registry() -> None:
+    adapter = _build_adapter()
+    adapter._started = True
+    state = OpenCodeSessionState(
+        session_id="local-1",
+        cwd="/tmp",
+        opencode_session_id="ses_1",
+    )
+    adapter._register_session(state)
+
+    class _FakeClient:
+        async def get(self, path, params=None):
+            assert path == "/command"
+            return [{"name": "review", "description": "Review changes"}]
+
+    adapter._client = _FakeClient()  # type: ignore[assignment]
+
+    assert await adapter.list_commands("local-1") == [
+        {"name": "review", "description": "Review changes"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_execute_command_uses_native_session_command_endpoint() -> None:
+    adapter = _build_adapter()
+    state = OpenCodeSessionState(
+        session_id="local-1",
+        cwd="/tmp",
+        opencode_session_id="ses_1",
+        model="opencode/test-model",
+        agent="build",
+        effort="high",
+    )
+    adapter._register_session(state)
+    posted: dict[str, object] = {}
+
+    class _FakeClient:
+        async def post(self, path, json_data=None, params=None, long_running=False):
+            posted["path"] = path
+            posted["json_data"] = json_data
+            posted["long_running"] = long_running
+            return {}
+
+    adapter._client = _FakeClient()  # type: ignore[assignment]
+
+    await adapter.execute_command("local-1", "review", "the auth changes")
+
+    assert posted == {
+        "path": "/session/ses_1/command",
+        "json_data": {
+            "command": "review",
+            "arguments": "the auth changes",
+            "model": "opencode/test-model",
+            "agent": "build",
+            "variant": "high",
+        },
+        "long_running": True,
+    }
+
+
 def test_tag_part_type_propagates_reasoning_to_subsequent_deltas() -> None:
     adapter = _build_adapter()
     state = OpenCodeSessionState(

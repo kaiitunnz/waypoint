@@ -826,6 +826,47 @@ class OpenCodeAdapter:
         except Exception as exc:
             raise OpenCodeError(f"failed to send message: {exc}") from exc
 
+    async def list_commands(self, session_id: str) -> list[dict[str, Any]]:
+        if not self._started:
+            await self.start()
+        if session_id not in self._sessions:
+            raise OpenCodeError(f"session not found: {session_id}")
+        client = self._require_client()
+        try:
+            data = await client.get("/command")
+        except Exception as exc:
+            raise OpenCodeError(f"failed to list commands: {exc}") from exc
+        return data if isinstance(data, list) else []
+
+    async def execute_command(
+        self,
+        session_id: str,
+        command: str,
+        arguments: str,
+    ) -> None:
+        state = self._sessions.get(session_id)
+        if state is None:
+            raise OpenCodeError(f"session not found: {session_id}")
+        client = self._require_client()
+        payload: dict[str, Any] = {
+            "command": command,
+            "arguments": arguments,
+        }
+        if state.model:
+            payload["model"] = state.model
+        if state.agent:
+            payload["agent"] = state.agent
+        if state.effort:
+            payload["variant"] = state.effort
+        try:
+            await client.post(
+                f"/session/{state.opencode_session_id}/command",
+                json_data=payload,
+                long_running=True,
+            )
+        except Exception as exc:
+            raise OpenCodeError(f"failed to execute command: {exc}") from exc
+
     def _split_model_ref(self, model: str | None) -> dict[str, str] | None:
         if not model or "/" not in model:
             return None

@@ -11,6 +11,7 @@ from waypoint.backends.codex.schemas import CodexThreadImportRequest
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
+    CommandCompletion,
     CompletionDispatch,
     EventKind,
     EventRecord,
@@ -408,6 +409,52 @@ async def test_list_command_completions_claude_uses_stored_init_commands(
 
 
 @pytest.mark.asyncio
+async def test_list_command_completions_claude_merges_dynamic_descriptions(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    fake.slash_commands["claude-sess"] = ("frontend-design:frontend-design",)
+    _claude_plugin(runtime).adapter = cast(Any, fake)
+
+    async def fake_dynamic_completions(**_kwargs: Any) -> list[CommandCompletion]:
+        return [
+            CommandCompletion(
+                id="claude_code:plugin_skill:frontend-design",
+                trigger="/",
+                replacement="/frontend-design ",
+                name="frontend-design",
+                description="Design polished frontend interfaces",
+                kind="skill",
+                source="plugin_skill",
+                dispatch=CompletionDispatch.PLAIN_TEXT,
+                metadata={"path": "/skills/frontend-design/SKILL.md"},
+            )
+        ]
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.list_claude_command_completions",
+        fake_dynamic_completions,
+    )
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend="claude_code",
+        transport="claude_cli",
+        thread_id="claude-thread",
+    )
+    storage.create_session(session)
+
+    completions = await runtime.list_command_completions(
+        session.id, trigger="/", prefix="/front", force_refresh=True
+    )
+
+    assert [item.name for item in completions] == ["frontend-design"]
+    assert completions[0].description == "Design polished frontend interfaces"
+    assert completions[0].metadata["path"] == "/skills/frontend-design/SKILL.md"
+
+
+@pytest.mark.asyncio
 async def test_emit_adapter_event_refreshes_completion_cache(
     monkeypatch, tmp_path
 ) -> None:
@@ -722,6 +769,32 @@ async def test_handle_input_status_renders_codex_status(tmp_path) -> None:
     assert "Codex session status" in events[1].text
     assert "- Status: idle" in events[1].text
     assert events[1].metadata["builtin_command"] == "/status"
+
+
+@pytest.mark.asyncio
+async def test_handle_input_status_renders_opencode_status(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    session = make_session(
+        settings,
+        id="opencode-sess",
+        backend="opencode",
+        transport="opencode_http",
+        transport_state={"opencode_session_id": "oc-session"},
+        permission_mode="default",
+    )
+    storage.create_session(session)
+
+    await runtime.handle_input("opencode-sess", SessionInputRequest(text="/status"))
+
+    events = storage.list_events("opencode-sess")
+    assert [event.kind for event in events] == [
+        EventKind.USER_INPUT,
+        EventKind.SYSTEM_NOTE,
+    ]
+    assert "OpenCode session status" in events[1].text
+    assert "- Thread: oc-session" in events[1].text
+    assert events[1].metadata["builtin_command"] == "/status"
+    assert events[1].metadata["source"] == "waypoint"
 
 
 @pytest.mark.asyncio

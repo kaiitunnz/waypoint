@@ -125,7 +125,11 @@ async def test_list_command_completions_reads_opencode_commands(tmp_path) -> Non
             assert session_id == "sess"
             return [
                 {"name": "review", "description": "Review changes"},
-                {"name": "skill-only", "source": "skill"},
+                {
+                    "name": "skill-only",
+                    "source": "skill",
+                    "description": "Skill command",
+                },
                 {"name": "compact", "description": "Duplicate static command"},
             ]
 
@@ -141,11 +145,15 @@ async def test_list_command_completions_reads_opencode_commands(tmp_path) -> Non
     )
 
     names = [item.name for item in completions]
-    assert names == ["compact", "new", "review"]
-    review = completions[-1]
+    assert names == ["compact", "new", "status", "review", "skill-only"]
+    review = completions[-2]
     assert review.dispatch == CompletionDispatch.BACKEND_COMMAND
     assert review.replacement == "/review "
     assert review.description == "Review changes"
+    skill = completions[-1]
+    assert skill.kind == "skill"
+    assert skill.source == "opencode_skill"
+    assert skill.description == "Skill command"
 
 
 @pytest.mark.asyncio

@@ -65,6 +65,7 @@ OPENCODE_SLASH_COMMANDS = (
         name="compact", description="Compact the session to reduce context"
     ),
     SlashCommandSpec(name="new", description="Start a new session"),
+    SlashCommandSpec(name="status", description="Show session status"),
 )
 
 OPENCODE_REASONING_EFFORTS = (
@@ -836,8 +837,6 @@ class OpenCodePlugin:
         for item in commands:
             if not isinstance(item, dict):
                 continue
-            if item.get("source") == "skill":
-                continue
             name = item.get("name")
             if not isinstance(name, str) or not name:
                 continue
@@ -847,6 +846,8 @@ class OpenCodePlugin:
             if command in seen:
                 continue
             description = item.get("description")
+            source = item.get("source")
+            is_skill = source == "skill"
             completions.append(
                 CommandCompletion(
                     id=f"{self.id}:command:{name}",
@@ -854,11 +855,11 @@ class OpenCodePlugin:
                     replacement=f"{command} ",
                     name=name,
                     description=description if isinstance(description, str) else None,
-                    kind="command",
-                    source="opencode_command",
+                    kind="skill" if is_skill else "command",
+                    source="opencode_skill" if is_skill else "opencode_command",
                     dispatch=CompletionDispatch.BACKEND_COMMAND,
                     metadata={
-                        "source": item.get("source") or "command",
+                        "source": source or "command",
                     },
                 )
             )
@@ -998,6 +999,25 @@ class OpenCodePlugin:
         if not text.startswith("/"):
             return None
 
+        rest = text[1:].split(maxsplit=1)
+        command = rest[0] if rest else ""
+        arguments = rest[1] if len(rest) > 1 else ""
+
+        if command == "status":
+            await runtime._record_user_event(
+                session.id,
+                text,
+                submit=getattr(request, "submit", True),
+                status=session.status,
+            )
+            await runtime._record_system_event(
+                session.id,
+                _format_opencode_status(session),
+                status=session.status,
+                metadata={"builtin_command": "/status", "source": "waypoint"},
+            )
+            return runtime.get_session(session.id)
+
         adapter = self._require_adapter(
             runtime,
             session.launch_target_id,
@@ -1006,9 +1026,6 @@ class OpenCodePlugin:
                 self._effective_args(runtime, session.launch_target_id, session.args)
             ),
         )
-        rest = text[1:].split(maxsplit=1)
-        command = rest[0] if rest else ""
-        arguments = rest[1] if len(rest) > 1 else ""
 
         if command == "compact":
             await runtime._record_user_event(
@@ -1544,6 +1561,33 @@ class OpenCodePlugin:
                 structured.append(selected)
 
         return structured or [[answer]]
+
+
+def _format_opencode_status(session: SessionRecord) -> str:
+    lines = [
+        "OpenCode session status",
+        f"- Status: {session.status.value}",
+        f"- Backend: {session.backend}",
+        f"- Transport: {session.transport}",
+        f"- CWD: {session.cwd}",
+    ]
+    if session.launch_target_id:
+        lines.append(f"- Launch target: {session.launch_target_id}")
+    if session.repo_name:
+        repo = session.repo_name
+        if session.branch:
+            repo = f"{repo} ({session.branch})"
+        lines.append(f"- Repo: {repo}")
+    if session.model:
+        lines.append(f"- Model: {session.model}")
+    if session.effort:
+        lines.append(f"- Effort: {session.effort}")
+    if session.permission_mode:
+        lines.append(f"- Permission mode: {session.permission_mode}")
+    opencode_session_id = session.transport_state.get("opencode_session_id")
+    if isinstance(opencode_session_id, str) and opencode_session_id:
+        lines.append(f"- Thread: {opencode_session_id}")
+    return "\n".join(lines)
 
 
 def build_plugin() -> OpenCodePlugin:

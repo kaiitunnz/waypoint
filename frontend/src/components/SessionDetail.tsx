@@ -61,6 +61,7 @@ import {
   BackendPermissionMode,
   CommandCompletion,
   EventRecord,
+  SessionCommandInvocation,
   SessionEnvelope,
   SessionRecord,
   SessionTransport,
@@ -672,7 +673,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     return () => observer.disconnect();
   }, [view, scrollToBottom]);
 
-  const submitInput = useCallback(async (text: string) => {
+  const submitInput = useCallback(async (
+    text: string,
+    command?: SessionCommandInvocation,
+  ) => {
     if (!text.trim()) {
       return false;
     }
@@ -727,7 +731,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
 
     try {
-      await sendInput(host, token, sessionId, text);
+      await sendInput(host, token, sessionId, text, command);
       return true;
     } catch (sendError) {
       if (isAuthError(sendError)) {
@@ -740,12 +744,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   }, [handleAuthFailure, host, token, sessionId, session, router]);
 
   const onSendWithOptimistic = useCallback(
-    async (text: string) => {
+    async (text: string, command?: SessionCommandInvocation) => {
       const tempId = Math.random().toString(36).slice(2);
       const ts = new Date().toISOString();
       setOptimisticMessages((prev) => [...prev, { tempId, text, ts, confirmed: false }]);
       try {
-        return await submitInput(text);
+        return await submitInput(text, command);
       } finally {
         setOptimisticMessages((prev) => prev.filter((m) => m.tempId !== tempId));
       }
@@ -1271,7 +1275,7 @@ interface ReplyComposerProps {
   onReattach: () => void | Promise<void>;
   onResume: () => void | Promise<void>;
   onSwitchSession: () => void;
-  onSend: (text: string) => Promise<boolean>;
+  onSend: (text: string, command?: SessionCommandInvocation) => Promise<boolean>;
   onTerminate: () => void | Promise<void>;
 }
 
@@ -1323,6 +1327,8 @@ const ReplyComposer = memo(function ReplyComposer({
   const [backendCompletions, setBackendCompletions] = useState<
     CommandCompletion[]
   >([]);
+  const [selectedCompletion, setSelectedCompletion] =
+    useState<CommandCompletion | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
   const [reattaching, setReattaching] = useState(false);
@@ -1400,6 +1406,15 @@ const ReplyComposer = memo(function ReplyComposer({
       setSuggestionsDismissed(false);
     }
   }, [draft]);
+
+  useEffect(() => {
+    if (
+      selectedCompletion &&
+      !draft.startsWith(completionCommand(selectedCompletion))
+    ) {
+      setSelectedCompletion(null);
+    }
+  }, [draft, selectedCompletion]);
 
   // Publish the composer's actual height as a CSS custom property so the
   // transcript end-spacer and floating "Jump to latest" pill can position
@@ -1512,12 +1527,30 @@ const ReplyComposer = memo(function ReplyComposer({
     handle.addEventListener("pointercancel", finishDrag);
   };
 
+  function selectedCommandInvocation(text: string): SessionCommandInvocation | undefined {
+    if (!selectedCompletion || selectedCompletion.dispatch === "frontend_control") {
+      return undefined;
+    }
+    const command = completionCommand(selectedCompletion);
+    if (text !== command && !text.startsWith(`${command} `)) {
+      return undefined;
+    }
+    return {
+      completion_id: selectedCompletion.id,
+      name: selectedCompletion.name,
+      arguments: text.slice(command.length).trim(),
+      dispatch: selectedCompletion.dispatch,
+      metadata: selectedCompletion.metadata,
+    };
+  }
+
   function applySuggestion(index: number) {
     const chosen = suggestions[index];
     if (!chosen) {
       return;
     }
     setDraft(chosen.replacement);
+    setSelectedCompletion(chosen);
     setSuggestionsDismissed(true);
     requestAnimationFrame(() => textareaRef.current?.focus());
   }
@@ -1529,9 +1562,10 @@ const ReplyComposer = memo(function ReplyComposer({
     }
     setSending(true);
     setDraft("");
+    setSelectedCompletion(null);
     setSuggestionsDismissed(false);
     try {
-      const sent = await onSend(text);
+      const sent = await onSend(text, selectedCommandInvocation(text));
       if (!sent) {
         setDraft(text);
       }

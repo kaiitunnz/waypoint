@@ -106,6 +106,7 @@ class CodexPlugin:
         effort_levels=(),  # discovered per-model from `model/list`
         model_source=ModelSource.LIVE_RPC,
         slash_commands=(
+            SlashCommandSpec(name="status", description="Show session status"),
             SlashCommandSpec(name="compact", description="Compact the current thread"),
         ),
         badges={"glyph": "X", "color": "#34d399"},
@@ -276,14 +277,28 @@ class CodexPlugin:
                 ) from exc
             return updated
 
-        # Codex's app-server doesn't parse user text as control
-        # commands — `/compact` only takes effect via the
-        # thread/compact/start RPC. Every other slash command
-        # (`/help`, `/status`, `/permissions`, plus the Codex-/Claude-
-        # specific extras) is forwarded as user input so the CLI/SDK
-        # can surface its own response.
         command = request.text.strip()
-        if command.split(None, 1)[0].lower() != "/compact":
+        command_name = command.split(None, 1)[0].lower()
+        if command_name == "/status":
+            await runtime._record_user_event(
+                session.id,
+                request.text,
+                submit=request.submit,
+                status=session.status,
+            )
+            await runtime._record_system_event(
+                session.id,
+                _format_codex_status(session),
+                status=session.status,
+                metadata={"builtin_command": "/status"},
+            )
+            return runtime.get_session(session.id)
+
+        # Codex's app-server doesn't parse user text as control commands.
+        # `/compact` takes effect through the thread/compact/start RPC; other
+        # slash commands are left to the model unless Waypoint handles them
+        # explicitly above.
+        if command_name != "/compact":
             return None
         try:
             await self._require_adapter().compact_thread(session.id)
@@ -972,6 +987,33 @@ class CodexPlugin:
 
 def _deny_approval(_method: str, _params: dict[str, Any] | None) -> dict[str, Any]:
     return {"decision": "decline"}
+
+
+def _format_codex_status(session: SessionRecord) -> str:
+    lines = [
+        "Codex session status",
+        f"- Status: {session.status.value}",
+        f"- Backend: {session.backend}",
+        f"- Transport: {session.transport}",
+        f"- CWD: {session.cwd}",
+    ]
+    if session.launch_target_id:
+        lines.append(f"- Launch target: {session.launch_target_id}")
+    if session.repo_name:
+        repo = session.repo_name
+        if session.branch:
+            repo = f"{repo} ({session.branch})"
+        lines.append(f"- Repo: {repo}")
+    if session.model:
+        lines.append(f"- Model: {session.model}")
+    if session.effort:
+        lines.append(f"- Effort: {session.effort}")
+    if session.permission_mode:
+        lines.append(f"- Permission mode: {session.permission_mode}")
+    thread_id = session.transport_state.get("thread_id")
+    if isinstance(thread_id, str) and thread_id:
+        lines.append(f"- Thread: {thread_id}")
+    return "\n".join(lines)
 
 
 def _thread_cwd(thread: Any) -> str:

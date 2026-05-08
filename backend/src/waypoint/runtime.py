@@ -27,6 +27,7 @@ from waypoint.schemas import (
     EventsPageResponse,
     SessionApprovalRequest,
     SessionAttachRequest,
+    SessionCommandInvocation,
     SessionCreateRequest,
     SessionEnvelope,
     SessionInputRequest,
@@ -356,6 +357,7 @@ class SessionRuntime:
         transport = self.transport_for(session)
         plugin = self.registry.plugin_for(session)
         if transport.is_structured:
+            request = self._trust_server_completion_invocation(session, request)
             handled = await plugin.maybe_handle_input(self, session, request)
             if handled is not None:
                 return handled
@@ -543,6 +545,47 @@ class SessionRuntime:
             for item in completions
             if f"{item.trigger}{item.name}".startswith(normalized_prefix)
         ]
+
+    def _trust_server_completion_invocation(
+        self, session: SessionRecord, request: SessionInputRequest
+    ) -> SessionInputRequest:
+        invocation = request.command
+        if invocation is None:
+            return request
+        completion = self._find_cached_completion(session.id, invocation.completion_id)
+        if completion is None:
+            return request.model_copy(update={"command": None})
+        trusted = SessionCommandInvocation(
+            completion_id=completion.id,
+            name=completion.name,
+            arguments=invocation.arguments,
+            dispatch=completion.dispatch,
+            metadata=dict(completion.metadata),
+        )
+        return request.model_copy(update={"command": trusted})
+
+    def _find_cached_completion(
+        self, session_id: str, completion_id: str
+    ) -> CommandCompletion | None:
+        for (
+            cached_session_id,
+            _trigger,
+        ), completions in self._completion_cache.items():
+            if cached_session_id != session_id:
+                continue
+            for completion in completions:
+                if completion.id == completion_id:
+                    return completion
+        return None
+
+    def cached_command_completion(
+        self, session_id: str, *, trigger: str, name: str
+    ) -> CommandCompletion | None:
+        completions = self._completion_cache.get((session_id, trigger), [])
+        for completion in completions:
+            if completion.name == name:
+                return completion
+        return None
 
     async def interrupt(self, session_id: str) -> SessionRecord:
         session = self.get_session(session_id)
@@ -1102,12 +1145,29 @@ class SessionRuntime:
         persisted = self.storage.append_event(event)
         self._append_structured_log(session_id, persisted)
         await self._publish_event(persisted)
-        if metadata.get("refresh_completions"):
-            self._completion_cache.pop((session_id, "/"), None)
-            self._completion_cache_updated_at.pop((session_id, "/"), None)
-            session = self.storage.get_session(session_id)
-            if session is not None:
-                self._ensure_command_completion_refresh(session, trigger="/")
+
+    def handle_completion_source_init(
+        self, session_id: str, payload: dict[str, Any]
+    ) -> None:
+        slash_commands = payload.get("slash_commands")
+        if not isinstance(slash_commands, list):
+            return
+        commands = [
+            command
+            for command in slash_commands
+            if isinstance(command, str) and command
+        ]
+        session = self.storage.get_session(session_id)
+        if session is None:
+            return
+        state = dict(session.transport_state)
+        if state.get("slash_commands") == commands:
+            return
+        state["slash_commands"] = commands
+        self.storage.update_session(session_id, transport_state=state)
+        self._completion_cache.pop((session_id, "/"), None)
+        self._completion_cache_updated_at.pop((session_id, "/"), None)
+        self._ensure_command_completion_refresh(session, trigger="/")
 
     async def _ingest_raw_output(self, session_id: str) -> None:
         session = self.get_session(session_id)

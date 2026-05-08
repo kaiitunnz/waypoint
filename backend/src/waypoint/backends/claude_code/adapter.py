@@ -140,6 +140,7 @@ EmitEvent = Callable[
     [str, EventKind, str, dict[str, Any], SessionStatus],
     Coroutine[Any, Any, None],
 ]
+InitCallback = Callable[[str, dict[str, Any]], None]
 LaunchFactory = Callable[
     [str, str, str, bool, str, str | None, str | None, list[str], str | None],
     "ClaudeLaunchSpec",
@@ -247,6 +248,7 @@ class ClaudeCliAdapter:
         default_hook_timeout_seconds: int,
         binary: str | None = None,
         launch_factory: LaunchFactory | None = None,
+        on_init: InitCallback | None = None,
     ) -> None:
         self._emit_event = emit_event
         self._hook_settings_path = hook_settings_path
@@ -255,6 +257,7 @@ class ClaudeCliAdapter:
         self._default_hook_timeout_seconds = default_hook_timeout_seconds
         self._binary = binary
         self._launch_factory = launch_factory
+        self._on_init = on_init
         self._sessions: dict[str, ClaudeSessionState] = {}
         self._approval_lock = asyncio.Lock()
 
@@ -1154,7 +1157,6 @@ class ClaudeCliAdapter:
                     "method": "rate_limit_event",
                     "payload": event,
                     "status": SessionStatus.RUNNING,
-                    "refresh_completions": True,
                 },
                 SessionStatus.RUNNING,
             )
@@ -1184,6 +1186,8 @@ class ClaudeCliAdapter:
                     for command in slash_commands
                     if isinstance(command, str) and command
                 )
+            if self._on_init is not None:
+                self._on_init(state.session_id, event)
             # Claude's stream-json mode emits `init` at the start of every
             # `--print` run, which here means once per user turn (not just at
             # session start). Tagging this with IDLE downgrades the freshly

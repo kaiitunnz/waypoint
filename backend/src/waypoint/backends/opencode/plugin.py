@@ -26,6 +26,7 @@ from waypoint.schemas import (
     EventKind,
     SessionCreateRequest,
     SessionEnvelope,
+    SessionInputRequest,
     SessionRecord,
     SessionSource,
     SessionStatus,
@@ -993,9 +994,9 @@ class OpenCodePlugin:
         self,
         runtime: "SessionRuntime",
         session: SessionRecord,
-        request: Any,
+        request: SessionInputRequest,
     ) -> SessionRecord | None:
-        text = getattr(request, "text", None) or ""
+        text = request.text
         if not text.startswith("/"):
             return None
 
@@ -1007,7 +1008,7 @@ class OpenCodePlugin:
             await runtime._record_user_event(
                 session.id,
                 text,
-                submit=getattr(request, "submit", True),
+                submit=request.submit,
                 status=session.status,
             )
             await runtime._record_system_event(
@@ -1028,9 +1029,7 @@ class OpenCodePlugin:
         )
 
         if command == "compact":
-            await runtime._record_user_event(
-                session.id, text, submit=getattr(request, "submit", True)
-            )
+            await runtime._record_user_event(session.id, text, submit=request.submit)
             await runtime._record_system_event(
                 session.id,
                 "Compacting session...",
@@ -1046,7 +1045,7 @@ class OpenCodePlugin:
                 ) from exc
             return runtime.get_session(session.id)
 
-        invocation = getattr(request, "command", None)
+        invocation = request.command
         if (
             invocation is not None
             and invocation.dispatch == CompletionDispatch.BACKEND_COMMAND
@@ -1058,28 +1057,22 @@ class OpenCodePlugin:
                 text=text,
                 command=invocation.name,
                 arguments=invocation.arguments,
-                submit=getattr(request, "submit", True),
+                submit=request.submit,
             )
 
         if command not in {"new", "fork"}:
-            try:
-                commands = await adapter.list_commands(session.id)
-            except OpenCodeError:
-                commands = []
-            if any(
-                isinstance(item, dict)
-                and item.get("source") != "skill"
-                and item.get("name") == command
-                for item in commands
-            ):
+            cached_command = _cached_opencode_command_completion(
+                runtime, session.id, command
+            )
+            if cached_command is not None:
                 return await self._execute_command_input(
                     runtime,
                     session,
                     adapter,
                     text=text,
-                    command=command,
+                    command=cached_command.name,
                     arguments=arguments,
-                    submit=getattr(request, "submit", True),
+                    submit=request.submit,
                 )
 
         return None
@@ -1588,6 +1581,21 @@ def _format_opencode_status(session: SessionRecord) -> str:
     if isinstance(opencode_session_id, str) and opencode_session_id:
         lines.append(f"- Thread: {opencode_session_id}")
     return "\n".join(lines)
+
+
+def _cached_opencode_command_completion(
+    runtime: "SessionRuntime", session_id: str, command: str
+) -> CommandCompletion | None:
+    completion = runtime.cached_command_completion(
+        session_id, trigger="/", name=command
+    )
+    if (
+        completion is not None
+        and completion.dispatch == CompletionDispatch.BACKEND_COMMAND
+        and completion.metadata.get("source") != "skill"
+    ):
+        return completion
+    return None
 
 
 def build_plugin() -> OpenCodePlugin:

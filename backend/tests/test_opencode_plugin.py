@@ -13,6 +13,7 @@ from waypoint.backends.opencode.plugin import (
 )
 from waypoint.backends.opencode.transport import OpenCodeTransport
 from waypoint.schemas import (
+    CommandCompletion,
     CompletionDispatch,
     SessionInputRequest,
     SessionRecord,
@@ -186,8 +187,31 @@ async def test_maybe_handle_input_routes_manual_opencode_command(tmp_path) -> No
             self.settings = Settings(data_dir=tmp_path / "data")
             self.storage = FakeStorage()
             self.user_events: list[tuple[str, str, bool]] = []
+            self._completion_cache = {
+                ("sess", "/"): [
+                    CommandCompletion(
+                        id="opencode:command:review",
+                        trigger="/",
+                        replacement="/review ",
+                        name="review",
+                        description="Review changes",
+                        kind="command",
+                        source="opencode_command",
+                        dispatch=CompletionDispatch.BACKEND_COMMAND,
+                        metadata={"source": "command"},
+                    )
+                ]
+            }
 
         def _find_launch_target(self, launch_target_id: str | None) -> None:
+            return None
+
+        def cached_command_completion(
+            self, session_id: str, *, trigger: str, name: str
+        ) -> CommandCompletion | None:
+            for completion in self._completion_cache.get((session_id, trigger), []):
+                if completion.name == name:
+                    return completion
             return None
 
         async def _record_user_event(

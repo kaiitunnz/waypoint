@@ -363,6 +363,97 @@ async def test_list_command_completions_claude_omits_unreported_tui_commands(
 
 
 @pytest.mark.asyncio
+async def test_list_command_completions_claude_uses_stored_init_commands(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    _claude_plugin(runtime).adapter = cast(Any, fake)
+
+    async def fake_dynamic_completions(**_kwargs: Any) -> list[Any]:
+        return []
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.list_claude_command_completions",
+        fake_dynamic_completions,
+    )
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend="claude_code",
+        transport="claude_cli",
+        thread_id="claude-thread",
+    )
+    storage.create_session(session)
+    storage.append_event(
+        EventRecord(
+            session_id=session.id,
+            ts=datetime.now(UTC),
+            kind=EventKind.SYSTEM_NOTE,
+            text="Claude session ready",
+            metadata={
+                "method": "system.init",
+                "payload": {"slash_commands": ["clear", "compact", "usage"]},
+                "status": SessionStatus.RUNNING,
+            },
+            sequence=storage.next_sequence(session.id),
+        )
+    )
+
+    completions = await runtime.list_command_completions(
+        session.id, trigger="/", prefix="/us", force_refresh=True
+    )
+
+    assert [item.name for item in completions] == ["usage"]
+
+
+@pytest.mark.asyncio
+async def test_emit_adapter_event_refreshes_completion_cache(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    fake.slash_commands["claude-sess"] = ("clear", "compact", "usage")
+    _claude_plugin(runtime).adapter = cast(Any, fake)
+
+    async def fake_dynamic_completions(**_kwargs: Any) -> list[Any]:
+        return []
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.list_claude_command_completions",
+        fake_dynamic_completions,
+    )
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend="claude_code",
+        transport="claude_cli",
+        thread_id="claude-thread",
+    )
+    storage.create_session(session)
+    runtime._completion_cache[(session.id, "/")] = []
+    runtime._completion_cache_updated_at[(session.id, "/")] = 1.0
+
+    await runtime._emit_adapter_event(
+        session.id,
+        EventKind.SYSTEM_NOTE,
+        "Claude session ready",
+        {
+            "method": "system.init",
+            "payload": {"slash_commands": ["clear", "compact", "usage"]},
+            "refresh_completions": True,
+        },
+        SessionStatus.RUNNING,
+    )
+    tasks = list(runtime._completion_refresh_tasks.values())
+    if tasks:
+        await asyncio.gather(*tasks)
+
+    completions = runtime._completion_cache[(session.id, "/")]
+    assert "usage" in {item.name for item in completions}
+
+
+@pytest.mark.asyncio
 async def test_list_command_completions_codex_omits_unsupported_legacy_commands(
     tmp_path,
 ) -> None:

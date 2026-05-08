@@ -1102,6 +1102,12 @@ class SessionRuntime:
         persisted = self.storage.append_event(event)
         self._append_structured_log(session_id, persisted)
         await self._publish_event(persisted)
+        if metadata.get("refresh_completions"):
+            self._completion_cache.pop((session_id, "/"), None)
+            self._completion_cache_updated_at.pop((session_id, "/"), None)
+            session = self.storage.get_session(session_id)
+            if session is not None:
+                self._ensure_command_completion_refresh(session, trigger="/")
 
     async def _ingest_raw_output(self, session_id: str) -> None:
         session = self.get_session(session_id)

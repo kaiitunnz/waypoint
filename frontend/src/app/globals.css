@@ -22,12 +22,40 @@
   --radius: 14px;
   --radius-sm: 10px;
   --radius-pill: 999px;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Inter",
-    "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "JetBrains Mono", "SFMono-Regular", "Menlo", "Consolas", monospace;
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Inter", "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono:
+    "JetBrains Mono", "SFMono-Regular", "Menlo", "Consolas", monospace;
   --font-display: "Iowan Old Style", "Charter", "Georgia", serif;
 }
 
+html[data-theme="light"] {
+  background-color: var(--bg-deep);
+
+  --bg-base: #f4f1eb;
+  --bg-deep: #ede9e0;
+  --bg-card: rgba(255, 253, 247, 0.88);
+  --bg-card-soft: rgba(248, 244, 236, 0.78);
+  --bg-input: rgba(255, 252, 245, 0.9);
+  --line: rgba(90, 78, 58, 0.13);
+  --line-strong: rgba(90, 78, 58, 0.26);
+  --text: #1c1914;
+  --text-strong: #0e0c09;
+  --muted: #6e6356;
+  --muted-soft: #a09380;
+  --accent: #b8820e;
+  --accent-strong: #d49a14;
+  --accent-cool: #2f6f9e;
+  --danger: #b83038;
+  --warn: #aa6618;
+  --success: #257a50;
+  --todo-glyph: #7040b0;
+  --shadow: 0 24px 60px rgba(60, 45, 20, 0.1);
+  --shadow-soft: 0 6px 18px rgba(60, 45, 20, 0.08);
+}
+
+/* ─── Reset & base ─── */
 * {
   box-sizing: border-box;
 }
@@ -51,8 +79,7 @@ body {
    * the white flash at the top/bottom on macOS rubber-band). */
   overscroll-behavior-y: none;
   position: relative;
-  background:
-    linear-gradient(180deg, #0b0f15 0%, #0a0d12 60%, #08090d 100%);
+  background: linear-gradient(180deg, #0b0f15 0%, #0a0d12 60%, #08090d 100%);
   background-color: var(--bg-deep);
   background-attachment: fixed;
   color: var(--text);
@@ -61,15 +88,42 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+html[data-theme="light"] body {
+  background: linear-gradient(180deg, #f7f4ee 0%, #f4f0e8 60%, #efe9d8 100%);
+  background-color: var(--bg-deep);
+}
+
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(900px 480px at 12% -8%, rgba(200, 169, 106, 0.07), transparent 60%),
-    radial-gradient(820px 540px at 110% 8%, rgba(143, 179, 214, 0.06), transparent 65%);
+    radial-gradient(
+      900px 480px at 12% -8%,
+      rgba(200, 169, 106, 0.07),
+      transparent 60%
+    ),
+    radial-gradient(
+      820px 540px at 110% 8%,
+      rgba(143, 179, 214, 0.06),
+      transparent 65%
+    );
   z-index: 0;
+}
+
+html[data-theme="light"] body::before {
+  background:
+    radial-gradient(
+      900px 480px at 12% -8%,
+      rgba(200, 169, 106, 0.14),
+      transparent 60%
+    ),
+    radial-gradient(
+      820px 540px at 110% 8%,
+      rgba(59, 123, 168, 0.09),
+      transparent 65%
+    );
 }
 
 a {
@@ -100,6 +154,7 @@ pre {
   line-height: 1.55;
 }
 
+/* ─── Page layout ─── */
 .page-shell {
   width: 100%;
   max-width: min(1024px, 100vw);
@@ -113,8 +168,10 @@ pre {
    * Add safe-area insets so headers and buttons sit clear of the cut-out.
    * Bottom inset is handled by the sticky composer when present, but we keep
    * a small floor so non-session pages still breathe. */
-  padding: calc(28px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right))
-    calc(40px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
+  padding: calc(28px + env(safe-area-inset-top))
+    calc(20px + env(safe-area-inset-right))
+    calc(40px + env(safe-area-inset-bottom))
+    calc(20px + env(safe-area-inset-left));
   display: grid;
   gap: 28px;
   position: relative;
@@ -128,6 +185,7 @@ pre {
   padding-bottom: 0;
 }
 
+/* ─── App bar ─── */
 .app-bar {
   display: flex;
   align-items: center;
@@ -136,9 +194,21 @@ pre {
   padding: 18px 22px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: linear-gradient(180deg, rgba(20, 24, 33, 0.85), rgba(14, 17, 24, 0.85));
+  background: linear-gradient(
+    180deg,
+    rgba(20, 24, 33, 0.85),
+    rgba(14, 17, 24, 0.85)
+  );
   box-shadow: var(--shadow-soft);
   backdrop-filter: blur(18px);
+}
+
+html[data-theme="light"] .app-bar {
+  background: linear-gradient(
+    180deg,
+    rgba(244, 241, 235, 0.94),
+    rgba(237, 233, 224, 0.9)
+  );
 }
 
 .app-bar-brand {
@@ -222,6 +292,11 @@ pre {
   box-shadow: 0 0 0 3px rgba(94, 210, 156, 0.16);
 }
 
+html[data-theme="light"] .app-bar-status.open::before {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(37, 122, 80, 0.18);
+}
+
 .app-bar-status.connecting::before,
 .app-bar-status.reconnecting::before {
   background: var(--warn);
@@ -269,6 +344,7 @@ pre {
   min-width: 0;
 }
 
+/* ─── Import / resume thread panel ─── */
 .launch-grid {
   display: grid;
   gap: 16px;
@@ -304,8 +380,19 @@ pre {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   overflow: hidden;
-  background:
-    linear-gradient(180deg, rgba(15, 19, 27, 0.62), rgba(12, 16, 22, 0.42));
+  background: linear-gradient(
+    180deg,
+    rgba(15, 19, 27, 0.62),
+    rgba(12, 16, 22, 0.42)
+  );
+}
+
+html[data-theme="light"] .import-thread-list {
+  background: linear-gradient(
+    180deg,
+    rgba(248, 244, 236, 0.8),
+    rgba(240, 236, 226, 0.6)
+  );
 }
 
 .import-thread-row {
@@ -337,6 +424,10 @@ pre {
 
 .import-thread-row:hover {
   background: rgba(28, 33, 44, 0.42);
+}
+
+html[data-theme="light"] .import-thread-row:hover {
+  background: rgba(220, 210, 190, 0.42);
 }
 
 .import-thread-row:hover::before {
@@ -437,6 +528,11 @@ pre {
   white-space: nowrap;
 }
 
+html[data-theme="light"] .import-thread-chip {
+  background: rgba(47, 111, 158, 0.1);
+  border-color: rgba(47, 111, 158, 0.24);
+}
+
 .import-thread-repo {
   font-family: var(--font-mono);
   font-size: 0.78rem;
@@ -487,6 +583,10 @@ pre {
   text-transform: lowercase;
 }
 
+html[data-theme="light"] .import-thread-footer {
+  background: rgba(220, 210, 190, 0.45);
+}
+
 .import-thread-pager {
   display: flex;
   align-items: center;
@@ -509,7 +609,6 @@ pre {
 }
 
 /* ---------- Resume thread panel (unified) ---------- */
-
 .resume-panel-header {
   display: flex;
   flex-wrap: wrap;
@@ -606,7 +705,9 @@ pre {
   color: var(--muted);
   padding: 6px 10px;
   border-radius: var(--radius-sm);
-  transition: color 140ms ease, background-color 140ms ease;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease;
 }
 
 .resume-panel-foot-link:hover {
@@ -619,6 +720,7 @@ pre {
   box-shadow: 0 0 0 2px rgba(200, 169, 106, 0.35);
 }
 
+/* ─── Form controls & buttons ─── */
 .field {
   display: grid;
   gap: 6px;
@@ -641,7 +743,9 @@ pre {
   background: var(--bg-input);
   color: var(--text);
   padding: 11px 14px;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .field input:focus,
@@ -660,7 +764,10 @@ pre {
   padding: 0 16px;
   font-weight: 500;
   letter-spacing: 0.02em;
-  transition: transform 120ms ease, background-color 120ms ease, color 120ms ease,
+  transition:
+    transform 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease,
     border-color 120ms ease;
   border: 1px solid transparent;
 }
@@ -670,6 +777,11 @@ pre {
   color: #1d1408;
   font-weight: 600;
   border-color: rgba(200, 169, 106, 0.6);
+}
+
+html[data-theme="light"] .primary {
+  background: linear-gradient(180deg, #e0bb73, #c8a96a);
+  border-color: rgba(180, 155, 90, 0.55);
 }
 
 .primary:hover:not(:disabled) {
@@ -690,9 +802,17 @@ pre {
   border-color: var(--line);
 }
 
+html[data-theme="light"] .secondary {
+  background: rgba(220, 210, 190, 0.7);
+}
+
 .secondary:hover:not(:disabled) {
   border-color: var(--line-strong);
   background: rgba(34, 40, 54, 0.9);
+}
+
+html[data-theme="light"] .secondary:hover:not(:disabled) {
+  background: rgba(205, 194, 170, 0.9);
 }
 
 .secondary:disabled {
@@ -827,7 +947,6 @@ pre {
  * Session header — replaces the generic .panel chrome with a layout that
  * actually leads the eye through title → cwd → tags → live status.
  * ──────────────────────────────────────────────────────────────────────── */
-
 .session-header {
   display: grid;
   gap: 12px;
@@ -835,12 +954,30 @@ pre {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background:
-    radial-gradient(180% 100% at 0% 0%, rgba(200, 169, 106, 0.06), transparent 60%),
+    radial-gradient(
+      180% 100% at 0% 0%,
+      rgba(200, 169, 106, 0.06),
+      transparent 60%
+    ),
     linear-gradient(180deg, rgba(20, 24, 33, 0.86), rgba(14, 17, 24, 0.86));
   box-shadow: var(--shadow-soft);
   backdrop-filter: blur(16px);
   position: relative;
   overflow: hidden;
+}
+
+html[data-theme="light"] .session-header {
+  background:
+    radial-gradient(
+      180% 100% at 0% 0%,
+      rgba(166, 122, 34, 0.07),
+      transparent 60%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(248, 245, 238, 0.92),
+      rgba(240, 236, 226, 0.88)
+    );
 }
 
 .session-header::before {
@@ -945,6 +1082,10 @@ pre {
   flex-shrink: 0;
 }
 
+html[data-theme="light"] .session-pulse {
+  background: rgba(240, 236, 226, 0.8);
+}
+
 .session-pulse-dot {
   width: 8px;
   height: 8px;
@@ -962,19 +1103,38 @@ pre {
   color: var(--success);
 }
 
+html[data-theme="light"] .session-pulse.open {
+  background: rgba(37, 122, 80, 0.08);
+  border-color: rgba(37, 122, 80, 0.28);
+}
+
 .session-pulse.open .session-pulse-dot {
   background: #5ed29c;
   box-shadow: 0 0 0 0 rgba(94, 210, 156, 0.45);
+}
+
+html[data-theme="light"] .session-pulse.open .session-pulse-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 0 rgba(37, 122, 80, 0.4);
 }
 
 .session-pulse.open.running .session-pulse-dot {
   animation: pulse-running 1.6s ease-in-out infinite;
 }
 
+html[data-theme="light"] .session-pulse.open.running .session-pulse-dot {
+  animation-name: pulse-running-light;
+}
+
 .session-pulse.open.warn {
   border-color: rgba(217, 154, 74, 0.36);
   background: rgba(217, 154, 74, 0.08);
   color: var(--warn);
+}
+
+html[data-theme="light"] .session-pulse.open.warn {
+  background: rgba(170, 102, 24, 0.08);
+  border-color: rgba(170, 102, 24, 0.3);
 }
 
 .session-pulse.open.warn .session-pulse-dot {
@@ -985,6 +1145,11 @@ pre {
   border-color: var(--line);
   background: rgba(8, 11, 16, 0.55);
   color: var(--muted);
+}
+
+html[data-theme="light"] .session-pulse.open.dim {
+  background: rgba(240, 236, 226, 0.8);
+  border-color: var(--line);
 }
 
 .session-pulse.open.dim .session-pulse-dot {
@@ -999,20 +1164,61 @@ pre {
   color: var(--warn);
 }
 
+html[data-theme="light"] .session-pulse.connecting,
+html[data-theme="light"] .session-pulse.reconnecting {
+  background: rgba(170, 102, 24, 0.08);
+  border-color: rgba(170, 102, 24, 0.28);
+}
+
 .session-pulse.connecting .session-pulse-dot,
 .session-pulse.reconnecting .session-pulse-dot {
   background: var(--warn);
   animation: pulse-warn 1.2s ease-in-out infinite;
 }
 
+html[data-theme="light"] .session-pulse.connecting .session-pulse-dot,
+html[data-theme="light"] .session-pulse.reconnecting .session-pulse-dot {
+  animation-name: pulse-warn-light;
+}
+
 @keyframes pulse-running {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(94, 210, 156, 0.5); }
-  50% { box-shadow: 0 0 0 6px rgba(94, 210, 156, 0); }
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(94, 210, 156, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(94, 210, 156, 0);
+  }
+}
+
+@keyframes pulse-running-light {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 122, 80, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(37, 122, 80, 0);
+  }
 }
 
 @keyframes pulse-warn {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(217, 154, 74, 0.55); }
-  50% { box-shadow: 0 0 0 5px rgba(217, 154, 74, 0); }
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(217, 154, 74, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(217, 154, 74, 0);
+  }
+}
+
+@keyframes pulse-warn-light {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(170, 102, 24, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(170, 102, 24, 0);
+  }
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -1020,7 +1226,6 @@ pre {
  * Uses a real segmented-control aesthetic instead of the old primary/secondary
  * pair, so the user can tell at a glance which mode is active.
  * ──────────────────────────────────────────────────────────────────────── */
-
 .session-toolbar {
   display: flex;
   align-items: center;
@@ -1042,7 +1247,10 @@ pre {
   font-size: 0.72rem;
   letter-spacing: 0.06em;
   cursor: pointer;
-  transition: border-color 140ms ease, color 140ms ease, background-color 140ms ease;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    background-color 140ms ease;
 }
 
 .tool-run-toggle:hover {
@@ -1065,6 +1273,10 @@ pre {
   gap: 2px;
 }
 
+html[data-theme="light"] .segmented {
+  background: rgba(222, 213, 196, 0.55);
+}
+
 .segmented-item {
   min-height: 30px;
   padding: 0 14px;
@@ -1075,7 +1287,9 @@ pre {
   font-size: 0.74rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  transition: background-color 140ms ease, color 140ms ease;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
 }
 
 .segmented-item:hover:not(.active) {
@@ -1083,15 +1297,33 @@ pre {
 }
 
 .segmented-item.active {
-  background: linear-gradient(180deg, rgba(200, 169, 106, 0.22), rgba(200, 169, 106, 0.12));
+  background: linear-gradient(
+    180deg,
+    rgba(200, 169, 106, 0.22),
+    rgba(200, 169, 106, 0.12)
+  );
   color: var(--accent-strong);
   box-shadow: inset 0 0 0 1px rgba(200, 169, 106, 0.32);
+}
+
+html[data-theme="light"] .segmented-item.active {
+  background: linear-gradient(
+    180deg,
+    rgba(184, 130, 14, 0.2),
+    rgba(184, 130, 14, 0.11)
+  );
+  box-shadow: inset 0 0 0 1px rgba(184, 130, 14, 0.3);
 }
 
 .segmented-quiet .segmented-item.active {
   background: rgba(143, 179, 214, 0.16);
   color: var(--accent-cool);
   box-shadow: inset 0 0 0 1px rgba(143, 179, 214, 0.32);
+}
+
+html[data-theme="light"] .segmented-quiet .segmented-item.active {
+  background: rgba(47, 111, 158, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(47, 111, 158, 0.3);
 }
 
 .transcript-load-older {
@@ -1176,6 +1408,10 @@ pre {
   color: #7fbf99;
 }
 
+html[data-theme="light"] .probe.reachable {
+  color: var(--success);
+}
+
 .probe.unreachable {
   color: var(--danger);
 }
@@ -1190,6 +1426,7 @@ pre {
   min-width: 0;
 }
 
+/* ─── Badges & status pills ─── */
 .badge,
 .status {
   display: inline-flex;
@@ -1210,10 +1447,20 @@ pre {
   border-color: rgba(143, 179, 214, 0.22);
 }
 
+html[data-theme="light"] .badge.codex {
+  background: rgba(47, 111, 158, 0.12);
+  border-color: rgba(47, 111, 158, 0.32);
+}
+
 .badge.claude_code {
   background: rgba(200, 169, 106, 0.12);
   color: var(--accent);
   border-color: rgba(200, 169, 106, 0.22);
+}
+
+html[data-theme="light"] .badge.claude_code {
+  background: rgba(184, 130, 14, 0.12);
+  border-color: rgba(184, 130, 14, 0.3);
 }
 
 /* OpenCode's identity is monochrome — use a brighter slate than --muted so
@@ -1222,6 +1469,12 @@ pre {
   background: rgba(203, 213, 225, 0.16);
   color: #cbd5e1;
   border-color: rgba(203, 213, 225, 0.32);
+}
+
+html[data-theme="light"] .badge.opencode {
+  background: rgba(110, 99, 86, 0.12);
+  color: var(--muted);
+  border-color: rgba(110, 99, 86, 0.28);
 }
 
 .badge.neutral {
@@ -1236,6 +1489,11 @@ pre {
   border-color: var(--line);
 }
 
+html[data-theme="light"] .badge.neutral,
+html[data-theme="light"] .badge.transport.tmux {
+  background: rgba(110, 99, 86, 0.1);
+}
+
 .badge.transport.codex_app_server,
 .badge.transport.claude_cli,
 .badge.fidelity.structured {
@@ -1244,16 +1502,34 @@ pre {
   border-color: rgba(200, 169, 106, 0.24);
 }
 
+html[data-theme="light"] .badge.transport.codex_app_server,
+html[data-theme="light"] .badge.transport.claude_cli,
+html[data-theme="light"] .badge.fidelity.structured {
+  background: rgba(184, 130, 14, 0.12);
+  border-color: rgba(184, 130, 14, 0.3);
+}
+
 .badge.transport.opencode_http {
   background: rgba(203, 213, 225, 0.12);
   color: #cbd5e1;
   border-color: rgba(203, 213, 225, 0.28);
 }
 
+html[data-theme="light"] .badge.transport.opencode_http {
+  background: rgba(90, 100, 120, 0.1);
+  color: var(--muted);
+  border-color: rgba(90, 100, 120, 0.26);
+}
+
 .badge.fidelity.heuristic {
   background: rgba(217, 154, 74, 0.12);
   color: var(--warn);
   border-color: rgba(217, 154, 74, 0.24);
+}
+
+html[data-theme="light"] .badge.fidelity.heuristic {
+  background: rgba(170, 102, 24, 0.12);
+  border-color: rgba(170, 102, 24, 0.26);
 }
 
 .badge.model {
@@ -1301,6 +1577,7 @@ pre {
   border-color: rgba(143, 179, 214, 0.24);
 }
 
+/* ─── Transcript cards ─── */
 .transcript {
   display: flex;
   flex-direction: column;
@@ -1333,7 +1610,9 @@ pre {
   font-family: var(--font-mono);
   font-size: 0.8rem;
   font-weight: 600;
-  transition: color 160ms ease, transform 160ms ease;
+  transition:
+    color 160ms ease,
+    transform 160ms ease;
 }
 
 details[open] > .transcript-summary::after {
@@ -1358,7 +1637,6 @@ details[open] > .transcript-summary::after {
  * shadow), inset them slightly, and quiet the typography so they read as
  * sidenotes that the eye can skip when scanning.
  * ──────────────────────────────────────────────────────────────────────── */
-
 .transcript.codex.tool_call:not(.ask-user-question),
 .transcript.codex.tool_result,
 .transcript.codex.tool_pair {
@@ -1373,7 +1651,9 @@ details[open] > .transcript-summary::after {
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
-  transition: border-color 160ms ease, background-color 160ms ease;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease;
 }
 
 @media (max-width: 720px) {
@@ -1392,9 +1672,21 @@ details[open] > .transcript-summary::after {
   background: rgba(12, 16, 22, 0.5);
 }
 
+html[data-theme="light"]
+  .transcript.codex.tool_call:not(.ask-user-question):hover,
+html[data-theme="light"] .transcript.codex.tool_result:hover,
+html[data-theme="light"] .transcript.codex.tool_pair:hover {
+  background: rgba(220, 210, 190, 0.65);
+  border-color: rgba(90, 78, 58, 0.22);
+}
+
 details.tool-disclosure[open] {
   border-color: var(--line);
   background: rgba(10, 13, 18, 0.6);
+}
+
+html[data-theme="light"] details.tool-disclosure[open] {
+  background: rgba(220, 210, 190, 0.55);
 }
 
 .transcript.codex.tool_call:not(.ask-user-question) .transcript-role,
@@ -1512,7 +1804,6 @@ details.tool-disclosure[open] .tool-glyph.todo {
  * span the full width. Reading the transcript should feel closer to a
  * conversation than a uniform stream of identical panels.
  * ──────────────────────────────────────────────────────────────────────── */
-
 /* Pin the implicit column to the container width so a single child with
  * wide intrinsic content (e.g. an OpenCode markdown table that doesn't
  * honor word-break) can't expand grid-auto-columns past the viewport and
@@ -1529,8 +1820,26 @@ details.tool-disclosure[open] .tool-glyph.todo {
   overflow-wrap: anywhere;
   word-break: break-word;
   border-color: rgba(143, 179, 214, 0.32);
-  background: linear-gradient(180deg, rgba(34, 44, 62, 0.78), rgba(22, 28, 40, 0.78));
-  box-shadow: var(--shadow-soft), inset -2px 0 0 rgba(143, 179, 214, 0.32);
+  background: linear-gradient(
+    180deg,
+    rgba(34, 44, 62, 0.78),
+    rgba(22, 28, 40, 0.78)
+  );
+  box-shadow:
+    var(--shadow-soft),
+    inset -2px 0 0 rgba(143, 179, 214, 0.32);
+}
+
+html[data-theme="light"] .transcript.codex.user_input {
+  background: linear-gradient(
+    180deg,
+    rgba(242, 234, 216, 0.9),
+    rgba(232, 222, 200, 0.86)
+  );
+  border-color: rgba(90, 78, 58, 0.22);
+  box-shadow:
+    var(--shadow-soft),
+    inset -2px 0 0 rgba(184, 130, 14, 0.32);
 }
 
 .transcript.codex.user_input.pending-optimistic {
@@ -1555,9 +1864,24 @@ details.tool-disclosure[open] .tool-glyph.todo {
     rgba(143, 179, 214, 0.72),
     rgba(143, 179, 214, 0.15)
   );
-  box-shadow: 0 0 0 1px rgba(143, 179, 214, 0.14), 0 0 18px rgba(143, 179, 214, 0.28);
+  box-shadow:
+    0 0 0 1px rgba(143, 179, 214, 0.14),
+    0 0 18px rgba(143, 179, 214, 0.28);
   animation: transcript-persisted-edge 5s ease-in-out infinite;
   pointer-events: none;
+}
+
+html[data-theme="light"]
+  .transcript.codex.user_input.pending-optimistic.persisted::after {
+  background: linear-gradient(
+    180deg,
+    rgba(184, 130, 14, 0.12),
+    rgba(184, 130, 14, 0.65),
+    rgba(184, 130, 14, 0.12)
+  );
+  box-shadow:
+    0 0 0 1px rgba(184, 130, 14, 0.12),
+    0 0 18px rgba(184, 130, 14, 0.2);
 }
 
 @keyframes transcript-persisted-edge {
@@ -1589,7 +1913,16 @@ details.tool-disclosure[open] .tool-glyph.todo {
   overflow-wrap: anywhere;
   word-break: break-word;
   border-color: rgba(200, 169, 106, 0.22);
-  box-shadow: var(--shadow-soft), inset 2px 0 0 rgba(200, 169, 106, 0.32);
+  box-shadow:
+    var(--shadow-soft),
+    inset 2px 0 0 rgba(200, 169, 106, 0.32);
+}
+
+html[data-theme="light"] .transcript.codex.agent_output {
+  border-color: rgba(184, 130, 14, 0.28);
+  box-shadow:
+    var(--shadow-soft),
+    inset 2px 0 0 rgba(184, 130, 14, 0.42);
 }
 
 /* On phones (and iPad portrait) drop `width: fit-content` and just go full-
@@ -1641,7 +1974,11 @@ details.tool-disclosure[open] .tool-glyph.todo {
   font-size: 1.05rem;
   line-height: 1;
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
   flex-shrink: 0;
   /* Visible by default but quiet enough to recede behind the actual message
    * content; brightens on hover/focus to confirm the affordance. */
@@ -1790,6 +2127,10 @@ details.tool-disclosure[open] .tool-glyph.todo {
   text-align: center;
 }
 
+html[data-theme="light"] .transcript-empty {
+  background: rgba(235, 230, 218, 0.45);
+}
+
 .transcript-empty-pulse {
   width: 14px;
   height: 14px;
@@ -1799,10 +2140,33 @@ details.tool-disclosure[open] .tool-glyph.todo {
   animation: transcript-pulse 1.6s ease-out infinite;
 }
 
+html[data-theme="light"] .transcript-empty-pulse {
+  background: rgba(184, 130, 14, 0.32);
+  animation-name: transcript-pulse-light;
+}
+
 @keyframes transcript-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(200, 169, 106, 0.55); }
-  70% { box-shadow: 0 0 0 14px rgba(200, 169, 106, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(200, 169, 106, 0); }
+  0% {
+    box-shadow: 0 0 0 0 rgba(200, 169, 106, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 14px rgba(200, 169, 106, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(200, 169, 106, 0);
+  }
+}
+
+@keyframes transcript-pulse-light {
+  0% {
+    box-shadow: 0 0 0 0 rgba(184, 130, 14, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 14px rgba(184, 130, 14, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(184, 130, 14, 0);
+  }
 }
 
 .transcript-empty-title {
@@ -1839,6 +2203,13 @@ details.tool-disclosure[open] .tool-glyph.todo {
   color: #c2cad8;
 }
 
+html[data-theme="light"] .transcript.codex.tool_call pre.shell,
+html[data-theme="light"] .transcript.codex.tool_result pre.output,
+html[data-theme="light"] .tool-pair-body pre.shell,
+html[data-theme="light"] .tool-pair-body pre.output {
+  color: var(--text);
+}
+
 .transcript.codex.system {
   padding: 6px 12px;
   font-size: 0.84rem;
@@ -1847,6 +2218,13 @@ details.tool-disclosure[open] .tool-glyph.todo {
 
 .transcript.codex.tool_pair {
   border-color: rgba(200, 169, 106, 0.22);
+}
+
+html[data-theme="light"] .transcript.codex.tool_call:not(.ask-user-question),
+html[data-theme="light"] .transcript.codex.tool_result,
+html[data-theme="light"] .transcript.codex.tool_pair {
+  background: rgba(235, 230, 218, 0.55);
+  border-color: rgba(90, 78, 58, 0.14);
 }
 
 .tool-pair-body {
@@ -1980,7 +2358,6 @@ details.tool-disclosure[open] .tool-glyph.todo {
  * Deliberately NOT inheriting from panel/transcript/agent_output — this is a
  * distinct element type that reads as infrastructure, not conversation.
  * ──────────────────────────────────────────────────────────────────────────── */
-
 .tool-call-run {
   position: relative;
   background: rgba(8, 11, 16, 0.35);
@@ -1988,7 +2365,14 @@ details.tool-disclosure[open] .tool-glyph.todo {
   border-radius: var(--radius-sm);
   margin: 3px 0;
   overflow: hidden;
-  transition: border-color 160ms ease, background-color 160ms ease;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+html[data-theme="light"] .tool-call-run {
+  background: rgba(235, 230, 218, 0.5);
+  border-color: rgba(90, 78, 58, 0.12);
 }
 
 /* Left accent bar: a tri-colour gradient signalling "mixed tool work". */
@@ -2010,6 +2394,11 @@ details.tool-disclosure[open] .tool-glyph.todo {
 .tool-call-run[open] {
   border-color: rgba(120, 138, 168, 0.17);
   background: rgba(10, 13, 20, 0.5);
+}
+
+html[data-theme="light"] .tool-call-run[open] {
+  background: rgba(228, 222, 208, 0.65);
+  border-color: rgba(90, 78, 58, 0.16);
 }
 
 .tool-call-run-summary {
@@ -2037,7 +2426,9 @@ details.tool-disclosure[open] .tool-glyph.todo {
   color: var(--muted-soft);
   font-size: 0.6rem;
   line-height: 1;
-  transition: transform 160ms ease, color 160ms ease;
+  transition:
+    transform 160ms ease,
+    color 160ms ease;
 }
 
 .tool-call-run[open] > .tool-call-run-summary::after {
@@ -2072,10 +2463,20 @@ details.tool-disclosure[open] .tool-glyph.todo {
   color: var(--success);
 }
 
+html[data-theme="light"] .tool-run-chip.bash {
+  background: rgba(37, 122, 80, 0.1);
+  border-color: rgba(37, 122, 80, 0.3);
+}
+
 .tool-run-chip.edit {
   background: rgba(200, 169, 106, 0.08);
   border-color: rgba(200, 169, 106, 0.18);
   color: var(--accent);
+}
+
+html[data-theme="light"] .tool-run-chip.edit {
+  background: rgba(184, 130, 14, 0.14);
+  border-color: rgba(184, 130, 14, 0.48);
 }
 
 .tool-run-chip.read {
@@ -2084,10 +2485,20 @@ details.tool-disclosure[open] .tool-glyph.todo {
   color: var(--accent-cool);
 }
 
+html[data-theme="light"] .tool-run-chip.read {
+  background: rgba(47, 111, 158, 0.1);
+  border-color: rgba(47, 111, 158, 0.3);
+}
+
 .tool-run-chip.other {
   background: rgba(151, 162, 179, 0.06);
   border-color: rgba(151, 162, 179, 0.14);
   color: var(--muted);
+}
+
+html[data-theme="light"] .tool-run-chip.other {
+  background: rgba(110, 99, 86, 0.1);
+  border-color: rgba(110, 99, 86, 0.26);
 }
 
 .tool-run-glyph {
@@ -2120,6 +2531,10 @@ details.tool-disclosure[open] .tool-glyph.todo {
   gap: 6px;
   padding: 8px 8px 10px 12px;
   border-top: 1px solid rgba(120, 138, 168, 0.08);
+}
+
+html[data-theme="light"] .tool-call-run-children {
+  border-top-color: rgba(90, 78, 58, 0.08);
 }
 
 /* Tool cards inside a run group: strip the default side margin so they sit
@@ -2163,7 +2578,9 @@ details.tool-disclosure[open] .tool-glyph.todo {
 
 .approval {
   border-color: rgba(200, 169, 106, 0.42);
-  box-shadow: 0 0 0 1px rgba(200, 169, 106, 0.16), var(--shadow-soft);
+  box-shadow:
+    0 0 0 1px rgba(200, 169, 106, 0.16),
+    var(--shadow-soft);
   display: grid;
   gap: 12px;
 }
@@ -2180,6 +2597,11 @@ details.tool-disclosure[open] .tool-glyph.todo {
   border-radius: var(--radius-sm);
 }
 
+html[data-theme="light"] .approval-plan {
+  background: rgba(235, 230, 218, 0.6);
+  border-left-color: rgba(184, 130, 14, 0.4);
+}
+
 .approval-shell {
   margin: 0;
   padding: 8px 12px;
@@ -2189,6 +2611,10 @@ details.tool-disclosure[open] .tool-glyph.todo {
   font-family: var(--font-mono);
   font-size: 0.88rem;
   overflow-x: auto;
+}
+
+html[data-theme="light"] .approval-shell {
+  background: rgba(228, 222, 208, 0.7);
 }
 
 .approval-pager {
@@ -2221,7 +2647,9 @@ details.tool-disclosure[open] .tool-glyph.todo {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 
 .approval-pager-btn:hover:not(:disabled) {
@@ -2247,6 +2675,7 @@ details.tool-disclosure[open] .tool-glyph.todo {
   word-break: break-word;
 }
 
+/* ─── Markdown & message content ─── */
 .markdown-message {
   display: grid;
   gap: 10px;
@@ -2291,6 +2720,10 @@ details.tool-disclosure[open] .tool-glyph.todo {
   font-size: 0.86em;
 }
 
+html[data-theme="light"] .inline-code {
+  color: var(--text-strong);
+}
+
 .markdown-pre {
   background: var(--bg-input);
   border: 1px solid var(--line);
@@ -2313,6 +2746,7 @@ details.tool-disclosure[open] .tool-glyph.todo {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+/* ─── Scroll controls & floaters ─── */
 .scroll-controls {
   position: sticky;
   bottom: calc(var(--composer-height, 220px) + 12px);
@@ -2335,7 +2769,6 @@ details.tool-disclosure[open] .tool-glyph.todo {
  * `--composer-height` worth of bottom padding so the last message can scroll
  * clear of the composer's overlay.
  * ──────────────────────────────────────────────────────────────────────── */
-
 .composer {
   position: sticky;
   bottom: 0;
@@ -2345,12 +2778,26 @@ details.tool-disclosure[open] .tool-glyph.todo {
   padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  background:
-    linear-gradient(180deg, rgba(20, 24, 33, 0.92), rgba(12, 15, 22, 0.96));
+  background: linear-gradient(
+    180deg,
+    rgba(20, 24, 33, 0.92),
+    rgba(12, 15, 22, 0.96)
+  );
   box-shadow:
     0 -10px 30px rgba(0, 0, 0, 0.36),
     0 0 0 1px rgba(200, 169, 106, 0.04) inset;
   backdrop-filter: blur(22px) saturate(1.2);
+}
+
+html[data-theme="light"] .composer {
+  background: linear-gradient(
+    180deg,
+    rgba(248, 245, 238, 0.96),
+    rgba(240, 236, 226, 0.98)
+  );
+  box-shadow:
+    0 -10px 30px rgba(90, 70, 30, 0.08),
+    0 0 0 1px rgba(166, 122, 34, 0.06) inset;
 }
 
 .composer-resize-handle {
@@ -2376,8 +2823,20 @@ details.tool-disclosure[open] .tool-glyph.todo {
   right: 0;
   bottom: 100%;
   height: 28px;
-  background: linear-gradient(180deg, rgba(8, 11, 16, 0) 0%, rgba(8, 11, 16, 0.66) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(8, 11, 16, 0) 0%,
+    rgba(8, 11, 16, 0.66) 100%
+  );
   pointer-events: none;
+}
+
+html[data-theme="light"] .composer::before {
+  background: linear-gradient(
+    180deg,
+    rgba(244, 241, 235, 0) 0%,
+    rgba(244, 241, 235, 0.7) 100%
+  );
 }
 
 .composer-toprow {
@@ -2418,6 +2877,10 @@ details.tool-disclosure[open] .tool-glyph.todo {
   flex: 0 0 auto;
 }
 
+html[data-theme="light"] .composer-connection {
+  background: rgba(235, 230, 218, 0.75);
+}
+
 .composer-connection::before {
   content: "";
   width: 7px;
@@ -2429,6 +2892,11 @@ details.tool-disclosure[open] .tool-glyph.todo {
 .composer-connection.open::before {
   background: #5ed29c;
   box-shadow: 0 0 0 3px rgba(94, 210, 156, 0.16);
+}
+
+html[data-theme="light"] .composer-connection.open::before {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(37, 122, 80, 0.18);
 }
 
 .composer-connection.connecting::before,
@@ -2451,6 +2919,10 @@ details.tool-disclosure[open] .tool-glyph.todo {
   border: 2px solid rgba(200, 169, 106, 0.22);
   border-top-color: var(--accent);
   animation: session-spinner-spin 0.85s linear infinite;
+}
+
+html[data-theme="light"] .composer-activity-spinner {
+  border-color: rgba(184, 130, 14, 0.3);
 }
 
 @keyframes session-spinner-spin {
@@ -2481,7 +2953,14 @@ details.tool-disclosure[open] .tool-glyph.todo {
   font-size: 0.78rem;
   letter-spacing: 0.02em;
   cursor: pointer;
-  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+html[data-theme="light"] .composer-tune-trigger {
+  background: rgba(235, 230, 218, 0.75);
 }
 
 .composer-tune-trigger:hover:not(:disabled) {
@@ -2490,10 +2969,18 @@ details.tool-disclosure[open] .tool-glyph.todo {
   color: var(--text-strong);
 }
 
+html[data-theme="light"] .composer-tune-trigger:hover:not(:disabled) {
+  background: rgba(220, 210, 190, 0.8);
+}
+
 .composer-tune-trigger.open {
   border-color: var(--line-strong);
   background: rgba(28, 33, 44, 0.8);
   color: var(--text-strong);
+}
+
+html[data-theme="light"] .composer-tune-trigger.open {
+  background: rgba(210, 198, 174, 0.9);
 }
 
 .composer-tune-trigger:focus-visible {
@@ -2540,6 +3027,11 @@ details.tool-disclosure[open] .tool-glyph.todo {
   z-index: 30;
 }
 
+html[data-theme="light"] .composer-tune-popover {
+  background: rgba(252, 249, 242, 0.98);
+  box-shadow: 0 12px 32px rgba(60, 45, 20, 0.15);
+}
+
 .composer-tune-field {
   display: grid;
   gap: 5px;
@@ -2567,6 +3059,11 @@ details.tool-disclosure[open] .tool-glyph.todo {
   cursor: pointer;
 }
 
+html[data-theme="light"] .composer-tune-field select {
+  background: rgba(235, 230, 218, 0.85);
+  color: var(--accent);
+}
+
 .composer-tune-field select:disabled {
   color: var(--muted-soft);
   cursor: progress;
@@ -2584,6 +3081,11 @@ details.tool-disclosure[open] .tool-glyph.todo {
   border: 1px solid rgba(217, 154, 74, 0.32);
   border-radius: 6px;
   background: rgba(217, 154, 74, 0.08);
+}
+
+html[data-theme="light"] .composer-tune-restart {
+  background: rgba(170, 102, 24, 0.08);
+  border-color: rgba(170, 102, 24, 0.3);
 }
 
 .composer-tune-restart p {
@@ -2610,6 +3112,11 @@ details.tool-disclosure[open] .tool-glyph.todo {
   color: var(--warn);
   cursor: pointer;
   white-space: nowrap;
+}
+
+html[data-theme="light"] .composer-tune-restart-apply {
+  background: rgba(170, 102, 24, 0.14);
+  border-color: rgba(170, 102, 24, 0.48);
 }
 
 .composer-tune-restart-apply:hover:not(:disabled) {
@@ -2646,6 +3153,10 @@ details.tool-disclosure[open] .tool-glyph.todo {
   letter-spacing: 0;
 }
 
+html[data-theme="light"] .composer-shortcut kbd {
+  background: rgba(235, 230, 218, 0.85);
+}
+
 .composer-textarea {
   width: 100%;
   min-height: 88px;
@@ -2656,7 +3167,13 @@ details.tool-disclosure[open] .tool-glyph.todo {
   background: rgba(6, 8, 13, 0.65);
   color: var(--text);
   line-height: 1.55;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+html[data-theme="light"] .composer-textarea {
+  background: rgba(248, 245, 238, 0.92);
 }
 
 .composer-textarea:focus {
@@ -2741,7 +3258,10 @@ details.tool-disclosure[open] .tool-glyph.todo {
   background: transparent;
   font-size: 1.05rem;
   letter-spacing: 0.1em;
-  transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease,
+    background-color 120ms ease;
 }
 
 .composer-overflow-trigger:hover:not(:disabled) {
@@ -2750,10 +3270,18 @@ details.tool-disclosure[open] .tool-glyph.todo {
   background: rgba(28, 33, 44, 0.6);
 }
 
+html[data-theme="light"] .composer-overflow-trigger:hover:not(:disabled) {
+  background: rgba(220, 210, 190, 0.6);
+}
+
 .composer-overflow-trigger.open {
   border-color: var(--line-strong);
   color: var(--text-strong);
   background: rgba(28, 33, 44, 0.8);
+}
+
+html[data-theme="light"] .composer-overflow-trigger.open {
+  background: rgba(215, 204, 182, 0.8);
 }
 
 .composer-overflow-menu {
@@ -2772,6 +3300,11 @@ details.tool-disclosure[open] .tool-glyph.todo {
   z-index: 30;
 }
 
+html[data-theme="light"] .composer-overflow-menu {
+  background: rgba(252, 249, 242, 0.98);
+  box-shadow: 0 12px 32px rgba(60, 45, 20, 0.15);
+}
+
 .composer-overflow-item {
   width: 100%;
   display: flex;
@@ -2787,12 +3320,23 @@ details.tool-disclosure[open] .tool-glyph.todo {
   font-size: 0.88rem;
   text-align: left;
   letter-spacing: 0.01em;
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+html[data-theme="light"] .composer-overflow-item {
+  background: rgba(220, 210, 190, 0.45);
 }
 
 .composer-overflow-item:hover:not(:disabled) {
   background: rgba(28, 33, 44, 0.85);
   border-color: var(--line-strong);
+}
+
+html[data-theme="light"] .composer-overflow-item:hover:not(:disabled) {
+  background: rgba(205, 194, 170, 0.85);
 }
 
 .composer-overflow-item.danger {
@@ -2801,9 +3345,17 @@ details.tool-disclosure[open] .tool-glyph.todo {
   border-color: rgba(226, 108, 112, 0.32);
 }
 
+html[data-theme="light"] .composer-overflow-item.danger {
+  background: rgba(184, 48, 56, 0.08);
+}
+
 .composer-overflow-item.danger:hover:not(:disabled) {
   background: rgba(226, 108, 112, 0.18);
   border-color: rgba(226, 108, 112, 0.5);
+}
+
+html[data-theme="light"] .composer-overflow-item.danger:hover:not(:disabled) {
+  background: rgba(184, 48, 56, 0.16);
 }
 
 .composer-overflow-item .glyph {
@@ -2860,7 +3412,11 @@ details.tool-disclosure[open] .tool-glyph.todo {
    * inner highlight on top-left + darker base bottom-right gives the chip
    * just enough dimension to separate from the page underneath. */
   background:
-    radial-gradient(circle at 30% 25%, rgba(143, 179, 214, 0.22), transparent 60%),
+    radial-gradient(
+      circle at 30% 25%,
+      rgba(143, 179, 214, 0.22),
+      transparent 60%
+    ),
     linear-gradient(180deg, rgba(30, 36, 48, 0.96), rgba(14, 17, 24, 0.96));
   border: 1px solid rgba(143, 179, 214, 0.42);
   color: var(--accent-cool);
@@ -2882,6 +3438,26 @@ details.tool-disclosure[open] .tool-glyph.todo {
     box-shadow 200ms ease;
 }
 
+html[data-theme="light"] .scroll-top-pill {
+  background:
+    radial-gradient(
+      circle at 30% 25%,
+      rgba(59, 123, 168, 0.12),
+      transparent 60%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(248, 245, 238, 0.96),
+      rgba(232, 228, 216, 0.96)
+    );
+  box-shadow:
+    0 14px 32px rgba(60, 45, 20, 0.18),
+    0 4px 10px rgba(60, 45, 20, 0.1),
+    0 0 0 1px rgba(59, 123, 168, 0.18),
+    0 0 24px rgba(59, 123, 168, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
 .scroll-top-pill:hover {
   border-color: rgba(143, 179, 214, 0.7);
   color: var(--text-strong);
@@ -2894,12 +3470,28 @@ details.tool-disclosure[open] .tool-glyph.todo {
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
+html[data-theme="light"] .scroll-top-pill:hover {
+  box-shadow:
+    0 18px 38px rgba(60, 45, 20, 0.22),
+    0 6px 14px rgba(60, 45, 20, 0.12),
+    0 0 0 1px rgba(59, 123, 168, 0.32),
+    0 0 32px rgba(59, 123, 168, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
 .scroll-top-pill:active {
   transform: translateY(0);
   box-shadow:
     0 6px 16px rgba(0, 0, 0, 0.45),
     0 0 0 1px rgba(143, 179, 214, 0.32),
     0 0 18px rgba(143, 179, 214, 0.18);
+}
+
+html[data-theme="light"] .scroll-top-pill:active {
+  box-shadow:
+    0 6px 16px rgba(60, 45, 20, 0.12),
+    0 0 0 1px rgba(59, 123, 168, 0.32),
+    0 0 18px rgba(59, 123, 168, 0.08);
 }
 
 /* Floating "↓ Latest" pill that hovers over the top edge of the sticky
@@ -2931,7 +3523,14 @@ details.tool-disclosure[open] .tool-glyph.todo {
   text-transform: uppercase;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42);
   backdrop-filter: blur(14px);
-  transition: transform 160ms ease, border-color 160ms ease;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease;
+}
+
+html[data-theme="light"] .scroll-latest-pill {
+  background: rgba(248, 245, 238, 0.96);
+  box-shadow: 0 12px 28px rgba(60, 45, 20, 0.12);
 }
 
 .scroll-latest-pill:hover {
@@ -2995,9 +3594,22 @@ details.tool-disclosure[open] .tool-glyph.todo {
   border-radius: 4px;
 }
 
+/* ─── Ask user question ─── */
 .ask-user-question {
   border-color: rgba(143, 179, 214, 0.3);
-  background: linear-gradient(180deg, rgba(20, 26, 36, 0.85), rgba(15, 19, 27, 0.7));
+  background: linear-gradient(
+    180deg,
+    rgba(20, 26, 36, 0.85),
+    rgba(15, 19, 27, 0.7)
+  );
+}
+
+html[data-theme="light"] .ask-user-question {
+  background: linear-gradient(
+    180deg,
+    rgba(230, 238, 252, 0.8),
+    rgba(220, 230, 248, 0.65)
+  );
 }
 
 .ask-question + .ask-question {
@@ -3045,12 +3657,23 @@ details.tool-disclosure[open] .tool-glyph.todo {
   border-radius: var(--radius-sm);
   background: rgba(15, 19, 27, 0.55);
   color: var(--text);
-  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+html[data-theme="light"] .ask-option {
+  background: rgba(240, 236, 226, 0.65);
 }
 
 .ask-option:hover:not(:disabled) {
   border-color: var(--line-strong);
   background: rgba(28, 33, 44, 0.7);
+}
+
+html[data-theme="light"] .ask-option:hover:not(:disabled) {
+  background: rgba(220, 210, 190, 0.7);
 }
 
 .ask-option.selected {
@@ -3119,6 +3742,12 @@ details.tool-disclosure[open] .tool-glyph.todo {
   color: rgba(200, 169, 106, 0.95);
 }
 
+html[data-theme="light"] .ask-answer-chip {
+  background: rgba(184, 130, 14, 0.1);
+  border-color: rgba(184, 130, 14, 0.4);
+  color: var(--accent);
+}
+
 .ask-answer-list {
   list-style: none;
   margin: 0;
@@ -3134,6 +3763,11 @@ details.tool-disclosure[open] .tool-glyph.todo {
   border-left: 2px solid rgba(200, 169, 106, 0.4);
   background: rgba(15, 19, 27, 0.4);
   border-radius: var(--radius-sm);
+}
+
+html[data-theme="light"] .ask-answer-item {
+  background: rgba(235, 230, 218, 0.55);
+  border-left-color: rgba(184, 130, 14, 0.38);
 }
 
 .ask-answer-question {
@@ -3203,6 +3837,10 @@ details.tool-disclosure[open] .tool-glyph.todo {
   line-height: 1.4;
 }
 
+html[data-theme="light"] .ask-question-note-input {
+  background: rgba(248, 244, 236, 0.9);
+}
+
 .ask-question-note-input:focus {
   outline: none;
   border-color: rgba(200, 169, 106, 0.55);
@@ -3243,6 +3881,11 @@ details.tool-disclosure[open] .tool-glyph.todo {
   overflow-y: auto;
 }
 
+html[data-theme="light"] .slash-suggestions {
+  background: rgba(252, 249, 242, 0.98);
+  box-shadow: var(--shadow-soft);
+}
+
 .slash-suggestion {
   display: grid;
   grid-template-columns: minmax(0, auto) minmax(0, 1fr);
@@ -3259,6 +3902,10 @@ details.tool-disclosure[open] .tool-glyph.todo {
 
 .slash-suggestion.active {
   background: rgba(143, 179, 214, 0.12);
+}
+
+html[data-theme="light"] .slash-suggestion.active {
+  background: rgba(47, 111, 158, 0.12);
 }
 
 .slash-name {
@@ -3286,6 +3933,10 @@ details.tool-disclosure[open] .tool-glyph.todo {
   min-width: 0;
 }
 
+html[data-theme="light"] .terminal {
+  background: rgba(228, 222, 208, 0.7);
+}
+
 .terminal pre {
   min-width: 0;
   max-width: 100%;
@@ -3308,13 +3959,17 @@ details.tool-disclosure[open] .tool-glyph.todo {
   color: var(--accent);
 }
 
+/* ─── Session list & cards ─── */
 .session-card {
   display: grid;
   gap: 8px;
   min-width: 0;
   width: 100%;
   overflow: hidden;
-  transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+  transition:
+    border-color 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
 }
 
 .session-card:hover {
@@ -3560,8 +4215,10 @@ details.tool-disclosure[open] .tool-glyph.todo {
 
 @media (max-width: 720px) {
   .page-shell {
-    padding: calc(20px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right))
-      calc(40px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
+    padding: calc(20px + env(safe-area-inset-top))
+      calc(12px + env(safe-area-inset-right))
+      calc(40px + env(safe-area-inset-bottom))
+      calc(12px + env(safe-area-inset-left));
     gap: 22px;
   }
 
@@ -3700,7 +4357,6 @@ details.tool-disclosure[open] .tool-glyph.todo {
 }
 
 /* ─── Advanced / CLI-args disclosure widget ────────────────────────────────── */
-
 .advanced-section {
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
@@ -3709,6 +4365,10 @@ details.tool-disclosure[open] .tool-glyph.todo {
   transition:
     border-color 200ms ease,
     box-shadow 200ms ease;
+}
+
+html[data-theme="light"] .advanced-section {
+  background: rgba(222, 213, 198, 0.65);
 }
 
 .advanced-section.open {
@@ -3739,14 +4399,26 @@ details.tool-disclosure[open] .tool-glyph.todo {
   -webkit-tap-highlight-color: transparent;
 }
 
+html[data-theme="light"] .advanced-toggle {
+  color: var(--muted);
+}
+
 .advanced-toggle:hover {
   color: var(--muted);
   background: rgba(255, 255, 255, 0.025);
 }
 
+html[data-theme="light"] .advanced-toggle:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
 .advanced-section.open .advanced-toggle {
   color: var(--accent);
   border-bottom: 1px solid rgba(200, 169, 106, 0.15);
+}
+
+html[data-theme="light"] .advanced-section.open .advanced-toggle {
+  color: var(--accent);
 }
 
 /* Gear icon */
@@ -3842,6 +4514,10 @@ details.tool-disclosure[open] .tool-glyph.todo {
   gap: 5px;
 }
 
+html[data-theme="light"] .advanced-args-field span {
+  color: var(--muted);
+}
+
 .advanced-args-field span::before {
   content: "$";
   color: var(--accent);
@@ -3865,10 +4541,21 @@ details.tool-disclosure[open] .tool-glyph.todo {
     box-shadow 140ms ease;
 }
 
+html[data-theme="light"] .advanced-args-field textarea {
+  background: rgba(235, 230, 218, 0.9) !important;
+  border-color: rgba(90, 78, 58, 0.2) !important;
+  color: var(--text-strong);
+}
+
 .advanced-args-field textarea:focus {
   border-color: rgba(200, 169, 106, 0.45) !important;
   box-shadow: 0 0 0 3px rgba(200, 169, 106, 0.09) !important;
   outline: none;
+}
+
+html[data-theme="light"] .advanced-args-field textarea:focus {
+  border-color: rgba(184, 130, 14, 0.45) !important;
+  box-shadow: 0 0 0 3px rgba(184, 130, 14, 0.09) !important;
 }
 
 .advanced-args-field textarea:disabled {
@@ -3879,6 +4566,11 @@ details.tool-disclosure[open] .tool-glyph.todo {
   color: var(--muted-soft);
   opacity: 0.55;
   font-style: italic;
+}
+
+html[data-theme="light"] .advanced-args-field textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.75;
 }
 
 /* ── Warning line ── */
@@ -3892,6 +4584,11 @@ details.tool-disclosure[open] .tool-glyph.todo {
   font-family: var(--font-mono);
   letter-spacing: 0.03em;
   line-height: 1.55;
+}
+
+html[data-theme="light"] .advanced-warning {
+  color: var(--warn);
+  opacity: 1;
 }
 
 .advanced-warning::before {
@@ -3922,189 +4619,6 @@ details.tool-disclosure[open] .tool-glyph.todo {
     font-size: 0.88rem !important;
   }
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
- * Light theme
- * :root establishes the dark default. These selectors override tokens and
- * patch components that hard-code dark RGBA values instead of CSS variables.
- * ════════════════════════════════════════════════════════════════════════════ */
-
-html[data-theme="light"] {
-  background-color: var(--bg-deep);
-
-  --bg-base:       #f4f1eb;
-  --bg-deep:       #ede9e0;
-  --bg-card:       rgba(255, 253, 247, 0.88);
-  --bg-card-soft:  rgba(248, 244, 236, 0.78);
-  --bg-input:      rgba(255, 252, 245, 0.90);
-  --line:          rgba(90, 78, 58, 0.13);
-  --line-strong:   rgba(90, 78, 58, 0.26);
-  --text:          #1c1914;
-  --text-strong:   #0e0c09;
-  --muted:         #6e6356;
-  --muted-soft:    #a09380;
-  --accent:        #b8820e;
-  --accent-strong: #d49a14;
-  --accent-cool:   #2f6f9e;
-  --danger:        #b83038;
-  --warn:          #aa6618;
-  --success:       #257a50;
-  --todo-glyph:    #7040b0;
-  --shadow:        0 24px 60px rgba(60, 45, 20, 0.10);
-  --shadow-soft:   0 6px 18px rgba(60, 45, 20, 0.08);
-}
-
-/* ── Page canvas ── */
-html[data-theme="light"] body {
-  background:
-    linear-gradient(180deg, #f7f4ee 0%, #f4f0e8 60%, #efe9d8 100%);
-  background-color: var(--bg-deep);
-}
-
-html[data-theme="light"] body::before {
-  background:
-    radial-gradient(900px 480px at 12% -8%, rgba(200, 169, 106, 0.14), transparent 60%),
-    radial-gradient(820px 540px at 110% 8%,  rgba(59, 123, 168, 0.09),  transparent 65%);
-}
-
-/* ── App bar ── */
-html[data-theme="light"] .app-bar {
-  background: linear-gradient(180deg, rgba(244, 241, 235, 0.94), rgba(237, 233, 224, 0.90));
-}
-
-/* ── Session header ── */
-html[data-theme="light"] .session-header {
-  background:
-    radial-gradient(180% 100% at 0% 0%, rgba(166, 122, 34, 0.07), transparent 60%),
-    linear-gradient(180deg, rgba(248, 245, 238, 0.92), rgba(240, 236, 226, 0.88));
-}
-
-/* ── Buttons ── */
-html[data-theme="light"] .secondary {
-  background: rgba(220, 210, 190, 0.70);
-}
-
-html[data-theme="light"] .secondary:hover:not(:disabled) {
-  background: rgba(205, 194, 170, 0.90);
-}
-
-/* ── Import thread list ── */
-html[data-theme="light"] .import-thread-list {
-  background: linear-gradient(180deg, rgba(248, 244, 236, 0.80), rgba(240, 236, 226, 0.60));
-}
-
-html[data-theme="light"] .import-thread-row:hover {
-  background: rgba(220, 210, 190, 0.42);
-}
-
-/* ── Composer ── */
-html[data-theme="light"] .composer {
-  background: linear-gradient(180deg, rgba(248, 245, 238, 0.96), rgba(240, 236, 226, 0.98));
-  box-shadow:
-    0 -10px 30px rgba(90, 70, 30, 0.08),
-    0 0 0 1px rgba(166, 122, 34, 0.06) inset;
-}
-
-html[data-theme="light"] .composer::before {
-  background: linear-gradient(
-    180deg,
-    rgba(244, 241, 235, 0) 0%,
-    rgba(244, 241, 235, 0.70) 100%
-  );
-}
-
-html[data-theme="light"] .composer-tune-popover {
-  background: rgba(252, 249, 242, 0.98);
-  box-shadow: 0 12px 32px rgba(60, 45, 20, 0.15);
-}
-
-html[data-theme="light"] .composer-tune-field select {
-  background: rgba(235, 230, 218, 0.85);
-  color: var(--accent);
-}
-
-html[data-theme="light"] .composer-overflow-trigger:hover:not(:disabled) {
-  background: rgba(220, 210, 190, 0.60);
-}
-
-html[data-theme="light"] .composer-overflow-trigger.open {
-  background: rgba(215, 204, 182, 0.80);
-}
-
-html[data-theme="light"] .composer-overflow-menu {
-  background: rgba(252, 249, 242, 0.98);
-  box-shadow: 0 12px 32px rgba(60, 45, 20, 0.15);
-}
-
-html[data-theme="light"] .composer-overflow-item {
-  background: rgba(220, 210, 190, 0.45);
-}
-
-html[data-theme="light"] .composer-overflow-item:hover:not(:disabled) {
-  background: rgba(205, 194, 170, 0.85);
-}
-
-html[data-theme="light"] .composer-overflow-item.danger {
-  background: rgba(184, 48, 56, 0.08);
-}
-
-html[data-theme="light"] .composer-overflow-item.danger:hover:not(:disabled) {
-  background: rgba(184, 48, 56, 0.16);
-}
-
-/* ── Scroll pills ── */
-html[data-theme="light"] .scroll-top-pill {
-  background:
-    radial-gradient(circle at 30% 25%, rgba(59, 123, 168, 0.12), transparent 60%),
-    linear-gradient(180deg, rgba(248, 245, 238, 0.96), rgba(232, 228, 216, 0.96));
-  box-shadow:
-    0 14px 32px rgba(60, 45, 20, 0.18),
-    0 4px 10px rgba(60, 45, 20, 0.10),
-    0 0 0 1px rgba(59, 123, 168, 0.18),
-    0 0 24px rgba(59, 123, 168, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.70);
-}
-
-html[data-theme="light"] .scroll-top-pill:hover {
-  box-shadow:
-    0 18px 38px rgba(60, 45, 20, 0.22),
-    0 6px 14px rgba(60, 45, 20, 0.12),
-    0 0 0 1px rgba(59, 123, 168, 0.32),
-    0 0 32px rgba(59, 123, 168, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.80);
-}
-
-html[data-theme="light"] .scroll-top-pill:active {
-  box-shadow:
-    0 6px 16px rgba(60, 45, 20, 0.12),
-    0 0 0 1px rgba(59, 123, 168, 0.32),
-    0 0 18px rgba(59, 123, 168, 0.08);
-}
-
-html[data-theme="light"] .scroll-latest-pill {
-  background: rgba(248, 245, 238, 0.96);
-  box-shadow: 0 12px 28px rgba(60, 45, 20, 0.12);
-}
-
-/* ── Ask question options ── */
-html[data-theme="light"] .ask-user-question {
-  background: linear-gradient(180deg, rgba(230, 238, 252, 0.80), rgba(220, 230, 248, 0.65));
-}
-
-html[data-theme="light"] .ask-option {
-  background: rgba(240, 236, 226, 0.65);
-}
-
-html[data-theme="light"] .ask-option:hover:not(:disabled) {
-  background: rgba(220, 210, 190, 0.70);
-}
-
-/* ── Advanced / CLI args section ── (overrides in later block) */
-html[data-theme="light"] .advanced-toggle:hover {
-  background: rgba(0, 0, 0, 0.03);
-}
-
-/* ── Theme toggle button ── */
 .theme-toggle {
   display: inline-flex;
   align-items: center;
@@ -4131,297 +4645,7 @@ html[data-theme="light"] .advanced-toggle:hover {
   background: var(--bg-card);
 }
 
-/* ── Primary button — pastel sandy gold matches the creamy palette ── */
-html[data-theme="light"] .primary {
-  background: linear-gradient(180deg, #e0bb73, #c8a96a);
-  border-color: rgba(180, 155, 90, 0.55);
-}
-
-/* ── Backend badges — boost opacity so they read on ivory ── */
-html[data-theme="light"] .badge.codex {
-  background: rgba(47, 111, 158, 0.12);
-  border-color: rgba(47, 111, 158, 0.32);
-}
-
-html[data-theme="light"] .badge.claude_code {
-  background: rgba(184, 130, 14, 0.12);
-  border-color: rgba(184, 130, 14, 0.30);
-}
-
-html[data-theme="light"] .badge.opencode {
-  background: rgba(110, 99, 86, 0.12);
-  color: var(--muted);
-  border-color: rgba(110, 99, 86, 0.28);
-}
-
-html[data-theme="light"] .badge.neutral,
-html[data-theme="light"] .badge.transport.tmux {
-  background: rgba(110, 99, 86, 0.10);
-}
-
-/* ── Advanced textarea (uses !important in base) ── */
-html[data-theme="light"] .advanced-args-field textarea {
-  background: rgba(235, 230, 218, 0.90) !important;
-  border-color: rgba(90, 78, 58, 0.20) !important;
-  color: var(--text-strong);
-}
-
-html[data-theme="light"] .advanced-args-field textarea:focus {
-  border-color: rgba(184, 130, 14, 0.45) !important;
-  box-shadow: 0 0 0 3px rgba(184, 130, 14, 0.09) !important;
-}
-
-html[data-theme="light"] .advanced-args-field textarea::placeholder {
-  color: var(--muted);
-  opacity: 0.75;
-}
-
-/* ── Import thread footer ── */
-html[data-theme="light"] .import-thread-footer {
-  background: rgba(220, 210, 190, 0.45);
-}
-
-html[data-theme="light"] .import-thread-chip {
-  background: rgba(47, 111, 158, 0.10);
-  border-color: rgba(47, 111, 158, 0.24);
-}
-
-/* ── Session pulse (live status chip) ── */
-html[data-theme="light"] .session-pulse {
-  background: rgba(240, 236, 226, 0.80);
-}
-
-html[data-theme="light"] .session-pulse.open {
-  background: rgba(37, 122, 80, 0.08);
-  border-color: rgba(37, 122, 80, 0.28);
-}
-
-html[data-theme="light"] .session-pulse.open .session-pulse-dot {
-  background: var(--success);
-  box-shadow: 0 0 0 0 rgba(37, 122, 80, 0.40);
-}
-
-html[data-theme="light"] .session-pulse.open.running .session-pulse-dot {
-  animation-name: pulse-running-light;
-}
-
-@keyframes pulse-running-light {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(37, 122, 80, 0.45); }
-  50%       { box-shadow: 0 0 0 6px rgba(37, 122, 80, 0); }
-}
-
-html[data-theme="light"] .session-pulse.open.dim {
-  background: rgba(240, 236, 226, 0.80);
-  border-color: var(--line);
-}
-
-html[data-theme="light"] .session-pulse.open.warn {
-  background: rgba(170, 102, 24, 0.08);
-  border-color: rgba(170, 102, 24, 0.30);
-}
-
-html[data-theme="light"] .session-pulse.connecting,
-html[data-theme="light"] .session-pulse.reconnecting {
-  background: rgba(170, 102, 24, 0.08);
-  border-color: rgba(170, 102, 24, 0.28);
-}
-
-html[data-theme="light"] .session-pulse.connecting .session-pulse-dot,
-html[data-theme="light"] .session-pulse.reconnecting .session-pulse-dot {
-  animation-name: pulse-warn-light;
-}
-
-@keyframes pulse-warn-light {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(170, 102, 24, 0.50); }
-  50%       { box-shadow: 0 0 0 5px rgba(170, 102, 24, 0); }
-}
-
-/* ── Composer textarea ── */
-html[data-theme="light"] .composer-textarea {
-  background: rgba(248, 245, 238, 0.92);
-}
-
-/* ── Composer connection pill ── */
-html[data-theme="light"] .composer-connection {
-  background: rgba(235, 230, 218, 0.75);
-}
-
-/* ── Composer tune trigger (model / effort picker) ── */
-html[data-theme="light"] .composer-tune-trigger {
-  background: rgba(235, 230, 218, 0.75);
-}
-
-html[data-theme="light"] .composer-tune-trigger:hover:not(:disabled) {
-  background: rgba(220, 210, 190, 0.80);
-}
-
-html[data-theme="light"] .composer-tune-trigger.open {
-  background: rgba(210, 198, 174, 0.90);
-}
-
-/* ── Keyboard shortcut hint (⌘↵) ── */
-html[data-theme="light"] .composer-shortcut kbd {
-  background: rgba(235, 230, 218, 0.85);
-}
-
-/* ── Tool call bubbles (Codex) ── */
-html[data-theme="light"] .transcript.codex.tool_call:not(.ask-user-question),
-html[data-theme="light"] .transcript.codex.tool_result,
-html[data-theme="light"] .transcript.codex.tool_pair {
-  background: rgba(235, 230, 218, 0.55);
-  border-color: rgba(90, 78, 58, 0.14);
-}
-
-html[data-theme="light"] .transcript.codex.tool_call:not(.ask-user-question):hover,
-html[data-theme="light"] .transcript.codex.tool_result:hover,
-html[data-theme="light"] .transcript.codex.tool_pair:hover {
-  background: rgba(220, 210, 190, 0.65);
-  border-color: rgba(90, 78, 58, 0.22);
-}
-
-html[data-theme="light"] details.tool-disclosure[open] {
-  background: rgba(220, 210, 190, 0.55);
-}
-
-/* ── Tool call run group (collapsed/expanded wrapper) ── */
-html[data-theme="light"] .tool-call-run {
-  background: rgba(235, 230, 218, 0.50);
-  border-color: rgba(90, 78, 58, 0.12);
-}
-
-html[data-theme="light"] .tool-call-run[open] {
-  background: rgba(228, 222, 208, 0.65);
-  border-color: rgba(90, 78, 58, 0.16);
-}
-
-html[data-theme="light"] .tool-call-run-children {
-  border-top-color: rgba(90, 78, 58, 0.08);
-}
-
-/* Chip borders: remap dark-mode tints to light-mode semantic colors. */
-html[data-theme="light"] .tool-run-chip.bash {
-  background: rgba(37, 122, 80, 0.10);
-  border-color: rgba(37, 122, 80, 0.30);
-}
-
-html[data-theme="light"] .tool-run-chip.edit {
-  background: rgba(184, 130, 14, 0.14);
-  border-color: rgba(184, 130, 14, 0.48);
-}
-
-html[data-theme="light"] .tool-run-chip.read {
-  background: rgba(47, 111, 158, 0.10);
-  border-color: rgba(47, 111, 158, 0.30);
-}
-
-html[data-theme="light"] .tool-run-chip.other {
-  background: rgba(110, 99, 86, 0.10);
-  border-color: rgba(110, 99, 86, 0.26);
-}
-
-/* ── User input bubble — warm cream, gold inset, no jarring blue ── */
-html[data-theme="light"] .transcript.codex.user_input {
-  background: linear-gradient(180deg, rgba(242, 234, 216, 0.90), rgba(232, 222, 200, 0.86));
-  border-color: rgba(90, 78, 58, 0.22);
-  box-shadow: var(--shadow-soft), inset -2px 0 0 rgba(184, 130, 14, 0.32);
-}
-
-/* ── Approval plan / shell code block ── */
-html[data-theme="light"] .approval-plan {
-  background: rgba(235, 230, 218, 0.60);
-  border-left-color: rgba(184, 130, 14, 0.40);
-}
-
-html[data-theme="light"] .approval-shell {
-  background: rgba(228, 222, 208, 0.70);
-}
-
-html[data-theme="light"] .terminal {
-  background: rgba(228, 222, 208, 0.70);
-}
-
-/* ── Transcript empty state ── */
-html[data-theme="light"] .transcript-empty {
-  background: rgba(235, 230, 218, 0.45);
-}
-
-/* ── Segmented controls (Chat/Terminal, All/Important) ── */
-html[data-theme="light"] .segmented {
-  background: rgba(222, 213, 196, 0.55);
-}
-
-html[data-theme="light"] .segmented-item.active {
-  background: linear-gradient(180deg, rgba(184, 130, 14, 0.20), rgba(184, 130, 14, 0.11));
-  box-shadow: inset 0 0 0 1px rgba(184, 130, 14, 0.30);
-}
-
-html[data-theme="light"] .segmented-quiet .segmented-item.active {
-  background: rgba(47, 111, 158, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(47, 111, 158, 0.30);
-}
-
-/* ── Tool call pre output — hardcoded light-grey text colors ── */
-html[data-theme="light"] .transcript.codex.tool_call pre.shell,
-html[data-theme="light"] .transcript.codex.tool_result pre.output,
-html[data-theme="light"] .tool-pair-body pre.shell,
-html[data-theme="light"] .tool-pair-body pre.output {
-  color: var(--text);
-}
-
-/* ── Advanced section ── */
-html[data-theme="light"] .advanced-section {
-  background: rgba(222, 213, 198, 0.65);
-}
-
-html[data-theme="light"] .advanced-toggle {
-  color: var(--muted);
-}
-
-html[data-theme="light"] .advanced-section.open .advanced-toggle {
-  color: var(--accent);
-}
-
-html[data-theme="light"] .advanced-args-field span {
-  color: var(--muted);
-}
-
-html[data-theme="light"] .advanced-warning {
-  color: var(--warn);
-  opacity: 1;
-}
-
-/* ── Transport / fidelity badges ── */
-html[data-theme="light"] .badge.transport.opencode_http {
-  background: rgba(90, 100, 120, 0.10);
-  color: var(--muted);
-  border-color: rgba(90, 100, 120, 0.26);
-}
-
-html[data-theme="light"] .badge.transport.codex_app_server,
-html[data-theme="light"] .badge.transport.claude_cli,
-html[data-theme="light"] .badge.fidelity.structured {
-  background: rgba(184, 130, 14, 0.12);
-  border-color: rgba(184, 130, 14, 0.30);
-}
-
-html[data-theme="light"] .badge.fidelity.heuristic {
-  background: rgba(170, 102, 24, 0.12);
-  border-color: rgba(170, 102, 24, 0.26);
-}
-
-/* ── User bubble send-pending animation — remap blue glow to gold ── */
-html[data-theme="light"] .transcript.codex.user_input.pending-optimistic.persisted::after {
-  background: linear-gradient(
-    180deg,
-    rgba(184, 130, 14, 0.12),
-    rgba(184, 130, 14, 0.65),
-    rgba(184, 130, 14, 0.12)
-  );
-  box-shadow: 0 0 0 1px rgba(184, 130, 14, 0.12), 0 0 18px rgba(184, 130, 14, 0.20);
-}
-
-/* ─── Search Bar ─────────────────────────────────────────────────────────── */
-
+/* ─── Search bar & help tooltip ─── */
 .search-bar {
   position: relative;
   display: flex;
@@ -4445,14 +4669,14 @@ html[data-theme="light"] .transcript.codex.user_input.pending-optimistic.persist
   color: var(--fg);
 }
 
+html[data-theme="light"] .search-bar input {
+  background: rgba(255, 255, 255, 0.6);
+}
+
 .search-bar input:focus {
   outline: none;
   border-color: var(--line-strong);
   background: rgba(10, 13, 18, 0.5);
-}
-
-html[data-theme="light"] .search-bar input {
-  background: rgba(255, 255, 255, 0.6);
 }
 
 html[data-theme="light"] .search-bar input:focus {
@@ -4508,7 +4732,7 @@ html[data-theme="light"] .search-bar input:focus {
 html[data-theme="light"] .help-tooltip {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   background: rgba(0, 0, 0, 0.08);
-  border-color: rgba(0, 0, 0, 0.10);
+  border-color: rgba(0, 0, 0, 0.1);
 }
 
 .help-tooltip p {
@@ -4544,8 +4768,7 @@ html[data-theme="light"] .help-tooltip {
   margin-top: 8px;
 }
 
-/* ─── Session Switcher ───────────────────────────────────────────────────── */
-
+/* ─── Session switcher modal ─── */
 .session-switcher-backdrop {
   position: fixed;
   top: 0;
@@ -4578,6 +4801,11 @@ html[data-theme="light"] .help-tooltip {
   overflow: hidden;
 }
 
+html[data-theme="light"] .session-switcher-modal {
+  background: rgba(252, 249, 242, 0.98);
+  box-shadow: 0 16px 48px rgba(60, 45, 20, 0.2);
+}
+
 .session-switcher-search {
   padding: 14px 14px 10px;
   border-bottom: 1px solid var(--line);
@@ -4585,6 +4813,10 @@ html[data-theme="light"] .help-tooltip {
 
 .session-switcher-search input {
   background: rgba(8, 11, 16, 0.5);
+}
+
+html[data-theme="light"] .session-switcher-search input {
+  background: rgba(240, 236, 226, 0.7);
 }
 
 .session-switcher-list {
@@ -4643,8 +4875,16 @@ html[data-theme="light"] .help-tooltip {
   background: rgba(255, 255, 255, 0.03);
 }
 
+html[data-theme="light"] .session-switcher-row:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
 .session-switcher-row.selected {
   background: rgba(255, 255, 255, 0.08);
+}
+
+html[data-theme="light"] .session-switcher-row.selected {
+  background: rgba(0, 0, 0, 0.06);
 }
 
 .session-switcher-rail {
@@ -4653,17 +4893,21 @@ html[data-theme="light"] .help-tooltip {
   border-radius: 2px;
   background: var(--muted-soft);
 }
+
 .session-switcher-rail.running,
 .session-switcher-rail.waiting_input {
   background: var(--accent-cool);
 }
+
 .session-switcher-rail.idle {
   background: var(--success);
 }
+
 .session-switcher-rail.error,
 .session-switcher-rail.interrupted {
   background: var(--warn);
 }
+
 .session-switcher-rail.exited {
   background: var(--muted);
   opacity: 0.5;
@@ -4713,6 +4957,10 @@ html[data-theme="light"] .help-tooltip {
   text-align: center;
 }
 
+html[data-theme="light"] .session-switcher-footer {
+  background: rgba(240, 236, 226, 0.6);
+}
+
 .session-switcher-pagination {
   display: flex;
   align-items: center;
@@ -4723,6 +4971,7 @@ html[data-theme="light"] .help-tooltip {
   font-size: 0.72rem;
   color: var(--muted);
 }
+
 .session-switcher-pagination button {
   padding: 4px 8px;
   border-radius: var(--radius-sm);
@@ -4732,10 +4981,22 @@ html[data-theme="light"] .help-tooltip {
   cursor: pointer;
   transition: all 120ms ease;
 }
+
+html[data-theme="light"] .session-switcher-pagination button {
+  background: rgba(220, 210, 190, 0.45);
+}
+
 .session-switcher-pagination button:hover:not(:disabled) {
   background: rgba(28, 33, 44, 0.85);
   border-color: var(--line-strong);
 }
+
+html[data-theme="light"]
+  .session-switcher-pagination
+  button:hover:not(:disabled) {
+  background: rgba(205, 194, 170, 0.85);
+}
+
 .session-switcher-pagination button:disabled {
   opacity: 0.45;
   cursor: default;
@@ -4756,24 +5017,4 @@ html[data-theme="light"] .help-tooltip {
   .session-switcher-footer {
     display: none;
   }
-}
-
-html[data-theme="light"] .session-switcher-modal {
-  background: rgba(252, 249, 242, 0.98);
-  box-shadow: 0 16px 48px rgba(60, 45, 20, 0.2);
-}
-html[data-theme="light"] .session-switcher-footer {
-  background: rgba(240, 236, 226, 0.6);
-}
-html[data-theme="light"] .session-switcher-pagination button {
-  background: rgba(220, 210, 190, 0.45);
-}
-html[data-theme="light"] .session-switcher-pagination button:hover:not(:disabled) {
-  background: rgba(205, 194, 170, 0.85);
-}
-html[data-theme="light"] .session-switcher-row:hover {
-  background: rgba(0, 0, 0, 0.02);
-}
-html[data-theme="light"] .session-switcher-row.selected {
-  background: rgba(0, 0, 0, 0.06);
 }

@@ -42,7 +42,8 @@ import {
   useBackendCatalog,
 } from "@/lib/backends";
 import { clearToken } from "@/lib/store";
-import { normalizeToolName } from "@/lib/events";
+import { normalizeToolName, parseEvent, type EventDiffPreview } from "@/lib/events";
+import { DiffPreview } from "@/components/DiffPreview";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import {
   AskAnswerEntry,
@@ -2499,6 +2500,7 @@ function UsageCard({ summary }: { summary: UsageSummary }) {
 }
 
 function ApprovalCard({ event, onDecide, supportsNote = false }: ApprovalCardProps) {
+  const diffPreview = parseEvent(event).diffPreview;
   const toolName = normalizeToolName(
     typeof event.metadata.tool_name === "string" ? event.metadata.tool_name : null
   );
@@ -2526,6 +2528,7 @@ function ApprovalCard({ event, onDecide, supportsNote = false }: ApprovalCardPro
         eventText={event.text}
         toolName={toolName}
         toolInput={toolInput}
+        diffPreview={diffPreview}
       />
       {supportsNote ? (
         noteOpen ? (
@@ -2599,11 +2602,21 @@ function ApprovalCardBody({
   eventText,
   toolName,
   toolInput,
+  diffPreview,
 }: {
   eventText: string;
   toolName: string | null;
   toolInput: Record<string, unknown> | null;
+  diffPreview?: EventDiffPreview | null;
 }) {
+  if (diffPreview) {
+    return (
+      <>
+        <p className="approval-prompt">{eventText}</p>
+        <DiffPreview preview={diffPreview} />
+      </>
+    );
+  }
   if (toolName === "ExitPlanMode" && typeof toolInput?.plan === "string") {
     return (
       <>

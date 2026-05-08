@@ -10,6 +10,7 @@ import {
   MeResponse,
   ScheduleCreateRequest,
   ScheduledSession,
+  SessionCommandInvocation,
   SessionEnvelope,
   SessionRecord,
 } from "@/lib/types";
@@ -489,6 +490,7 @@ export async function sendInput(
   token: string,
   sessionId: string,
   text: string,
+  command?: SessionCommandInvocation,
 ): Promise<void> {
   const response = await fetch(`${host}/api/sessions/${sessionId}/input`, {
     method: "POST",
@@ -496,7 +498,7 @@ export async function sendInput(
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ text, submit: true }),
+    body: JSON.stringify({ text, submit: true, command }),
   });
   await ensureOk(response, "failed to send input");
 }

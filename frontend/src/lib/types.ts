@@ -93,6 +93,14 @@ export interface CommandCompletion {
   metadata: Record<string, unknown>;
 }
 
+export interface SessionCommandInvocation {
+  completion_id: string;
+  name: string;
+  arguments: string;
+  dispatch: CompletionDispatch;
+  metadata: Record<string, unknown>;
+}
+
 export interface BackendCapabilities {
   is_structured: boolean;
   supports_resume: boolean;

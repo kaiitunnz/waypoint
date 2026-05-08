@@ -43,6 +43,7 @@ class FakeStructuredAdapter:
     def __init__(self, pending: bool = False) -> None:
         self.pending = pending
         self.inputs: list[tuple[str, str]] = []
+        self.input_items: list[tuple[str, list[dict[str, Any]]]] = []
         self.turn_params_calls: list[tuple[str, dict[str, Any] | None]] = []
         self.approval_calls: list[tuple[str, str]] = []
 
@@ -51,6 +52,11 @@ class FakeStructuredAdapter:
     ) -> None:
         self.inputs.append((session_id, text))
         self.turn_params_calls.append((session_id, turn_params))
+
+    async def send_input_items(
+        self, session_id: str, items: list[dict[str, Any]]
+    ) -> None:
+        self.input_items.append((session_id, items))
 
     def has_pending_approval(self, session_id: str) -> bool:
         return self.pending
@@ -400,6 +406,8 @@ async def test_list_command_completions_claude_uses_stored_init_commands(
             sequence=storage.next_sequence(session.id),
         )
     )
+    await _claude_plugin(runtime).restore_session(runtime, session)
+    session = runtime.get_session(session.id)
 
     completions = await runtime.list_command_completions(
         session.id, trigger="/", prefix="/us", force_refresh=True
@@ -481,16 +489,9 @@ async def test_emit_adapter_event_refreshes_completion_cache(
     runtime._completion_cache[(session.id, "/")] = []
     runtime._completion_cache_updated_at[(session.id, "/")] = 1.0
 
-    await runtime._emit_adapter_event(
+    runtime.handle_completion_source_init(
         session.id,
-        EventKind.SYSTEM_NOTE,
-        "Claude session ready",
-        {
-            "method": "system.init",
-            "payload": {"slash_commands": ["clear", "compact", "usage"]},
-            "refresh_completions": True,
-        },
-        SessionStatus.RUNNING,
+        {"slash_commands": ["clear", "compact", "usage"]},
     )
     tasks = list(runtime._completion_refresh_tasks.values())
     if tasks:
@@ -548,6 +549,76 @@ async def test_list_command_completions_uses_codex_skills(tmp_path) -> None:
     assert [item.name for item in completions] == ["humanizer"]
     assert completions[0].replacement == "$humanizer "
     assert completions[0].dispatch == CompletionDispatch.STRUCTURED_SKILL
+
+
+@pytest.mark.asyncio
+async def test_handle_input_uses_server_completion_metadata_for_codex_skill(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeStructuredAdapter()
+    _codex_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(settings)
+    storage.create_session(session)
+    runtime._completion_cache[(session.id, "$")] = [
+        CommandCompletion(
+            id="codex:skill:humanizer",
+            trigger="$",
+            replacement="$humanizer ",
+            name="humanizer",
+            description="Humanize prose",
+            kind="skill",
+            source="codex_skill",
+            dispatch=CompletionDispatch.STRUCTURED_SKILL,
+            metadata={"path": "/trusted/SKILL.md"},
+        )
+    ]
+    request = SessionInputRequest(
+        text="$humanizer please",
+        command={
+            "completion_id": "codex:skill:humanizer",
+            "name": "humanizer",
+            "arguments": "please",
+            "dispatch": "structured_skill",
+            "metadata": {"path": "/attacker/SKILL.md"},
+        },
+    )
+
+    await runtime.handle_input(session.id, request)
+
+    assert fake.input_items == [
+        (
+            session.id,
+            [
+                {"type": "skill", "name": "humanizer", "path": "/trusted/SKILL.md"},
+                {"type": "text", "text": "please"},
+            ],
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_handle_input_drops_unknown_completion_invocation(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeStructuredAdapter()
+    _codex_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(settings)
+    storage.create_session(session)
+    request = SessionInputRequest(
+        text="$humanizer please",
+        command={
+            "completion_id": "codex:skill:missing",
+            "name": "humanizer",
+            "arguments": "please",
+            "dispatch": "structured_skill",
+            "metadata": {"path": "/attacker/SKILL.md"},
+        },
+    )
+
+    await runtime.handle_input(session.id, request)
+
+    assert fake.input_items == []
+    assert fake.inputs == [(session.id, "$humanizer please")]
 
 
 @pytest.mark.asyncio

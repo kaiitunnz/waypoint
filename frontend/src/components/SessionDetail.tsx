@@ -92,6 +92,7 @@ const LOCAL_SLASH_COMPLETIONS: ReadonlyArray<CommandCompletion> = [
   },
 ];
 const COMPLETION_REFRESH_POLL_MS = 750;
+const COMPLETION_FETCH_DEBOUNCE_MS = 180;
 
 function completionCommand(entry: CommandCompletion): string {
   return `${entry.trigger}${entry.name}`;
@@ -1345,8 +1346,10 @@ const ReplyComposer = memo(function ReplyComposer({
       return;
     }
     const controller = new AbortController();
+    let debounceTimer: number | null = null;
     let pollTimer: number | null = null;
     const loadCompletions = () => {
+      debounceTimer = null;
       fetchSessionCompletionsResponse(
         host,
         token,
@@ -1375,9 +1378,15 @@ const ReplyComposer = memo(function ReplyComposer({
           setBackendCompletions([]);
         });
     };
-    loadCompletions();
+    debounceTimer = window.setTimeout(
+      loadCompletions,
+      COMPLETION_FETCH_DEBOUNCE_MS,
+    );
     return () => {
       controller.abort();
+      if (debounceTimer !== null) {
+        window.clearTimeout(debounceTimer);
+      }
       if (pollTimer !== null) {
         window.clearTimeout(pollTimer);
       }

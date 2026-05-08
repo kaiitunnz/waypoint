@@ -56,6 +56,7 @@ from waypoint.schemas import (
     CompletionDispatch,
     SessionCreateRequest,
     SessionEnvelope,
+    SessionInputRequest,
     SessionRecord,
     SessionSource,
     SessionStatus,
@@ -67,28 +68,6 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger("waypoint.backends.claude_code")
-
-
-_CLAUDE_RUNTIME_COMMAND_DESCRIPTIONS: dict[str, str] = {
-    "batch": "Run a batch of Claude Code tasks",
-    "claude-api": "Configure or inspect Claude API usage",
-    "clear": "Clear the Claude Code conversation",
-    "compact": "Compact Claude Code context",
-    "context": "Show Claude Code context usage",
-    "debug": "Show Claude Code debugging information",
-    "fewer-permission-prompts": "Reduce permission prompt frequency",
-    "heapdump": "Write a Claude Code heap dump for debugging",
-    "insights": "Show Claude Code usage insights",
-    "init": "Create or update Claude Code project instructions",
-    "loop": "Run Claude Code in a repeated loop",
-    "review": "Review code changes",
-    "schedule": "Create or manage scheduled Claude Code work",
-    "security-review": "Run a security-focused review",
-    "simplify": "Simplify the current task or implementation",
-    "team-onboarding": "Create team onboarding guidance",
-    "update-config": "Update Claude Code configuration",
-    "usage": "Show Claude Code usage for this session",
-}
 
 
 class ClaudeCodePluginConfig(PluginConfig):
@@ -183,6 +162,7 @@ class ClaudeCodePlugin:
             hook_secret=hook.secret,
             hook_url=hook_url,
             default_hook_timeout_seconds=self._config(runtime).hook_timeout_seconds,
+            on_init=runtime.handle_completion_source_init,
         )
         self.thread_enumerator = RemoteClaudeThreadEnumerator(
             hook.thread_enumerator_path
@@ -423,7 +403,7 @@ class ClaudeCodePlugin:
             return []
         runtime_commands = _session_slash_commands(
             self.adapter, session.id
-        ) or _stored_slash_commands(runtime, session.id)
+        ) or _session_transport_slash_commands(session)
         completions = (
             []
             if _commands_include_name(runtime_commands, "status")
@@ -468,19 +448,19 @@ class ClaudeCodePlugin:
         self,
         runtime: "SessionRuntime",
         session: SessionRecord,
-        request: Any,
+        request: SessionInputRequest,
     ) -> SessionRecord | None:
-        command = _first_slash_command(getattr(request, "text", ""))
+        command = _first_slash_command(request.text)
         runtime_commands = _session_slash_commands(
             self.adapter, session.id
-        ) or _stored_slash_commands(runtime, session.id)
+        ) or _session_transport_slash_commands(session)
         if command == "/status" and not _commands_include_name(
             runtime_commands, "status"
         ):
             await runtime._record_user_event(
                 session.id,
                 request.text,
-                submit=True,
+                submit=request.submit,
                 status=session.status,
             )
             await runtime._record_system_event(
@@ -659,6 +639,14 @@ class ClaudeCodePlugin:
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
+        if not _session_transport_slash_commands(session):
+            slash_commands = _latest_stored_slash_commands(runtime, session.id)
+            if slash_commands:
+                state = dict(session.transport_state)
+                state["slash_commands"] = list(slash_commands)
+                session = runtime.storage.update_session(
+                    session.id, transport_state=state
+                )
         if self.adapter is None:
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
             await runtime._record_system_event(
@@ -1066,7 +1054,7 @@ def _claude_runtime_slash_completions(
                 trigger="/",
                 replacement=f"{command} ",
                 name=name,
-                description=_CLAUDE_RUNTIME_COMMAND_DESCRIPTIONS.get(name),
+                description=None,
                 kind="skill" if is_plugin_command else "command",
                 source="plugin_skill" if is_plugin_command else "claude_builtin",
                 dispatch=CompletionDispatch.PLAIN_TEXT,
@@ -1125,7 +1113,14 @@ def _session_slash_commands(
     return commands if isinstance(commands, tuple) else tuple(commands or ())
 
 
-def _stored_slash_commands(
+def _session_transport_slash_commands(session: SessionRecord) -> tuple[str, ...]:
+    commands = session.transport_state.get("slash_commands")
+    if not isinstance(commands, list):
+        return ()
+    return tuple(command for command in commands if isinstance(command, str))
+
+
+def _latest_stored_slash_commands(
     runtime: "SessionRuntime", session_id: str
 ) -> tuple[str, ...]:
     for event in reversed(runtime.storage.list_events(session_id)):
@@ -1135,9 +1130,8 @@ def _stored_slash_commands(
         if not isinstance(payload, dict):
             continue
         commands = payload.get("slash_commands")
-        if not isinstance(commands, list):
-            continue
-        return tuple(command for command in commands if isinstance(command, str))
+        if isinstance(commands, list):
+            return tuple(command for command in commands if isinstance(command, str))
     return ()
 
 

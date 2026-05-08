@@ -4,7 +4,6 @@ import {
   Backend,
   BackendDescriptor,
   BackendModelListResponse,
-  CommandCompletion,
   EventRecord,
   EventsPage,
   MeResponse,
@@ -108,27 +107,6 @@ export async function fetchSession(host: string, token: string, sessionId: strin
   await ensureOk(response, "failed to fetch session");
   const payload = await response.json();
   return payload.session as SessionRecord;
-}
-
-export async function fetchSessionCompletions(
-  host: string,
-  token: string,
-  sessionId: string,
-  trigger: string,
-  prefix: string,
-  forceRefresh = false,
-  signal?: AbortSignal,
-): Promise<CommandCompletion[]> {
-  const payload = await fetchSessionCompletionsResponse(
-    host,
-    token,
-    sessionId,
-    trigger,
-    prefix,
-    forceRefresh,
-    signal,
-  );
-  return payload.completions;
 }
 
 export async function fetchSessionCompletionsResponse(

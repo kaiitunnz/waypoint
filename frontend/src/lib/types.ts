@@ -93,6 +93,11 @@ export interface CommandCompletion {
   metadata: Record<string, unknown>;
 }
 
+export interface SessionCompletionsResponse {
+  completions: CommandCompletion[];
+  refreshing: boolean;
+}
+
 export interface SessionCommandInvocation {
   completion_id: string;
   name: string;

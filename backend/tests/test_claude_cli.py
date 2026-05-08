@@ -251,6 +251,62 @@ async def test_await_approval_preserves_hook_diff_preview() -> None:
     assert emitted[1][3]["diff_preview"]["files"][0]["path"] == "/tmp/app.py"
 
 
+@pytest.mark.asyncio
+async def test_user_tool_result_inherits_hook_diff_preview() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    state.permission_mode = "acceptEdits"
+    payload = {
+        "waypoint_session_id": "sess",
+        "tool_use_id": "toolu_1",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "/tmp/app.py"},
+        "diff_preview": {
+            "schema_version": 1,
+            "phase": "proposed",
+            "files": [
+                {
+                    "path": "/tmp/app.py",
+                    "change_type": "update",
+                    "diff": "--- /tmp/app.py\n+++ /tmp/app.py\n@@ -1 +1 @@\n-old\n+new\n",
+                    "additions": 1,
+                    "deletions": 1,
+                    "truncated": False,
+                    "binary": False,
+                    "unavailable_reason": None,
+                }
+            ],
+            "total_additions": 1,
+            "total_deletions": 1,
+            "truncated": False,
+        },
+    }
+
+    decision = await adapter.await_approval(payload)
+    await adapter._dispatch(
+        state,
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_1",
+                        "content": "updated successfully",
+                    }
+                ]
+            },
+        },
+    )
+
+    assert decision["permissionDecision"] == "allow"
+    assert emitted[-1][1] == EventKind.TOOL_RESULT
+    assert emitted[-1][3]["tool_name"] == "Edit"
+    assert emitted[-1][3]["tool_input"] == {"file_path": "/tmp/app.py"}
+    assert emitted[-1][3]["diff_preview"]["files"][0]["path"] == "/tmp/app.py"
+
+
 def test_claude_hook_builds_edit_diff_preview(tmp_path: Path) -> None:
     hook = _load_claude_hook_module()
     target = tmp_path / "app.py"

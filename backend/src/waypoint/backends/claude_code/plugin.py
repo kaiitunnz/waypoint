@@ -23,6 +23,7 @@ from waypoint.backends.capabilities import (
     ModelSource,
 )
 from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeCliError
+from waypoint.backends.claude_code.commands import list_claude_command_completions
 from waypoint.backends.claude_code.models import (
     CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
@@ -399,7 +400,37 @@ class ClaudeCodePlugin:
     ) -> list[CommandCompletion]:
         if trigger != "/":
             return []
-        return static_slash_completions(self.id, self.capabilities, prefix=prefix)
+        completions = static_slash_completions(
+            self.id, self.capabilities, prefix=prefix
+        )
+        launch_target = (
+            runtime._find_launch_target(session.launch_target_id)
+            if session.launch_target_id
+            else None
+        )
+        claude_bin = (
+            self.remote_executable(launch_target)
+            if launch_target is not None
+            else self._config(runtime).local_bin or self.capabilities.cli_binary
+        )
+        if not claude_bin:
+            return completions
+        try:
+            dynamic = await list_claude_command_completions(
+                cwd=session.cwd,
+                claude_bin=claude_bin,
+                prefix=prefix,
+                launch_target=launch_target,
+            )
+        except Exception:
+            return completions
+        seen = {f"{item.trigger}{item.name}" for item in completions}
+        for item in dynamic:
+            key = f"{item.trigger}{item.name}"
+            if key not in seen:
+                completions.append(item)
+                seen.add(key)
+        return completions
 
     def effort_swap_message(self, effort: str | None) -> str:
         return _claude_effort_swap_message(effort)

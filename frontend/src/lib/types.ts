@@ -74,6 +74,25 @@ export interface BackendSlashCommand {
   description?: string | null;
 }
 
+export type CompletionDispatch =
+  | "frontend_control"
+  | "plain_text"
+  | "backend_command"
+  | "structured_skill";
+
+export interface CommandCompletion {
+  id: string;
+  trigger: string;
+  replacement: string;
+  name: string;
+  description?: string | null;
+  kind: string;
+  source: string;
+  dispatch: CompletionDispatch;
+  argument_hint?: string | null;
+  metadata: Record<string, unknown>;
+}
+
 export interface BackendCapabilities {
   is_structured: boolean;
   supports_resume: boolean;

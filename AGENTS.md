@@ -28,6 +28,14 @@ Override ports or paths inline with `WAYPOINT_STACK_BACKEND_PORT`, `WAYPOINT_STA
 ## Coding Style & Naming Conventions
 Follow the existing style in each half of the repo. Python uses 4-space indentation, type hints, top-level imports, and `snake_case` for functions/modules; keep FastAPI handlers and Pydantic models explicit. TypeScript uses 2-space indentation, strict typing, `PascalCase` for components, and `camelCase` for helpers and state. Keep comments sparse and only explain non-obvious reasoning.
 
+## Frontend Theming
+The app supports dark (default) and light themes via the `html[data-theme="light"]` attribute set by `ThemeToggle`. All CSS lives in `frontend/src/app/globals.css`, which is organized into named sections with `/* ─── Section ─── */` dividers; light-mode overrides are co-located immediately after the base rule they override.
+
+**When adding or editing styles**, you must maintain parity between themes:
+- `:root` defines CSS variables for dark mode. Variables like `--bg-card`, `--line`, `--text`, `--success`, etc. resolve automatically in both themes — use them for anything that should adapt without extra work.
+- Components that use **hardcoded dark RGBA values** (e.g. `background: rgba(8,11,16,0.35)`) will not adapt automatically. Every such rule needs a matching `html[data-theme="light"] .selector { ... }` override placed directly below it.
+- After adding any new component styles, scan for hardcoded dark RGBA values and add the corresponding light override before committing.
+
 ## Testing Guidelines
 Backend tests use `pytest` and `pytest-asyncio`; place new tests in `backend/tests/` as `test_<feature>.py`. Add focused unit tests for reusable runtime, storage, auth, or API behavior. Before shipping backend changes, prefer running `uv run pre-commit run --all-files` so formatting, lint, spelling, and mypy stay aligned with the repo hooks. The frontend currently has no automated test harness in this repo, so at minimum run `npm run lint` and a production build for UI changes.
 

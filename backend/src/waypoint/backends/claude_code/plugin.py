@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from waypoint.backends.capabilities import (
     BackendCapabilities,
     ModelSource,
+    SlashCommandSpec,
 )
 from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeCliError
 from waypoint.backends.claude_code.commands import list_claude_command_completions
@@ -121,7 +122,14 @@ class ClaudeCodePlugin:
         permission_modes=CLAUDE_PERMISSION_MODE_SPECS,
         effort_levels=CLAUDE_EFFORT_LEVELS,
         model_source=ModelSource.STATIC,
-        slash_commands=(),
+        slash_commands=(
+            SlashCommandSpec(name="help", description="Show Claude Code help"),
+            SlashCommandSpec(name="status", description="Show Claude Code status"),
+            SlashCommandSpec(
+                name="permissions", description="Show Claude Code permissions"
+            ),
+            SlashCommandSpec(name="compact", description="Compact Claude Code context"),
+        ),
         badges={"glyph": "C", "color": "#a78bfa"},
         cli_binary="claude",
         target_aliases=("claude",),

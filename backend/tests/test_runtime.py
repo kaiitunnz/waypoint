@@ -288,6 +288,55 @@ async def test_list_command_completions_uses_backend_static_slash_commands(
 
 
 @pytest.mark.asyncio
+async def test_list_command_completions_uses_claude_pass_through_commands(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+
+    async def fake_dynamic_completions(**_kwargs: Any) -> list[Any]:
+        return []
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.list_claude_command_completions",
+        fake_dynamic_completions,
+    )
+    session = make_session(
+        settings,
+        backend="claude_code",
+        transport="claude_cli",
+        thread_id="claude-thread",
+    )
+    storage.create_session(session)
+
+    completions = await runtime.list_command_completions(
+        session.id, trigger="/", prefix="/per"
+    )
+
+    assert [item.name for item in completions] == ["permissions"]
+    assert completions[0].replacement == "/permissions "
+    assert completions[0].dispatch == CompletionDispatch.PLAIN_TEXT
+
+
+@pytest.mark.asyncio
+async def test_list_command_completions_codex_omits_unsupported_legacy_commands(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    session = make_session(settings)
+    storage.create_session(session)
+
+    completions = await runtime.list_command_completions(
+        session.id, trigger="/", prefix="/"
+    )
+
+    names = [item.name for item in completions]
+    assert "status" in names
+    assert "compact" in names
+    assert "help" not in names
+    assert "permissions" not in names
+
+
+@pytest.mark.asyncio
 async def test_list_command_completions_uses_codex_skills(tmp_path) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
 

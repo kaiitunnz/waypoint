@@ -745,6 +745,11 @@ class ClaudeCliAdapter:
                             "approval_id": tool_use_id,
                             "method": "PreToolUse",
                             "status": SessionStatus.WAITING_INPUT,
+                            **(
+                                {"diff_preview": payload["diff_preview"]}
+                                if isinstance(payload.get("diff_preview"), dict)
+                                else {}
+                            ),
                         },
                         SessionStatus.WAITING_INPUT,
                     )

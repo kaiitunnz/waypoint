@@ -2,6 +2,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from waypoint.backends.diff_preview import DiffPreviewPayload
 from waypoint.schemas import EventKind, SessionStatus
 
 
@@ -35,5 +36,6 @@ class EventEnvelope(BaseModel):
     status: SessionStatus | None = None
     item: ItemPayload | None = None
     approval: ApprovalPayload | None = None
+    diff_preview: DiffPreviewPayload | None = None
     metadata_version: Literal[1] = 1
     extra: dict[str, Any] = Field(default_factory=dict)

@@ -1,4 +1,5 @@
 import asyncio
+import importlib.util
 import json
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,16 @@ from waypoint.backends.claude_code.adapter import (
 )
 from waypoint.backends.claude_code.plugin import ClaudeCodePluginConfig
 from waypoint.schemas import EventKind, SessionStatus
+
+
+def _load_claude_hook_module() -> Any:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "claude_pretool_hook.py"
+    spec = importlib.util.spec_from_file_location("claude_pretool_hook_test", script)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 class FakeStream:
@@ -190,6 +201,75 @@ async def test_await_approval_resolves_via_respond() -> None:
     assert decision["permissionDecision"] == "allow"
     # Pending was emitted as APPROVAL_REQUEST
     assert emitted[0][1] == EventKind.APPROVAL_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_await_approval_preserves_hook_diff_preview() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    _attach_state(adapter)
+    payload = {
+        "waypoint_session_id": "sess",
+        "tool_use_id": "toolu_1",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "/tmp/app.py"},
+        "diff_preview": {
+            "schema_version": 1,
+            "phase": "proposed",
+            "files": [
+                {
+                    "path": "/tmp/app.py",
+                    "change_type": "update",
+                    "diff": "--- /tmp/app.py\n+++ /tmp/app.py\n@@ -1 +1 @@\n-old\n+new\n",
+                    "additions": 1,
+                    "deletions": 1,
+                    "truncated": False,
+                    "binary": False,
+                    "unavailable_reason": None,
+                }
+            ],
+            "total_additions": 1,
+            "total_deletions": 1,
+            "truncated": False,
+        },
+    }
+
+    async def resolver() -> None:
+        for _ in range(50):
+            if adapter.has_pending_approval("sess"):
+                break
+            await asyncio.sleep(0.01)
+        await adapter.respond_to_approval("sess", "decline")
+
+    decision_task = asyncio.create_task(adapter.await_approval(payload))
+    await resolver()
+    await decision_task
+
+    assert emitted[0][1] == EventKind.APPROVAL_REQUEST
+    assert emitted[0][3]["diff_preview"]["files"][0]["path"] == "/tmp/app.py"
+
+
+def test_claude_hook_builds_edit_diff_preview(tmp_path: Path) -> None:
+    hook = _load_claude_hook_module()
+    target = tmp_path / "app.py"
+    target.write_text("old\n", encoding="utf-8")
+
+    preview = hook.build_diff_preview(
+        {
+            "cwd": str(tmp_path),
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": "app.py",
+                "old_string": "old\n",
+                "new_string": "new\n",
+            },
+        }
+    )
+
+    assert preview["phase"] == "proposed"
+    assert preview["files"][0]["path"] == "app.py"
+    assert preview["files"][0]["additions"] == 1
+    assert preview["files"][0]["deletions"] == 1
 
 
 @pytest.mark.asyncio

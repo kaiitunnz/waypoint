@@ -152,8 +152,22 @@ def files_from_codex_file_changes(changes: Any) -> list[DiffPreviewFile]:
         diff = change.get("diff")
         if not path or not isinstance(diff, str):
             continue
-        kind = _normalize_change_type(change.get("kind"))
-        files.append(file_from_unified_diff(path, diff, kind))
+        kind_raw = change.get("kind")
+        kind = _normalize_change_type(kind_raw)
+        if kind == "add":
+            files.append(file_from_old_new(path, "", diff, "add"))
+        elif kind == "delete":
+            files.append(file_from_old_new(path, diff, "", "delete"))
+        else:
+            move_path = _move_path_from_change_kind(kind_raw)
+            files.append(
+                file_from_unified_diff(
+                    str(move_path or path),
+                    diff,
+                    "move" if move_path else kind,
+                    old_path=path if move_path else None,
+                )
+            )
     return files
 
 
@@ -280,6 +294,8 @@ def count_unified_diff(diff: str) -> tuple[int, int]:
 
 
 def _normalize_change_type(value: Any) -> ChangeType:
+    if isinstance(value, dict):
+        value = value.get("type")
     normalized = str(value or "").lower()
     if normalized in {"add", "added", "create", "created", "new"}:
         return "add"
@@ -290,6 +306,15 @@ def _normalize_change_type(value: Any) -> ChangeType:
     if normalized in {"move", "moved", "rename", "renamed"}:
         return "move"
     return "unknown"
+
+
+def _move_path_from_change_kind(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    if value.get("type") != "update":
+        return None
+    move_path = value.get("move_path")
+    return move_path if isinstance(move_path, str) and move_path else None
 
 
 def _split_unified_diff(diff: str) -> list[list[str]]:

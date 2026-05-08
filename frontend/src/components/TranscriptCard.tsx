@@ -2,7 +2,7 @@ import { memo, useCallback, useState } from "react";
 
 import { fidelityFor, transportLabel } from "@/lib/backends";
 import { EventRecord, SessionTransport } from "@/lib/types";
-import { normalizeToolName, parseEvent } from "@/lib/events";
+import { normalizeToolName, parseEvent, type EventDiffPreview } from "@/lib/events";
 import { DiffPreview } from "@/components/DiffPreview";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 
@@ -340,6 +340,7 @@ function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
       return { glyph: "▤", variant: "read", label: toolName };
     case "Edit":
     case "MultiEdit":
+    case "NotebookEdit":
       return { glyph: "✎", variant: "edit", label: toolName };
     case "Write":
       return { glyph: "✚", variant: "write", label: toolName };
@@ -374,6 +375,65 @@ export function readToolName(event: EventRecord): string | null {
   return null;
 }
 
+function isFileEditToolName(toolName: string | null | undefined): boolean {
+  return (
+    toolName === "Edit" ||
+    toolName === "MultiEdit" ||
+    toolName === "Write" ||
+    toolName === "NotebookEdit"
+  );
+}
+
+function fallbackDiffPreviewForFileEdit(
+  events: (EventRecord | null | undefined)[],
+  phase: EventDiffPreview["phase"],
+): EventDiffPreview | null {
+  for (const event of events) {
+    if (!event || !isFileEditToolName(readToolName(event))) {
+      continue;
+    }
+    const path = filePathForToolInput(toolInputForEvent(event));
+    if (!path) {
+      continue;
+    }
+    return {
+      schemaVersion: 1,
+      phase,
+      files: [
+        {
+          path,
+          oldPath: null,
+          changeType: "unknown",
+          diff: "",
+          additions: 0,
+          deletions: 0,
+          truncated: false,
+          binary: false,
+          unavailableReason: "Diff preview was not included by the backend.",
+        },
+      ],
+      totalAdditions: 0,
+      totalDeletions: 0,
+      truncated: false,
+    };
+  }
+  return null;
+}
+
+function toolInputForEvent(event: EventRecord): Record<string, unknown> | null {
+  const meta = event.metadata as Record<string, unknown> | undefined;
+  const payload = asRecord(meta?.payload);
+  return asRecord(payload?.input) ?? asRecord(meta?.tool_input);
+}
+
+function filePathForToolInput(input: Record<string, unknown> | null): string | null {
+  if (!input) {
+    return null;
+  }
+  const value = input.file_path ?? input.path ?? input.notebook_path;
+  return typeof value === "string" && value ? value : null;
+}
+
 export function ToolCallRunGroup({
   toolNames,
   initiallyOpen,
@@ -390,7 +450,7 @@ export function ToolCallRunGroup({
   let otherCount = 0;
   for (const name of toolNames) {
     if (name === "Bash") bashCount++;
-    else if (name === "Edit" || name === "MultiEdit" || name === "Write") editCount++;
+    else if (isFileEditToolName(name)) editCount++;
     else if (name === "Read" || name === "Grep" || name === "Glob") readCount++;
     else otherCount++;
   }
@@ -447,7 +507,12 @@ function ToolDisclosure({
   const tool = toolBadgeFor(readToolName(event));
   const preview = previewForToolEvent(event, tool.label);
   const kindLabel = event.kind === "tool_call" ? "call" : "result";
-  const diffPreview = parseEvent(event).diffPreview;
+  const diffPreview =
+    parseEvent(event).diffPreview ||
+    fallbackDiffPreviewForFileEdit(
+      [event],
+      event.kind === "tool_result" ? "applied" : "proposed",
+    );
   return (
     <details className={`panel transcript codex ${event.kind} tool-disclosure`}>
       <summary className="transcript-summary">
@@ -501,7 +566,8 @@ function ToolPairCard({
   const tool = toolBadgeFor(readToolName(call ?? result ?? ({} as EventRecord)));
   const diffPreview =
     (result ? parseEvent(result).diffPreview : null) ||
-    (call ? parseEvent(call).diffPreview : null);
+    (call ? parseEvent(call).diffPreview : null) ||
+    fallbackDiffPreviewForFileEdit([call, result], result ? "applied" : "proposed");
   const summary =
     (call ? previewForToolEvent(call, tool.label) : null) ||
     (result ? previewForToolEvent(result, tool.label) : null) ||
@@ -1039,26 +1105,18 @@ function previewForToolEvent(event: EventRecord, toolLabel: string): string {
   // event.text for Claude tool_call events is `"ToolName\n{json input}"`,
   // which is verbose and redundant with the tool-name chip we already render
   // in the role row.
-  const meta = event.metadata as Record<string, unknown> | undefined;
   const toolName = readToolName(event);
-  const payload = (meta?.payload ?? null) as Record<string, unknown> | null;
-  const input =
-    (payload && typeof payload.input === "object" && payload.input !== null
-      ? (payload.input as Record<string, unknown>)
-      : null) ??
-    (typeof meta?.tool_input === "object" && meta?.tool_input !== null
-      ? (meta.tool_input as Record<string, unknown>)
-      : null);
+  const input = toolInputForEvent(event);
 
   if (event.kind === "tool_call" && input) {
     if (toolName === "Bash" && typeof input.command === "string") {
       return truncate(collapseWhitespace(input.command), 240);
     }
-    if (
-      (toolName === "Edit" || toolName === "MultiEdit" || toolName === "Write") &&
-      (typeof input.file_path === "string" || typeof input.path === "string")
-    ) {
-      return String(input.file_path ?? input.path);
+    if (isFileEditToolName(toolName)) {
+      const path = filePathForToolInput(input);
+      if (path) {
+        return path;
+      }
     }
     if (toolName === "Read" && typeof input.file_path === "string") {
       const range =

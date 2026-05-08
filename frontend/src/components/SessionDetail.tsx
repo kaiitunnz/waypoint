@@ -2053,7 +2053,9 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
     if (event.kind === "tool_call") {
       item.pair.call = event;
     } else {
-      item.pair.result = event;
+      item.pair.result = item.pair.result
+        ? mergeToolResultEvent(item.pair.result, event)
+        : event;
     }
     item.pair.ts = event.ts;
     item.pair.sequence = Math.max(item.pair.sequence, event.sequence);
@@ -2115,6 +2117,16 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
   }
 
   return grouped;
+}
+
+function mergeToolResultEvent(existing: EventRecord, incoming: EventRecord): EventRecord {
+  return {
+    ...existing,
+    text: mergeEventText(existing, incoming),
+    metadata: { ...existing.metadata, ...incoming.metadata },
+    ts: incoming.ts,
+    sequence: Math.max(existing.sequence, incoming.sequence),
+  };
 }
 
 function filterOptimisticTranscriptEvents(
@@ -2665,7 +2677,36 @@ function ApprovalCardBody({
       </>
     );
   }
+  if (isApprovalFileEditTool(toolName)) {
+    const path = approvalFileEditPath(toolInput);
+    return (
+      <>
+        <p className="approval-prompt">
+          Approve {toolName}
+          {path ? ` on ${path}` : ""}
+        </p>
+        <p className="diff-unavailable">Diff preview was not included by the backend.</p>
+      </>
+    );
+  }
   return <pre>{eventText}</pre>;
+}
+
+function isApprovalFileEditTool(toolName: string | null): boolean {
+  return (
+    toolName === "Edit" ||
+    toolName === "MultiEdit" ||
+    toolName === "Write" ||
+    toolName === "NotebookEdit"
+  );
+}
+
+function approvalFileEditPath(toolInput: Record<string, unknown> | null): string | null {
+  if (!toolInput) {
+    return null;
+  }
+  const value = toolInput.file_path ?? toolInput.path ?? toolInput.notebook_path;
+  return typeof value === "string" && value ? value : null;
 }
 
 function sanitizeEvent(event: EventRecord): EventRecord {

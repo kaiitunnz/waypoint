@@ -153,6 +153,7 @@ const NORMALIZED_TOOL_NAMES: Record<string, string> = {
   edit: "Edit",
   multiedit: "MultiEdit",
   write: "Write",
+  notebookedit: "NotebookEdit",
   grep: "Grep",
   glob: "Glob",
   webfetch: "WebFetch",

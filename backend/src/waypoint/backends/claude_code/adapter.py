@@ -199,6 +199,7 @@ class ClaudeSessionState:
     wait_task: asyncio.Task[None]
     pending: dict[str, ClaudePendingApproval] = field(default_factory=dict)
     emitted_diff_preview_tool_ids: set[str] = field(default_factory=set)
+    file_edit_preview_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
     last_message_text: dict[str, str] = field(default_factory=dict)
     terminal_fragments: list[str] = field(default_factory=list)
     stderr_tail: deque[str] = field(
@@ -669,6 +670,13 @@ class ClaudeCliAdapter:
             # the mode never gets consulted unless we do it here.
             tool_input = payload.get("tool_input")
             tool_input_dict = tool_input if isinstance(tool_input, dict) else None
+            diff_preview = payload.get("diff_preview")
+            if isinstance(diff_preview, dict):
+                state.file_edit_preview_metadata[tool_use_id] = {
+                    "tool_name": payload.get("tool_name"),
+                    "tool_input": payload.get("tool_input"),
+                    "diff_preview": diff_preview,
+                }
             # AskUserQuestion always surfaces to the user — auto-approving any
             # mode would let the binary's defer path auto-decline before the
             # answer arrives.
@@ -1306,6 +1314,11 @@ class ClaudeCliAdapter:
             }
             if tool_use_id:
                 state.terminal_fragments.append(text + "\n")
+                preview_metadata = state.file_edit_preview_metadata.pop(
+                    tool_use_id, None
+                )
+                if preview_metadata is not None:
+                    metadata.update(preview_metadata)
             await self._emit_event(state.session_id, kind, text, metadata, status)
 
     async def _handle_result(

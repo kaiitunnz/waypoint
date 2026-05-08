@@ -230,6 +230,7 @@ class ClaudeSessionState:
     # can respawn through the same factory (local vs. remote SSH) without
     # re-resolving target config.
     launch_factory: LaunchFactory | None = None
+    slash_commands: tuple[str, ...] = ()
 
 
 class ClaudeCliError(RuntimeError):
@@ -350,6 +351,10 @@ class ClaudeCliAdapter:
     def session_model(self, session_id: str) -> str | None:
         state = self._sessions.get(session_id)
         return state.model if state is not None else None
+
+    def session_slash_commands(self, session_id: str) -> tuple[str, ...]:
+        state = self._sessions.get(session_id)
+        return state.slash_commands if state is not None else ()
 
     async def set_effort(self, session_id: str, effort: str | None) -> None:
         """Swap the session's reasoning-effort by relaunching the binary.
@@ -1171,6 +1176,13 @@ class ClaudeCliAdapter:
     ) -> None:
         subtype = event.get("subtype")
         if subtype == "init":
+            slash_commands = event.get("slash_commands")
+            if isinstance(slash_commands, list):
+                state.slash_commands = tuple(
+                    command
+                    for command in slash_commands
+                    if isinstance(command, str) and command
+                )
             # Claude's stream-json mode emits `init` at the start of every
             # `--print` run, which here means once per user turn (not just at
             # session start). Tagging this with IDLE downgrades the freshly

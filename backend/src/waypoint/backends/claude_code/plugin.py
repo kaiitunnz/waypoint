@@ -21,7 +21,6 @@ from pydantic import BaseModel, Field
 from waypoint.backends.capabilities import (
     BackendCapabilities,
     ModelSource,
-    SlashCommandSpec,
 )
 from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeCliError
 from waypoint.backends.claude_code.commands import list_claude_command_completions
@@ -48,13 +47,13 @@ from waypoint.backends.claude_code.threads import (
     list_local_claude_threads,
 )
 from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
-from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
     BackendModelOption,
     CommandCompletion,
+    CompletionDispatch,
     SessionCreateRequest,
     SessionEnvelope,
     SessionRecord,
@@ -68,6 +67,17 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger("waypoint.backends.claude_code")
+
+
+_CLAUDE_RUNTIME_COMMAND_DESCRIPTIONS: dict[str, str] = {
+    "clear": "Clear the Claude Code conversation",
+    "compact": "Compact Claude Code context",
+    "context": "Show Claude Code context usage",
+    "init": "Create or update Claude Code project instructions",
+    "review": "Review code changes",
+    "security-review": "Run a security-focused review",
+    "usage": "Show Claude Code usage for this session",
+}
 
 
 class ClaudeCodePluginConfig(PluginConfig):
@@ -122,14 +132,6 @@ class ClaudeCodePlugin:
         permission_modes=CLAUDE_PERMISSION_MODE_SPECS,
         effort_levels=CLAUDE_EFFORT_LEVELS,
         model_source=ModelSource.STATIC,
-        slash_commands=(
-            SlashCommandSpec(name="help", description="Show Claude Code help"),
-            SlashCommandSpec(name="status", description="Show Claude Code status"),
-            SlashCommandSpec(
-                name="permissions", description="Show Claude Code permissions"
-            ),
-            SlashCommandSpec(name="compact", description="Compact Claude Code context"),
-        ),
         badges={"glyph": "C", "color": "#a78bfa"},
         cli_binary="claude",
         target_aliases=("claude",),
@@ -408,9 +410,13 @@ class ClaudeCodePlugin:
     ) -> list[CommandCompletion]:
         if trigger != "/":
             return []
-        completions = static_slash_completions(
-            self.id, self.capabilities, prefix=prefix
+        runtime_commands = _session_slash_commands(self.adapter, session.id)
+        completions = (
+            []
+            if _commands_include_name(runtime_commands, "status")
+            else _claude_waypoint_completions(prefix)
         )
+        completions.extend(_claude_runtime_slash_completions(runtime_commands, prefix))
         launch_target = (
             runtime._find_launch_target(session.launch_target_id)
             if session.launch_target_id
@@ -449,8 +455,23 @@ class ClaudeCodePlugin:
         session: SessionRecord,
         request: Any,
     ) -> SessionRecord | None:
-        # Claude has no slash routing today; let the runtime forward
-        # everything to the structured stdin path.
+        command = _first_slash_command(getattr(request, "text", ""))
+        if command == "/status" and not _claude_runtime_has_command(
+            self.adapter, session.id, "status"
+        ):
+            await runtime._record_user_event(
+                session.id,
+                request.text,
+                submit=True,
+                status=session.status,
+            )
+            await runtime._record_system_event(
+                session.id,
+                _format_claude_status(session, self.adapter),
+                status=session.status,
+                metadata={"builtin_command": "/status", "source": "waypoint"},
+            )
+            return runtime.get_session(session.id)
         return None
 
     async def answer_question(
@@ -987,6 +1008,138 @@ def _claude_effort_swap_message(effort: str | None) -> str:
     if effort:
         return f"Restarted Claude session with --effort {effort}"
     return "Restarted Claude session with default effort"
+
+
+def _claude_waypoint_completions(prefix: str) -> list[CommandCompletion]:
+    command = "/status"
+    if not _slash_prefix_matches(command, prefix):
+        return []
+    return [
+        CommandCompletion(
+            id="claude_code:waypoint:status",
+            trigger="/",
+            replacement="/status ",
+            name="status",
+            description="Show Waypoint session status",
+            kind="command",
+            source="waypoint",
+            dispatch=CompletionDispatch.PLAIN_TEXT,
+            metadata={"builtin_command": "/status"},
+        )
+    ]
+
+
+def _claude_runtime_slash_completions(
+    commands: tuple[str, ...], prefix: str
+) -> list[CommandCompletion]:
+    completions: list[CommandCompletion] = []
+    seen: set[str] = set()
+    for raw in commands:
+        name = _slash_command_name(raw)
+        if not name:
+            continue
+        command = f"/{name}"
+        if command in seen or not _slash_prefix_matches(command, prefix):
+            continue
+        is_plugin_command = ":" in raw
+        completions.append(
+            CommandCompletion(
+                id=f"claude_code:runtime:{raw}",
+                trigger="/",
+                replacement=f"{command} ",
+                name=name,
+                description=_CLAUDE_RUNTIME_COMMAND_DESCRIPTIONS.get(name),
+                kind="skill" if is_plugin_command else "command",
+                source="plugin_skill" if is_plugin_command else "claude_builtin",
+                dispatch=CompletionDispatch.PLAIN_TEXT,
+                metadata={"runtime_command": raw},
+            )
+        )
+        seen.add(command)
+    return completions
+
+
+def _slash_prefix_matches(command: str, prefix: str) -> bool:
+    if not prefix:
+        return True
+    normalized = prefix if prefix.startswith("/") else f"/{prefix}"
+    return normalized == "/" or command.startswith(normalized)
+
+
+def _slash_command_name(raw: str) -> str:
+    candidate = raw.rsplit(":", 1)[-1].strip()
+    if candidate.startswith("/"):
+        candidate = candidate[1:]
+    return candidate
+
+
+def _first_slash_command(text: str) -> str | None:
+    stripped = text.strip()
+    if not stripped.startswith("/"):
+        return None
+    return stripped.split(maxsplit=1)[0].lower()
+
+
+def _session_slash_commands(
+    adapter: ClaudeCliAdapter | None, session_id: str
+) -> tuple[str, ...]:
+    if adapter is None:
+        return ()
+    getter = getattr(adapter, "session_slash_commands", None)
+    if not callable(getter):
+        return ()
+    commands = getter(session_id)
+    return commands if isinstance(commands, tuple) else tuple(commands or ())
+
+
+def _claude_runtime_has_command(
+    adapter: ClaudeCliAdapter | None, session_id: str, name: str
+) -> bool:
+    return _commands_include_name(_session_slash_commands(adapter, session_id), name)
+
+
+def _commands_include_name(commands: tuple[str, ...], name: str) -> bool:
+    return any(_slash_command_name(command) == name for command in commands)
+
+
+def _format_claude_status(
+    session: SessionRecord, adapter: ClaudeCliAdapter | None
+) -> str:
+    lines = [
+        "Claude Code session status",
+        f"- Status: {session.status.value}",
+        f"- Backend: {session.backend}",
+        f"- Transport: {session.transport}",
+        f"- CWD: {session.cwd}",
+    ]
+    if session.launch_target_id:
+        lines.append(f"- Launch target: {session.launch_target_id}")
+    if session.repo_name:
+        repo = session.repo_name
+        if session.branch:
+            repo = f"{repo} ({session.branch})"
+        lines.append(f"- Repo: {repo}")
+    if session.model:
+        lines.append(f"- Model: {session.model}")
+    if session.effort:
+        lines.append(f"- Effort: {session.effort}")
+    if session.permission_mode:
+        lines.append(f"- Permission mode: {session.permission_mode}")
+    thread_id = session.transport_state.get("thread_id")
+    if isinstance(thread_id, str) and thread_id:
+        lines.append(f"- Thread: {thread_id}")
+    commands = sorted(
+        {
+            f"/{name}"
+            for command in _session_slash_commands(adapter, session.id)
+            if (name := _slash_command_name(command))
+        }
+    )
+    if commands:
+        preview = ", ".join(commands[:12])
+        suffix = f", +{len(commands) - 12} more" if len(commands) > 12 else ""
+        lines.append(f"- Runtime slash commands: {preview}{suffix}")
+    return "\n".join(lines)
 
 
 def build_plugin() -> ClaudeCodePlugin:

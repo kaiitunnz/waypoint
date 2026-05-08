@@ -4191,8 +4191,49 @@ html[data-theme="light"] .session-pulse {
   background: rgba(240, 236, 226, 0.80);
 }
 
+html[data-theme="light"] .session-pulse.open {
+  background: rgba(37, 122, 80, 0.08);
+  border-color: rgba(37, 122, 80, 0.28);
+}
+
+html[data-theme="light"] .session-pulse.open .session-pulse-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 0 rgba(37, 122, 80, 0.40);
+}
+
+html[data-theme="light"] .session-pulse.open.running .session-pulse-dot {
+  animation-name: pulse-running-light;
+}
+
+@keyframes pulse-running-light {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(37, 122, 80, 0.45); }
+  50%       { box-shadow: 0 0 0 6px rgba(37, 122, 80, 0); }
+}
+
 html[data-theme="light"] .session-pulse.open.dim {
   background: rgba(240, 236, 226, 0.80);
+  border-color: var(--line);
+}
+
+html[data-theme="light"] .session-pulse.open.warn {
+  background: rgba(170, 102, 24, 0.08);
+  border-color: rgba(170, 102, 24, 0.30);
+}
+
+html[data-theme="light"] .session-pulse.connecting,
+html[data-theme="light"] .session-pulse.reconnecting {
+  background: rgba(170, 102, 24, 0.08);
+  border-color: rgba(170, 102, 24, 0.28);
+}
+
+html[data-theme="light"] .session-pulse.connecting .session-pulse-dot,
+html[data-theme="light"] .session-pulse.reconnecting .session-pulse-dot {
+  animation-name: pulse-warn-light;
+}
+
+@keyframes pulse-warn-light {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(170, 102, 24, 0.50); }
+  50%       { box-shadow: 0 0 0 5px rgba(170, 102, 24, 0); }
 }
 
 /* ── Composer textarea ── */

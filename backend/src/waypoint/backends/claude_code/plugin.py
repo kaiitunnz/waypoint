@@ -70,12 +70,23 @@ log = logging.getLogger("waypoint.backends.claude_code")
 
 
 _CLAUDE_RUNTIME_COMMAND_DESCRIPTIONS: dict[str, str] = {
+    "batch": "Run a batch of Claude Code tasks",
+    "claude-api": "Configure or inspect Claude API usage",
     "clear": "Clear the Claude Code conversation",
     "compact": "Compact Claude Code context",
     "context": "Show Claude Code context usage",
+    "debug": "Show Claude Code debugging information",
+    "fewer-permission-prompts": "Reduce permission prompt frequency",
+    "heapdump": "Write a Claude Code heap dump for debugging",
+    "insights": "Show Claude Code usage insights",
     "init": "Create or update Claude Code project instructions",
+    "loop": "Run Claude Code in a repeated loop",
     "review": "Review code changes",
+    "schedule": "Create or manage scheduled Claude Code work",
     "security-review": "Run a security-focused review",
+    "simplify": "Simplify the current task or implementation",
+    "team-onboarding": "Create team onboarding guidance",
+    "update-config": "Update Claude Code configuration",
     "usage": "Show Claude Code usage for this session",
 }
 
@@ -443,9 +454,11 @@ class ClaudeCodePlugin:
         seen = {f"{item.trigger}{item.name}" for item in completions}
         for item in dynamic:
             key = f"{item.trigger}{item.name}"
-            if key not in seen:
-                completions.append(item)
-                seen.add(key)
+            if key in seen:
+                _merge_completion_metadata(completions, key, item)
+                continue
+            completions.append(item)
+            seen.add(key)
         return completions
 
     def effort_swap_message(self, effort: str | None) -> str:
@@ -1062,6 +1075,21 @@ def _claude_runtime_slash_completions(
         )
         seen.add(command)
     return completions
+
+
+def _merge_completion_metadata(
+    completions: list[CommandCompletion], key: str, incoming: CommandCompletion
+) -> None:
+    for existing in completions:
+        if f"{existing.trigger}{existing.name}" != key:
+            continue
+        if not existing.description and incoming.description:
+            existing.description = incoming.description
+        if incoming.metadata:
+            existing.metadata = {**existing.metadata, **incoming.metadata}
+        if existing.source == "plugin_skill" and incoming.source == "plugin_skill":
+            existing.kind = incoming.kind
+        return
 
 
 def _slash_prefix_matches(command: str, prefix: str) -> bool:

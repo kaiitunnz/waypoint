@@ -198,10 +198,21 @@ class CodexPlugin:
             return None
         return session_model(session.id)
 
+    def _session_effort_for_turn(self, session: SessionRecord) -> str | None:
+        if session.effort:
+            return session.effort
+        if self.adapter is None:
+            return None
+        session_effort = getattr(self.adapter, "session_effort", None)
+        if not callable(session_effort):
+            return None
+        return session_effort(session.id)
+
     def turn_params_for(self, session: SessionRecord) -> dict[str, Any] | None:
         return codex_turn_params_for(
             session.permission_mode,
             model=self._session_model_for_turn(session),
+            effort=self._session_effort_for_turn(session),
             pre_plan_mode=session.transport_state.get("pre_plan_mode"),
         )
 

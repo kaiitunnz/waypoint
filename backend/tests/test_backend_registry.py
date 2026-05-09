@@ -102,6 +102,15 @@ class _StubPlugin:
     ) -> Any:
         raise NotImplementedError
 
+    async def approve_plan(
+        self,
+        runtime: Any,
+        session: Any,
+        plan_item_id: str,
+        text: str | None,
+    ) -> Any:
+        raise NotImplementedError
+
     async def post_approval(self, runtime: Any, session: Any) -> None:
         return None
 

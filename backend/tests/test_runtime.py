@@ -18,6 +18,7 @@ from waypoint.schemas import (
     SessionApprovalRequest,
     SessionCreateRequest,
     SessionInputRequest,
+    SessionPlanApprovalRequest,
     SessionRecord,
     SessionSource,
     SessionStatus,
@@ -1877,6 +1878,198 @@ async def test_fork_codex_plan_session_persists_pre_plan_mode(tmp_path) -> None:
         "thread_id": "thread-forked",
         "pre_plan_mode": "full_access",
     }
+
+
+@pytest.mark.asyncio
+async def test_approve_codex_plan_restores_mode_and_sends_prompt(tmp_path) -> None:
+    from waypoint.backends.codex.permission_modes import CODEX_PERMISSION_PRESETS
+
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeCodexRuntimeAdapter()
+    fake.models["sess"] = "gpt-5.3-codex"
+    _codex_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(
+        settings,
+        permission_mode="plan",
+        transport_state={"thread_id": "thread-1", "pre_plan_mode": "full_access"},
+    )
+    storage.create_session(session)
+    storage.append_event(
+        EventRecord(
+            session_id="sess",
+            ts=datetime.now(UTC),
+            kind=EventKind.SYSTEM_NOTE,
+            text="Completed plan",
+            metadata={
+                "item_id": "plan-1",
+                "item_type": "plan",
+                "payload": {
+                    "item": {
+                        "id": "plan-1",
+                        "type": "plan",
+                        "text": "1. Update the UI\n2. Run tests",
+                    }
+                },
+            },
+            sequence=storage.next_sequence("sess"),
+        )
+    )
+
+    updated = await runtime.approve_plan(
+        "sess", SessionPlanApprovalRequest(plan_item_id="plan-1")
+    )
+
+    refreshed = storage.get_session("sess")
+    assert refreshed is not None
+    assert updated.permission_mode == "full_access"
+    assert refreshed.permission_mode == "full_access"
+    assert refreshed.status == SessionStatus.RUNNING
+    assert "pre_plan_mode" not in refreshed.transport_state
+    assert fake.inputs == [
+        (
+            "sess",
+            "User has approved your plan. You can now start coding. "
+            "Start with updating your todo list if applicable.\n\n"
+            "## Approved Plan:\n"
+            "1. Update the UI\n2. Run tests",
+        )
+    ]
+    [(_, params)] = fake.turn_params_calls
+    assert params == {
+        **CODEX_PERMISSION_PRESETS["full_access"],
+        "collaborationMode": {
+            "mode": "default",
+            "settings": {
+                "model": "gpt-5.3-codex",
+                "reasoning_effort": None,
+                "developer_instructions": None,
+            },
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_approve_codex_plan_rejects_when_not_in_plan_mode(tmp_path) -> None:
+    from fastapi import HTTPException
+
+    runtime, storage, settings = make_runtime(tmp_path)
+    _codex_plugin(runtime).adapter = cast(Any, FakeCodexRuntimeAdapter())
+    session = make_session(settings, permission_mode="default")
+    storage.create_session(session)
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.approve_plan(
+            "sess", SessionPlanApprovalRequest(plan_item_id="plan-1")
+        )
+
+    assert exc.value.status_code == 400
+    assert "not in plan mode" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_approve_plan_rejects_unsupported_backend(tmp_path) -> None:
+    from fastapi import HTTPException
+
+    runtime, storage, settings = make_runtime(tmp_path)
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend="claude_code",
+        transport="claude_cli",
+        permission_mode="plan",
+    )
+    storage.create_session(session)
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.approve_plan(
+            "claude-sess", SessionPlanApprovalRequest(plan_item_id="plan-1")
+        )
+
+    assert exc.value.status_code == 400
+    assert "not supported" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_approve_codex_plan_rejects_unknown_plan_item(tmp_path) -> None:
+    from fastapi import HTTPException
+
+    runtime, storage, settings = make_runtime(tmp_path)
+    _codex_plugin(runtime).adapter = cast(Any, FakeCodexRuntimeAdapter())
+    session = make_session(
+        settings,
+        permission_mode="plan",
+        transport_state={"thread_id": "thread-1", "pre_plan_mode": "auto_review"},
+    )
+    storage.create_session(session)
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.approve_plan(
+            "sess", SessionPlanApprovalRequest(plan_item_id="missing-plan")
+        )
+
+    assert exc.value.status_code == 400
+    assert "plan item was not found" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_approve_codex_plan_send_failure_preserves_plan_state(
+    tmp_path,
+) -> None:
+    from fastapi import HTTPException
+
+    class FailingCodexAdapter(FakeCodexRuntimeAdapter):
+        async def send_input(
+            self,
+            session_id: str,
+            text: str,
+            turn_params: dict[str, Any] | None = None,
+        ) -> None:
+            raise RuntimeError("send failed")
+
+    runtime, storage, settings = make_runtime(tmp_path)
+    _codex_plugin(runtime).adapter = cast(Any, FailingCodexAdapter())
+    session = make_session(
+        settings,
+        permission_mode="plan",
+        transport_state={"thread_id": "thread-1", "pre_plan_mode": "full_access"},
+    )
+    storage.create_session(session)
+    storage.append_event(
+        EventRecord(
+            session_id="sess",
+            ts=datetime.now(UTC),
+            kind=EventKind.SYSTEM_NOTE,
+            text="Completed plan",
+            metadata={
+                "item_id": "plan-1",
+                "item_type": "plan",
+                "payload": {
+                    "item": {
+                        "id": "plan-1",
+                        "type": "plan",
+                        "text": "Implement the change",
+                    }
+                },
+            },
+            sequence=storage.next_sequence("sess"),
+        )
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.approve_plan(
+            "sess", SessionPlanApprovalRequest(plan_item_id="plan-1")
+        )
+
+    assert exc.value.status_code == 400
+    refreshed = storage.get_session("sess")
+    assert refreshed is not None
+    assert refreshed.permission_mode == "plan"
+    assert refreshed.status == SessionStatus.IDLE
+    assert refreshed.transport_state["pre_plan_mode"] == "full_access"
+    assert not any(
+        "Plan approved; exited plan mode" in event.text
+        for event in storage.list_events("sess")
+    )
 
 
 @pytest.mark.asyncio

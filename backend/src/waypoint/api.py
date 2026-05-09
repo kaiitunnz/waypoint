@@ -32,6 +32,7 @@ from waypoint.schemas import (
     SessionInputRequest,
     SessionModelRequest,
     SessionPermissionModeRequest,
+    SessionPlanApprovalRequest,
     SessionTitleRequest,
     TerminalSnapshot,
 )
@@ -255,6 +256,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         session = await context.runtime.approve(session_id, request)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.post("/api/sessions/{session_id}/approve-plan")
+    async def session_approve_plan(
+        session_id: str,
+        request: SessionPlanApprovalRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.approve_plan(session_id, request)
         return {"session": session.model_dump(mode="json")}
 
     @app.post("/api/sessions/{session_id}/answer-question")

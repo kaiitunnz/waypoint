@@ -102,6 +102,7 @@ class CodexPlugin:
         supports_thread_discovery=True,
         supports_thread_import=True,
         supports_fork=True,
+        supports_plan_approval=True,
         supports_slash_compact=True,
         supports_approval_note=False,
         supports_custom_cli_args=True,
@@ -285,6 +286,60 @@ class CodexPlugin:
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
         return None
+
+    async def approve_plan(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        plan_item_id: str,
+        text: str | None,
+    ) -> SessionRecord:
+        if session.permission_mode != CODEX_PLAN_MODE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="codex session is not in plan mode",
+            )
+
+        plan = _plan_text_for_item(runtime, session.id, plan_item_id)
+        if not plan:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="codex plan item was not found",
+            )
+
+        target_mode = session.transport_state.get("pre_plan_mode")
+        if target_mode not in CODEX_PERMISSION_PRESETS:
+            target_mode = "default"
+
+        previous_status = session.status
+        runtime.storage.update_session(session.id, status=SessionStatus.RUNNING)
+        try:
+            await self._require_adapter().send_input(
+                session.id,
+                _format_plan_approval_prompt(plan, text),
+                turn_params=codex_turn_params_for(
+                    target_mode,
+                    model=self._session_model_for_turn(session),
+                    effort=self._session_effort_for_turn(session),
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            runtime.storage.update_session(session.id, status=previous_status)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+
+        await runtime.set_permission_mode(session.id, target_mode)
+        running = runtime.storage.update_session(
+            session.id, status=SessionStatus.RUNNING
+        )
+        await runtime._record_system_event(
+            session.id,
+            f"Plan approved; exited plan mode ({target_mode})",
+            status=SessionStatus.RUNNING,
+            metadata={"plan_item_id": plan_item_id},
+        )
+        return running
 
     async def maybe_handle_input(
         self,
@@ -1083,6 +1138,39 @@ class CodexPlugin:
 
 def _deny_approval(_method: str, _params: dict[str, Any] | None) -> dict[str, Any]:
     return {"decision": "decline"}
+
+
+def _plan_text_for_item(
+    runtime: "SessionRuntime", session_id: str, plan_item_id: str
+) -> str:
+    for event in reversed(runtime.storage.list_events(session_id)):
+        if event.metadata.get("item_id") != plan_item_id:
+            continue
+        if event.metadata.get("item_type") != "plan":
+            continue
+        payload = event.metadata.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        item = payload.get("item")
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text")
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+    return ""
+
+
+def _format_plan_approval_prompt(plan: str, note: str | None = None) -> str:
+    lines = [
+        "User has approved your plan. You can now start coding. "
+        "Start with updating your todo list if applicable.",
+        "",
+        "## Approved Plan:",
+        plan,
+    ]
+    if note:
+        lines.extend(["", "User note:", note])
+    return "\n".join(lines)
 
 
 def _format_codex_status(session: SessionRecord) -> str:

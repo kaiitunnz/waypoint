@@ -518,6 +518,18 @@ class ClaudeCodePlugin:
         )
         return updated
 
+    async def approve_plan(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        plan_item_id: str,
+        text: str | None,
+    ) -> SessionRecord:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"plan approval is not supported for {self.id}",
+        )
+
     async def post_approval(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

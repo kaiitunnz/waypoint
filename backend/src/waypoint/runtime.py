@@ -31,6 +31,7 @@ from waypoint.schemas import (
     SessionCreateRequest,
     SessionEnvelope,
     SessionInputRequest,
+    SessionPlanApprovalRequest,
     SessionRecord,
     SessionSource,
     SessionStatus,
@@ -882,6 +883,20 @@ class SessionRuntime:
             return updated
         await transport.respond_to_approval(session, request.decision, request.text)
         return self.get_session(session_id)
+
+    async def approve_plan(
+        self, session_id: str, request: SessionPlanApprovalRequest
+    ) -> SessionRecord:
+        session = self.get_session(session_id)
+        plugin = self.registry.plugin_for(session)
+        if not plugin.capabilities.supports_plan_approval:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"plan approval is not supported for {session.backend}",
+            )
+        return await plugin.approve_plan(
+            self, session, request.plan_item_id, request.text
+        )
 
     def session_events(
         self, session_id: str, cursor: int | None = None

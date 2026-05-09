@@ -187,14 +187,107 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-export function planTextForEvent(event: EventRecord): string {
-  if (event.metadata.item_type !== "plan") {
-    return "";
+export type PlanDecision = "accept" | "acceptForSession" | "decline" | "cancel";
+
+export const PLAN_DECISIONS: ReadonlyArray<PlanDecision> = [
+  "accept",
+  "acceptForSession",
+  "decline",
+  "cancel",
+];
+
+export interface PlanViewModel {
+  id: string;
+  text: string;
+  source: "codex" | "claude_code";
+  decisions: ReadonlyArray<PlanDecision>;
+}
+
+function readDecisions(value: unknown): ReadonlyArray<PlanDecision> {
+  if (!Array.isArray(value)) {
+    return PLAN_DECISIONS;
   }
-  const payload = asRecord(event.metadata.payload);
-  const item = asRecord(payload?.item);
-  const text = item?.text;
-  return typeof text === "string" ? text.trim() : "";
+  const allowed = new Set<PlanDecision>(PLAN_DECISIONS);
+  const seen: PlanDecision[] = [];
+  for (const entry of value) {
+    if (typeof entry === "string" && allowed.has(entry as PlanDecision)) {
+      seen.push(entry as PlanDecision);
+    }
+  }
+  return seen.length > 0 ? seen : PLAN_DECISIONS;
+}
+
+/**
+ * Resolve a Codex plan event or Claude ExitPlanMode approval request to a
+ * shared plan approval view model. Returns ``null`` when the event does
+ * not represent a plan.
+ */
+export function planForEvent(event: EventRecord): PlanViewModel | null {
+  const metadata = event.metadata ?? {};
+  const planEnvelope = asRecord(metadata.plan);
+  if (planEnvelope) {
+    const text = typeof planEnvelope.text === "string" ? planEnvelope.text.trim() : "";
+    const id =
+      typeof planEnvelope.id === "string" && planEnvelope.id
+        ? planEnvelope.id
+        : (typeof metadata.item_id === "string" && metadata.item_id
+            ? metadata.item_id
+            : null);
+    if (text && id) {
+      const sourceRaw = planEnvelope.source;
+      const source: PlanViewModel["source"] =
+        sourceRaw === "claude_code" ? "claude_code" : "codex";
+      return {
+        id,
+        text,
+        source,
+        decisions: readDecisions(planEnvelope.decisions),
+      };
+    }
+  }
+
+  if (metadata.item_type === "plan") {
+    const payload = asRecord(metadata.payload);
+    const item = asRecord(payload?.item);
+    const text = typeof item?.text === "string" ? item.text.trim() : "";
+    const id =
+      typeof metadata.item_id === "string" && metadata.item_id
+        ? metadata.item_id
+        : (typeof item?.id === "string" && item.id ? (item.id as string) : null);
+    if (text && id) {
+      return { id, text, source: "codex", decisions: PLAN_DECISIONS };
+    }
+  }
+
+  if (event.kind === "approval_request") {
+    const toolName = typeof metadata.tool_name === "string" ? metadata.tool_name : null;
+    if (toolName === "ExitPlanMode") {
+      const toolInput = asRecord(metadata.tool_input);
+      const text = typeof toolInput?.plan === "string" ? toolInput.plan.trim() : "";
+      const approvalId =
+        typeof metadata.approval_id === "string" && metadata.approval_id
+          ? metadata.approval_id
+          : null;
+      if (text && approvalId) {
+        return {
+          id: approvalId,
+          text,
+          source: "claude_code",
+          decisions: PLAN_DECISIONS,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+export function planTextForEvent(event: EventRecord): string {
+  const plan = planForEvent(event);
+  // Approval-request plans (Claude's ExitPlanMode) live in the
+  // approval pipeline; transcript helpers that consume this only
+  // care about backend-emitted plan items.
+  return plan && event.kind !== "approval_request" ? plan.text : "";
 }
 
 export function isPlanEvent(event: EventRecord): boolean {

@@ -461,6 +461,7 @@ export async function approvePlan(
   token: string,
   sessionId: string,
   planItemId: string,
+  decision: "accept" | "acceptForSession" | "decline" | "cancel",
   text?: string,
 ): Promise<SessionRecord> {
   const response = await fetch(`${host}/api/sessions/${sessionId}/approve-plan`, {
@@ -469,7 +470,7 @@ export async function approvePlan(
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ plan_item_id: planItemId, text }),
+    body: JSON.stringify({ plan_item_id: planItemId, decision, text }),
   });
   await ensureOk(response, "failed to approve plan");
   const body = await response.json();

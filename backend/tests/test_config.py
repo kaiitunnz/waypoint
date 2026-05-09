@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,38 @@ def test_load_settings_silently_uses_default_when_file_missing(
     settings = load_settings()
     assert settings.config_path is None
     assert settings.host == "127.0.0.1"
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://100.64.0.1:3000",
+        "http://mymachine:3000",
+        "http://my-machine-1:3000",
+        "http://mymachine.tailnet.ts.net:3000",
+        "http://mymachine.github.beta.tailscale.net:3000",
+        "https://mymachine:3000",
+    ],
+)
+def test_default_cors_regex_allows_local_and_tailscale_origins(origin: str) -> None:
+    assert settings_module.DEFAULT_CORS_ORIGIN_REGEX is not None
+    assert re.fullmatch(settings_module.DEFAULT_CORS_ORIGIN_REGEX, origin)
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://example.com:3000",
+        "http://not_tailscale:3000",
+        "http://bad-.tailnet.ts.net:3000",
+        "ftp://mymachine:3000",
+    ],
+)
+def test_default_cors_regex_rejects_public_or_invalid_origins(origin: str) -> None:
+    assert settings_module.DEFAULT_CORS_ORIGIN_REGEX is not None
+    assert not re.fullmatch(settings_module.DEFAULT_CORS_ORIGIN_REGEX, origin)
 
 
 def test_load_settings_loads_default_when_file_exists(

@@ -5,7 +5,7 @@ default_backend: codex
 default_cwd: ~/
 data_dir: ~/.waypoint/data
 cors_origins: []
-# cors_allow_origin_regex: ^https?://(localhost|127\.0\.0\.1|100\.\d{1,3}\.\d{1,3}\.\d{1,3})(:\d+)?$
+# cors_allow_origin_regex: defaults to localhost, Tailscale IPs, and MagicDNS names.
 # chat_page_messages: 20  # latest N *logical* chat messages per page.
                           # Codex streams a single agent reply as
                           # hundreds of same-item_id deltas; the

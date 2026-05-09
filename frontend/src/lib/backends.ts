@@ -60,6 +60,7 @@ const FALLBACK_STRUCTURED = new Set([
 ]);
 const FALLBACK_RESUMABLE = new Set(["tmux"]);
 const FALLBACK_APPROVAL_NOTE = new Set(["claude_code", "opencode"]);
+const FALLBACK_PLAN_APPROVAL = new Set(["codex"]);
 
 const FALLBACK_PERMISSION_MODES: Record<string, BackendPermissionMode[]> = {
   claude_code: [
@@ -148,6 +149,14 @@ export function supportsApprovalNote(
 ): boolean {
   const caps = catalog?.byId(backend)?.capabilities;
   return caps ? caps.supports_approval_note : FALLBACK_APPROVAL_NOTE.has(backend);
+}
+
+export function supportsPlanApproval(
+  backend: Backend,
+  catalog?: BackendCatalog,
+): boolean {
+  const caps = catalog?.byId(backend)?.capabilities;
+  return caps ? Boolean(caps.supports_plan_approval) : FALLBACK_PLAN_APPROVAL.has(backend);
 }
 
 export function permissionModesFor(

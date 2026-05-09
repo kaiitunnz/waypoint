@@ -181,6 +181,31 @@ export function normalizeToolName(name: string | null | undefined): string | nul
   return normalized;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+export function planTextForEvent(event: EventRecord): string {
+  if (event.metadata.item_type !== "plan") {
+    return "";
+  }
+  const payload = asRecord(event.metadata.payload);
+  const item = asRecord(payload?.item);
+  const text = item?.text;
+  return typeof text === "string" ? text.trim() : "";
+}
+
+export function isPlanEvent(event: EventRecord): boolean {
+  return planTextForEvent(event) !== "";
+}
+
+export function itemIdForEvent(event: EventRecord): string | null {
+  const value = event.metadata.item_id;
+  return typeof value === "string" && value ? value : null;
+}
+
 export function parseEvent(event: EventRecord): EventEnvelope {
   const metadata = event.metadata ?? {};
   const versionRaw = metadata.version;

@@ -1,80 +1,17 @@
-import { memo, useCallback, useState } from "react";
+import { memo, useState } from "react";
 
 import { fidelityFor, transportLabel } from "@/lib/backends";
 import { EventRecord, SessionTransport } from "@/lib/types";
-import { normalizeToolName, parseEvent, type EventDiffPreview } from "@/lib/events";
+import {
+  normalizeToolName,
+  parseEvent,
+  planTextForEvent,
+  type EventDiffPreview,
+} from "@/lib/events";
+import { PlanApprovalCard } from "@/components/ApprovalCard";
+import { CopyMessageButton } from "@/components/CopyMessageButton";
 import { DiffPreview } from "@/components/DiffPreview";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
-
-function legacyCopy(text: string): boolean {
-  // execCommand("copy") has different security gating than the async API:
-  // it works on plain-HTTP origins and when document focus is ambiguous,
-  // as long as the call originates from a user gesture. It returns false
-  // (rather than throwing) when the host browser refuses.
-  const el = document.createElement("textarea");
-  el.value = text;
-  el.setAttribute("readonly", "");
-  el.style.position = "fixed";
-  el.style.opacity = "0";
-  document.body.appendChild(el);
-  el.select();
-  let ok = false;
-  try {
-    ok = document.execCommand("copy");
-  } catch {
-    ok = false;
-  }
-  document.body.removeChild(el);
-  return ok;
-}
-
-export function CopyMessageButton({
-  text,
-  label = "Copy message",
-}: {
-  text: string;
-  label?: string;
-}) {
-  const [copied, setCopied] = useState(false);
-  const onCopy = useCallback(async () => {
-    if (!text) return;
-    let ok = false;
-    if (navigator.clipboard?.writeText) {
-      try {
-        await navigator.clipboard.writeText(text);
-        ok = true;
-      } catch {
-        // writeText can reject at runtime — NotAllowedError when the
-        // document loses focus or the user denied clipboard-write
-        // permission. Fall back to the legacy path before giving up so
-        // we don't silently no-op in those contexts.
-        ok = legacyCopy(text);
-      }
-    } else {
-      ok = legacyCopy(text);
-    }
-    if (!ok) return;
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
-  }, [text]);
-  return (
-    <button
-      type="button"
-      className={`message-copy${copied ? " copied" : ""}`}
-      onClick={(event) => {
-        // Tool cards live inside a <details>, so the click would otherwise
-        // toggle the disclosure as well as copying.
-        event.stopPropagation();
-        event.preventDefault();
-        void onCopy();
-      }}
-      aria-label={copied ? "Copied" : label}
-      title={copied ? "Copied" : label}
-    >
-      <span aria-hidden>{copied ? "✓" : "⎘"}</span>
-    </button>
-  );
-}
 
 export interface ToolPair {
   call: EventRecord | null;
@@ -255,11 +192,24 @@ function CodexCard({
       // post-resolution "Approval response sent: …" system note.
       return null;
     case "system_note":
-    case "status_update":
+    case "status_update": {
+      const plan = planTextForEvent(event);
+      if (plan) {
+        return (
+          <PlanApprovalCard
+            agentLabel={agentLabel}
+            className="transcript codex plan-output"
+            plan={plan}
+            prompt="Plan"
+            timeLabel={formatTime(event.ts)}
+          />
+        );
+      }
       if (event.metadata?.builtin_command === "/status") {
         return <CommandStatusCard event={event} agentLabel={agentLabel} />;
       }
       return <SystemRule event={event} />;
+    }
     default:
       return <HeuristicCard event={event} />;
   }

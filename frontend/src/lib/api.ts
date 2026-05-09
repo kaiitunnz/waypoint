@@ -456,6 +456,26 @@ export async function approveSession(
   await ensureOk(response, "failed to send approval");
 }
 
+export async function approvePlan(
+  host: string,
+  token: string,
+  sessionId: string,
+  planItemId: string,
+  text?: string,
+): Promise<SessionRecord> {
+  const response = await fetch(`${host}/api/sessions/${sessionId}/approve-plan`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ plan_item_id: planItemId, text }),
+  });
+  await ensureOk(response, "failed to approve plan");
+  const body = await response.json();
+  return body.session as SessionRecord;
+}
+
 export interface AskAnswerPayload {
   question: string;
   answer: string | null;

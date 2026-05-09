@@ -14,6 +14,7 @@ import {
 
 import {
   answerAskQuestion,
+  approvePlan,
   approveSession,
   connectSessionSocket,
   createSession,
@@ -37,23 +38,26 @@ import {
   humaniseBackend,
   permissionModesFor,
   supportsApprovalNote,
+  supportsPlanApproval,
   supportsResume,
   supportsStructuredApproval,
   transportLabel,
   useBackendCatalog,
 } from "@/lib/backends";
 import { clearToken } from "@/lib/store";
-import { normalizeToolName, parseEvent, type EventDiffPreview } from "@/lib/events";
-import { DiffPreview } from "@/components/DiffPreview";
-import { MarkdownMessage } from "@/components/MarkdownMessage";
 import {
-  AskAnswerEntry,
-  CopyMessageButton,
+  isPlanEvent,
+  itemIdForEvent,
+  planTextForEvent,
+} from "@/lib/events";
+import { ApprovalRequestCard, PlanApprovalCard } from "@/components/ApprovalCard";
+import {
   PendingUserInputCard,
   TranscriptCard,
-  ToolPair,
   ToolCallRunGroup,
   readToolName,
+  type AskAnswerEntry,
+  type ToolPair,
 } from "@/components/TranscriptCard";
 import { useSwitcher } from "@/components/SwitcherProvider";
 import {
@@ -835,6 +839,23 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }
 
+  async function submitPlanApproval(planItemId: string, text?: string) {
+    try {
+      const updated = await approvePlan(host, token, sessionId, planItemId, text);
+      setSession(updated);
+    } catch (approvalError) {
+      if (isAuthError(approvalError)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(
+        approvalError instanceof Error
+          ? approvalError.message
+          : "failed to approve plan",
+      );
+    }
+  }
+
   const pendingApprovals =
     session && supportsStructuredApproval(session.transport)
       ? findPendingApprovals(events)
@@ -843,13 +864,28 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const safeApprovalPage = approvalCount > 0 ? Math.min(approvalPageIndex, approvalCount - 1) : 0;
   const pendingApproval = pendingApprovals[safeApprovalPage] ?? null;
   const agentBusy = session ? isAgentBusy(session, connection) : false;
-  const visibleEvents = filterMode === "all" ? renderedEvents : renderedEvents.filter(isImportantEvent);
-  const hiddenEventCount = renderedEvents.length - visibleEvents.length;
+  const displayEvents = collapseSupersededPlanEvents(renderedEvents);
+  const visibleEvents = filterMode === "all" ? displayEvents : displayEvents.filter(isImportantEvent);
+  const hiddenEventCount = displayEvents.length - visibleEvents.length;
   const transcriptEvents =
     optimisticMessages.length > 0
       ? filterOptimisticTranscriptEvents(visibleEvents, optimisticMessages)
       : visibleEvents;
-  const transcriptItems = buildTranscriptItems(transcriptEvents);
+  const pendingPlanApprovalEvent =
+    session?.permission_mode === "plan" &&
+    supportsPlanApproval(session.backend, catalog)
+      ? latestPlanEvent(transcriptEvents)
+      : null;
+  const pendingPlanApprovalItemId = pendingPlanApprovalEvent
+    ? itemIdForEvent(pendingPlanApprovalEvent)
+    : null;
+  const pendingPlanApprovalText = pendingPlanApprovalEvent
+    ? planTextForEvent(pendingPlanApprovalEvent)
+    : "";
+  const transcriptEventsForDisplay = pendingPlanApprovalEvent
+    ? transcriptEvents.filter((event) => event !== pendingPlanApprovalEvent)
+    : transcriptEvents;
+  const transcriptItems = buildTranscriptItems(transcriptEventsForDisplay);
   const hasToolRuns = transcriptItems.some((item) => item.kind === "tool_run");
   const usageSummary = extractUsageSummary(events);
   // Session has stopped its backend process (clean shutdown or crash).
@@ -1033,7 +1069,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                   />
                 );
               })
-            : session && optimisticMessages.length === 0
+            : session && optimisticMessages.length === 0 && !pendingPlanApprovalEvent
               ? (
                 <TranscriptEmpty
                   status={session.status}
@@ -1096,12 +1132,20 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
               </button>
             </div>
           ) : null}
-          <ApprovalCard
+          <ApprovalRequestCard
             event={pendingApproval}
             onDecide={submitApproval}
             supportsNote={session ? supportsApprovalNote(session.backend, catalog) : false}
           />
         </>
+      ) : null}
+      {!pendingApproval && pendingPlanApprovalItemId && pendingPlanApprovalText ? (
+        <PlanApprovalCard
+          agentLabel={session ? humaniseBackend(session.backend) : "Codex"}
+          canApprove
+          onApprove={(note) => submitPlanApproval(pendingPlanApprovalItemId, note)}
+          plan={pendingPlanApprovalText}
+        />
       ) : null}
       {view === "chat" && showScrollToBottom ? (
         <div className="scroll-latest-floater" aria-hidden={false}>
@@ -2150,11 +2194,7 @@ function mergeEvents(current: EventRecord[], incoming: EventRecord): EventRecord
 }
 
 function readItemId(event: EventRecord): string | null {
-  const meta = event.metadata;
-  if (typeof meta?.item_id === "string" && meta.item_id) {
-    return meta.item_id;
-  }
-  return null;
+  return itemIdForEvent(event);
 }
 
 function mergeEventText(existing: EventRecord, incoming: EventRecord): string {
@@ -2181,6 +2221,44 @@ function mergeEventText(existing: EventRecord, incoming: EventRecord): string {
   }
   const separator = existing.text.endsWith("\n") || incoming.text.startsWith("\n") ? "" : "\n";
   return `${existing.text}${separator}${incoming.text}`;
+}
+
+function collapseSupersededPlanEvents(events: EventRecord[]): EventRecord[] {
+  const latestPlanByItemId = new Map<string, EventRecord>();
+  for (const event of events) {
+    if (!isPlanEvent(event)) {
+      continue;
+    }
+    const itemId = readItemId(event);
+    if (itemId) {
+      latestPlanByItemId.set(itemId, event);
+    }
+  }
+  if (latestPlanByItemId.size === 0) {
+    return events;
+  }
+  return events.filter((event) => {
+    if (!isPlanEvent(event)) {
+      return true;
+    }
+    const itemId = readItemId(event);
+    return !itemId || latestPlanByItemId.get(itemId) === event;
+  });
+}
+
+function latestPlanEvent(events: EventRecord[]): EventRecord | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    const plan = planTextForEvent(event);
+    if (!plan) {
+      continue;
+    }
+    const itemId = readItemId(event);
+    if (itemId) {
+      return event;
+    }
+  }
+  return null;
 }
 
 type TranscriptItem =
@@ -2255,7 +2333,7 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
           ? "content"
           : "tool";
       default:
-        return "absorbed";
+        return isPlanEvent(event) ? "content" : "absorbed";
     }
   }
 
@@ -2383,6 +2461,9 @@ function isImportantEvent(event: EventRecord): boolean {
       return true;
     case "system_note":
     case "status_update":
+      if (isPlanEvent(event)) {
+        return true;
+      }
       if (typeof event.metadata?.builtin_command === "string") {
         return true;
       }
@@ -2392,12 +2473,6 @@ function isImportantEvent(event: EventRecord): boolean {
     default:
       return false;
   }
-}
-
-interface ApprovalCardProps {
-  event: EventRecord;
-  onDecide: (decision: string, text?: string, approvalId?: string) => void | Promise<void>;
-  supportsNote?: boolean;
 }
 
 interface UsageSummary {
@@ -2677,204 +2752,6 @@ function UsageCard({ summary }: { summary: UsageSummary }) {
       </div>
     </section>
   );
-}
-
-function ApprovalCard({ event, onDecide, supportsNote = false }: ApprovalCardProps) {
-  const diffPreview = parseEvent(event).diffPreview;
-  const toolName = normalizeToolName(
-    typeof event.metadata.tool_name === "string" ? event.metadata.tool_name : null
-  );
-  const toolInput =
-    event.metadata.tool_input && typeof event.metadata.tool_input === "object"
-      ? (event.metadata.tool_input as Record<string, unknown>)
-      : null;
-  const copyText = approvalCopyText(event.text, toolName, toolInput);
-
-  const [noteOpen, setNoteOpen] = useState(false);
-  const [noteText, setNoteText] = useState("");
-
-  const handleDecide = (decision: string) => {
-    const approvalId = typeof event.metadata?.approval_id === "string" ? event.metadata.approval_id as string : undefined;
-    void onDecide(decision, noteText.trim() || undefined, approvalId);
-  };
-
-  return (
-    <section className="panel approval">
-      <div className="session-row">
-        <span className="badge fidelity structured">approval</span>
-        <CopyMessageButton text={copyText} label="Copy approval body" />
-      </div>
-      <ApprovalCardBody
-        eventText={event.text}
-        toolName={toolName}
-        toolInput={toolInput}
-        diffPreview={diffPreview}
-      />
-      {supportsNote ? (
-        noteOpen ? (
-          <div className="ask-question-note" style={{ margin: "0 12px" }}>
-            <textarea
-              className="ask-question-note-input"
-              value={noteText}
-              onChange={(e) => setNoteText(e.target.value)}
-              placeholder="Add a note to your approval or decline…"
-              rows={2}
-            />
-            <button
-              type="button"
-              className="link-button"
-              onClick={() => setNoteOpen(false)}
-            >
-              Hide note
-            </button>
-          </div>
-        ) : (
-          <div style={{ margin: "0 12px" }}>
-            <button
-              type="button"
-              className="link-button ask-question-note-toggle"
-              onClick={() => setNoteOpen(true)}
-            >
-              + Add note
-            </button>
-          </div>
-        )
-      ) : null}
-      <div className="action-row">
-        <button className="primary" onClick={() => handleDecide("accept")} type="button">
-          Approve
-        </button>
-        <button className="secondary" onClick={() => handleDecide("acceptForSession")} type="button">
-          Approve for session
-        </button>
-        <button className="secondary" onClick={() => handleDecide("decline")} type="button">
-          Decline
-        </button>
-        <button className="secondary" onClick={() => handleDecide("cancel")} type="button">
-          Cancel
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function approvalCopyText(
-  eventText: string,
-  toolName: string | null,
-  toolInput: Record<string, unknown> | null,
-): string {
-  if (toolName === "ExitPlanMode" && typeof toolInput?.plan === "string") {
-    return toolInput.plan as string;
-  }
-  if (
-    (toolName === "Task" || toolName === "Agent") &&
-    typeof toolInput?.prompt === "string"
-  ) {
-    return toolInput.prompt as string;
-  }
-  if (toolName === "Bash" && typeof toolInput?.command === "string") {
-    return toolInput.command as string;
-  }
-  return eventText;
-}
-
-function ApprovalCardBody({
-  eventText,
-  toolName,
-  toolInput,
-  diffPreview,
-}: {
-  eventText: string;
-  toolName: string | null;
-  toolInput: Record<string, unknown> | null;
-  diffPreview?: EventDiffPreview | null;
-}) {
-  if (diffPreview) {
-    return (
-      <>
-        <p className="approval-prompt">{eventText}</p>
-        <DiffPreview preview={diffPreview} />
-      </>
-    );
-  }
-  if (toolName === "ExitPlanMode" && typeof toolInput?.plan === "string") {
-    return (
-      <>
-        <p className="approval-prompt">Approve plan and exit plan mode</p>
-        <div className="approval-plan">
-          <MarkdownMessage text={toolInput.plan as string} />
-        </div>
-      </>
-    );
-  }
-  if (
-    (toolName === "Task" || toolName === "Agent") &&
-    toolInput &&
-    typeof toolInput.prompt === "string"
-  ) {
-    const description =
-      typeof toolInput.description === "string" ? (toolInput.description as string) : "";
-    const subagent =
-      typeof toolInput.subagent_type === "string"
-        ? (toolInput.subagent_type as string)
-        : "";
-    return (
-      <>
-        <p className="approval-prompt">
-          Approve subagent task
-          {description ? `: ${description}` : ""}
-          {subagent ? ` (via ${subagent})` : ""}
-        </p>
-        <div className="approval-plan">
-          <MarkdownMessage text={toolInput.prompt as string} />
-        </div>
-      </>
-    );
-  }
-  if (toolName === "Bash" && typeof toolInput?.command === "string") {
-    const desc =
-      typeof toolInput.description === "string"
-        ? (toolInput.description as string)
-        : "";
-    return (
-      <>
-        <p className="approval-prompt">
-          Approve Bash command{desc ? `: ${desc}` : ""}
-        </p>
-        <pre className="approval-shell">{toolInput.command as string}</pre>
-      </>
-    );
-  }
-  if (isApprovalFileEditTool(toolName)) {
-    const path = approvalFileEditPath(toolInput);
-    return (
-      <>
-        <p className="approval-prompt">
-          Approve {toolName}
-          {path ? ` on ${path}` : ""}
-        </p>
-        <p className="diff-unavailable">Diff preview was not included by the backend.</p>
-      </>
-    );
-  }
-  return <pre>{eventText}</pre>;
-}
-
-function isApprovalFileEditTool(toolName: string | null): boolean {
-  return (
-    toolName === "Edit" ||
-    toolName === "MultiEdit" ||
-    toolName === "Write" ||
-    toolName === "NotebookEdit"
-  );
-}
-
-function approvalFileEditPath(toolInput: Record<string, unknown> | null): string | null {
-  if (!toolInput) {
-    return null;
-  }
-  const value = toolInput.file_path ?? toolInput.path ?? toolInput.notebook_path;
-  return typeof value === "string" && value ? value : null;
 }
 
 function sanitizeEvent(event: EventRecord): EventRecord {

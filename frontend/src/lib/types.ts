@@ -116,6 +116,7 @@ export interface BackendCapabilities {
   supports_set_permission_mode_inline: boolean;
   supports_thread_discovery: boolean;
   supports_thread_import: boolean;
+  supports_plan_approval: boolean;
   supports_slash_compact: boolean;
   supports_approval_note: boolean;
   supports_custom_cli_args: boolean;

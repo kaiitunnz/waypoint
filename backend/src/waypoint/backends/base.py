@@ -207,9 +207,10 @@ class BackendPlugin(Protocol):
         runtime: "SessionRuntime",
         session: SessionRecord,
         plan_item_id: str,
+        decision: str,
         text: str | None,
     ) -> SessionRecord:
-        """Approve a backend-native plan item and resume execution."""
+        """Apply a plan-approval decision (accept / decline / cancel)."""
         ...
 
     async def post_approval(

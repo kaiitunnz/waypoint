@@ -215,6 +215,7 @@ class SessionApprovalRequest(BaseModel):
 
 class SessionPlanApprovalRequest(BaseModel):
     plan_item_id: str
+    decision: Literal["accept", "acceptForSession", "decline", "cancel"] = "accept"
     text: str | None = None
 
 

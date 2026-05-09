@@ -20,6 +20,7 @@ from waypoint.backends.codex.normalize import (
     format_approval_text,
     map_notification,
     payload_to_dict,
+    plan_metadata_for_item,
 )
 from waypoint.backends.diff_preview import DiffPreviewPayload, preview_to_metadata
 from waypoint.schemas import EventKind, SessionStatus
@@ -601,6 +602,9 @@ class CodexAppServerAdapter:
                         tool_name = _extract_tool_name(item_type, item)
                         if tool_name:
                             metadata["tool_name"] = tool_name
+                        plan_envelope = plan_metadata_for_item(item)
+                        if plan_envelope is not None:
+                            metadata["plan"] = plan_envelope
                     if (
                         kind == EventKind.TOOL_RESULT
                         and notification.method

@@ -292,12 +292,18 @@ class CodexPlugin:
         runtime: "SessionRuntime",
         session: SessionRecord,
         plan_item_id: str,
+        decision: str,
         text: str | None,
     ) -> SessionRecord:
         if session.permission_mode != CODEX_PLAN_MODE:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="codex session is not in plan mode",
+            )
+        if decision not in _PLAN_DECISIONS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"unsupported plan decision: {decision}",
             )
 
         plan = _plan_text_for_item(runtime, session.id, plan_item_id)
@@ -307,20 +313,29 @@ class CodexPlugin:
                 detail="codex plan item was not found",
             )
 
-        target_mode = session.transport_state.get("pre_plan_mode")
-        if target_mode not in CODEX_PERMISSION_PRESETS:
-            target_mode = "default"
+        accept = decision in {"accept", "acceptForSession"}
+        # accept: exit plan mode, send approval prompt under restored mode.
+        # decline / cancel: stay in plan mode, send rejection prompt under plan mode.
+        if accept:
+            target_mode = session.transport_state.get("pre_plan_mode")
+            if target_mode not in CODEX_PERMISSION_PRESETS:
+                target_mode = "default"
+            prompt = _format_plan_approval_prompt(plan, text)
+        else:
+            target_mode = CODEX_PLAN_MODE
+            prompt = _format_plan_rejection_prompt(decision, text)
 
         previous_status = session.status
         runtime.storage.update_session(session.id, status=SessionStatus.RUNNING)
         try:
             await self._require_adapter().send_input(
                 session.id,
-                _format_plan_approval_prompt(plan, text),
+                prompt,
                 turn_params=codex_turn_params_for(
                     target_mode,
                     model=self._session_model_for_turn(session),
                     effort=self._session_effort_for_turn(session),
+                    pre_plan_mode=session.transport_state.get("pre_plan_mode"),
                 ),
             )
         except Exception as exc:  # noqa: BLE001
@@ -329,15 +344,28 @@ class CodexPlugin:
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
 
-        await runtime.set_permission_mode(session.id, target_mode)
+        if accept:
+            await runtime.set_permission_mode(session.id, target_mode)
+            running = runtime.storage.update_session(
+                session.id, status=SessionStatus.RUNNING
+            )
+            await runtime._record_system_event(
+                session.id,
+                f"Plan approved; exited plan mode ({target_mode})",
+                status=SessionStatus.RUNNING,
+                metadata={"plan_item_id": plan_item_id, "plan_decision": decision},
+            )
+            return running
+
         running = runtime.storage.update_session(
             session.id, status=SessionStatus.RUNNING
         )
+        rejection_label = "declined" if decision == "decline" else "cancelled"
         await runtime._record_system_event(
             session.id,
-            f"Plan approved; exited plan mode ({target_mode})",
+            f"Plan {rejection_label}; staying in plan mode",
             status=SessionStatus.RUNNING,
-            metadata={"plan_item_id": plan_item_id},
+            metadata={"plan_item_id": plan_item_id, "plan_decision": decision},
         )
         return running
 
@@ -1148,6 +1176,11 @@ def _plan_text_for_item(
             continue
         if event.metadata.get("item_type") != "plan":
             continue
+        plan = event.metadata.get("plan")
+        if isinstance(plan, dict):
+            text = plan.get("text")
+            if isinstance(text, str) and text.strip():
+                return text.strip()
         payload = event.metadata.get("payload")
         if not isinstance(payload, dict):
             continue
@@ -1160,6 +1193,9 @@ def _plan_text_for_item(
     return ""
 
 
+_PLAN_DECISIONS = frozenset({"accept", "acceptForSession", "decline", "cancel"})
+
+
 def _format_plan_approval_prompt(plan: str, note: str | None = None) -> str:
     lines = [
         "User has approved your plan. You can now start coding. "
@@ -1168,6 +1204,20 @@ def _format_plan_approval_prompt(plan: str, note: str | None = None) -> str:
         "## Approved Plan:",
         plan,
     ]
+    if note:
+        lines.extend(["", "User note:", note])
+    return "\n".join(lines)
+
+
+def _format_plan_rejection_prompt(decision: str, note: str | None) -> str:
+    if decision == "cancel":
+        intro = "User has cancelled the plan; stay in plan mode and wait for further instructions."
+    else:
+        intro = (
+            "User has declined the plan; stay in plan mode and revise the plan "
+            "based on the note below before proposing a new plan."
+        )
+    lines = [intro]
     if note:
         lines.extend(["", "User note:", note])
     return "\n".join(lines)

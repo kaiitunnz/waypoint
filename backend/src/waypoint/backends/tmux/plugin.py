@@ -178,6 +178,15 @@ class TmuxPlugin:
     ) -> SessionRecord:
         _unsupported("answer-question")
 
+    async def approve_plan(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        plan_item_id: str,
+        text: str | None,
+    ) -> SessionRecord:
+        _unsupported("plan approval")
+
     async def post_approval(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

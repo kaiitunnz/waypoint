@@ -213,6 +213,11 @@ class SessionApprovalRequest(BaseModel):
     approval_id: str | None = None
 
 
+class SessionPlanApprovalRequest(BaseModel):
+    plan_item_id: str
+    text: str | None = None
+
+
 class SessionTitleRequest(BaseModel):
     title: Annotated[
         str,

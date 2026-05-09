@@ -202,6 +202,16 @@ class BackendPlugin(Protocol):
         """Respond to a Claude AskUserQuestion tool call."""
         ...
 
+    async def approve_plan(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        plan_item_id: str,
+        text: str | None,
+    ) -> SessionRecord:
+        """Approve a backend-native plan item and resume execution."""
+        ...
+
     async def post_approval(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

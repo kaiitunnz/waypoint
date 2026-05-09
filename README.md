@@ -1,12 +1,14 @@
 # Waypoint
 
-Waypoint is a personal remote-control companion for Claude Code, Codex, and OpenCode sessions running on your Mac. It provides a private, phone-first interface over Tailscale with:
+Waypoint is a personal remote-control companion for Claude Code, Codex, and OpenCode sessions running on your machine. It provides a private, phone-first interface over Tailscale with:
 
 - a unified session list
 - chat-style transcript rendering
 - raw terminal fallback
 - managed launches for new sessions
 - tmux attachment for existing sessions
+
+Waypoint runs on macOS and Linux, and should also work under WSL when the local tooling and network access are available. Some convenience scripts are still OS-specific, for example the backend LaunchAgent helper is macOS-only.
 
 ## Issue Tracking
 

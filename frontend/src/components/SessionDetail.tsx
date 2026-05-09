@@ -49,7 +49,6 @@ import {
   isPlanEvent,
   itemIdForEvent,
   planForEvent,
-  planTextForEvent,
   type PlanDecision,
   type PlanViewModel,
 } from "@/lib/events";
@@ -888,7 +887,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const pendingPlanApprovalEvent =
     session?.permission_mode === "plan" &&
     supportsPlanApproval(session.backend, catalog)
-      ? latestPlanEvent(transcriptEvents)
+      ? latestActionablePlanEvent(displayEvents)
       : null;
   const pendingPlanApprovalView: PlanViewModel | null = pendingPlanApprovalEvent
     ? planForEvent(pendingPlanApprovalEvent)
@@ -2260,19 +2259,31 @@ function collapseSupersededPlanEvents(events: EventRecord[]): EventRecord[] {
   });
 }
 
-function latestPlanEvent(events: EventRecord[]): EventRecord | null {
+function latestActionablePlanEvent(events: EventRecord[]): EventRecord | null {
+  const decidedPlanIds = new Set<string>();
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
-    const plan = planTextForEvent(event);
-    if (!plan) {
+    const decisionPlanId = planDecisionItemId(event);
+    if (decisionPlanId) {
+      decidedPlanIds.add(decisionPlanId);
       continue;
     }
-    const itemId = readItemId(event);
-    if (itemId) {
-      return event;
+    const plan = planForEvent(event);
+    if (!plan || event.kind === "approval_request") {
+      continue;
     }
+    return decidedPlanIds.has(plan.id) ? null : event;
   }
   return null;
+}
+
+function planDecisionItemId(event: EventRecord): string | null {
+  const planItemId = event.metadata.plan_item_id;
+  if (typeof planItemId !== "string" || !planItemId) {
+    return null;
+  }
+  const decision = event.metadata.plan_decision;
+  return typeof decision === "string" ? planItemId : null;
 }
 
 type TranscriptItem =

@@ -31,8 +31,8 @@ Waypoint speaks to Claude Code, Codex, and OpenCode through wire formats that ch
 
 | Agent       | Tested versions   | Wire entry point                                                     | Notes                                                                                       |
 | ----------- | ----------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Claude Code | `2.1.136`         | `claude -p --input-format=stream-json --output-format=stream-json`   | Relies on `--include-hook-events`, the `system/status`/`compact_boundary` events, and `--session-id`/`--resume`. |
-| Codex CLI   | `0.129.0`         | `codex app-server --listen stdio://`                                 | Driven via the vendored Python SDK in `3rdparty/codex/sdk/python` (`thread_*` / `turn_*` RPCs). |
+| Claude Code | `2.1.123`-`2.1.136` | `claude -p --input-format=stream-json --output-format=stream-json`   | Relies on `--include-hook-events`, the `system/status`/`compact_boundary` events, and `--session-id`/`--resume`. |
+| Codex CLI   | `0.125.0`-`0.129.0` | `codex app-server --listen stdio://`                                 | Driven via the vendored Python SDK in `3rdparty/codex/sdk/python` (`thread_*` / `turn_*` RPCs). |
 | Codex SDK   | `0.116.0a1`       | `3rdparty/codex/` submodule pin                                      | Bumped together with Codex CLI; track via `git submodule update --remote 3rdparty/codex`.   |
 | OpenCode   | `1.14.30`        | `opencode serve` with REST + SSE API                             | HTTP-based; discovers models from `/provider`. |
 

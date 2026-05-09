@@ -49,6 +49,7 @@ def codex_turn_params_for(
     mode: str | None,
     *,
     model: str | None = None,
+    effort: str | None = None,
     pre_plan_mode: str | None = None,
 ) -> dict[str, Any] | None:
     if mode is None:
@@ -64,13 +65,14 @@ def codex_turn_params_for(
     if preset is None:
         return None
     params = dict(preset)
-    if mode == CODEX_PLAN_MODE and model:
+    if model:
+        collaboration_mode = CODEX_PLAN_MODE if mode == CODEX_PLAN_MODE else "default"
         params["collaborationMode"] = {
-            "mode": "plan",
+            "mode": collaboration_mode,
             "settings": {
                 "model": model,
-                "reasoning_effort": "medium",
-                # Let app-server inject Codex's built-in Plan instructions.
+                "reasoning_effort": "medium" if mode == CODEX_PLAN_MODE else effort,
+                # Let app-server inject Codex's built-in mode instructions.
                 "developer_instructions": None,
             },
         }

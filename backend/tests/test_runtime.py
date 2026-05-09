@@ -1880,6 +1880,46 @@ async def test_fork_codex_plan_session_persists_pre_plan_mode(tmp_path) -> None:
     }
 
 
+def _seed_plan_event(
+    storage: Storage,
+    *,
+    session_id: str = "sess",
+    plan_id: str = "plan-1",
+    text: str = "1. Update the UI\n2. Run tests",
+) -> None:
+    storage.append_event(
+        EventRecord(
+            session_id=session_id,
+            ts=datetime.now(UTC),
+            kind=EventKind.SYSTEM_NOTE,
+            text="Completed plan",
+            metadata={
+                "item_id": plan_id,
+                "item_type": "plan",
+                "plan": {
+                    "id": plan_id,
+                    "text": text,
+                    "source": "codex",
+                    "decisions": [
+                        "accept",
+                        "acceptForSession",
+                        "decline",
+                        "cancel",
+                    ],
+                },
+                "payload": {
+                    "item": {
+                        "id": plan_id,
+                        "type": "plan",
+                        "text": text,
+                    }
+                },
+            },
+            sequence=storage.next_sequence(session_id),
+        )
+    )
+
+
 @pytest.mark.asyncio
 async def test_approve_codex_plan_restores_mode_and_sends_prompt(tmp_path) -> None:
     from waypoint.backends.codex.permission_modes import CODEX_PERMISSION_PRESETS
@@ -1894,29 +1934,11 @@ async def test_approve_codex_plan_restores_mode_and_sends_prompt(tmp_path) -> No
         transport_state={"thread_id": "thread-1", "pre_plan_mode": "full_access"},
     )
     storage.create_session(session)
-    storage.append_event(
-        EventRecord(
-            session_id="sess",
-            ts=datetime.now(UTC),
-            kind=EventKind.SYSTEM_NOTE,
-            text="Completed plan",
-            metadata={
-                "item_id": "plan-1",
-                "item_type": "plan",
-                "payload": {
-                    "item": {
-                        "id": "plan-1",
-                        "type": "plan",
-                        "text": "1. Update the UI\n2. Run tests",
-                    }
-                },
-            },
-            sequence=storage.next_sequence("sess"),
-        )
-    )
+    _seed_plan_event(storage)
 
     updated = await runtime.approve_plan(
-        "sess", SessionPlanApprovalRequest(plan_item_id="plan-1")
+        "sess",
+        SessionPlanApprovalRequest(plan_item_id="plan-1", decision="accept"),
     )
 
     refreshed = storage.get_session("sess")
@@ -1946,6 +1968,117 @@ async def test_approve_codex_plan_restores_mode_and_sends_prompt(tmp_path) -> No
             },
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_approve_codex_plan_accept_for_session_matches_accept(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeCodexRuntimeAdapter()
+    _codex_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(
+        settings,
+        permission_mode="plan",
+        transport_state={"thread_id": "thread-1", "pre_plan_mode": "auto_review"},
+    )
+    storage.create_session(session)
+    _seed_plan_event(storage)
+
+    updated = await runtime.approve_plan(
+        "sess",
+        SessionPlanApprovalRequest(plan_item_id="plan-1", decision="acceptForSession"),
+    )
+
+    refreshed = storage.get_session("sess")
+    assert refreshed is not None
+    assert updated.permission_mode == "auto_review"
+    assert refreshed.permission_mode == "auto_review"
+    assert "pre_plan_mode" not in refreshed.transport_state
+    assert fake.inputs[0][1].startswith("User has approved your plan.")
+
+
+@pytest.mark.asyncio
+async def test_approve_codex_plan_decline_keeps_plan_mode(tmp_path) -> None:
+    from waypoint.backends.codex.permission_modes import CODEX_PERMISSION_PRESETS
+
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeCodexRuntimeAdapter()
+    fake.models["sess"] = "gpt-5.3-codex"
+    _codex_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(
+        settings,
+        permission_mode="plan",
+        transport_state={"thread_id": "thread-1", "pre_plan_mode": "full_access"},
+    )
+    storage.create_session(session)
+    _seed_plan_event(storage)
+
+    updated = await runtime.approve_plan(
+        "sess",
+        SessionPlanApprovalRequest(
+            plan_item_id="plan-1", decision="decline", text="prefer option B"
+        ),
+    )
+
+    refreshed = storage.get_session("sess")
+    assert refreshed is not None
+    assert updated.permission_mode == "plan"
+    assert refreshed.permission_mode == "plan"
+    assert refreshed.transport_state["pre_plan_mode"] == "full_access"
+    assert refreshed.status == SessionStatus.RUNNING
+    [(_, prompt)] = fake.inputs
+    assert prompt.startswith("User has declined the plan;")
+    assert "prefer option B" in prompt
+    [(_, params)] = fake.turn_params_calls
+    assert params == {
+        **CODEX_PERMISSION_PRESETS["full_access"],
+        "collaborationMode": {
+            "mode": "plan",
+            "settings": {
+                "model": "gpt-5.3-codex",
+                "reasoning_effort": "medium",
+                "developer_instructions": None,
+            },
+        },
+    }
+    assert any(
+        "Plan declined; staying in plan mode" in event.text
+        for event in storage.list_events("sess")
+    )
+
+
+@pytest.mark.asyncio
+async def test_approve_codex_plan_cancel_keeps_plan_mode(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeCodexRuntimeAdapter()
+    fake.models["sess"] = "gpt-5.3-codex"
+    _codex_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(
+        settings,
+        permission_mode="plan",
+        transport_state={"thread_id": "thread-1", "pre_plan_mode": "default"},
+    )
+    storage.create_session(session)
+    _seed_plan_event(storage)
+
+    updated = await runtime.approve_plan(
+        "sess",
+        SessionPlanApprovalRequest(plan_item_id="plan-1", decision="cancel"),
+    )
+
+    refreshed = storage.get_session("sess")
+    assert refreshed is not None
+    assert updated.permission_mode == "plan"
+    assert refreshed.permission_mode == "plan"
+    assert refreshed.transport_state["pre_plan_mode"] == "default"
+    [(_, prompt)] = fake.inputs
+    assert prompt.startswith("User has cancelled the plan;")
+    [(_, params)] = fake.turn_params_calls
+    assert params is not None
+    assert params["collaborationMode"]["mode"] == "plan"
+    assert any(
+        "Plan cancelled; staying in plan mode" in event.text
+        for event in storage.list_events("sess")
+    )
 
 
 @pytest.mark.asyncio

@@ -284,6 +284,31 @@ def extract_item(payload: dict[str, Any]) -> dict[str, Any]:
     return item if isinstance(item, dict) else {}
 
 
+_PLAN_DECISIONS: tuple[str, ...] = ("accept", "acceptForSession", "decline", "cancel")
+
+
+def plan_metadata_for_item(item: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a normalised plan envelope for a Codex ``plan`` item.
+
+    Frontends consume this directly so they don't have to re-derive the
+    plan id / text from the raw codex item shape, and so the same view
+    model can express Claude's ExitPlanMode flow in a future change.
+    """
+
+    if item.get("type") != "plan":
+        return None
+    plan_id = item.get("id")
+    text = item.get("text", "")
+    if not isinstance(text, str):
+        text = ""
+    return {
+        "id": plan_id if isinstance(plan_id, str) and plan_id else None,
+        "text": text,
+        "source": "codex",
+        "decisions": list(_PLAN_DECISIONS),
+    }
+
+
 def diff_preview_for_notification(
     method: str, payload: dict[str, Any]
 ) -> DiffPreviewPayload | None:

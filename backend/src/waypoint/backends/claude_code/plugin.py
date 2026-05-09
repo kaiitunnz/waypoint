@@ -523,6 +523,7 @@ class ClaudeCodePlugin:
         runtime: "SessionRuntime",
         session: SessionRecord,
         plan_item_id: str,
+        decision: str,
         text: str | None,
     ) -> SessionRecord:
         raise HTTPException(

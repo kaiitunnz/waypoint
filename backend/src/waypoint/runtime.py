@@ -895,7 +895,7 @@ class SessionRuntime:
                 detail=f"plan approval is not supported for {session.backend}",
             )
         return await plugin.approve_plan(
-            self, session, request.plan_item_id, request.text
+            self, session, request.plan_item_id, request.decision, request.text
         )
 
     def session_events(

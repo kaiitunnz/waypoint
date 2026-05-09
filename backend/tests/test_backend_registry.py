@@ -107,6 +107,7 @@ class _StubPlugin:
         runtime: Any,
         session: Any,
         plan_item_id: str,
+        decision: str,
         text: str | None,
     ) -> Any:
         raise NotImplementedError

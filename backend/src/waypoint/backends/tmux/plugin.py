@@ -183,6 +183,7 @@ class TmuxPlugin:
         runtime: "SessionRuntime",
         session: SessionRecord,
         plan_item_id: str,
+        decision: str,
         text: str | None,
     ) -> SessionRecord:
         _unsupported("plan approval")

@@ -462,6 +462,11 @@ class CodexPlugin:
 
         now = datetime.now(UTC)
         raw_log.touch(exist_ok=True)
+        forked_transport_state: dict[str, Any] = {"thread_id": new_thread_id}
+        pre_plan_mode = session.transport_state.get("pre_plan_mode")
+        if pre_plan_mode is not None:
+            forked_transport_state["pre_plan_mode"] = pre_plan_mode
+
         new_session = SessionRecord(
             id=new_session_id,
             backend=self.id,
@@ -478,7 +483,7 @@ class CodexPlugin:
             last_event_at=now,
             raw_log_path=str(raw_log),
             structured_log_path=str(structured_log),
-            transport_state={"thread_id": new_thread_id},
+            transport_state=forked_transport_state,
             permission_mode=session.permission_mode,
             model=session.model,
             effort=session.effort,

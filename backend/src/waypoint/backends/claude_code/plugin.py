@@ -31,6 +31,7 @@ from waypoint.backends.claude_code.models import (
 from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_PERMISSION_MODE_SPECS,
     CLAUDE_PERMISSION_MODES,
+    claude_permission_mode_label,
 )
 from waypoint.backends.claude_code.remote import build_remote_claude_launch_factory
 from waypoint.backends.claude_code.runtime_hook import (
@@ -304,12 +305,37 @@ class ClaudeCodePlugin:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="claude adapter is not configured on this backend",
             )
+        before_pending = self.adapter.pending_approval_ids(session.id)
         try:
             await self.adapter.set_permission_mode(session.id, mode)
         except Exception as exc:  # noqa: BLE001 — surface adapter errors as 400
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
+        after_pending = set(self.adapter.pending_approval_ids(session.id))
+        cleared_pending = [
+            approval_id
+            for approval_id in before_pending
+            if approval_id not in after_pending
+        ]
+        if not cleared_pending:
+            return
+        next_status = (
+            SessionStatus.WAITING_INPUT if after_pending else SessionStatus.RUNNING
+        )
+        runtime.storage.update_session(session.id, status=next_status)
+        mode_label = claude_permission_mode_label(mode)
+        for approval_id in cleared_pending:
+            await runtime._record_system_event(
+                session.id,
+                f"Pending approval cleared by permission mode change to {mode_label}",
+                status=next_status,
+                metadata={
+                    "method": "approval.invalidated",
+                    "approval_id": approval_id,
+                    "permission_mode": mode,
+                },
+            )
 
     async def apply_model(
         self,

@@ -45,6 +45,7 @@ class FakeStructuredAdapter:
         self.inputs: list[tuple[str, str]] = []
         self.input_items: list[tuple[str, list[dict[str, Any]]]] = []
         self.turn_params_calls: list[tuple[str, dict[str, Any] | None]] = []
+        self.input_items_turn_params_calls: list[tuple[str, dict[str, Any] | None]] = []
         self.approval_calls: list[tuple[str, str]] = []
 
     async def send_input(
@@ -54,9 +55,13 @@ class FakeStructuredAdapter:
         self.turn_params_calls.append((session_id, turn_params))
 
     async def send_input_items(
-        self, session_id: str, items: list[dict[str, Any]]
+        self,
+        session_id: str,
+        items: list[dict[str, Any]],
+        turn_params: dict[str, Any] | None = None,
     ) -> None:
         self.input_items.append((session_id, items))
+        self.input_items_turn_params_calls.append((session_id, turn_params))
 
     def has_pending_approval(self, session_id: str) -> bool:
         return self.pending
@@ -516,6 +521,7 @@ async def test_list_command_completions_codex_omits_unsupported_legacy_commands(
     names = [item.name for item in completions]
     assert "status" in names
     assert "compact" in names
+    assert "plan" in names
     assert "help" not in names
     assert "permissions" not in names
 
@@ -1077,6 +1083,69 @@ async def test_handle_input_builtin_compact_invokes_codex_thread_compact(
 
 
 @pytest.mark.asyncio
+async def test_handle_input_builtin_plan_switches_codex_plan_mode_only(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeCodexRuntimeAdapter()
+    _codex_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(settings, permission_mode="full_access")
+    storage.create_session(session)
+
+    updated = await runtime.handle_input("sess", SessionInputRequest(text="/plan"))
+
+    assert updated.permission_mode == "plan"
+    assert runtime.get_session("sess").transport_state["pre_plan_mode"] == "full_access"
+    assert fake.inputs == []
+    events = storage.list_events("sess")
+    assert [event.kind for event in events] == [
+        EventKind.USER_INPUT,
+        EventKind.SYSTEM_NOTE,
+    ]
+    assert events[-1].metadata["builtin_command"] == "/plan"
+    assert "plan mode" in events[-1].text
+
+
+@pytest.mark.asyncio
+async def test_handle_input_builtin_plan_with_prompt_starts_plan_turn(
+    tmp_path,
+) -> None:
+    from waypoint.backends.codex.permission_modes import CODEX_PERMISSION_PRESETS
+
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeCodexRuntimeAdapter()
+    fake.models["sess"] = "gpt-5.3-codex"
+    _codex_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(settings, permission_mode="full_access")
+    storage.create_session(session)
+
+    updated = await runtime.handle_input(
+        "sess", SessionInputRequest(text="/plan design this")
+    )
+
+    assert updated.status == SessionStatus.RUNNING
+    assert fake.inputs == [("sess", "design this")]
+    assert runtime.get_session("sess").permission_mode == "plan"
+    assert runtime.get_session("sess").transport_state["pre_plan_mode"] == "full_access"
+    [(_, params)] = fake.turn_params_calls
+    assert params == {
+        **CODEX_PERMISSION_PRESETS["full_access"],
+        "collaborationMode": {
+            "mode": "plan",
+            "settings": {
+                "model": "gpt-5.3-codex",
+                "reasoning_effort": "medium",
+                "developer_instructions": None,
+            },
+        },
+    }
+    events = storage.list_events("sess")
+    assert len(events) == 1
+    assert events[0].kind == EventKind.USER_INPUT
+    assert events[0].text == "/plan design this"
+
+
+@pytest.mark.asyncio
 async def test_handle_input_unknown_slash_command_forwards_to_structured_session(
     tmp_path,
 ) -> None:
@@ -1625,6 +1694,59 @@ async def test_set_permission_mode_codex_persists_and_threads_to_next_turn(
     assert fake.inputs == [("sess", "hello")]
     [(_, params)] = fake.turn_params_calls
     assert params == CODEX_PERMISSION_PRESETS["auto_review"]
+
+
+@pytest.mark.asyncio
+async def test_set_permission_mode_codex_plan_preserves_previous_preset(
+    tmp_path,
+) -> None:
+    from waypoint.backends.codex.permission_modes import CODEX_PERMISSION_PRESETS
+
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeCodexRuntimeAdapter()
+    fake.models["sess"] = "gpt-5.3-codex"
+    _codex_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(settings, permission_mode="auto_review")
+    storage.create_session(session)
+
+    updated = await runtime.set_permission_mode("sess", "plan")
+
+    assert updated.permission_mode == "plan"
+    assert runtime.get_session("sess").transport_state["pre_plan_mode"] == "auto_review"
+
+    await runtime.handle_input("sess", SessionInputRequest(text="hello"))
+
+    [(_, params)] = fake.turn_params_calls
+    assert params == {
+        **CODEX_PERMISSION_PRESETS["auto_review"],
+        "collaborationMode": {
+            "mode": "plan",
+            "settings": {
+                "model": "gpt-5.3-codex",
+                "reasoning_effort": "medium",
+                "developer_instructions": None,
+            },
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_set_permission_mode_codex_leaving_plan_clears_previous_preset(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    _codex_plugin(runtime).adapter = cast(Any, FakeCodexRuntimeAdapter())
+    session = make_session(
+        settings,
+        permission_mode="plan",
+        transport_state={"thread_id": "thread-1", "pre_plan_mode": "auto_review"},
+    )
+    storage.create_session(session)
+
+    updated = await runtime.set_permission_mode("sess", "default")
+
+    assert updated.permission_mode == "default"
+    assert "pre_plan_mode" not in runtime.get_session("sess").transport_state
 
 
 @pytest.mark.asyncio

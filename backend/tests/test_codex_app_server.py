@@ -17,6 +17,7 @@ class FakeThread:
 @dataclass
 class FakeStartResponse:
     thread: FakeThread
+    model: str | None = None
 
 
 @dataclass
@@ -37,6 +38,7 @@ class FakeAppServerClient:
         self.started = False
         self.initialized = False
         self.closed = False
+        self.start_model: str | None = None
 
     def start(self) -> None:
         self.started = True
@@ -49,7 +51,7 @@ class FakeAppServerClient:
 
     def thread_start(self, params: dict[str, Any]) -> FakeStartResponse:
         self.calls.append(("thread_start", (params,)))
-        return FakeStartResponse(FakeThread(id="thread-1"))
+        return FakeStartResponse(FakeThread(id="thread-1"), model=self.start_model)
 
     def thread_resume(self, thread_id: str) -> dict[str, Any]:
         self.calls.append(("thread_resume", (thread_id,)))
@@ -196,6 +198,17 @@ async def test_start_session_passes_model_to_thread_start() -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_session_remembers_app_server_default_model() -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    fake.start_model = "gpt-5.3-codex"
+
+    await adapter.start_session("sess", "/tmp/work")
+
+    assert adapter.session_model("sess") == "gpt-5.3-codex"
+
+
+@pytest.mark.asyncio
 async def test_set_model_persists_and_re_emits_on_turn_start() -> None:
     """Codex model is a per-turn override that the SDK persists; waypoint must
     still re-emit it on every turn_start so a restart can't drop it."""
@@ -327,6 +340,24 @@ async def test_send_input_items_starts_structured_turn() -> None:
     await adapter.send_input_items("sess", items)
 
     assert ("turn_start", (state.thread_id, items)) in fake.calls
+    if state.stream_task is not None:
+        state.stream_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await state.stream_task
+
+
+@pytest.mark.asyncio
+async def test_send_input_items_accepts_per_turn_params() -> None:
+    emitted: list = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+    state = adapter._sessions["sess"]
+    items = [{"type": "text", "text": "plan this"}]
+    params = {"collaborationMode": {"mode": "plan"}}
+
+    await adapter.send_input_items("sess", items, turn_params=params)
+
+    assert ("turn_start", (state.thread_id, items, params)) in fake.calls
     if state.stream_task is not None:
         state.stream_task.cancel()
         with pytest.raises(asyncio.CancelledError):

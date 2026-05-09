@@ -7,6 +7,9 @@ import pytest
 
 from waypoint.backends.claude_code.schemas import ClaudeThreadImportRequest
 from waypoint.backends.claude_code.threads import ClaudeThreadInfo
+from waypoint.backends.codex.permission_modes import (
+    codex_mode_developer_instructions,
+)
 from waypoint.backends.codex.schemas import CodexThreadImportRequest
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.runtime import SessionRuntime
@@ -1120,7 +1123,7 @@ async def test_handle_input_builtin_plan_switches_codex_plan_mode_only(
             "settings": {
                 "model": "gpt-5.3-codex",
                 "reasoning_effort": "medium",
-                "developer_instructions": None,
+                "developer_instructions": codex_mode_developer_instructions("plan"),
             },
         },
     }
@@ -1155,7 +1158,7 @@ async def test_handle_input_builtin_plan_with_prompt_starts_plan_turn(
             "settings": {
                 "model": "gpt-5.3-codex",
                 "reasoning_effort": "medium",
-                "developer_instructions": None,
+                "developer_instructions": codex_mode_developer_instructions("plan"),
             },
         },
     }
@@ -1722,7 +1725,7 @@ async def test_set_permission_mode_codex_persists_and_threads_to_next_turn(
             "settings": {
                 "model": "gpt-5.3-codex",
                 "reasoning_effort": "high",
-                "developer_instructions": None,
+                "developer_instructions": codex_mode_developer_instructions("default"),
             },
         },
     }
@@ -1756,7 +1759,7 @@ async def test_set_permission_mode_codex_plan_preserves_previous_preset(
             "settings": {
                 "model": "gpt-5.3-codex",
                 "reasoning_effort": "medium",
-                "developer_instructions": None,
+                "developer_instructions": codex_mode_developer_instructions("plan"),
             },
         },
     }
@@ -1794,10 +1797,17 @@ async def test_set_permission_mode_codex_leaving_plan_clears_previous_preset(
             "settings": {
                 "model": "gpt-5.3-codex",
                 "reasoning_effort": None,
-                "developer_instructions": None,
+                "developer_instructions": codex_mode_developer_instructions("default"),
             },
         },
     }
+    # Sanity: a non-empty body is required for Codex's app-server to
+    # emit a collaboration-mode update item; otherwise the previous
+    # plan-mode developer instructions linger and the model behaves
+    # as if it never left plan mode.
+    body = params["collaborationMode"]["settings"]["developer_instructions"]
+    assert isinstance(body, str) and "Default" in body
+    assert "Plan Mode (Conversational)" not in body
 
 
 @pytest.mark.asyncio
@@ -1964,7 +1974,7 @@ async def test_approve_codex_plan_restores_mode_and_sends_prompt(tmp_path) -> No
             "settings": {
                 "model": "gpt-5.3-codex",
                 "reasoning_effort": None,
-                "developer_instructions": None,
+                "developer_instructions": codex_mode_developer_instructions("default"),
             },
         },
     }
@@ -2036,7 +2046,7 @@ async def test_approve_codex_plan_decline_keeps_plan_mode(tmp_path) -> None:
             "settings": {
                 "model": "gpt-5.3-codex",
                 "reasoning_effort": "medium",
-                "developer_instructions": None,
+                "developer_instructions": codex_mode_developer_instructions("plan"),
             },
         },
     }

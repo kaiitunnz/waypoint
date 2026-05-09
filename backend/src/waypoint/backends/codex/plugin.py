@@ -31,8 +31,11 @@ from waypoint.backends.codex.adapter import (
     default_client_factory,
 )
 from waypoint.backends.codex.permission_modes import (
+    CODEX_PERMISSION_MODE_IDS,
     CODEX_PERMISSION_MODE_SPECS,
     CODEX_PERMISSION_PRESETS,
+    CODEX_PLAN_MODE,
+    codex_turn_params_for,
 )
 from waypoint.backends.codex.remote import build_remote_codex_client_factory
 from waypoint.backends.codex.schemas import (
@@ -108,6 +111,10 @@ class CodexPlugin:
         slash_commands=(
             SlashCommandSpec(name="status", description="Show session status"),
             SlashCommandSpec(name="compact", description="Compact the current thread"),
+            SlashCommandSpec(
+                name="plan",
+                description="Switch to Codex Plan mode or plan the provided prompt",
+            ),
         ),
         badges={"glyph": "X", "color": "#34d399"},
         cli_binary="codex",
@@ -167,23 +174,55 @@ class CodexPlugin:
     def validate_permission_mode(self, mode: str | None) -> str | None:
         if mode is None or mode == "":
             return None
-        if mode not in CODEX_PERMISSION_PRESETS:
+        if mode not in CODEX_PERMISSION_MODE_IDS:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
                     f"unsupported {self.id} permission mode: {mode}; "
-                    f"expected one of {', '.join(CODEX_PERMISSION_PRESETS)}"
+                    f"expected one of {', '.join(CODEX_PERMISSION_MODE_IDS)}"
                 ),
             )
         return mode
 
     @property
     def permission_mode_ids(self) -> tuple[str, ...]:
-        return tuple(CODEX_PERMISSION_PRESETS)
+        return CODEX_PERMISSION_MODE_IDS
+
+    def _session_model_for_turn(self, session: SessionRecord) -> str | None:
+        if session.model:
+            return session.model
+        if self.adapter is None:
+            return None
+        session_model = getattr(self.adapter, "session_model", None)
+        if not callable(session_model):
+            return None
+        return session_model(session.id)
+
+    def turn_params_for(self, session: SessionRecord) -> dict[str, Any] | None:
+        return codex_turn_params_for(
+            session.permission_mode,
+            model=self._session_model_for_turn(session),
+            pre_plan_mode=session.transport_state.get("pre_plan_mode"),
+        )
 
     async def apply_permission_mode(
         self, runtime: "SessionRuntime", session: SessionRecord, mode: str
     ) -> None:
+        if mode == CODEX_PLAN_MODE:
+            pre_plan_mode = (
+                session.permission_mode
+                if session.permission_mode != CODEX_PLAN_MODE
+                else session.transport_state.get("pre_plan_mode")
+            )
+            if pre_plan_mode not in CODEX_PERMISSION_PRESETS:
+                pre_plan_mode = "default"
+            state = {**session.transport_state, "pre_plan_mode": pre_plan_mode}
+            runtime.storage.update_session(session.id, transport_state=state)
+            return None
+        if session.transport_state.get("pre_plan_mode") is not None:
+            state = dict(session.transport_state)
+            state.pop("pre_plan_mode", None)
+            runtime.storage.update_session(session.id, transport_state=state)
         # Codex applies on next turn_start — no protocol round-trip here.
         return None
 
@@ -268,7 +307,11 @@ class CodexPlugin:
                 status=session.status,
             )
             try:
-                await self._require_adapter().send_input_items(session.id, items)
+                await self._require_adapter().send_input_items(
+                    session.id,
+                    items,
+                    turn_params=self.turn_params_for(updated),
+                )
             except Exception as exc:  # noqa: BLE001
                 runtime.storage.update_session(session.id, status=previous_status)
                 raise HTTPException(
@@ -278,7 +321,8 @@ class CodexPlugin:
             return updated
 
         command = request.text.strip()
-        command_name = command.split(None, 1)[0].lower()
+        command_parts = command.split(None, 1)
+        command_name = command_parts[0].lower() if command_parts else ""
         if command_name == "/status":
             await runtime._record_user_event(
                 session.id,
@@ -293,6 +337,41 @@ class CodexPlugin:
                 metadata={"builtin_command": "/status"},
             )
             return runtime.get_session(session.id)
+
+        if command_name == "/plan":
+            plan_prompt = command_parts[1].strip() if len(command_parts) > 1 else ""
+            updated = await runtime.set_permission_mode(session.id, CODEX_PLAN_MODE)
+            await runtime._record_user_event(
+                session.id,
+                request.text,
+                submit=request.submit,
+                status=session.status,
+            )
+            if not plan_prompt:
+                await runtime._record_system_event(
+                    session.id,
+                    "Switched Codex to plan mode",
+                    status=session.status,
+                    metadata={"builtin_command": "/plan"},
+                )
+                return updated
+
+            previous_status = updated.status
+            running = runtime.storage.update_session(
+                session.id, status=SessionStatus.RUNNING
+            )
+            try:
+                await self._require_adapter().send_input(
+                    session.id,
+                    plan_prompt,
+                    turn_params=self.turn_params_for(running),
+                )
+            except Exception as exc:  # noqa: BLE001
+                runtime.storage.update_session(session.id, status=previous_status)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+                ) from exc
+            return running
 
         # Codex's app-server doesn't parse user text as control commands.
         # `/compact` takes effect through the thread/compact/start RPC; other

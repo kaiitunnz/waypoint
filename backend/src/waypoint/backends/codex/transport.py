@@ -4,13 +4,6 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
 
-# Re-exported from the backend plugin so legacy
-# `from waypoint.transports.codex import CODEX_PERMISSION_PRESETS`
-# imports keep working; the source of truth lives in
-# `backends/codex/permission_modes.py`.
-from waypoint.backends.codex.permission_modes import (
-    codex_turn_params_for,
-)
 from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
 
@@ -46,7 +39,7 @@ class CodexTransport(TransportAdapter):
             await self.adapter.send_input(
                 session.id,
                 text,
-                turn_params=codex_turn_params_for(session.permission_mode),
+                turn_params=self._plugin.turn_params_for(session),
             )
         except Exception as exc:
             raise HTTPException(

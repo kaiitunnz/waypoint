@@ -9,6 +9,8 @@ from typing import Any
 
 from waypoint.backends.capabilities import PermissionModeSpec
 
+CODEX_PLAN_MODE = "plan"
+
 CODEX_PERMISSION_PRESETS: dict[str, dict[str, Any]] = {
     "default": {
         "approval_policy": "on-request",
@@ -29,15 +31,47 @@ CODEX_PERMISSION_PRESETS: dict[str, dict[str, Any]] = {
 
 CODEX_PERMISSION_MODE_SPECS: tuple[PermissionModeSpec, ...] = (
     PermissionModeSpec(id="default", label="Default"),
+    PermissionModeSpec(
+        id=CODEX_PLAN_MODE,
+        label="Plan",
+        description="Use Codex Plan collaboration mode with the previous permission preset",
+    ),
     PermissionModeSpec(id="auto_review", label="Auto review"),
     PermissionModeSpec(id="full_access", label="Full access"),
 )
 
+CODEX_PERMISSION_MODE_IDS: tuple[str, ...] = tuple(CODEX_PERMISSION_PRESETS) + (
+    CODEX_PLAN_MODE,
+)
 
-def codex_turn_params_for(mode: str | None) -> dict[str, Any] | None:
+
+def codex_turn_params_for(
+    mode: str | None,
+    *,
+    model: str | None = None,
+    pre_plan_mode: str | None = None,
+) -> dict[str, Any] | None:
     if mode is None:
         return None
-    preset = CODEX_PERMISSION_PRESETS.get(mode)
+    preset_mode = (
+        pre_plan_mode
+        if mode == CODEX_PLAN_MODE and pre_plan_mode in CODEX_PERMISSION_PRESETS
+        else mode
+    )
+    if mode == CODEX_PLAN_MODE and preset_mode == CODEX_PLAN_MODE:
+        preset_mode = "default"
+    preset = CODEX_PERMISSION_PRESETS.get(preset_mode)
     if preset is None:
         return None
-    return dict(preset)
+    params = dict(preset)
+    if mode == CODEX_PLAN_MODE and model:
+        params["collaborationMode"] = {
+            "mode": "plan",
+            "settings": {
+                "model": model,
+                "reasoning_effort": "medium",
+                # Let app-server inject Codex's built-in Plan instructions.
+                "developer_instructions": None,
+            },
+        }
+    return params

@@ -205,6 +205,7 @@ class CodexAppServerAdapter:
             state, state.client.thread_start, thread_params
         )
         state.thread_id = started.thread.id
+        state.model = model or getattr(started, "model", None)
         return state.thread_id
 
     async def restore_session(
@@ -231,7 +232,8 @@ class CodexAppServerAdapter:
             model=model,
             effort=effort,
         )
-        await self._call_client(state, state.client.thread_resume, thread_id)
+        resumed = await self._call_client(state, state.client.thread_resume, thread_id)
+        state.model = model or getattr(resumed, "model", None)
 
     async def fork_session(
         self,
@@ -265,6 +267,7 @@ class CodexAppServerAdapter:
             state, state.client.thread_fork, thread_id, fork_params
         )
         state.thread_id = forked.thread.id
+        state.model = model or getattr(forked, "model", None)
         return state.thread_id
 
     async def _spawn_session(

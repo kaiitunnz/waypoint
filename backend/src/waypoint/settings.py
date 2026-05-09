@@ -15,10 +15,14 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = BACKEND_ROOT / "waypoint.yaml"
 
 DEFAULT_CORS_ORIGINS: tuple[str, ...] = ()
+DNS_LABEL_PATTERN = r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
+TAILSCALE_DNS_NAME_PATTERN = rf"(?:{DNS_LABEL_PATTERN}\.)+(?:ts\.net|tailscale\.net)"
+
 DEFAULT_CORS_ORIGIN_REGEX = (
     r"^https?://(localhost|127\.0\.0\.1|"
     r"100\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
-    r"\[fd7a:115c:a1e0(:[0-9a-fA-F]{0,4}){0,7}\])(:\d+)?$"
+    r"\[fd7a:115c:a1e0(:[0-9a-fA-F]{0,4}){0,7}\]|"
+    rf"{DNS_LABEL_PATTERN}|{TAILSCALE_DNS_NAME_PATTERN})(:\d+)?$"
 )
 
 

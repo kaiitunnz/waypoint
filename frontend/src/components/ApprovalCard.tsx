@@ -7,6 +7,7 @@ import {
   normalizeToolName,
   parseEvent,
   type EventDiffPreview,
+  type PlanDecision,
 } from "@/lib/events";
 import type { EventRecord } from "@/lib/types";
 
@@ -193,11 +194,44 @@ export function ApprovalRequestCard({
   );
 }
 
+const PLAN_ACTION_DEFINITIONS: ReadonlyArray<{
+  id: PlanDecision;
+  label: string;
+  loadingLabel: string;
+  className: "primary" | "secondary";
+}> = [
+  {
+    id: "accept",
+    label: "Approve",
+    loadingLabel: "Approving…",
+    className: "primary",
+  },
+  {
+    id: "acceptForSession",
+    label: "Approve for session",
+    loadingLabel: "Approving…",
+    className: "secondary",
+  },
+  {
+    id: "decline",
+    label: "Decline",
+    loadingLabel: "Declining…",
+    className: "secondary",
+  },
+  {
+    id: "cancel",
+    label: "Cancel",
+    loadingLabel: "Cancelling…",
+    className: "secondary",
+  },
+];
+
 export function PlanApprovalCard({
   agentLabel,
   canApprove = false,
   className,
-  onApprove,
+  decisions,
+  onDecide,
   plan,
   prompt = "Approve plan and exit plan mode",
   timeLabel,
@@ -205,33 +239,39 @@ export function PlanApprovalCard({
   agentLabel: string;
   canApprove?: boolean;
   className?: string;
-  onApprove?: (note?: string) => void | Promise<void>;
+  decisions?: ReadonlyArray<PlanDecision>;
+  onDecide?: (decision: PlanDecision, note?: string) => void | Promise<void>;
   plan: string;
   prompt?: string;
   timeLabel?: string;
 }) {
+  const allowed = new Set<PlanDecision>(
+    decisions && decisions.length > 0
+      ? decisions
+      : PLAN_ACTION_DEFINITIONS.map((entry) => entry.id),
+  );
+  const actions =
+    canApprove && onDecide
+      ? PLAN_ACTION_DEFINITIONS.filter((entry) => allowed.has(entry.id)).map(
+          (entry) => ({
+            id: entry.id,
+            label: entry.label,
+            loadingLabel: entry.loadingLabel,
+            className: entry.className,
+            onSelect: (note?: string) => onDecide(entry.id, note),
+          }),
+        )
+      : [];
   return (
     <SharedApprovalCard
       badge={`${agentLabel} plan`}
       className={className}
       copyLabel="Copy plan"
       copyText={plan}
-      notePlaceholder="Add a note to your approval…"
+      notePlaceholder="Add a note to your decision…"
       supportsNote={canApprove}
       timeLabel={timeLabel}
-      actions={
-        canApprove && onApprove
-          ? [
-              {
-                id: "approve",
-                label: "Approve",
-                loadingLabel: "Approving…",
-                className: "primary",
-                onSelect: onApprove,
-              },
-            ]
-          : []
-      }
+      actions={actions}
     >
       <ApprovalPlanBody plan={plan} prompt={prompt} />
     </SharedApprovalCard>

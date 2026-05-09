@@ -48,7 +48,10 @@ import { clearToken } from "@/lib/store";
 import {
   isPlanEvent,
   itemIdForEvent,
+  planForEvent,
   planTextForEvent,
+  type PlanDecision,
+  type PlanViewModel,
 } from "@/lib/events";
 import { ApprovalRequestCard, PlanApprovalCard } from "@/components/ApprovalCard";
 import {
@@ -839,9 +842,20 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }
 
-  async function submitPlanApproval(planItemId: string, text?: string) {
+  async function submitPlanApproval(
+    planItemId: string,
+    decision: PlanDecision,
+    text?: string,
+  ) {
     try {
-      const updated = await approvePlan(host, token, sessionId, planItemId, text);
+      const updated = await approvePlan(
+        host,
+        token,
+        sessionId,
+        planItemId,
+        decision,
+        text,
+      );
       setSession(updated);
     } catch (approvalError) {
       if (isAuthError(approvalError)) {
@@ -876,12 +890,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     supportsPlanApproval(session.backend, catalog)
       ? latestPlanEvent(transcriptEvents)
       : null;
-  const pendingPlanApprovalItemId = pendingPlanApprovalEvent
-    ? itemIdForEvent(pendingPlanApprovalEvent)
+  const pendingPlanApprovalView: PlanViewModel | null = pendingPlanApprovalEvent
+    ? planForEvent(pendingPlanApprovalEvent)
     : null;
-  const pendingPlanApprovalText = pendingPlanApprovalEvent
-    ? planTextForEvent(pendingPlanApprovalEvent)
-    : "";
   const transcriptEventsForDisplay = pendingPlanApprovalEvent
     ? transcriptEvents.filter((event) => event !== pendingPlanApprovalEvent)
     : transcriptEvents;
@@ -1139,12 +1150,15 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           />
         </>
       ) : null}
-      {!pendingApproval && pendingPlanApprovalItemId && pendingPlanApprovalText ? (
+      {!pendingApproval && pendingPlanApprovalView ? (
         <PlanApprovalCard
           agentLabel={session ? humaniseBackend(session.backend) : "Codex"}
           canApprove
-          onApprove={(note) => submitPlanApproval(pendingPlanApprovalItemId, note)}
-          plan={pendingPlanApprovalText}
+          decisions={pendingPlanApprovalView.decisions}
+          onDecide={(decision, note) =>
+            submitPlanApproval(pendingPlanApprovalView.id, decision, note)
+          }
+          plan={pendingPlanApprovalView.text}
         />
       ) : null}
       {view === "chat" && showScrollToBottom ? (

@@ -10,11 +10,9 @@ Waypoint is a personal remote-control companion for Claude Code, Codex, and Open
 
 Waypoint runs on macOS and Linux, and should also work under WSL when the local tooling and network access are available. Some convenience scripts are still OS-specific, for example the backend LaunchAgent helper is macOS-only.
 
-## Issue Tracking
+## Issues
 
-GitHub Issues are the source of truth for active bugs and feature requests. Create leaf issues directly; tracking issues are no longer used.
-
-Use this convention when opening issues:
+Use GitHub Issues directly for active bugs and feature requests.
 
 - one leaf issue per actionable bug or feature request
 - lowercase title prefixes: `bug: ...` and `feat: ...`
@@ -45,7 +43,7 @@ To extend this matrix:
    - Claude: `backend/src/waypoint/backends/claude_code/normalize.py` (status / compact / rate-limit / approval / content-block helpers) and `adapter.py`'s `_handle_*` stream handlers; hook bootstrap in `backends/claude_code/runtime_hook.py` + `server_config.py::_build_remote_claude_command`.
    - Codex: `backend/src/waypoint/backends/codex/normalize.py::map_notification` and the SDK calls in `backends/codex/adapter.py::CodexAppServerAdapter`.
    - OpenCode: `backend/src/waypoint/backends/opencode/normalize.py::map_event` and the HTTP/SSE adapter in `backends/opencode/adapter.py::OpenCodeAdapter`.
-3. If a bump breaks an event shape, prefer adding a branch in the relevant `normalize.py` over hard-pinning — the goal is for the matrix to grow, not to fork on version.
+3. If a bump breaks an event shape, prefer adding a branch in the relevant `normalize.py` over hard-pinning.
 
 Adding a brand-new coding agent (Aider, …) is its own flow — the runtime, API, and frontend dispatch by plugin id, so a new backend is "implement [`BackendPlugin`](backend/src/waypoint/backends/base.py) and register it." See [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the contract, capability descriptor, and a step-by-step recipe.
 

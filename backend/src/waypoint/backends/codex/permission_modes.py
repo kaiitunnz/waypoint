@@ -49,6 +49,19 @@ _DEFAULT_MODE_ASKING_QUESTIONS_GUIDANCE = (
     "risky, ask the user directly with a concise plain-text question. "
     "Never write a multiple choice question as a textual assistant message."
 )
+_PLAN_MODE_FALLBACK = (
+    "# Plan Mode (Conversational)\n\n"
+    "You are in Plan Mode. Do not edit files or run mutating commands. "
+    "Explore the repository, ask clarifying questions when needed, and "
+    "return a decision-complete plan in a <proposed_plan> block."
+)
+_DEFAULT_MODE_FALLBACK = (
+    "# Collaboration Mode: Default\n\n"
+    "You are now in Default mode. Any previous instructions for other modes "
+    "(e.g. Plan mode) are no longer active.\n\n"
+    f"{_DEFAULT_MODE_REQUEST_USER_INPUT_AVAILABILITY}\n\n"
+    f"{_DEFAULT_MODE_ASKING_QUESTIONS_GUIDANCE}"
+)
 
 
 @cache
@@ -63,20 +76,20 @@ def _load_mode_template(name: str) -> str | None:
 
 
 @cache
-def codex_mode_developer_instructions(mode: str) -> str | None:
+def codex_mode_developer_instructions(mode: str) -> str:
     """Return the developer-instructions body Codex's TUI sends for ``mode``.
 
-    Returns ``None`` only when the bundled templates are missing; callers
-    should treat ``None`` as "no instruction switch available" and fall
-    back to a non-empty placeholder so the App Server still emits a
-    collaboration-mode update item.
+    Always returns a non-empty body. Codex's App Server only emits a
+    collaboration-mode update item when the next turn carries developer
+    instructions, so missing vendored templates must fall back to explicit
+    instructions rather than ``None``.
     """
 
     if mode == CODEX_PLAN_MODE:
-        return _load_mode_template("plan.md")
+        return _load_mode_template("plan.md") or _PLAN_MODE_FALLBACK
     template = _load_mode_template("default.md")
     if template is None:
-        return None
+        return _DEFAULT_MODE_FALLBACK
     return (
         template.replace("{{KNOWN_MODE_NAMES}}", _KNOWN_MODE_NAMES)
         .replace(

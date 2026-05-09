@@ -1810,6 +1810,23 @@ async def test_set_permission_mode_codex_leaving_plan_clears_previous_preset(
     assert "Plan Mode (Conversational)" not in body
 
 
+def test_codex_mode_developer_instructions_falls_back_when_templates_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from waypoint.backends.codex import permission_modes
+
+    permission_modes.codex_mode_developer_instructions.cache_clear()
+    monkeypatch.setattr(permission_modes, "_load_mode_template", lambda name: None)
+    try:
+        default_body = permission_modes.codex_mode_developer_instructions("default")
+        plan_body = permission_modes.codex_mode_developer_instructions("plan")
+    finally:
+        permission_modes.codex_mode_developer_instructions.cache_clear()
+
+    assert "Default mode" in default_body
+    assert "Plan Mode" in plan_body
+
+
 @pytest.mark.asyncio
 async def test_runtime_fork_codex_session_uses_codex_plugin(tmp_path) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
@@ -2152,6 +2169,69 @@ async def test_approve_codex_plan_rejects_unknown_plan_item(tmp_path) -> None:
 
     assert exc.value.status_code == 400
     assert "plan item was not found" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_approve_codex_plan_rejects_stale_plan_item(tmp_path) -> None:
+    from fastapi import HTTPException
+
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeCodexRuntimeAdapter()
+    _codex_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(
+        settings,
+        permission_mode="plan",
+        transport_state={"thread_id": "thread-1", "pre_plan_mode": "auto_review"},
+    )
+    storage.create_session(session)
+    _seed_plan_event(storage, plan_id="plan-1", text="Old plan")
+    _seed_plan_event(storage, plan_id="plan-2", text="New plan")
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.approve_plan(
+            "sess",
+            SessionPlanApprovalRequest(plan_item_id="plan-1", decision="accept"),
+        )
+
+    assert exc.value.status_code == 400
+    assert "no longer current" in str(exc.value.detail)
+    assert fake.inputs == []
+
+
+@pytest.mark.asyncio
+async def test_approve_codex_plan_rejects_already_decided_plan_item(tmp_path) -> None:
+    from fastapi import HTTPException
+
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeCodexRuntimeAdapter()
+    _codex_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(
+        settings,
+        permission_mode="plan",
+        transport_state={"thread_id": "thread-1", "pre_plan_mode": "auto_review"},
+    )
+    storage.create_session(session)
+    _seed_plan_event(storage, plan_id="plan-1", text="Plan to revise")
+    storage.append_event(
+        EventRecord(
+            session_id="sess",
+            ts=datetime.now(UTC),
+            kind=EventKind.SYSTEM_NOTE,
+            text="Plan declined; staying in plan mode",
+            metadata={"plan_item_id": "plan-1", "plan_decision": "decline"},
+            sequence=storage.next_sequence("sess"),
+        )
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.approve_plan(
+            "sess",
+            SessionPlanApprovalRequest(plan_item_id="plan-1", decision="accept"),
+        )
+
+    assert exc.value.status_code == 400
+    assert "no longer current" in str(exc.value.detail)
+    assert fake.inputs == []
 
 
 @pytest.mark.asyncio

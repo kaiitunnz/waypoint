@@ -31,3 +31,11 @@ CLAUDE_AUTO_APPROVE_MODES = frozenset({"auto", "bypassPermissions", "dontAsk"})
 
 # Tools acceptEdits auto-approves; everything else still surfaces the card.
 CLAUDE_ACCEPT_EDITS_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
+
+CLAUDE_PERMISSION_MODE_LABELS = {
+    spec.id: spec.label for spec in CLAUDE_PERMISSION_MODE_SPECS
+}
+
+
+def claude_permission_mode_label(mode: str) -> str:
+    return CLAUDE_PERMISSION_MODE_LABELS.get(mode, mode)

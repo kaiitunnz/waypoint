@@ -5,6 +5,7 @@ from typing import Any, cast
 
 import pytest
 
+from waypoint.backends.claude_code.permission_modes import CLAUDE_AUTO_APPROVE_MODES
 from waypoint.backends.claude_code.schemas import ClaudeThreadImportRequest
 from waypoint.backends.claude_code.threads import ClaudeThreadInfo
 from waypoint.backends.codex.permission_modes import (
@@ -98,6 +99,7 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         self.models: dict[str, str | None] = {}
         self.efforts: dict[str, str | None] = {}
         self.slash_commands: dict[str, tuple[str, ...]] = {}
+        self.pending_ids: list[str] = []
 
     async def terminate_session(self, session_id: str) -> bool:
         self.terminate_calls.append(session_id)
@@ -161,6 +163,8 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
     async def set_permission_mode(self, session_id: str, mode: str) -> None:
         self.permission_mode_calls.append((session_id, mode))
         self.modes[session_id] = mode
+        if mode in CLAUDE_AUTO_APPROVE_MODES:
+            self.pending_ids.clear()
 
     async def set_model(self, session_id: str, model: str | None) -> None:
         self.model_calls.append((session_id, model))
@@ -181,6 +185,9 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
 
     def session_slash_commands(self, session_id: str) -> tuple[str, ...]:
         return self.slash_commands.get(session_id, ())
+
+    def pending_approval_ids(self, session_id: str) -> tuple[str, ...]:
+        return tuple(self.pending_ids)
 
 
 class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
@@ -2326,6 +2333,39 @@ async def test_set_permission_mode_claude_calls_adapter(tmp_path) -> None:
 
     assert fake.permission_mode_calls == [("claude-sess", "plan")]
     assert updated.permission_mode == "plan"
+
+
+@pytest.mark.asyncio
+async def test_set_permission_mode_claude_emits_invalidation_note(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    fake.pending_ids = ["approval-1"]
+    _claude_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend="claude_code",
+        transport="claude_cli",
+        status=SessionStatus.WAITING_INPUT,
+    )
+    storage.create_session(session)
+
+    updated = await runtime.set_permission_mode("claude-sess", "auto")
+
+    refreshed = storage.get_session("claude-sess")
+    assert refreshed is not None
+    assert updated.permission_mode == "auto"
+    assert refreshed.status == SessionStatus.RUNNING
+
+    notes = [
+        event
+        for event in storage.list_events("claude-sess")
+        if event.kind == EventKind.SYSTEM_NOTE
+        and event.metadata.get("method") == "approval.invalidated"
+    ]
+    assert len(notes) == 1
+    assert notes[0].metadata.get("approval_id") == "approval-1"
+    assert "permission mode change to Auto" in notes[0].text
 
 
 @pytest.mark.asyncio

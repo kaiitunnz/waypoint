@@ -813,6 +813,12 @@ class ClaudeCliAdapter:
         state = self._sessions.get(session_id)
         return bool(state and state.pending)
 
+    def pending_approval_ids(self, session_id: str) -> tuple[str, ...]:
+        state = self._sessions.get(session_id)
+        if state is None:
+            return ()
+        return tuple(state.pending.keys())
+
     def session_permission_mode(self, session_id: str) -> str | None:
         """Read the binary's currently-active permission mode for a session.
 

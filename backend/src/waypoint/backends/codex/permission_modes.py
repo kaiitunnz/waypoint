@@ -103,21 +103,28 @@ def codex_mode_developer_instructions(mode: str) -> str:
     )
 
 
+# Keys mirror Codex's v2 `TurnStartParams` wire format
+# (`#[serde(rename_all = "camelCase")]` in
+# `app-server-protocol/src/protocol/v2.rs`). Codex's app-server silently
+# ignores unknown fields, so snake_case overrides here are dropped on the
+# wire and the thread keeps its initial defaults — making `auto_review`
+# regress to user-routed approvals whenever the local sandbox forces an
+# escalation.
 CODEX_PERMISSION_PRESETS: dict[str, dict[str, Any]] = {
     "default": {
-        "approval_policy": "on-request",
-        "sandbox_policy": {"type": "workspaceWrite"},
-        "approvals_reviewer": "user",
+        "approvalPolicy": "on-request",
+        "sandboxPolicy": {"type": "workspaceWrite"},
+        "approvalsReviewer": "user",
     },
     "auto_review": {
-        "approval_policy": "on-request",
-        "sandbox_policy": {"type": "workspaceWrite"},
-        "approvals_reviewer": "guardian_subagent",
+        "approvalPolicy": "on-request",
+        "sandboxPolicy": {"type": "workspaceWrite"},
+        "approvalsReviewer": "guardian_subagent",
     },
     "full_access": {
-        "approval_policy": "never",
-        "sandbox_policy": {"type": "dangerFullAccess"},
-        "approvals_reviewer": "user",
+        "approvalPolicy": "never",
+        "sandboxPolicy": {"type": "dangerFullAccess"},
+        "approvalsReviewer": "user",
     },
 }
 

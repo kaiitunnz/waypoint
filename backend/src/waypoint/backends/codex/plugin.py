@@ -49,6 +49,7 @@ from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
     CommandCompletion,
     CompletionDispatch,
+    EventRecord,
     SessionCreateRequest,
     SessionInputRequest,
     SessionRecord,
@@ -306,11 +307,11 @@ class CodexPlugin:
                 detail=f"unsupported plan decision: {decision}",
             )
 
-        plan = _plan_text_for_item(runtime, session.id, plan_item_id)
+        plan = _current_plan_text_for_item(runtime, session.id, plan_item_id)
         if not plan:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="codex plan item was not found",
+                detail="codex plan item was not found or is no longer current",
             )
 
         accept = decision in {"accept", "acceptForSession"}
@@ -1168,28 +1169,64 @@ def _deny_approval(_method: str, _params: dict[str, Any] | None) -> dict[str, An
     return {"decision": "decline"}
 
 
-def _plan_text_for_item(
+def _current_plan_text_for_item(
     runtime: "SessionRuntime", session_id: str, plan_item_id: str
 ) -> str:
+    decided_plan_ids: set[str] = set()
     for event in reversed(runtime.storage.list_events(session_id)):
-        if event.metadata.get("item_id") != plan_item_id:
-            continue
         if event.metadata.get("item_type") != "plan":
+            decision_plan_id = event.metadata.get("plan_item_id")
+            if (
+                isinstance(decision_plan_id, str)
+                and event.metadata.get("plan_decision") in _PLAN_DECISIONS
+            ):
+                decided_plan_ids.add(decision_plan_id)
             continue
-        plan = event.metadata.get("plan")
-        if isinstance(plan, dict):
-            text = plan.get("text")
-            if isinstance(text, str) and text.strip():
-                return text.strip()
-        payload = event.metadata.get("payload")
-        if not isinstance(payload, dict):
-            continue
+        current_plan_id = _plan_id_for_event(event)
+        if not current_plan_id or current_plan_id in decided_plan_ids:
+            return ""
+        if current_plan_id != plan_item_id:
+            return ""
+        text = _plan_text_for_event(event)
+        if text:
+            return text
+    return ""
+
+
+def _plan_id_for_event(event: EventRecord) -> str | None:
+    plan = event.metadata.get("plan")
+    if isinstance(plan, dict):
+        plan_id = plan.get("id")
+        if isinstance(plan_id, str) and plan_id:
+            return plan_id
+    item_id = event.metadata.get("item_id")
+    if isinstance(item_id, str) and item_id:
+        return item_id
+    payload = event.metadata.get("payload")
+    if isinstance(payload, dict):
         item = payload.get("item")
-        if not isinstance(item, dict):
-            continue
-        text = item.get("text")
+        if isinstance(item, dict):
+            item_id = item.get("id")
+            if isinstance(item_id, str) and item_id:
+                return item_id
+    return None
+
+
+def _plan_text_for_event(event: EventRecord) -> str:
+    plan = event.metadata.get("plan")
+    if isinstance(plan, dict):
+        text = plan.get("text")
         if isinstance(text, str) and text.strip():
             return text.strip()
+    payload = event.metadata.get("payload")
+    if not isinstance(payload, dict):
+        return ""
+    item = payload.get("item")
+    if not isinstance(item, dict):
+        return ""
+    text = item.get("text")
+    if isinstance(text, str) and text.strip():
+        return text.strip()
     return ""
 
 

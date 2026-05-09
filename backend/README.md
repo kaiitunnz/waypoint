@@ -31,17 +31,17 @@ Prefer the YAML file for structured settings and grouped config such as named SS
 
 Waypoint can expose named SSH coding targets alongside its local launch path. The frontend backend picker keeps host URLs and SSH targets at the same level; choosing an SSH target only changes how new managed sessions launch on the currently selected Waypoint host.
 
-The current config shape supports zero or more `ssh_targets` entries with:
+A config may define zero or more `ssh_targets` entries with:
 
 - `default_backend` and `default_cwd`, which seed the frontend launch form
 - top-level backend defaults such as `host`, `port`, `password`, and `data_dir`
 - `id` and `name` for picker/UI identity
 - `ssh_destination` and optional `ssh_args`
-- `plugin_configs`, a plugin-id → per-target plugin config mapping. Presence of a key means "this target supports the plugin"; omitting `plugin_configs` entirely defaults to every registered non-fallback plugin (today: `codex` + `claude_code`). Each block is validated against the plugin's `launch_target_schema` — common fields include `remote_bin` (path to the CLI on the remote host; falls back to the plugin's `cli_binary`), and codex adds `config_overrides` for the `--config K=V` flag.
+- `plugin_configs`, a plugin-id → per-target plugin config mapping. Presence of a key means "this target supports the plugin"; omitting `plugin_configs` entirely defaults to every registered non-fallback plugin (`codex`, `claude_code`, and `opencode`). Each block is validated against the plugin's `launch_target_schema` — common fields include `remote_bin` (path to the CLI on the remote host; falls back to the plugin's `cli_binary`), and codex adds `config_overrides` for the `--config K=V` flag.
 - `default_cwd`, which seeds the remote working-directory field and defaults to `~`
 - `remote_env` for secrets such as `OPENAI_API_KEY`
 
-Managed launches use a single `cwd` value for both UI display and the actual remote working directory. When an SSH target is selected, the frontend seeds that field from the target's `default_cwd`. Remote `codex` launches use the Codex app-server over SSH, while remote `claude_code` launches use tmux plus an SSH-wrapped `claude` command.
+Managed launches use a single `cwd` value for both UI display and the actual remote working directory. When an SSH target is selected, the frontend seeds that field from the target's `default_cwd`. Remote `codex` launches use the Codex app-server over SSH, remote `claude_code` launches use tmux plus an SSH-wrapped `claude` command, and remote `opencode` launches use `opencode serve` over SSH.
 
 ## Remote Claude thread import
 

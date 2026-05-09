@@ -9,12 +9,15 @@ from fastapi import HTTPException
 from waypoint.backends.opencode.plugin import (
     DEFAULT_OPENCODE_MODEL,
     OpenCodePlugin,
+    OpenCodePluginConfig,
     _ruleset_for_mode,
 )
 from waypoint.backends.opencode.transport import OpenCodeTransport
+from waypoint.git_meta import GitMeta
 from waypoint.schemas import (
     CommandCompletion,
     CompletionDispatch,
+    SessionCreateRequest,
     SessionInputRequest,
     SessionRecord,
     SessionSource,
@@ -41,8 +44,12 @@ def _session(**overrides: Any) -> SessionRecord:
         last_event_at=now,
         raw_log_path="",
         structured_log_path="",
-        transport_state={},
-        permission_mode=None,
+        transport_state=overrides.get("transport_state", {}),
+        permission_mode=overrides.get("permission_mode"),
+        model=overrides.get("model"),
+        effort=overrides.get("effort"),
+        args=overrides.get("args", []),
+        config_overrides=overrides.get("config_overrides", []),
     )
 
 
@@ -106,6 +113,7 @@ def test_validate_permission_mode_accepts_known_actions() -> None:
     assert plugin.validate_permission_mode("ask") == "ask"
     assert plugin.validate_permission_mode("allow") == "allow"
     assert plugin.validate_permission_mode("deny") == "deny"
+    assert plugin.validate_permission_mode("plan") == "plan"
 
 
 def test_validate_permission_mode_rejects_legacy_auto() -> None:
@@ -115,6 +123,78 @@ def test_validate_permission_mode_rejects_legacy_auto() -> None:
         HTTPException, match="unsupported opencode permission mode: auto"
     ):
         plugin.validate_permission_mode("auto")
+
+
+@pytest.mark.asyncio
+async def test_create_plan_session_persists_plan_agent_state(tmp_path) -> None:
+    plugin = OpenCodePlugin()
+
+    class FakeAdapter:
+        def __init__(self) -> None:
+            self.started: list[dict[str, Any]] = []
+
+        async def start_session(self, *args: object, **kwargs: object) -> str:
+            self.started.append({"args": args, "kwargs": kwargs})
+            return "ses_plan"
+
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.sessions: dict[str, SessionRecord] = {}
+
+        def create_session(self, session: SessionRecord) -> None:
+            self.sessions[session.id] = session
+
+        def update_session(self, session_id: str, **kwargs: object) -> SessionRecord:
+            session = self.sessions[session_id]
+            for key, value in kwargs.items():
+                setattr(session, key, value)
+            return session
+
+    fake_adapter = FakeAdapter()
+
+    async def fake_get_or_create_adapter(
+        *args: object, **kwargs: object
+    ) -> FakeAdapter:
+        return fake_adapter
+
+    cast(Any, plugin)._get_or_create_adapter = fake_get_or_create_adapter
+
+    storage = FakeStorage()
+    runtime: Any = SimpleNamespace(
+        storage=storage,
+        settings=SimpleNamespace(plugin_config=lambda _id: OpenCodePluginConfig()),
+        _find_launch_target=lambda _id: None,
+        get_session=lambda session_id: storage.sessions[session_id],
+    )
+    request = SessionCreateRequest(
+        backend="opencode",
+        cwd="/repo",
+        args=[],
+        permission_mode="plan",
+    )
+
+    session = await plugin.create_session(
+        runtime,
+        request,
+        session_id="sess",
+        launch_target=None,
+        title="Plan",
+        raw_log=tmp_path / "raw.log",
+        structured_log=tmp_path / "events.jsonl",
+        git_meta=GitMeta(repo_name="repo", branch="main"),
+        permission_mode="plan",
+        resolved_model=None,
+        resolved_effort=None,
+    )
+
+    started_kwargs = fake_adapter.started[0]["kwargs"]
+    assert started_kwargs["agent"] == "plan"
+    assert started_kwargs["permission"] is None
+    assert session.transport_state == {
+        "opencode_session_id": "ses_plan",
+        "agent": "plan",
+        "pre_plan_mode": "default",
+    }
 
 
 @pytest.mark.asyncio
@@ -743,6 +823,163 @@ async def test_list_threads_sorts_by_updated_at_after_merging_adapters() -> None
     threads = await plugin.list_threads(runtime, launch_target_id="ssh-1")
 
     assert [thread.id for thread in threads] == ["ses_b", "ses_a"]
+
+
+@pytest.mark.asyncio
+async def test_reconnect_restore_rehydrates_pre_plan_mode(tmp_path) -> None:
+    plugin = OpenCodePlugin()
+    session = _session(
+        transport_state={
+            "opencode_session_id": "ses_plan",
+            "agent": "plan",
+            "pre_plan_mode": "ask",
+        },
+        permission_mode="plan",
+    )
+
+    class FakeAdapter:
+        def __init__(self) -> None:
+            self.restore_calls: list[dict[str, object]] = []
+            self.pre_plan_calls: list[tuple[str, str | None]] = []
+
+        async def restore_session(
+            self,
+            session_id: str,
+            cwd: str,
+            opencode_session_id: str,
+            model: str | None = None,
+            agent: str | None = None,
+            effort: str | None = None,
+        ) -> None:
+            self.restore_calls.append(
+                {
+                    "session_id": session_id,
+                    "cwd": cwd,
+                    "opencode_session_id": opencode_session_id,
+                    "model": model,
+                    "agent": agent,
+                    "effort": effort,
+                }
+            )
+
+        async def set_pre_plan_mode(self, session_id: str, mode: str | None) -> bool:
+            self.pre_plan_calls.append((session_id, mode))
+            return True
+
+    fake_adapter = FakeAdapter()
+    key = (None, "/repo", ())
+    plugin._adapters = cast(Any, {key: fake_adapter})
+    plugin._reconnect_targets[key] = {"sess"}
+
+    class FakeStorage:
+        def get_session(self, session_id: str) -> SessionRecord | None:
+            assert session_id == "sess"
+            return session
+
+        def update_session(self, session_id: str, **kwargs: object) -> SessionRecord:
+            assert session_id == "sess"
+            for key, value in kwargs.items():
+                setattr(session, key, value)
+            return session
+
+    async def record_system_event(*args: object, **kwargs: object) -> None:
+        return None
+
+    runtime: Any = SimpleNamespace(
+        storage=FakeStorage(),
+        _record_system_event=record_system_event,
+    )
+
+    await plugin._restore_after_reconnect(runtime, key)
+
+    assert fake_adapter.restore_calls[0]["agent"] == "plan"
+    assert fake_adapter.pre_plan_calls == [("sess", "ask")]
+    assert session.status == SessionStatus.IDLE
+
+
+@pytest.mark.asyncio
+async def test_fork_plan_session_persists_pre_plan_mode(tmp_path) -> None:
+    plugin = OpenCodePlugin()
+    session = _session(
+        transport_state={
+            "opencode_session_id": "ses_parent",
+            "agent": "plan",
+            "pre_plan_mode": "allow",
+        },
+        permission_mode="plan",
+    )
+
+    class FakeAdapter:
+        def __init__(self) -> None:
+            self.pre_plan_calls: list[tuple[str, str | None]] = []
+
+        async def fork_session(
+            self,
+            session_id: str,
+            cwd: str,
+            opencode_session_id: str,
+            model: str | None = None,
+            agent: str | None = None,
+            effort: str | None = None,
+        ) -> str:
+            assert (session_id, cwd, opencode_session_id, agent) == (
+                "forked",
+                "/repo",
+                "ses_parent",
+                "plan",
+            )
+            return "ses_forked"
+
+        async def set_pre_plan_mode(self, session_id: str, mode: str | None) -> bool:
+            self.pre_plan_calls.append((session_id, mode))
+            return True
+
+    fake_adapter = FakeAdapter()
+
+    async def fake_get_or_create_adapter(
+        *args: object, **kwargs: object
+    ) -> FakeAdapter:
+        return fake_adapter
+
+    cast(Any, plugin)._get_or_create_adapter = fake_get_or_create_adapter
+
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.sessions: dict[str, SessionRecord] = {"sess": session}
+
+        def create_session(self, new_session: SessionRecord) -> None:
+            self.sessions[new_session.id] = new_session
+
+        def clone_events(self, source_id: str, target_id: str) -> None:
+            assert (source_id, target_id) == ("sess", "forked")
+
+    async def record_system_event(*args: object, **kwargs: object) -> None:
+        return None
+
+    storage = FakeStorage()
+    runtime: Any = SimpleNamespace(
+        storage=storage,
+        settings=SimpleNamespace(plugin_config=lambda _id: OpenCodePluginConfig()),
+        _find_launch_target=lambda _id: None,
+        _record_system_event=record_system_event,
+        get_session=lambda session_id: storage.sessions[session_id],
+    )
+
+    forked = await plugin.fork_session(
+        runtime,
+        session,
+        new_session_id="forked",
+        title="Forked",
+        raw_log=tmp_path / "raw.log",
+        structured_log=tmp_path / "events.jsonl",
+    )
+
+    assert fake_adapter.pre_plan_calls == [("forked", "allow")]
+    assert forked.transport_state == {
+        "opencode_session_id": "ses_forked",
+        "agent": "plan",
+        "pre_plan_mode": "allow",
+    }
 
 
 @pytest.mark.asyncio

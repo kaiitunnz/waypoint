@@ -505,6 +505,9 @@ class OpenCodePlugin:
                     agent=session.transport_state.get("agent"),
                     effort=session.effort,
                 )
+                pre_plan_mode = session.transport_state.get("pre_plan_mode")
+                if pre_plan_mode is not None:
+                    await adapter.set_pre_plan_mode(session.id, pre_plan_mode)
             except Exception as exc:
                 log.warning(
                     "opencode resurrect of %s failed after reconnect: %s",
@@ -1268,6 +1271,8 @@ class OpenCodePlugin:
         }
         if agent:
             forked_transport_state["agent"] = agent
+        if pre_plan_mode is not None:
+            forked_transport_state["pre_plan_mode"] = pre_plan_mode
         new_session = SessionRecord(
             id=new_session_id,
             backend=self.id,
@@ -1518,6 +1523,9 @@ class OpenCodePlugin:
                 permission=mapped_permission,
             )
             session.transport_state = {"opencode_session_id": opencode_session_id}
+            if agent is not None:
+                session.transport_state["agent"] = agent
+                session.transport_state["pre_plan_mode"] = "default"
             runtime.storage.update_session(
                 session.id, transport_state=session.transport_state
             )

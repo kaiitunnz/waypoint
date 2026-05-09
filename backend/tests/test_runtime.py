@@ -1800,6 +1800,38 @@ async def test_set_permission_mode_codex_leaving_plan_clears_previous_preset(
 
 
 @pytest.mark.asyncio
+async def test_runtime_fork_codex_session_uses_codex_plugin(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+
+    class CodexForkFake(FakeCodexRuntimeAdapter):
+        async def fork_session(
+            self,
+            session_id: str,
+            cwd: str,
+            thread_id: str,
+            client_factory_override: Any = None,
+            model: str | None = None,
+            effort: str | None = None,
+            custom_args: list[str] | None = None,
+            config_overrides: list[str] | None = None,
+        ) -> str:
+            assert session_id.startswith("codex-")
+            assert (cwd, thread_id) == ("/tmp/project", "thread-1")
+            return "thread-forked"
+
+    plugin = _codex_plugin(runtime)
+    plugin.adapter = cast(Any, CodexForkFake())
+    session = make_session(settings)
+    storage.create_session(session)
+
+    forked = await runtime.fork_session("sess")
+
+    assert forked.backend == "codex"
+    assert forked.title == "Session (fork #1)"
+    assert forked.transport_state == {"thread_id": "thread-forked"}
+
+
+@pytest.mark.asyncio
 async def test_fork_codex_plan_session_persists_pre_plan_mode(tmp_path) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
 

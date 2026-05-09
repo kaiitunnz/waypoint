@@ -101,6 +101,7 @@ class CodexPlugin:
         supports_set_permission_mode_inline=True,
         supports_thread_discovery=True,
         supports_thread_import=True,
+        supports_fork=True,
         supports_slash_compact=True,
         supports_approval_note=False,
         supports_custom_cli_args=True,

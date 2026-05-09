@@ -1,0 +1,368 @@
+import { useEffect, useRef, useState, type ReactNode } from "react";
+
+import { DiffPreview } from "@/components/DiffPreview";
+import { MarkdownMessage } from "@/components/MarkdownMessage";
+import { CopyMessageButton } from "@/components/CopyMessageButton";
+import {
+  normalizeToolName,
+  parseEvent,
+  type EventDiffPreview,
+} from "@/lib/events";
+import type { EventRecord } from "@/lib/types";
+
+interface SharedApprovalAction {
+  id: string;
+  label: string;
+  className: "primary" | "secondary";
+  loadingLabel?: string;
+  onSelect: (note?: string) => void | Promise<void>;
+}
+
+interface SharedApprovalCardProps {
+  badge: string;
+  children: ReactNode;
+  actions?: SharedApprovalAction[];
+  className?: string;
+  copyLabel?: string;
+  copyText: string;
+  notePlaceholder?: string;
+  supportsNote?: boolean;
+  timeLabel?: string;
+}
+
+function SharedApprovalCard({
+  badge,
+  children,
+  actions = [],
+  className = "",
+  copyLabel = "Copy approval body",
+  copyText,
+  notePlaceholder = "Add a note…",
+  supportsNote = false,
+  timeLabel,
+}: SharedApprovalCardProps) {
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteText, setNoteText] = useState("");
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  async function handleAction(action: SharedApprovalAction) {
+    if (pendingAction) {
+      return;
+    }
+    setPendingAction(action.id);
+    try {
+      await action.onSelect(noteText.trim() || undefined);
+    } finally {
+      if (mountedRef.current) {
+        setPendingAction(null);
+      }
+    }
+  }
+
+  const cardClassName = `panel approval${className ? ` ${className}` : ""}`;
+
+  return (
+    <section className={cardClassName}>
+      <div className="session-row">
+        <span className="badge fidelity structured">{badge}</span>
+        {timeLabel ? <span className="role-time">{timeLabel}</span> : null}
+        <CopyMessageButton text={copyText} label={copyLabel} />
+      </div>
+      {children}
+      {supportsNote && actions.length > 0 ? (
+        noteOpen ? (
+          <div className="approval-note-wrap ask-question-note">
+            <textarea
+              className="ask-question-note-input"
+              value={noteText}
+              onChange={(event) => setNoteText(event.target.value)}
+              placeholder={notePlaceholder}
+              rows={2}
+            />
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => setNoteOpen(false)}
+            >
+              Hide note
+            </button>
+          </div>
+        ) : (
+          <div className="approval-note-wrap">
+            <button
+              type="button"
+              className="link-button ask-question-note-toggle"
+              onClick={() => setNoteOpen(true)}
+            >
+              + Add note
+            </button>
+          </div>
+        )
+      ) : null}
+      {actions.length > 0 ? (
+        <div className="action-row">
+          {actions.map((action) => (
+            <button
+              key={action.id}
+              className={action.className}
+              onClick={() => void handleAction(action)}
+              type="button"
+              disabled={pendingAction !== null}
+            >
+              {pendingAction === action.id && action.loadingLabel
+                ? action.loadingLabel
+                : action.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+export function ApprovalRequestCard({
+  event,
+  onDecide,
+  supportsNote = false,
+}: {
+  event: EventRecord;
+  onDecide: (decision: string, text?: string, approvalId?: string) => void | Promise<void>;
+  supportsNote?: boolean;
+}) {
+  const diffPreview = parseEvent(event).diffPreview;
+  const toolName = normalizeToolName(
+    typeof event.metadata.tool_name === "string" ? event.metadata.tool_name : null,
+  );
+  const toolInput =
+    event.metadata.tool_input && typeof event.metadata.tool_input === "object"
+      ? (event.metadata.tool_input as Record<string, unknown>)
+      : null;
+  const copyText = approvalCopyText(event.text, toolName, toolInput);
+  const approvalId =
+    typeof event.metadata?.approval_id === "string"
+      ? (event.metadata.approval_id as string)
+      : undefined;
+
+  return (
+    <SharedApprovalCard
+      badge="approval"
+      copyText={copyText}
+      notePlaceholder="Add a note to your approval or decline…"
+      supportsNote={supportsNote}
+      actions={[
+        {
+          id: "accept",
+          label: "Approve",
+          className: "primary",
+          onSelect: (note) => onDecide("accept", note, approvalId),
+        },
+        {
+          id: "acceptForSession",
+          label: "Approve for session",
+          className: "secondary",
+          onSelect: (note) => onDecide("acceptForSession", note, approvalId),
+        },
+        {
+          id: "decline",
+          label: "Decline",
+          className: "secondary",
+          onSelect: (note) => onDecide("decline", note, approvalId),
+        },
+        {
+          id: "cancel",
+          label: "Cancel",
+          className: "secondary",
+          onSelect: (note) => onDecide("cancel", note, approvalId),
+        },
+      ]}
+    >
+      <ApprovalCardBody
+        eventText={event.text}
+        toolName={toolName}
+        toolInput={toolInput}
+        diffPreview={diffPreview}
+      />
+    </SharedApprovalCard>
+  );
+}
+
+export function PlanApprovalCard({
+  agentLabel,
+  canApprove = false,
+  className,
+  onApprove,
+  plan,
+  prompt = "Approve plan and exit plan mode",
+  timeLabel,
+}: {
+  agentLabel: string;
+  canApprove?: boolean;
+  className?: string;
+  onApprove?: (note?: string) => void | Promise<void>;
+  plan: string;
+  prompt?: string;
+  timeLabel?: string;
+}) {
+  return (
+    <SharedApprovalCard
+      badge={`${agentLabel} plan`}
+      className={className}
+      copyLabel="Copy plan"
+      copyText={plan}
+      notePlaceholder="Add a note to your approval…"
+      supportsNote={canApprove}
+      timeLabel={timeLabel}
+      actions={
+        canApprove && onApprove
+          ? [
+              {
+                id: "approve",
+                label: "Approve",
+                loadingLabel: "Approving…",
+                className: "primary",
+                onSelect: onApprove,
+              },
+            ]
+          : []
+      }
+    >
+      <ApprovalPlanBody plan={plan} prompt={prompt} />
+    </SharedApprovalCard>
+  );
+}
+
+function approvalCopyText(
+  eventText: string,
+  toolName: string | null,
+  toolInput: Record<string, unknown> | null,
+): string {
+  if (toolName === "ExitPlanMode" && typeof toolInput?.plan === "string") {
+    return toolInput.plan as string;
+  }
+  if (
+    (toolName === "Task" || toolName === "Agent") &&
+    typeof toolInput?.prompt === "string"
+  ) {
+    return toolInput.prompt as string;
+  }
+  if (toolName === "Bash" && typeof toolInput?.command === "string") {
+    return toolInput.command as string;
+  }
+  return eventText;
+}
+
+function ApprovalCardBody({
+  eventText,
+  toolName,
+  toolInput,
+  diffPreview,
+}: {
+  eventText: string;
+  toolName: string | null;
+  toolInput: Record<string, unknown> | null;
+  diffPreview?: EventDiffPreview | null;
+}) {
+  if (diffPreview) {
+    return (
+      <>
+        <p className="approval-prompt">{eventText}</p>
+        <DiffPreview preview={diffPreview} />
+      </>
+    );
+  }
+  if (toolName === "ExitPlanMode" && typeof toolInput?.plan === "string") {
+    return <ApprovalPlanBody plan={toolInput.plan as string} />;
+  }
+  if (
+    (toolName === "Task" || toolName === "Agent") &&
+    toolInput &&
+    typeof toolInput.prompt === "string"
+  ) {
+    const description =
+      typeof toolInput.description === "string" ? (toolInput.description as string) : "";
+    const subagent =
+      typeof toolInput.subagent_type === "string"
+        ? (toolInput.subagent_type as string)
+        : "";
+    return (
+      <>
+        <p className="approval-prompt">
+          Approve subagent task
+          {description ? `: ${description}` : ""}
+          {subagent ? ` (via ${subagent})` : ""}
+        </p>
+        <div className="approval-plan">
+          <MarkdownMessage text={toolInput.prompt as string} />
+        </div>
+      </>
+    );
+  }
+  if (toolName === "Bash" && typeof toolInput?.command === "string") {
+    const desc =
+      typeof toolInput.description === "string"
+        ? (toolInput.description as string)
+        : "";
+    return (
+      <>
+        <p className="approval-prompt">
+          Approve Bash command{desc ? `: ${desc}` : ""}
+        </p>
+        <pre className="approval-shell">{toolInput.command as string}</pre>
+      </>
+    );
+  }
+  if (isApprovalFileEditTool(toolName)) {
+    const path = approvalFileEditPath(toolInput);
+    return (
+      <>
+        <p className="approval-prompt">
+          Approve {toolName}
+          {path ? ` on ${path}` : ""}
+        </p>
+        <p className="diff-unavailable">Diff preview was not included by the backend.</p>
+      </>
+    );
+  }
+  return <pre>{eventText}</pre>;
+}
+
+function ApprovalPlanBody({
+  plan,
+  prompt = "Approve plan and exit plan mode",
+}: {
+  plan: string;
+  prompt?: string;
+}) {
+  return (
+    <>
+      <p className="approval-prompt">{prompt}</p>
+      <div className="approval-plan">
+        <MarkdownMessage text={plan} />
+      </div>
+    </>
+  );
+}
+
+function isApprovalFileEditTool(toolName: string | null): boolean {
+  return (
+    toolName === "Edit" ||
+    toolName === "MultiEdit" ||
+    toolName === "Write" ||
+    toolName === "NotebookEdit"
+  );
+}
+
+function approvalFileEditPath(toolInput: Record<string, unknown> | null): string | null {
+  if (!toolInput) {
+    return null;
+  }
+  const value = toolInput.file_path ?? toolInput.path ?? toolInput.notebook_path;
+  return typeof value === "string" && value ? value : null;
+}

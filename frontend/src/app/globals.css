@@ -2779,6 +2779,11 @@ html[data-theme="light"] .tool-call-run-children {
   gap: 12px;
 }
 
+.transcript.codex.plan-output {
+  justify-self: start;
+  width: min(94%, 820px);
+}
+
 .approval-prompt {
   font-weight: 600;
   margin: 0;
@@ -2809,6 +2814,10 @@ html[data-theme="light"] .approval-plan {
 
 html[data-theme="light"] .approval-shell {
   background: rgba(228, 222, 208, 0.7);
+}
+
+.approval-note-wrap {
+  margin: 0 12px;
 }
 
 .approval-pager {

@@ -1750,6 +1750,54 @@ async def test_set_permission_mode_codex_leaving_plan_clears_previous_preset(
 
 
 @pytest.mark.asyncio
+async def test_fork_codex_plan_session_persists_pre_plan_mode(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+
+    class CodexForkFake(FakeCodexRuntimeAdapter):
+        async def fork_session(
+            self,
+            session_id: str,
+            cwd: str,
+            thread_id: str,
+            client_factory_override: Any = None,
+            model: str | None = None,
+            effort: str | None = None,
+            custom_args: list[str] | None = None,
+            config_overrides: list[str] | None = None,
+        ) -> str:
+            assert (session_id, cwd, thread_id) == (
+                "forked",
+                "/tmp/project",
+                "thread-1",
+            )
+            return "thread-forked"
+
+    plugin = _codex_plugin(runtime)
+    plugin.adapter = cast(Any, CodexForkFake())
+    session = make_session(
+        settings,
+        permission_mode="plan",
+        transport_state={"thread_id": "thread-1", "pre_plan_mode": "full_access"},
+    )
+    storage.create_session(session)
+
+    forked = await plugin.fork_session(
+        runtime,
+        session,
+        new_session_id="forked",
+        title="Forked",
+        raw_log=tmp_path / "raw.log",
+        structured_log=tmp_path / "events.jsonl",
+    )
+
+    assert forked.permission_mode == "plan"
+    assert forked.transport_state == {
+        "thread_id": "thread-forked",
+        "pre_plan_mode": "full_access",
+    }
+
+
+@pytest.mark.asyncio
 async def test_set_permission_mode_codex_rejects_unknown_mode(tmp_path) -> None:
     from fastapi import HTTPException
 

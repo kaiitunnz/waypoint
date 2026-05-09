@@ -17,7 +17,7 @@ GitHub Issues are the source of truth for active bugs and feature requests. Crea
 Use this convention when opening issues:
 
 - one leaf issue per actionable bug or feature request
-- lowercase title prefixes: `bug: ...` and `feature request: ...`
+- lowercase title prefixes: `bug: ...` and `feat: ...`
 - label bug reports with `bug` and feature requests with `enhancement`
 
 ## Layout

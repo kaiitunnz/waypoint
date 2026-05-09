@@ -2460,10 +2460,7 @@ function findPendingApprovals(events: EventRecord[]): EventRecord[] {
   for (const event of events) {
     if (event.kind === "approval_request") {
       queue.push(event);
-    } else if (
-      event.kind === "system_note" &&
-      /(Approval response sent|Approval timed out)/i.test(event.text)
-    ) {
+    } else if (event.kind === "system_note" && isApprovalResolutionEvent(event)) {
       const approvalId = event.metadata?.approval_id;
       if (typeof approvalId === "string") {
         const index = queue.findIndex((e) => e.metadata?.approval_id === approvalId);
@@ -2476,6 +2473,13 @@ function findPendingApprovals(events: EventRecord[]): EventRecord[] {
   return queue;
 }
 
+function isApprovalResolutionEvent(event: EventRecord): boolean {
+  if (event.metadata?.method === "approval.invalidated") {
+    return true;
+  }
+  return /(Approval response sent|Approval timed out)/i.test(event.text);
+}
+
 function isImportantEvent(event: EventRecord): boolean {
   switch (event.kind) {
     case "user_input":
@@ -2486,6 +2490,9 @@ function isImportantEvent(event: EventRecord): boolean {
       return true;
     case "system_note":
     case "status_update":
+      if (event.metadata?.method === "approval.invalidated") {
+        return true;
+      }
       if (isPlanEvent(event)) {
         return true;
       }

@@ -7,12 +7,18 @@ import os
 import shutil
 import uuid
 from collections import deque
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from contextlib import suppress
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from waypoint.backends.claude_code.models import (
+    claude_context_window_for_model,
+    claude_model_family,
+    normalize_claude_model_id,
+)
 from waypoint.backends.claude_code.normalize import (
     format_approval_text,
     format_compact_boundary,
@@ -29,7 +35,7 @@ from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_AUTO_APPROVE_MODES,
     CLAUDE_PERMISSION_MODES,
 )
-from waypoint.schemas import EventKind, SessionStatus
+from waypoint.schemas import EventKind, SessionContextUsage, SessionStatus
 
 log = logging.getLogger("waypoint.claude_cli")
 
@@ -141,6 +147,7 @@ EmitEvent = Callable[
     Coroutine[Any, Any, None],
 ]
 InitCallback = Callable[[str, dict[str, Any]], None]
+SessionUpdateCallback = Callable[[str, dict[str, Any], bool], Awaitable[Any]]
 LaunchFactory = Callable[
     [str, str, str, bool, str, str | None, str | None, list[str], str | None],
     "ClaudeLaunchSpec",
@@ -218,6 +225,8 @@ class ClaudeSessionState:
     last_plan_content: str | None = None
     closing: bool = False
     model: str | None = None
+    context_usage_snapshot: SessionContextUsage | None = None
+    context_usage_signature: tuple[int, int | None] | None = None
     # Reasoning effort. Claude's CLI accepts `--effort <level>` at launch
     # only — there is no in-process control_request to swap it — so changing
     # this value at runtime requires terminating and respawning the process
@@ -249,6 +258,8 @@ class ClaudeCliAdapter:
         binary: str | None = None,
         launch_factory: LaunchFactory | None = None,
         on_init: InitCallback | None = None,
+        on_session_update: SessionUpdateCallback | None = None,
+        default_model_id: str | None = None,
     ) -> None:
         self._emit_event = emit_event
         self._hook_settings_path = hook_settings_path
@@ -258,6 +269,8 @@ class ClaudeCliAdapter:
         self._binary = binary
         self._launch_factory = launch_factory
         self._on_init = on_init
+        self._on_session_update = on_session_update
+        self._default_model_id = normalize_claude_model_id(default_model_id)
         self._sessions: dict[str, ClaudeSessionState] = {}
         self._approval_lock = asyncio.Lock()
 
@@ -349,7 +362,10 @@ class ClaudeCliAdapter:
         await self._send_control_request(session_id, request_id, payload)
         state = self._sessions.get(session_id)
         if state is not None:
-            state.model = model or None
+            previous_model = state.model
+            state.model = self._effective_model_id(model)
+            if state.model != previous_model:
+                await self._refresh_context_usage(state)
 
     def session_model(self, session_id: str) -> str | None:
         state = self._sessions.get(session_id)
@@ -941,7 +957,7 @@ class ClaudeCliAdapter:
             stderr_task=asyncio.create_task(asyncio.sleep(0)),
             wait_task=asyncio.create_task(asyncio.sleep(0)),
             permission_mode=resolved_mode,
-            model=model,
+            model=self._effective_model_id(model),
             effort=effort or None,
             custom_args=list(effective_custom_args),
             launch_factory=launch_factory,
@@ -1192,6 +1208,17 @@ class ClaudeCliAdapter:
                     for command in slash_commands
                     if isinstance(command, str) and command
                 )
+            model = self._effective_model_id(event.get("model"))
+            if model is not None:
+                current_family = claude_model_family(state.model)
+                incoming_family = claude_model_family(model)
+                if (
+                    state.model is None
+                    or current_family != incoming_family
+                    or model.endswith("[1m]")
+                ):
+                    state.model = model
+                    await self._refresh_context_usage(state)
             if self._on_init is not None:
                 self._on_init(state.session_id, event)
             # Claude's stream-json mode emits `init` at the start of every
@@ -1268,6 +1295,7 @@ class ClaudeCliAdapter:
     ) -> None:
         message = event.get("message") or {}
         message_id = str(message.get("id") or "")
+        usage = message.get("usage") or event.get("usage") or {}
         for block in iter_content_blocks(message.get("content")):
             block_type = block.get("type")
             if block_type == "text":
@@ -1313,6 +1341,13 @@ class ClaudeCliAdapter:
             elif block_type == "thinking":
                 # Optional surface; hide behind an opt-in later if too noisy.
                 continue
+        snapshot = _context_usage_snapshot_from_message(
+            state.model,
+            usage if isinstance(usage, dict) else {},
+        )
+        if snapshot is not None:
+            state.context_usage_snapshot = snapshot
+            await self._publish_context_usage(state, snapshot)
 
     async def _handle_user(
         self, state: ClaudeSessionState, event: dict[str, Any]
@@ -1372,6 +1407,36 @@ class ClaudeCliAdapter:
             SessionStatus.ERROR if is_error else SessionStatus.IDLE,
         )
 
+    async def _publish_context_usage(
+        self, state: ClaudeSessionState, snapshot: SessionContextUsage
+    ) -> None:
+        signature = (snapshot.used_tokens, snapshot.context_window_tokens)
+        if state.context_usage_signature == signature:
+            return
+        state.context_usage_signature = signature
+        if self._on_session_update is None:
+            return
+        await self._on_session_update(
+            state.session_id,
+            {"context_usage": snapshot.model_dump(mode="json")},
+            False,
+        )
+
+    async def _refresh_context_usage(self, state: ClaudeSessionState) -> None:
+        snapshot = state.context_usage_snapshot
+        if snapshot is None:
+            return
+        model = state.model or self._default_model_id
+        if model is None:
+            return
+        refreshed = snapshot.model_copy(
+            update={"context_window_tokens": claude_context_window_for_model(model)}
+        )
+        if refreshed.context_window_tokens is None:
+            return
+        state.context_usage_snapshot = refreshed
+        await self._publish_context_usage(state, refreshed)
+
     def _map_decision(self, decision: str) -> str:
         lowered = decision.strip().lower()
         if lowered in {"approve", "accept", "yes", "y", "allow", "acceptforsession"}:
@@ -1383,3 +1448,64 @@ class ClaudeCliAdapter:
             return self._sessions[session_id]
         except KeyError as exc:
             raise ClaudeCliError(f"claude session not active: {session_id}") from exc
+
+    def _effective_model_id(self, model: str | None) -> str | None:
+        normalized = normalize_claude_model_id(model)
+        if normalized is not None:
+            return normalized
+        return self._default_model_id
+
+
+def _context_usage_snapshot_from_message(
+    model: str | None, usage: dict[str, Any]
+) -> SessionContextUsage | None:
+    input_tokens = _non_negative_int(usage.get("input_tokens"))
+    cache_read_input_tokens = _non_negative_int(usage.get("cache_read_input_tokens"))
+    cache_creation_input_tokens = _non_negative_int(
+        usage.get("cache_creation_input_tokens")
+    )
+    output_tokens = _non_negative_int(usage.get("output_tokens"))
+
+    used_tokens = sum(
+        value
+        for value in (
+            input_tokens,
+            cache_read_input_tokens,
+            cache_creation_input_tokens,
+        )
+        if value is not None
+    )
+    if used_tokens <= 0:
+        return None
+
+    context_window_tokens = claude_context_window_for_model(model)
+    if context_window_tokens is None:
+        return None
+
+    breakdown = {
+        key: value
+        for key, value in {
+            "input_tokens": input_tokens,
+            "cache_read_tokens": cache_read_input_tokens,
+            "cache_creation_tokens": cache_creation_input_tokens,
+            "output_tokens": output_tokens,
+        }.items()
+        if value is not None
+    }
+    return SessionContextUsage(
+        used_tokens=used_tokens,
+        context_window_tokens=context_window_tokens,
+        updated_at=datetime.now(UTC),
+        source="claude_code",
+        breakdown=breakdown,
+    )
+
+
+def _non_negative_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return max(0, value)
+    if isinstance(value, float) and value.is_integer():
+        return max(0, int(value))
+    return None

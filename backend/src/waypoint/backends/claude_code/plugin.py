@@ -27,6 +27,7 @@ from waypoint.backends.claude_code.commands import list_claude_command_completio
 from waypoint.backends.claude_code.models import (
     CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
+    claude_default_model_id,
 )
 from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_PERMISSION_MODE_SPECS,
@@ -82,6 +83,7 @@ class ClaudeCodePluginConfig(PluginConfig):
     models: list[BackendModelOption] = Field(
         default_factory=lambda: list(DEFAULT_CLAUDE_MODELS)
     )
+    default_model_id: str | None = Field(default_factory=claude_default_model_id)
     # Network-failure ceiling (seconds) for the PreToolUse hook's HTTP
     # request — *not* a deadline on user response time, which is
     # unbounded. Sized as the upper bound for "the SSH reverse tunnel
@@ -164,6 +166,8 @@ class ClaudeCodePlugin:
             hook_url=hook_url,
             default_hook_timeout_seconds=self._config(runtime).hook_timeout_seconds,
             on_init=runtime.handle_completion_source_init,
+            on_session_update=runtime.session_update_callback(),
+            default_model_id=self._config(runtime).default_model_id,
         )
         self.thread_enumerator = RemoteClaudeThreadEnumerator(
             hook.thread_enumerator_path

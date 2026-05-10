@@ -1259,7 +1259,7 @@ async def test_create_session_uses_structured_claude_for_ssh_target(
             session.transport_state["thread_id"],
             "remote-launch-factory",
             "default",
-            None,
+            "opus[1m]",
             None,
         )
     ]

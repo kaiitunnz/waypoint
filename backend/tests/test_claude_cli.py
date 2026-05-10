@@ -11,6 +11,10 @@ from waypoint.backends.claude_code.adapter import (
     ClaudeSessionState,
     claude_cli_mode_for,
 )
+from waypoint.backends.claude_code.models import (
+    DEFAULT_CLAUDE_MODELS,
+    claude_default_model_id,
+)
 from waypoint.backends.claude_code.plugin import ClaudeCodePluginConfig
 from waypoint.schemas import EventKind, SessionStatus
 
@@ -76,9 +80,15 @@ class FakeProcess:
 
 def _make_adapter(
     emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]],
+    session_updates: list[tuple[str, dict[str, Any], bool]] | None = None,
 ) -> ClaudeCliAdapter:
     async def emit(session_id, kind, text, metadata, status):
         emitted.append((session_id, kind, text, metadata, status))
+
+    async def update(session_id: str, updates: dict[str, Any], publish: bool) -> Any:
+        if session_updates is not None:
+            session_updates.append((session_id, updates, publish))
+        return updates
 
     return ClaudeCliAdapter(
         emit,
@@ -86,6 +96,7 @@ def _make_adapter(
         hook_secret="test-secret",
         hook_url="http://127.0.0.1:8787",
         default_hook_timeout_seconds=3600,
+        on_session_update=update if session_updates is not None else None,
     )
 
 
@@ -376,6 +387,12 @@ def test_hook_timeout_default_is_finite() -> None:
     assert 0 < config.hook_timeout_seconds < 24 * 3600
 
 
+def test_claude_default_model_id_comes_from_catalog() -> None:
+    default_option = next(opt for opt in DEFAULT_CLAUDE_MODELS if opt.is_default)
+    assert claude_default_model_id() == default_option.id
+    assert ClaudeCodePluginConfig().default_model_id == default_option.id
+
+
 @pytest.mark.asyncio
 async def test_send_input_reports_dead_process_with_stderr_tail() -> None:
     emitted: list = []
@@ -409,6 +426,140 @@ async def test_dispatch_system_init_records_runtime_slash_commands() -> None:
     )
 
     assert adapter.session_slash_commands("sess") == ("clear", "compact", "usage")
+    assert state.model == "sonnet"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_system_init_preserves_1m_default_model() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    state.model = "opus[1m]"
+
+    await adapter._dispatch(
+        state,
+        {
+            "type": "system",
+            "subtype": "init",
+            "model": "opus",
+            "session_id": "claude-uuid",
+        },
+    )
+
+    assert state.model == "opus[1m]"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_assistant_emits_context_usage_snapshot() -> None:
+    emitted: list = []
+    session_updates: list[tuple[str, dict[str, Any], bool]] = []
+    adapter = _make_adapter(emitted, session_updates=session_updates)
+    state, _ = _attach_state(adapter)
+    state.model = "opus[1m]"
+
+    await adapter._dispatch(
+        state,
+        {
+            "type": "assistant",
+            "message": {
+                "id": "msg_1",
+                "usage": {
+                    "input_tokens": 11,
+                    "cache_read_input_tokens": 3,
+                    "cache_creation_input_tokens": 5,
+                    "output_tokens": 7,
+                },
+                "content": [{"type": "text", "text": "Working on it"}],
+            },
+        },
+    )
+
+    assert emitted[0][1] == EventKind.AGENT_OUTPUT
+    assert len(session_updates) == 1
+    session_id, payload, publish = session_updates[0]
+    assert session_id == "sess"
+    assert publish is False
+    context_usage = payload["context_usage"]
+    assert context_usage["used_tokens"] == 19
+    assert context_usage["context_window_tokens"] == 1_000_000
+    assert context_usage["source"] == "claude_code"
+    assert context_usage["breakdown"] == {
+        "input_tokens": 11,
+        "cache_read_tokens": 3,
+        "cache_creation_tokens": 5,
+        "output_tokens": 7,
+    }
+    assert isinstance(context_usage["updated_at"], str)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_assistant_dedupes_context_usage_snapshot() -> None:
+    emitted: list = []
+    session_updates: list[tuple[str, dict[str, Any], bool]] = []
+    adapter = _make_adapter(emitted, session_updates=session_updates)
+    state, _ = _attach_state(adapter)
+    state.model = "sonnet"
+
+    event = {
+        "type": "assistant",
+        "message": {
+            "id": "msg_1",
+            "usage": {
+                "input_tokens": 8,
+                "cache_read_input_tokens": 2,
+                "cache_creation_input_tokens": 1,
+                "output_tokens": 6,
+            },
+            "content": [{"type": "text", "text": "Still going"}],
+        },
+    }
+
+    await adapter._dispatch(state, event)
+    await adapter._dispatch(state, event)
+
+    assert len(session_updates) == 1
+    assert state.context_usage_signature == (11, 200_000)
+
+
+@pytest.mark.asyncio
+async def test_set_model_refreshes_context_window_immediately() -> None:
+    emitted: list = []
+    session_updates: list[tuple[str, dict[str, Any], bool]] = []
+    adapter = _make_adapter(emitted, session_updates=session_updates)
+    state, _ = _attach_state(adapter)
+    state.model = "opus"
+
+    await adapter._dispatch(
+        state,
+        {
+            "type": "assistant",
+            "message": {
+                "id": "msg_1",
+                "usage": {
+                    "input_tokens": 11,
+                    "cache_read_input_tokens": 3,
+                    "cache_creation_input_tokens": 5,
+                    "output_tokens": 7,
+                },
+                "content": [{"type": "text", "text": "Working on it"}],
+            },
+        },
+    )
+    assert session_updates[-1][1]["context_usage"]["context_window_tokens"] == 200_000
+
+    captured: list[dict[str, Any]] = []
+
+    async def fake_send(session_id: str, request_id: str, request: dict) -> dict:
+        captured.append(request)
+        return {"subtype": "ack"}
+
+    object.__setattr__(adapter, "_send_control_request", fake_send)
+    await adapter.set_model("sess", "opus[1m]")
+
+    assert captured[-1] == {"subtype": "set_model", "model": "opus[1m]"}
+    assert state.model == "opus[1m]"
+    assert len(session_updates) == 2
+    assert session_updates[-1][1]["context_usage"]["context_window_tokens"] == 1_000_000
 
 
 @pytest.mark.asyncio

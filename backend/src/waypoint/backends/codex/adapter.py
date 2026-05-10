@@ -721,7 +721,7 @@ class CodexAppServerAdapter:
         await self._on_session_update(
             state.session_id,
             {"context_usage": snapshot.model_dump(mode="json")},
-            False,
+            True,
         )
 
     def _require_session(self, session_id: str) -> CodexSessionState:

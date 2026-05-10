@@ -12,6 +12,25 @@ from waypoint.schemas import BackendModelOption
 # don't accept --effort at all.
 CLAUDE_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh")
 
+# Claude's CLI only exposes a small fixed catalog of aliases. The adapter may
+# see either the human-facing alias (``opus[1m]``) or a resolved API model id
+# (``claude-opus-4-7``); normalize both to the same family so the context window
+# lookup stays stable.
+CLAUDE_MODEL_ALIASES: dict[str, str] = {
+    "claude-opus-4-7": "opus",
+    "claude-sonnet-4-6": "sonnet",
+    "claude-sonnet-4-5": "sonnet",
+    "claude-haiku-4-5": "haiku",
+}
+
+CLAUDE_CONTEXT_WINDOWS: dict[str, int] = {
+    "opus": 200_000,
+    "sonnet": 200_000,
+    "haiku": 200_000,
+    "opus[1m]": 1_000_000,
+    "sonnet[1m]": 1_000_000,
+}
+
 DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
     BackendModelOption(
         id="opus",
@@ -48,3 +67,49 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
         default_effort="high",
     ),
 )
+
+
+def normalize_claude_model_id(model: str | None) -> str | None:
+    if model is None or not isinstance(model, str):
+        return None
+    candidate = model.strip()
+    if not candidate:
+        return None
+    if candidate in CLAUDE_CONTEXT_WINDOWS:
+        return candidate
+    normalized = CLAUDE_MODEL_ALIASES.get(candidate)
+    if normalized is not None:
+        return normalized
+    if candidate.startswith("claude-opus-"):
+        return "opus"
+    if candidate.startswith("claude-sonnet-"):
+        return "sonnet"
+    if candidate.startswith("claude-haiku-"):
+        return "haiku"
+    return candidate
+
+
+def claude_model_family(model: str | None) -> str | None:
+    normalized = normalize_claude_model_id(model)
+    if normalized is None:
+        return None
+    return normalized.split("[", 1)[0]
+
+
+def claude_context_window_for_model(model: str | None) -> int | None:
+    normalized = normalize_claude_model_id(model)
+    if normalized is None:
+        return None
+    if normalized in CLAUDE_CONTEXT_WINDOWS:
+        return CLAUDE_CONTEXT_WINDOWS[normalized]
+    family = claude_model_family(normalized)
+    if family is None:
+        return None
+    return CLAUDE_CONTEXT_WINDOWS.get(family)
+
+
+def claude_default_model_id() -> str | None:
+    for option in DEFAULT_CLAUDE_MODELS:
+        if option.is_default:
+            return option.id
+    return None

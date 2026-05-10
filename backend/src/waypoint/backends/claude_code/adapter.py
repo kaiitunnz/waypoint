@@ -1212,11 +1212,7 @@ class ClaudeCliAdapter:
             if model is not None:
                 current_family = claude_model_family(state.model)
                 incoming_family = claude_model_family(model)
-                if (
-                    state.model is None
-                    or current_family != incoming_family
-                    or model.endswith("[1m]")
-                ):
+                if state.model is None or current_family != incoming_family:
                     state.model = model
                     await self._refresh_context_usage(state)
             if self._on_init is not None:
@@ -1429,11 +1425,16 @@ class ClaudeCliAdapter:
         model = state.model or self._default_model_id
         if model is None:
             return
-        refreshed = snapshot.model_copy(
-            update={"context_window_tokens": claude_context_window_for_model(model)}
-        )
-        if refreshed.context_window_tokens is None:
+        context_window_tokens = claude_context_window_for_model(model)
+        if context_window_tokens is None:
             return
+        if snapshot.context_window_tokens == context_window_tokens:
+            return
+        # Bump only the window here; used_tokens is recomputed from the next
+        # assistant turn under the active model.
+        refreshed = snapshot.model_copy(
+            update={"context_window_tokens": context_window_tokens}
+        )
         state.context_usage_snapshot = refreshed
         await self._publish_context_usage(state, refreshed)
 

@@ -1929,6 +1929,12 @@ const ReplyComposer = memo(function ReplyComposer({
         .map((window) => `${window.label} ${Math.round(window.used_percent)}%`)
         .join(" · ")
     : null;
+  const rateLimitUpdatedAt = rateLimitUsage?.updated_at ?? null;
+  const rateLimitSourceLabel = rateLimitUsage
+    ? rateLimitUsage.notes?.length
+      ? rateLimitUsage.notes[0]
+      : humaniseBackend(rateLimitUsage.source)
+    : "Unavailable";
   const usageToneValue = (() => {
     if (contextUsage === null) {
       return rateLimitUsageToneValue;
@@ -2213,99 +2219,98 @@ const ReplyComposer = memo(function ReplyComposer({
                       ) : null}
                     </section>
                   ) : null}
-                  {rateLimitUsage ? (
-                    <section className="composer-usage-section">
-                      <div className="composer-context-head">
-                        <div className="composer-context-titles">
-                          <span className="composer-context-kicker">Rate limits</span>
-                          <strong>
-                            {rateLimitUsageSummary ?? "Unavailable"}
-                          </strong>
-                        </div>
-                        <span className="composer-context-source">
-                          {rateLimitUsage.notes?.length
-                            ? rateLimitUsage.notes.join(" · ")
-                            : humaniseBackend(rateLimitUsage.source)}
-                        </span>
+                  <section className="composer-usage-section">
+                    <div className="composer-context-head">
+                      <div className="composer-context-titles">
+                        <span className="composer-context-kicker">Rate limits</span>
+                        <strong>
+                          {rateLimitUsageSummary ?? "Unavailable"}
+                        </strong>
                       </div>
-                      <div className="composer-rate-list">
-                        {rateLimitUsageWindows.map((window) => {
-                          const percent = rateLimitWindowPercent(window);
-                          const tone = usageTone(percent);
-                          const resetText = formatRateLimitWindowReset(window);
-                          const tokenSummary = formatRateLimitWindowTokens(window);
-                          return (
-                            <article
-                              key={window.id}
-                              className={`composer-rate-card tone-${tone}`}
-                            >
-                              <div className="composer-rate-card-head">
-                                <strong>{window.label}</strong>
-                                <span>
-                                  {percent !== null ? `${percent}% used` : "Unavailable"}
-                                </span>
-                              </div>
-                              <div className="composer-rate-card-meter" aria-hidden="true">
-                                <span
-                                  style={{
-                                    width: percent !== null ? `${percent}%` : "0%",
-                                  }}
-                                />
-                              </div>
-                              <div className="composer-rate-card-body">
-                                {tokenSummary ? (
-                                  <div>
-                                    <span>Tokens</span>
-                                    <strong>{tokenSummary}</strong>
-                                  </div>
-                                ) : null}
-                                <div>
-                                  <span>Reset</span>
-                                  <strong>{resetText ?? "Unavailable"}</strong>
-                                </div>
-                              </div>
-                            </article>
-                          );
-                        })}
-                        {rateLimitUsageWindows.length === 0 ? (
-                          <p className="composer-usage-empty">
-                            Rate-limit data is unavailable.
-                          </p>
-                        ) : null}
-                      </div>
-                      <div className="composer-context-grid">
-                        <div>
-                          <span>Updated</span>
-                          <strong
-                            title={new Date(rateLimitUsage.updated_at).toLocaleString()}
+                      <span className="composer-context-source">
+                        {rateLimitSourceLabel}
+                      </span>
+                    </div>
+                    <div className="composer-rate-list">
+                      {rateLimitUsageWindows.map((window) => {
+                        const percent = rateLimitWindowPercent(window);
+                        const tone = usageTone(percent);
+                        const resetText = formatRateLimitWindowReset(window);
+                        const tokenSummary = formatRateLimitWindowTokens(window);
+                        return (
+                          <article
+                            key={window.id}
+                            className={`composer-rate-card tone-${tone}`}
                           >
-                            {formatRelativeTime(rateLimitUsage.updated_at)}
-                          </strong>
-                        </div>
-                        <div>
-                          <span>Source</span>
-                          <strong>
-                            {rateLimitUsage.notes?.length
-                              ? rateLimitUsage.notes[0]
-                              : "Unavailable"}
-                          </strong>
-                        </div>
-                        <div>
-                          <span>Credits</span>
-                          <strong>
-                            {rateLimitUsage.credits_remaining !== null &&
-                            rateLimitUsage.credits_remaining !== undefined
-                              ? `${rateLimitUsage.credits_currency ?? "credits"} ${rateLimitUsage.credits_remaining.toFixed(2)}`
-                              : "Unavailable"}
-                          </strong>
-                        </div>
-                        <div>
-                          <span>Windows</span>
-                          <strong>{rateLimitUsageWindows.length} tracked</strong>
-                        </div>
+                            <div className="composer-rate-card-head">
+                              <strong>{window.label}</strong>
+                              <span>
+                                {percent !== null ? `${percent}% used` : "Unavailable"}
+                              </span>
+                            </div>
+                            <div className="composer-rate-card-meter" aria-hidden="true">
+                              <span
+                                style={{
+                                  width: percent !== null ? `${percent}%` : "0%",
+                                }}
+                              />
+                            </div>
+                            <div className="composer-rate-card-body">
+                              {tokenSummary ? (
+                                <div>
+                                  <span>Tokens</span>
+                                  <strong>{tokenSummary}</strong>
+                                </div>
+                              ) : null}
+                              <div>
+                                <span>Reset</span>
+                                <strong>{resetText ?? "Unavailable"}</strong>
+                              </div>
+                            </div>
+                          </article>
+                        );
+                      })}
+                      {rateLimitUsageWindows.length === 0 ? (
+                        <p className="composer-usage-empty">
+                          Rate-limit data is unavailable.
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="composer-context-grid">
+                      <div>
+                        <span>Updated</span>
+                        <strong
+                          title={
+                            rateLimitUpdatedAt
+                              ? new Date(rateLimitUpdatedAt).toLocaleString()
+                              : "Unavailable"
+                          }
+                        >
+                          {rateLimitUpdatedAt
+                            ? formatRelativeTime(rateLimitUpdatedAt)
+                            : "Unavailable"}
+                        </strong>
                       </div>
-                    </section>
-                  ) : null}
+                      <div>
+                        <span>Source</span>
+                        <strong>{rateLimitSourceLabel}</strong>
+                      </div>
+                      <div>
+                        <span>Credits</span>
+                        <strong>
+                          {rateLimitUsage &&
+                          rateLimitUsage.credits_remaining !== null &&
+                          rateLimitUsage.credits_remaining !== undefined
+                            ? `${rateLimitUsage.credits_currency ?? "credits"} ${rateLimitUsage.credits_remaining.toFixed(2)}`
+                            : "Unavailable"}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Windows</span>
+                        <strong>{rateLimitUsageWindows.length} tracked</strong>
+                      </div>
+                    </div>
+                  </section>
                 </div>
               ) : null}
             </div>

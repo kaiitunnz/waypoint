@@ -3084,6 +3084,167 @@ html[data-theme="light"] .composer-connection {
   background: rgba(235, 230, 218, 0.75);
 }
 
+.composer-context {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.composer-context-trigger {
+  appearance: none;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.composer-context-trigger:hover {
+  transform: translateY(-1px);
+}
+
+.composer-context-trigger.open {
+  color: var(--text-strong);
+  border-color: rgba(200, 169, 106, 0.32);
+  box-shadow: 0 0 0 1px rgba(200, 169, 106, 0.08) inset;
+}
+
+html[data-theme="light"] .composer-context-trigger.open {
+  border-color: rgba(184, 130, 14, 0.28);
+  box-shadow: 0 0 0 1px rgba(184, 130, 14, 0.08) inset;
+}
+
+.composer-context-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: min(360px, calc(100vw - 32px));
+  padding: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: rgba(14, 17, 24, 0.98);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(14px);
+  display: grid;
+  gap: 12px;
+  z-index: 30;
+}
+
+html[data-theme="light"] .composer-context-popover {
+  background: rgba(252, 249, 242, 0.98);
+  box-shadow: 0 12px 32px rgba(60, 45, 20, 0.15);
+}
+
+.composer-context-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.composer-context-titles {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.composer-context-kicker {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.composer-context-titles strong {
+  font-size: 1rem;
+  color: var(--text-strong);
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.composer-context-source {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: rgba(8, 11, 16, 0.45);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+html[data-theme="light"] .composer-context-source {
+  background: rgba(235, 230, 218, 0.75);
+}
+
+.composer-context-meter {
+  height: 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(8, 11, 16, 0.44);
+}
+
+html[data-theme="light"] .composer-context-meter {
+  background: rgba(235, 230, 218, 0.78);
+}
+
+.composer-context-meter > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--success), #79d6ff);
+}
+
+.composer-context-popover.tone-warn .composer-context-meter > span {
+  background: linear-gradient(90deg, var(--warn), #f0c46b);
+}
+
+.composer-context-popover.tone-danger .composer-context-meter > span {
+  background: linear-gradient(90deg, var(--danger), #ff8f70);
+}
+
+.composer-context-grid,
+.composer-context-breakdown {
+  display: grid;
+  gap: 10px 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.composer-context-grid > div,
+.composer-context-breakdown > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.composer-context-grid span,
+.composer-context-breakdown span {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.composer-context-grid strong,
+.composer-context-breakdown strong {
+  font-size: 0.82rem;
+  color: var(--accent-strong);
+  word-break: break-word;
+}
+
+.composer-context-breakdown {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 .composer-connection::before {
   content: "";
   width: 7px;
@@ -4525,6 +4686,30 @@ html[data-theme="light"] .terminal {
   .composer-tune-restart-apply {
     font-size: 0.68rem;
     padding: 6px 10px;
+  }
+
+  .composer-context-popover {
+    width: min(320px, calc(100vw - 24px));
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .composer-context-head {
+    gap: 10px;
+  }
+
+  .composer-context-grid {
+    gap: 8px 10px;
+    grid-template-columns: 1fr;
+  }
+
+  .composer-context-breakdown {
+    display: none;
+  }
+
+  .composer-context-source {
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
   }
 
   .composer-shortcut {

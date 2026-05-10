@@ -371,6 +371,7 @@ wait_for_exit() {
 # Recursively print descendant PIDs of ${1}, deepest first.
 collect_descendants() {
   local parent="$1"
+  [[ "${parent}" =~ ^[0-9]+$ ]] || return 0
   local children child
   children=$(pgrep -P "${parent}" 2>/dev/null) || true
   for child in ${children}; do
@@ -379,43 +380,60 @@ collect_descendants() {
   done
 }
 
-# Stop a process and every descendant. We track only the npm/uv leader
-# in pid files, but `npm run start` forks `sh -c 'next start'` which
-# forks `node next-server`; on Linux the leader's signal forwarder
-# doesn't always propagate before its own death, so the next-server
-# grandchild gets reparented to PID 1 and keeps the port. Walking the
-# tree avoids relying on npm's forwarding behavior.
+# Stop a process and every descendant captured at snapshot time. We
+# track only the npm/uv leader in pid files, but `npm run start`
+# forks `sh -c 'next start'` which forks `node next-server`; on
+# Linux the leader's signal forwarder doesn't always propagate
+# before its own death, so the next-server grandchild gets reparented
+# to PID 1 and keeps the port. Signaling each process directly avoids
+# depending on the leader's forwarder.
+#
+# Limitations:
+#   * Snapshots descendants once. Children spawned after the snapshot
+#     (or that double-fork / setsid into a new session) are missed.
+#     For our process tree (npm/sh/node, uv/python — none fork
+#     dynamically post-boot) this is not observed in practice.
+#   * Numeric PID validation reduces but does not eliminate PID-reuse
+#     races between TERM and KILL.
 kill_process_tree() {
   local pid="$1"
-  local descendants
-  descendants=$(collect_descendants "${pid}")
+  [[ "${pid}" =~ ^[0-9]+$ ]] || return 0
 
-  # SIGTERM children first so the leader sees them gone via SIGCHLD
-  # and shuts down cleanly, then signal the leader itself.
-  if [[ -n "${descendants}" ]]; then
-    while IFS= read -r d; do
-      [[ -n "${d}" ]] && kill "${d}" >/dev/null 2>&1 || true
-    done <<<"${descendants}"
-  fi
-  kill "${pid}" >/dev/null 2>&1 || true
+  local pids p deadline any_alive
+  pids=$(
+    {
+      collect_descendants "${pid}"
+      printf '%s\n' "${pid}"
+    } | grep -E '^[0-9]+$' || true
+  )
+  [[ -n "${pids}" ]] || return 0
 
-  if wait_for_exit "${pid}"; then
-    if [[ -n "${descendants}" ]]; then
-      while IFS= read -r d; do
-        if [[ -n "${d}" ]] && is_pid_running "${d}"; then
-          kill -9 "${d}" >/dev/null 2>&1 || true
-        fi
-      done <<<"${descendants}"
+  for p in ${pids}; do
+    kill -- "${p}" >/dev/null 2>&1 || true
+  done
+
+  # Single shared deadline so a child mid-graceful-shutdown isn't
+  # SIGKILLed just because the leader exited fast.
+  deadline=$((SECONDS + 10))
+  while (( SECONDS < deadline )); do
+    any_alive=false
+    for p in ${pids}; do
+      if is_pid_running "${p}"; then
+        any_alive=true
+        break
+      fi
+    done
+    if [[ "${any_alive}" == false ]]; then
+      return 0
     fi
-    return 0
-  fi
+    sleep 1
+  done
 
-  if [[ -n "${descendants}" ]]; then
-    while IFS= read -r d; do
-      [[ -n "${d}" ]] && kill -9 "${d}" >/dev/null 2>&1 || true
-    done <<<"${descendants}"
-  fi
-  kill -9 "${pid}" >/dev/null 2>&1 || true
+  for p in ${pids}; do
+    if is_pid_running "${p}"; then
+      kill -9 -- "${p}" >/dev/null 2>&1 || true
+    fi
+  done
 }
 
 # macOS-only sleep inhibitor. We hold a `caffeinate -i -s` process for

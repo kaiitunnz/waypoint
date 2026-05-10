@@ -6,9 +6,10 @@ import re
 import shutil
 import signal
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,7 @@ from waypoint.backends.opencode.client import (
 from waypoint.backends.opencode.normalize import map_event
 from waypoint.backends.opencode.remote import build_remote_serve_args
 from waypoint.launch_targets import SshLaunchTargetConfig
-from waypoint.schemas import EventKind, SessionStatus
+from waypoint.schemas import EventKind, SessionContextUsage, SessionStatus
 
 log = logging.getLogger("waypoint.opencode")
 
@@ -61,6 +62,10 @@ EmitEvent = Callable[
     [str, EventKind, str, dict[str, Any], SessionStatus],
     Any,
 ]
+SessionUpdateCallback = Callable[
+    [str, dict[str, Any]],
+    Awaitable[Any],
+]
 
 
 class OpenCodeError(RuntimeError):
@@ -85,6 +90,8 @@ class OpenCodeSessionState:
     agent: str | None = None
     effort: str | None = None
     pre_plan_mode: str | None = None
+    context_window_by_model: dict[tuple[str, str], int] = field(default_factory=dict)
+    context_usage_signature: tuple[int, int | None] | None = None
     closing: bool = False
 
 
@@ -96,6 +103,7 @@ class OpenCodeAdapter:
     def __init__(
         self,
         emit_event: EmitEvent,
+        on_session_update: SessionUpdateCallback | None = None,
         binary: str | None = None,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
@@ -106,6 +114,7 @@ class OpenCodeAdapter:
         extra_args: tuple[str, ...] = (),
     ) -> None:
         self._emit_event = emit_event
+        self._on_session_update = on_session_update
         self._binary = binary
         self._host = host
         self._port = port
@@ -505,6 +514,8 @@ class OpenCodeAdapter:
         if "sessionID" not in properties:
             properties = {**properties, "sessionID": state.opencode_session_id}
         self._update_pending_state(state, event_type, properties)
+        if event_type == "message.updated":
+            await self._maybe_update_context_usage(state, properties)
         properties = self._tag_part_type(state, event_type, properties)
 
         kind, text, metadata = map_event(event_type, properties)
@@ -632,6 +643,101 @@ class OpenCodeAdapter:
                 state.pending_question_ids = [
                     item for item in state.pending_question_ids if item != request_id
                 ]
+
+    async def _maybe_update_context_usage(
+        self,
+        state: OpenCodeSessionState,
+        properties: dict[str, Any],
+    ) -> None:
+        info = properties.get("info")
+        if not isinstance(info, dict):
+            return
+        if info.get("role") != "assistant":
+            return
+        tokens = info.get("tokens")
+        if not isinstance(tokens, dict):
+            return
+        if _positive_int(tokens.get("output")) is None:
+            return
+
+        provider_id = info.get("providerID")
+        model_id = info.get("modelID")
+        if not isinstance(provider_id, str) or not provider_id:
+            return
+        if not isinstance(model_id, str) or not model_id:
+            return
+
+        context_window_tokens = await self._context_window_for_model(
+            state, provider_id, model_id
+        )
+        if context_window_tokens is None:
+            return
+
+        snapshot = _context_usage_snapshot_from_message(
+            provider_id,
+            model_id,
+            tokens,
+            context_window_tokens,
+        )
+        if snapshot is None:
+            return
+
+        signature = (snapshot.used_tokens, snapshot.context_window_tokens)
+        if state.context_usage_signature == signature:
+            return
+        state.context_usage_signature = signature
+        if self._on_session_update is None:
+            return
+        await self._on_session_update(
+            state.session_id,
+            {"context_usage": snapshot.model_dump(mode="json")},
+        )
+
+    async def _context_window_for_model(
+        self, state: OpenCodeSessionState, provider_id: str, model_id: str
+    ) -> int | None:
+        key = (provider_id, model_id)
+        cached = state.context_window_by_model.get(key)
+        if cached is not None:
+            return cached
+
+        client = self._require_client()
+        try:
+            payload = await client.get(
+                "/config/providers", params={"directory": state.cwd}
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.debug(
+                "failed to fetch opencode context window",
+                extra={"session_id": state.session_id, "error": str(exc)},
+            )
+            return None
+
+        if not isinstance(payload, dict):
+            return None
+        providers = payload.get("providers")
+        if not isinstance(providers, list):
+            return None
+
+        for provider in providers:
+            if not isinstance(provider, dict):
+                continue
+            if provider.get("id") != provider_id:
+                continue
+            models = provider.get("models")
+            if not isinstance(models, dict):
+                continue
+            model = models.get(model_id)
+            if not isinstance(model, dict):
+                continue
+            limit = model.get("limit")
+            if not isinstance(limit, dict):
+                continue
+            context = _positive_int(limit.get("context"))
+            if context is not None:
+                state.context_window_by_model[key] = context
+            return context
+        return None
 
     def _tag_part_type(
         self,
@@ -1118,4 +1224,80 @@ def build_adapter(
     port: int = DEFAULT_PORT,
     workdir: str | None = None,
 ) -> OpenCodeAdapter:
-    return OpenCodeAdapter(emit_event, binary, host, port, workdir=workdir)
+    return OpenCodeAdapter(
+        emit_event,
+        binary=binary,
+        host=host,
+        port=port,
+        workdir=workdir,
+    )
+
+
+def _context_usage_snapshot_from_message(
+    _provider_id: str,
+    _model_id: str,
+    tokens: dict[str, Any],
+    context_window_tokens: int,
+) -> SessionContextUsage | None:
+    input_tokens = _non_negative_int(tokens.get("input"))
+    output_tokens = _non_negative_int(tokens.get("output"))
+    reasoning_tokens = _non_negative_int(tokens.get("reasoning"))
+    cache = tokens.get("cache")
+    if not isinstance(cache, dict):
+        cache = {}
+    cache_read_tokens = _non_negative_int(cache.get("read"))
+    cache_write_tokens = _non_negative_int(cache.get("write"))
+
+    used_tokens = sum(
+        value
+        for value in (
+            input_tokens,
+            output_tokens,
+            reasoning_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+        )
+        if value is not None
+    )
+    if used_tokens <= 0:
+        return None
+
+    breakdown = {
+        key: value
+        for key, value in {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "reasoning_tokens": reasoning_tokens,
+            "cache_read_tokens": cache_read_tokens,
+            "cache_write_tokens": cache_write_tokens,
+        }.items()
+        if value is not None
+    }
+    return SessionContextUsage(
+        used_tokens=used_tokens,
+        context_window_tokens=context_window_tokens,
+        updated_at=datetime.now(UTC),
+        source="opencode",
+        breakdown=breakdown,
+    )
+
+
+def _non_negative_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return max(0, value)
+    if isinstance(value, float) and value.is_integer():
+        return max(0, int(value))
+    return None
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float) and value.is_integer():
+        int_value = int(value)
+        return int_value if int_value > 0 else None
+    return None

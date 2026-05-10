@@ -4,9 +4,10 @@ import asyncio
 import logging
 import shutil
 import threading
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from contextlib import suppress
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 from codex_app_server.client import AppServerClient, AppServerConfig
@@ -23,7 +24,7 @@ from waypoint.backends.codex.normalize import (
     plan_metadata_for_item,
 )
 from waypoint.backends.diff_preview import DiffPreviewPayload, preview_to_metadata
-from waypoint.schemas import EventKind, SessionStatus
+from waypoint.schemas import EventKind, SessionContextUsage, SessionStatus
 
 log = logging.getLogger("waypoint.codex")
 
@@ -33,6 +34,7 @@ ApprovalDecisionHandler = Callable[
 ]
 ApprovalCallback = Callable[[str, dict[str, Any] | None], dict[str, Any]]
 ClientFactory = Callable[[str, ApprovalCallback], AppServerClient]
+SessionUpdateCallback = Callable[[str, dict[str, Any]], Awaitable[Any]]
 
 
 def _extract_tool_name(item_type: str | None, item: dict[str, Any]) -> str | None:
@@ -160,15 +162,18 @@ class CodexSessionState:
     # Same shape as `model` for reasoning-effort: re-emit on each turn_start so
     # the override survives restarts and turn reuse.
     effort: str | None = None
+    context_usage_signature: tuple[int, int | None] | None = None
 
 
 class CodexAppServerAdapter:
     def __init__(
         self,
         emit_event: ApprovalDecisionHandler,
+        on_session_update: SessionUpdateCallback | None = None,
         client_factory: ClientFactory | None = None,
     ) -> None:
         self._emit_event = emit_event
+        self._on_session_update = on_session_update
         self._client_factory = client_factory or default_client_factory
         self._sessions: dict[str, CodexSessionState] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -571,6 +576,11 @@ class CodexAppServerAdapter:
                     state, state.client.next_notification
                 )
                 payload = payload_to_dict(notification.payload)
+                if notification.method == "thread/tokenUsage/updated":
+                    snapshot = _context_usage_snapshot_from_thread_token_usage(payload)
+                    if snapshot is not None:
+                        await self._publish_context_usage(state, snapshot)
+                    continue
                 kind, text, status = map_notification(notification.method, payload)
                 if kind is not None and text:
                     if notification.method == "item/commandExecution/outputDelta":
@@ -699,6 +709,20 @@ class CodexAppServerAdapter:
         async with state.transport_lock:
             return await asyncio.to_thread(func, *args)
 
+    async def _publish_context_usage(
+        self, state: CodexSessionState, snapshot: SessionContextUsage
+    ) -> None:
+        signature = (snapshot.used_tokens, snapshot.context_window_tokens)
+        if state.context_usage_signature == signature:
+            return
+        state.context_usage_signature = signature
+        if self._on_session_update is None:
+            return
+        await self._on_session_update(
+            state.session_id,
+            {"context_usage": snapshot.model_dump(mode="json")},
+        )
+
     def _require_session(self, session_id: str) -> CodexSessionState:
         try:
             return self._sessions[session_id]
@@ -714,3 +738,49 @@ class CodexAppServerAdapter:
         if lowered in {"cancel"}:
             return "cancel"
         return "decline"
+
+
+def _context_usage_snapshot_from_thread_token_usage(
+    payload: dict[str, Any],
+) -> SessionContextUsage | None:
+    token_usage = payload.get("tokenUsage") or payload.get("token_usage")
+    if not isinstance(token_usage, dict):
+        return None
+
+    last = token_usage.get("last")
+    if not isinstance(last, dict):
+        return None
+
+    used_tokens = _positive_int(last.get("totalTokens"))
+    if used_tokens is None:
+        return None
+
+    context_window_tokens = _positive_int(token_usage.get("modelContextWindow"))
+    breakdown = {
+        key: value
+        for key, value in {
+            "input_tokens": _positive_int(last.get("inputTokens")),
+            "cached_input_tokens": _positive_int(last.get("cachedInputTokens")),
+            "output_tokens": _positive_int(last.get("outputTokens")),
+            "reasoning_output_tokens": _positive_int(last.get("reasoningOutputTokens")),
+        }.items()
+        if value is not None
+    }
+    return SessionContextUsage(
+        used_tokens=used_tokens,
+        context_window_tokens=context_window_tokens,
+        updated_at=datetime.now(UTC),
+        source="codex",
+        breakdown=breakdown,
+    )
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float) and value.is_integer():
+        int_value = int(value)
+        return int_value if int_value > 0 else None
+    return None

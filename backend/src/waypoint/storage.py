@@ -118,7 +118,8 @@ class Storage:
                 model TEXT,
                 effort TEXT,
                 args TEXT NOT NULL DEFAULT '[]',
-                config_overrides TEXT NOT NULL DEFAULT '[]'
+                config_overrides TEXT NOT NULL DEFAULT '[]',
+                context_usage TEXT
             );
 
             CREATE TABLE IF NOT EXISTS events (
@@ -162,6 +163,7 @@ class Storage:
         self._ensure_column(
             "sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
         )
+        self._ensure_column("sessions", "context_usage", "TEXT")
         self._ensure_column(
             "scheduled_sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
         )
@@ -179,8 +181,8 @@ class Storage:
                 id, backend, source, transport, title, cwd, launch_target_id,
                 repo_name, branch, status, created_at, updated_at, last_event_at,
                 raw_log_path, structured_log_path, transport_state, pinned_at,
-                permission_mode, model, effort, args, config_overrides
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                permission_mode, model, effort, args, config_overrides, context_usage
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -205,6 +207,11 @@ class Storage:
                 session.effort,
                 json.dumps(list(session.args)),
                 json.dumps(list(session.config_overrides)),
+                (
+                    json.dumps(session.context_usage.model_dump(mode="json"))
+                    if session.context_usage is not None
+                    else None
+                ),
             ),
         )
         self.connection.commit()
@@ -603,6 +610,18 @@ class Storage:
         payload["config_overrides"] = (
             parsed_overrides if isinstance(parsed_overrides, list) else []
         )
+        raw_context_usage = payload.get("context_usage")
+        if raw_context_usage:
+            try:
+                parsed_context_usage = json.loads(raw_context_usage)
+            except json.JSONDecodeError:
+                parsed_context_usage = None
+            if isinstance(parsed_context_usage, dict):
+                payload["context_usage"] = parsed_context_usage
+            else:
+                payload["context_usage"] = None
+        else:
+            payload["context_usage"] = None
         return SessionRecord.model_validate(payload)
 
     def _schedule_from_row(self, row: sqlite3.Row) -> ScheduledSessionRecord:
@@ -635,6 +654,8 @@ class Storage:
     def _serialize_field(self, value: Any) -> Any:
         if isinstance(value, datetime):
             return value.isoformat()
+        if hasattr(value, "model_dump"):
+            return json.dumps(value.model_dump(mode="json"))
         if isinstance(value, dict):
             return json.dumps(value)
         return value

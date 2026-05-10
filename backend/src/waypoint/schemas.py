@@ -104,6 +104,14 @@ class SessionCompletionsResponse(BaseModel):
     refreshing: bool = False
 
 
+class SessionContextUsage(BaseModel):
+    used_tokens: int
+    context_window_tokens: int | None = None
+    updated_at: datetime
+    source: BackendId
+    breakdown: dict[str, int] = Field(default_factory=dict)
+
+
 class SessionRecord(BaseModel):
     id: str
     backend: BackendId
@@ -135,6 +143,7 @@ class SessionRecord(BaseModel):
     # Codex uses this for ``--config K=V`` entries; other backends ignore
     # the field. Empty list = none.
     config_overrides: list[str] = Field(default_factory=list)
+    context_usage: SessionContextUsage | None = None
 
 
 class EventRecord(BaseModel):

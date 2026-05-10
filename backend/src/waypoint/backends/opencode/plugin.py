@@ -377,8 +377,14 @@ class OpenCodePlugin:
             def _on_server_died(active_session_ids: list[str]) -> None:
                 self._handle_server_died(runtime, key, active_session_ids)
 
+            async def _update_session_fields(
+                session_id: str, updates: dict[str, Any]
+            ) -> Any:
+                return await runtime.update_session_fields(session_id, **updates)
+
             adapter = OpenCodeAdapter(
                 emit_event=runtime._emit_adapter_event,
+                on_session_update=_update_session_fields,
                 launch_target=launch_target,
                 on_agent_changed=_on_agent_changed,
                 on_server_died=_on_server_died,

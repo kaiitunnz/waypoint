@@ -1,11 +1,15 @@
 import asyncio
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from waypoint.backends.codex.adapter import CodexAppServerAdapter
+from waypoint.backends.codex.adapter import (
+    CodexAppServerAdapter,
+    _context_usage_snapshot_from_thread_token_usage,
+)
 from waypoint.schemas import EventKind, SessionStatus
 
 
@@ -880,3 +884,33 @@ def test_map_decision_table() -> None:
     assert adapter._map_decision("acceptForSession") == "acceptForSession"
     assert adapter._map_decision("cancel") == "cancel"
     assert adapter._map_decision("anything-else") == "decline"
+
+
+def test_context_usage_snapshot_uses_thread_token_usage_totals() -> None:
+    snapshot = _context_usage_snapshot_from_thread_token_usage(
+        {
+            "tokenUsage": {
+                "last": {
+                    "totalTokens": 4096,
+                    "inputTokens": 2048,
+                    "cachedInputTokens": 256,
+                    "outputTokens": 1536,
+                    "reasoningOutputTokens": 256,
+                },
+                "modelContextWindow": 8192,
+            }
+        }
+    )
+
+    assert snapshot is not None
+    assert snapshot.used_tokens == 4096
+    assert snapshot.context_window_tokens == 8192
+    assert snapshot.source == "codex"
+    assert snapshot.breakdown == {
+        "input_tokens": 2048,
+        "cached_input_tokens": 256,
+        "output_tokens": 1536,
+        "reasoning_output_tokens": 256,
+    }
+    assert isinstance(snapshot.updated_at, datetime)
+    assert snapshot.updated_at.tzinfo is UTC

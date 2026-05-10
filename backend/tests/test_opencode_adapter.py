@@ -6,6 +6,7 @@ from waypoint.backends.opencode.adapter import (
     OpenCodeAdapter,
     OpenCodeError,
     OpenCodeSessionState,
+    _context_usage_snapshot_from_message,
 )
 
 
@@ -320,3 +321,29 @@ async def test_listen_events_treats_mid_session_eof_as_server_death() -> None:
 
     assert seen == [{"type": "server.connected", "properties": {"sessionID": "ses_1"}}]
     assert died.is_set()
+
+
+def test_context_usage_snapshot_aggregates_token_categories() -> None:
+    snapshot = _context_usage_snapshot_from_message(
+        "opencode",
+        "opencode/minimax-m2.5-free",
+        {
+            "input": 120,
+            "output": 30,
+            "reasoning": 20,
+            "cache": {"read": 15, "write": 5},
+        },
+        4096,
+    )
+
+    assert snapshot is not None
+    assert snapshot.used_tokens == 190
+    assert snapshot.context_window_tokens == 4096
+    assert snapshot.source == "opencode"
+    assert snapshot.breakdown == {
+        "input_tokens": 120,
+        "output_tokens": 30,
+        "reasoning_tokens": 20,
+        "cache_read_tokens": 15,
+        "cache_write_tokens": 5,
+    }

@@ -1033,6 +1033,13 @@ class SessionRuntime:
         self._append_structured_log(session_id, persisted)
         await self._publish_event(persisted)
 
+    async def update_session_fields(
+        self, session_id: str, **updates: Any
+    ) -> SessionRecord:
+        session = self.storage.update_session(session_id, **updates)
+        await self._publish_session_state(session_id)
+        return session
+
     async def _publish_event(self, event: EventRecord) -> None:
         await self.broadcast.publish(
             SessionEnvelope(
@@ -1041,13 +1048,16 @@ class SessionRuntime:
             ),
             session_id=event.session_id,
         )
-        session = self.get_session(event.session_id)
+        await self._publish_session_state(event.session_id)
+
+    async def _publish_session_state(self, session_id: str) -> None:
+        session = self.get_session(session_id)
         await self.broadcast.publish(
             SessionEnvelope(
                 type="session_state",
                 payload={"session": session.model_dump(mode="json")},
             ),
-            session_id=event.session_id,
+            session_id=session_id,
         )
         await self.broadcast.publish(
             SessionEnvelope(

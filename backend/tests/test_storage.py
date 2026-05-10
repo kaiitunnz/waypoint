@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from waypoint.schemas import (
     EventKind,
     EventRecord,
+    SessionContextUsage,
     SessionRecord,
     SessionSource,
     SessionStatus,
@@ -27,6 +28,13 @@ def test_storage_round_trip(tmp_path) -> None:
         last_event_at=now,
         raw_log_path="/tmp/raw.log",
         structured_log_path="/tmp/events.jsonl",
+        context_usage=SessionContextUsage(
+            used_tokens=2048,
+            context_window_tokens=8192,
+            updated_at=now,
+            source="codex",
+            breakdown={"input_tokens": 1024, "output_tokens": 1024},
+        ),
     )
     storage.create_session(session)
     event = EventRecord(
@@ -44,6 +52,13 @@ def test_storage_round_trip(tmp_path) -> None:
     assert loaded.cwd == "/tmp"
     assert loaded.launch_target_id == "devbox"
     assert loaded.status == SessionStatus.RUNNING
+    assert loaded.context_usage is not None
+    assert loaded.context_usage.used_tokens == 2048
+    assert loaded.context_usage.context_window_tokens == 8192
+    assert loaded.context_usage.breakdown == {
+        "input_tokens": 1024,
+        "output_tokens": 1024,
+    }
     events = storage.list_events("session-1")
     assert len(events) == 1
 

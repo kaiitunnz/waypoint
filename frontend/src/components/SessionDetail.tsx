@@ -207,8 +207,7 @@ function rateLimitWindowPercent(window: UsageWindow): number | null {
   return clampPercent(Math.round(window.used_percent));
 }
 
-function formatRateLimitWindowValue(window: UsageWindow): string {
-  const used = formatTokens(Math.round(window.used_percent));
+function formatRateLimitWindowTokens(window: UsageWindow): string | null {
   const parts: string[] = [];
   if (window.used_tokens !== undefined && window.used_tokens !== null) {
     parts.push(`${formatTokens(window.used_tokens)} used`);
@@ -224,10 +223,7 @@ function formatRateLimitWindowValue(window: UsageWindow): string {
   ) {
     parts.push(`of ${formatTokens(window.limit_tokens)}`);
   }
-  if (parts.length > 0) {
-    return `${used}% used · ${parts.join(" · ")}`;
-  }
-  return `${used}% used`;
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 function formatRateLimitWindowReset(window: UsageWindow): string | null {
@@ -2237,6 +2233,7 @@ const ReplyComposer = memo(function ReplyComposer({
                           const percent = rateLimitWindowPercent(window);
                           const tone = usageTone(percent);
                           const resetText = formatRateLimitWindowReset(window);
+                          const tokenSummary = formatRateLimitWindowTokens(window);
                           return (
                             <article
                               key={window.id}
@@ -2256,10 +2253,12 @@ const ReplyComposer = memo(function ReplyComposer({
                                 />
                               </div>
                               <div className="composer-rate-card-body">
-                                <div>
-                                  <span>Usage</span>
-                                  <strong>{formatRateLimitWindowValue(window)}</strong>
-                                </div>
+                                {tokenSummary ? (
+                                  <div>
+                                    <span>Tokens</span>
+                                    <strong>{tokenSummary}</strong>
+                                  </div>
+                                ) : null}
                                 <div>
                                   <span>Reset</span>
                                   <strong>{resetText ?? "Unavailable"}</strong>
@@ -2302,7 +2301,7 @@ const ReplyComposer = memo(function ReplyComposer({
                         </div>
                         <div>
                           <span>Windows</span>
-                          <strong>{formatTokens(rateLimitUsageWindows.length)} tracked</strong>
+                          <strong>{rateLimitUsageWindows.length} tracked</strong>
                         </div>
                       </div>
                     </section>

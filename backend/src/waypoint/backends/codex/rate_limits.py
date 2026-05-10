@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import importlib.resources
 import json
 import logging
 import os
@@ -24,6 +25,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 is unsupported here
     tomllib = None  # type: ignore[assignment]
 
+from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import SessionRateLimitUsage, UsageWindow
 
 log = logging.getLogger("waypoint.codex.rate_limits")
@@ -150,6 +152,105 @@ async def probe_codex_status(
             extra={"cwd": cwd, "binary": resolved},
         )
     return snapshot
+
+
+_REMOTE_PROBE_CODEX_BIN_ENV = "WAYPOINT_REMOTE_PROBE_CODEX_BIN"
+_REMOTE_PROBE_SCRIPT_BYTES: bytes | None = None
+
+
+def _remote_probe_script_bytes() -> bytes:
+    global _REMOTE_PROBE_SCRIPT_BYTES
+    if _REMOTE_PROBE_SCRIPT_BYTES is None:
+        _REMOTE_PROBE_SCRIPT_BYTES = (
+            importlib.resources.files("waypoint.backends.codex")
+            .joinpath("remote_probe_script.py")
+            .read_bytes()
+        )
+    return _REMOTE_PROBE_SCRIPT_BYTES
+
+
+async def probe_codex_usage_remote(
+    launch_target: SshLaunchTargetConfig,
+    *,
+    binary: str = "codex",
+    timeout_seconds: float = 30.0,
+) -> SessionRateLimitUsage | None:
+    payload = await _run_remote_probe_script(launch_target, binary, timeout_seconds)
+    if payload is None:
+        return None
+    error = payload.get("error")
+    if error == "no_data":
+        log.warning("codex remote rate-limit probe yielded no data")
+        return None
+    if error == "internal":
+        log.warning(
+            f"codex remote rate-limit probe internal error: {payload.get('message')!r}"
+        )
+        return None
+    raw = payload.get("payload")
+    if isinstance(raw, dict):
+        snapshot = parse_codex_usage_payload(raw, notes=["remote OAuth"])
+        if snapshot is not None:
+            return snapshot
+    status_text = payload.get("status_text")
+    if isinstance(status_text, str) and status_text.strip():
+        snapshot = parse_codex_status(status_text)
+        if snapshot is not None:
+            snapshot.notes = list(snapshot.notes) + ["remote /status"]
+            return snapshot
+    log.warning("codex remote rate-limit probe returned unparsable payload")
+    return None
+
+
+async def _run_remote_probe_script(
+    launch_target: SshLaunchTargetConfig,
+    binary: str,
+    timeout_seconds: float,
+) -> dict[str, Any] | None:
+    argv = launch_target.build_remote_exec_args(
+        ["env", f"{_REMOTE_PROBE_CODEX_BIN_ENV}={binary}", "python3", "-"]
+    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except (OSError, FileNotFoundError) as exc:
+        log.warning(f"codex remote rate-limit probe failed to spawn ssh: {exc!r}")
+        return None
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(_remote_probe_script_bytes()), timeout=timeout_seconds
+        )
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()
+        log.warning("codex remote rate-limit probe timed out")
+        return None
+    if proc.returncode != 0:
+        log.warning(
+            "codex remote rate-limit probe exited non-zero "
+            f"(rc={proc.returncode} stderr={stderr[:240]!r})"
+        )
+        return None
+    text = stdout.decode("utf-8", errors="replace").strip()
+    if not text:
+        log.warning("codex remote rate-limit probe produced no output")
+        return None
+    last_line = text.splitlines()[-1]
+    try:
+        decoded = json.loads(last_line)
+    except json.JSONDecodeError:
+        log.warning(
+            "codex remote rate-limit probe produced non-JSON output "
+            f"(last_line={last_line[:240]!r})"
+        )
+        return None
+    if not isinstance(decoded, dict):
+        return None
+    return decoded
 
 
 async def _probe_codex_oauth_usage(

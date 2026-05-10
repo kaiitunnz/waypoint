@@ -10,13 +10,16 @@ from waypoint.backends.claude_code.rate_limits import (
     parse_claude_rate_limit_headers,
     parse_claude_usage_payload,
     probe_claude_usage,
+    probe_claude_usage_remote,
 )
 from waypoint.backends.codex.rate_limits import (
     _load_oauth_credentials,
     _resolve_usage_url,
     parse_codex_status,
     parse_codex_usage_payload,
+    probe_codex_usage_remote,
 )
+from waypoint.launch_targets import SshLaunchTargetConfig
 
 
 def test_parse_codex_status_extracts_windows_and_credits() -> None:
@@ -417,3 +420,183 @@ def test_parse_codex_usage_payload_emits_empty_snapshot_for_education_plan() -> 
         "plan: education",
         "noppanat@example.com",
     ]
+
+
+def _ssh_target() -> SshLaunchTargetConfig:
+    return SshLaunchTargetConfig(
+        id="rover",
+        name="rover",
+        ssh_destination="user@rover.lan",
+        ssh_args=["-o", "ControlMaster=no"],
+        remote_shell="",
+    )
+
+
+def test_probe_claude_usage_remote_parses_messages_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "status": 200,
+        "headers": {
+            "anthropic-ratelimit-unified-5h-utilization": "0.4",
+            "anthropic-ratelimit-unified-5h-reset": str(
+                datetime(2026, 5, 12, 13, 0, tzinfo=UTC).timestamp()
+            ),
+            "anthropic-ratelimit-unified-7d-utilization": "0.92",
+            "anthropic-ratelimit-unified-7d-reset": str(
+                datetime(2026, 5, 19, 1, 0, tzinfo=UTC).timestamp()
+            ),
+        },
+        "body_preview": "{}",
+        "oauth_account_notes": ["org: lumid", "user tier: default_claude_max_5x"],
+        "expires_at": None,
+    }
+
+    async def _fake_runner(launch_target, timeout_seconds):
+        assert launch_target.ssh_destination == "user@rover.lan"
+        return payload
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._run_remote_probe_script",
+        _fake_runner,
+    )
+    snapshot = asyncio.run(probe_claude_usage_remote(_ssh_target()))
+    assert snapshot is not None
+    assert snapshot.source == "claude_code"
+    assert [w.label for w in snapshot.windows] == ["5h", "Weekly"]
+    assert snapshot.windows[0].used_percent == 40.0
+    assert snapshot.windows[1].used_percent == 92.0
+    assert snapshot.notes == [
+        "remote CLI creds",
+        "org: lumid",
+        "user tier: default_claude_max_5x",
+    ]
+
+
+def test_probe_claude_usage_remote_handles_expired_sentinel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_runner(launch_target, timeout_seconds):
+        return {
+            "error": "expired",
+            "expires_at": 1700000000.0,
+            "oauth_account_notes": ["org: lumid"],
+        }
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._run_remote_probe_script",
+        _fake_runner,
+    )
+    snapshot = asyncio.run(probe_claude_usage_remote(_ssh_target()))
+    assert snapshot is not None
+    assert snapshot.source == "claude_code"
+    assert snapshot.windows == []
+    assert snapshot.notes == [
+        "remote CLI creds",
+        "credentials expired — run `claude` to refresh",
+        "org: lumid",
+    ]
+
+
+def test_probe_claude_usage_remote_handles_no_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_runner(launch_target, timeout_seconds):
+        return {"error": "no_credentials"}
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._run_remote_probe_script",
+        _fake_runner,
+    )
+    snapshot = asyncio.run(probe_claude_usage_remote(_ssh_target()))
+    assert snapshot is None
+
+
+def test_probe_claude_usage_remote_surfaces_401_as_expired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_runner(launch_target, timeout_seconds):
+        return {
+            "status": 401,
+            "headers": {},
+            "body_preview": '{"type":"error"}',
+            "oauth_account_notes": [],
+            "expires_at": None,
+        }
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._run_remote_probe_script",
+        _fake_runner,
+    )
+    snapshot = asyncio.run(probe_claude_usage_remote(_ssh_target()))
+    assert snapshot is not None
+    assert snapshot.windows == []
+    assert "credentials expired" in snapshot.notes[1]
+
+
+def test_probe_codex_usage_remote_parses_oauth_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_runner(launch_target, binary, timeout_seconds):
+        return {
+            "payload": {
+                "plan_type": "pro",
+                "rate_limit": {
+                    "primary_window": {
+                        "used_percent": 30,
+                        "limit_window_seconds": 18000,
+                    }
+                },
+                "email": "user@example.com",
+            },
+            "usage_url": "https://chatgpt.com/backend-api/wham/usage",
+        }
+
+    monkeypatch.setattr(
+        "waypoint.backends.codex.rate_limits._run_remote_probe_script",
+        _fake_runner,
+    )
+    snapshot = asyncio.run(probe_codex_usage_remote(_ssh_target(), binary="codex"))
+    assert snapshot is not None
+    assert snapshot.source == "codex"
+    assert [w.label for w in snapshot.windows] == ["5h"]
+    assert snapshot.windows[0].used_percent == 30.0
+    assert "remote OAuth" in snapshot.notes
+    assert "plan: pro" in snapshot.notes
+
+
+def test_probe_codex_usage_remote_falls_back_to_status_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status_text = (
+        "Credits: $5.00\n"
+        "5h limit: 12% used (resets in 1h)\n"
+        "Weekly limit: 80% left, resets at 2026-05-11 00:00 UTC\n"
+    )
+
+    async def _fake_runner(launch_target, binary, timeout_seconds):
+        return {"status_text": status_text}
+
+    monkeypatch.setattr(
+        "waypoint.backends.codex.rate_limits._run_remote_probe_script",
+        _fake_runner,
+    )
+    snapshot = asyncio.run(probe_codex_usage_remote(_ssh_target(), binary="codex"))
+    assert snapshot is not None
+    assert snapshot.credits_remaining == 5.0
+    assert [w.label for w in snapshot.windows] == ["5h", "Weekly"]
+    assert "remote /status" in snapshot.notes
+
+
+def test_probe_codex_usage_remote_returns_none_for_no_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_runner(launch_target, binary, timeout_seconds):
+        return {"error": "no_data"}
+
+    monkeypatch.setattr(
+        "waypoint.backends.codex.rate_limits._run_remote_probe_script",
+        _fake_runner,
+    )
+    snapshot = asyncio.run(probe_codex_usage_remote(_ssh_target(), binary="codex"))
+    assert snapshot is None

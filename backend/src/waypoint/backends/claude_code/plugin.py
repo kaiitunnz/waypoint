@@ -34,7 +34,10 @@ from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_PERMISSION_MODES,
     claude_permission_mode_label,
 )
-from waypoint.backends.claude_code.rate_limits import probe_claude_usage
+from waypoint.backends.claude_code.rate_limits import (
+    probe_claude_usage,
+    probe_claude_usage_remote,
+)
 from waypoint.backends.claude_code.remote import build_remote_claude_launch_factory
 from waypoint.backends.claude_code.runtime_hook import (
     ClaudeHookBundle,
@@ -203,12 +206,42 @@ class ClaudeCodePlugin:
             session_id, _probe, refresh_interval_seconds=300.0
         )
 
+    async def _register_remote_rate_limit_probe(
+        self,
+        runtime: "SessionRuntime",
+        session_id: str,
+        launch_target: SshLaunchTargetConfig,
+    ) -> None:
+        if self.adapter is None:
+            return
+
+        async def _probe() -> SessionRateLimitUsage | None:
+            return await probe_claude_usage_remote(launch_target)
+
+        await self.adapter.register_rate_limit_probe(
+            session_id, _probe, refresh_interval_seconds=300.0
+        )
+
+    async def _register_rate_limit_probe(
+        self,
+        runtime: "SessionRuntime",
+        session_id: str,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> None:
+        if launch_target is None:
+            await self._register_local_rate_limit_probe(runtime, session_id)
+            return
+        await self._register_remote_rate_limit_probe(runtime, session_id, launch_target)
+
     async def refresh_rate_limit_usage(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        if session.launch_target_id is not None:
-            return
-        await self._register_local_rate_limit_probe(runtime, session.id)
+        launch_target = (
+            runtime._find_launch_target(session.launch_target_id)
+            if session.launch_target_id
+            else None
+        )
+        await self._register_rate_limit_probe(runtime, session.id, launch_target)
 
     def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
         # The Claude adapter is wired up lazily by setup() — if the
@@ -698,8 +731,7 @@ class ClaudeCodePlugin:
         )
         runtime.storage.create_session(new_session)
         runtime.storage.clone_events(session.id, new_session_id)
-        if launch_target is None:
-            await self._register_local_rate_limit_probe(runtime, new_session_id)
+        await self._register_rate_limit_probe(runtime, new_session_id, launch_target)
         await runtime._record_system_event(
             new_session_id,
             self.format_restore_message(runtime, session.cwd, session.launch_target_id)
@@ -776,8 +808,11 @@ class ClaudeCodePlugin:
             )
             return
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
-        if session.launch_target_id is None:
-            await self._register_local_rate_limit_probe(runtime, session.id)
+        await self._register_rate_limit_probe(
+            runtime,
+            session.id,
+            runtime._find_launch_target(session.launch_target_id),
+        )
         await runtime._record_system_event(
             session.id,
             self.format_restore_message(runtime, session.cwd, session.launch_target_id),
@@ -961,8 +996,7 @@ class ClaudeCodePlugin:
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
-        if launch_target is None:
-            await self._register_local_rate_limit_probe(runtime, session.id)
+        await self._register_rate_limit_probe(runtime, session.id, launch_target)
         await runtime._record_system_event(
             session.id,
             self.format_start_message(claude_session_id, request.cwd, launch_target),
@@ -1077,8 +1111,7 @@ class ClaudeCodePlugin:
         if launch_target is not None and self.thread_enumerator is not None:
             self.thread_enumerator.invalidate(launch_target.id)
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
-        if launch_target is None:
-            await self._register_local_rate_limit_probe(runtime, session.id)
+        await self._register_rate_limit_probe(runtime, session.id, launch_target)
         await runtime._record_system_event(
             session.id,
             self.format_import_message(cwd, launch_target),

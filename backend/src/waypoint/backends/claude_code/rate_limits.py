@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.resources
 import json
 import logging
 import os
@@ -14,6 +15,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import SessionRateLimitUsage, UsageWindow
 
 log = logging.getLogger("waypoint.claude_code.rate_limits")
@@ -100,30 +102,160 @@ async def probe_claude_usage(
     if response is None:
         log.warning("claude rate-limit request failed before receiving a response")
         return None
-    notes = [credential_note, *_read_oauth_account_notes(resolved_env)]
+    return _build_messages_snapshot(
+        status=response.status,
+        headers=response.headers,
+        body=response.body,
+        credential_note=credential_note,
+        account_notes=_read_oauth_account_notes(resolved_env),
+    )
+
+
+async def probe_claude_usage_remote(
+    launch_target: SshLaunchTargetConfig,
+    *,
+    timeout_seconds: float = 30.0,
+) -> SessionRateLimitUsage | None:
+    payload = await _run_remote_probe_script(launch_target, timeout_seconds)
+    if payload is None:
+        return None
+    error = payload.get("error")
+    account_notes = _string_list(payload.get("oauth_account_notes"))
+    credential_note = "remote CLI creds"
+    if error == "no_credentials":
+        log.warning("claude remote rate-limit probe found no CLI credentials")
+        return None
+    if error == "expired":
+        log.info(
+            "claude remote rate-limit probe: cached access token expired; "
+            "skipping HTTP and surfacing expiry"
+        )
+        return _expired_credentials_snapshot_from_notes(credential_note, account_notes)
+    if error == "network":
+        log.warning(
+            "claude remote rate-limit probe network error "
+            f"(preview={payload.get('body_preview')!r})"
+        )
+        return None
+    if error == "internal":
+        log.warning(
+            f"claude remote rate-limit probe internal error: {payload.get('message')!r}"
+        )
+        return None
+    status = payload.get("status")
+    headers = payload.get("headers")
+    body_preview = payload.get("body_preview", "")
+    if not isinstance(status, int) or not isinstance(headers, dict):
+        log.warning("claude remote rate-limit probe returned malformed payload")
+        return None
+    return _build_messages_snapshot(
+        status=status,
+        headers={str(k): str(v) for k, v in headers.items()},
+        body=body_preview.encode("utf-8") if isinstance(body_preview, str) else b"",
+        credential_note=credential_note,
+        account_notes=account_notes,
+    )
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+_REMOTE_PROBE_SCRIPT_BYTES: bytes | None = None
+
+
+def _remote_probe_script_bytes() -> bytes:
+    global _REMOTE_PROBE_SCRIPT_BYTES
+    if _REMOTE_PROBE_SCRIPT_BYTES is None:
+        _REMOTE_PROBE_SCRIPT_BYTES = (
+            importlib.resources.files("waypoint.backends.claude_code")
+            .joinpath("remote_probe_script.py")
+            .read_bytes()
+        )
+    return _REMOTE_PROBE_SCRIPT_BYTES
+
+
+async def _run_remote_probe_script(
+    launch_target: SshLaunchTargetConfig, timeout_seconds: float
+) -> dict[str, Any] | None:
+    argv = launch_target.build_remote_exec_args(["python3", "-"])
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except (OSError, FileNotFoundError) as exc:
+        log.warning(f"claude remote rate-limit probe failed to spawn ssh: {exc!r}")
+        return None
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(_remote_probe_script_bytes()), timeout=timeout_seconds
+        )
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()
+        log.warning("claude remote rate-limit probe timed out")
+        return None
+    if proc.returncode != 0:
+        log.warning(
+            "claude remote rate-limit probe exited non-zero "
+            f"(rc={proc.returncode} stderr={stderr[:240]!r})"
+        )
+        return None
+    text = stdout.decode("utf-8", errors="replace").strip()
+    if not text:
+        log.warning("claude remote rate-limit probe produced no output")
+        return None
+    last_line = text.splitlines()[-1]
+    try:
+        decoded = json.loads(last_line)
+    except json.JSONDecodeError:
+        log.warning(
+            "claude remote rate-limit probe produced non-JSON output "
+            f"(last_line={last_line[:240]!r})"
+        )
+        return None
+    if not isinstance(decoded, dict):
+        return None
+    return decoded
+
+
+def _build_messages_snapshot(
+    *,
+    status: int,
+    headers: dict[str, str],
+    body: bytes,
+    credential_note: str,
+    account_notes: list[str],
+) -> SessionRateLimitUsage | None:
+    notes = [credential_note, *account_notes]
     usage = parse_claude_rate_limit_headers(
-        response.headers,
+        headers,
         now=datetime.now(UTC),
         notes=_unique_notes(notes),
     )
     if usage is not None:
         return usage
-    if response.status == 401:
+    if status == 401:
         log.warning(
             "claude rate-limit response was unauthenticated "
-            f"(status=401 preview={response.body[:240].decode('utf-8', errors='replace')!r})",
+            f"(status=401 preview={body[:240].decode('utf-8', errors='replace')!r})",
         )
-        return _expired_credentials_snapshot(credential_note, resolved_env)
-    if response.status == 429:
-        retry_after = _header_value(response.headers, "Retry-After")
+        return _expired_credentials_snapshot_from_notes(credential_note, account_notes)
+    if status == 429:
+        retry_after = _header_value(headers, "Retry-After")
         if retry_after:
             notes.append(f"rate limited; retry after {retry_after}s")
         else:
             notes.append("rate limited")
         log.warning(
             "claude rate-limit response was throttled "
-            f"(status={response.status} retry_after={retry_after!r} "
-            f"preview={response.body[:240].decode('utf-8', errors='replace')!r})",
+            f"(status={status} retry_after={retry_after!r} "
+            f"preview={body[:240].decode('utf-8', errors='replace')!r})",
         )
         return SessionRateLimitUsage(
             source="claude_code",
@@ -131,17 +263,16 @@ async def probe_claude_usage(
             windows=[],
             notes=_unique_notes(notes),
         )
-    if response.status != 200:
+    if status != 200:
         log.warning(
             "claude rate-limit response was not successful "
-            f"(status={response.status} "
-            f"preview={response.body[:240].decode('utf-8', errors='replace')!r})",
+            f"(status={status} "
+            f"preview={body[:240].decode('utf-8', errors='replace')!r})",
         )
         return None
     log.warning(
         "claude rate-limit response did not include usable rate-limit headers "
-        f"(status={response.status} "
-        f"headers={sorted(_normalize_headers(response.headers).keys())})",
+        f"(status={status} headers={sorted(_normalize_headers(headers).keys())})",
     )
     return None
 
@@ -161,16 +292,20 @@ def _is_access_token_expired(expires_at: datetime | None) -> bool:
 def _expired_credentials_snapshot(
     credential_note: str, env: dict[str, str]
 ) -> SessionRateLimitUsage:
+    return _expired_credentials_snapshot_from_notes(
+        credential_note, _read_oauth_account_notes(env)
+    )
+
+
+def _expired_credentials_snapshot_from_notes(
+    credential_note: str, account_notes: list[str]
+) -> SessionRateLimitUsage:
     return SessionRateLimitUsage(
         source="claude_code",
         updated_at=datetime.now(UTC),
         windows=[],
         notes=_unique_notes(
-            [
-                credential_note,
-                _EXPIRED_CREDENTIALS_NOTE,
-                *_read_oauth_account_notes(env),
-            ]
+            [credential_note, _EXPIRED_CREDENTIALS_NOTE, *account_notes]
         ),
     )
 

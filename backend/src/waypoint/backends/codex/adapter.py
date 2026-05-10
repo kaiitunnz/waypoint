@@ -34,7 +34,7 @@ ApprovalDecisionHandler = Callable[
 ]
 ApprovalCallback = Callable[[str, dict[str, Any] | None], dict[str, Any]]
 ClientFactory = Callable[[str, ApprovalCallback], AppServerClient]
-SessionUpdateCallback = Callable[[str, dict[str, Any]], Awaitable[Any]]
+SessionUpdateCallback = Callable[[str, dict[str, Any], bool], Awaitable[Any]]
 
 
 def _extract_tool_name(item_type: str | None, item: dict[str, Any]) -> str | None:
@@ -721,6 +721,7 @@ class CodexAppServerAdapter:
         await self._on_session_update(
             state.session_id,
             {"context_usage": snapshot.model_dump(mode="json")},
+            False,
         )
 
     def _require_session(self, session_id: str) -> CodexSessionState:

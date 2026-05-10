@@ -2,12 +2,14 @@ import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from codex_app_server.client import AppServerClient
 
 from waypoint.backends.codex.adapter import (
     CodexAppServerAdapter,
+    CodexSessionState,
     _context_usage_snapshot_from_thread_token_usage,
 )
 from waypoint.schemas import EventKind, SessionStatus
@@ -914,3 +916,53 @@ def test_context_usage_snapshot_uses_thread_token_usage_totals() -> None:
     }
     assert isinstance(snapshot.updated_at, datetime)
     assert snapshot.updated_at.tzinfo is UTC
+
+
+@pytest.mark.asyncio
+async def test_context_usage_snapshot_deduplicates_repeated_updates() -> None:
+    calls: list[tuple[str, dict[str, Any], bool]] = []
+
+    async def _emit(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def on_session_update(
+        session_id: str, updates: dict[str, Any], publish: bool
+    ) -> Any:
+        calls.append((session_id, updates, publish))
+        return None
+
+    fake = FakeAppServerClient()
+    adapter = CodexAppServerAdapter(
+        _emit,
+        on_session_update=on_session_update,
+        client_factory=lambda *_: cast(AppServerClient, fake),
+    )
+    state = CodexSessionState(
+        session_id="sess",
+        cwd="/tmp",
+        client=cast(AppServerClient, fake),
+        transport_lock=asyncio.Lock(),
+        thread_id="thread-1",
+    )
+    snapshot = _context_usage_snapshot_from_thread_token_usage(
+        {
+            "tokenUsage": {
+                "last": {
+                    "totalTokens": 4096,
+                    "inputTokens": 2048,
+                    "cachedInputTokens": 256,
+                    "outputTokens": 1536,
+                    "reasoningOutputTokens": 256,
+                },
+                "modelContextWindow": 8192,
+            }
+        }
+    )
+    assert snapshot is not None
+
+    await adapter._publish_context_usage(state, snapshot)
+    await adapter._publish_context_usage(state, snapshot)
+
+    assert calls == [
+        ("sess", {"context_usage": snapshot.model_dump(mode="json")}, False)
+    ]

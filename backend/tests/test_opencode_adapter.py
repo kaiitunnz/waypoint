@@ -1,4 +1,5 @@
 import asyncio
+from typing import Any, cast
 
 import pytest
 
@@ -337,10 +338,75 @@ def test_context_usage_snapshot_aggregates_token_categories() -> None:
     )
 
     assert snapshot is not None
-    assert snapshot.used_tokens == 190
+    assert snapshot.used_tokens == 140
     assert snapshot.context_window_tokens == 4096
     assert snapshot.source == "opencode"
     assert snapshot.breakdown == {
+        "input_tokens": 120,
+        "output_tokens": 30,
+        "reasoning_tokens": 20,
+        "cache_read_tokens": 15,
+        "cache_write_tokens": 5,
+    }
+
+
+@pytest.mark.asyncio
+async def test_context_usage_snapshot_deduplicates_cached_updates() -> None:
+    calls: list[tuple[str, dict[str, object], bool]] = []
+
+    async def _emit(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def on_session_update(
+        session_id: str, updates: dict[str, object], publish: bool
+    ) -> object:
+        calls.append((session_id, updates, publish))
+        return None
+
+    adapter = OpenCodeAdapter(
+        emit_event=_emit,
+        on_session_update=on_session_update,
+    )
+    state = OpenCodeSessionState(
+        session_id="local-1",
+        cwd="/tmp",
+        opencode_session_id="ses_1",
+    )
+    state.context_window_by_model[("opencode", "opencode/minimax-m2.5-free")] = 4096
+
+    properties = {
+        "sessionID": "ses_1",
+        "info": {
+            "role": "assistant",
+            "providerID": "opencode",
+            "modelID": "opencode/minimax-m2.5-free",
+            "tokens": {
+                "input": 120,
+                "output": 30,
+                "reasoning": 20,
+                "cache": {"read": 15, "write": 5},
+            },
+        },
+    }
+
+    await adapter._maybe_update_context_usage(state, properties)
+    await adapter._maybe_update_context_usage(state, properties)
+
+    snapshot = _context_usage_snapshot_from_message(
+        "opencode",
+        "opencode/minimax-m2.5-free",
+        properties["info"]["tokens"],  # type: ignore[index]
+        4096,
+    )
+    assert snapshot is not None
+    assert len(calls) == 1
+    assert calls[0][0] == "local-1"
+    assert calls[0][2] is False
+    context_usage = cast(dict[str, Any], calls[0][1]["context_usage"])
+    assert context_usage["used_tokens"] == 140
+    assert context_usage["context_window_tokens"] == 4096
+    assert context_usage["source"] == "opencode"
+    assert context_usage["breakdown"] == {
         "input_tokens": 120,
         "output_tokens": 30,
         "reasoning_tokens": 20,

@@ -139,14 +139,9 @@ class CodexPlugin:
         # external bootstrap. The plugin owns the adapter so every call
         # site reads ``self.adapter`` instead of reaching into the
         # runtime.
-        async def _update_session_fields(
-            session_id: str, updates: dict[str, Any]
-        ) -> Any:
-            return await runtime.update_session_fields(session_id, **updates)
-
         self.adapter = CodexAppServerAdapter(
             runtime._emit_adapter_event,
-            _update_session_fields,
+            runtime.session_update_callback(),
         )
 
     async def shutdown(self, runtime: "SessionRuntime") -> None:

@@ -5,6 +5,7 @@ import re
 import secrets
 import shutil
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1034,11 +1035,24 @@ class SessionRuntime:
         await self._publish_event(persisted)
 
     async def update_session_fields(
-        self, session_id: str, **updates: Any
+        self, session_id: str, *, publish: bool = True, **updates: Any
     ) -> SessionRecord:
         session = self.storage.update_session(session_id, **updates)
-        await self._publish_session_state(session_id)
+        if publish:
+            await self._publish_session_state(session_id)
         return session
+
+    def session_update_callback(
+        self,
+    ) -> Callable[[str, dict[str, Any], bool], Awaitable[SessionRecord]]:
+        async def _update_session_fields(
+            session_id: str, updates: dict[str, Any], publish: bool
+        ) -> SessionRecord:
+            return await self.update_session_fields(
+                session_id, publish=publish, **updates
+            )
+
+        return _update_session_fields
 
     async def _publish_event(self, event: EventRecord) -> None:
         await self.broadcast.publish(

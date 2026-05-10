@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 import logging
 import os
 from datetime import UTC, datetime
@@ -379,19 +378,19 @@ class OpenCodePlugin:
                 self._handle_server_died(runtime, key, active_session_ids)
 
             session_update_callback = getattr(runtime, "session_update_callback", None)
-            adapter_kwargs: dict[str, Any] = {
-                "emit_event": runtime._emit_adapter_event,
-                "launch_target": launch_target,
-                "on_agent_changed": _on_agent_changed,
-                "on_server_died": _on_server_died,
-                "workdir": key[1],
-                "extra_args": custom_args,
-            }
-            if callable(session_update_callback):
-                adapter_params = inspect.signature(OpenCodeAdapter).parameters
-                if "on_session_update" in adapter_params:
-                    adapter_kwargs["on_session_update"] = session_update_callback()
-            adapter = OpenCodeAdapter(**adapter_kwargs)
+            adapter = OpenCodeAdapter(
+                emit_event=runtime._emit_adapter_event,
+                on_session_update=(
+                    session_update_callback()
+                    if callable(session_update_callback)
+                    else None
+                ),
+                launch_target=launch_target,
+                on_agent_changed=_on_agent_changed,
+                on_server_died=_on_server_died,
+                workdir=key[1],
+                extra_args=custom_args,
+            )
             self._adapters[key] = adapter
             return adapter
 

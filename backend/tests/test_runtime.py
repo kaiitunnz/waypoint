@@ -105,6 +105,15 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         self.terminate_calls.append(session_id)
         return True
 
+    async def register_rate_limit_probe(
+        self,
+        session_id: str,
+        probe: Any,
+        *,
+        refresh_interval_seconds: float = 60.0,
+    ) -> None:
+        return None
+
     async def restore_session(
         self,
         session_id: str,
@@ -203,6 +212,15 @@ class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
     async def terminate_session(self, session_id: str) -> bool:
         self.terminate_calls.append(session_id)
         return True
+
+    async def register_rate_limit_probe(
+        self,
+        session_id: str,
+        probe: Any,
+        *,
+        refresh_interval_seconds: float = 60.0,
+    ) -> None:
+        return None
 
     async def restore_session(
         self,

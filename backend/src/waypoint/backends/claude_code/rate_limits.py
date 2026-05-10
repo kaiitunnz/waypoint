@@ -135,11 +135,15 @@ def _credential_paths(env: dict[str, str]) -> tuple[Path, ...]:
 def _read_keychain_access_token(env: dict[str, str]) -> str | None:
     if platform.system() != "Darwin":
         return None
-    for service in _resolve_keychain_service_names(env):
-        token = _read_keychain_access_token_for_service(service, env)
-        if token:
-            return token
-    return None
+    token = _read_keychain_access_token_for_service(
+        _canonical_keychain_service_name(), env
+    )
+    if token:
+        return token
+    discovered = _discover_hashed_keychain_service_name()
+    if discovered is None:
+        return None
+    return _read_keychain_access_token_for_service(discovered, env)
 
 
 def _read_keychain_access_token_for_service(
@@ -169,15 +173,19 @@ def _read_keychain_access_token_for_service(
     return token or None
 
 
-def _resolve_keychain_service_names(env: dict[str, str]) -> tuple[str, ...]:
-    services = ["Claude Code-credentials"]
-    discovered = _discover_hashed_keychain_service_name(env)
-    if discovered and discovered not in services:
-        services.append(discovered)
-    return tuple(services)
+_HASHED_KEYCHAIN_SERVICE_NAME: str | None = None
+_HASHED_KEYCHAIN_SERVICE_NAME_RESOLVED = False
 
 
-def _discover_hashed_keychain_service_name(env: dict[str, str]) -> str | None:
+def _canonical_keychain_service_name() -> str:
+    return "Claude Code-credentials"
+
+
+def _discover_hashed_keychain_service_name() -> str | None:
+    global _HASHED_KEYCHAIN_SERVICE_NAME_RESOLVED
+    global _HASHED_KEYCHAIN_SERVICE_NAME
+    if _HASHED_KEYCHAIN_SERVICE_NAME_RESOLVED:
+        return _HASHED_KEYCHAIN_SERVICE_NAME
     try:
         completed = subprocess.run(
             ["security", "dump-keychain"],
@@ -189,9 +197,13 @@ def _discover_hashed_keychain_service_name(env: dict[str, str]) -> str | None:
     except (OSError, subprocess.TimeoutExpired):
         return None
     if completed.returncode != 0:
+        _HASHED_KEYCHAIN_SERVICE_NAME_RESOLVED = True
         return None
-    match = re.search(r'Claude Code-credentials-[^"\s]+', completed.stdout)
-    return match.group(0) if match else None
+    match = re.search(r"(Claude Code-credentials-[^\"\s]+)", completed.stdout)
+    if match is not None:
+        _HASHED_KEYCHAIN_SERVICE_NAME = match.group(1)
+    _HASHED_KEYCHAIN_SERVICE_NAME_RESOLVED = True
+    return _HASHED_KEYCHAIN_SERVICE_NAME
 
 
 def _extract_access_token(raw: str) -> str | None:

@@ -70,8 +70,10 @@ import {
   SessionCommandInvocation,
   SessionContextUsage,
   SessionEnvelope,
+  SessionRateLimitUsage,
   SessionRecord,
   SessionTransport,
+  UsageWindow,
 } from "@/lib/types";
 
 const LOCAL_SLASH_COMPLETIONS: ReadonlyArray<CommandCompletion> = [
@@ -183,6 +185,66 @@ function clampPercent(percent: number | null): number | null {
     return null;
   }
   return Math.min(100, Math.max(0, percent));
+}
+
+function usageTone(percent: number | null): "good" | "warn" | "danger" {
+  if (percent === null) {
+    return "good";
+  }
+  if (percent >= 90) {
+    return "danger";
+  }
+  if (percent >= 70) {
+    return "warn";
+  }
+  return "good";
+}
+
+function rateLimitWindowPercent(window: UsageWindow): number | null {
+  if (window.used_percent < 0 || !Number.isFinite(window.used_percent)) {
+    return null;
+  }
+  return clampPercent(Math.round(window.used_percent));
+}
+
+function formatRateLimitWindowValue(window: UsageWindow): string {
+  const used = formatTokens(Math.round(window.used_percent));
+  const parts: string[] = [];
+  if (window.used_tokens !== undefined && window.used_tokens !== null) {
+    parts.push(`${formatTokens(window.used_tokens)} used`);
+  }
+  if (window.remaining_tokens !== undefined && window.remaining_tokens !== null) {
+    parts.push(`${formatTokens(window.remaining_tokens)} left`);
+  }
+  if (
+    window.limit_tokens !== undefined &&
+    window.limit_tokens !== null &&
+    window.used_tokens !== undefined &&
+    window.used_tokens !== null
+  ) {
+    parts.push(`of ${formatTokens(window.limit_tokens)}`);
+  }
+  if (parts.length > 0) {
+    return `${used}% used · ${parts.join(" · ")}`;
+  }
+  return `${used}% used`;
+}
+
+function formatRateLimitWindowReset(window: UsageWindow): string | null {
+  if (window.resets_at) {
+    return formatRelativeTime(window.resets_at);
+  }
+  return window.reset_description ?? null;
+}
+
+function rateLimitUsageTone(usage: SessionRateLimitUsage | null): "good" | "warn" | "danger" {
+  if (!usage || usage.windows.length === 0) {
+    return "good";
+  }
+  const worst = Math.max(
+    ...usage.windows.map((window) => rateLimitWindowPercent(window) ?? 0),
+  );
+  return usageTone(worst);
 }
 
 function contextUsageLabel(key: string): string {
@@ -1840,6 +1902,7 @@ const ReplyComposer = memo(function ReplyComposer({
     pendingEffort !== null &&
     pendingEffort !== (currentEffort ?? "");
   const contextUsage = session?.context_usage ?? null;
+  const rateLimitUsage = session?.rate_limit_usage ?? null;
   const contextUsagePercentValue = contextUsage
     ? contextUsagePercent(contextUsage)
     : null;
@@ -1847,6 +1910,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const contextUsageToneValue = contextUsage
     ? contextUsageTone(contextUsagePercentValue)
     : "good";
+  const rateLimitUsageToneValue = rateLimitUsageTone(rateLimitUsage);
   const contextUsageBreakdown = contextUsage
     ? Object.entries(contextUsage.breakdown ?? {})
     : [];
@@ -1863,6 +1927,37 @@ const ReplyComposer = memo(function ReplyComposer({
       ? `${formatTokens(contextUsage.used_tokens)} / ${formatTokens(contextUsageWindowDisplay)} (${contextUsagePercentDisplay}%)`
       : formatTokens(contextUsage.used_tokens)
     : null;
+  const rateLimitUsageWindows = rateLimitUsage?.windows ?? [];
+  const rateLimitUsageSummary = rateLimitUsage
+    ? rateLimitUsageWindows
+        .map((window) => `${window.label} ${Math.round(window.used_percent)}%`)
+        .join(" · ")
+    : null;
+  const usageToneValue = (() => {
+    if (contextUsage === null) {
+      return rateLimitUsageToneValue;
+    }
+    if (rateLimitUsage === null) {
+      return contextUsageToneValue;
+    }
+    if (
+      contextUsageToneValue === "danger" ||
+      rateLimitUsageToneValue === "danger"
+    ) {
+      return "danger";
+    }
+    if (contextUsageToneValue === "warn" || rateLimitUsageToneValue === "warn") {
+      return "warn";
+    }
+    return "good";
+  })();
+  const showUsagePopover = contextUsage !== null || rateLimitUsage !== null;
+  const usagePopoverTitle = [
+    contextUsageSummary ? `Context ${contextUsageSummary}` : null,
+    rateLimitUsageSummary ? `Rate limits ${rateLimitUsageSummary}` : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
 
   const handleEffortSelect = (next: string) => {
     if (effortRequiresConfirm) {
@@ -2027,20 +2122,20 @@ const ReplyComposer = memo(function ReplyComposer({
           </div>
         ) : null}
         <div className="composer-toprow-trail">
-          {contextUsage ? (
+          {showUsagePopover ? (
             <div className="composer-context" ref={contextUsageRef}>
               <button
                 type="button"
-                className={`composer-connection composer-context-trigger tone-${contextUsageToneValue} ${connection} ${contextUsageOpen ? "open" : ""}`}
+                className={`composer-connection composer-context-trigger tone-${usageToneValue} ${connection} ${contextUsageOpen ? "open" : ""}`}
                 title={
-                  contextUsageSummary
-                    ? `Backend socket ${connection}. Context ${contextUsageSummary}`
-                    : `Backend socket ${connection}. Click for context usage`
+                  usagePopoverTitle
+                    ? `Backend socket ${connection}. ${usagePopoverTitle}`
+                    : `Backend socket ${connection}. Click for usage details`
                 }
                 aria-live="polite"
                 aria-haspopup="dialog"
                 aria-expanded={contextUsageOpen}
-                aria-label={`Backend socket ${connection}. Context usage details`}
+                aria-label={`Backend socket ${connection}. Usage details`}
                 onClick={() => setContextUsageOpen((open) => !open)}
               >
                 {connection === "open"
@@ -2050,64 +2145,167 @@ const ReplyComposer = memo(function ReplyComposer({
                     : "connecting"}
               </button>
               {contextUsageOpen ? (
-                <div className={`composer-context-popover tone-${contextUsageToneValue}`} role="dialog" aria-label="Context usage">
-                  <div className="composer-context-head">
-                    <div className="composer-context-titles">
-                      <span className="composer-context-kicker">Context</span>
-                      <strong>
-                        {contextUsageSummary ?? formatTokens(contextUsage.used_tokens)}
-                      </strong>
-                    </div>
-                    <span className="composer-context-source">
-                      {humaniseBackend(contextUsage.source)}
-                    </span>
-                  </div>
-                  <div className="composer-context-meter" aria-hidden="true">
-                    <span
-                      style={{
-                        width: contextUsageHasWindow && contextUsagePercentDisplay !== null
-                          ? `${contextUsagePercentDisplay}%`
-                          : "0%",
-                      }}
-                    />
-                  </div>
-                  <div className="composer-context-grid">
-                    <div>
-                      <span>Used</span>
-                      <strong>{formatTokens(contextUsage.used_tokens)} tokens</strong>
-                    </div>
-                    <div>
-                      <span>Window</span>
-                      <strong>
-                        {contextUsageWindowTokens !== null
-                          ? `${formatTokens(contextUsageWindowDisplay)} tokens`
-                          : "Unavailable"}
-                      </strong>
-                    </div>
-                    <div>
-                      <span>Percent</span>
-                      <strong>
-                        {contextUsagePercentDisplay !== null
-                          ? `${contextUsagePercentDisplay}% used`
-                          : "Unavailable"}
-                      </strong>
-                    </div>
-                    <div>
-                      <span>Updated</span>
-                      <strong title={new Date(contextUsage.updated_at).toLocaleString()}>
-                        {formatRelativeTime(contextUsage.updated_at)}
-                      </strong>
-                    </div>
-                  </div>
-                  {contextUsageBreakdown.length > 0 ? (
-                    <div className="composer-context-breakdown">
-                      {contextUsageBreakdown.map(([key, value]) => (
-                        <div key={key}>
-                          <span>{contextUsageLabel(key)}</span>
-                          <strong>{formatTokens(value)}</strong>
+                <div
+                  className={`composer-context-popover tone-${usageToneValue}`}
+                  role="dialog"
+                  aria-label="Usage details"
+                >
+                  {contextUsage ? (
+                    <section className="composer-usage-section">
+                      <div className="composer-context-head">
+                        <div className="composer-context-titles">
+                          <span className="composer-context-kicker">Context</span>
+                          <strong>
+                            {contextUsageSummary ??
+                              formatTokens(contextUsage.used_tokens)}
+                          </strong>
                         </div>
-                      ))}
-                    </div>
+                        <span className="composer-context-source">
+                          {humaniseBackend(contextUsage.source)}
+                        </span>
+                      </div>
+                      <div className="composer-context-meter" aria-hidden="true">
+                        <span
+                          style={{
+                            width:
+                              contextUsageHasWindow &&
+                              contextUsagePercentDisplay !== null
+                                ? `${contextUsagePercentDisplay}%`
+                                : "0%",
+                          }}
+                        />
+                      </div>
+                      <div className="composer-context-grid">
+                        <div>
+                          <span>Used</span>
+                          <strong>{formatTokens(contextUsage.used_tokens)} tokens</strong>
+                        </div>
+                        <div>
+                          <span>Window</span>
+                          <strong>
+                            {contextUsageWindowTokens !== null
+                              ? `${formatTokens(contextUsageWindowDisplay)} tokens`
+                              : "Unavailable"}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Percent</span>
+                          <strong>
+                            {contextUsagePercentDisplay !== null
+                              ? `${contextUsagePercentDisplay}% used`
+                              : "Unavailable"}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Updated</span>
+                          <strong
+                            title={new Date(contextUsage.updated_at).toLocaleString()}
+                          >
+                            {formatRelativeTime(contextUsage.updated_at)}
+                          </strong>
+                        </div>
+                      </div>
+                      {contextUsageBreakdown.length > 0 ? (
+                        <div className="composer-context-breakdown">
+                          {contextUsageBreakdown.map(([key, value]) => (
+                            <div key={key}>
+                              <span>{contextUsageLabel(key)}</span>
+                              <strong>{formatTokens(value)}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </section>
+                  ) : null}
+                  {rateLimitUsage ? (
+                    <section className="composer-usage-section">
+                      <div className="composer-context-head">
+                        <div className="composer-context-titles">
+                          <span className="composer-context-kicker">Rate limits</span>
+                          <strong>
+                            {rateLimitUsageSummary ?? "Unavailable"}
+                          </strong>
+                        </div>
+                        <span className="composer-context-source">
+                          {rateLimitUsage.notes?.length
+                            ? rateLimitUsage.notes.join(" · ")
+                            : humaniseBackend(rateLimitUsage.source)}
+                        </span>
+                      </div>
+                      <div className="composer-rate-list">
+                        {rateLimitUsageWindows.map((window) => {
+                          const percent = rateLimitWindowPercent(window);
+                          const tone = usageTone(percent);
+                          const resetText = formatRateLimitWindowReset(window);
+                          return (
+                            <article
+                              key={window.id}
+                              className={`composer-rate-card tone-${tone}`}
+                            >
+                              <div className="composer-rate-card-head">
+                                <strong>{window.label}</strong>
+                                <span>
+                                  {percent !== null ? `${percent}% used` : "Unavailable"}
+                                </span>
+                              </div>
+                              <div className="composer-rate-card-meter" aria-hidden="true">
+                                <span
+                                  style={{
+                                    width: percent !== null ? `${percent}%` : "0%",
+                                  }}
+                                />
+                              </div>
+                              <div className="composer-rate-card-body">
+                                <div>
+                                  <span>Usage</span>
+                                  <strong>{formatRateLimitWindowValue(window)}</strong>
+                                </div>
+                                <div>
+                                  <span>Reset</span>
+                                  <strong>{resetText ?? "Unavailable"}</strong>
+                                </div>
+                              </div>
+                            </article>
+                          );
+                        })}
+                        {rateLimitUsageWindows.length === 0 ? (
+                          <p className="composer-usage-empty">
+                            Rate-limit data is unavailable.
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="composer-context-grid">
+                        <div>
+                          <span>Updated</span>
+                          <strong
+                            title={new Date(rateLimitUsage.updated_at).toLocaleString()}
+                          >
+                            {formatRelativeTime(rateLimitUsage.updated_at)}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Source</span>
+                          <strong>
+                            {rateLimitUsage.notes?.length
+                              ? rateLimitUsage.notes[0]
+                              : "Unavailable"}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Credits</span>
+                          <strong>
+                            {rateLimitUsage.credits_remaining !== null &&
+                            rateLimitUsage.credits_remaining !== undefined
+                              ? `${rateLimitUsage.credits_currency ?? "credits"} ${rateLimitUsage.credits_remaining.toFixed(2)}`
+                              : "Unavailable"}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Windows</span>
+                          <strong>{formatTokens(rateLimitUsageWindows.length)} tracked</strong>
+                        </div>
+                      </div>
+                    </section>
                   ) : null}
                 </div>
               ) : null}

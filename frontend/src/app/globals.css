@@ -3159,7 +3159,7 @@ html[data-theme="light"] .composer-context-trigger.tone-danger {
   position: absolute;
   right: 0;
   bottom: calc(100% + 8px);
-  width: min(360px, calc(100vw - 32px));
+  width: min(420px, calc(100vw - 32px));
   padding: 14px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
@@ -3283,6 +3283,113 @@ html[data-theme="light"] .composer-context-meter {
 .composer-context-breakdown {
   padding-top: 12px;
   border-top: 1px solid var(--line);
+}
+
+.composer-usage-section {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.composer-rate-list {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.composer-rate-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(8, 11, 16, 0.45);
+}
+
+html[data-theme="light"] .composer-rate-card {
+  background: rgba(235, 230, 218, 0.72);
+}
+
+.composer-rate-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.composer-rate-card-head strong {
+  color: var(--text-strong);
+  font-size: 0.84rem;
+}
+
+.composer-rate-card-head span {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex: 0 0 auto;
+}
+
+.composer-rate-card-meter {
+  height: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(8, 11, 16, 0.42);
+}
+
+html[data-theme="light"] .composer-rate-card-meter {
+  background: rgba(235, 230, 218, 0.8);
+}
+
+.composer-rate-card-meter > span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--success), #79d6ff);
+}
+
+.composer-rate-card.tone-warn .composer-rate-card-meter > span {
+  background: linear-gradient(90deg, var(--warn), #f0c46b);
+}
+
+.composer-rate-card.tone-danger .composer-rate-card-meter > span {
+  background: linear-gradient(90deg, var(--danger), #ff8f70);
+}
+
+.composer-rate-card-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+
+.composer-rate-card-body > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.composer-rate-card-body span,
+.composer-usage-empty {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.composer-rate-card-body strong {
+  font-size: 0.8rem;
+  color: var(--accent-strong);
+  word-break: break-word;
+}
+
+.composer-usage-empty {
+  margin: 0;
+  padding: 2px 0 0;
 }
 
 .composer-connection::before {
@@ -4745,6 +4852,10 @@ html[data-theme="light"] .terminal {
 
   .composer-context-breakdown {
     display: none;
+  }
+
+  .composer-rate-card-body {
+    grid-template-columns: 1fr;
   }
 
   .composer-context-source {

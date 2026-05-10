@@ -190,7 +190,7 @@ async def probe_codex_usage_remote(
     raw = payload.get("payload")
     if isinstance(raw, dict):
         snapshot = parse_codex_usage_payload(raw, notes=["remote OAuth"])
-        if snapshot is not None:
+        if snapshot is not None and _oauth_snapshot_is_actionable(snapshot):
             return snapshot
     status_text = payload.get("status_text")
     if isinstance(status_text, str) and status_text.strip():
@@ -310,7 +310,29 @@ async def _probe_codex_oauth_usage(
             "codex OAuth usage response did not yield a snapshot "
             f"(bytes={len(response)} preview={preview!r})",
         )
-    return snapshot
+        return None
+    if _oauth_snapshot_is_actionable(snapshot):
+        return snapshot
+    # Empty payload with no plan/email metadata — likely a schema drift or
+    # account-id mismatch. Fall through to /status so the caller can try the
+    # PTY scrape rather than rendering a blank panel.
+    return None
+
+
+def _oauth_snapshot_is_actionable(snapshot: SessionRateLimitUsage) -> bool:
+    if snapshot.windows:
+        return True
+    if snapshot.credits_remaining is not None:
+        return True
+    # "CLI OAuth" is the default seed note; only metadata that came from the
+    # payload itself counts as confirmation we hit a real account (e.g.
+    # education-plan accounts return rate_limit=null but include plan/email).
+    for note in snapshot.notes:
+        if note == "CLI OAuth" or note == "remote OAuth":
+            continue
+        if note.startswith("plan:") or "@" in note:
+            return True
+    return False
 
 
 def parse_codex_usage_payload(

@@ -68,6 +68,7 @@ import {
   CommandCompletion,
   EventRecord,
   SessionCommandInvocation,
+  SessionContextUsage,
   SessionEnvelope,
   SessionRecord,
   SessionTransport,
@@ -127,6 +128,54 @@ const EFFORT_LABEL: Record<string, string> = {
   xhigh: "Extra high",
   max: "Max",
 };
+
+const TOKEN_FORMATTER = new Intl.NumberFormat("en-US");
+
+function formatTokens(value: number): string {
+  return TOKEN_FORMATTER.format(value);
+}
+
+function contextUsagePercent(usage: SessionContextUsage): number | null {
+  const windowTokens = usage.context_window_tokens;
+  if (!windowTokens || windowTokens <= 0) {
+    return null;
+  }
+  return Math.round((usage.used_tokens / windowTokens) * 100);
+}
+
+function contextUsageTone(percent: number | null): "good" | "warn" | "danger" {
+  if (percent === null) {
+    return "good";
+  }
+  if (percent >= 90) {
+    return "danger";
+  }
+  if (percent >= 70) {
+    return "warn";
+  }
+  return "good";
+}
+
+function contextUsageLabel(key: string): string {
+  switch (key) {
+    case "input_tokens":
+      return "Input";
+    case "cached_input_tokens":
+      return "Cached input";
+    case "output_tokens":
+      return "Output";
+    case "reasoning_output_tokens":
+      return "Reasoning";
+    case "reasoning_tokens":
+      return "Reasoning";
+    case "cache_read_tokens":
+      return "Cache read";
+    case "cache_write_tokens":
+      return "Cache write";
+    default:
+      return key.replaceAll("_", " ");
+  }
+}
 
 interface SessionDetailProps {
   host: string;
@@ -1190,6 +1239,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         host={host}
         token={token}
         sessionId={sessionId}
+        session={session}
         permissionModeOptions={
           session ? permissionModesFor(session.backend, catalog) : []
         }
@@ -1252,6 +1302,7 @@ interface ReplyComposerProps {
   host: string;
   token: string;
   sessionId: string;
+  session: SessionRecord | null;
   agentBusy: boolean;
   permissionModeOptions: readonly BackendPermissionMode[];
   hasToolRuns: boolean;
@@ -1298,6 +1349,7 @@ const ReplyComposer = memo(function ReplyComposer({
   host,
   token,
   sessionId,
+  session,
   agentBusy,
   permissionModeOptions,
   canDelete,
@@ -1345,6 +1397,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const [selectedCompletion, setSelectedCompletion] =
     useState<CommandCompletion | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  const [contextUsageOpen, setContextUsageOpen] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
   const [reattaching, setReattaching] = useState(false);
   // Pending effort for backends that need a session restart to apply (Claude)
@@ -1369,6 +1422,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const suggestionsRef = useRef<HTMLUListElement | null>(null);
   const suggestionItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const overflowRef = useRef<HTMLDivElement | null>(null);
+  const contextUsageRef = useRef<HTMLDivElement | null>(null);
   const tuneRef = useRef<HTMLDivElement | null>(null);
 
   // Built-in slash commands are intercepted on the backend only for
@@ -1533,6 +1587,28 @@ const ReplyComposer = memo(function ReplyComposer({
       window.removeEventListener("keydown", onKey);
     };
   }, [overflowOpen]);
+
+  useEffect(() => {
+    if (!contextUsageOpen) {
+      return;
+    }
+    function onPointer(event: PointerEvent) {
+      if (!contextUsageRef.current) return;
+      if (contextUsageRef.current.contains(event.target as Node)) return;
+      setContextUsageOpen(false);
+    }
+    function onKey(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setContextUsageOpen(false);
+      }
+    }
+    window.addEventListener("pointerdown", onPointer);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onPointer);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [contextUsageOpen]);
 
   useEffect(() => {
     if (!tuneOpen) {
@@ -1734,6 +1810,28 @@ const ReplyComposer = memo(function ReplyComposer({
     effortRequiresConfirm &&
     pendingEffort !== null &&
     pendingEffort !== (currentEffort ?? "");
+  const contextUsage = session?.context_usage ?? null;
+  const contextUsagePercentValue = contextUsage
+    ? contextUsagePercent(contextUsage)
+    : null;
+  const contextUsageToneValue = contextUsage
+    ? contextUsageTone(contextUsagePercentValue)
+    : "good";
+  const contextUsageBreakdown = contextUsage
+    ? Object.entries(contextUsage.breakdown ?? {})
+    : [];
+  const contextUsageHasWindow =
+    contextUsage !== null &&
+    typeof contextUsage.context_window_tokens === "number" &&
+    contextUsage.context_window_tokens > 0;
+  const contextUsageWindowTokens = contextUsageHasWindow
+    ? contextUsage.context_window_tokens
+    : null;
+  const contextUsageSummary = contextUsage
+    ? contextUsageHasWindow && contextUsagePercentValue !== null
+      ? `${formatTokens(contextUsage.used_tokens)} / ${formatTokens(contextUsageWindowTokens ?? 0)} (${Math.max(0, contextUsagePercentValue)}%)`
+      : formatTokens(contextUsage.used_tokens)
+    : null;
 
   const handleEffortSelect = (next: string) => {
     if (effortRequiresConfirm) {
@@ -1898,18 +1996,105 @@ const ReplyComposer = memo(function ReplyComposer({
           </div>
         ) : null}
         <div className="composer-toprow-trail">
-          <span
-            className={`composer-connection ${connection}`}
-            title={`Backend socket ${connection}`}
-            role="status"
-            aria-live="polite"
-          >
-            {connection === "open"
-              ? "live"
-              : connection === "reconnecting"
-                ? "reconnecting"
-                : "connecting"}
-          </span>
+          {contextUsage ? (
+            <div className="composer-context" ref={contextUsageRef}>
+              <button
+                type="button"
+                className={`composer-connection composer-context-trigger ${connection} ${contextUsageOpen ? "open" : ""}`}
+                title={
+                  contextUsageSummary
+                    ? `Backend socket ${connection}. Context ${contextUsageSummary}`
+                    : `Backend socket ${connection}. Click for context usage`
+                }
+                aria-live="polite"
+                aria-haspopup="dialog"
+                aria-expanded={contextUsageOpen}
+                aria-label={`Backend socket ${connection}. Context usage details`}
+                onClick={() => setContextUsageOpen((open) => !open)}
+              >
+                {connection === "open"
+                  ? "live"
+                  : connection === "reconnecting"
+                    ? "reconnecting"
+                    : "connecting"}
+              </button>
+              {contextUsageOpen ? (
+                <div className={`composer-context-popover tone-${contextUsageToneValue}`} role="dialog" aria-label="Context usage">
+                  <div className="composer-context-head">
+                    <div className="composer-context-titles">
+                      <span className="composer-context-kicker">Context</span>
+                      <strong>
+                        {contextUsageSummary ?? formatTokens(contextUsage.used_tokens)}
+                      </strong>
+                    </div>
+                    <span className="composer-context-source">
+                      {humaniseBackend(contextUsage.source)}
+                    </span>
+                  </div>
+                  <div className="composer-context-meter" aria-hidden="true">
+                    <span
+                      style={{
+                        width: contextUsageHasWindow && contextUsagePercentValue !== null
+                          ? `${Math.min(100, Math.max(0, contextUsagePercentValue))}%`
+                          : "0%",
+                      }}
+                    />
+                  </div>
+                  <div className="composer-context-grid">
+                    <div>
+                      <span>Used</span>
+                      <strong>{formatTokens(contextUsage.used_tokens)} tokens</strong>
+                    </div>
+                    <div>
+                      <span>Window</span>
+                      <strong>
+                        {contextUsageHasWindow
+                          ? `${formatTokens(contextUsage.context_window_tokens ?? 0)} tokens`
+                          : "Unavailable"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Percent</span>
+                      <strong>
+                        {contextUsagePercentValue !== null
+                          ? `${Math.max(0, contextUsagePercentValue)}% used`
+                          : "Unavailable"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Updated</span>
+                      <strong>
+                        {new Date(contextUsage.updated_at).toLocaleString()}
+                      </strong>
+                    </div>
+                  </div>
+                  {contextUsageBreakdown.length > 0 ? (
+                    <div className="composer-context-breakdown">
+                      {contextUsageBreakdown.map(([key, value]) => (
+                        <div key={key}>
+                          <span>{contextUsageLabel(key)}</span>
+                          <strong>{formatTokens(value)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <span
+              className={`composer-connection ${connection}`}
+              title={`Backend socket ${connection}`}
+              role="status"
+              aria-live="polite"
+            >
+              {connection === "open"
+                ? "live"
+                : connection === "reconnecting"
+                  ? "reconnecting"
+                  : "connecting"}
+            </span>
+          )}
         </div>
       </div>
       <div className="reply-textarea-wrap">

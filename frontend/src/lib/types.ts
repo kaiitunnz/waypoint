@@ -23,6 +23,14 @@ export type EventKind =
   | "system_note"
   | "raw_terminal_chunk";
 
+export interface SessionContextUsage {
+  used_tokens: number;
+  context_window_tokens?: number | null;
+  updated_at: string;
+  source: Backend;
+  breakdown?: Record<string, number>;
+}
+
 export interface SessionRecord {
   id: string;
   backend: Backend;
@@ -48,6 +56,7 @@ export interface SessionRecord {
   permission_mode?: string | null;
   model?: string | null;
   effort?: string | null;
+  context_usage?: SessionContextUsage | null;
   args: string[];
   config_overrides: string[];
 }

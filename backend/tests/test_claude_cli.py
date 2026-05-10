@@ -450,6 +450,34 @@ async def test_dispatch_system_init_preserves_1m_default_model() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dispatch_system_init_refreshes_context_window_on_family_change() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    state.model = "sonnet"
+
+    calls: list[str] = []
+
+    async def fake_refresh(target_state: ClaudeSessionState) -> None:
+        calls.append(target_state.session_id)
+
+    adapter._refresh_context_usage = fake_refresh  # type: ignore[assignment]
+
+    await adapter._dispatch(
+        state,
+        {
+            "type": "system",
+            "subtype": "init",
+            "model": "opus",
+            "session_id": "claude-uuid",
+        },
+    )
+
+    assert state.model == "opus"
+    assert calls == ["sess"]
+
+
+@pytest.mark.asyncio
 async def test_dispatch_assistant_emits_context_usage_snapshot() -> None:
     emitted: list = []
     session_updates: list[tuple[str, dict[str, Any], bool]] = []

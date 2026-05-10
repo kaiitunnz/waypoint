@@ -267,6 +267,23 @@ export async function postAction(
   await ensureOk(response, `failed to ${action}`);
 }
 
+export async function refreshSessionRateLimitUsage(
+  host: string,
+  token: string,
+  sessionId: string,
+): Promise<SessionRecord> {
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/rate-limit-usage/refresh`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  await ensureOk(response, "failed to refresh rate-limit usage");
+  const body = await response.json();
+  return body.session as SessionRecord;
+}
+
 export async function setSessionPermissionMode(
   host: string,
   token: string,

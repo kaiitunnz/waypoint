@@ -27,6 +27,7 @@ import {
   forkSession,
   isAuthError,
   postAction,
+  refreshSessionRateLimitUsage,
   sendInput,
   setSessionEffort,
   setSessionModel,
@@ -243,6 +244,39 @@ function rateLimitUsageTone(usage: SessionRateLimitUsage | null): "good" | "warn
   return usageTone(worst);
 }
 
+const USAGE_BAR_SEGMENTS = 14;
+
+function UsageBar({
+  percent,
+  tone,
+  disabled,
+}: {
+  percent: number | null;
+  tone: "good" | "warn" | "danger";
+  disabled?: boolean;
+}) {
+  const filled = !disabled && percent !== null
+    ? Math.min(
+        USAGE_BAR_SEGMENTS,
+        Math.max(0, Math.round((percent / 100) * USAGE_BAR_SEGMENTS)),
+      )
+    : 0;
+  return (
+    <div
+      className={`usage-bar tone-${tone}${disabled ? " is-disabled" : ""}`}
+      role="presentation"
+    >
+      {Array.from({ length: USAGE_BAR_SEGMENTS }, (_, index) => (
+        <span
+          key={index}
+          className={index < filled ? "is-filled" : ""}
+          style={{ animationDelay: `${index * 18}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
+
 function contextUsageLabel(key: string): string {
   switch (key) {
     case "input_tokens":
@@ -311,6 +345,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [defaultEffort, setDefaultEffort] = useState<string | null>(null);
   const [modelBusy, setModelBusy] = useState(false);
   const [effortBusy, setEffortBusy] = useState(false);
+  const [rateLimitRefreshBusy, setRateLimitRefreshBusy] = useState(false);
   const [approvalPageIndex, setApprovalPageIndex] = useState(0);
   const [hasOlderEvents, setHasOlderEvents] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -933,6 +968,26 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }, [handleAuthFailure, host, token, sessionId]);
 
+  const handleRateLimitRefresh = useCallback(async () => {
+    setRateLimitRefreshBusy(true);
+    try {
+      const updated = await refreshSessionRateLimitUsage(host, token, sessionId);
+      setSession(updated);
+    } catch (refreshError) {
+      if (isAuthError(refreshError)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(
+        refreshError instanceof Error
+          ? refreshError.message
+          : "failed to refresh rate-limit usage",
+      );
+    } finally {
+      setRateLimitRefreshBusy(false);
+    }
+  }, [handleAuthFailure, host, sessionId, token]);
+
   const removeFromList = useCallback(async () => {
     if (!window.confirm("Delete this session and its transcript? This cannot be undone.")) {
       return;
@@ -1336,6 +1391,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         canTerminate={Boolean(session && !sessionExited)}
         connection={connection}
         disabled={composerDisabled}
+        rateLimitRefreshBusy={rateLimitRefreshBusy}
         dormant={dormantReattach}
         placeholder={composerPlaceholder}
         agentBusy={agentBusy}
@@ -1375,6 +1431,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         onModelChange={handleModelChange}
         onEffortChange={handleEffortChange}
         onRefresh={refresh}
+        onRateLimitRefresh={handleRateLimitRefresh}
         onReattach={reattach}
         onResume={resumeSession}
         onSwitchSession={openSwitcher}
@@ -1401,6 +1458,7 @@ interface ReplyComposerProps {
   canTerminate: boolean;
   connection: ConnectionState;
   disabled: boolean;
+  rateLimitRefreshBusy: boolean;
   dormant: boolean;
   placeholder: string;
   modeBusy: boolean;
@@ -1425,6 +1483,7 @@ interface ReplyComposerProps {
   onModelChange: (model: string) => void | Promise<void>;
   onEffortChange: (effort: string) => void | Promise<void>;
   onRefresh: () => void;
+  onRateLimitRefresh: () => void | Promise<void>;
   onReattach: () => void | Promise<void>;
   onResume: () => void | Promise<void>;
   onSwitchSession: () => void;
@@ -1445,6 +1504,7 @@ const ReplyComposer = memo(function ReplyComposer({
   canTerminate,
   connection,
   disabled,
+  rateLimitRefreshBusy,
   dormant,
   placeholder,
   modeBusy,
@@ -1468,6 +1528,7 @@ const ReplyComposer = memo(function ReplyComposer({
   onModelChange,
   onEffortChange,
   onRefresh,
+  onRateLimitRefresh,
   onReattach,
   onResume,
   onSwitchSession,
@@ -1925,14 +1986,18 @@ const ReplyComposer = memo(function ReplyComposer({
     : null;
   const rateLimitUsageWindows = rateLimitUsage?.windows ?? [];
   const rateLimitUsageSummary = rateLimitUsage
-    ? rateLimitUsageWindows
-        .map((window) => `${window.label} ${Math.round(window.used_percent)}%`)
-        .join(" · ")
+    ? rateLimitUsageWindows.length > 0
+      ? rateLimitUsageWindows
+          .map((window) => `${window.label} ${Math.round(window.used_percent)}%`)
+          .join(" · ")
+      : rateLimitUsage.notes?.length
+        ? rateLimitUsage.notes.join(" · ")
+        : null
     : null;
   const rateLimitUpdatedAt = rateLimitUsage?.updated_at ?? null;
   const rateLimitSourceLabel = rateLimitUsage
     ? rateLimitUsage.notes?.length
-      ? rateLimitUsage.notes[0]
+      ? rateLimitUsage.notes.join(" · ")
       : humaniseBackend(rateLimitUsage.source)
     : "Unavailable";
   const usageToneValue = (() => {
@@ -2148,138 +2213,161 @@ const ReplyComposer = memo(function ReplyComposer({
               </button>
               {contextUsageOpen ? (
                 <div
-                  className={`composer-context-popover tone-${usageToneValue}`}
+                  className={`usage-panel tone-${usageToneValue}`}
                   role="dialog"
                   aria-label="Usage details"
                 >
+                  <span className="usage-panel-rail" aria-hidden="true" />
+
                   {contextUsage ? (
-                    <section className="composer-usage-section">
-                      <div className="composer-context-head">
-                        <div className="composer-context-titles">
-                          <span className="composer-context-kicker">Context</span>
-                          <strong>
-                            {contextUsageSummary ??
-                              formatTokens(contextUsage.used_tokens)}
-                          </strong>
-                        </div>
-                        <span className="composer-context-source">
+                    <section className="usage-block">
+                      <header className="usage-block-head">
+                        <h3 className="usage-block-eyebrow">
+                          <span aria-hidden className="usage-block-mark">
+                            ◆
+                          </span>
+                          Context
+                        </h3>
+                        <span className="usage-block-tag">
                           {humaniseBackend(contextUsage.source)}
                         </span>
-                      </div>
-                      <div className="composer-context-meter" aria-hidden="true">
-                        <span
-                          style={{
-                            width:
-                              contextUsageHasWindow &&
-                              contextUsagePercentDisplay !== null
-                                ? `${contextUsagePercentDisplay}%`
-                                : "0%",
-                          }}
-                        />
-                      </div>
-                      <div className="composer-context-grid">
-                        <div>
-                          <span>Used</span>
-                          <strong>{formatTokens(contextUsage.used_tokens)} tokens</strong>
-                        </div>
-                        <div>
-                          <span>Window</span>
-                          <strong>
-                            {contextUsageWindowTokens !== null
-                              ? `${formatTokens(contextUsageWindowDisplay)} tokens`
-                              : "Unavailable"}
-                          </strong>
-                        </div>
-                        <div>
-                          <span>Percent</span>
+                      </header>
+                      <div className="usage-block-body">
+                        <div className={`usage-numeral tone-${contextUsageToneValue}`}>
                           <strong>
                             {contextUsagePercentDisplay !== null
-                              ? `${contextUsagePercentDisplay}% used`
-                              : "Unavailable"}
+                              ? contextUsagePercentDisplay
+                              : "—"}
                           </strong>
+                          <em>%</em>
                         </div>
-                        <div>
-                          <span>Updated</span>
-                          <strong
-                            title={new Date(contextUsage.updated_at).toLocaleString()}
-                          >
-                            {formatRelativeTime(contextUsage.updated_at)}
-                          </strong>
+                        <div className="usage-block-stack">
+                          <p className="usage-line">
+                            <span>{formatTokens(contextUsage.used_tokens)}</span>
+                            <em>of</em>
+                            <span>
+                              {contextUsageWindowTokens !== null
+                                ? formatTokens(contextUsageWindowDisplay)
+                                : "—"}
+                            </span>
+                            <em>tokens</em>
+                          </p>
+                          <UsageBar
+                            percent={contextUsagePercentDisplay}
+                            tone={contextUsageToneValue}
+                            disabled={
+                              !contextUsageHasWindow ||
+                              contextUsagePercentDisplay === null
+                            }
+                          />
+                          <p className="usage-line-meta">
+                            <em>updated</em>
+                            <span title={new Date(contextUsage.updated_at).toLocaleString()}>
+                              {formatRelativeTime(contextUsage.updated_at)}
+                            </span>
+                          </p>
                         </div>
                       </div>
                       {contextUsageBreakdown.length > 0 ? (
-                        <div className="composer-context-breakdown">
+                        <ul className="usage-chips">
                           {contextUsageBreakdown.map(([key, value]) => (
-                            <div key={key}>
-                              <span>{contextUsageLabel(key)}</span>
+                            <li key={key}>
+                              <em>{contextUsageLabel(key)}</em>
                               <strong>{formatTokens(value)}</strong>
-                            </div>
+                            </li>
                           ))}
-                        </div>
+                        </ul>
                       ) : null}
                     </section>
                   ) : null}
-                  <section className="composer-usage-section">
-                    <div className="composer-context-head">
-                      <div className="composer-context-titles">
-                        <span className="composer-context-kicker">Rate limits</span>
-                        <strong>
-                          {rateLimitUsageSummary ?? "Unavailable"}
-                        </strong>
-                      </div>
-                      <span className="composer-context-source">
-                        {rateLimitSourceLabel}
-                      </span>
-                    </div>
-                    <div className="composer-rate-list">
-                      {rateLimitUsageWindows.map((window) => {
-                        const percent = rateLimitWindowPercent(window);
-                        const tone = usageTone(percent);
-                        const resetText = formatRateLimitWindowReset(window);
-                        const tokenSummary = formatRateLimitWindowTokens(window);
-                        return (
-                          <article
-                            key={window.id}
-                            className={`composer-rate-card tone-${tone}`}
-                          >
-                            <div className="composer-rate-card-head">
-                              <strong>{window.label}</strong>
-                              <span>
-                                {percent !== null ? `${percent}% used` : "Unavailable"}
-                              </span>
-                            </div>
-                            <div className="composer-rate-card-meter" aria-hidden="true">
-                              <span
-                                style={{
-                                  width: percent !== null ? `${percent}%` : "0%",
-                                }}
-                              />
-                            </div>
-                            <div className="composer-rate-card-body">
-                              {tokenSummary ? (
-                                <div>
-                                  <span>Tokens</span>
-                                  <strong>{tokenSummary}</strong>
-                                </div>
-                              ) : null}
-                              <div>
-                                <span>Reset</span>
-                                <strong>{resetText ?? "Unavailable"}</strong>
+
+                  {contextUsage && rateLimitUsage ? (
+                    <hr className="usage-divider" aria-hidden="true" />
+                  ) : null}
+
+                  {rateLimitUsage ? (
+                  <section className="usage-block">
+                    <header className="usage-block-head">
+                      <h3 className="usage-block-eyebrow">
+                        <span aria-hidden className="usage-block-mark">
+                          ◇
+                        </span>
+                        Rate limits
+                      </h3>
+                      <button
+                        type="button"
+                        className="usage-refresh"
+                        onClick={() => void onRateLimitRefresh()}
+                        disabled={rateLimitRefreshBusy}
+                        aria-label="Refresh rate limits"
+                      >
+                        <span
+                          aria-hidden
+                          className={`usage-refresh-glyph${rateLimitRefreshBusy ? " is-spinning" : ""}`}
+                        >
+                          ↻
+                        </span>
+                        {rateLimitRefreshBusy ? "Refreshing" : "Refresh"}
+                      </button>
+                    </header>
+
+                    {rateLimitUsageWindows.length > 0 ? (
+                      <ul className="usage-windows">
+                        {rateLimitUsageWindows.map((window) => {
+                          const percent = rateLimitWindowPercent(window);
+                          const tone = usageTone(percent);
+                          const resetText = formatRateLimitWindowReset(window);
+                          const tokenSummary = formatRateLimitWindowTokens(window);
+                          return (
+                            <li
+                              key={window.id}
+                              className={`usage-window tone-${tone}`}
+                            >
+                              <div className="usage-window-head">
+                                <span className="usage-window-label">
+                                  {window.label}
+                                </span>
+                                {resetText ? (
+                                  <span className="usage-window-reset">
+                                    <span aria-hidden className="usage-window-reset-glyph">
+                                      ◷
+                                    </span>
+                                    {resetText}
+                                  </span>
+                                ) : null}
                               </div>
-                            </div>
-                          </article>
-                        );
-                      })}
-                      {rateLimitUsageWindows.length === 0 ? (
-                        <p className="composer-usage-empty">
-                          Rate-limit data is unavailable.
-                        </p>
-                      ) : null}
-                    </div>
-                    <div className="composer-context-grid">
-                      <div>
-                        <span>Updated</span>
-                        <strong
+                              <div className="usage-window-body">
+                                <div
+                                  className={`usage-numeral usage-numeral--sm tone-${tone}`}
+                                >
+                                  <strong>
+                                    {percent !== null ? percent : "—"}
+                                  </strong>
+                                  <em>%</em>
+                                </div>
+                                <UsageBar
+                                  percent={percent}
+                                  tone={tone}
+                                  disabled={percent === null}
+                                />
+                              </div>
+                              {tokenSummary ? (
+                                <p className="usage-window-tokens">{tokenSummary}</p>
+                              ) : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <p className="usage-empty">
+                        No quota tracked on this plan.
+                      </p>
+                    )}
+
+                    <footer className="usage-meta">
+                      <span className="usage-meta-cell">
+                        <em>updated</em>
+                        <span
                           title={
                             rateLimitUpdatedAt
                               ? new Date(rateLimitUpdatedAt).toLocaleString()
@@ -2288,29 +2376,34 @@ const ReplyComposer = memo(function ReplyComposer({
                         >
                           {rateLimitUpdatedAt
                             ? formatRelativeTime(rateLimitUpdatedAt)
-                            : "Unavailable"}
-                        </strong>
-                      </div>
-                      <div>
-                        <span>Source</span>
-                        <strong>{rateLimitSourceLabel}</strong>
-                      </div>
-                      <div>
-                        <span>Credits</span>
-                        <strong>
-                          {rateLimitUsage &&
-                          rateLimitUsage.credits_remaining !== null &&
-                          rateLimitUsage.credits_remaining !== undefined
-                            ? `${rateLimitUsage.credits_currency ?? "credits"} ${rateLimitUsage.credits_remaining.toFixed(2)}`
-                            : "Unavailable"}
-                        </strong>
-                      </div>
-                      <div>
-                        <span>Windows</span>
-                        <strong>{rateLimitUsageWindows.length} tracked</strong>
-                      </div>
-                    </div>
+                            : "—"}
+                        </span>
+                      </span>
+                      <i aria-hidden className="usage-meta-bullet">
+                        ·
+                      </i>
+                      <span className="usage-meta-cell">
+                        <em>source</em>
+                        <span>{rateLimitSourceLabel}</span>
+                      </span>
+                      {rateLimitUsage &&
+                      rateLimitUsage.credits_remaining !== null &&
+                      rateLimitUsage.credits_remaining !== undefined ? (
+                        <>
+                          <i aria-hidden className="usage-meta-bullet">
+                            ·
+                          </i>
+                          <span className="usage-meta-cell">
+                            <em>credits</em>
+                            <span>
+                              {`${rateLimitUsage.credits_currency ?? "credits"} ${rateLimitUsage.credits_remaining.toFixed(2)}`}
+                            </span>
+                          </span>
+                        </>
+                      ) : null}
+                    </footer>
                   </section>
+                  ) : null}
                 </div>
               ) : null}
             </div>

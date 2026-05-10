@@ -35,7 +35,12 @@ from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_AUTO_APPROVE_MODES,
     CLAUDE_PERMISSION_MODES,
 )
-from waypoint.schemas import EventKind, SessionContextUsage, SessionStatus
+from waypoint.schemas import (
+    EventKind,
+    SessionContextUsage,
+    SessionRateLimitUsage,
+    SessionStatus,
+)
 
 log = logging.getLogger("waypoint.claude_cli")
 
@@ -227,6 +232,12 @@ class ClaudeSessionState:
     model: str | None = None
     context_usage_snapshot: SessionContextUsage | None = None
     context_usage_signature: tuple[int, int | None] | None = None
+    rate_limit_usage_snapshot: SessionRateLimitUsage | None = None
+    rate_limit_usage_signature: str | None = None
+    rate_limit_probe: Callable[[], Awaitable[SessionRateLimitUsage | None]] | None = (
+        None
+    )
+    rate_limit_refresh_task: asyncio.Task[None] | None = None
     # Reasoning effort. Claude's CLI accepts `--effort <level>` at launch
     # only — there is no in-process control_request to swap it — so changing
     # this value at runtime requires terminating and respawning the process
@@ -370,6 +381,24 @@ class ClaudeCliAdapter:
     def session_model(self, session_id: str) -> str | None:
         state = self._sessions.get(session_id)
         return state.model if state is not None else None
+
+    async def register_rate_limit_probe(
+        self,
+        session_id: str,
+        probe: Callable[[], Awaitable[SessionRateLimitUsage | None]],
+        *,
+        refresh_interval_seconds: float = 60.0,
+    ) -> None:
+        state = self._require_session(session_id)
+        state.rate_limit_probe = probe
+        if state.rate_limit_refresh_task is not None:
+            state.rate_limit_refresh_task.cancel()
+        state.rate_limit_refresh_task = asyncio.create_task(
+            self._refresh_rate_limit_usage_loop(
+                state, refresh_interval_seconds=refresh_interval_seconds
+            )
+        )
+        await self._refresh_rate_limit_usage(state)
 
     def session_slash_commands(self, session_id: str) -> tuple[str, ...]:
         state = self._sessions.get(session_id)
@@ -851,6 +880,10 @@ class ClaudeCliAdapter:
         if state is None:
             return False
         state.closing = True
+        if state.rate_limit_refresh_task is not None:
+            state.rate_limit_refresh_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await state.rate_limit_refresh_task
         # Resolve any pending approvals as deny so the hook unblocks.
         for pending in list(state.pending.values()):
             if not pending.future.done():
@@ -1416,6 +1449,53 @@ class ClaudeCliAdapter:
             state.session_id,
             {"context_usage": snapshot.model_dump(mode="json")},
             False,
+        )
+
+    async def _refresh_rate_limit_usage_loop(
+        self, state: ClaudeSessionState, *, refresh_interval_seconds: float
+    ) -> None:
+        try:
+            while state.session_id in self._sessions:
+                await self._refresh_rate_limit_usage(state)
+                await asyncio.sleep(refresh_interval_seconds)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            log.exception(
+                "claude rate-limit refresh loop failed",
+                extra={"session_id": state.session_id},
+            )
+
+    async def _refresh_rate_limit_usage(self, state: ClaudeSessionState) -> None:
+        probe = state.rate_limit_probe
+        if probe is None:
+            return
+        try:
+            snapshot = await probe()
+        except Exception:  # noqa: BLE001
+            log.exception(
+                "claude rate-limit probe failed",
+                extra={"session_id": state.session_id},
+            )
+            return
+        if snapshot is None:
+            return
+        await self._publish_rate_limit_usage(state, snapshot)
+
+    async def _publish_rate_limit_usage(
+        self, state: ClaudeSessionState, snapshot: SessionRateLimitUsage
+    ) -> None:
+        signature = json.dumps(snapshot.model_dump(mode="json"), sort_keys=True)
+        if state.rate_limit_usage_signature == signature:
+            return
+        state.rate_limit_usage_signature = signature
+        state.rate_limit_usage_snapshot = snapshot
+        if self._on_session_update is None:
+            return
+        await self._on_session_update(
+            state.session_id,
+            {"rate_limit_usage": snapshot.model_dump(mode="json")},
+            True,
         )
 
     async def _refresh_context_usage(self, state: ClaudeSessionState) -> None:

@@ -112,6 +112,27 @@ class SessionContextUsage(BaseModel):
     breakdown: dict[str, int] = Field(default_factory=dict)
 
 
+class UsageWindow(BaseModel):
+    id: str
+    label: str
+    used_percent: float
+    used_tokens: int | None = None
+    limit_tokens: int | None = None
+    remaining_tokens: int | None = None
+    window_minutes: int | None = None
+    resets_at: datetime | None = None
+    reset_description: str | None = None
+
+
+class SessionRateLimitUsage(BaseModel):
+    source: BackendId
+    updated_at: datetime
+    windows: list[UsageWindow] = Field(default_factory=list)
+    credits_remaining: float | None = None
+    credits_currency: str | None = None
+    notes: list[str] = Field(default_factory=list)
+
+
 class SessionRecord(BaseModel):
     id: str
     backend: BackendId
@@ -144,6 +165,7 @@ class SessionRecord(BaseModel):
     # the field. Empty list = none.
     config_overrides: list[str] = Field(default_factory=list)
     context_usage: SessionContextUsage | None = None
+    rate_limit_usage: SessionRateLimitUsage | None = None
 
 
 class EventRecord(BaseModel):

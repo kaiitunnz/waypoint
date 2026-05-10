@@ -31,6 +31,27 @@ export interface SessionContextUsage {
   breakdown?: Record<string, number>;
 }
 
+export interface UsageWindow {
+  id: string;
+  label: string;
+  used_percent: number;
+  used_tokens?: number | null;
+  limit_tokens?: number | null;
+  remaining_tokens?: number | null;
+  window_minutes?: number | null;
+  resets_at?: string | null;
+  reset_description?: string | null;
+}
+
+export interface SessionRateLimitUsage {
+  source: Backend;
+  updated_at: string;
+  windows: UsageWindow[];
+  credits_remaining?: number | null;
+  credits_currency?: string | null;
+  notes?: string[];
+}
+
 export interface SessionRecord {
   id: string;
   backend: Backend;
@@ -57,6 +78,7 @@ export interface SessionRecord {
   model?: string | null;
   effort?: string | null;
   context_usage?: SessionContextUsage | null;
+  rate_limit_usage?: SessionRateLimitUsage | null;
   args: string[];
   config_overrides: string[];
 }

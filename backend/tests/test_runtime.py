@@ -95,6 +95,8 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         self.permission_mode_calls: list[tuple[str, str]] = []
         self.model_calls: list[tuple[str, str | None]] = []
         self.effort_calls: list[tuple[str, str | None]] = []
+        self.register_rate_limit_calls: list[str] = []
+        self.force_refresh_rate_limit_calls: list[str] = []
         self.modes: dict[str, str] = {}
         self.models: dict[str, str | None] = {}
         self.efforts: dict[str, str | None] = {}
@@ -112,7 +114,10 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         *,
         refresh_interval_seconds: float = 60.0,
     ) -> None:
-        return None
+        self.register_rate_limit_calls.append(session_id)
+
+    async def force_refresh_rate_limit_usage(self, session_id: str) -> None:
+        self.force_refresh_rate_limit_calls.append(session_id)
 
     async def restore_session(
         self,
@@ -206,6 +211,8 @@ class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
         self.terminate_calls: list[str] = []
         self.model_calls: list[tuple[str, str | None]] = []
         self.effort_calls: list[tuple[str, str | None]] = []
+        self.register_rate_limit_calls: list[str] = []
+        self.force_refresh_rate_limit_calls: list[str] = []
         self.models: dict[str, str | None] = {}
         self.efforts: dict[str, str | None] = {}
 
@@ -220,7 +227,10 @@ class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
         *,
         refresh_interval_seconds: float = 60.0,
     ) -> None:
-        return None
+        self.register_rate_limit_calls.append(session_id)
+
+    async def force_refresh_rate_limit_usage(self, session_id: str) -> None:
+        self.force_refresh_rate_limit_calls.append(session_id)
 
     async def restore_session(
         self,
@@ -2675,3 +2685,38 @@ def test_session_events_page_collapses_codex_style_delta_run(tmp_path) -> None:
     assert page.events[0].sequence == 1
     assert len(page.events) == 51
     assert page.has_more is False
+
+
+@pytest.mark.asyncio
+async def test_refresh_rate_limit_usage_runs_probe_inline_for_claude(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    _claude_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(settings, backend="claude_code", transport="claude_cli")
+    storage.create_session(session)
+
+    await runtime.refresh_rate_limit_usage(session.id)
+
+    # The probe is registered first so the periodic loop is set up, then
+    # immediately forced inline so the response carries the fresh snapshot
+    # instead of racing the WS push.
+    assert fake.register_rate_limit_calls == [session.id]
+    assert fake.force_refresh_rate_limit_calls == [session.id]
+
+
+@pytest.mark.asyncio
+async def test_refresh_rate_limit_usage_runs_probe_inline_for_codex(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeCodexRuntimeAdapter()
+    _codex_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(settings, backend="codex", transport="codex_app_server")
+    storage.create_session(session)
+
+    await runtime.refresh_rate_limit_usage(session.id)
+
+    assert fake.register_rate_limit_calls == [session.id]
+    assert fake.force_refresh_rate_limit_calls == [session.id]

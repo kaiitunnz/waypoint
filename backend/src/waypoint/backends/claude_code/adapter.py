@@ -399,6 +399,14 @@ class ClaudeCliAdapter:
             )
         )
 
+    async def force_refresh_rate_limit_usage(self, session_id: str) -> None:
+        # User-driven path: run the registered probe inline so the caller's
+        # response carries the fresh snapshot instead of racing the WS push.
+        state = self._sessions.get(session_id)
+        if state is None:
+            return
+        await self._refresh_rate_limit_usage(state)
+
     def session_slash_commands(self, session_id: str) -> tuple[str, ...]:
         state = self._sessions.get(session_id)
         return state.slash_commands if state is not None else ()

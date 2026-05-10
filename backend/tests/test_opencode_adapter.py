@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Any, cast
 
 import pytest
@@ -392,13 +393,6 @@ async def test_context_usage_snapshot_deduplicates_cached_updates() -> None:
     await adapter._maybe_update_context_usage(state, properties)
     await adapter._maybe_update_context_usage(state, properties)
 
-    snapshot = _context_usage_snapshot_from_message(
-        "opencode",
-        "opencode/minimax-m2.5-free",
-        properties["info"]["tokens"],  # type: ignore[index]
-        4096,
-    )
-    assert snapshot is not None
     assert len(calls) == 1
     assert calls[0][0] == "local-1"
     assert calls[0][2] is False
@@ -413,3 +407,174 @@ async def test_context_usage_snapshot_deduplicates_cached_updates() -> None:
         "cache_read_tokens": 15,
         "cache_write_tokens": 5,
     }
+
+
+@pytest.mark.asyncio
+async def test_context_usage_background_lookup_publishes_once_ready() -> None:
+    calls: list[tuple[str, dict[str, object], bool]] = []
+
+    async def _emit(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def on_session_update(
+        session_id: str, updates: dict[str, object], publish: bool
+    ) -> object:
+        calls.append((session_id, updates, publish))
+        return None
+
+    class _FakeClient:
+        async def get(self, path, params=None):
+            assert path == "/config/providers"
+            return {
+                "providers": [
+                    {
+                        "id": "opencode",
+                        "models": {
+                            "opencode/minimax-m2.5-free": {"limit": {"context": 4096}}
+                        },
+                    }
+                ]
+            }
+
+    adapter = OpenCodeAdapter(
+        emit_event=_emit,
+        on_session_update=on_session_update,
+    )
+    adapter._client = _FakeClient()  # type: ignore[assignment]
+    state = OpenCodeSessionState(
+        session_id="local-1",
+        cwd="/tmp",
+        opencode_session_id="ses_1",
+    )
+    adapter._register_session(state)
+    properties = {
+        "sessionID": "ses_1",
+        "info": {
+            "role": "assistant",
+            "providerID": "opencode",
+            "modelID": "opencode/minimax-m2.5-free",
+            "tokens": {
+                "input": 120,
+                "output": 30,
+                "reasoning": 20,
+                "cache": {"read": 15, "write": 5},
+            },
+        },
+    }
+
+    await adapter._maybe_update_context_usage(state, properties)
+
+    for _ in range(100):
+        if calls:
+            break
+        await asyncio.sleep(0.01)
+
+    assert len(calls) == 1
+    assert calls[0][0] == "local-1"
+    assert calls[0][2] is True
+    context_usage = cast(dict[str, Any], calls[0][1]["context_usage"])
+    assert context_usage["used_tokens"] == 140
+    assert context_usage["context_window_tokens"] == 4096
+    assert context_usage["source"] == "opencode"
+    assert context_usage["breakdown"] == {
+        "input_tokens": 120,
+        "output_tokens": 30,
+        "reasoning_tokens": 20,
+        "cache_read_tokens": 15,
+        "cache_write_tokens": 5,
+    }
+    assert (
+        state.context_window_by_model[("opencode", "opencode/minimax-m2.5-free")]
+        == 4096
+    )
+    assert (
+        "opencode",
+        "opencode/minimax-m2.5-free",
+    ) not in state.context_usage_pending_tokens
+    assert state.context_window_lookup_pending == set()
+    assert not adapter._context_window_lookup_tasks
+
+
+@pytest.mark.asyncio
+async def test_context_window_lookup_failure_retries_after_ttl() -> None:
+    calls: list[tuple[str, dict[str, object], bool]] = []
+
+    async def _emit(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def on_session_update(
+        session_id: str, updates: dict[str, object], publish: bool
+    ) -> object:
+        calls.append((session_id, updates, publish))
+        return None
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self.fail_first = True
+
+        async def get(self, path, params=None):
+            assert path == "/config/providers"
+            if self.fail_first:
+                self.fail_first = False
+                raise RuntimeError("temporary outage")
+            return {
+                "providers": [
+                    {
+                        "id": "opencode",
+                        "models": {
+                            "opencode/minimax-m2.5-free": {"limit": {"context": 4096}}
+                        },
+                    }
+                ]
+            }
+
+    adapter = OpenCodeAdapter(
+        emit_event=_emit,
+        on_session_update=on_session_update,
+    )
+    client = _FakeClient()
+    adapter._client = client  # type: ignore[assignment]
+    state = OpenCodeSessionState(
+        session_id="local-1",
+        cwd="/tmp",
+        opencode_session_id="ses_1",
+    )
+    adapter._register_session(state)
+    key = ("opencode", "opencode/minimax-m2.5-free")
+    properties = {
+        "sessionID": "ses_1",
+        "info": {
+            "role": "assistant",
+            "providerID": key[0],
+            "modelID": key[1],
+            "tokens": {
+                "input": 120,
+                "output": 30,
+                "reasoning": 20,
+                "cache": {"read": 15, "write": 5},
+            },
+        },
+    }
+
+    await adapter._maybe_update_context_usage(state, properties)
+    for _ in range(100):
+        if (
+            key in state.context_window_lookup_failed
+            and not state.context_window_lookup_pending
+        ):
+            break
+        await asyncio.sleep(0.01)
+    assert key in state.context_window_lookup_failed
+    assert not calls
+
+    state.context_window_lookup_failed[key] = time.monotonic() - 2 * 60.0
+    await adapter._maybe_update_context_usage(state, properties)
+
+    for _ in range(100):
+        if calls:
+            break
+        await asyncio.sleep(0.01)
+
+    assert len(calls) == 1
+    assert calls[0][2] is True
+    assert state.context_window_by_model[key] == 4096

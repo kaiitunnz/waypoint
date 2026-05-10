@@ -28,6 +28,7 @@ log = logging.getLogger("waypoint.opencode")
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 0
 DEFAULT_TIMEOUT_SECONDS = 60.0
+CONTEXT_WINDOW_LOOKUP_RETRY_SECONDS = 60.0
 
 PERMISSION_REPLIES = {"once", "always", "reject"}
 # OpenCode's reply schema is strictly {once|always|reject}. Waypoint and the
@@ -95,7 +96,9 @@ class OpenCodeSessionState:
         default_factory=dict
     )
     context_window_lookup_pending: set[tuple[str, str]] = field(default_factory=set)
-    context_window_lookup_failed: set[tuple[str, str]] = field(default_factory=set)
+    context_window_lookup_failed: dict[tuple[str, str], float] = field(
+        default_factory=dict
+    )
     context_usage_signature: tuple[int, int | None] | None = None
     closing: bool = False
 
@@ -131,6 +134,7 @@ class OpenCodeAdapter:
         self._sessions: dict[str, OpenCodeSessionState] = {}
         self._remote_sessions: dict[str, str] = {}
         self._part_sessions: dict[str, str] = {}
+        self._context_window_lookup_tasks: set[asyncio.Task[None]] = set()
 
         self._server_process: asyncio.subprocess.Process | None = None
         self._sse_task: asyncio.Task[None] | None = None
@@ -677,6 +681,7 @@ class OpenCodeAdapter:
 
         context_window_tokens = state.context_window_by_model.get(key)
         if context_window_tokens is not None:
+            state.context_window_lookup_failed.pop(key, None)
             await self._publish_context_usage(
                 state,
                 provider_id,
@@ -687,27 +692,32 @@ class OpenCodeAdapter:
             )
             return
 
-        if (
-            key in state.context_window_lookup_failed
-            or key in state.context_window_lookup_pending
-        ):
+        failed_at = state.context_window_lookup_failed.get(key)
+        if failed_at is not None:
+            if time.monotonic() - failed_at < CONTEXT_WINDOW_LOOKUP_RETRY_SECONDS:
+                return
+            state.context_window_lookup_failed.pop(key, None)
+
+        if key in state.context_window_lookup_pending:
             return
 
         state.context_window_lookup_pending.add(key)
-        asyncio.create_task(
+        task = asyncio.create_task(
             self._resolve_context_window_and_publish(
                 state,
                 provider_id,
                 model_id,
             )
         )
+        self._context_window_lookup_tasks.add(task)
+        task.add_done_callback(self._context_window_lookup_tasks.discard)
 
     async def _resolve_context_window_and_publish(
         self,
         state: OpenCodeSessionState,
         provider_id: str,
         model_id: str,
-    ) -> int | None:
+    ) -> None:
         key = (provider_id, model_id)
         try:
             context_window_tokens = await self._context_window_for_model(
@@ -723,17 +733,18 @@ class OpenCodeAdapter:
             state.context_window_lookup_pending.discard(key)
 
         if context_window_tokens is None:
-            state.context_window_lookup_failed.add(key)
-            return None
+            state.context_window_lookup_failed[key] = time.monotonic()
+            return
 
         current_state = self._sessions.get(state.session_id)
         if current_state is not state or state.closing:
-            return None
+            return
 
         state.context_window_by_model[key] = context_window_tokens
+        state.context_window_lookup_failed.pop(key, None)
         tokens = state.context_usage_pending_tokens.get(key)
         if tokens is None:
-            return None
+            return
         await self._publish_context_usage(
             state,
             provider_id,
@@ -742,7 +753,6 @@ class OpenCodeAdapter:
             context_window_tokens,
             publish=True,
         )
-        return None
 
     async def _context_window_for_model(
         self, state: OpenCodeSessionState, provider_id: str, model_id: str
@@ -796,8 +806,10 @@ class OpenCodeAdapter:
 
         signature = (snapshot.used_tokens, snapshot.context_window_tokens)
         if state.context_usage_signature == signature:
+            state.context_usage_pending_tokens.pop((provider_id, model_id), None)
             return
         state.context_usage_signature = signature
+        state.context_usage_pending_tokens.pop((provider_id, model_id), None)
         if self._on_session_update is None:
             return
         await self._on_session_update(
@@ -1262,6 +1274,13 @@ class OpenCodeAdapter:
         return True
 
     async def shutdown(self) -> None:
+        if self._context_window_lookup_tasks:
+            for task in list(self._context_window_lookup_tasks):
+                task.cancel()
+            for task in list(self._context_window_lookup_tasks):
+                with suppress(asyncio.CancelledError, Exception):
+                    await task
+            self._context_window_lookup_tasks.clear()
         if self._sse_task is not None:
             self._sse_task.cancel()
             with suppress(asyncio.CancelledError):

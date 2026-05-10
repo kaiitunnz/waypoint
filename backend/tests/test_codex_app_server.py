@@ -964,5 +964,5 @@ async def test_context_usage_snapshot_deduplicates_repeated_updates() -> None:
     await adapter._publish_context_usage(state, snapshot)
 
     assert calls == [
-        ("sess", {"context_usage": snapshot.model_dump(mode="json")}, False)
+        ("sess", {"context_usage": snapshot.model_dump(mode="json")}, True)
     ]

@@ -8,10 +8,12 @@ import { useCallback, useEffect, useState } from "react";
 import { SessionDetail } from "@/components/SessionDetail";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { clearToken, readHost, readToken } from "@/lib/store";
+import { useTheme } from "@/lib/theme";
 
 export default function SessionPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const { theme } = useTheme();
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
   const [sessionId, setSessionId] = useState("");
@@ -33,7 +35,13 @@ export default function SessionPage() {
       <header className="app-bar">
         <div className="app-bar-brand">
           <Link className="app-bar-mark" href="/" aria-label="Waypoint home">
-            <Image src="/waypoint.svg" alt="" width={38} height={38} priority />
+            <Image
+              src={theme === "light" ? "/waypoint-light.svg" : "/waypoint.svg"}
+              alt=""
+              width={38}
+              height={38}
+              priority
+            />
           </Link>
           <div className="app-bar-titles">
             <p className="app-bar-eyebrow">Waypoint · session</p>

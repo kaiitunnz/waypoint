@@ -10,8 +10,9 @@ Reads `assets/icons/waypoint-favicon.svg` and writes favicon assets into
 `frontend/public` and `frontend/src/app`, including `favicon.svg`,
 `favicon.ico`, and the PNG favicons under `frontend/public/icons/`.
 
-Also mirrors `assets/icons/waypoint.svg` to `frontend/public/waypoint.svg` so
-the in-app brand mark stays in sync with the canonical artwork.
+Also mirrors `assets/icons/waypoint.svg` and `assets/icons/waypoint-light.svg`
+to `frontend/public/` so the in-app brand mark stays in sync with the canonical
+artwork across themes.
 
 Usage:
     scripts/generate_icons.py
@@ -39,7 +40,9 @@ PUBLIC_ICONS = PUBLIC_DIR / "icons"
 APP_DIR = REPO_ROOT / "frontend" / "src" / "app"
 
 SVG_SOURCE = REPO_ROOT / "assets" / "icons" / "waypoint.svg"
+SVG_LIGHT_SOURCE = REPO_ROOT / "assets" / "icons" / "waypoint-light.svg"
 SVG_TARGET = PUBLIC_DIR / "waypoint.svg"
+SVG_LIGHT_TARGET = PUBLIC_DIR / "waypoint-light.svg"
 FAVICON_SVG_TARGET = PUBLIC_DIR / "favicon.svg"
 FAVICON_ICO_TARGET = PUBLIC_DIR / "favicon.ico"
 APP_FAVICON_ICO_TARGET = APP_DIR / "favicon.ico"
@@ -155,6 +158,12 @@ def main() -> int:
         default=FAVICON_SOURCE,
         help=f"favicon SVG source (default: {FAVICON_SOURCE.relative_to(REPO_ROOT)})",
     )
+    parser.add_argument(
+        "--light-source",
+        type=Path,
+        default=SVG_LIGHT_SOURCE,
+        help=f"light-theme SVG source (default: {SVG_LIGHT_SOURCE.relative_to(REPO_ROOT)})",
+    )
     args = parser.parse_args()
 
     if not args.source.is_file():
@@ -164,6 +173,9 @@ def main() -> int:
         print(
             f"error: favicon source not found: {args.favicon_source}", file=sys.stderr
         )
+        return 2
+    if not args.light_source.is_file():
+        print(f"error: source not found: {args.light_source}", file=sys.stderr)
         return 2
 
     app_source = Image.open(args.source).convert("RGBA")
@@ -217,6 +229,13 @@ def main() -> int:
         check=args.check,
     ):
         drift.append(FAVICON_SVG_TARGET)
+    if sync_bytes(
+        SVG_LIGHT_TARGET,
+        args.light_source.read_bytes(),
+        label="svg",
+        check=args.check,
+    ):
+        drift.append(SVG_LIGHT_TARGET)
 
     if SVG_SOURCE.is_file():
         svg_bytes = SVG_SOURCE.read_bytes()

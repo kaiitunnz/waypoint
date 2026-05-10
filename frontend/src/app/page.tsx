@@ -10,6 +10,7 @@ import { LoginForm } from "@/components/LoginForm";
 import { SchedulePanel } from "@/components/SchedulePanel";
 import { SessionList } from "@/components/SessionList";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { useTheme } from "@/lib/theme";
 import {
   attachTmux,
   cancelSchedule as cancelScheduleRequest,
@@ -101,6 +102,7 @@ const FALLBACK_BACKENDS: Backend[] = ["codex", "claude_code"];
 
 export default function HomePage() {
   const router = useRouter();
+  const { theme } = useTheme();
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
@@ -668,7 +670,13 @@ export default function HomePage() {
       <header className="app-bar">
         <div className="app-bar-brand">
           <div className="app-bar-mark" aria-hidden="true">
-            <Image src="/waypoint.svg" alt="" width={38} height={38} priority />
+            <Image
+              src={theme === "light" ? "/waypoint-light.svg" : "/waypoint.svg"}
+              alt=""
+              width={38}
+              height={38}
+              priority
+            />
           </div>
           <div className="app-bar-titles">
             <p className="app-bar-eyebrow">Waypoint</p>

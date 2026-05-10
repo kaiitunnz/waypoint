@@ -5,9 +5,11 @@ from waypoint.schemas import (
     EventKind,
     EventRecord,
     SessionContextUsage,
+    SessionRateLimitUsage,
     SessionRecord,
     SessionSource,
     SessionStatus,
+    UsageWindow,
 )
 from waypoint.storage import Storage
 
@@ -35,6 +37,21 @@ def test_storage_round_trip(tmp_path) -> None:
             source="codex",
             breakdown={"input_tokens": 1024, "output_tokens": 1024},
         ),
+        rate_limit_usage=SessionRateLimitUsage(
+            source="claude_code",
+            updated_at=now,
+            windows=[
+                UsageWindow(
+                    id="five_hour",
+                    label="5h",
+                    used_percent=42.0,
+                    used_tokens=420,
+                    remaining_tokens=580,
+                    limit_tokens=1000,
+                )
+            ],
+            notes=["CLI creds"],
+        ),
     )
     storage.create_session(session)
     event = EventRecord(
@@ -59,6 +76,11 @@ def test_storage_round_trip(tmp_path) -> None:
         "input_tokens": 1024,
         "output_tokens": 1024,
     }
+    assert loaded.rate_limit_usage is not None
+    assert loaded.rate_limit_usage.source == "claude_code"
+    assert loaded.rate_limit_usage.windows[0].label == "5h"
+    assert loaded.rate_limit_usage.windows[0].used_percent == 42.0
+    assert loaded.rate_limit_usage.windows[0].remaining_tokens == 580
     events = storage.list_events("session-1")
     assert len(events) == 1
 

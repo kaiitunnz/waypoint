@@ -119,7 +119,8 @@ class Storage:
                 effort TEXT,
                 args TEXT NOT NULL DEFAULT '[]',
                 config_overrides TEXT NOT NULL DEFAULT '[]',
-                context_usage TEXT
+                context_usage TEXT,
+                rate_limit_usage TEXT
             );
 
             CREATE TABLE IF NOT EXISTS events (
@@ -164,6 +165,7 @@ class Storage:
             "sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
         )
         self._ensure_column("sessions", "context_usage", "TEXT")
+        self._ensure_column("sessions", "rate_limit_usage", "TEXT")
         self._ensure_column(
             "scheduled_sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
         )
@@ -181,8 +183,9 @@ class Storage:
                 id, backend, source, transport, title, cwd, launch_target_id,
                 repo_name, branch, status, created_at, updated_at, last_event_at,
                 raw_log_path, structured_log_path, transport_state, pinned_at,
-                permission_mode, model, effort, args, config_overrides, context_usage
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                permission_mode, model, effort, args, config_overrides, context_usage,
+                rate_limit_usage
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -210,6 +213,11 @@ class Storage:
                 (
                     json.dumps(session.context_usage.model_dump(mode="json"))
                     if session.context_usage is not None
+                    else None
+                ),
+                (
+                    json.dumps(session.rate_limit_usage.model_dump(mode="json"))
+                    if session.rate_limit_usage is not None
                     else None
                 ),
             ),
@@ -622,6 +630,18 @@ class Storage:
                 payload["context_usage"] = None
         else:
             payload["context_usage"] = None
+        raw_rate_limit_usage = payload.get("rate_limit_usage")
+        if raw_rate_limit_usage:
+            try:
+                parsed_rate_limit_usage = json.loads(raw_rate_limit_usage)
+            except json.JSONDecodeError:
+                parsed_rate_limit_usage = None
+            if isinstance(parsed_rate_limit_usage, dict):
+                payload["rate_limit_usage"] = parsed_rate_limit_usage
+            else:
+                payload["rate_limit_usage"] = None
+        else:
+            payload["rate_limit_usage"] = None
         return SessionRecord.model_validate(payload)
 
     def _schedule_from_row(self, row: sqlite3.Row) -> ScheduledSessionRecord:

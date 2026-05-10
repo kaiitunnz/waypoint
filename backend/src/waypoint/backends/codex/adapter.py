@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shutil
 import threading
@@ -24,7 +25,12 @@ from waypoint.backends.codex.normalize import (
     plan_metadata_for_item,
 )
 from waypoint.backends.diff_preview import DiffPreviewPayload, preview_to_metadata
-from waypoint.schemas import EventKind, SessionContextUsage, SessionStatus
+from waypoint.schemas import (
+    EventKind,
+    SessionContextUsage,
+    SessionRateLimitUsage,
+    SessionStatus,
+)
 
 log = logging.getLogger("waypoint.codex")
 
@@ -163,6 +169,12 @@ class CodexSessionState:
     # the override survives restarts and turn reuse.
     effort: str | None = None
     context_usage_signature: tuple[int, int | None] | None = None
+    rate_limit_usage_snapshot: SessionRateLimitUsage | None = None
+    rate_limit_usage_signature: str | None = None
+    rate_limit_probe: Callable[[], Awaitable[SessionRateLimitUsage | None]] | None = (
+        None
+    )
+    rate_limit_refresh_task: asyncio.Task[None] | None = None
 
 
 class CodexAppServerAdapter:
@@ -275,6 +287,24 @@ class CodexAppServerAdapter:
         state.thread_id = forked.thread.id
         state.model = model or getattr(forked, "model", None)
         return state.thread_id
+
+    async def register_rate_limit_probe(
+        self,
+        session_id: str,
+        probe: Callable[[], Awaitable[SessionRateLimitUsage | None]],
+        *,
+        refresh_interval_seconds: float = 60.0,
+    ) -> None:
+        state = self._require_session(session_id)
+        state.rate_limit_probe = probe
+        if state.rate_limit_refresh_task is not None:
+            state.rate_limit_refresh_task.cancel()
+        state.rate_limit_refresh_task = asyncio.create_task(
+            self._refresh_rate_limit_usage_loop(
+                state, refresh_interval_seconds=refresh_interval_seconds
+            )
+        )
+        await self._refresh_rate_limit_usage(state)
 
     async def _spawn_session(
         self,
@@ -549,6 +579,10 @@ class CodexAppServerAdapter:
         state = self._sessions.pop(session_id, None)
         if state is None:
             return False
+        if state.rate_limit_refresh_task is not None:
+            state.rate_limit_refresh_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await state.rate_limit_refresh_task
         if state.pending_approval is not None:
             state.pending_approval.response = {"decision": "decline"}
             state.pending_approval.event.set()
@@ -721,6 +755,53 @@ class CodexAppServerAdapter:
         await self._on_session_update(
             state.session_id,
             {"context_usage": snapshot.model_dump(mode="json")},
+            True,
+        )
+
+    async def _refresh_rate_limit_usage_loop(
+        self, state: CodexSessionState, *, refresh_interval_seconds: float
+    ) -> None:
+        try:
+            while state.session_id in self._sessions:
+                await self._refresh_rate_limit_usage(state)
+                await asyncio.sleep(refresh_interval_seconds)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            log.exception(
+                "codex rate-limit refresh loop failed",
+                extra={"session_id": state.session_id},
+            )
+
+    async def _refresh_rate_limit_usage(self, state: CodexSessionState) -> None:
+        probe = state.rate_limit_probe
+        if probe is None:
+            return
+        try:
+            snapshot = await probe()
+        except Exception:  # noqa: BLE001
+            log.exception(
+                "codex rate-limit probe failed",
+                extra={"session_id": state.session_id},
+            )
+            return
+        if snapshot is None:
+            return
+        await self._publish_rate_limit_usage(state, snapshot)
+
+    async def _publish_rate_limit_usage(
+        self, state: CodexSessionState, snapshot: SessionRateLimitUsage
+    ) -> None:
+        signature = json.dumps(snapshot.model_dump(mode="json"), sort_keys=True)
+        if state.rate_limit_usage_signature == signature:
+            return
+        state.rate_limit_usage_signature = signature
+        state.rate_limit_usage_snapshot = snapshot
+        if self._on_session_update is None:
+            return
+        await self._on_session_update(
+            state.session_id,
+            {"rate_limit_usage": snapshot.model_dump(mode="json")},
             True,
         )
 

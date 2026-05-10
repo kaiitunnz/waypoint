@@ -37,6 +37,7 @@ from waypoint.backends.codex.permission_modes import (
     CODEX_PLAN_MODE,
     codex_turn_params_for,
 )
+from waypoint.backends.codex.rate_limits import probe_codex_status
 from waypoint.backends.codex.remote import build_remote_codex_client_factory
 from waypoint.backends.codex.schemas import (
     CodexThreadImportRequest,
@@ -52,6 +53,7 @@ from waypoint.schemas import (
     EventRecord,
     SessionCreateRequest,
     SessionInputRequest,
+    SessionRateLimitUsage,
     SessionRecord,
     SessionSource,
     SessionStatus,
@@ -152,6 +154,26 @@ class CodexPlugin:
     def _require_adapter(self) -> CodexAppServerAdapter:
         assert self.adapter is not None, "codex plugin adapter not initialized"
         return self.adapter
+
+    async def _register_local_rate_limit_probe(
+        self,
+        runtime: "SessionRuntime",
+        session_id: str,
+        cwd: str,
+    ) -> None:
+        if self.adapter is None:
+            return
+        binary = (
+            self._config(runtime).local_bin or self.capabilities.cli_binary or "codex"
+        )
+
+        async def _probe() -> SessionRateLimitUsage | None:
+            return await probe_codex_status(cwd=cwd, binary=binary)
+
+        register_probe = getattr(self.adapter, "register_rate_limit_probe", None)
+        if not callable(register_probe):
+            return
+        await register_probe(session_id, _probe)
 
     def register_routes(self, app: Any, context: Any) -> None:
         return None
@@ -591,6 +613,10 @@ class CodexPlugin:
         )
         runtime.storage.create_session(new_session)
         runtime.storage.clone_events(session.id, new_session_id)
+        if session.launch_target_id is None:
+            await self._register_local_rate_limit_probe(
+                runtime, new_session_id, session.cwd
+            )
         await runtime._record_system_event(
             new_session_id,
             self.format_restore_message(runtime, session.cwd, session.launch_target_id)
@@ -661,6 +687,10 @@ class CodexPlugin:
             )
             return
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+        if session.launch_target_id is None:
+            await self._register_local_rate_limit_probe(
+                runtime, session.id, session.cwd
+            )
         await runtime._record_system_event(
             session.id,
             self.format_restore_message(runtime, session.cwd, session.launch_target_id),
@@ -947,6 +977,10 @@ class CodexPlugin:
             transport_state={**session.transport_state, "thread_id": thread_id},
             status=SessionStatus.IDLE,
         )
+        if launch_target is None:
+            await self._register_local_rate_limit_probe(
+                runtime, session.id, session.cwd
+            )
         await runtime._record_system_event(
             session.id,
             self.format_start_message(request.cwd, launch_target),
@@ -1046,6 +1080,8 @@ class CodexPlugin:
                 detail=f"failed to import codex thread: {exc}",
             ) from exc
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+        if launch_target is None:
+            await self._register_local_rate_limit_probe(runtime, session.id, cwd)
         await runtime._record_system_event(
             session.id,
             self.format_import_message(cwd, launch_target),

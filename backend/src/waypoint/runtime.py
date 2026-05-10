@@ -630,6 +630,14 @@ class SessionRuntime:
         session = self.get_session(session_id)
         return await self._reattach_session(session)
 
+    async def refresh_rate_limit_usage(self, session_id: str) -> SessionRecord:
+        session = self.get_session(session_id)
+        plugin = self.registry.plugin_for(session)
+        refresher = getattr(plugin, "refresh_rate_limit_usage", None)
+        if callable(refresher):
+            await refresher(self, session)
+        return self.get_session(session_id)
+
     async def _reattach_session(self, session: SessionRecord) -> SessionRecord:
         # ERROR sessions reach this path while the prior adapter state may
         # still be in `_sessions` — the stream/process watchers emit the

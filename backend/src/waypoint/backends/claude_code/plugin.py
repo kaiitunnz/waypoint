@@ -203,6 +203,13 @@ class ClaudeCodePlugin:
             session_id, _probe, refresh_interval_seconds=300.0
         )
 
+    async def refresh_rate_limit_usage(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        if session.launch_target_id is not None:
+            return
+        await self._register_local_rate_limit_probe(runtime, session.id)
+
     def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
         # The Claude adapter is wired up lazily by setup() — if the
         # PreToolUse hook bundle failed to materialise we leave

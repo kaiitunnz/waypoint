@@ -310,6 +310,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session = await context.runtime.reattach(session_id)
         return {"session": session.model_dump(mode="json")}
 
+    @app.post("/api/sessions/{session_id}/rate-limit-usage/refresh")
+    async def session_refresh_rate_limit_usage(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.refresh_rate_limit_usage(session_id)
+        return {"session": session.model_dump(mode="json")}
+
     @app.post("/api/sessions/{session_id}/terminate")
     async def session_terminate(
         session_id: str,

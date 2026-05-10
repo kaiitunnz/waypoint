@@ -368,6 +368,56 @@ wait_for_exit() {
   ! is_pid_running "${pid}"
 }
 
+# Recursively print descendant PIDs of ${1}, deepest first.
+collect_descendants() {
+  local parent="$1"
+  local children child
+  children=$(pgrep -P "${parent}" 2>/dev/null) || true
+  for child in ${children}; do
+    collect_descendants "${child}"
+    printf '%s\n' "${child}"
+  done
+}
+
+# Stop a process and every descendant. We track only the npm/uv leader
+# in pid files, but `npm run start` forks `sh -c 'next start'` which
+# forks `node next-server`; on Linux the leader's signal forwarder
+# doesn't always propagate before its own death, so the next-server
+# grandchild gets reparented to PID 1 and keeps the port. Walking the
+# tree avoids relying on npm's forwarding behavior.
+kill_process_tree() {
+  local pid="$1"
+  local descendants
+  descendants=$(collect_descendants "${pid}")
+
+  # SIGTERM children first so the leader sees them gone via SIGCHLD
+  # and shuts down cleanly, then signal the leader itself.
+  if [[ -n "${descendants}" ]]; then
+    while IFS= read -r d; do
+      [[ -n "${d}" ]] && kill "${d}" >/dev/null 2>&1 || true
+    done <<<"${descendants}"
+  fi
+  kill "${pid}" >/dev/null 2>&1 || true
+
+  if wait_for_exit "${pid}"; then
+    if [[ -n "${descendants}" ]]; then
+      while IFS= read -r d; do
+        if [[ -n "${d}" ]] && is_pid_running "${d}"; then
+          kill -9 "${d}" >/dev/null 2>&1 || true
+        fi
+      done <<<"${descendants}"
+    fi
+    return 0
+  fi
+
+  if [[ -n "${descendants}" ]]; then
+    while IFS= read -r d; do
+      [[ -n "${d}" ]] && kill -9 "${d}" >/dev/null 2>&1 || true
+    done <<<"${descendants}"
+  fi
+  kill -9 "${pid}" >/dev/null 2>&1 || true
+}
+
 # macOS-only sleep inhibitor. We hold a `caffeinate -i -s` process for
 # the lifetime of the stack so scheduled sessions and phone clients
 # don't lose the host on idle/system sleep. `-d`/`-m` are intentionally
@@ -436,10 +486,7 @@ stop_service() {
   fi
 
   echo "stopping ${service} (pid ${pid})"
-  kill "${pid}" >/dev/null 2>&1 || true
-  if ! wait_for_exit "${pid}"; then
-    kill -9 "${pid}" >/dev/null 2>&1 || true
-  fi
+  kill_process_tree "${pid}"
 
   rm -f "$(pid_file_for "${service}")"
 }
@@ -523,6 +570,7 @@ start_stack() {
   require_command "curl"
   require_command "lsof"
   require_command "npm"
+  require_command "pgrep"
   require_command "uv"
 
   ensure_state_dirs

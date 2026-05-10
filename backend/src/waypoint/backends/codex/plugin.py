@@ -217,6 +217,11 @@ class CodexPlugin:
         await self._register_rate_limit_probe(
             runtime, session.id, session.cwd, launch_target
         )
+        # Run the probe inline so the caller's HTTP response carries the
+        # post-refresh snapshot — otherwise the response races the WS push
+        # from the periodic loop and the UI sees stale data.
+        if self.adapter is not None:
+            await self.adapter.force_refresh_rate_limit_usage(session.id)
 
     def register_routes(self, app: Any, context: Any) -> None:
         return None

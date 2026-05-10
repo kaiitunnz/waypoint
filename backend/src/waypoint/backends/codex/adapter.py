@@ -305,6 +305,14 @@ class CodexAppServerAdapter:
             )
         )
 
+    async def force_refresh_rate_limit_usage(self, session_id: str) -> None:
+        # User-driven path: run the registered probe inline so the caller's
+        # response carries the fresh snapshot instead of racing the WS push.
+        state = self._sessions.get(session_id)
+        if state is None:
+            return
+        await self._refresh_rate_limit_usage(state)
+
     async def _spawn_session(
         self,
         session_id: str,

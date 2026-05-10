@@ -130,9 +130,31 @@ const EFFORT_LABEL: Record<string, string> = {
 };
 
 const TOKEN_FORMATTER = new Intl.NumberFormat("en-US");
+const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat("en", {
+  numeric: "auto",
+});
 
 function formatTokens(value: number): string {
   return TOKEN_FORMATTER.format(value);
+}
+
+function formatRelativeTime(value: string): string {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    return "Unknown";
+  }
+  const diffSeconds = Math.round((timestamp - Date.now()) / 1000);
+  const absSeconds = Math.abs(diffSeconds);
+  if (absSeconds < 60) {
+    return RELATIVE_TIME_FORMATTER.format(diffSeconds, "second");
+  }
+  if (absSeconds < 3600) {
+    return RELATIVE_TIME_FORMATTER.format(Math.round(diffSeconds / 60), "minute");
+  }
+  if (absSeconds < 86400) {
+    return RELATIVE_TIME_FORMATTER.format(Math.round(diffSeconds / 3600), "hour");
+  }
+  return RELATIVE_TIME_FORMATTER.format(Math.round(diffSeconds / 86400), "day");
 }
 
 function contextUsagePercent(usage: SessionContextUsage): number | null {
@@ -154,6 +176,13 @@ function contextUsageTone(percent: number | null): "good" | "warn" | "danger" {
     return "warn";
   }
   return "good";
+}
+
+function clampPercent(percent: number | null): number | null {
+  if (percent === null) {
+    return null;
+  }
+  return Math.min(100, Math.max(0, percent));
 }
 
 function contextUsageLabel(key: string): string {
@@ -1814,6 +1843,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const contextUsagePercentValue = contextUsage
     ? contextUsagePercent(contextUsage)
     : null;
+  const contextUsagePercentDisplay = clampPercent(contextUsagePercentValue);
   const contextUsageToneValue = contextUsage
     ? contextUsageTone(contextUsagePercentValue)
     : "good";
@@ -1827,9 +1857,10 @@ const ReplyComposer = memo(function ReplyComposer({
   const contextUsageWindowTokens = contextUsageHasWindow
     ? contextUsage.context_window_tokens
     : null;
+  const contextUsageWindowDisplay = contextUsageWindowTokens ?? 0;
   const contextUsageSummary = contextUsage
-    ? contextUsageHasWindow && contextUsagePercentValue !== null
-      ? `${formatTokens(contextUsage.used_tokens)} / ${formatTokens(contextUsageWindowTokens ?? 0)} (${Math.max(0, contextUsagePercentValue)}%)`
+    ? contextUsageWindowTokens !== null && contextUsagePercentDisplay !== null
+      ? `${formatTokens(contextUsage.used_tokens)} / ${formatTokens(contextUsageWindowDisplay)} (${contextUsagePercentDisplay}%)`
       : formatTokens(contextUsage.used_tokens)
     : null;
 
@@ -2000,7 +2031,7 @@ const ReplyComposer = memo(function ReplyComposer({
             <div className="composer-context" ref={contextUsageRef}>
               <button
                 type="button"
-                className={`composer-connection composer-context-trigger ${connection} ${contextUsageOpen ? "open" : ""}`}
+                className={`composer-connection composer-context-trigger tone-${contextUsageToneValue} ${connection} ${contextUsageOpen ? "open" : ""}`}
                 title={
                   contextUsageSummary
                     ? `Backend socket ${connection}. Context ${contextUsageSummary}`
@@ -2034,8 +2065,8 @@ const ReplyComposer = memo(function ReplyComposer({
                   <div className="composer-context-meter" aria-hidden="true">
                     <span
                       style={{
-                        width: contextUsageHasWindow && contextUsagePercentValue !== null
-                          ? `${Math.min(100, Math.max(0, contextUsagePercentValue))}%`
+                        width: contextUsageHasWindow && contextUsagePercentDisplay !== null
+                          ? `${contextUsagePercentDisplay}%`
                           : "0%",
                       }}
                     />
@@ -2048,23 +2079,23 @@ const ReplyComposer = memo(function ReplyComposer({
                     <div>
                       <span>Window</span>
                       <strong>
-                        {contextUsageHasWindow
-                          ? `${formatTokens(contextUsage.context_window_tokens ?? 0)} tokens`
+                        {contextUsageWindowTokens !== null
+                          ? `${formatTokens(contextUsageWindowDisplay)} tokens`
                           : "Unavailable"}
                       </strong>
                     </div>
                     <div>
                       <span>Percent</span>
                       <strong>
-                        {contextUsagePercentValue !== null
-                          ? `${Math.max(0, contextUsagePercentValue)}% used`
+                        {contextUsagePercentDisplay !== null
+                          ? `${contextUsagePercentDisplay}% used`
                           : "Unavailable"}
                       </strong>
                     </div>
                     <div>
                       <span>Updated</span>
-                      <strong>
-                        {new Date(contextUsage.updated_at).toLocaleString()}
+                      <strong title={new Date(contextUsage.updated_at).toLocaleString()}>
+                        {formatRelativeTime(contextUsage.updated_at)}
                       </strong>
                     </div>
                   </div>

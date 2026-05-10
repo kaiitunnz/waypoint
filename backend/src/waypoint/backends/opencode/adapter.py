@@ -63,7 +63,7 @@ EmitEvent = Callable[
     Any,
 ]
 SessionUpdateCallback = Callable[
-    [str, dict[str, Any]],
+    [str, dict[str, Any], bool],
     Awaitable[Any],
 ]
 
@@ -91,6 +91,11 @@ class OpenCodeSessionState:
     effort: str | None = None
     pre_plan_mode: str | None = None
     context_window_by_model: dict[tuple[str, str], int] = field(default_factory=dict)
+    context_usage_pending_tokens: dict[tuple[str, str], dict[str, Any]] = field(
+        default_factory=dict
+    )
+    context_window_lookup_pending: set[tuple[str, str]] = field(default_factory=set)
+    context_window_lookup_failed: set[tuple[str, str]] = field(default_factory=set)
     context_usage_signature: tuple[int, int | None] | None = None
     closing: bool = False
 
@@ -667,51 +672,83 @@ class OpenCodeAdapter:
         if not isinstance(model_id, str) or not model_id:
             return
 
-        context_window_tokens = await self._context_window_for_model(
-            state, provider_id, model_id
-        )
-        if context_window_tokens is None:
+        key = (provider_id, model_id)
+        state.context_usage_pending_tokens[key] = tokens
+
+        context_window_tokens = state.context_window_by_model.get(key)
+        if context_window_tokens is not None:
+            await self._publish_context_usage(
+                state,
+                provider_id,
+                model_id,
+                tokens,
+                context_window_tokens,
+                publish=False,
+            )
             return
 
-        snapshot = _context_usage_snapshot_from_message(
-            provider_id,
-            model_id,
-            tokens,
-            context_window_tokens,
-        )
-        if snapshot is None:
+        if (
+            key in state.context_window_lookup_failed
+            or key in state.context_window_lookup_pending
+        ):
             return
 
-        signature = (snapshot.used_tokens, snapshot.context_window_tokens)
-        if state.context_usage_signature == signature:
-            return
-        state.context_usage_signature = signature
-        if self._on_session_update is None:
-            return
-        await self._on_session_update(
-            state.session_id,
-            {"context_usage": snapshot.model_dump(mode="json")},
+        state.context_window_lookup_pending.add(key)
+        asyncio.create_task(
+            self._resolve_context_window_and_publish(
+                state,
+                provider_id,
+                model_id,
+            )
         )
 
-    async def _context_window_for_model(
-        self, state: OpenCodeSessionState, provider_id: str, model_id: str
+    async def _resolve_context_window_and_publish(
+        self,
+        state: OpenCodeSessionState,
+        provider_id: str,
+        model_id: str,
     ) -> int | None:
         key = (provider_id, model_id)
-        cached = state.context_window_by_model.get(key)
-        if cached is not None:
-            return cached
-
-        client = self._require_client()
         try:
-            payload = await client.get(
-                "/config/providers", params={"directory": state.cwd}
+            context_window_tokens = await self._context_window_for_model(
+                state, provider_id, model_id
             )
         except Exception as exc:  # noqa: BLE001
             log.debug(
                 "failed to fetch opencode context window",
                 extra={"session_id": state.session_id, "error": str(exc)},
             )
+            context_window_tokens = None
+        finally:
+            state.context_window_lookup_pending.discard(key)
+
+        if context_window_tokens is None:
+            state.context_window_lookup_failed.add(key)
             return None
+
+        current_state = self._sessions.get(state.session_id)
+        if current_state is not state or state.closing:
+            return None
+
+        state.context_window_by_model[key] = context_window_tokens
+        tokens = state.context_usage_pending_tokens.get(key)
+        if tokens is None:
+            return None
+        await self._publish_context_usage(
+            state,
+            provider_id,
+            model_id,
+            tokens,
+            context_window_tokens,
+            publish=True,
+        )
+        return None
+
+    async def _context_window_for_model(
+        self, state: OpenCodeSessionState, provider_id: str, model_id: str
+    ) -> int | None:
+        client = self._require_client()
+        payload = await client.get("/config/providers", params={"directory": state.cwd})
 
         if not isinstance(payload, dict):
             return None
@@ -735,9 +772,39 @@ class OpenCodeAdapter:
                 continue
             context = _positive_int(limit.get("context"))
             if context is not None:
-                state.context_window_by_model[key] = context
-            return context
+                return context
         return None
+
+    async def _publish_context_usage(
+        self,
+        state: OpenCodeSessionState,
+        provider_id: str,
+        model_id: str,
+        tokens: dict[str, Any],
+        context_window_tokens: int,
+        *,
+        publish: bool,
+    ) -> None:
+        snapshot = _context_usage_snapshot_from_message(
+            provider_id,
+            model_id,
+            tokens,
+            context_window_tokens,
+        )
+        if snapshot is None:
+            return
+
+        signature = (snapshot.used_tokens, snapshot.context_window_tokens)
+        if state.context_usage_signature == signature:
+            return
+        state.context_usage_signature = signature
+        if self._on_session_update is None:
+            return
+        await self._on_session_update(
+            state.session_id,
+            {"context_usage": snapshot.model_dump(mode="json")},
+            publish,
+        )
 
     def _tag_part_type(
         self,
@@ -1179,6 +1246,9 @@ class OpenCodeAdapter:
         self._remote_sessions.pop(state.opencode_session_id, None)
         state.pending_permission_ids.clear()
         state.pending_question_ids.clear()
+        state.context_usage_pending_tokens.clear()
+        state.context_window_lookup_pending.clear()
+        state.context_window_lookup_failed.clear()
         for part_id, owner in list(self._part_sessions.items()):
             if owner == session_id:
                 self._part_sessions.pop(part_id, None)
@@ -1204,6 +1274,10 @@ class OpenCodeAdapter:
             self._terminate_server_process()
             await self._await_server_process_exit()
             self._server_process = None
+        for state in self._sessions.values():
+            state.context_usage_pending_tokens.clear()
+            state.context_window_lookup_pending.clear()
+            state.context_window_lookup_failed.clear()
         self._sessions.clear()
         self._remote_sessions.clear()
         self._part_sessions.clear()
@@ -1252,8 +1326,6 @@ def _context_usage_snapshot_from_message(
         value
         for value in (
             input_tokens,
-            output_tokens,
-            reasoning_tokens,
             cache_read_tokens,
             cache_write_tokens,
         )

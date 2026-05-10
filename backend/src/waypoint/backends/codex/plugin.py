@@ -37,7 +37,10 @@ from waypoint.backends.codex.permission_modes import (
     CODEX_PLAN_MODE,
     codex_turn_params_for,
 )
-from waypoint.backends.codex.rate_limits import probe_codex_status
+from waypoint.backends.codex.rate_limits import (
+    probe_codex_status,
+    probe_codex_usage_remote,
+)
 from waypoint.backends.codex.remote import build_remote_codex_client_factory
 from waypoint.backends.codex.schemas import (
     CodexThreadImportRequest,
@@ -174,12 +177,46 @@ class CodexPlugin:
             session_id, _probe, refresh_interval_seconds=300.0
         )
 
+    async def _register_remote_rate_limit_probe(
+        self,
+        runtime: "SessionRuntime",
+        session_id: str,
+        launch_target: SshLaunchTargetConfig,
+    ) -> None:
+        if self.adapter is None:
+            return
+        binary = self.remote_executable(launch_target) or "codex"
+
+        async def _probe() -> SessionRateLimitUsage | None:
+            return await probe_codex_usage_remote(launch_target, binary=binary)
+
+        await self.adapter.register_rate_limit_probe(
+            session_id, _probe, refresh_interval_seconds=300.0
+        )
+
+    async def _register_rate_limit_probe(
+        self,
+        runtime: "SessionRuntime",
+        session_id: str,
+        cwd: str,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> None:
+        if launch_target is None:
+            await self._register_local_rate_limit_probe(runtime, session_id, cwd)
+            return
+        await self._register_remote_rate_limit_probe(runtime, session_id, launch_target)
+
     async def refresh_rate_limit_usage(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        if session.launch_target_id is not None:
-            return
-        await self._register_local_rate_limit_probe(runtime, session.id, session.cwd)
+        launch_target = (
+            runtime._find_launch_target(session.launch_target_id)
+            if session.launch_target_id
+            else None
+        )
+        await self._register_rate_limit_probe(
+            runtime, session.id, session.cwd, launch_target
+        )
 
     def register_routes(self, app: Any, context: Any) -> None:
         return None
@@ -619,10 +656,12 @@ class CodexPlugin:
         )
         runtime.storage.create_session(new_session)
         runtime.storage.clone_events(session.id, new_session_id)
-        if session.launch_target_id is None:
-            await self._register_local_rate_limit_probe(
-                runtime, new_session_id, session.cwd
-            )
+        await self._register_rate_limit_probe(
+            runtime,
+            new_session_id,
+            session.cwd,
+            runtime._find_launch_target(session.launch_target_id),
+        )
         await runtime._record_system_event(
             new_session_id,
             self.format_restore_message(runtime, session.cwd, session.launch_target_id)
@@ -693,10 +732,12 @@ class CodexPlugin:
             )
             return
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
-        if session.launch_target_id is None:
-            await self._register_local_rate_limit_probe(
-                runtime, session.id, session.cwd
-            )
+        await self._register_rate_limit_probe(
+            runtime,
+            session.id,
+            session.cwd,
+            runtime._find_launch_target(session.launch_target_id),
+        )
         await runtime._record_system_event(
             session.id,
             self.format_restore_message(runtime, session.cwd, session.launch_target_id),
@@ -983,10 +1024,9 @@ class CodexPlugin:
             transport_state={**session.transport_state, "thread_id": thread_id},
             status=SessionStatus.IDLE,
         )
-        if launch_target is None:
-            await self._register_local_rate_limit_probe(
-                runtime, session.id, session.cwd
-            )
+        await self._register_rate_limit_probe(
+            runtime, session.id, session.cwd, launch_target
+        )
         await runtime._record_system_event(
             session.id,
             self.format_start_message(request.cwd, launch_target),
@@ -1086,8 +1126,7 @@ class CodexPlugin:
                 detail=f"failed to import codex thread: {exc}",
             ) from exc
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
-        if launch_target is None:
-            await self._register_local_rate_limit_probe(runtime, session.id, cwd)
+        await self._register_rate_limit_probe(runtime, session.id, cwd, launch_target)
         await runtime._record_system_event(
             session.id,
             self.format_import_message(cwd, launch_target),

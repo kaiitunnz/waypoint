@@ -170,10 +170,9 @@ class CodexPlugin:
         async def _probe() -> SessionRateLimitUsage | None:
             return await probe_codex_status(cwd=cwd, binary=binary)
 
-        register_probe = getattr(self.adapter, "register_rate_limit_probe", None)
-        if not callable(register_probe):
-            return
-        await register_probe(session_id, _probe)
+        await self.adapter.register_rate_limit_probe(
+            session_id, _probe, refresh_interval_seconds=300.0
+        )
 
     def register_routes(self, app: Any, context: Any) -> None:
         return None

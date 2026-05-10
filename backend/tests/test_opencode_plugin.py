@@ -566,6 +566,7 @@ async def test_get_or_create_adapter_keys_by_cwd(
         def __init__(
             self,
             emit_event,
+            on_session_update=None,
             launch_target=None,
             on_agent_changed=None,
             on_server_died=None,
@@ -611,6 +612,7 @@ async def test_get_or_create_adapter_normalizes_equivalent_cwds(
         def __init__(
             self,
             emit_event,
+            on_session_update=None,
             launch_target=None,
             on_agent_changed=None,
             on_server_died=None,

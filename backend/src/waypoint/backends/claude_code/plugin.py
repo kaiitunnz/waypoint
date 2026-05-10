@@ -199,10 +199,9 @@ class ClaudeCodePlugin:
         async def _probe() -> SessionRateLimitUsage | None:
             return await probe_claude_usage()
 
-        register_probe = getattr(self.adapter, "register_rate_limit_probe", None)
-        if not callable(register_probe):
-            return
-        await register_probe(session_id, _probe)
+        await self.adapter.register_rate_limit_probe(
+            session_id, _probe, refresh_interval_seconds=300.0
+        )
 
     def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
         # The Claude adapter is wired up lazily by setup() — if the

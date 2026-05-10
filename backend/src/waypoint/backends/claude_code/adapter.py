@@ -398,7 +398,6 @@ class ClaudeCliAdapter:
                 state, refresh_interval_seconds=refresh_interval_seconds
             )
         )
-        await self._refresh_rate_limit_usage(state)
 
     def session_slash_commands(self, session_id: str) -> tuple[str, ...]:
         state = self._sessions.get(session_id)

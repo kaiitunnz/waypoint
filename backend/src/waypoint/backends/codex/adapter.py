@@ -304,7 +304,6 @@ class CodexAppServerAdapter:
                 state, refresh_interval_seconds=refresh_interval_seconds
             )
         )
-        await self._refresh_rate_limit_usage(state)
 
     async def _spawn_session(
         self,

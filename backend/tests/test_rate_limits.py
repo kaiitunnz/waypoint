@@ -14,12 +14,14 @@ from waypoint.backends.claude_code.rate_limits import (
 )
 from waypoint.backends.codex.rate_limits import (
     _load_oauth_credentials,
+    _oauth_snapshot_is_actionable,
     _resolve_usage_url,
     parse_codex_status,
     parse_codex_usage_payload,
     probe_codex_usage_remote,
 )
 from waypoint.launch_targets import SshLaunchTargetConfig
+from waypoint.schemas import SessionRateLimitUsage, UsageWindow
 
 
 def test_parse_codex_status_extracts_windows_and_credits() -> None:
@@ -600,3 +602,52 @@ def test_probe_codex_usage_remote_returns_none_for_no_data(
     )
     snapshot = asyncio.run(probe_codex_usage_remote(_ssh_target(), binary="codex"))
     assert snapshot is None
+
+
+def test_oauth_snapshot_is_actionable_recognizes_useful_data() -> None:
+    now = datetime(2026, 5, 11, tzinfo=UTC)
+
+    def _snap(**kwargs: object) -> SessionRateLimitUsage:
+        return SessionRateLimitUsage(source="codex", updated_at=now, **kwargs)
+
+    assert _oauth_snapshot_is_actionable(
+        _snap(
+            windows=[UsageWindow(id="five_hour", label="5h", used_percent=10.0)],
+            notes=["CLI OAuth"],
+        )
+    )
+    assert _oauth_snapshot_is_actionable(
+        _snap(credits_remaining=42.5, credits_currency="USD", notes=["CLI OAuth"])
+    )
+    assert _oauth_snapshot_is_actionable(_snap(notes=["CLI OAuth", "plan: education"]))
+    assert _oauth_snapshot_is_actionable(_snap(notes=["CLI OAuth", "user@example.com"]))
+    # Default seed notes only — no real signal that we hit a real account.
+    assert not _oauth_snapshot_is_actionable(_snap(notes=["CLI OAuth"]))
+    assert not _oauth_snapshot_is_actionable(_snap(notes=["remote OAuth"]))
+    assert not _oauth_snapshot_is_actionable(_snap(notes=[]))
+
+
+def test_probe_codex_usage_remote_falls_back_when_oauth_payload_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status_text = "5h limit: 12% used (resets in 1h)\nWeekly limit: 80% left\n"
+
+    async def _fake_runner(launch_target, binary, timeout_seconds):
+        return {
+            "payload": {
+                "rate_limit": None,
+                "additional_rate_limits": None,
+            },
+            "status_text": status_text,
+        }
+
+    monkeypatch.setattr(
+        "waypoint.backends.codex.rate_limits._run_remote_probe_script",
+        _fake_runner,
+    )
+    snapshot = asyncio.run(probe_codex_usage_remote(_ssh_target(), binary="codex"))
+    # OAuth payload had no actionable data, so the runner should have fallen
+    # through to the /status text instead of returning the empty snapshot.
+    assert snapshot is not None
+    assert [w.label for w in snapshot.windows] == ["5h", "Weekly"]
+    assert "remote /status" in snapshot.notes

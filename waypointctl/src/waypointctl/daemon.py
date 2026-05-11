@@ -2,8 +2,11 @@ import argparse
 import json
 import os
 import signal
+import socket as socket_mod
 import socketserver
+import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -19,6 +22,9 @@ from waypointctl.process import write_pid_file
 from waypointctl.protocol import DaemonLog, DaemonRequest, DaemonResult
 from waypointctl.stack import WaypointStack
 
+DEFERRED_COMMANDS: frozenset[str] = frozenset({"stop", "restart"})
+WORKER_SHUTDOWN_GRACE_SECONDS = 30.0
+
 
 class WaypointDaemonServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     allow_reuse_address = True
@@ -27,9 +33,29 @@ class WaypointDaemonServer(socketserver.ThreadingMixIn, socketserver.UnixStreamS
     def __init__(self, socket_path: Path, home: Path) -> None:
         self.home = home
         self.stack = WaypointStack(load_stack_config(home))
+        self._workers: list[threading.Thread] = []
+        self._workers_lock = threading.Lock()
         socket_path.parent.mkdir(parents=True, exist_ok=True)
         socket_path.unlink(missing_ok=True)
         super().__init__(str(socket_path), WaypointDaemonHandler)
+
+    def schedule_worker(self, target: Callable[[], None], name: str) -> None:
+        thread = threading.Thread(target=self._run_worker, args=(target,), name=name)
+        thread.start()
+        with self._workers_lock:
+            self._workers.append(thread)
+
+    def _run_worker(self, target: Callable[[], None]) -> None:
+        try:
+            target()
+        except Exception as exc:  # noqa: BLE001
+            print(f"worker error: {exc}", file=sys.stderr, flush=True)
+
+    def join_workers(self, timeout: float) -> None:
+        with self._workers_lock:
+            threads = list(self._workers)
+        for thread in threads:
+            thread.join(timeout=timeout)
 
 
 class WaypointDaemonHandler(socketserver.StreamRequestHandler):
@@ -57,7 +83,13 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
             self._send_result(DaemonResult(ok=True))
             return
 
-        stack = cast(WaypointDaemonServer, self.server).stack
+        server = cast(WaypointDaemonServer, self.server)
+        stack = server.stack
+
+        if request.command in DEFERRED_COMMANDS:
+            self._dispatch_deferred(server, stack, request)
+            return
+
         write_lock = threading.Lock()
 
         def log(stream: str, line: str) -> None:
@@ -66,11 +98,6 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
 
         if request.command == "start":
             result = stack.start(log)
-        elif request.command == "stop":
-            result = stack.stop(log)
-        elif request.command == "restart":
-            target = request.args[0] if request.args else "all"
-            result = stack.restart(target, log)
         elif request.command == "status":
             result = stack.status(log)
         else:
@@ -90,6 +117,50 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
                 error=result.message or None,
             )
         )
+
+    def _dispatch_deferred(
+        self,
+        server: "WaypointDaemonServer",
+        stack: WaypointStack,
+        request: DaemonRequest,
+    ) -> None:
+        command = request.command
+
+        def file_log(stream: str, line: str) -> None:
+            tag = "stderr" if stream == "stderr" else "stdout"
+            print(f"[{command}] {tag}: {line}", flush=True)
+
+        if command == "restart":
+            target = request.args[0] if request.args else "all"
+
+            def worker() -> None:
+                stack.restart(target, file_log)
+
+        elif command == "stop":
+
+            def worker() -> None:
+                stack.stop(file_log)
+
+        else:
+            self._send_result(
+                DaemonResult(
+                    ok=False, returncode=2, error=f"unknown command: {command}"
+                )
+            )
+            return
+
+        self._send_result(DaemonResult(ok=True, returncode=0))
+        # Flush + close the response side so the caller's connection is fully
+        # released before we touch the stack. This is what lets a CLI invocation
+        # inside the target's own process tree return to its caller before the
+        # group is signalled.
+        try:
+            self.wfile.flush()
+            self.connection.shutdown(socket_mod.SHUT_WR)
+        except OSError:
+            pass
+
+        server.schedule_worker(worker, name=f"waypointd-{command}")
 
     def _send_log(self, frame: DaemonLog) -> None:
         self._write_frame(frame.to_payload())
@@ -131,6 +202,7 @@ def serve(home: Path) -> None:
     finally:
         server.shutdown()
         server_thread.join(timeout=2.0)
+        server.join_workers(timeout=WORKER_SHUTDOWN_GRACE_SECONDS)
         server.server_close()
         socket_path.unlink(missing_ok=True)
         pid_path.unlink(missing_ok=True)

@@ -94,9 +94,25 @@ command go through the daemon and auto-start it on first invocation.
 process tree (e.g., an agent session that Waypoint itself is hosting)
 would kill the caller mid-restart in in-process mode. The CLI detects
 this case and refuses with a pointer to `waypointctl daemon start`.
-Running with the daemon avoids the problem entirely: the daemon owns
-the backend's process group, so the agent's CLI invocation is in a
-separate tree.
+
+When `waypointd` is running, `restart` and `stop` are **deferred**:
+the daemon acknowledges the request, closes its end of the socket,
+and only then does the kill+start on a worker thread. The caller gets
+its exit code before the backend (and any process descended from it)
+is signalled, so a Waypoint-hosted agent can issue a restart and have
+its `subprocess.run` return cleanly before its own process tree is
+torn down.
+
+Side effect of deferral: deferred commands don't stream progress logs
+to the client. `restart`/`stop` reply `ok` immediately; the actual work
+is visible in the daemon's own log (`<state-dir>/logs/waypointd.log`).
+Use `waypointctl status` to inspect afterward. `start` and `status` stay
+synchronous and stream output as before.
+
+`waypointctl daemon stop` only stops the daemon. Backend/frontend
+processes survive it intentionally (they were spawned in their own
+sessions), so a daemon restart doesn't bounce running services. If
+any are still up the CLI prints a hint pointing at `waypointctl stop`.
 
 ## Logs
 

@@ -14,6 +14,7 @@ from waypointctl.client import (
 )
 from waypointctl.config import load_stack_config
 from waypointctl.paths import (
+    pid_file_for,
     resolve_state_dir,
     resolve_waypoint_home,
     waypoint_pid_path,
@@ -119,9 +120,24 @@ def daemon_stop(ctx: typer.Context) -> None:
         typer.echo("waypointd not running")
         pid_path.unlink(missing_ok=True)
         waypoint_socket_path().unlink(missing_ok=True)
+        _warn_if_services_running()
         return
     os.kill(pid, signal.SIGTERM)
     typer.echo(f"waypointd stopped (pid {pid})")
+    _warn_if_services_running()
+
+
+def _warn_if_services_running() -> None:
+    survivors = [
+        name for name in ("backend", "frontend") if running_pid(pid_file_for(name))
+    ]
+    if not survivors:
+        return
+    typer.echo(
+        f"note: {', '.join(survivors)} still running; "
+        "use `waypointctl stop` to shut them down.",
+        err=True,
+    )
 
 
 @daemon_app.command("status")

@@ -44,6 +44,35 @@ def _wait_until(predicate, timeout: float = 5.0) -> bool:
     return predicate()
 
 
+def test_daemon_restart_returns_result_before_doing_work(state_dir: Path) -> None:
+    home = _make_home(state_dir)
+    env = {**os.environ, "WAYPOINTCTL_STATE_DIR": str(state_dir)}
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "waypointctl.daemon", "--home", str(home)],
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        assert _wait_until(daemon_available, timeout=5.0)
+        client = DaemonClient(home)
+        # restart is deferred: the daemon should answer immediately with ok=true
+        # even though there's no managed backend/frontend to actually restart.
+        start = time.monotonic()
+        result = client.request("restart", ["backend"], log=lambda *_: None)
+        elapsed = time.monotonic() - start
+        assert result.ok is True
+        # If the daemon were doing the work synchronously it would also try to
+        # spawn `uv run waypoint serve` and wait for health — far slower than
+        # this. A loose bound is enough to catch a regression.
+        assert elapsed < 2.0
+    finally:
+        try:
+            os.kill(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        proc.wait(timeout=5)
+
+
 def test_daemon_status_e2e(state_dir: Path) -> None:
     home = _make_home(state_dir)
     env = {**os.environ, "WAYPOINTCTL_STATE_DIR": str(state_dir)}

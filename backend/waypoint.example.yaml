@@ -3,7 +3,7 @@ port: 8787
 password: change-me
 default_backend: codex
 default_cwd: ~/
-data_dir: ~/.waypoint/data
+data_dir: ~/.waypoint/backend-data
 cors_origins: []
 # cors_allow_origin_regex: defaults to localhost, Tailscale IPs, and MagicDNS names.
 # chat_page_messages: 20  # latest N *logical* chat messages per page.

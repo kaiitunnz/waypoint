@@ -27,7 +27,7 @@ DEFAULT_CORS_ORIGIN_REGEX = (
 
 
 def default_data_dir() -> Path:
-    return Path.home() / "Library" / "Application Support" / "Waypoint"
+    return Path.home() / ".waypoint" / "backend-data"
 
 
 def parse_cors_origins(raw: str | None) -> list[str]:

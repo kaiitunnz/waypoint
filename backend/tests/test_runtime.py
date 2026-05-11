@@ -749,6 +749,50 @@ async def test_get_command_completions_omits_builtins_for_non_slash_trigger(
     assert all(item.source != "waypoint" for item in completions)
 
 
+def test_warm_command_completions_runs_for_ssh_sessions(monkeypatch, tmp_path) -> None:
+    runtime, _storage, settings = make_runtime(tmp_path)
+    session = make_session(
+        settings,
+        id="remote-sess",
+        backend="codex",
+        transport="codex_app_server",
+        launch_target_id="remote-host",
+    )
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        runtime,
+        "_ensure_command_completion_refresh",
+        lambda sess, *, trigger: calls.append((sess.id, trigger)),
+    )
+    runtime._warm_command_completions(session)
+
+    assert calls == [("remote-sess", "/"), ("remote-sess", "$")]
+
+
+def test_warm_command_completions_skips_unstructured_transports(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, _storage, settings = make_runtime(tmp_path)
+    session = make_session(
+        settings,
+        id="tmux-sess",
+        backend="tmux",
+        transport="tmux",
+        thread_id=None,
+    )
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        runtime,
+        "_ensure_command_completion_refresh",
+        lambda sess, *, trigger: calls.append((sess.id, trigger)),
+    )
+    runtime._warm_command_completions(session)
+
+    assert calls == []
+
+
 @pytest.mark.asyncio
 async def test_get_command_completions_returns_cache_while_refreshing(
     tmp_path,
@@ -1347,6 +1391,14 @@ async def test_create_session_uses_structured_claude_for_ssh_target(
     monkeypatch.setattr(
         "waypoint.backends.claude_code.plugin.build_remote_claude_launch_factory",
         lambda *args, **kwargs: "remote-launch-factory",
+    )
+
+    async def fake_dynamic_completions(**_kwargs: Any) -> list[Any]:
+        return []
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.list_claude_command_completions",
+        fake_dynamic_completions,
     )
 
     session = await runtime.create_session(

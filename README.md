@@ -156,14 +156,22 @@ This is intended for local development. If you want a machine-managed background
 
 ## `waypointctl`
 
-The repo root now contains an installable `waypointctl` package for the control plane. It is intended for release-mode installs such as `uv tool install .` or `pipx install .`.
+The repo root contains an installable `waypointctl` package: a native Python
+control plane that supervises the backend and frontend without going through
+`scripts/waypoint.sh`. Install it with `uv tool install ./waypointctl` or
+`pipx install ./waypointctl`.
 
-`waypointctl` resolves the Waypoint checkout from `WAYPOINT_HOME` and uses that anchor to find `backend/`, `frontend/`, and `scripts/`.
+```bash
+waypointctl --home . start          # in-process start, exits when up
+waypointctl --home . status         # query running state
+waypointctl --home . logs           # tail backend + frontend logs
+waypointctl daemon start            # opt in to the long-lived waypointd supervisor
+```
 
-The initial implementation adds:
+State (PIDs, logs, default data dirs) lives under `WAYPOINTCTL_STATE_DIR`,
+defaulting to `~/.waypoint/`. All `WAYPOINT_STACK_*` env vars honored by
+`scripts/waypoint.sh` are honored by `waypointctl` too. See
+[`waypointctl/README.md`](waypointctl/README.md) for the full reference,
+including daemon mode and the agent-restart safety check.
 
-- a Typer-based CLI
-- a small local daemon entrypoint (`waypointd`)
-- daemon bootstrap and command forwarding
-
-`scripts/waypoint.sh` is unchanged for now and continues to work as the legacy workflow.
+`scripts/waypoint.sh` is preserved for users on the existing workflow.

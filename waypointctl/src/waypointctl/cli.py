@@ -35,7 +35,9 @@ app.add_typer(daemon_app, name="daemon")
 
 def _ctx_home(ctx: typer.Context) -> Path:
     obj = ctx.obj or {}
-    return obj["home"]
+    home = obj["home"]
+    assert isinstance(home, Path)
+    return home
 
 
 @app.callback()

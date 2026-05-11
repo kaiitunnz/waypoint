@@ -133,6 +133,18 @@ class SessionRateLimitUsage(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class UsageDashboardBucket(BaseModel):
+    backend: BackendId
+    account_key: str
+    account_label: str
+    snapshot: SessionRateLimitUsage
+    session_ids: list[str] = Field(default_factory=list)
+
+
+class UsageDashboardResponse(BaseModel):
+    buckets: list[UsageDashboardBucket] = Field(default_factory=list)
+
+
 class SessionRecord(BaseModel):
     id: str
     backend: BackendId

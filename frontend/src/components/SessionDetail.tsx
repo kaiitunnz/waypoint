@@ -82,49 +82,11 @@ import {
   rateLimitUsageTone,
 } from "@/lib/usage";
 
-const LOCAL_SLASH_COMPLETIONS: ReadonlyArray<CommandCompletion> = [
-  {
-    id: "waypoint:new",
-    trigger: "/",
-    replacement: "/new ",
-    name: "new",
-    description: "Start a new session with the same settings",
-    kind: "session_control",
-    source: "waypoint",
-    dispatch: "frontend_control",
-    metadata: {},
-  },
-  {
-    id: "waypoint:fork",
-    trigger: "/",
-    replacement: "/fork ",
-    name: "fork",
-    description: "Fork this session into a new branch",
-    kind: "session_control",
-    source: "waypoint",
-    dispatch: "frontend_control",
-    metadata: {},
-  },
-];
 const COMPLETION_REFRESH_POLL_MS = 750;
 const COMPLETION_FETCH_DEBOUNCE_MS = 180;
 
 function completionCommand(entry: CommandCompletion): string {
   return `${entry.trigger}${entry.name}`;
-}
-
-function mergeCompletions(
-  primary: ReadonlyArray<CommandCompletion>,
-  secondary: ReadonlyArray<CommandCompletion>,
-): CommandCompletion[] {
-  const merged = new Map<string, CommandCompletion>();
-  for (const entry of [...primary, ...secondary]) {
-    const key = `${entry.trigger}${entry.name}`;
-    if (!merged.has(key)) {
-      merged.set(key, entry);
-    }
-  }
-  return [...merged.values()];
 }
 
 const EFFORT_LABEL: Record<string, string> = {
@@ -1466,10 +1428,7 @@ const ReplyComposer = memo(function ReplyComposer({
       ? "$"
       : null;
   const suggestions = supportsSlash && !suggestionsDismissed
-    ? mergeCompletions(
-        completionTrigger === "/" ? LOCAL_SLASH_COMPLETIONS : [],
-        backendCompletions,
-      ).filter(
+    ? backendCompletions.filter(
         (entry) =>
           completionTrigger !== null &&
           completionCommand(entry).startsWith(completionHead),

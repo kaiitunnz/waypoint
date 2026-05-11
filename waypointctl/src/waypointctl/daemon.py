@@ -74,6 +74,7 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
                 command=str(payload["command"]),
                 args=[str(item) for item in payload.get("args", [])],
                 home=str(home_value) if home_value is not None else None,
+                wait=bool(payload.get("wait", False)),
             )
         except Exception as exc:  # noqa: BLE001
             self._send_result(DaemonResult(ok=False, returncode=1, error=str(exc)))
@@ -105,7 +106,7 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
 
         stack = server.stack
 
-        if request.command in DEFERRED_COMMANDS:
+        if request.command in DEFERRED_COMMANDS and not request.wait:
             self._dispatch_deferred(server, stack, request)
             return
 
@@ -119,6 +120,11 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
             result = stack.start(log)
         elif request.command == "status":
             result = stack.status(log)
+        elif request.command == "stop":
+            result = stack.stop(log)
+        elif request.command == "restart":
+            target = request.args[0] if request.args else "all"
+            result = stack.restart(target, log)
         else:
             self._send_result(
                 DaemonResult(

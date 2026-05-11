@@ -37,10 +37,13 @@ class DaemonClient:
         command: str,
         args: list[str],
         log: LogFn | None = None,
+        wait: bool = False,
     ) -> DaemonResult:
         on_log = log or (lambda _stream, _line: None)
         payload = json.dumps(
-            DaemonRequest(command=command, args=args, home=str(self.home)).to_payload()
+            DaemonRequest(
+                command=command, args=args, home=str(self.home), wait=wait
+            ).to_payload()
         )
 
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:

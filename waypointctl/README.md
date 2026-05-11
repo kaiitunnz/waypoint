@@ -110,6 +110,12 @@ is visible in the daemon's own log (`<state-dir>/logs/waypointd.log`).
 Use `waypointctl status` to inspect afterward. `start` and `status` stay
 synchronous and stream output as before.
 
+Pass `-w` / `--wait` to `stop` or `restart` to force the daemon to run
+the command synchronously and stream its progress, the same way `start`
+behaves. When `--wait` is set, the agent-restart safety check applies
+even in daemon mode — the CLI can't be inside the target's process tree
+because it stays on the wire across the kill.
+
 `waypointctl daemon stop` only stops the daemon. Backend/frontend
 processes survive it intentionally (they were spawned in their own
 sessions), so a daemon restart doesn't bounce running services. If

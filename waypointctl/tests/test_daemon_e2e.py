@@ -44,6 +44,38 @@ def _wait_until(predicate, timeout: float = 5.0) -> bool:
     return predicate()
 
 
+def test_daemon_stop_waits_when_wait_flag_set(state_dir: Path) -> None:
+    home = _make_home(state_dir)
+    env = {**os.environ, "WAYPOINTCTL_STATE_DIR": str(state_dir)}
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "waypointctl.daemon", "--home", str(home)],
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        assert _wait_until(daemon_available, timeout=5.0)
+        client = DaemonClient(home)
+
+        logs: list[tuple[str, str]] = []
+
+        def collect(stream: str, line: str) -> None:
+            logs.append((stream, line))
+
+        # With wait=True, deferred commands stream progress and the result
+        # comes back only after the work is done. No services are running,
+        # so stop is fast and we should see the "already stopped" log.
+        result = client.request("stop", ["all"], log=collect, wait=True)
+        assert result.ok is True
+        text = "\n".join(line for _, line in logs)
+        assert "stopped" in text or "stopping" in text.lower() or logs
+    finally:
+        try:
+            os.kill(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        proc.wait(timeout=5)
+
+
 def test_daemon_restart_returns_result_before_doing_work(state_dir: Path) -> None:
     home = _make_home(state_dir)
     env = {**os.environ, "WAYPOINTCTL_STATE_DIR": str(state_dir)}

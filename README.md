@@ -22,6 +22,7 @@ Use GitHub Issues directly for active bugs and feature requests.
 
 - `backend/` — FastAPI daemon, tmux/session runtime, auth, persistence
 - `backend/src/waypoint/backends/` — one package per coding agent (`claude_code/`, `codex/`, `opencode/`, `tmux/`); see [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the plugin contract and extension recipe
+- `waypointctl/` — standalone control-plane package and daemon (`uv tool install ./waypointctl`, `pipx install ./waypointctl`)
 - `frontend/` — Next.js PWA client
 - `3rdparty/codex/` — pinned Codex submodule used for the local app-server SDK
 
@@ -152,3 +153,17 @@ WAYPOINT_STACK_BACKEND_DATA_DIR=/tmp/waypoint-data ./scripts/waypoint.sh start
 ```
 
 This is intended for local development. If you want a machine-managed background service on macOS, keep using `backend/scripts/install_launchd.sh` for the backend and treat the frontend separately.
+
+## `waypointctl`
+
+The repo root now contains an installable `waypointctl` package for the control plane. It is intended for release-mode installs such as `uv tool install .` or `pipx install .`.
+
+`waypointctl` resolves the Waypoint checkout from `WAYPOINT_HOME` and uses that anchor to find `backend/`, `frontend/`, and `scripts/`.
+
+The initial implementation adds:
+
+- a Typer-based CLI
+- a small local daemon entrypoint (`waypointd`)
+- daemon bootstrap and command forwarding
+
+`scripts/waypoint.sh` is unchanged for now and continues to work as the legacy workflow.

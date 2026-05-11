@@ -39,6 +39,7 @@ from waypoint.schemas import (
 from waypoint.settings import Settings, load_settings
 from waypoint.storage import Storage
 from waypoint.tailnet import fetch_snapshot
+from waypoint.usage_dashboard import build_dashboard
 
 
 def _backend_descriptors(registry: BackendRegistry) -> list[dict[str, Any]]:
@@ -317,6 +318,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         session = await context.runtime.refresh_rate_limit_usage(session_id)
         return {"session": session.model_dump(mode="json")}
+
+    @app.get("/api/usage")
+    async def get_usage_dashboard(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        dashboard = build_dashboard(context.runtime.list_sessions())
+        return dashboard.model_dump(mode="json")
+
+    @app.post("/api/usage/refresh")
+    async def refresh_usage_dashboard(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        # Refresh one representative session per bucket — every session in
+        # a bucket shares the same account-level rate limit, so probing
+        # one is enough to update the bucket's snapshot.
+        dashboard = build_dashboard(context.runtime.list_sessions())
+        targets = [
+            bucket.session_ids[0] for bucket in dashboard.buckets if bucket.session_ids
+        ]
+        if targets:
+            await asyncio.gather(
+                *(context.runtime.refresh_rate_limit_usage(sid) for sid in targets),
+                return_exceptions=True,
+            )
+        refreshed = build_dashboard(context.runtime.list_sessions())
+        return refreshed.model_dump(mode="json")
 
     @app.post("/api/sessions/{session_id}/terminate")
     async def session_terminate(

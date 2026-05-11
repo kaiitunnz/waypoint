@@ -62,9 +62,5 @@ def started_marker_for(service: str) -> Path:
     return state_run_dir() / f"{service}.started-this-run"
 
 
-def waypoint_script_path(home: Path) -> Path:
-    return home / "scripts" / "waypoint.sh"
-
-
 def _looks_like_waypoint_repo(path: Path) -> bool:
     return all((path / name).exists() for name in ("backend", "frontend", "scripts"))

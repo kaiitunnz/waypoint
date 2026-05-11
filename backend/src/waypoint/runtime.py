@@ -18,6 +18,7 @@ from waypoint.backends import BackendRegistry, get_registry
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
 from waypoint.backends.tmux.normalize import TerminalNormalizer
+from waypoint.builtin_completions import waypoint_builtin_completions
 from waypoint.git_meta import resolve_git_meta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.scheduler import Scheduler
@@ -408,6 +409,7 @@ class SessionRuntime:
         session = self.get_session(session_id)
         plugin = self.registry.plugin_for(session)
         key = (session.id, trigger)
+        builtins = waypoint_builtin_completions(plugin.capabilities, trigger=trigger)
         if force_refresh:
             completions = await self._refresh_command_completion_cache(
                 session,
@@ -416,7 +418,7 @@ class SessionRuntime:
             )
             return (
                 self._filter_command_completions(
-                    completions,
+                    self._merge_builtins(builtins, completions),
                     trigger=trigger,
                     prefix=prefix,
                 ),
@@ -437,12 +439,41 @@ class SessionRuntime:
                 trigger=trigger,
                 prefix=prefix,
             )
-            return cached, key in self._completion_refresh_tasks
+            return (
+                self._filter_command_completions(
+                    self._merge_builtins(builtins, cached),
+                    trigger=trigger,
+                    prefix=prefix,
+                ),
+                key in self._completion_refresh_tasks,
+            )
 
         return (
-            self._filter_command_completions(cached, trigger=trigger, prefix=prefix),
+            self._filter_command_completions(
+                self._merge_builtins(builtins, cached),
+                trigger=trigger,
+                prefix=prefix,
+            ),
             key in self._completion_refresh_tasks,
         )
+
+    @staticmethod
+    def _merge_builtins(
+        builtins: list[CommandCompletion],
+        plugin_completions: list[CommandCompletion],
+    ) -> list[CommandCompletion]:
+        if not builtins:
+            return list(plugin_completions)
+        # Waypoint built-ins win on name collision — the user-facing
+        # `/new` should always open the Waypoint new-session UI, even
+        # for backends (e.g. opencode) that also expose their own
+        # backend-scoped `/new`.
+        seen = {f"{item.trigger}{item.name}" for item in builtins}
+        return [*builtins] + [
+            item
+            for item in plugin_completions
+            if f"{item.trigger}{item.name}" not in seen
+        ]
 
     async def _restore_session_and_warm_completions(
         self, plugin: Any, session: SessionRecord

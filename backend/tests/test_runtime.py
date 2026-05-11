@@ -667,6 +667,89 @@ async def test_handle_input_drops_unknown_completion_invocation(tmp_path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_get_command_completions_injects_waypoint_builtins(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+
+    async def fake_dynamic_completions(**_kwargs: Any) -> list[Any]:
+        return []
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.list_claude_command_completions",
+        fake_dynamic_completions,
+    )
+    fake = FakeClaudeAdapter()
+    fake.slash_commands["claude-sess"] = ()
+    _claude_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend="claude_code",
+        transport="claude_cli",
+        thread_id="claude-thread",
+    )
+    storage.create_session(session)
+
+    completions = await runtime.list_command_completions(
+        session.id, trigger="/", prefix="", force_refresh=True
+    )
+
+    names = [item.name for item in completions]
+    assert "new" in names
+    assert "fork" in names
+    new_entry = next(item for item in completions if item.name == "new")
+    fork_entry = next(item for item in completions if item.name == "fork")
+    assert new_entry.dispatch == CompletionDispatch.FRONTEND_CONTROL
+    assert new_entry.source == "waypoint"
+    assert fork_entry.dispatch == CompletionDispatch.FRONTEND_CONTROL
+
+
+@pytest.mark.asyncio
+async def test_get_command_completions_skips_fork_for_tmux(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    session = make_session(
+        settings,
+        id="tmux-sess",
+        backend="tmux",
+        transport="tmux",
+        thread_id=None,
+    )
+    storage.create_session(session)
+
+    completions = await runtime.list_command_completions(
+        session.id, trigger="/", prefix="", force_refresh=True
+    )
+
+    names = [item.name for item in completions]
+    assert "new" in names
+    assert "fork" not in names
+
+
+@pytest.mark.asyncio
+async def test_get_command_completions_omits_builtins_for_non_slash_trigger(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+
+    class FakeAdapter:
+        async def list_skills(
+            self, session_id: str, *, force_reload: bool = False
+        ) -> list[dict[str, Any]]:
+            return []
+
+    _codex_plugin(runtime).adapter = cast(Any, FakeAdapter())
+    session = make_session(settings)
+    storage.create_session(session)
+
+    completions = await runtime.list_command_completions(
+        session.id, trigger="$", prefix="", force_refresh=True
+    )
+
+    assert all(item.source != "waypoint" for item in completions)
+
+
+@pytest.mark.asyncio
 async def test_get_command_completions_returns_cache_while_refreshing(
     tmp_path,
 ) -> None:

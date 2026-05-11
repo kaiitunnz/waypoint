@@ -770,6 +770,46 @@ def test_warm_command_completions_runs_for_ssh_sessions(monkeypatch, tmp_path) -
     assert calls == [("remote-sess", "/"), ("remote-sess", "$")]
 
 
+def test_warm_command_completions_skips_remote_on_boot_restore(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, _storage, settings = make_runtime(tmp_path)
+    session = make_session(
+        settings,
+        id="remote-sess",
+        backend="codex",
+        transport="codex_app_server",
+        launch_target_id="remote-host",
+    )
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        runtime,
+        "_ensure_command_completion_refresh",
+        lambda sess, *, trigger: calls.append((sess.id, trigger)),
+    )
+    runtime._warm_command_completions(session, include_remote=False)
+
+    assert calls == []
+
+
+def test_warm_command_completions_runs_for_local_on_boot_restore(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, _storage, settings = make_runtime(tmp_path)
+    session = make_session(settings, id="local-sess")
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        runtime,
+        "_ensure_command_completion_refresh",
+        lambda sess, *, trigger: calls.append((sess.id, trigger)),
+    )
+    runtime._warm_command_completions(session, include_remote=False)
+
+    assert calls == [("local-sess", "/"), ("local-sess", "$")]
+
+
 def test_warm_command_completions_skips_unstructured_transports(
     monkeypatch, tmp_path
 ) -> None:

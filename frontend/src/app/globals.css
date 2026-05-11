@@ -3704,72 +3704,370 @@ html[data-theme="light"] .usage-meta-bullet {
   color: rgba(184, 130, 14, 0.5);
 }
 
-/* ─── Usage dashboard (home-page section) ─── */
-.usage-dashboard {
+/* ─── Telemetry deck (home-page usage dashboard) ─── */
+/*  The dashboard is styled as a brass-edged instrument console:
+    a hinged toggle revealing a status strip, then an asymmetric grid
+    of instrument panels. The aesthetic borrows the same vocabulary
+    as the composer popover (serif numerals, brass rail, segmented
+    bars) and extends it with SVG dial gauges and stamped plaques. */
+
+.usage-deck {
+  --deck-tone: var(--accent);
+  --deck-paper: linear-gradient(
+      180deg,
+      rgba(18, 23, 32, 0.92),
+      rgba(10, 13, 19, 0.94)
+    ),
+    radial-gradient(
+      120% 80% at 0% 0%,
+      rgba(200, 169, 106, 0.05),
+      transparent 60%
+    );
+  --deck-paper-light: linear-gradient(
+      180deg,
+      rgba(255, 252, 244, 0.96),
+      rgba(247, 241, 228, 0.96)
+    ),
+    radial-gradient(
+      120% 80% at 0% 0%,
+      rgba(184, 130, 14, 0.06),
+      transparent 60%
+    );
+  --deck-grid: linear-gradient(
+      to right,
+      rgba(200, 169, 106, 0.045) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      rgba(200, 169, 106, 0.045) 1px,
+      transparent 1px
+    );
+  position: relative;
   padding: 0;
   overflow: hidden;
+  isolation: isolate;
+  background: var(--deck-paper);
+  border: 1px solid var(--line-strong);
+  box-shadow:
+    0 30px 60px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 1px rgba(200, 169, 106, 0.05);
 }
 
-.usage-dashboard-toggle {
+html[data-theme="light"] .usage-deck {
+  background: var(--deck-paper-light);
+  box-shadow:
+    0 20px 38px rgba(80, 60, 25, 0.16),
+    inset 0 0 0 1px rgba(184, 130, 14, 0.06);
+}
+
+.usage-deck.tone-warn {
+  --deck-tone: var(--warn);
+}
+
+.usage-deck.tone-danger {
+  --deck-tone: var(--danger);
+}
+
+/*  Top rail: thin brass strip with a subtle gradient across the deck. */
+.usage-deck::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(200, 169, 106, 0.6) 14%,
+    rgba(200, 169, 106, 0.6) 86%,
+    transparent
+  );
+  z-index: 1;
+}
+
+html[data-theme="light"] .usage-deck::before {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(184, 130, 14, 0.5) 14%,
+    rgba(184, 130, 14, 0.5) 86%,
+    transparent
+  );
+}
+
+/*  Faint engineer's-graph paper texture; very low contrast on purpose. */
+.usage-deck::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: var(--deck-grid);
+  background-size: 48px 48px;
+  background-position: top left;
+  pointer-events: none;
+  opacity: 0.55;
+  mix-blend-mode: overlay;
+  z-index: 0;
+}
+
+html[data-theme="light"] .usage-deck::after {
+  opacity: 0.35;
+  mix-blend-mode: multiply;
+}
+
+.usage-deck > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* ── Toggle bar ── */
+.usage-deck-toggle {
   width: 100%;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, auto) minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 14px;
-  padding: 14px 18px;
+  padding: 14px 20px;
   background: transparent;
   border: none;
-  color: var(--muted-soft);
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  border-bottom: 1px solid transparent;
   cursor: pointer;
   text-align: left;
-  transition: color 140ms ease, background-color 140ms ease;
+  transition:
+    color 200ms ease,
+    border-color 200ms ease,
+    background-color 200ms ease;
   -webkit-tap-highlight-color: transparent;
-}
-
-.usage-dashboard-toggle:hover {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.025);
 }
 
-html[data-theme="light"] .usage-dashboard-toggle {
+.usage-deck-toggle:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+html[data-theme="light"] .usage-deck-toggle:hover {
+  background: rgba(60, 45, 20, 0.025);
+}
+
+.usage-deck.is-open .usage-deck-toggle {
+  border-bottom-color: rgba(200, 169, 106, 0.22);
+}
+
+html[data-theme="light"] .usage-deck.is-open .usage-deck-toggle {
+  border-bottom-color: rgba(184, 130, 14, 0.22);
+}
+
+/*  Mini compass-rose mark with a needle that rotates with the deck tone. */
+.usage-deck-toggle-mark {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(200, 169, 106, 0.42);
+  background: radial-gradient(
+    60% 60% at 50% 40%,
+    rgba(200, 169, 106, 0.18),
+    rgba(0, 0, 0, 0) 70%
+  );
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+html[data-theme="light"] .usage-deck-toggle-mark {
+  border-color: rgba(184, 130, 14, 0.4);
+  background: radial-gradient(
+    60% 60% at 50% 40%,
+    rgba(184, 130, 14, 0.12),
+    rgba(0, 0, 0, 0) 70%
+  );
+}
+
+.usage-deck-toggle-mark::before,
+.usage-deck-toggle-mark::after {
+  content: "";
+  position: absolute;
+  background: rgba(200, 169, 106, 0.35);
+}
+
+html[data-theme="light"] .usage-deck-toggle-mark::before,
+html[data-theme="light"] .usage-deck-toggle-mark::after {
+  background: rgba(184, 130, 14, 0.35);
+}
+
+/*  Cardinal hairlines. */
+.usage-deck-toggle-mark::before {
+  left: 50%;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+.usage-deck-toggle-mark::after {
+  top: 50%;
+  left: 4px;
+  right: 4px;
+  height: 1px;
+  transform: translateY(-50%);
+}
+
+.usage-deck-toggle-needle {
+  /*  Positioned so the needle's BASE (not its midpoint) sits at the dial
+      center: `bottom: 50%` plants the bottom edge on the vertical center
+      line; `left: 50%` + `margin-left: -1px` plants its horizontal center
+      there too. With `transform-origin: 50% 100%`, rotations then pivot
+      cleanly around that base. */
+  position: absolute;
+  left: 50%;
+  bottom: 50%;
+  margin-left: -1px;
+  width: 2px;
+  height: 10px;
+  background: var(--deck-tone);
+  transform-origin: 50% 100%;
+  transform: rotate(-30deg);
+  transition: transform 600ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  border-radius: 1px;
+  filter: drop-shadow(0 0 4px var(--deck-tone));
+}
+
+.usage-deck.tone-warn .usage-deck-toggle-needle {
+  transform: rotate(35deg);
+}
+
+.usage-deck.tone-danger .usage-deck-toggle-needle {
+  transform: rotate(80deg);
+}
+
+.usage-deck-toggle-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.usage-deck-toggle-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.usage-deck-toggle-title {
+  font-family: var(--font-display);
+  font-size: 1.18rem;
+  letter-spacing: 0.005em;
+  color: var(--text-strong);
+  line-height: 1.1;
+}
+
+.usage-deck.tone-warn .usage-deck-toggle-title {
+  color: var(--warn);
+}
+
+.usage-deck.tone-danger .usage-deck-toggle-title {
+  color: var(--danger);
+}
+
+.usage-deck-toggle-summary {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: var(--muted-soft);
+  text-transform: lowercase;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  min-width: 0;
+  text-align: right;
+}
+
+html[data-theme="light"] .usage-deck-toggle-summary {
   color: var(--muted);
 }
 
-html[data-theme="light"] .usage-dashboard-toggle:hover {
-  background: rgba(0, 0, 0, 0.03);
+.usage-deck-toggle-pips {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
-.usage-dashboard.open .usage-dashboard-toggle {
-  color: var(--accent);
-  border-bottom: 1px solid rgba(200, 169, 106, 0.18);
+.usage-deck-pip {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.25),
+    0 0 8px var(--success);
 }
 
-.usage-dashboard-toggle-eyebrow {
-  font-weight: 600;
-  color: var(--accent);
+.usage-deck-pip.tone-warn {
+  background: var(--warn);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.25),
+    0 0 8px var(--warn);
 }
 
-.usage-dashboard-toggle-summary {
-  flex: 1;
+.usage-deck-pip.tone-danger {
+  background: var(--danger);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.25),
+    0 0 10px var(--danger);
+  animation: deck-pip-pulse 1.6s ease-in-out infinite;
+}
+
+html[data-theme="light"] .usage-deck-pip {
+  box-shadow:
+    0 0 0 1px rgba(60, 45, 20, 0.18),
+    0 0 6px var(--success);
+}
+
+html[data-theme="light"] .usage-deck-pip.tone-warn {
+  box-shadow:
+    0 0 0 1px rgba(60, 45, 20, 0.18),
+    0 0 6px var(--warn);
+}
+
+html[data-theme="light"] .usage-deck-pip.tone-danger {
+  box-shadow:
+    0 0 0 1px rgba(60, 45, 20, 0.18),
+    0 0 8px var(--danger);
+}
+
+@keyframes deck-pip-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.78);
+  }
+}
+
+.usage-deck-pip-extra {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
   color: var(--muted);
-  font-family: var(--font-sans);
-  font-size: 0.85rem;
-  letter-spacing: 0;
-  text-transform: none;
+  padding: 0 4px;
 }
 
-.usage-dashboard-toggle-chevron {
+.usage-deck-toggle-chevron {
   position: relative;
   width: 14px;
   height: 14px;
   flex-shrink: 0;
+  color: var(--muted);
 }
 
-.usage-dashboard-toggle-chevron::before,
-.usage-dashboard-toggle-chevron::after {
+.usage-deck-toggle-chevron::before,
+.usage-deck-toggle-chevron::after {
   content: "";
   position: absolute;
   width: 5.5px;
@@ -3777,99 +4075,899 @@ html[data-theme="light"] .usage-dashboard-toggle:hover {
   background: currentColor;
   border-radius: 1px;
   top: 50%;
-  transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.usage-dashboard-toggle-chevron::before {
+.usage-deck-toggle-chevron::before {
   right: 50%;
   margin-right: -0.5px;
   transform: translateY(-50%) rotate(-45deg);
   transform-origin: right center;
 }
 
-.usage-dashboard-toggle-chevron::after {
+.usage-deck-toggle-chevron::after {
   left: 50%;
   margin-left: -0.5px;
   transform: translateY(-50%) rotate(45deg);
   transform-origin: left center;
 }
 
-.usage-dashboard.open .usage-dashboard-toggle-chevron::before {
+.usage-deck.is-open .usage-deck-toggle-chevron::before {
   transform: translateY(-50%) rotate(45deg);
 }
 
-.usage-dashboard.open .usage-dashboard-toggle-chevron::after {
+.usage-deck.is-open .usage-deck-toggle-chevron::after {
   transform: translateY(-50%) rotate(-45deg);
 }
 
-.usage-dashboard-body {
+/* ── Body ── */
+.usage-deck-body {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 16px 18px 18px;
+  gap: 18px;
+  padding: 18px 20px 22px;
+  animation: deck-body-enter 320ms cubic-bezier(0.22, 0.8, 0.36, 1) both;
 }
 
-.usage-dashboard-actions {
+@keyframes deck-body-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.usage-deck-status {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border: 1px solid rgba(200, 169, 106, 0.18);
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(0, 0, 0, 0)),
+    rgba(8, 11, 16, 0.45);
+}
+
+html[data-theme="light"] .usage-deck-status {
+  background:
+    linear-gradient(180deg, rgba(255, 252, 244, 0.7), rgba(0, 0, 0, 0)),
+    rgba(255, 252, 244, 0.65);
+  border-color: rgba(184, 130, 14, 0.2);
+}
+
+.usage-deck-status-rivet {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255, 220, 150, 0.9), rgba(120, 95, 35, 0.7) 60%, rgba(0, 0, 0, 0.6) 100%);
+  box-shadow:
+    inset 0 0 2px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+html[data-theme="light"] .usage-deck-status-rivet {
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255, 230, 170, 1), rgba(170, 120, 30, 0.85) 60%, rgba(80, 55, 10, 0.55) 100%);
+  box-shadow:
+    inset 0 0 2px rgba(80, 55, 10, 0.5),
+    0 0 0 1px rgba(80, 55, 10, 0.18);
+}
+
+.usage-deck-status-text {
   display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.usage-deck-status-headline {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  color: var(--success);
+  letter-spacing: 0.005em;
+}
+
+.usage-deck-status-headline.tone-warn {
+  color: var(--warn);
+}
+
+.usage-deck-status-headline.tone-danger {
+  color: var(--danger);
+}
+
+.usage-deck-status-detail {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.usage-deck-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
   justify-content: flex-end;
 }
 
-.usage-dashboard-error {
+.usage-deck-status-sweep {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  color: var(--muted-soft);
+  text-transform: lowercase;
+}
+
+.usage-deck-refresh-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border: 1px solid rgba(200, 169, 106, 0.34);
+  border-radius: var(--radius-pill);
+  background: rgba(200, 169, 106, 0.06);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease,
+    transform 120ms ease;
+}
+
+.usage-deck-refresh-all:hover:not(:disabled) {
+  background: rgba(200, 169, 106, 0.12);
+  color: var(--accent-strong);
+  border-color: rgba(200, 169, 106, 0.55);
+}
+
+.usage-deck-refresh-all:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.usage-deck-refresh-all:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+html[data-theme="light"] .usage-deck-refresh-all {
+  border-color: rgba(184, 130, 14, 0.35);
+  background: rgba(184, 130, 14, 0.05);
+  color: var(--accent);
+}
+
+html[data-theme="light"] .usage-deck-refresh-all:hover:not(:disabled) {
+  background: rgba(184, 130, 14, 0.1);
+  border-color: rgba(184, 130, 14, 0.55);
+}
+
+.usage-deck-refresh-all-glyph {
+  display: inline-block;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.usage-deck-refresh-all-glyph.is-spinning {
+  animation: deck-spin 900ms linear infinite;
+}
+
+@keyframes deck-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.usage-deck-error {
   margin: 0;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: rgba(220, 80, 80, 0.1);
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(226, 108, 112, 0.1);
   color: var(--danger);
   font-family: var(--font-mono);
   font-size: 0.78rem;
+  border: 1px solid rgba(226, 108, 112, 0.3);
 }
 
-html[data-theme="light"] .usage-dashboard-error {
-  background: rgba(196, 64, 64, 0.1);
+html[data-theme="light"] .usage-deck-error {
+  background: rgba(184, 48, 56, 0.08);
+  border-color: rgba(184, 48, 56, 0.3);
 }
 
-.usage-dashboard-grid {
+/* ── Loading and empty ── */
+.usage-deck-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 30px 24px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+}
+
+.usage-deck-loading-bar {
+  width: 96px;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--accent) 50%,
+    transparent
+  );
+  background-size: 200% 100%;
+  animation: deck-loading 1.6s ease-in-out infinite;
+}
+
+@keyframes deck-loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.usage-deck-empty {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  align-items: center;
+  gap: 6px;
+  padding: 36px 24px;
+  text-align: center;
+  border: 1px dashed rgba(200, 169, 106, 0.2);
+  border-radius: var(--radius-sm);
 }
 
-.usage-dashboard-group {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+html[data-theme="light"] .usage-deck-empty {
+  border-color: rgba(184, 130, 14, 0.22);
 }
 
-.usage-dashboard-group-title {
+.usage-deck-empty-mark {
+  font-family: var(--font-display);
+  font-size: 2.4rem;
+  color: var(--accent);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.usage-deck-empty-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  color: var(--text-strong);
+}
+
+.usage-deck-empty-sub {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 0.74rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+/* ── Instrument grid (asymmetric on desktop) ── */
+.usage-deck-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 720px) {
+  .usage-deck-grid[data-bucket-count="2"],
+  .usage-deck-grid[data-bucket-count="3"],
+  .usage-deck-grid[data-bucket-count="4"],
+  .usage-deck-grid[data-bucket-count="5"],
+  .usage-deck-grid[data-bucket-count="6"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /*  In a multi-bucket layout, the worst-tone (first) bucket takes the
+      full row as the "hero" instrument so its dials read at full scale. */
+  .usage-deck-grid[data-bucket-count="3"] > :nth-child(1),
+  .usage-deck-grid[data-bucket-count="4"] > :nth-child(1),
+  .usage-deck-grid[data-bucket-count="5"] > :nth-child(1),
+  .usage-deck-grid[data-bucket-count="6"] > :nth-child(1) {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 1080px) {
+  .usage-deck-grid[data-bucket-count="4"],
+  .usage-deck-grid[data-bucket-count="5"],
+  .usage-deck-grid[data-bucket-count="6"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .usage-deck-grid[data-bucket-count="4"] > :nth-child(1),
+  .usage-deck-grid[data-bucket-count="5"] > :nth-child(1),
+  .usage-deck-grid[data-bucket-count="6"] > :nth-child(1) {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ── Instrument panel ── */
+.usage-instrument {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 14px;
+  padding: 20px 22px 18px;
+  background:
+    linear-gradient(180deg, rgba(28, 34, 46, 0.86), rgba(12, 16, 22, 0.92));
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
+  isolation: isolate;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    inset 0 0 0 1px rgba(200, 169, 106, 0.04),
+    0 10px 24px rgba(0, 0, 0, 0.35);
+  animation: instrument-enter 520ms cubic-bezier(0.22, 0.8, 0.36, 1) both;
+  animation-delay: var(--enter-delay, 0ms);
+}
+
+@keyframes instrument-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+html[data-theme="light"] .usage-instrument {
+  background:
+    linear-gradient(180deg, rgba(255, 253, 247, 0.94), rgba(244, 237, 220, 0.92));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 0 0 1px rgba(184, 130, 14, 0.06),
+    0 10px 20px rgba(80, 60, 25, 0.1);
+}
+
+.usage-instrument.tone-warn {
+  border-color: rgba(217, 154, 74, 0.4);
+}
+
+.usage-instrument.tone-danger {
+  border-color: rgba(226, 108, 112, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    inset 0 0 0 1px rgba(226, 108, 112, 0.08),
+    0 10px 24px rgba(0, 0, 0, 0.4),
+    0 0 30px rgba(226, 108, 112, 0.08);
+}
+
+html[data-theme="light"] .usage-instrument.tone-warn {
+  border-color: rgba(170, 102, 24, 0.4);
+}
+
+html[data-theme="light"] .usage-instrument.tone-danger {
+  border-color: rgba(184, 48, 56, 0.38);
+}
+
+/*  Corner rivets — a touch of fabricated-instrument feel. */
+.usage-instrument-rivet {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 30% 30%,
+    rgba(220, 188, 130, 0.85),
+    rgba(110, 86, 40, 0.7) 60%,
+    rgba(0, 0, 0, 0.6) 100%
+  );
+  box-shadow:
+    inset 0 0 1px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(0, 0, 0, 0.35);
+  z-index: 2;
+}
+
+html[data-theme="light"] .usage-instrument-rivet {
+  background: radial-gradient(
+    circle at 30% 30%,
+    rgba(255, 232, 170, 1),
+    rgba(160, 110, 30, 0.85) 60%,
+    rgba(80, 55, 10, 0.5) 100%
+  );
+  box-shadow:
+    inset 0 0 1px rgba(80, 55, 10, 0.4),
+    0 0 0 1px rgba(80, 55, 10, 0.18);
+}
+
+.usage-instrument-rivet--tl {
+  top: 8px;
+  left: 8px;
+}
+
+.usage-instrument-rivet--tr {
+  top: 8px;
+  right: 8px;
+}
+
+.usage-instrument-rivet--bl {
+  bottom: 8px;
+  left: 8px;
+}
+
+.usage-instrument-rivet--br {
+  bottom: 8px;
+  right: 8px;
+}
+
+.usage-instrument-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.usage-instrument-plaque {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.usage-instrument-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.usage-instrument-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.16rem;
+  line-height: 1.2;
+  color: var(--text-strong);
+  letter-spacing: 0.005em;
+  /*  Subtle engraved/etched look — light highlight + soft shadow */
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05),
+    0 -1px 0 rgba(0, 0, 0, 0.4);
+  word-break: break-word;
+}
+
+html[data-theme="light"] .usage-instrument-title {
+  text-shadow:
+    0 1px 0 rgba(255, 252, 244, 0.6),
+    0 -1px 0 rgba(80, 60, 20, 0.08);
+}
+
+.usage-instrument-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.usage-instrument-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
   letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(108, 201, 154, 0.3);
+  color: var(--success);
+  background: rgba(108, 201, 154, 0.06);
+}
+
+.usage-instrument-status.tone-warn {
+  color: var(--warn);
+  border-color: rgba(217, 154, 74, 0.35);
+  background: rgba(217, 154, 74, 0.06);
+}
+
+.usage-instrument-status.tone-danger {
+  color: var(--danger);
+  border-color: rgba(226, 108, 112, 0.4);
+  background: rgba(226, 108, 112, 0.06);
+}
+
+html[data-theme="light"] .usage-instrument-status {
+  border-color: rgba(37, 122, 80, 0.35);
+  background: rgba(37, 122, 80, 0.06);
+}
+
+html[data-theme="light"] .usage-instrument-status.tone-warn {
+  border-color: rgba(170, 102, 24, 0.36);
+  background: rgba(170, 102, 24, 0.06);
+}
+
+html[data-theme="light"] .usage-instrument-status.tone-danger {
+  border-color: rgba(184, 48, 56, 0.36);
+  background: rgba(184, 48, 56, 0.06);
+}
+
+.usage-instrument-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.usage-instrument-refresh {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(200, 169, 106, 0.3);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    transform 120ms ease;
+}
+
+.usage-instrument-refresh:hover:not(:disabled) {
+  background: rgba(200, 169, 106, 0.1);
+  border-color: rgba(200, 169, 106, 0.55);
+}
+
+.usage-instrument-refresh:active:not(:disabled) {
+  transform: rotate(-20deg);
+}
+
+.usage-instrument-refresh:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+html[data-theme="light"] .usage-instrument-refresh {
+  border-color: rgba(184, 130, 14, 0.3);
+}
+
+html[data-theme="light"] .usage-instrument-refresh:hover:not(:disabled) {
+  background: rgba(184, 130, 14, 0.08);
+  border-color: rgba(184, 130, 14, 0.55);
+}
+
+.usage-instrument-refresh-glyph {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.usage-instrument-refresh-glyph.is-spinning {
+  animation: deck-spin 900ms linear infinite;
+}
+
+.usage-instrument-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.usage-instrument-dials {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  width: 100%;
+  justify-items: center;
+}
+
+.usage-instrument.emphasis-primary .usage-instrument-dials {
+  gap: 32px;
+}
+
+.usage-instrument-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 12px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.usage-instrument-empty-mark {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  color: var(--accent);
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.usage-instrument-empty p {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.usage-instrument-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(200, 169, 106, 0.1);
+}
+
+html[data-theme="light"] .usage-instrument-footer {
+  border-top-color: rgba(184, 130, 14, 0.12);
+}
+
+.usage-instrument-footer-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 22px;
+}
+
+.usage-instrument-footer-cell {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.usage-instrument-footer-cell em {
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.usage-instrument-footer-cell strong {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.usage-instrument-notes {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.usage-instrument-note-chip {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(200, 169, 106, 0.16);
+  background: rgba(200, 169, 106, 0.04);
+}
+
+html[data-theme="light"] .usage-instrument-note-chip {
+  border-color: rgba(184, 130, 14, 0.18);
+  background: rgba(184, 130, 14, 0.04);
+}
+
+/* ── Dial gauge ── */
+.usage-dial {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.usage-dial-svg {
+  width: 100%;
+  max-width: 160px;
+  height: auto;
+  display: block;
+}
+
+.usage-dial.size-md .usage-dial-svg {
+  max-width: 132px;
+}
+
+.usage-dial-bezel {
+  fill: rgba(0, 0, 0, 0);
+  stroke: rgba(200, 169, 106, 0.32);
+  stroke-width: 1.2;
+}
+
+html[data-theme="light"] .usage-dial-bezel {
+  stroke: rgba(184, 130, 14, 0.42);
+}
+
+.usage-dial-face {
+  fill: url(#usage-dial-face);
+  stroke: rgba(200, 169, 106, 0.12);
+  stroke-width: 0.8;
+}
+
+html[data-theme="light"] .usage-dial-face {
+  fill: url(#usage-dial-face-light);
+  stroke: rgba(184, 130, 14, 0.15);
+}
+
+.usage-dial-tick {
+  stroke: rgba(200, 169, 106, 0.35);
+  stroke-width: 1;
+  stroke-linecap: round;
+}
+
+.usage-dial-tick.is-major {
+  stroke: rgba(200, 169, 106, 0.7);
+  stroke-width: 1.4;
+}
+
+html[data-theme="light"] .usage-dial-tick {
+  stroke: rgba(184, 130, 14, 0.4);
+}
+
+html[data-theme="light"] .usage-dial-tick.is-major {
+  stroke: rgba(184, 130, 14, 0.75);
+}
+
+.usage-dial-track {
+  stroke: rgba(200, 169, 106, 0.18);
+}
+
+html[data-theme="light"] .usage-dial-track {
+  stroke: rgba(184, 130, 14, 0.22);
+}
+
+.usage-dial-fill {
+  stroke: var(--success);
+  filter: drop-shadow(0 0 6px rgba(108, 201, 154, 0.45));
+  /*  Stroke sweeps from 0 → full on mount. */
+  stroke-dasharray: 260 260;
+  stroke-dashoffset: 260;
+  animation: dial-fill-in 900ms cubic-bezier(0.22, 0.8, 0.36, 1) both 120ms;
+}
+
+.usage-dial.tone-warn .usage-dial-fill {
+  stroke: var(--warn);
+  filter: drop-shadow(0 0 6px rgba(217, 154, 74, 0.45));
+}
+
+.usage-dial.tone-danger .usage-dial-fill {
+  stroke: var(--danger);
+  filter: drop-shadow(0 0 8px rgba(226, 108, 112, 0.5));
+}
+
+html[data-theme="light"] .usage-dial-fill {
+  filter: drop-shadow(0 0 5px rgba(37, 122, 80, 0.35));
+}
+
+html[data-theme="light"] .usage-dial.tone-warn .usage-dial-fill {
+  filter: drop-shadow(0 0 5px rgba(170, 102, 24, 0.35));
+}
+
+html[data-theme="light"] .usage-dial.tone-danger .usage-dial-fill {
+  filter: drop-shadow(0 0 7px rgba(184, 48, 56, 0.4));
+}
+
+@keyframes dial-fill-in {
+  from {
+    stroke-dashoffset: 260;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.usage-dial-needle {
+  stroke: var(--accent-strong);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 3px rgba(224, 187, 115, 0.6));
+  transform-origin: 72px 72px;
+  /*  Needle sweeps in from rest at -135° to its target position. */
+  animation: dial-needle-sweep 900ms cubic-bezier(0.22, 0.8, 0.36, 1) both 120ms;
+}
+
+.usage-dial.tone-warn .usage-dial-needle {
+  stroke: var(--warn);
+}
+
+.usage-dial.tone-danger .usage-dial-needle {
+  stroke: var(--danger);
+}
+
+@keyframes dial-needle-sweep {
+  from {
+    transform: rotate(-90deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+.usage-dial-hub {
+  fill: var(--accent-strong);
+  filter: drop-shadow(0 0 3px rgba(200, 169, 106, 0.55));
+}
+
+.usage-dial-hub-cap {
+  fill: rgba(8, 11, 16, 0.95);
+}
+
+html[data-theme="light"] .usage-dial-hub-cap {
+  fill: rgba(20, 16, 8, 0.85);
+}
+
+.usage-dial-empty {
+  fill: var(--muted-soft);
+  font-family: var(--font-display);
+  font-size: 28px;
+}
+
+.usage-dial-readout {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin-top: -8px;
+}
+
+.usage-dial-percent {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-family: var(--font-display);
+  color: var(--text-strong);
+  line-height: 1;
+}
+
+.usage-dial-percent strong {
+  font-size: 1.85rem;
+  font-weight: 500;
+  font-feature-settings: "tnum";
+}
+
+.usage-dial-percent em {
+  font-size: 0.95rem;
+  font-style: normal;
+  color: var(--muted);
+}
+
+.usage-dial.tone-warn .usage-dial-percent strong {
+  color: var(--warn);
+}
+
+.usage-dial.tone-danger .usage-dial-percent strong {
+  color: var(--danger);
+}
+
+.usage-dial-label {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
-.usage-dashboard-cards {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+.usage-dial-caption {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  color: var(--muted-soft);
+  text-align: center;
 }
 
-/* The .usage-panel rule positions the popover absolutely; on the
-   dashboard we want each card to flow in the grid instead, so reset
-   positioning when the panel is rendered as a dashboard card. */
-.usage-dashboard-card.usage-panel {
-  position: relative;
-  inset: auto;
-  width: auto;
-  max-width: none;
-  max-height: none;
-  margin: 0;
-  z-index: auto;
-  animation: none;
-}
-
-/* ─── Mobile: bottom-anchored sheet ─── */
+/* ── Mobile: bottom-anchored sheet for the popover; dashboard cards
+       fold to a single column with smaller dials. ── */
 @media (max-width: 540px) {
   .usage-panel {
     position: fixed;
@@ -3881,22 +4979,6 @@ html[data-theme="light"] .usage-dashboard-error {
     overflow-y: auto;
     padding: 16px 16px 14px;
     border-radius: var(--radius);
-  }
-
-  /* Dashboard cards flow inline even on mobile — the fixed-sheet
-     positioning above is only meant for the floating popover. */
-  .usage-dashboard-card.usage-panel {
-    position: relative;
-    inset: auto;
-    left: auto;
-    right: auto;
-    bottom: auto;
-    max-height: none;
-    overflow-y: visible;
-  }
-
-  .usage-dashboard-cards {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .usage-numeral strong {
@@ -3920,6 +5002,98 @@ html[data-theme="light"] .usage-dashboard-error {
 
   .usage-window-head {
     flex-wrap: wrap;
+  }
+
+  /*  Deck collapses to a single column; dials shrink and align center. */
+  .usage-deck-toggle {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .usage-deck-toggle-summary {
+    display: none;
+  }
+
+  .usage-deck-toggle-title {
+    font-size: 1rem;
+  }
+
+  .usage-deck-body {
+    padding: 14px 14px 18px;
+    gap: 14px;
+  }
+
+  .usage-deck-status {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    gap: 10px 12px;
+    padding: 10px 12px;
+  }
+
+  .usage-deck-status-actions {
+    grid-column: 1 / -1;
+    justify-content: space-between;
+  }
+
+  .usage-deck-grid,
+  .usage-deck-grid[data-bucket-count="2"],
+  .usage-deck-grid[data-bucket-count="3"],
+  .usage-deck-grid[data-bucket-count="4"],
+  .usage-deck-grid[data-bucket-count="5"],
+  .usage-deck-grid[data-bucket-count="6"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .usage-deck-grid > * {
+    grid-column: auto;
+  }
+
+  .usage-instrument {
+    padding: 16px 16px 14px;
+  }
+
+  .usage-instrument-rivet {
+    width: 5px;
+    height: 5px;
+  }
+
+  .usage-instrument-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .usage-instrument-meta {
+    align-self: flex-end;
+  }
+
+  .usage-instrument-title {
+    font-size: 1.02rem;
+  }
+
+  .usage-instrument-dials {
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 14px;
+  }
+
+  .usage-instrument.emphasis-primary .usage-instrument-dials {
+    gap: 18px;
+  }
+
+  .usage-dial-svg {
+    max-width: 130px;
+  }
+
+  .usage-dial.size-md .usage-dial-svg {
+    max-width: 110px;
+  }
+
+  .usage-dial-percent strong {
+    font-size: 1.55rem;
+  }
+
+  .usage-instrument-footer-row {
+    gap: 14px 18px;
   }
 }
 

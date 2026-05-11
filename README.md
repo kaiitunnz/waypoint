@@ -120,58 +120,66 @@ When the frontend is opened from a phone, it now infers the backend URL from the
 
 ## Local stack supervisor
 
-For a repo-local workflow that feels closer to `docker compose up/down`, use:
+`waypointctl` is the canonical way to run the local stack. It's an installable
+Python control plane that supervises backend + frontend without depending on
+the legacy shell script. Install it once:
 
 ```bash
-./scripts/waypoint.sh start
-./scripts/waypoint.sh status
-./scripts/waypoint.sh logs
-./scripts/waypoint.sh stop
+uv tool install ./waypointctl
+# or: pipx install ./waypointctl
 ```
 
-The script:
+Then from the repo root (or anywhere, with `--home <repo>`):
 
-- starts `uv run waypoint serve` in `backend/`
-- runs `npm run build` and then starts `npm run start` in `frontend/`
-- stores PID files, logs, backend runtime data, and a local `uv` cache under `tmp/waypoint/`
-- waits for backend `http://127.0.0.1:8787/health` and the frontend root URL before reporting success
+```bash
+waypointctl start                   # bring up backend + frontend, exits when ready
+waypointctl status                  # pid, port, health for each service
+waypointctl logs                    # tail backend + frontend logs
+waypointctl restart [backend|frontend|all]
+waypointctl stop
+waypointctl daemon start            # opt in to the long-lived waypointd supervisor
+```
 
-Supported commands are `start`, `stop`, `restart`, `status`, and `logs [backend|frontend]`.
+What it does:
 
-Configuration comes from a repo-root `.env` file if present. Start from:
+- starts `uv run waypoint serve` in `backend/` (in its own process group)
+- builds the frontend if needed, then runs `npm run start` in `frontend/`
+- waits for backend `http://127.0.0.1:8787/health` and the frontend root URL
+  before reporting success
+- stores PID files, logs, and default backend/uv-cache directories under
+  `WAYPOINTCTL_STATE_DIR` (defaults to `~/.waypoint/`)
+
+Configuration comes from a repo-root `.env` file if present:
 
 ```bash
 cp .env.example .env
 ```
 
-Useful overrides:
+Useful overrides (set in `.env` or per invocation):
 
 ```bash
-WAYPOINT_STACK_BACKEND_PORT=8788 WAYPOINT_STACK_FRONTEND_PORT=3001 ./scripts/waypoint.sh start
-WAYPOINT_STACK_CONFIG=/absolute/path/to/waypoint.yaml ./scripts/waypoint.sh restart
-WAYPOINT_STACK_BACKEND_DATA_DIR=/tmp/waypoint-data ./scripts/waypoint.sh start
+WAYPOINT_STACK_BACKEND_PORT=8788 WAYPOINT_STACK_FRONTEND_PORT=3001 waypointctl start
+WAYPOINT_STACK_CONFIG=/absolute/path/to/waypoint.yaml waypointctl restart
+WAYPOINT_STACK_BACKEND_DATA_DIR=/tmp/waypoint-data waypointctl start
 ```
 
-This is intended for local development. If you want a machine-managed background service on macOS, keep using `backend/scripts/install_launchd.sh` for the backend and treat the frontend separately.
+By default each command runs in-process and exits when the work is done.
+`waypointctl daemon start` brings up a long-lived `waypointd` that subsequent
+commands transparently route through; this is useful when an agent hosted by
+Waypoint itself needs to issue `restart` without taking its own process tree
+down. See [`waypointctl/README.md`](waypointctl/README.md) for the daemon
+model, agent-restart safety check, and full env-var reference.
 
-## `waypointctl`
+For a machine-managed background backend on macOS, `backend/scripts/install_launchd.sh`
+remains the right tool; treat the frontend separately.
 
-The repo root contains an installable `waypointctl` package: a native Python
-control plane that supervises the backend and frontend without going through
-`scripts/waypoint.sh`. Install it with `uv tool install ./waypointctl` or
-`pipx install ./waypointctl`.
+### Legacy: `scripts/waypoint.sh`
+
+The shell-based supervisor is preserved for users on the existing workflow
+and will be **deprecated** once we're confident `waypointctl` covers all
+their cases. It writes state under `tmp/waypoint/` (repo-local) and the two
+tools do not share state by default. New work should target `waypointctl`.
 
 ```bash
-waypointctl --home . start          # in-process start, exits when up
-waypointctl --home . status         # query running state
-waypointctl --home . logs           # tail backend + frontend logs
-waypointctl daemon start            # opt in to the long-lived waypointd supervisor
+./scripts/waypoint.sh start | stop | restart | status | logs
 ```
-
-State (PIDs, logs, default data dirs) lives under `WAYPOINTCTL_STATE_DIR`,
-defaulting to `~/.waypoint/`. All `WAYPOINT_STACK_*` env vars honored by
-`scripts/waypoint.sh` are honored by `waypointctl` too. See
-[`waypointctl/README.md`](waypointctl/README.md) for the full reference,
-including daemon mode and the agent-restart safety check.
-
-`scripts/waypoint.sh` is preserved for users on the existing workflow.

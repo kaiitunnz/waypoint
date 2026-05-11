@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 import signal
 import time
@@ -47,4 +45,4 @@ def terminate_pid(pid: int, *, timeout_seconds: float = 10.0) -> None:
     while time.monotonic() < deadline and is_pid_running(pid):
         time.sleep(0.1)
     if is_pid_running(pid):
-        os.kill(pid, 9)
+        os.kill(pid, signal.SIGKILL)

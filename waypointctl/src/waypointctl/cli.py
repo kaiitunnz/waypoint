@@ -1,11 +1,9 @@
-from __future__ import annotations
-
 from pathlib import Path
 
 import typer
 
 from waypointctl.client import DaemonUnavailableError, ensure_daemon
-from waypointctl.legacy import run_legacy_command
+from waypointctl.legacy import stream_legacy_command
 from waypointctl.paths import resolve_waypoint_home
 from waypointctl.protocol import DaemonResponse
 
@@ -85,12 +83,12 @@ def _run_control_command(ctx: typer.Context, command: str, args: list[str]) -> N
 
 def _run_legacy(ctx: typer.Context, command: str, args: list[str]) -> None:
     home = _ctx_home(ctx)
-    completed = run_legacy_command(home, command, args)
-    if completed.stdout:
-        typer.echo(completed.stdout, nl=False)
-    if completed.stderr:
-        typer.echo(completed.stderr, err=True, nl=False)
-    raise typer.Exit(code=completed.returncode)
+    try:
+        returncode = stream_legacy_command(home, command, args)
+    except FileNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    raise typer.Exit(code=returncode)
 
 
 def _emit_response(response: DaemonResponse) -> None:
@@ -98,6 +96,8 @@ def _emit_response(response: DaemonResponse) -> None:
         typer.echo(response.stdout, nl=False)
     if response.stderr:
         typer.echo(response.stderr, err=True, nl=False)
+    if response.error and not response.stderr:
+        typer.echo(response.error, err=True)
 
 
 def main() -> None:

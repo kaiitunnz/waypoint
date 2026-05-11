@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,15 +22,3 @@ class WaypointSupervisor:
             stdout=completed.stdout,
             stderr=completed.stderr,
         )
-
-    def ping(self) -> CommandResult:
-        return self.run("status", [])
-
-    def start(self, service: str) -> CommandResult:
-        return self.run("start", [service])
-
-    def stop(self, service: str) -> CommandResult:
-        return self.run("stop", [service])
-
-    def restart(self, service: str) -> CommandResult:
-        return self.run("restart", [service])

@@ -18,12 +18,14 @@ Coding-agent backends live in `backend/src/waypoint/backends/<id>/` (currently `
 - `cd frontend && npm run lint` runs the frontend linter.
 
 ## Local Stack Supervisor
-`./scripts/waypoint.sh` (run from the repo root) is the canonical way to manage the running stack. Use it whenever the user asks to deploy, bring up, tear down, restart, or check on the app:
-- Deploy / bring up: `./scripts/waypoint.sh start`.
-- Teardown: `./scripts/waypoint.sh stop`.
-- Apply code changes: `./scripts/waypoint.sh restart [backend|frontend]` — DO NOT RUN `./scripts/waypoint.sh restart` OR `./scripts/waypoint.sh restart backend` WITHOUT EXPLICIT VERBAL PERMISSION FROM THE USER. `./scripts/waypoint.sh restart frontend` can be run safely when the frontend code is updated.
-- Check state during testing: `./scripts/waypoint.sh status` for health, `./scripts/waypoint.sh logs [backend|frontend]` for output. Restart before re-testing if you have changed code since the last `start`.
-Override ports or paths inline with `WAYPOINT_STACK_BACKEND_PORT`, `WAYPOINT_STACK_FRONTEND_PORT`, `WAYPOINT_STACK_CONFIG`, or `WAYPOINT_STACK_BACKEND_DATA_DIR` rather than editing the script.
+`waypointctl` (installed via `uv tool install ./waypointctl` or `pipx install ./waypointctl`) is the canonical way to manage the running stack. Use it whenever the user asks to deploy, bring up, tear down, restart, or check on the app:
+- Deploy / bring up: `waypointctl start`.
+- Teardown: `waypointctl stop`.
+- Apply code changes: `waypointctl restart [backend|frontend]` — `waypointctl restart` and `waypointctl restart backend` are allowed, but you must have explicit permission from the user for this session before running them. If the user hasn't given that permission yet, pause and ask. `waypointctl restart frontend` can be run safely when the frontend code is updated.
+- Check state during testing: `waypointctl status` for health, `waypointctl logs [backend|frontend]` for output. Restart before re-testing if you have changed code since the last `start`.
+Override ports or paths inline with `WAYPOINT_STACK_BACKEND_PORT`, `WAYPOINT_STACK_FRONTEND_PORT`, `WAYPOINT_STACK_CONFIG`, or `WAYPOINT_STACK_BACKEND_DATA_DIR` rather than editing config files; values may also live in `.env` at the repo root.
+
+`scripts/waypoint.sh` is the legacy supervisor and is slated for deprecation; prefer `waypointctl` for new work and only fall back to the script if the user explicitly asks for it.
 
 ## Coding Style & Naming Conventions
 Follow the existing style in each half of the repo. Python uses 4-space indentation, type hints, top-level imports, and `snake_case` for functions/modules; keep FastAPI handlers and Pydantic models explicit. TypeScript uses 2-space indentation, strict typing, `PascalCase` for components, and `camelCase` for helpers and state. Keep comments sparse and only explain non-obvious reasoning.

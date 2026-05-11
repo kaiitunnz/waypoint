@@ -219,6 +219,7 @@ class FrontendService(ManagedService):
                 ["npm", "run", "build"],
                 cwd=frontend_dir,
                 env=env,
+                stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
                 check=False,

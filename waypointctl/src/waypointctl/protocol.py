@@ -12,29 +12,33 @@ class DaemonRequest:
 
 
 @dataclass(slots=True)
-class DaemonResponse:
+class DaemonLog:
+    stream: str
+    line: str
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"type": "log", "stream": self.stream, "line": self.line}
+
+
+@dataclass(slots=True)
+class DaemonResult:
     ok: bool
     returncode: int = 0
-    stdout: str = ""
-    stderr: str = ""
     error: str | None = None
 
     @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> "DaemonResponse":
+    def from_payload(cls, payload: dict[str, Any]) -> "DaemonResult":
         return cls(
             ok=bool(payload.get("ok", False)),
             returncode=int(payload.get("returncode", 0)),
-            stdout=str(payload.get("stdout", "")),
-            stderr=str(payload.get("stderr", "")),
             error=payload.get("error"),
         )
 
     def to_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
+            "type": "result",
             "ok": self.ok,
             "returncode": self.returncode,
-            "stdout": self.stdout,
-            "stderr": self.stderr,
         }
         if self.error is not None:
             payload["error"] = self.error

@@ -40,7 +40,7 @@ def frontmatter(path):
         key, value = raw.split(":", 1)
         key = key.strip()
         value = value.strip().strip("\"'")
-        if key in {"name", "description"} and value:
+        if key in {"name", "description", "argument-hint"} and value:
             data[key] = value
     return data
 
@@ -65,7 +65,33 @@ def custom_commands():
             yield {
                 "name": name,
                 "description": meta.get("description") if isinstance(meta.get("description"), str) else None,
+                "argument_hint": meta.get("argument-hint") if isinstance(meta.get("argument-hint"), str) else None,
                 "source": "custom_command",
+                "path": str(path),
+            }
+
+
+def user_skills():
+    # Workspace skills win over user skills on name collision: order
+    # matters here.
+    roots = [Path(cwd) / ".claude" / "skills", Path.home() / ".claude" / "skills"]
+    seen = set()
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in sorted(root.glob("*/SKILL.md")):
+            meta = frontmatter(path)
+            name = meta.get("name") if isinstance(meta.get("name"), str) else None
+            if not name:
+                name = path.parent.name
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            yield {
+                "name": name,
+                "description": meta.get("description") if isinstance(meta.get("description"), str) else None,
+                "argument_hint": meta.get("argument-hint") if isinstance(meta.get("argument-hint"), str) else None,
+                "source": "user_skill",
                 "path": str(path),
             }
 
@@ -116,12 +142,13 @@ def plugin_skills():
             yield {
                 "name": name,
                 "description": description if isinstance(description, str) else None,
+                "argument_hint": meta.get("argument-hint") if isinstance(meta.get("argument-hint"), str) else None,
                 "source": "plugin_skill",
                 "path": path,
             }
 
 
-print(json.dumps([*custom_commands(), *plugin_skills()]))
+print(json.dumps([*custom_commands(), *user_skills(), *plugin_skills()]))
 """
 
 
@@ -143,6 +170,7 @@ async def list_claude_command_completions(
 async def _list_local_records(cwd: str, claude_bin: str) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     records.extend(_local_custom_commands(cwd))
+    records.extend(_local_user_skills(cwd))
     records.extend(await _local_plugin_skills(claude_bin))
     return records
 
@@ -167,7 +195,39 @@ def _local_custom_commands(cwd: str) -> list[dict[str, Any]]:
                 {
                     "name": name,
                     "description": _string_or_none(meta.get("description")),
+                    "argument_hint": _string_or_none(meta.get("argument-hint")),
                     "source": "custom_command",
+                    "path": str(path),
+                }
+            )
+    return records
+
+
+def _local_user_skills(cwd: str) -> list[dict[str, Any]]:
+    # Workspace `<cwd>/.claude/skills/` wins over `~/.claude/skills/` on
+    # name collision, matching how the Claude CLI itself resolves
+    # overlapping skill names.
+    roots = [
+        Path(cwd).expanduser() / ".claude" / "skills",
+        Path.home() / ".claude" / "skills",
+    ]
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in sorted(root.glob("*/SKILL.md")):
+            meta = _frontmatter(path)
+            name = _string_or_none(meta.get("name")) or path.parent.name
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            records.append(
+                {
+                    "name": name,
+                    "description": _string_or_none(meta.get("description")),
+                    "argument_hint": _string_or_none(meta.get("argument-hint")),
+                    "source": "user_skill",
                     "path": str(path),
                 }
             )
@@ -211,6 +271,7 @@ async def _local_plugin_skills(claude_bin: str) -> list[dict[str, Any]]:
                 {
                     "name": name,
                     "description": _string_or_none(meta.get("description")),
+                    "argument_hint": _string_or_none(meta.get("argument-hint")),
                     "source": "plugin_skill",
                     "path": str(path),
                 }
@@ -274,6 +335,7 @@ def _records_to_completions(
         if command in seen:
             continue
         source = _string_or_none(record.get("source")) or "custom_command"
+        kind = "skill" if source in {"plugin_skill", "user_skill"} else "command"
         completions.append(
             CommandCompletion(
                 id=f"claude_code:{source}:{name}",
@@ -281,9 +343,10 @@ def _records_to_completions(
                 replacement=f"{command} ",
                 name=name,
                 description=_string_or_none(record.get("description")),
-                kind="skill" if source == "plugin_skill" else "command",
+                kind=kind,
                 source=source,
                 dispatch=CompletionDispatch.PLAIN_TEXT,
+                argument_hint=_string_or_none(record.get("argument_hint")),
                 metadata={"path": record.get("path")} if record.get("path") else {},
             )
         )

@@ -95,13 +95,13 @@ def doctor(ctx: typer.Context) -> None:
     typer.echo(f"WAYPOINT_HOME={home}")
     typer.echo(f"WAYPOINTCTL_STATE_DIR={resolve_state_dir()}")
     typer.echo(f"daemon socket={waypoint_socket_path()}")
-    typer.echo(f"daemon available={'yes' if daemon_available() else 'no'}")
+    typer.echo(f"daemon for this home={'yes' if daemon_available(home) else 'no'}")
 
 
 @daemon_app.command("start")
 def daemon_start(ctx: typer.Context) -> None:
     home = _ctx_home(ctx)
-    if daemon_available():
+    if daemon_available(home):
         typer.echo("waypointd already running")
         return
     try:
@@ -142,11 +142,15 @@ def _warn_if_services_running() -> None:
 
 @daemon_app.command("status")
 def daemon_status(ctx: typer.Context) -> None:
+    home = _ctx_home(ctx)
     pid = read_pid_file(waypoint_pid_path())
     if pid and is_pid_running(pid):
         responsive = daemon_available()
+        for_this_home = daemon_available(home)
         typer.echo(
-            f"waypointd: running pid={pid} responsive={'yes' if responsive else 'no'}"
+            f"waypointd: running pid={pid} "
+            f"responsive={'yes' if responsive else 'no'} "
+            f"for_this_home={'yes' if for_this_home else 'no'}"
         )
         return
     typer.echo("waypointd: stopped")
@@ -161,7 +165,7 @@ def daemon_serve(ctx: typer.Context) -> None:
 
 def _run_control_command(ctx: typer.Context, command: str, args: list[str]) -> None:
     home = _ctx_home(ctx)
-    if _should_use_daemon():
+    if _should_use_daemon(home):
         client = _daemon_client(home)
         if client is not None:
             _run_via_daemon(client, command, args)
@@ -214,14 +218,14 @@ def _run_in_process(home: Path, command: str, args: list[str]) -> None:
         raise typer.Exit(code=1)
 
 
-def _should_use_daemon() -> bool:
+def _should_use_daemon(home: Path) -> bool:
     if _env_flag("WAYPOINTCTL_DAEMON"):
         return True
-    return daemon_available()
+    return daemon_available(home)
 
 
 def _daemon_client(home: Path) -> DaemonClient | None:
-    if daemon_available():
+    if daemon_available(home):
         return DaemonClient(home)
     if not _env_flag("WAYPOINTCTL_DAEMON"):
         return None
@@ -237,9 +241,9 @@ def _env_flag(name: str) -> bool:
 
 
 def _check_agent_restart_safety(ctx: typer.Context, args: list[str]) -> None:
-    if _should_use_daemon():
-        return
     home = _ctx_home(ctx)
+    if _should_use_daemon(home):
+        return
     config = load_stack_config(home)
     stack = WaypointStack(config)
 

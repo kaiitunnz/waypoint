@@ -53,3 +53,33 @@ def test_daemon_available_false_without_socket(
         client_module, "waypoint_socket_path", lambda: tmp_path / "missing.sock"
     )
     assert client_module.daemon_available() is False
+    assert client_module.daemon_available(tmp_path) is False
+
+
+def test_ensure_daemon_waits_when_pid_already_live(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WAYPOINTCTL_STATE_DIR", str(tmp_path))
+
+    spawn_count = {"n": 0}
+    ready_after = {"n": 2}
+
+    def fake_start_daemon(_home: Path) -> None:
+        spawn_count["n"] += 1
+
+    available_calls = {"n": 0}
+
+    def fake_daemon_available(_home: Path | None = None) -> bool:
+        available_calls["n"] += 1
+        return available_calls["n"] > ready_after["n"]
+
+    monkeypatch.setattr(client_module, "start_daemon", fake_start_daemon)
+    monkeypatch.setattr(client_module, "daemon_available", fake_daemon_available)
+    # A peer is already starting waypointd; advertise its pid as alive.
+    monkeypatch.setattr(client_module, "_live_daemon_pid", lambda: 4242)
+    monkeypatch.setattr(client_module, "DAEMON_POLL_INTERVAL_SECONDS", 0.0)
+
+    client = client_module.ensure_daemon(tmp_path)
+
+    assert isinstance(client, client_module.DaemonClient)
+    assert spawn_count["n"] == 0

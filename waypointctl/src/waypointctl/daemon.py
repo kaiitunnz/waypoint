@@ -65,9 +65,11 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
             return
         try:
             payload = json.loads(raw)
+            home_value = payload.get("home")
             request = DaemonRequest(
                 command=str(payload["command"]),
                 args=[str(item) for item in payload.get("args", [])],
+                home=str(home_value) if home_value is not None else None,
             )
         except Exception as exc:  # noqa: BLE001
             self._send_result(DaemonResult(ok=False, returncode=1, error=str(exc)))
@@ -79,11 +81,24 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
             self._send_result(DaemonResult(ok=False, returncode=1, error=str(exc)))
 
     def _dispatch(self, request: DaemonRequest) -> None:
+        server = cast(WaypointDaemonServer, self.server)
+        if request.home is not None and request.home != str(server.home):
+            self._send_result(
+                DaemonResult(
+                    ok=False,
+                    returncode=1,
+                    error=(
+                        f"daemon serves home {server.home}, "
+                        f"refusing request for home {request.home}"
+                    ),
+                )
+            )
+            return
+
         if request.command == "ping":
             self._send_result(DaemonResult(ok=True))
             return
 
-        server = cast(WaypointDaemonServer, self.server)
         stack = server.stack
 
         if request.command in DEFERRED_COMMANDS:

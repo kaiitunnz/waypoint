@@ -73,6 +73,37 @@ def test_daemon_restart_returns_result_before_doing_work(state_dir: Path) -> Non
         proc.wait(timeout=5)
 
 
+def test_daemon_rejects_request_for_different_home(state_dir: Path) -> None:
+    home_a = _make_home(state_dir)
+    other_home = state_dir / "other-repo"
+    (other_home / "backend").mkdir(parents=True)
+    (other_home / "frontend").mkdir()
+    (other_home / "scripts").mkdir()
+
+    env = {**os.environ, "WAYPOINTCTL_STATE_DIR": str(state_dir)}
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "waypointctl.daemon", "--home", str(home_a)],
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        assert _wait_until(daemon_available, timeout=5.0)
+
+        wrong_client = DaemonClient(other_home)
+        result = wrong_client.request("status", [], log=lambda *_: None)
+        assert result.ok is False
+        assert "refusing request" in (result.error or "").lower()
+
+        right_client = DaemonClient(home_a)
+        assert right_client.request("status", [], log=lambda *_: None).ok is True
+    finally:
+        try:
+            os.kill(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        proc.wait(timeout=5)
+
+
 def test_daemon_status_e2e(state_dir: Path) -> None:
     home = _make_home(state_dir)
     env = {**os.environ, "WAYPOINTCTL_STATE_DIR": str(state_dir)}

@@ -6,9 +6,13 @@ from typing import Any
 class DaemonRequest:
     command: str
     args: list[str] = field(default_factory=list)
+    home: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
-        return {"command": self.command, "args": list(self.args)}
+        payload: dict[str, Any] = {"command": self.command, "args": list(self.args)}
+        if self.home is not None:
+            payload["home"] = self.home
+        return payload
 
 
 @dataclass(slots=True)

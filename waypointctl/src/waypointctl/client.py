@@ -163,6 +163,7 @@ def start_daemon(home: Path) -> None:
             argv,
             cwd=home,
             env=env,
+            stdin=subprocess.DEVNULL,
             stdout=log_file,
             stderr=subprocess.STDOUT,
             start_new_session=True,

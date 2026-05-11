@@ -20,6 +20,7 @@ def spawn_detached(
             argv,
             cwd=cwd,
             env=env,
+            stdin=subprocess.DEVNULL,
             stdout=log_file,
             stderr=subprocess.STDOUT,
             start_new_session=True,

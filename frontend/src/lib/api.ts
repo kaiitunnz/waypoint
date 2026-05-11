@@ -13,6 +13,7 @@ import {
   SessionCommandInvocation,
   SessionEnvelope,
   SessionRecord,
+  UsageDashboardResponse,
 } from "@/lib/types";
 
 export class AuthError extends Error {
@@ -282,6 +283,30 @@ export async function refreshSessionRateLimitUsage(
   await ensureOk(response, "failed to refresh rate-limit usage");
   const body = await response.json();
   return body.session as SessionRecord;
+}
+
+export async function fetchUsageDashboard(
+  host: string,
+  token: string,
+): Promise<UsageDashboardResponse> {
+  const response = await fetch(`${host}/api/usage`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch usage dashboard");
+  return (await response.json()) as UsageDashboardResponse;
+}
+
+export async function refreshUsageDashboard(
+  host: string,
+  token: string,
+): Promise<UsageDashboardResponse> {
+  const response = await fetch(`${host}/api/usage/refresh`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, "failed to refresh usage dashboard");
+  return (await response.json()) as UsageDashboardResponse;
 }
 
 export async function setSessionPermissionMode(

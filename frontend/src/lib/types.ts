@@ -52,6 +52,18 @@ export interface SessionRateLimitUsage {
   notes?: string[];
 }
 
+export interface UsageDashboardBucket {
+  backend: Backend;
+  account_key: string;
+  account_label: string;
+  snapshot: SessionRateLimitUsage;
+  session_ids: string[];
+}
+
+export interface UsageDashboardResponse {
+  buckets: UsageDashboardBucket[];
+}
+
 export interface SessionRecord {
   id: string;
   backend: Backend;

@@ -2220,7 +2220,12 @@ const ReplyComposer = memo(function ReplyComposer({
                   }}
                   onMouseEnter={() => setSuggestionIndex(index)}
                 >
-                  <span className="slash-name">{completionCommand(entry)}</span>
+                  <span className="slash-name">
+                    {completionCommand(entry)}
+                    {entry.argument_hint ? (
+                      <span className="slash-hint">{entry.argument_hint}</span>
+                    ) : null}
+                  </span>
                   <span className="slash-desc">{entry.description}</span>
                 </button>
               </li>

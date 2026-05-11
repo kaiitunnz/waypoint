@@ -122,6 +122,7 @@ class CodexPlugin:
             SlashCommandSpec(
                 name="plan",
                 description="Switch to Codex Plan mode or plan the provided prompt",
+                argument_hint="[prompt]",
             ),
         ),
         badges={"glyph": "X", "color": "#34d399"},

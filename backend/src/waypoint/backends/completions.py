@@ -26,6 +26,7 @@ def static_slash_completions(
                 kind="command",
                 source="builtin",
                 dispatch=CompletionDispatch.PLAIN_TEXT,
+                argument_hint=spec.argument_hint,
             )
         )
     return completions

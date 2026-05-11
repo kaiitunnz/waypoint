@@ -1,8 +1,9 @@
+import os
 from pathlib import Path
 
 import pytest
 
-from waypointctl.config import load_env, load_stack_config
+from waypointctl.config import apply_dotenv, load_env, load_stack_config
 
 
 def test_load_env_merges_dotenv_over_process(
@@ -102,3 +103,24 @@ def test_load_stack_config_absolute_path_kept_as_is(
     config = load_stack_config(home, env={"WAYPOINT_STACK_CONFIG": str(external)})
 
     assert config.backend_config == external
+
+
+def test_apply_dotenv_overrides_process_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("BOTH", "from-shell")
+    monkeypatch.delenv("FROM_DOTENV_ONLY", raising=False)
+
+    (tmp_path / ".env").write_text("BOTH=from-dotenv\nFROM_DOTENV_ONLY=yes\n")
+    apply_dotenv(tmp_path)
+
+    assert os.environ["BOTH"] == "from-dotenv"
+    assert os.environ["FROM_DOTENV_ONLY"] == "yes"
+
+
+def test_apply_dotenv_no_op_without_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("UNAFFECTED", "kept")
+    apply_dotenv(tmp_path)
+    assert os.environ["UNAFFECTED"] == "kept"

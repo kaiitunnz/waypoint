@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
-from waypointctl.config import load_stack_config
+from waypointctl.config import apply_dotenv, load_stack_config
 from waypointctl.paths import (
     resolve_waypoint_home,
     state_log_dir,
@@ -196,6 +196,7 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
 
 
 def serve(home: Path) -> None:
+    apply_dotenv(home)
     state_run_dir().mkdir(parents=True, exist_ok=True)
     state_log_dir().mkdir(parents=True, exist_ok=True)
     pid_path = waypoint_pid_path()

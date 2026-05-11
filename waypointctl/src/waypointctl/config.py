@@ -34,6 +34,16 @@ def load_env(home: Path) -> dict[str, str]:
     return merged
 
 
+def apply_dotenv(home: Path) -> None:
+    """Merge `$home/.env` into `os.environ` (dotenv wins, matching `set -a; source .env`)."""
+    env_file = home / ".env"
+    if not env_file.exists():
+        return
+    for key, value in dotenv_values(env_file).items():
+        if value is not None:
+            os.environ[key] = value
+
+
 def load_stack_config(home: Path, env: dict[str, str] | None = None) -> StackConfig:
     env = env if env is not None else load_env(home)
     state_dir = resolve_state_dir()

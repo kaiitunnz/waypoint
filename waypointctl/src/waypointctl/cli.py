@@ -12,7 +12,7 @@ from waypointctl.client import (
     daemon_available,
     ensure_daemon,
 )
-from waypointctl.config import load_stack_config
+from waypointctl.config import apply_dotenv, load_stack_config
 from waypointctl.paths import (
     pid_file_for,
     resolve_state_dir,
@@ -51,7 +51,9 @@ def bootstrap(
         help="Waypoint repository root.",
     ),
 ) -> None:
-    ctx.obj = {"home": resolve_waypoint_home(home)}
+    home_path = resolve_waypoint_home(home)
+    apply_dotenv(home_path)
+    ctx.obj = {"home": home_path}
 
 
 @app.command()

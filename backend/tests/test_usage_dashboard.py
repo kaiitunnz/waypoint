@@ -100,6 +100,38 @@ def test_account_bucket_no_account_info_falls_back_to_session_scope() -> None:
     )
 
 
+def test_build_dashboard_lists_freshest_session_first() -> None:
+    # The refresh path probes ``session_ids[0]``; if the oldest-encountered
+    # session is exited, ``force_refresh_rate_limit_usage`` would silently
+    # no-op. Putting the freshest-snapshot session first keeps refresh
+    # pointed at the session most likely to still have live adapter state.
+    now = datetime(2026, 5, 11, 12, 0, tzinfo=UTC)
+    older = _snapshot(
+        source="claude_code",
+        notes=["org: Acme"],
+        updated_at=now - timedelta(minutes=15),
+    )
+    newer = _snapshot(
+        source="claude_code",
+        notes=["org: Acme"],
+        updated_at=now,
+    )
+    middle = _snapshot(
+        source="claude_code",
+        notes=["org: Acme"],
+        updated_at=now - timedelta(minutes=5),
+    )
+    sessions = [
+        _session(sid="s-old", backend="claude_code", snapshot=older),
+        _session(sid="s-new", backend="claude_code", snapshot=newer),
+        _session(sid="s-mid", backend="claude_code", snapshot=middle),
+    ]
+    dashboard = build_dashboard(sessions)
+    assert len(dashboard.buckets) == 1
+    assert dashboard.buckets[0].session_ids[0] == "s-new"
+    assert set(dashboard.buckets[0].session_ids) == {"s-old", "s-new", "s-mid"}
+
+
 def test_build_dashboard_groups_sessions_and_keeps_freshest_snapshot() -> None:
     now = datetime(2026, 5, 11, 12, 0, tzinfo=UTC)
     older = _snapshot(

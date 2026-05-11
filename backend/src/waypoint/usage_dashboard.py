@@ -75,6 +75,9 @@ def _humanise_backend(backend: BackendId) -> str:
 
 
 def build_dashboard(sessions: list[SessionRecord]) -> UsageDashboardResponse:
+    # ``session_ids[0]`` is the session that produced the freshest snapshot
+    # in the bucket — refresh paths target it so a stale/torn-down session
+    # cannot silently no-op the probe when a live one is available.
     buckets: dict[str, UsageDashboardBucket] = {}
     for session in sessions:
         snapshot = session.rate_limit_usage
@@ -91,10 +94,12 @@ def build_dashboard(sessions: list[SessionRecord]) -> UsageDashboardResponse:
                 session_ids=[session.id],
             )
             continue
-        existing.session_ids.append(session.id)
         if snapshot.updated_at > existing.snapshot.updated_at:
             existing.snapshot = snapshot
             existing.account_label = label
+            existing.session_ids.insert(0, session.id)
+        else:
+            existing.session_ids.append(session.id)
 
     ordered = sorted(
         buckets.values(),

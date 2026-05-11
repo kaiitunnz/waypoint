@@ -23,6 +23,7 @@ class PermissionModeSpec(_FrozenModel):
 class SlashCommandSpec(_FrozenModel):
     name: str
     description: str | None = None
+    argument_hint: str | None = None
 
 
 class BackendCapabilities(_FrozenModel):

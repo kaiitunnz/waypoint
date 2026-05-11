@@ -6134,6 +6134,14 @@ html[data-theme="light"] .slash-suggestion.active {
   color: var(--accent-cool);
 }
 
+.slash-hint {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 400;
+}
+
 .slash-desc {
   font-size: 0.8rem;
   color: var(--muted);

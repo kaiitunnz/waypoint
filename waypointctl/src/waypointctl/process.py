@@ -1,6 +1,4 @@
 import os
-import signal
-import time
 from pathlib import Path
 
 
@@ -37,12 +35,9 @@ def remove_if_stale(path: Path) -> None:
         path.unlink(missing_ok=True)
 
 
-def terminate_pid(pid: int, *, timeout_seconds: float = 10.0) -> None:
-    if not is_pid_running(pid):
-        return
-    os.kill(pid, signal.SIGTERM)
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline and is_pid_running(pid):
-        time.sleep(0.1)
-    if is_pid_running(pid):
-        os.kill(pid, signal.SIGKILL)
+def running_pid(path: Path) -> int | None:
+    remove_if_stale(path)
+    pid = read_pid_file(path)
+    if pid is None or not is_pid_running(pid):
+        return None
+    return pid

@@ -5,6 +5,7 @@ const TOKEN_KEY = "waypoint.token";
 const TARGETS_KEY = "waypoint.launch-targets";
 const RECENT_CWDS_KEY = "waypoint.recent-cwds";
 const RECENT_CWDS_LIMIT = 8;
+const USAGE_DASHBOARD_OPEN_KEY = "waypoint.usage-dashboard-open";
 
 export function readHost(): string {
   if (typeof window === "undefined") {
@@ -169,6 +170,24 @@ function normalizeCwd(cwd: string): string {
   const collapsed = trimmed.replace(/\/{2,}/g, "/");
   if (collapsed === "/") return collapsed;
   return collapsed.replace(/\/+$/, "");
+}
+
+export function readUsageDashboardOpen(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return window.localStorage.getItem(USAGE_DASHBOARD_OPEN_KEY) === "1";
+}
+
+export function writeUsageDashboardOpen(open: boolean): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (open) {
+    window.localStorage.setItem(USAGE_DASHBOARD_OPEN_KEY, "1");
+  } else {
+    window.localStorage.removeItem(USAGE_DASHBOARD_OPEN_KEY);
+  }
 }
 
 function inferBackendHost(): string {

@@ -969,7 +969,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     : transcriptEvents;
   const transcriptItems = buildTranscriptItems(transcriptEventsForDisplay);
   const hasToolRuns = transcriptItems.some((item) => item.kind === "tool_run");
-  const usageSummary = extractUsageSummary(events);
   // Session has stopped its backend process (clean shutdown or crash).
   const sessionExited = Boolean(
     session && (session.status === "exited" || session.status === "error"),
@@ -1027,7 +1026,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           onSetTitle={handleSetTitle}
         />
       ) : null}
-      {usageSummary ? <UsageCard summary={usageSummary} /> : null}
       <div className="session-toolbar">
         <div className="segmented" role="tablist" aria-label="View">
           <button
@@ -2786,20 +2784,6 @@ function isImportantEvent(event: EventRecord): boolean {
   }
 }
 
-interface UsageSummary {
-  lastTurn: {
-    outputTokens: number | null;
-    totalCostUsd: number | null;
-    permissionDenials: number;
-    ts: string;
-  } | null;
-  rateLimit: {
-    status: string | null;
-    type: string | null;
-    ts: string;
-  } | null;
-}
-
 function SessionHeader({
   session,
   connection,
@@ -3025,98 +3009,11 @@ function TranscriptEmpty({
   );
 }
 
-function UsageCard({ summary }: { summary: UsageSummary }) {
-  return (
-    <section className="panel usage-card">
-      <div className="session-row">
-        <span className="badge fidelity structured">usage</span>
-        <span className="muted">Latest structured telemetry</span>
-      </div>
-      <div className="usage-grid">
-        <div>
-          <p className="meta">Last turn</p>
-          {summary.lastTurn ? (
-            <p className="muted">
-              {summary.lastTurn.totalCostUsd !== null ? `Cost ${formatUsd(summary.lastTurn.totalCostUsd)} · ` : ""}
-              {summary.lastTurn.outputTokens !== null
-                ? `${summary.lastTurn.outputTokens.toLocaleString()} output tokens`
-                : "No token count"}
-              {summary.lastTurn.permissionDenials > 0
-                ? ` · ${summary.lastTurn.permissionDenials} denial${summary.lastTurn.permissionDenials === 1 ? "" : "s"}`
-                : ""}
-            </p>
-          ) : (
-            <p className="muted">No turn usage yet.</p>
-          )}
-        </div>
-        <div>
-          <p className="meta">Rate limits</p>
-          {summary.rateLimit ? (
-            <p className="muted">
-              {summary.rateLimit.status ?? "unknown"}
-              {summary.rateLimit.type ? ` · ${summary.rateLimit.type}` : ""}
-            </p>
-          ) : (
-            <p className="muted">No rate-limit event yet.</p>
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function sanitizeEvent(event: EventRecord): EventRecord {
   return {
     ...event,
     text: stripAnsi(event.text),
   };
-}
-
-function extractUsageSummary(events: EventRecord[]): UsageSummary | null {
-  let lastTurn: UsageSummary["lastTurn"] = null;
-  let rateLimit: UsageSummary["rateLimit"] = null;
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    const metadata = asRecord(event.metadata);
-    if (!lastTurn && metadata?.method === "result") {
-      const payload = asRecord(metadata.payload);
-      const usage = asRecord(payload?.usage);
-      const permissionDenials = Array.isArray(payload?.permission_denials) ? payload.permission_denials.length : 0;
-      lastTurn = {
-        outputTokens: typeof usage?.output_tokens === "number" ? usage.output_tokens : null,
-        totalCostUsd: typeof payload?.total_cost_usd === "number" ? payload.total_cost_usd : null,
-        permissionDenials,
-        ts: event.ts,
-      };
-    }
-    if (!rateLimit && metadata?.method === "rate_limit_event") {
-      const payload = asRecord(metadata.payload);
-      const info = asRecord(payload?.rate_limit_info);
-      rateLimit = {
-        status: typeof info?.status === "string" ? info.status : null,
-        type: typeof info?.rate_limit_type === "string" ? info.rate_limit_type : null,
-        ts: event.ts,
-      };
-    }
-    if (lastTurn && rateLimit) {
-      break;
-    }
-  }
-  if (!lastTurn && !rateLimit) {
-    return null;
-  }
-  return { lastTurn, rateLimit };
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
-}
-
-function formatUsd(value: number): string {
-  return `$${value.toFixed(4)}`;
 }
 
 function stripAnsi(text: string): string {

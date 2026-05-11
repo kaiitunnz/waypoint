@@ -10,6 +10,7 @@ import { LoginForm } from "@/components/LoginForm";
 import { SchedulePanel } from "@/components/SchedulePanel";
 import { SessionList } from "@/components/SessionList";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { UsageDashboardSection } from "@/components/UsageDashboardSection";
 import { useTheme } from "@/lib/theme";
 import {
   attachTmux,
@@ -740,6 +741,14 @@ export default function HomePage() {
           onCreate={handleCreateSchedule}
           onCancel={handleCancelSchedule}
           onClearHistory={handleClearScheduleHistory}
+          onAuthFailure={handleAuthFailure}
+        />
+      ) : null}
+      {token ? (
+        <UsageDashboardSection
+          host={host}
+          token={token}
+          sessions={sessions}
           onAuthFailure={handleAuthFailure}
         />
       ) : null}

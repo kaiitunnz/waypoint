@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import argparse
 import json
 import os
@@ -10,9 +8,10 @@ from typing import cast
 
 from waypointctl.paths import (
     resolve_waypoint_home,
+    state_log_dir,
+    state_run_dir,
     waypoint_pid_path,
     waypoint_socket_path,
-    waypoint_state_dir,
 )
 from waypointctl.process import write_pid_file
 from waypointctl.protocol import DaemonRequest, DaemonResponse
@@ -46,7 +45,10 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
             self._write_response(DaemonResponse(ok=False, returncode=1, error=str(exc)))
             return
 
-        response = self._dispatch(request)
+        try:
+            response = self._dispatch(request)
+        except Exception as exc:  # noqa: BLE001
+            response = DaemonResponse(ok=False, returncode=1, error=str(exc))
         self._write_response(response)
 
     def _dispatch(self, request: DaemonRequest) -> DaemonResponse:
@@ -76,10 +78,10 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
 
 
 def serve(home: Path) -> None:
-    state_dir = waypoint_state_dir(home)
-    state_dir.mkdir(parents=True, exist_ok=True)
-    pid_path = waypoint_pid_path(home)
-    socket_path = waypoint_socket_path(home)
+    state_run_dir().mkdir(parents=True, exist_ok=True)
+    state_log_dir().mkdir(parents=True, exist_ok=True)
+    pid_path = waypoint_pid_path()
+    socket_path = waypoint_socket_path()
 
     server = WaypointDaemonServer(socket_path, home)
     write_pid_file(pid_path, os.getpid())

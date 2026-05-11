@@ -28,10 +28,10 @@ def test_ensure_daemon_starts_background_daemon(
     monkeypatch.setattr(client_module, "remove_if_stale", lambda path: None)
     monkeypatch.setattr(client_module, "is_pid_running", lambda pid: False)
     monkeypatch.setattr(
-        client_module, "waypoint_socket_path", lambda home: tmp_path / "waypointd.sock"
+        client_module, "waypoint_socket_path", lambda: tmp_path / "waypointd.sock"
     )
     monkeypatch.setattr(
-        client_module, "waypoint_pid_path", lambda home: tmp_path / "waypointd.pid"
+        client_module, "waypoint_pid_path", lambda: tmp_path / "waypointd.pid"
     )
 
     client = client_module.ensure_daemon(tmp_path)

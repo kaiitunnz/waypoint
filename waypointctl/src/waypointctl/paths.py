@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 
+DEFAULT_STATE_DIR = Path("~/.waypoint")
+
 
 def resolve_waypoint_home(raw: str | Path | None = None) -> Path:
     if raw is not None:
@@ -21,20 +23,43 @@ def resolve_waypoint_home(raw: str | Path | None = None) -> Path:
     )
 
 
-def waypoint_state_dir(home: Path) -> Path:
-    return home / "tmp" / "waypointctl"
+def resolve_state_dir() -> Path:
+    raw = os.environ.get("WAYPOINTCTL_STATE_DIR")
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return DEFAULT_STATE_DIR.expanduser().resolve()
 
 
-def waypoint_socket_path(home: Path) -> Path:
-    return waypoint_state_dir(home) / "waypointd.sock"
+def state_run_dir() -> Path:
+    return resolve_state_dir() / "run"
 
 
-def waypoint_pid_path(home: Path) -> Path:
-    return waypoint_state_dir(home) / "waypointd.pid"
+def state_log_dir() -> Path:
+    return resolve_state_dir() / "logs"
 
 
-def waypoint_log_path(home: Path) -> Path:
-    return waypoint_state_dir(home) / "waypointd.log"
+def waypoint_socket_path() -> Path:
+    return state_run_dir() / "waypointd.sock"
+
+
+def waypoint_pid_path() -> Path:
+    return state_run_dir() / "waypointd.pid"
+
+
+def waypoint_log_path() -> Path:
+    return state_log_dir() / "waypointd.log"
+
+
+def pid_file_for(service: str) -> Path:
+    return state_run_dir() / f"{service}.pid"
+
+
+def log_file_for(service: str) -> Path:
+    return state_log_dir() / f"{service}.log"
+
+
+def started_marker_for(service: str) -> Path:
+    return state_run_dir() / f"{service}.started-this-run"
 
 
 def waypoint_script_path(home: Path) -> Path:

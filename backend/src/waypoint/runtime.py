@@ -484,11 +484,10 @@ class SessionRuntime:
             self._warm_command_completions(refreshed)
 
     def _warm_command_completions(self, session: SessionRecord) -> None:
-        # Remote discovery can involve SSH and user-specific shell startup.
-        # Keep automatic warming local; remote sessions still use the same
-        # stale-while-revalidate path when the user opens autocomplete.
-        if session.launch_target_id is not None:
-            return
+        # SSH-launched sessions pay an upfront discovery cost (a one-off
+        # remote shell + plugin-list call), traded for an instant first
+        # `/` press in the composer. Stale-while-revalidate handles
+        # subsequent refreshes the same way it does for local sessions.
         try:
             transport = self.transport_for(session)
         except KeyError:

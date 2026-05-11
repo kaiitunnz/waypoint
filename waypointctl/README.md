@@ -11,8 +11,9 @@ uv tool install ./waypointctl
 pipx install ./waypointctl
 ```
 
-This installs two console scripts: `waypointctl` (the CLI) and `waypointd`
-(the optional daemon).
+This installs one console script: `waypointctl`. The optional daemon
+(`waypointd`) is launched by `waypointctl daemon start` and runs as
+`python -m waypointctl.daemon` under the hood.
 
 ## Commands
 

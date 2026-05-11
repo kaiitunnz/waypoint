@@ -20,7 +20,6 @@ dev = [
 
 [project.scripts]
 waypointctl = "waypointctl.cli:main"
-waypointd = "waypointctl.daemon:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

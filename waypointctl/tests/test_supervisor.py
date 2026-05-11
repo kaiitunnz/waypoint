@@ -1,9 +1,13 @@
 from pathlib import Path
 
+import pytest
+
 from waypointctl import supervisor as supervisor_module
 
 
-def test_supervisor_delegates_to_legacy_runner(monkeypatch, tmp_path: Path) -> None:
+def test_supervisor_delegates_to_legacy_runner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     captured: dict[str, object] = {}
 
     class FakeCompleted:
@@ -24,7 +28,7 @@ def test_supervisor_delegates_to_legacy_runner(monkeypatch, tmp_path: Path) -> N
     )
 
     supervisor = supervisor_module.WaypointSupervisor(tmp_path)
-    result = supervisor.restart("backend")
+    result = supervisor.run("restart", ["backend"])
 
     assert captured == {
         "home": tmp_path,

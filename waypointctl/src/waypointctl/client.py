@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import os
 import socket
@@ -33,7 +31,7 @@ class DaemonClient:
         payload = json.dumps(DaemonRequest(command=command, args=args).to_payload())
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
             sock.settimeout(DAEMON_START_TIMEOUT_SECONDS)
-            sock.connect(str(waypoint_socket_path(self.home)))
+            sock.connect(str(waypoint_socket_path()))
             sock.sendall(payload.encode("utf-8") + b"\n")
             sock.shutdown(socket.SHUT_WR)
             chunks: list[bytes] = []
@@ -49,8 +47,8 @@ class DaemonClient:
 
 
 def ensure_daemon(home: Path) -> DaemonClient:
-    socket_path = waypoint_socket_path(home)
-    pid_path = waypoint_pid_path(home)
+    socket_path = waypoint_socket_path()
+    pid_path = waypoint_pid_path()
     remove_if_stale(pid_path)
     if socket_path.exists():
         client = DaemonClient(home)
@@ -87,8 +85,8 @@ def ensure_daemon(home: Path) -> DaemonClient:
 
 
 def start_daemon(home: Path) -> None:
-    pid_path = waypoint_pid_path(home)
-    log_path = waypoint_log_path(home)
+    pid_path = waypoint_pid_path()
+    log_path = waypoint_log_path()
     log_path.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["WAYPOINT_HOME"] = str(home)

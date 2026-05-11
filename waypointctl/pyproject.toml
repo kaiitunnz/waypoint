@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "waypointctl"
+version = "0.1.0"
+description = "Local control plane and daemon for Waypoint"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "typer>=0.12.0",
+]
+
+[project.scripts]
+waypointctl = "waypointctl.cli:main"
+waypointd = "waypointctl.daemon:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["waypointctl*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py312"
+extend-exclude = [".venv", "build", "dist", "backend/.venv", "frontend/node_modules"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+  "E501",
+  "B008",
+]
+
+[tool.black]
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"

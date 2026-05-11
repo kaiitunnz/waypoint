@@ -41,7 +41,7 @@ class ServiceStatus:
     health: HealthState | None = None
 
 
-class _ManagedService:
+class ManagedService:
     name: str = ""
 
     def __init__(self, config: StackConfig) -> None:
@@ -69,7 +69,7 @@ class _ManagedService:
         return _stop_managed_service(self.name, self.pid_path, log)
 
 
-class BackendService(_ManagedService):
+class BackendService(ManagedService):
     name = "backend"
 
     def status(self) -> ServiceStatus:
@@ -133,7 +133,7 @@ class BackendService(_ManagedService):
         self.started_marker.write_text("")
 
 
-class FrontendService(_ManagedService):
+class FrontendService(ManagedService):
     name = "frontend"
 
     def status(self) -> ServiceStatus:
@@ -230,7 +230,7 @@ class FrontendService(_ManagedService):
         self.started_marker.write_text("")
 
 
-class CaffeinateService(_ManagedService):
+class CaffeinateService(ManagedService):
     name = "caffeinate"
 
     @property

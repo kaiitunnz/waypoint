@@ -63,6 +63,7 @@ import {
   type ToolPair,
 } from "@/components/TranscriptCard";
 import { useSwitcher } from "@/components/SwitcherProvider";
+import { UsageBar, UsageReadout } from "@/components/UsageReadout";
 import {
   BackendModelOption,
   BackendPermissionMode,
@@ -71,11 +72,15 @@ import {
   SessionCommandInvocation,
   SessionContextUsage,
   SessionEnvelope,
-  SessionRateLimitUsage,
   SessionRecord,
   SessionTransport,
-  UsageWindow,
 } from "@/lib/types";
+import {
+  clampPercent,
+  formatRelativeTime,
+  formatTokens,
+  rateLimitUsageTone,
+} from "@/lib/usage";
 
 const LOCAL_SLASH_COMPLETIONS: ReadonlyArray<CommandCompletion> = [
   {
@@ -132,34 +137,6 @@ const EFFORT_LABEL: Record<string, string> = {
   max: "Max",
 };
 
-const TOKEN_FORMATTER = new Intl.NumberFormat("en-US");
-const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat("en", {
-  numeric: "auto",
-});
-
-function formatTokens(value: number): string {
-  return TOKEN_FORMATTER.format(value);
-}
-
-function formatRelativeTime(value: string): string {
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) {
-    return "Unknown";
-  }
-  const diffSeconds = Math.round((timestamp - Date.now()) / 1000);
-  const absSeconds = Math.abs(diffSeconds);
-  if (absSeconds < 60) {
-    return RELATIVE_TIME_FORMATTER.format(diffSeconds, "second");
-  }
-  if (absSeconds < 3600) {
-    return RELATIVE_TIME_FORMATTER.format(Math.round(diffSeconds / 60), "minute");
-  }
-  if (absSeconds < 86400) {
-    return RELATIVE_TIME_FORMATTER.format(Math.round(diffSeconds / 3600), "hour");
-  }
-  return RELATIVE_TIME_FORMATTER.format(Math.round(diffSeconds / 86400), "day");
-}
-
 function contextUsagePercent(usage: SessionContextUsage): number | null {
   const windowTokens = usage.context_window_tokens;
   if (!windowTokens || windowTokens <= 0) {
@@ -179,102 +156,6 @@ function contextUsageTone(percent: number | null): "good" | "warn" | "danger" {
     return "warn";
   }
   return "good";
-}
-
-function clampPercent(percent: number | null): number | null {
-  if (percent === null) {
-    return null;
-  }
-  return Math.min(100, Math.max(0, percent));
-}
-
-function usageTone(percent: number | null): "good" | "warn" | "danger" {
-  if (percent === null) {
-    return "good";
-  }
-  if (percent >= 90) {
-    return "danger";
-  }
-  if (percent >= 70) {
-    return "warn";
-  }
-  return "good";
-}
-
-function rateLimitWindowPercent(window: UsageWindow): number | null {
-  if (window.used_percent < 0 || !Number.isFinite(window.used_percent)) {
-    return null;
-  }
-  return clampPercent(Math.round(window.used_percent));
-}
-
-function formatRateLimitWindowTokens(window: UsageWindow): string | null {
-  const parts: string[] = [];
-  if (window.used_tokens !== undefined && window.used_tokens !== null) {
-    parts.push(`${formatTokens(window.used_tokens)} used`);
-  }
-  if (window.remaining_tokens !== undefined && window.remaining_tokens !== null) {
-    parts.push(`${formatTokens(window.remaining_tokens)} left`);
-  }
-  if (
-    window.limit_tokens !== undefined &&
-    window.limit_tokens !== null &&
-    window.used_tokens !== undefined &&
-    window.used_tokens !== null
-  ) {
-    parts.push(`of ${formatTokens(window.limit_tokens)}`);
-  }
-  return parts.length > 0 ? parts.join(" · ") : null;
-}
-
-function formatRateLimitWindowReset(window: UsageWindow): string | null {
-  if (window.resets_at) {
-    return formatRelativeTime(window.resets_at);
-  }
-  return window.reset_description ?? null;
-}
-
-function rateLimitUsageTone(usage: SessionRateLimitUsage | null): "good" | "warn" | "danger" {
-  if (!usage || usage.windows.length === 0) {
-    return "good";
-  }
-  const worst = Math.max(
-    ...usage.windows.map((window) => rateLimitWindowPercent(window) ?? 0),
-  );
-  return usageTone(worst);
-}
-
-const USAGE_BAR_SEGMENTS = 14;
-
-function UsageBar({
-  percent,
-  tone,
-  disabled,
-}: {
-  percent: number | null;
-  tone: "good" | "warn" | "danger";
-  disabled?: boolean;
-}) {
-  const filled = !disabled && percent !== null
-    ? Math.min(
-        USAGE_BAR_SEGMENTS,
-        Math.max(0, Math.round((percent / 100) * USAGE_BAR_SEGMENTS)),
-      )
-    : 0;
-  return (
-    <div
-      className={`usage-bar tone-${tone}${disabled ? " is-disabled" : ""}`}
-      role="presentation"
-    >
-      {Array.from({ length: USAGE_BAR_SEGMENTS }, (_, index) => (
-        <span
-          key={index}
-          className={index < filled ? "is-filled" : ""}
-          style={{ animationDelay: `${index * 18}ms` }}
-        />
-      ))}
-    </div>
-  );
 }
 
 function contextUsageLabel(key: string): string {
@@ -1984,17 +1865,15 @@ const ReplyComposer = memo(function ReplyComposer({
       ? `${formatTokens(contextUsage.used_tokens)} / ${formatTokens(contextUsageWindowDisplay)} (${contextUsagePercentDisplay}%)`
       : formatTokens(contextUsage.used_tokens)
     : null;
-  const rateLimitUsageWindows = rateLimitUsage?.windows ?? [];
   const rateLimitUsageSummary = rateLimitUsage
-    ? rateLimitUsageWindows.length > 0
-      ? rateLimitUsageWindows
+    ? rateLimitUsage.windows.length > 0
+      ? rateLimitUsage.windows
           .map((window) => `${window.label} ${Math.round(window.used_percent)}%`)
           .join(" · ")
       : rateLimitUsage.notes?.length
         ? rateLimitUsage.notes.join(" · ")
         : null
     : null;
-  const rateLimitUpdatedAt = rateLimitUsage?.updated_at ?? null;
   const rateLimitSourceLabel = rateLimitUsage
     ? rateLimitUsage.notes?.length
       ? rateLimitUsage.notes.join(" · ")
@@ -2286,123 +2165,12 @@ const ReplyComposer = memo(function ReplyComposer({
                   ) : null}
 
                   {rateLimitUsage ? (
-                  <section className="usage-block">
-                    <header className="usage-block-head">
-                      <h3 className="usage-block-eyebrow">
-                        <span aria-hidden className="usage-block-mark">
-                          ◇
-                        </span>
-                        Rate limits
-                      </h3>
-                      <button
-                        type="button"
-                        className="usage-refresh"
-                        onClick={() => void onRateLimitRefresh()}
-                        disabled={rateLimitRefreshBusy}
-                        aria-label="Refresh rate limits"
-                      >
-                        <span
-                          aria-hidden
-                          className={`usage-refresh-glyph${rateLimitRefreshBusy ? " is-spinning" : ""}`}
-                        >
-                          ↻
-                        </span>
-                        {rateLimitRefreshBusy ? "Refreshing" : "Refresh"}
-                      </button>
-                    </header>
-
-                    {rateLimitUsageWindows.length > 0 ? (
-                      <ul className="usage-windows">
-                        {rateLimitUsageWindows.map((window) => {
-                          const percent = rateLimitWindowPercent(window);
-                          const tone = usageTone(percent);
-                          const resetText = formatRateLimitWindowReset(window);
-                          const tokenSummary = formatRateLimitWindowTokens(window);
-                          return (
-                            <li
-                              key={window.id}
-                              className={`usage-window tone-${tone}`}
-                            >
-                              <div className="usage-window-head">
-                                <span className="usage-window-label">
-                                  {window.label}
-                                </span>
-                                {resetText ? (
-                                  <span className="usage-window-reset">
-                                    <span aria-hidden className="usage-window-reset-glyph">
-                                      ◷
-                                    </span>
-                                    {resetText}
-                                  </span>
-                                ) : null}
-                              </div>
-                              <div className="usage-window-body">
-                                <div
-                                  className={`usage-numeral usage-numeral--sm tone-${tone}`}
-                                >
-                                  <strong>
-                                    {percent !== null ? percent : "—"}
-                                  </strong>
-                                  <em>%</em>
-                                </div>
-                                <UsageBar
-                                  percent={percent}
-                                  tone={tone}
-                                  disabled={percent === null}
-                                />
-                              </div>
-                              {tokenSummary ? (
-                                <p className="usage-window-tokens">{tokenSummary}</p>
-                              ) : null}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    ) : (
-                      <p className="usage-empty">
-                        No quota tracked on this plan.
-                      </p>
-                    )}
-
-                    <footer className="usage-meta">
-                      <span className="usage-meta-cell">
-                        <em>updated</em>
-                        <span
-                          title={
-                            rateLimitUpdatedAt
-                              ? new Date(rateLimitUpdatedAt).toLocaleString()
-                              : "Unavailable"
-                          }
-                        >
-                          {rateLimitUpdatedAt
-                            ? formatRelativeTime(rateLimitUpdatedAt)
-                            : "—"}
-                        </span>
-                      </span>
-                      <i aria-hidden className="usage-meta-bullet">
-                        ·
-                      </i>
-                      <span className="usage-meta-cell">
-                        <em>source</em>
-                        <span>{rateLimitSourceLabel}</span>
-                      </span>
-                      {rateLimitUsage &&
-                      rateLimitUsage.credits_remaining !== null &&
-                      rateLimitUsage.credits_remaining !== undefined ? (
-                        <>
-                          <i aria-hidden className="usage-meta-bullet">
-                            ·
-                          </i>
-                          <span className="usage-meta-cell">
-                            <em>credits</em>
-                            <span>
-                              {`${rateLimitUsage.credits_currency ?? "credits"} ${rateLimitUsage.credits_remaining.toFixed(2)}`}
-                            </span>
-                          </span>
-                        </>
-                      ) : null}
-                    </footer>
-                  </section>
+                    <UsageReadout
+                      usage={rateLimitUsage}
+                      sourceLabel={rateLimitSourceLabel}
+                      onRefresh={onRateLimitRefresh}
+                      refreshing={rateLimitRefreshBusy}
+                    />
                   ) : null}
                 </div>
               ) : null}

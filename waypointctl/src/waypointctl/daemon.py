@@ -40,7 +40,11 @@ class WaypointDaemonServer(socketserver.ThreadingMixIn, socketserver.UnixStreamS
         super().__init__(str(socket_path), WaypointDaemonHandler)
 
     def schedule_worker(self, target: Callable[[], None], name: str) -> None:
-        thread = threading.Thread(target=self._run_worker, args=(target,), name=name)
+        # daemon=True: a stuck worker can't pin the interpreter past the
+        # join_workers grace period in serve().
+        thread = threading.Thread(
+            target=self._run_worker, args=(target,), name=name, daemon=True
+        )
         thread.start()
         with self._workers_lock:
             self._workers.append(thread)

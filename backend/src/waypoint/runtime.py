@@ -481,13 +481,19 @@ class SessionRuntime:
         await plugin.restore_session(self, session)
         refreshed = self.storage.get_session(session.id)
         if refreshed is not None:
-            self._warm_command_completions(refreshed)
+            # Boot-restore warming is fire-and-forget for every persisted
+            # session, so we skip remote targets to avoid fanning out
+            # SSH/plugin-list probes against hosts the user may never
+            # open. New SSH sessions still warm eagerly via
+            # ``create_session`` / fork; reattached ones fall back to
+            # stale-while-revalidate on the first `/` press.
+            self._warm_command_completions(refreshed, include_remote=False)
 
-    def _warm_command_completions(self, session: SessionRecord) -> None:
-        # SSH-launched sessions pay an upfront discovery cost (a one-off
-        # remote shell + plugin-list call), traded for an instant first
-        # `/` press in the composer. Stale-while-revalidate handles
-        # subsequent refreshes the same way it does for local sessions.
+    def _warm_command_completions(
+        self, session: SessionRecord, *, include_remote: bool = True
+    ) -> None:
+        if not include_remote and session.launch_target_id is not None:
+            return
         try:
             transport = self.transport_for(session)
         except KeyError:

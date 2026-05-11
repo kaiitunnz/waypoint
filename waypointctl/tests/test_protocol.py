@@ -6,6 +6,16 @@ def test_request_round_trip() -> None:
     assert request.to_payload() == {"command": "restart", "args": ["backend"]}
 
 
+def test_request_omits_wait_when_false() -> None:
+    request = DaemonRequest(command="stop", args=["backend"])
+    assert "wait" not in request.to_payload()
+
+
+def test_request_includes_wait_when_true() -> None:
+    request = DaemonRequest(command="stop", args=["backend"], wait=True)
+    assert request.to_payload()["wait"] is True
+
+
 def test_log_frame_payload() -> None:
     frame = DaemonLog(stream="stderr", line="failure")
     assert frame.to_payload() == {

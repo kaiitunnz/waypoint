@@ -7,11 +7,14 @@ class DaemonRequest:
     command: str
     args: list[str] = field(default_factory=list)
     home: str | None = None
+    wait: bool = False
 
     def to_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"command": self.command, "args": list(self.args)}
         if self.home is not None:
             payload["home"] = self.home
+        if self.wait:
+            payload["wait"] = True
         return payload
 
 

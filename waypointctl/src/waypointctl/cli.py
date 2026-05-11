@@ -62,15 +62,33 @@ def start(ctx: typer.Context, service: str = typer.Argument("all")) -> None:
 
 
 @app.command()
-def stop(ctx: typer.Context, service: str = typer.Argument("all")) -> None:
-    _check_agent_restart_safety(ctx, [service])
-    _run_control_command(ctx, "stop", [service])
+def stop(
+    ctx: typer.Context,
+    service: str = typer.Argument("all"),
+    wait: bool = typer.Option(
+        False,
+        "-w",
+        "--wait",
+        help="Block until the daemon finishes stopping (streams logs).",
+    ),
+) -> None:
+    _check_agent_restart_safety(ctx, [service], wait=wait)
+    _run_control_command(ctx, "stop", [service], wait=wait)
 
 
 @app.command()
-def restart(ctx: typer.Context, service: str = typer.Argument("all")) -> None:
-    _check_agent_restart_safety(ctx, [service])
-    _run_control_command(ctx, "restart", [service])
+def restart(
+    ctx: typer.Context,
+    service: str = typer.Argument("all"),
+    wait: bool = typer.Option(
+        False,
+        "-w",
+        "--wait",
+        help="Block until the daemon finishes restarting (streams logs).",
+    ),
+) -> None:
+    _check_agent_restart_safety(ctx, [service], wait=wait)
+    _run_control_command(ctx, "restart", [service], wait=wait)
 
 
 @app.command()
@@ -165,23 +183,27 @@ def daemon_serve(ctx: typer.Context) -> None:
     serve(_ctx_home(ctx))
 
 
-def _run_control_command(ctx: typer.Context, command: str, args: list[str]) -> None:
+def _run_control_command(
+    ctx: typer.Context, command: str, args: list[str], wait: bool = False
+) -> None:
     home = _ctx_home(ctx)
     if _should_use_daemon(home):
         client = _daemon_client(home)
         if client is not None:
-            _run_via_daemon(client, command, args)
+            _run_via_daemon(client, command, args, wait=wait)
             return
 
     _run_in_process(home, command, args)
 
 
-def _run_via_daemon(client: DaemonClient, command: str, args: list[str]) -> None:
+def _run_via_daemon(
+    client: DaemonClient, command: str, args: list[str], wait: bool = False
+) -> None:
     def log(stream: str, line: str) -> None:
         typer.echo(line, err=(stream == "stderr"))
 
     try:
-        result = client.request(command, args, log=log)
+        result = client.request(command, args, log=log, wait=wait)
     except DaemonUnavailableError as exc:
         typer.echo(f"waypointd unavailable: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -242,9 +264,14 @@ def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").lower() in {"1", "true", "yes", "on"}
 
 
-def _check_agent_restart_safety(ctx: typer.Context, args: list[str]) -> None:
+def _check_agent_restart_safety(
+    ctx: typer.Context, args: list[str], wait: bool = False
+) -> None:
     home = _ctx_home(ctx)
-    if _should_use_daemon(home):
+    # In deferred daemon mode the CLI returns before the kill, so being
+    # inside the target's tree is fine. --wait puts us back on the kill
+    # path; the check is unconditional in that case.
+    if _should_use_daemon(home) and not wait:
         return
     config = load_stack_config(home)
     stack = WaypointStack(config)

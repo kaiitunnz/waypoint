@@ -85,10 +85,11 @@ import {
 const COMPLETION_REFRESH_POLL_MS = 750;
 const COMPLETION_FETCH_DEBOUNCE_MS = 180;
 
-// Baseline so the two core Waypoint actions stay visible during the
-// debounced fetch or if the request fails. Backend entries with the
-// same trigger+name override these (e.g. for per-plugin capability
-// gating).
+// `/new` is universal across every backend, so it stays visible during
+// the debounced fetch or if the request fails. `/fork` is gated on
+// per-plugin `supports_fork` capability and is left to the backend
+// response — showing it locally would surface it for tmux sessions
+// where the action would 400 on submit.
 const LOCAL_BUILTIN_FALLBACK: ReadonlyArray<CommandCompletion> = [
   {
     id: "waypoint:builtin:new",
@@ -96,17 +97,6 @@ const LOCAL_BUILTIN_FALLBACK: ReadonlyArray<CommandCompletion> = [
     replacement: "/new ",
     name: "new",
     description: "Start a new session with the same settings",
-    kind: "session_control",
-    source: "waypoint",
-    dispatch: "frontend_control",
-    metadata: {},
-  },
-  {
-    id: "waypoint:builtin:fork",
-    trigger: "/",
-    replacement: "/fork ",
-    name: "fork",
-    description: "Fork this session into a new branch",
     kind: "session_control",
     source: "waypoint",
     dispatch: "frontend_control",

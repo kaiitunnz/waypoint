@@ -3186,11 +3186,11 @@ function buildTerminalRows(
 function classifyTerminalLine(text: string): TerminalLineTone {
   const trimmed = text.trim();
   if (!trimmed) return "plain";
-  if (/^(?:[$#❯›»]|(?:╭|╮|╰|╯|│|├|└|┌|┐|┬|┴|┼))/u.test(trimmed)) {
-    return "box";
-  }
-  if (/^(?:>|\$|❯|›|»|λ)\s/.test(trimmed)) {
+  if (/^(?:[$#>❯›»λ])\s/u.test(trimmed)) {
     return "prompt";
+  }
+  if (/^[╭╮╰╯│├└┌┐┬┴┼]/u.test(trimmed)) {
+    return "box";
   }
   if (/\b(?:error|failed|fatal|panic|exception)\b/i.test(trimmed)) {
     return "error";

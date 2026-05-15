@@ -1385,6 +1385,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                   : "awaiting capture"}
               </span>
             </div>
+            {liveTmux ? (
+              <TerminalKeyBar onSend={handleTerminalInput} />
+            ) : null}
             <div className="terminal-viewport" role="log" aria-live="polite">
               <XTerminal
                 ref={terminalRef}
@@ -3233,6 +3236,40 @@ function sanitizeEvent(event: EventRecord): EventRecord {
     ...event,
     text: stripAnsi(event.text),
   };
+}
+
+// Common terminal control bytes that are awkward to type on touch
+// keyboards but routine for TUI agents. Each entry sends the literal
+// bytes to the pane via the existing input handler — Ctrl-* combinations
+// are encoded directly so the toolbar works even when the OS keyboard
+// doesn't expose a Ctrl modifier.
+const TERMINAL_KEY_BAR: { label: string; data: string; title: string }[] = [
+  { label: "Esc", data: "\x1b", title: "Escape" },
+  { label: "Tab", data: "\t", title: "Tab" },
+  { label: "↑", data: "\x1b[A", title: "Up" },
+  { label: "↓", data: "\x1b[B", title: "Down" },
+  { label: "←", data: "\x1b[D", title: "Left" },
+  { label: "→", data: "\x1b[C", title: "Right" },
+  { label: "^C", data: "\x03", title: "Ctrl-C (interrupt)" },
+];
+
+function TerminalKeyBar({ onSend }: { onSend: (data: string) => void }) {
+  return (
+    <div className="terminal-keys" role="group" aria-label="Send terminal keys">
+      {TERMINAL_KEY_BAR.map((key) => (
+        <button
+          key={key.label}
+          type="button"
+          className="terminal-key"
+          title={key.title}
+          aria-label={key.title}
+          onClick={() => onSend(key.data)}
+        >
+          {key.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function stripAnsi(text: string): string {

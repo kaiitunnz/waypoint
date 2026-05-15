@@ -1,6 +1,8 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import (
@@ -17,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from waypoint.auth import TokenStore, require_token
 from waypoint.backends import BackendRegistry
+from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     LoginRequest,
@@ -571,6 +574,106 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             pass
         finally:
             context.runtime.broadcast.unsubscribe_session(session_id, queue)
+            with suppress(Exception):
+                await websocket.close()
+
+    @app.websocket("/ws/sessions/{session_id}/terminal")
+    async def ws_terminal(websocket: WebSocket, session_id: str) -> None:
+        await websocket.accept()
+        token = websocket.query_params.get("token", "")
+        if not context.tokens.validate(token):
+            await websocket.close(code=4401)
+            return
+        try:
+            session = context.runtime.get_session(session_id)
+        except HTTPException:
+            await websocket.close(code=4404)
+            return
+        # Tmux is the only transport that gives us a live pane to mirror;
+        # structured backends already publish to the event stream and have
+        # no pty to wrap.
+        if session.transport != "tmux":
+            await websocket.close(code=4403)
+            return
+        tmux_state = session.transport_state or {}
+        pane = tmux_state.get("tmux_pane") or session.id
+        tmux_session = tmux_state.get("tmux_session") or session.id
+        adapter = context.runtime.tmux
+        raw_log_path = Path(session.raw_log_path)
+
+        # Seed the client with the current pane state so reconnects don't
+        # leave the user staring at a blank emulator. capture-pane runs
+        # cheaply and bypasses replaying the entire pipe-pane log.
+        try:
+            initial = await adapter.capture_snapshot(pane, start_line=-10000)
+            if initial:
+                await websocket.send_text(initial)
+        except TmuxError:
+            pass
+
+        tail_offset = raw_log_path.stat().st_size if raw_log_path.exists() else 0
+
+        async def stream_loop() -> None:
+            offset = tail_offset
+            while True:
+                chunk: bytes | None = None
+                try:
+                    if raw_log_path.exists():
+                        size = raw_log_path.stat().st_size
+                        if size > offset:
+                            with raw_log_path.open("rb") as fh:
+                                fh.seek(offset)
+                                chunk = fh.read(size - offset)
+                            offset = size
+                        elif size < offset:
+                            # pipe-pane was restarted or the file rotated.
+                            offset = 0
+                except OSError:
+                    break
+                if chunk:
+                    await websocket.send_text(chunk.decode("utf-8", errors="replace"))
+                await asyncio.sleep(0.05)
+
+        async def recv_loop() -> None:
+            while True:
+                message = await websocket.receive_text()
+                try:
+                    payload = json.loads(message)
+                except json.JSONDecodeError:
+                    continue
+                kind = payload.get("type")
+                if kind == "input":
+                    data = payload.get("data", "")
+                    if isinstance(data, str) and data:
+                        with suppress(TmuxError):
+                            await adapter.send_bytes(pane, data.encode("utf-8"))
+                elif kind == "resize":
+                    try:
+                        cols = int(payload.get("cols", 0))
+                        rows = int(payload.get("rows", 0))
+                    except (TypeError, ValueError):
+                        continue
+                    if cols > 0 and rows > 0:
+                        with suppress(TmuxError):
+                            await adapter.resize_window(tmux_session, cols, rows)
+
+        stream_task = asyncio.create_task(stream_loop())
+        recv_task = asyncio.create_task(recv_loop())
+        try:
+            _, pending = await asyncio.wait(
+                {stream_task, recv_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+        except (WebSocketDisconnect, asyncio.CancelledError):
+            pass
+        finally:
+            for task in (stream_task, recv_task):
+                if not task.done():
+                    task.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await task
             with suppress(Exception):
                 await websocket.close()
 

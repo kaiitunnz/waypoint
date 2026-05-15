@@ -616,6 +616,39 @@ export function connectSessionSocket(
   return attachHandlers(new WebSocket(url), { onMessage, onAuthFailure, ...extra });
 }
 
+interface TerminalSocketHandlers {
+  onChunk: (text: string) => void;
+  onAuthFailure?: () => void;
+  onOpen?: () => void;
+  onClose?: (event: CloseEvent) => void;
+}
+
+export function connectTerminalSocket(
+  host: string,
+  token: string,
+  sessionId: string,
+  handlers: TerminalSocketHandlers,
+): WebSocket {
+  const url = `${host.replace(/^http/, "ws")}/ws/sessions/${sessionId}/terminal?token=${encodeURIComponent(token)}`;
+  const socket = new WebSocket(url);
+  socket.onmessage = (event) => {
+    if (typeof event.data === "string") {
+      handlers.onChunk(event.data);
+    }
+  };
+  socket.onopen = () => {
+    handlers.onOpen?.();
+  };
+  socket.onclose = (event) => {
+    if (event.code === 4401) {
+      handlers.onAuthFailure?.();
+      return;
+    }
+    handlers.onClose?.(event);
+  };
+  return socket;
+}
+
 export function isAuthError(error: unknown): error is AuthError {
   return error instanceof AuthError;
 }

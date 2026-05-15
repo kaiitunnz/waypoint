@@ -8,7 +8,7 @@ import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
 import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
 import type { BackendCatalog } from "@/lib/backends";
 import { humaniseBackend } from "@/lib/backends";
-import { Backend, BackendModelListResponse } from "@/lib/types";
+import { Backend, BackendModelListResponse, LaunchMode } from "@/lib/types";
 
 interface ThreadSummary {
   id: string;
@@ -39,6 +39,7 @@ interface LaunchPanelProps {
     title: string,
     model: string | null,
     effort: string | null,
+    launchMode: LaunchMode,
     args: string[],
     configOverrides: string[],
   ) => Promise<void>;
@@ -73,6 +74,7 @@ export function LaunchPanel({
   const [title, setTitle] = useState("");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
+  const [launchMode, setLaunchMode] = useState<LaunchMode>("auto");
   const [customArgsText, setCustomArgsText] = useState("");
   const [configOverridesText, setConfigOverridesText] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -161,6 +163,7 @@ export function LaunchPanel({
         title,
         model.trim() || null,
         effort.trim() || null,
+        launchMode,
         args,
         configOverrides,
       );
@@ -198,6 +201,27 @@ export function LaunchPanel({
             ))}
           </select>
         </label>
+        <div className="field">
+          <span>Launch mode</span>
+          <div className="segmented segmented-quiet" role="radiogroup" aria-label="Launch mode">
+            {[
+              ["auto", "Auto"],
+              ["direct", "Direct"],
+              ["tmux_wrapper", "Via tmux wrapper"],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={launchMode === value}
+                className={`segmented-item ${launchMode === value ? "active" : ""}`}
+                onClick={() => setLaunchMode(value as LaunchMode)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         <WorkingDirectoryField
           cwd={cwd}
           onChange={setCwd}

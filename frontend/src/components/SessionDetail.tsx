@@ -8,6 +8,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -183,6 +184,7 @@ interface SessionDetailProps {
 type ViewMode = "chat" | "terminal";
 type FilterMode = "important" | "all";
 type ConnectionState = "connecting" | "open" | "reconnecting";
+type TerminalLineTone = "plain" | "prompt" | "status" | "warning" | "error" | "box";
 
 // The composer sticks to the viewport bottom; floating scroll affordances
 // read `--composer-height` to sit just above it. The fallback keeps things
@@ -967,6 +969,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const sessionExited = Boolean(
     session && (session.status === "exited" || session.status === "error"),
   );
+  const terminalOnly = session?.transport === "tmux";
   // Only structured transports can be brought back via the plugin's
   // restore_session path. Tmux has no resume contract, so the backend
   // hard-fails reattach there and the composer must follow suit.
@@ -990,6 +993,14 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const canResume = Boolean(
     session && supportsResume(session.transport) && !sessionExited,
   );
+  useEffect(() => {
+    if (terminalOnly) {
+      setView("terminal");
+    }
+  }, [terminalOnly]);
+  const activeView = terminalOnly ? "terminal" : view;
+  const terminalRows = useMemo(() => buildTerminalRows(snapshot), [snapshot]);
+  const terminalLineDigits = Math.max(2, String(Math.max(terminalRows.length, 1)).length);
   const interruptSession = useCallback(() => {
     void runAction("interrupt");
   }, [runAction]);
@@ -999,7 +1010,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
 
   return (
     <section className="stack" ref={sectionRef}>
-      {view === "chat" && showScrollToTop ? (
+      {!terminalOnly && activeView === "chat" && showScrollToTop ? (
         <div className="scroll-top-floater" aria-hidden={false}>
           <button
             type="button"
@@ -1021,27 +1032,33 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         />
       ) : null}
       <div className="session-toolbar">
-        <div className="segmented" role="tablist" aria-label="View">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "chat"}
-            className={`segmented-item ${view === "chat" ? "active" : ""}`}
-            onClick={() => setView("chat")}
-          >
-            Chat
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "terminal"}
-            className={`segmented-item ${view === "terminal" ? "active" : ""}`}
-            onClick={() => setView("terminal")}
-          >
-            Terminal
-          </button>
-        </div>
-        {view === "chat" ? (
+        {!terminalOnly ? (
+          <div className="segmented" role="tablist" aria-label="View">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeView === "chat"}
+              className={`segmented-item ${activeView === "chat" ? "active" : ""}`}
+              onClick={() => setView("chat")}
+            >
+              Chat
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeView === "terminal"}
+              className={`segmented-item ${activeView === "terminal" ? "active" : ""}`}
+              onClick={() => setView("terminal")}
+            >
+              Terminal
+            </button>
+          </div>
+        ) : (
+          <div className="segmented segmented-quiet" aria-label="View mode">
+            <span className="segmented-item active">Terminal</span>
+          </div>
+        )}
+        {!terminalOnly && activeView === "chat" ? (
           <div className="segmented segmented-quiet" role="radiogroup" aria-label="Event filter">
             <button
               type="button"
@@ -1064,7 +1081,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           </div>
         ) : null}
       </div>
-      {view === "chat" ? (
+      {!terminalOnly && activeView === "chat" ? (
         <section className="stack transcript-stack">
           {hasOlderEvents ? (
             <div className="transcript-load-older">
@@ -1165,21 +1182,157 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
             : null}
         </section>
       ) : (
-        <section className="panel terminal stack">
-          <div className="action-row">
-            <button
-              className="secondary"
-              onClick={() => void refreshSnapshot()}
-              type="button"
-              disabled={snapshotLoading}
-            >
-              {snapshotLoading ? "Refreshing…" : "Refresh"}
-            </button>
+        <section className="panel terminal terminal-shell stack">
+          <div className="terminal-shell-header">
+            <div className="terminal-shell-brand">
+              <span className="terminal-shell-mark" aria-hidden="true">
+                ▣
+              </span>
+              <div className="terminal-shell-heading">
+                <p className="terminal-shell-kicker">Terminal render</p>
+                <h3>{session ? humaniseBackend(session.backend) : "Tmux session"}</h3>
+                <p className="terminal-shell-subtitle">
+                  {terminalOnly
+                    ? "Live tmux pane captured as a terminal surface. No chat composer, no transcript reinterpretation."
+                    : "Terminal capture from the session runtime."}
+                </p>
+              </div>
+            </div>
+            <div className="terminal-shell-badges" aria-label="Session metadata">
+              {session ? (
+                <>
+                  <span className="terminal-pill">{transportLabel(session.transport, catalog)}</span>
+                  <span className="terminal-pill">{fidelityFor(session.transport, catalog)}</span>
+                  <span className="terminal-pill">{session.status}</span>
+                  <span className="terminal-pill terminal-pill-accent">{session.cwd}</span>
+                </>
+              ) : (
+                <span className="terminal-pill">Waiting for session</span>
+              )}
+            </div>
           </div>
-          <pre>{snapshot || (snapshotLoading ? "Loading…" : "No terminal output yet.")}</pre>
+          <div className="terminal-shell-note">
+            <div>
+              <span className="terminal-shell-note-label">Mode</span>
+              <p>Terminal-only, optimized for TUI-driven agents such as Claude Code, Codex, and OpenCode.</p>
+            </div>
+            <div className="terminal-shell-note-meta">
+              <span className="terminal-shell-note-label">Updated</span>
+              <span>{session ? (snapshotLoading ? "refreshing" : formatRelativeTime(session.updated_at)) : "waiting"}</span>
+            </div>
+          </div>
+          <div className="terminal-shell-actions">
+            <div className="action-row terminal-action-row">
+              <button
+                className="secondary"
+                onClick={() => void refreshSnapshot()}
+                type="button"
+                disabled={snapshotLoading}
+              >
+                {snapshotLoading ? "Refreshing…" : "Refresh"}
+              </button>
+              {session && !sessionExited ? (
+                <button
+                  className="secondary"
+                  onClick={() => void interruptSession()}
+                  type="button"
+                >
+                  Interrupt
+                </button>
+              ) : null}
+              {canResume ? (
+                <button
+                  className="secondary"
+                  onClick={() => void resumeSession()}
+                  type="button"
+                >
+                  Resume
+                </button>
+              ) : null}
+              {dormantReattach ? (
+                <button
+                  className="secondary"
+                  onClick={() => void reattach()}
+                  type="button"
+                >
+                  Reconnect session
+                </button>
+              ) : null}
+              {session && !sessionExited ? (
+                <button
+                  className="secondary danger"
+                  onClick={() => void terminate()}
+                  type="button"
+                >
+                  Terminate
+                </button>
+              ) : null}
+              {sessionExited ? (
+                <button
+                  className="secondary danger"
+                  onClick={() => void removeFromList()}
+                  type="button"
+                >
+                  Delete transcript
+                </button>
+              ) : null}
+            </div>
+            <p className="terminal-shell-note terminal-shell-note-quiet">
+              Read-only terminal rendering. The output is intentionally not collapsed into chat bubbles.
+            </p>
+          </div>
+          <div className="terminal-frame">
+            <div className="terminal-frame-topline">
+              <span className="terminal-frame-title">
+                {session ? `${session.backend} · ${session.transport}` : "tmux"}
+              </span>
+              <span className="terminal-frame-meta">
+                {session
+                  ? snapshotLoading
+                    ? "refreshing capture"
+                    : formatRelativeTime(session.updated_at)
+                  : "awaiting capture"}
+              </span>
+            </div>
+            <div className="terminal-viewport" role="log" aria-live="polite">
+              {terminalRows.length > 0 ? (
+                <div className="terminal-lines">
+                  {terminalRows.map((row) => (
+                    <div
+                      key={row.number}
+                      className={`terminal-row terminal-row-${row.tone}`}
+                    >
+                      <span className="terminal-row-number">
+                        {String(row.number).padStart(terminalLineDigits, "0")}
+                      </span>
+                      <span className="terminal-row-text">{row.text || "\u00a0"}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="terminal-empty-state">
+                  <div className="terminal-empty-state-header">
+                    <span className="terminal-empty-dot" aria-hidden="true" />
+                    <p>{snapshotLoading ? "Capturing terminal output…" : "No terminal output yet."}</p>
+                  </div>
+                  <p className="terminal-empty-state-sub">
+                    The pane will appear here once the backend emits a screen worth rendering.
+                  </p>
+                  <div className="terminal-empty-state-grid" aria-hidden="true">
+                    <span>$</span>
+                    <span>tui capture active</span>
+                    <span>╭</span>
+                    <span>status rail waiting</span>
+                    <span>▣</span>
+                    <span>pane mirror ready</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </section>
       )}
-      {pendingApproval ? (
+      {!terminalOnly && pendingApproval ? (
         <>
           {approvalCount > 1 ? (
             <div className="approval-pager">
@@ -1213,7 +1366,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           />
         </>
       ) : null}
-      {!pendingApproval && pendingPlanApprovalView ? (
+      {!terminalOnly && !pendingApproval && pendingPlanApprovalView ? (
         <PlanApprovalCard
           agentLabel={session ? humaniseBackend(session.backend) : "Codex"}
           canApprove
@@ -1224,7 +1377,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           plan={pendingPlanApprovalView.text}
         />
       ) : null}
-      {view === "chat" && showScrollToBottom ? (
+      {!terminalOnly && activeView === "chat" && showScrollToBottom ? (
         <div className="scroll-latest-floater" aria-hidden={false}>
           <button
             type="button"
@@ -1250,67 +1403,69 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           </button>
         </div>
       ) : null}
-      <ReplyComposer
-        host={host}
-        token={token}
-        sessionId={sessionId}
-        session={session}
-        permissionModeOptions={
-          session ? permissionModesFor(session.backend, catalog) : []
-        }
-        canDelete={sessionExited}
-        canResume={canResume}
-        canReattach={dormantReattach}
-        canTerminate={Boolean(session && !sessionExited)}
-        connection={connection}
-        disabled={composerDisabled}
-        rateLimitRefreshBusy={rateLimitRefreshBusy}
-        dormant={dormantReattach}
-        placeholder={composerPlaceholder}
-        agentBusy={agentBusy}
-        modeBusy={modeBusy}
-        modelBusy={modelBusy}
-        modelOptions={modelOptions}
-        defaultModelId={defaultModelId}
-        defaultModelLabel={defaultModelLabel}
-        defaultEffort={defaultEffort}
-        currentModel={session?.model ?? null}
-        currentEffort={session?.effort ?? null}
-        effortBusy={effortBusy}
-        permissionMode={session?.permission_mode ?? null}
-        transport={session?.transport ?? null}
-        effortRequiresConfirm={
-          // The plugin advertises "effort swap requires a restart"
-          // (Claude does, Codex doesn't) and we surface the confirm
-          // step accordingly. Falls back to false until the catalog
-          // hydrates so a fresh load doesn't gate the picker.
-          Boolean(
-            session &&
-              catalog
-                .byId(session.backend)
-                ?.capabilities.supports_set_effort_with_restart,
-          )
-        }
-        hasToolRuns={hasToolRuns}
-        toolRunsExpanded={toolRunsExpanded}
-        onToggleToolRuns={() => {
-          const next = !toolRunsExpanded;
-          document.querySelectorAll<HTMLDetailsElement>("details.tool-call-run").forEach((el) => { el.open = next; });
-          setToolRunsExpanded(next);
-        }}
-        onDelete={removeFromList}
-        onInterrupt={interruptSession}
-        onModeChange={handlePermissionModeChange}
-        onModelChange={handleModelChange}
-        onEffortChange={handleEffortChange}
-        onRefresh={refresh}
-        onRateLimitRefresh={handleRateLimitRefresh}
-        onReattach={reattach}
-        onResume={resumeSession}
-        onSwitchSession={openSwitcher}
-        onSend={onSendWithOptimistic}
-        onTerminate={terminate}
-      />
+      {!terminalOnly ? (
+        <ReplyComposer
+          host={host}
+          token={token}
+          sessionId={sessionId}
+          session={session}
+          permissionModeOptions={
+            session ? permissionModesFor(session.backend, catalog) : []
+          }
+          canDelete={sessionExited}
+          canResume={canResume}
+          canReattach={dormantReattach}
+          canTerminate={Boolean(session && !sessionExited)}
+          connection={connection}
+          disabled={composerDisabled}
+          rateLimitRefreshBusy={rateLimitRefreshBusy}
+          dormant={dormantReattach}
+          placeholder={composerPlaceholder}
+          agentBusy={agentBusy}
+          modeBusy={modeBusy}
+          modelBusy={modelBusy}
+          modelOptions={modelOptions}
+          defaultModelId={defaultModelId}
+          defaultModelLabel={defaultModelLabel}
+          defaultEffort={defaultEffort}
+          currentModel={session?.model ?? null}
+          currentEffort={session?.effort ?? null}
+          effortBusy={effortBusy}
+          permissionMode={session?.permission_mode ?? null}
+          transport={session?.transport ?? null}
+          effortRequiresConfirm={
+            // The plugin advertises "effort swap requires a restart"
+            // (Claude does, Codex doesn't) and we surface the confirm
+            // step accordingly. Falls back to false until the catalog
+            // hydrates so a fresh load doesn't gate the picker.
+            Boolean(
+              session &&
+                catalog
+                  .byId(session.backend)
+                  ?.capabilities.supports_set_effort_with_restart,
+            )
+          }
+          hasToolRuns={hasToolRuns}
+          toolRunsExpanded={toolRunsExpanded}
+          onToggleToolRuns={() => {
+            const next = !toolRunsExpanded;
+            document.querySelectorAll<HTMLDetailsElement>("details.tool-call-run").forEach((el) => { el.open = next; });
+            setToolRunsExpanded(next);
+          }}
+          onDelete={removeFromList}
+          onInterrupt={interruptSession}
+          onModeChange={handlePermissionModeChange}
+          onModelChange={handleModelChange}
+          onEffortChange={handleEffortChange}
+          onRefresh={refresh}
+          onRateLimitRefresh={handleRateLimitRefresh}
+          onReattach={reattach}
+          onResume={resumeSession}
+          onSwitchSession={openSwitcher}
+          onSend={onSendWithOptimistic}
+          onTerminate={terminate}
+        />
+      ) : null}
     </section>
   );
 }
@@ -3013,6 +3168,40 @@ function sanitizeEvent(event: EventRecord): EventRecord {
     ...event,
     text: stripAnsi(event.text),
   };
+}
+
+function buildTerminalRows(
+  snapshot: string,
+): { number: number; text: string; tone: TerminalLineTone }[] {
+  if (!snapshot) {
+    return [];
+  }
+  return snapshot.split(/\r?\n/).map((text, index) => ({
+    number: index + 1,
+    text,
+    tone: classifyTerminalLine(text),
+  }));
+}
+
+function classifyTerminalLine(text: string): TerminalLineTone {
+  const trimmed = text.trim();
+  if (!trimmed) return "plain";
+  if (/^(?:[$#❯›»]|(?:╭|╮|╰|╯|│|├|└|┌|┐|┬|┴|┼))/u.test(trimmed)) {
+    return "box";
+  }
+  if (/^(?:>|\$|❯|›|»|λ)\s/.test(trimmed)) {
+    return "prompt";
+  }
+  if (/\b(?:error|failed|fatal|panic|exception)\b/i.test(trimmed)) {
+    return "error";
+  }
+  if (/\b(?:warn|warning|caution|deprecated)\b/i.test(trimmed)) {
+    return "warning";
+  }
+  if (/\b(?:ready|running|complete|done|success|ok)\b/i.test(trimmed)) {
+    return "status";
+  }
+  return "plain";
 }
 
 function stripAnsi(text: string): string {

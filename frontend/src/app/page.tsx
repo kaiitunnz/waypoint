@@ -31,7 +31,6 @@ import {
   setSessionPinned,
   setSessionTitle,
 } from "@/lib/api";
-import { useBackendCatalog } from "@/lib/backends";
 import {
   clearToken,
   mergeRecentCwds,
@@ -44,10 +43,12 @@ import {
   writeLaunchTarget,
   writeToken,
 } from "@/lib/store";
+import { isManagedLaunchWrapper, useBackendCatalog } from "@/lib/backends";
 import {
   Backend,
   BackendDescriptor,
   LaunchTargetSummary,
+  LaunchMode,
   ScheduleCreateRequest,
   ScheduledSession,
   SessionEnvelope,
@@ -147,9 +148,12 @@ export default function HomePage() {
   const supportedBackends = activeLaunchTarget?.supported_backends.length
     ? activeLaunchTarget.supported_backends
     : registeredBackends;
-  const effectiveDefaultBackend = supportedBackends.includes(activeLaunchTarget?.default_backend ?? defaultBackend)
+  const launchableBackends = supportedBackends.filter(
+    (id) => !isManagedLaunchWrapper(id, catalog),
+  );
+  const effectiveDefaultBackend = launchableBackends.includes(activeLaunchTarget?.default_backend ?? defaultBackend)
     ? (activeLaunchTarget?.default_backend ?? defaultBackend)
-    : supportedBackends[0];
+    : launchableBackends[0] ?? supportedBackends[0];
   const effectiveDefaultCwd = activeLaunchTarget?.default_cwd ?? defaultCwd;
 
   useEffect(() => {
@@ -268,11 +272,11 @@ export default function HomePage() {
   // active launch target (or all registered backends when launching
   // locally). Computed via JSON for stable dep keys so the effect does
   // not retrigger on identity-only changes.
-  const discoveryBackends = supportedBackends.filter((id) => {
+  const discoveryBackends = launchableBackends.filter((id) => {
     const caps = catalog.byId(id)?.capabilities;
     // Default to True so a fresh page load (catalog not yet hydrated)
     // tries the call rather than silently skipping the per-backend
-    // fetch — the dispatcher returns 400 cheaply for tmux either way.
+    // fetch.
     return caps?.supports_thread_discovery ?? true;
   });
   const discoveryBackendsKey = JSON.stringify(discoveryBackends);
@@ -367,6 +371,7 @@ export default function HomePage() {
     title: string,
     model: string | null,
     effort: string | null,
+    launchMode: LaunchMode,
     args: string[] = [],
     configOverrides: string[] = [],
   ) {
@@ -375,6 +380,7 @@ export default function HomePage() {
         backend,
         cwd,
         launch_target_id: activeLaunchTargetId || null,
+        launch_mode: launchMode,
         title: title || null,
         source_mode: "managed",
         args,
@@ -716,7 +722,7 @@ export default function HomePage() {
           targetLabel={activeLaunchTarget?.name ?? null}
           launchTargetId={activeLaunchTargetId || null}
           recentCwds={recentCwds}
-          supportedBackends={supportedBackends}
+          supportedBackends={launchableBackends}
           catalog={catalog}
           threadsByBackend={threadsByBackend}
           loadingByBackend={loadingByBackend}
@@ -735,7 +741,7 @@ export default function HomePage() {
           targetLabel={activeLaunchTarget?.name ?? null}
           launchTargetId={activeLaunchTargetId || null}
           recentCwds={recentCwds}
-          supportedBackends={supportedBackends}
+          supportedBackends={launchableBackends}
           catalog={catalog}
           schedules={schedules}
           onCreate={handleCreateSchedule}

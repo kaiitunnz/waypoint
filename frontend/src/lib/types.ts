@@ -5,6 +5,7 @@
 export type Backend = string;
 export type SessionTransport = string;
 export type SessionSource = "managed" | "attached_tmux";
+export type LaunchMode = "auto" | "direct" | "tmux_wrapper";
 export type SessionStatus =
   | "starting"
   | "idle"
@@ -171,6 +172,7 @@ export interface BackendCapabilities {
   slash_commands: BackendSlashCommand[];
   cli_binary?: string | null;
   target_aliases: string[];
+  is_fallback_for_managed_launch: boolean;
 }
 
 export interface BackendDescriptor {
@@ -210,6 +212,7 @@ export interface ScheduledSession {
   backend: Backend;
   cwd: string;
   launch_target_id?: string | null;
+  launch_mode: LaunchMode;
   title?: string | null;
   args: string[];
   config_overrides?: string[];
@@ -228,6 +231,7 @@ export interface ScheduleCreateRequest {
   backend: Backend;
   cwd: string;
   launch_target_id?: string | null;
+  launch_mode?: LaunchMode;
   title?: string | null;
   args?: string[];
   config_overrides?: string[];

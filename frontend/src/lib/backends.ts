@@ -151,6 +151,16 @@ export function supportsApprovalNote(
   return caps ? caps.supports_approval_note : FALLBACK_APPROVAL_NOTE.has(backend);
 }
 
+export function isManagedLaunchWrapper(
+  backend: Backend,
+  catalog?: BackendCatalog,
+): boolean {
+  const caps = catalog?.byId(backend)?.capabilities;
+  return caps
+    ? Boolean(caps.is_fallback_for_managed_launch)
+    : backend === "tmux";
+}
+
 export function supportsPlanApproval(
   backend: Backend,
   catalog?: BackendCatalog,

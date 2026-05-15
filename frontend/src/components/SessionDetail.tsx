@@ -17,6 +17,7 @@ import {
   approvePlan,
   approveSession,
   connectSessionSocket,
+  connectTerminalSocket,
   createSession,
   deleteSession as deleteSessionRequest,
   fetchBackendModels,
@@ -999,21 +1000,96 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }, [terminalOnly]);
   const activeView = terminalOnly ? "terminal" : view;
+  const liveTmux = session?.transport === "tmux";
   const { theme } = useTheme();
   const terminalRef = useRef<XTerminalHandle | null>(null);
-  // Push the latest snapshot to xterm whenever it changes (or when the
-  // terminal tab mounts). Reset clears the scrollback first so each refresh
-  // is a clean replay rather than an append; Phase 2's WebSocket stream
-  // will replace this with delta writes.
+  const terminalSocketRef = useRef<WebSocket | null>(null);
+  // Push the latest REST snapshot to xterm whenever it changes (or when the
+  // terminal tab mounts). For tmux sessions the WebSocket below seeds and
+  // streams the pane directly, so skip the REST replay to avoid duplicating
+  // content.
   useEffect(() => {
     if (activeView !== "terminal") return;
+    if (liveTmux) return;
     const term = terminalRef.current;
     if (!term) return;
     term.reset();
     if (snapshot) {
       term.write(snapshot);
     }
-  }, [activeView, snapshot]);
+  }, [activeView, snapshot, liveTmux]);
+
+  // Live tmux pane: connect a WebSocket, write streamed bytes into xterm,
+  // forward keystrokes and viewport-resize back to the pane. Reconnects with
+  // capped exponential backoff on transient drops.
+  useEffect(() => {
+    if (activeView !== "terminal") return;
+    if (!liveTmux || !session) return;
+    let active = true;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+
+    function connect() {
+      const term = terminalRef.current;
+      if (term) {
+        term.reset();
+      }
+      socket = connectTerminalSocket(host, token, sessionId, {
+        onOpen: () => {
+          attempt = 0;
+          // Push the current viewport size so tmux resizes the pane to
+          // match — otherwise xterm renders the seed at whatever pane size
+          // the agent last used.
+          const cols = term?.cols();
+          const rows = term?.rows();
+          if (cols && rows && socket?.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: "resize", cols, rows }));
+          }
+        },
+        onChunk: (text) => {
+          terminalRef.current?.write(text);
+        },
+        onAuthFailure: () => {
+          handleAuthFailure();
+        },
+        onClose: () => {
+          if (!active) return;
+          const delay = Math.min(RECONNECT_BASE_MS * 2 ** attempt, RECONNECT_MAX_MS);
+          attempt += 1;
+          reconnectTimer = setTimeout(() => {
+            if (active) connect();
+          }, delay);
+        },
+      });
+      terminalSocketRef.current = socket;
+    }
+
+    connect();
+    return () => {
+      active = false;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      socket?.close();
+      terminalSocketRef.current = null;
+    };
+  }, [activeView, liveTmux, host, token, sessionId, session, handleAuthFailure]);
+
+  const handleTerminalInput = useCallback((data: string) => {
+    const socket = terminalSocketRef.current;
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "input", data }));
+    }
+  }, []);
+
+  const handleTerminalResize = useCallback(
+    ({ cols, rows }: { cols: number; rows: number }) => {
+      const socket = terminalSocketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "resize", cols, rows }));
+      }
+    },
+    [],
+  );
   const interruptSession = useCallback(() => {
     void runAction("interrupt");
   }, [runAction]);
@@ -1205,8 +1281,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                 <p className="terminal-shell-kicker">Terminal render</p>
                 <h3>{session ? humaniseBackend(session.backend) : "Tmux session"}</h3>
                 <p className="terminal-shell-subtitle">
-                  {terminalOnly
-                    ? "Live tmux pane captured as a terminal surface. No chat composer, no transcript reinterpretation."
+                  {liveTmux
+                    ? "Live tmux pane — colors, cursor moves, and keystrokes all stream both ways. The composer is hidden because the terminal is the composer."
                     : "Terminal capture from the session runtime."}
                 </p>
               </div>
@@ -1291,7 +1367,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
               ) : null}
             </div>
             <p className="terminal-shell-note terminal-shell-note-quiet">
-              Read-only terminal rendering. The output is intentionally not collapsed into chat bubbles.
+              {liveTmux
+                ? "Type directly into the terminal. Keystrokes, arrows, and Ctrl combinations stream to the pane; the pane streams back live."
+                : "Read-only terminal rendering. The output is intentionally not collapsed into chat bubbles."}
             </p>
           </div>
           <div className="terminal-frame">
@@ -1308,7 +1386,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
               </span>
             </div>
             <div className="terminal-viewport" role="log" aria-live="polite">
-              <XTerminal ref={terminalRef} theme={theme} readOnly />
+              <XTerminal
+                ref={terminalRef}
+                theme={theme}
+                readOnly={!liveTmux}
+                onData={liveTmux ? handleTerminalInput : undefined}
+                onResize={liveTmux ? handleTerminalResize : undefined}
+              />
             </div>
           </div>
         </section>

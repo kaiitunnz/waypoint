@@ -145,6 +145,7 @@ class Storage:
                 backend TEXT NOT NULL,
                 cwd TEXT NOT NULL,
                 launch_target_id TEXT,
+                launch_mode TEXT NOT NULL DEFAULT 'auto',
                 title TEXT,
                 args TEXT NOT NULL DEFAULT '[]',
                 config_overrides TEXT NOT NULL DEFAULT '[]',
@@ -160,6 +161,9 @@ class Storage:
         self._ensure_column("scheduled_sessions", "permission_mode", "TEXT")
         self._ensure_column("scheduled_sessions", "model", "TEXT")
         self._ensure_column("scheduled_sessions", "effort", "TEXT")
+        self._ensure_column(
+            "scheduled_sessions", "launch_mode", "TEXT NOT NULL DEFAULT 'auto'"
+        )
         self._ensure_column("sessions", "args", "TEXT NOT NULL DEFAULT '[]'")
         self._ensure_column(
             "sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
@@ -490,16 +494,17 @@ class Storage:
         self.connection.execute(
             """
             INSERT INTO scheduled_sessions (
-                id, backend, cwd, launch_target_id, title, args, config_overrides,
+                id, backend, cwd, launch_target_id, launch_mode, title, args, config_overrides,
                 initial_prompt, permission_mode, model, effort, scheduled_at, created_at, status,
                 session_id, failure_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 schedule.id,
                 schedule.backend,
                 schedule.cwd,
                 schedule.launch_target_id,
+                schedule.launch_mode,
                 schedule.title,
                 json.dumps(list(schedule.args)),
                 json.dumps(list(schedule.config_overrides)),
@@ -649,6 +654,7 @@ class Storage:
         for field_name in ("scheduled_at", "created_at"):
             payload[field_name] = datetime.fromisoformat(payload[field_name])
         payload["status"] = ScheduleStatus(payload.get("status", "pending"))
+        payload["launch_mode"] = payload.get("launch_mode") or "auto"
         raw_args = payload.get("args") or "[]"
         try:
             parsed_args = json.loads(raw_args)

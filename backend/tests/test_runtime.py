@@ -1,9 +1,11 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from fastapi import HTTPException
 
 from waypoint.backends.claude_code.permission_modes import CLAUDE_AUTO_APPROVE_MODES
 from waypoint.backends.claude_code.schemas import ClaudeThreadImportRequest
@@ -19,6 +21,7 @@ from waypoint.schemas import (
     CompletionDispatch,
     EventKind,
     EventRecord,
+    LaunchMode,
     SessionApprovalRequest,
     SessionCreateRequest,
     SessionInputRequest,
@@ -988,8 +991,6 @@ async def test_reattach_terminates_before_restoring_codex(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_handle_input_rejects_reattach_for_tmux_session(tmp_path) -> None:
-    from fastapi import HTTPException
-
     runtime, storage, settings = make_runtime(tmp_path)
     session = make_session(
         settings,
@@ -1466,6 +1467,218 @@ async def test_create_session_uses_structured_claude_for_ssh_target(
             None,
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_create_session_direct_mode_uses_requested_backend(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    codex = runtime.registry.get("codex")
+    tmux = runtime.registry.fallback_for_managed_launch()
+    assert tmux is not None
+    create_calls: list[tuple[str, LaunchMode]] = []
+
+    async def fake_codex_create_session(
+        _runtime: SessionRuntime,
+        request: SessionCreateRequest,
+        *,
+        session_id: str,
+        launch_target: Any,
+        title: str,
+        raw_log: Any,
+        structured_log: Any,
+        git_meta: Any,
+        permission_mode: str | None,
+        resolved_model: str | None,
+        resolved_effort: str | None,
+    ) -> SessionRecord:
+        create_calls.append((session_id, request.launch_mode))
+        session = make_session(
+            settings,
+            id=session_id,
+            backend=request.backend,
+            transport="codex_app_server",
+            thread_id="thread-direct",
+        )
+        session.cwd = request.cwd
+        session.title = title
+        storage.create_session(session)
+        return session
+
+    monkeypatch.setattr(codex, "create_session", fake_codex_create_session)
+    monkeypatch.setattr(
+        codex,
+        "is_available_for_managed_launch",
+        lambda _runtime: True,
+    )
+    monkeypatch.setattr(
+        tmux,
+        "create_session",
+        lambda *args, **kwargs: pytest.fail("tmux fallback should not be used"),
+    )
+    monkeypatch.setattr(
+        runtime, "_warm_command_completions", lambda *_args, **_kwargs: None
+    )
+
+    session = await runtime.create_session(
+        SessionCreateRequest(
+            backend="codex",
+            cwd="~/workspace",
+            launch_mode=LaunchMode.DIRECT,
+            title="Direct launch",
+            args=[],
+            source_mode=SessionSource.MANAGED,
+        )
+    )
+
+    assert create_calls == [(session.id, LaunchMode.DIRECT)]
+    assert session.backend == "codex"
+    assert session.transport == "codex_app_server"
+    assert session.cwd == str(Path.home() / "workspace")
+
+
+@pytest.mark.asyncio
+async def test_create_session_tmux_wrapper_mode_routes_through_tmux(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    codex = runtime.registry.get("codex")
+    tmux = runtime.registry.fallback_for_managed_launch()
+    assert tmux is not None
+    create_calls: list[tuple[str, str]] = []
+
+    async def fake_tmux_create_session(
+        _runtime: SessionRuntime,
+        request: SessionCreateRequest,
+        *,
+        session_id: str,
+        launch_target: Any,
+        title: str,
+        raw_log: Any,
+        structured_log: Any,
+        git_meta: Any,
+        permission_mode: str | None,
+        resolved_model: str | None,
+        resolved_effort: str | None,
+    ) -> SessionRecord:
+        create_calls.append((session_id, request.backend))
+        session = make_session(
+            settings,
+            id=session_id,
+            backend=request.backend,
+            transport="tmux",
+        )
+        session.cwd = request.cwd
+        session.title = title
+        storage.create_session(session)
+        return session
+
+    monkeypatch.setattr(tmux, "create_session", fake_tmux_create_session)
+    monkeypatch.setattr(
+        codex,
+        "create_session",
+        lambda *args, **kwargs: pytest.fail("codex backend should not be used"),
+    )
+    monkeypatch.setattr(
+        runtime, "_warm_command_completions", lambda *_args, **_kwargs: None
+    )
+
+    session = await runtime.create_session(
+        SessionCreateRequest(
+            backend="codex",
+            cwd="~/workspace",
+            launch_mode=LaunchMode.TMUX_WRAPPER,
+            title="Wrapper launch",
+            args=[],
+            source_mode=SessionSource.MANAGED,
+        )
+    )
+
+    assert create_calls == [(session.id, "codex")]
+    assert session.backend == "codex"
+    assert session.transport == "tmux"
+    assert session.cwd == str(Path.home() / "workspace")
+
+
+@pytest.mark.asyncio
+async def test_create_session_auto_mode_falls_back_to_tmux_when_backend_unavailable(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    codex = runtime.registry.get("codex")
+    tmux = runtime.registry.fallback_for_managed_launch()
+    assert tmux is not None
+    create_calls: list[tuple[str, str]] = []
+
+    async def fake_tmux_create_session(
+        _runtime: SessionRuntime,
+        request: SessionCreateRequest,
+        *,
+        session_id: str,
+        launch_target: Any,
+        title: str,
+        raw_log: Any,
+        structured_log: Any,
+        git_meta: Any,
+        permission_mode: str | None,
+        resolved_model: str | None,
+        resolved_effort: str | None,
+    ) -> SessionRecord:
+        create_calls.append((session_id, request.backend))
+        session = make_session(
+            settings,
+            id=session_id,
+            backend=request.backend,
+            transport="tmux",
+        )
+        session.cwd = request.cwd
+        session.title = title
+        storage.create_session(session)
+        return session
+
+    monkeypatch.setattr(
+        codex,
+        "create_session",
+        lambda *args, **kwargs: pytest.fail("codex backend should not be used"),
+    )
+    monkeypatch.setattr(
+        codex, "is_available_for_managed_launch", lambda _runtime: False
+    )
+    monkeypatch.setattr(tmux, "create_session", fake_tmux_create_session)
+    monkeypatch.setattr(
+        runtime, "_warm_command_completions", lambda *_args, **_kwargs: None
+    )
+
+    session = await runtime.create_session(
+        SessionCreateRequest(
+            backend="codex",
+            cwd="~/workspace",
+            title="Auto fallback",
+            args=[],
+            source_mode=SessionSource.MANAGED,
+        )
+    )
+
+    assert create_calls == [(session.id, "codex")]
+    assert session.transport == "tmux"
+
+
+@pytest.mark.asyncio
+async def test_create_session_rejects_tmux_backend(tmp_path) -> None:
+    runtime, _, _ = make_runtime(tmp_path)
+    with pytest.raises(HTTPException) as exc:
+        await runtime.create_session(
+            SessionCreateRequest(
+                backend="tmux",
+                cwd="~/workspace",
+                title="Invalid",
+                args=[],
+                source_mode=SessionSource.MANAGED,
+            )
+        )
+
+    assert exc.value.status_code == 400
 
 
 @pytest.mark.asyncio

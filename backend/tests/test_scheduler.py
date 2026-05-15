@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
+    LaunchMode,
     ScheduleCreateRequest,
     ScheduleStatus,
     SessionRecord,
@@ -53,6 +54,7 @@ async def test_create_schedule_with_delay_persists_pending(tmp_path) -> None:
             cwd="/tmp/project",
             initial_prompt="hello",
             delay_seconds=60,
+            launch_mode=LaunchMode.TMUX_WRAPPER,
         )
     )
     assert schedule.status == ScheduleStatus.PENDING
@@ -60,6 +62,7 @@ async def test_create_schedule_with_delay_persists_pending(tmp_path) -> None:
     stored = runtime.storage.list_schedules()
     assert [item.id for item in stored] == [schedule.id]
     assert stored[0].initial_prompt == "hello"
+    assert stored[0].launch_mode == LaunchMode.TMUX_WRAPPER
 
 
 @pytest.mark.asyncio
@@ -252,3 +255,32 @@ async def test_fire_passes_permission_mode_to_create_session(
     await runtime.scheduler._fire_due_schedules()
 
     assert captured == ["acceptEdits"]
+
+
+@pytest.mark.asyncio
+async def test_fire_passes_launch_mode_to_create_session(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    schedule = runtime.scheduler.create_schedule(
+        ScheduleCreateRequest(
+            backend="codex",
+            cwd="/tmp/project",
+            launch_mode=LaunchMode.TMUX_WRAPPER,
+            delay_seconds=0,
+        )
+    )
+    runtime.storage.update_schedule(
+        schedule.id, scheduled_at=datetime.now(UTC) - timedelta(seconds=1)
+    )
+    created_session = make_session(runtime.settings, "codex-aaaaaaaa")
+    runtime.storage.create_session(created_session)
+    captured: list[LaunchMode] = []
+
+    async def fake_create_session(request) -> SessionRecord:
+        captured.append(request.launch_mode)
+        return created_session
+
+    monkeypatch.setattr(runtime, "create_session", fake_create_session)
+
+    await runtime.scheduler._fire_due_schedules()
+
+    assert captured == [LaunchMode.TMUX_WRAPPER]

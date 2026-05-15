@@ -88,5 +88,7 @@ class TmuxTransport(TransportAdapter):
         raw_log_path = Path(session.raw_log_path)
         if not raw_log_path.exists():
             return ""
-        snapshot = raw_log_path.read_text(encoding="utf-8", errors="ignore")
-        return self._runtime.normalizer.clean(snapshot)
+        # Return the pipe-pane bytes verbatim — ANSI sequences included —
+        # so the frontend's terminal emulator can render colors, cursor
+        # moves, and alternate-screen redraws produced by the agent's TUI.
+        return raw_log_path.read_text(encoding="utf-8", errors="ignore")

@@ -8,7 +8,6 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -54,6 +53,8 @@ import {
   type PlanDecision,
   type PlanViewModel,
 } from "@/lib/events";
+import { useTheme } from "@/lib/theme";
+import { XTerminal, type XTerminalHandle } from "@/components/XTerminal";
 import { ApprovalRequestCard, PlanApprovalCard } from "@/components/ApprovalCard";
 import {
   PendingUserInputCard,
@@ -184,7 +185,6 @@ interface SessionDetailProps {
 type ViewMode = "chat" | "terminal";
 type FilterMode = "important" | "all";
 type ConnectionState = "connecting" | "open" | "reconnecting";
-type TerminalLineTone = "plain" | "prompt" | "status" | "warning" | "error" | "box";
 
 // The composer sticks to the viewport bottom; floating scroll affordances
 // read `--composer-height` to sit just above it. The fallback keeps things
@@ -252,7 +252,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     setSnapshotLoading(true);
     try {
       const text = await fetchTerminalSnapshot(host, token, sessionId);
-      setSnapshot(stripAnsi(text));
+      setSnapshot(text);
     } catch (snapshotError) {
       if (isAuthError(snapshotError)) {
         handleAuthFailure();
@@ -543,7 +543,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         setEvents(coalesced);
         setHasOlderEvents(loadedPage.has_more);
         setOldestRawSequence(minRawSequence(sanitized));
-        setSnapshot(stripAnsi(loadedSnapshot));
+        setSnapshot(loadedSnapshot);
       } catch (loadError) {
         if (active) {
           if (isAuthError(loadError)) {
@@ -999,8 +999,21 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }, [terminalOnly]);
   const activeView = terminalOnly ? "terminal" : view;
-  const terminalRows = useMemo(() => buildTerminalRows(snapshot), [snapshot]);
-  const terminalLineDigits = Math.max(2, String(Math.max(terminalRows.length, 1)).length);
+  const { theme } = useTheme();
+  const terminalRef = useRef<XTerminalHandle | null>(null);
+  // Push the latest snapshot to xterm whenever it changes (or when the
+  // terminal tab mounts). Reset clears the scrollback first so each refresh
+  // is a clean replay rather than an append; Phase 2's WebSocket stream
+  // will replace this with delta writes.
+  useEffect(() => {
+    if (activeView !== "terminal") return;
+    const term = terminalRef.current;
+    if (!term) return;
+    term.reset();
+    if (snapshot) {
+      term.write(snapshot);
+    }
+  }, [activeView, snapshot]);
   const interruptSession = useCallback(() => {
     void runAction("interrupt");
   }, [runAction]);
@@ -1295,39 +1308,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
               </span>
             </div>
             <div className="terminal-viewport" role="log" aria-live="polite">
-              {terminalRows.length > 0 ? (
-                <div className="terminal-lines">
-                  {terminalRows.map((row) => (
-                    <div
-                      key={row.number}
-                      className={`terminal-row terminal-row-${row.tone}`}
-                    >
-                      <span className="terminal-row-number">
-                        {String(row.number).padStart(terminalLineDigits, "0")}
-                      </span>
-                      <span className="terminal-row-text">{row.text || "\u00a0"}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="terminal-empty-state">
-                  <div className="terminal-empty-state-header">
-                    <span className="terminal-empty-dot" aria-hidden="true" />
-                    <p>{snapshotLoading ? "Capturing terminal output…" : "No terminal output yet."}</p>
-                  </div>
-                  <p className="terminal-empty-state-sub">
-                    The pane will appear here once the backend emits a screen worth rendering.
-                  </p>
-                  <div className="terminal-empty-state-grid" aria-hidden="true">
-                    <span>$</span>
-                    <span>tui capture active</span>
-                    <span>╭</span>
-                    <span>status rail waiting</span>
-                    <span>▣</span>
-                    <span>pane mirror ready</span>
-                  </div>
-                </div>
-              )}
+              <XTerminal ref={terminalRef} theme={theme} readOnly />
             </div>
           </div>
         </section>
@@ -3168,40 +3149,6 @@ function sanitizeEvent(event: EventRecord): EventRecord {
     ...event,
     text: stripAnsi(event.text),
   };
-}
-
-function buildTerminalRows(
-  snapshot: string,
-): { number: number; text: string; tone: TerminalLineTone }[] {
-  if (!snapshot) {
-    return [];
-  }
-  return snapshot.split(/\r?\n/).map((text, index) => ({
-    number: index + 1,
-    text,
-    tone: classifyTerminalLine(text),
-  }));
-}
-
-function classifyTerminalLine(text: string): TerminalLineTone {
-  const trimmed = text.trim();
-  if (!trimmed) return "plain";
-  if (/^(?:[$#>❯›»λ])\s/u.test(trimmed)) {
-    return "prompt";
-  }
-  if (/^[╭╮╰╯│├└┌┐┬┴┼]/u.test(trimmed)) {
-    return "box";
-  }
-  if (/\b(?:error|failed|fatal|panic|exception)\b/i.test(trimmed)) {
-    return "error";
-  }
-  if (/\b(?:warn|warning|caution|deprecated)\b/i.test(trimmed)) {
-    return "warning";
-  }
-  if (/\b(?:ready|running|complete|done|success|ok)\b/i.test(trimmed)) {
-    return "status";
-  }
-  return "plain";
 }
 
 function stripAnsi(text: string): string {

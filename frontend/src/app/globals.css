@@ -6439,121 +6439,25 @@ html[data-theme="light"] .terminal-frame-topline {
 }
 
 .terminal-viewport {
-  max-height: min(72vh, 860px);
-  overflow: auto;
-  padding: 14px 16px 18px;
-  scrollbar-gutter: stable both-edges;
+  position: relative;
+  height: min(72vh, 860px);
+  padding: 10px 12px;
+  overflow: hidden;
 }
 
-.terminal-lines {
-  display: grid;
-  gap: 0;
-  font-family: var(--font-mono);
-  font-size: 0.84rem;
-  line-height: 1.5;
+.terminal-viewport .xterm,
+.terminal-viewport .xterm-viewport,
+.terminal-viewport .xterm-screen {
+  background: transparent !important;
 }
 
-.terminal-row {
-  display: grid;
-  grid-template-columns: 3.5rem minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-  padding: 0.05rem 0;
-}
-
-.terminal-row-number {
-  color: var(--muted-soft);
-  text-align: right;
-  user-select: none;
-  opacity: 0.72;
-}
-
-.terminal-row-text {
-  min-width: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  color: var(--text);
-}
-
-.terminal-row-prompt .terminal-row-text {
-  color: var(--accent-strong);
-}
-
-.terminal-row-status .terminal-row-text {
-  color: var(--success);
-}
-
-.terminal-row-warning .terminal-row-text {
-  color: var(--warn);
-}
-
-.terminal-row-error .terminal-row-text {
-  color: var(--danger);
-}
-
-.terminal-row-box .terminal-row-text {
-  color: var(--accent-cool);
-}
-
-.terminal-empty-state {
-  min-height: 280px;
-  display: grid;
-  place-content: center;
-  gap: 12px;
-  padding: 18px 8px;
-}
-
-.terminal-empty-state-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--text);
-  font-family: var(--font-display);
-  font-size: 1.1rem;
-}
-
-.terminal-empty-dot {
+.terminal-viewport .xterm-viewport::-webkit-scrollbar {
   width: 10px;
-  height: 10px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #f0d18a, #c8a96a);
-  box-shadow: 0 0 0 6px rgba(200, 169, 106, 0.15);
 }
 
-.terminal-empty-state-sub {
-  margin: 0;
-  max-width: 60ch;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-  line-height: 1.45;
-}
-
-.terminal-empty-state-grid {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 8px 12px;
-  margin-top: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.025);
-  color: var(--muted-soft);
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-}
-
-html[data-theme="light"] .terminal-empty-state-grid {
-  background: rgba(255, 255, 255, 0.52);
-}
-
-.terminal-empty-state-grid span:nth-child(odd) {
-  color: var(--accent-strong);
-}
-
-.terminal-empty-state-grid span:nth-child(even) {
-  color: var(--muted);
+.terminal-viewport .xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: var(--radius-pill);
 }
 
 @keyframes terminal-shell-enter {

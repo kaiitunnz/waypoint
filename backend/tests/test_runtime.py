@@ -1546,7 +1546,7 @@ async def test_create_session_tmux_wrapper_mode_routes_through_tmux(
     codex = runtime.registry.get("codex")
     tmux = runtime.registry.fallback_for_managed_launch()
     assert tmux is not None
-    create_calls: list[tuple[str, str]] = []
+    create_calls: list[tuple[str, str, LaunchMode]] = []
 
     async def fake_tmux_create_session(
         _runtime: SessionRuntime,
@@ -1562,7 +1562,7 @@ async def test_create_session_tmux_wrapper_mode_routes_through_tmux(
         resolved_model: str | None,
         resolved_effort: str | None,
     ) -> SessionRecord:
-        create_calls.append((session_id, request.backend))
+        create_calls.append((session_id, request.backend, request.launch_mode))
         session = make_session(
             settings,
             id=session_id,
@@ -1595,7 +1595,7 @@ async def test_create_session_tmux_wrapper_mode_routes_through_tmux(
         )
     )
 
-    assert create_calls == [(session.id, "codex")]
+    assert create_calls == [(session.id, "codex", LaunchMode.TMUX_WRAPPER)]
     assert session.backend == "codex"
     assert session.transport == "tmux"
     assert session.cwd == str(Path.home() / "workspace")

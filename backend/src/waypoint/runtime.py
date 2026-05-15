@@ -220,19 +220,15 @@ class SessionRuntime:
         plugin_config = self.settings.plugin_config(request.backend)
         resolved_model = request.model or plugin_config.default_model_id
         resolved_effort = request.effort or plugin_config.default_effort
-        # Pick the plugin that owns the session lifecycle: structured
-        # backends launch their own protocol process; if the requested
-        # backend reports its adapter isn't ready (e.g. the Claude
-        # PreToolUse hook bundle failed to materialise), or if the
-        # backend isn't structured at all, fall through to the
-        # registry's wrapper plugin (today: tmux) so the user still
-        # gets a session.
-        if request.backend == "tmux":
+        plugin = self.registry.get(request.backend)
+        if plugin.capabilities.is_fallback_for_managed_launch:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="tmux sessions must be attached, not launched",
+                detail=(
+                    f"{request.backend} is a managed-launch wrapper and "
+                    "cannot be requested as the target backend"
+                ),
             )
-        plugin = self.registry.get(request.backend)
         launch_mode = request.launch_mode
         if launch_mode == LaunchMode.TMUX_WRAPPER:
             fallback = self.registry.fallback_for_managed_launch()
@@ -253,6 +249,12 @@ class SessionRuntime:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"{request.backend} is not available for direct launch",
                 )
+        # Structured backends launch their own protocol process; if the
+        # requested backend reports its adapter isn't ready (e.g. the
+        # Claude PreToolUse hook bundle failed to materialise), or if
+        # the backend isn't structured at all, fall through to the
+        # registry's wrapper plugin (today: tmux) so the user still
+        # gets a session.
         elif (
             not plugin.is_available_for_managed_launch(self)
             or not plugin.capabilities.is_structured

@@ -27,6 +27,7 @@ from waypoint.schemas import (
     EventKind,
     EventRecord,
     EventsPageResponse,
+    LaunchMode,
     SessionApprovalRequest,
     SessionAttachRequest,
     SessionCommandInvocation,
@@ -226,8 +227,33 @@ class SessionRuntime:
         # backend isn't structured at all, fall through to the
         # registry's wrapper plugin (today: tmux) so the user still
         # gets a session.
+        if request.backend == "tmux":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="tmux sessions must be attached, not launched",
+            )
         plugin = self.registry.get(request.backend)
-        if (
+        launch_mode = request.launch_mode
+        if launch_mode == LaunchMode.TMUX_WRAPPER:
+            fallback = self.registry.fallback_for_managed_launch()
+            if fallback is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="tmux fallback launch is not available",
+                )
+            plugin = fallback
+        elif launch_mode == LaunchMode.DIRECT:
+            if not plugin.capabilities.is_structured:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{request.backend} cannot be launched directly",
+                )
+            if not plugin.is_available_for_managed_launch(self):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{request.backend} is not available for direct launch",
+                )
+        elif (
             not plugin.is_available_for_managed_launch(self)
             or not plugin.capabilities.is_structured
         ):

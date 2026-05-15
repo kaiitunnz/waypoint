@@ -4,6 +4,9 @@ from datetime import UTC, datetime, timedelta
 from waypoint.schemas import (
     EventKind,
     EventRecord,
+    LaunchMode,
+    ScheduledSessionRecord,
+    ScheduleStatus,
     SessionContextUsage,
     SessionRateLimitUsage,
     SessionRecord,
@@ -112,6 +115,35 @@ def test_storage_round_trips_pinned_at(tmp_path) -> None:
 
     unpinned = storage.update_session("session-pin", pinned_at=None)
     assert unpinned.pinned_at is None
+
+
+def test_schedule_round_trip_persists_launch_mode(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+    schedule = ScheduledSessionRecord(
+        id="schedule-1",
+        backend="codex",
+        cwd="/tmp/project",
+        launch_mode=LaunchMode.TMUX_WRAPPER,
+        title="Nightly run",
+        args=["--dangerously-skip-permissions"],
+        config_overrides=["model_reasoning_effort=high"],
+        initial_prompt="Ship it",
+        permission_mode="full_access",
+        model="gpt-4.1",
+        effort="high",
+        scheduled_at=now + timedelta(minutes=15),
+        created_at=now,
+        status=ScheduleStatus.PENDING,
+    )
+    storage.create_schedule(schedule)
+
+    loaded = storage.get_schedule(schedule.id)
+    assert loaded is not None
+    assert loaded.launch_mode == LaunchMode.TMUX_WRAPPER
+    assert loaded.args == ["--dangerously-skip-permissions"]
+    assert loaded.config_overrides == ["model_reasoning_effort=high"]
+    assert storage.list_schedules()[0].launch_mode == LaunchMode.TMUX_WRAPPER
 
 
 def _seed_session(

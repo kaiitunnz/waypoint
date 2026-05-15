@@ -43,6 +43,12 @@ class SessionSource(StrEnum):
     ATTACHED_TMUX = "attached_tmux"
 
 
+class LaunchMode(StrEnum):
+    AUTO = "auto"
+    DIRECT = "direct"
+    TMUX_WRAPPER = "tmux_wrapper"
+
+
 class SessionStatus(StrEnum):
     STARTING = "starting"
     IDLE = "idle"
@@ -228,6 +234,7 @@ class SessionCreateRequest(BaseModel):
     backend: BackendId
     cwd: str
     launch_target_id: str | None = None
+    launch_mode: LaunchMode = LaunchMode.AUTO
     title: str | None = None
     args: list[str] = Field(default_factory=list)
     config_overrides: list[str] = Field(default_factory=list)
@@ -337,6 +344,7 @@ class ScheduledSessionRecord(BaseModel):
     backend: BackendId
     cwd: str
     launch_target_id: str | None = None
+    launch_mode: LaunchMode = LaunchMode.AUTO
     title: str | None = None
     args: list[str] = Field(default_factory=list)
     config_overrides: list[str] = Field(default_factory=list)
@@ -355,6 +363,7 @@ class ScheduleCreateRequest(BaseModel):
     backend: BackendId
     cwd: str
     launch_target_id: str | None = None
+    launch_mode: LaunchMode = LaunchMode.AUTO
     title: str | None = None
     args: list[str] = Field(default_factory=list)
     config_overrides: list[str] = Field(default_factory=list)

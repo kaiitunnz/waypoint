@@ -70,4 +70,4 @@ class BackendCapabilities(_FrozenModel):
     # opts out via ``is_available_for_managed_launch=False``. Exactly
     # one registered plugin should set this to ``True``; today only
     # the tmux fallback does.
-    is_fallback_for_managed_launch: bool = Field(default=False, exclude=True)
+    is_fallback_for_managed_launch: bool = False

@@ -16,6 +16,7 @@ import {
   Backend,
   BackendModelListResponse,
   BackendModelOption,
+  LaunchMode,
   ScheduleCreateRequest,
   ScheduledSession,
 } from "@/lib/types";
@@ -60,6 +61,7 @@ export function SchedulePanel({
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [permissionMode, setPermissionMode] = useState<string>("default");
+  const [launchMode, setLaunchMode] = useState<LaunchMode>("auto");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const [customArgsText, setCustomArgsText] = useState("");
@@ -159,6 +161,7 @@ export function SchedulePanel({
     const payload: ScheduleCreateRequest = {
       backend,
       cwd,
+      launch_mode: launchMode,
       title: title.trim() || null,
       initial_prompt: prompt.trim() || null,
       permission_mode: permissionMode || null,
@@ -233,6 +236,27 @@ export function SchedulePanel({
               ))}
             </select>
           </label>
+          <div className="field">
+            <span>Launch mode</span>
+            <div className="segmented segmented-quiet" role="radiogroup" aria-label="Launch mode">
+              {[
+                ["auto", "Auto"],
+                ["direct", "Direct"],
+                ["tmux_wrapper", "Via tmux wrapper"],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={launchMode === value}
+                  className={`segmented-item ${launchMode === value ? "active" : ""}`}
+                  onClick={() => setLaunchMode(value as LaunchMode)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           <WorkingDirectoryField
             cwd={cwd}
             onChange={setCwd}

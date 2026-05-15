@@ -58,6 +58,23 @@ class TmuxAdapter:
         if submit:
             await self._run("send-keys", "-t", target, "Enter")
 
+    async def send_bytes(self, target: str, data: bytes) -> None:
+        """Forward arbitrary terminal input bytes to the pane.
+
+        Uses ``send-keys -H`` so escape sequences (arrows, function keys,
+        Ctrl combinations) and multibyte UTF-8 characters pass through
+        without re-interpretation.
+        """
+        if not data:
+            return
+        hex_args = [f"{byte:02x}" for byte in data]
+        await self._run("send-keys", "-t", target, "-H", *hex_args)
+
+    async def resize_window(self, session: str, cols: int, rows: int) -> None:
+        await self._run(
+            "resize-window", "-t", session, "-x", str(cols), "-y", str(rows)
+        )
+
     async def interrupt(self, target: str) -> None:
         await self._run("send-keys", "-t", target, "C-c")
 

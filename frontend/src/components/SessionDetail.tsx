@@ -1023,9 +1023,16 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   // Live tmux pane: connect a WebSocket, write streamed bytes into xterm,
   // forward keystrokes and viewport-resize back to the pane. Reconnects with
   // capped exponential backoff on transient drops.
+  //
+  // Deliberately does NOT depend on the full ``session`` object — the
+  // session-state WS pushes updated SessionRecord references on every change
+  // (effort/model/etc.), and re-running this effect would close the terminal
+  // socket and ``term.reset()`` xterm on every push, which the user sees as
+  // the whole pane blanking out and re-painting. ``liveTmux`` already implies
+  // ``session !== null``.
   useEffect(() => {
     if (activeView !== "terminal") return;
-    if (!liveTmux || !session) return;
+    if (!liveTmux) return;
     let active = true;
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1073,7 +1080,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       socket?.close();
       terminalSocketRef.current = null;
     };
-  }, [activeView, liveTmux, host, token, sessionId, session, handleAuthFailure]);
+  }, [activeView, liveTmux, host, token, sessionId, handleAuthFailure]);
 
   const handleTerminalInput = useCallback((data: string) => {
     const socket = terminalSocketRef.current;

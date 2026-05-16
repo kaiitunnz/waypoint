@@ -1264,6 +1264,9 @@ html[data-theme="light"] .segmented {
 }
 
 .segmented-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 30px;
   padding: 0 14px;
   border-radius: var(--radius-pill);
@@ -6200,6 +6203,13 @@ html[data-theme="light"] .terminal {
 }
 
 .term-bar {
+  /* position+z-index creates a stacking context for the bar so the
+     ``.composer-overflow-menu`` (z-index: 30, position: absolute)
+     inside ``.term-bar-overflow`` paints above .term-stage's content
+     — xterm's canvases sit there at z-index: auto and would otherwise
+     win on document order when the bar isn't a stacking context. */
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 10px;

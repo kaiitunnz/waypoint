@@ -1448,7 +1448,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           </button>
         </div>
       ) : null}
-      {!terminalOnly ? (
+      {session && !terminalOnly ? (
         <ReplyComposer
           host={host}
           token={token}

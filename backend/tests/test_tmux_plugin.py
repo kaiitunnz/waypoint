@@ -404,7 +404,13 @@ class _FakeRuntime:
         return None
 
     def _command_for_backend(
-        self, backend: str, args: list[str], _lt: Any, _cwd: str
+        self,
+        backend: str,
+        args: list[str],
+        _lt: Any,
+        _cwd: str,
+        *,
+        allocate_tty: bool = False,
     ) -> list[str]:
         return [backend, *args]
 

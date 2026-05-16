@@ -1184,6 +1184,8 @@ class SessionRuntime:
         args: list[str],
         launch_target: SshLaunchTargetConfig | None = None,
         cwd: str | None = None,
+        *,
+        allocate_tty: bool = False,
     ) -> list[str]:
         plugin = self.registry.get(backend)
         if launch_target is None:
@@ -1205,7 +1207,9 @@ class SessionRuntime:
             )
         return list(
             launch_target.build_remote_exec_args(
-                [executable, *args], cwd or launch_target.default_cwd
+                [executable, *args],
+                cwd or launch_target.default_cwd,
+                allocate_tty=allocate_tty,
             )
         )
 

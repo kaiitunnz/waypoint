@@ -35,6 +35,17 @@ class TmuxAdapter:
             cwd,
             command_string,
         )
+        # Pin window-size to whatever we explicitly resize to. Default
+        # ("latest") tracks the most-recently-attached client's size —
+        # we never have a client attached, so tmux can revert the pane
+        # back to the global default and break our handshake.
+        await self._run("set-option", "-t", session_name, "window-size", "manual")
+        # Tmux reserves the bottom row of the window for its own status
+        # bar by default; we don't render that bar to the user, so the
+        # pane ends up one row short of the xterm viewport. Disabling
+        # the status bar gives the pane the full window height and keeps
+        # the cursor's parked position at the actual visual bottom.
+        await self._run("set-option", "-t", session_name, "status", "off")
         return await self.describe_target(session_name)
 
     async def describe_target(self, target: str) -> TmuxTarget:
@@ -71,9 +82,19 @@ class TmuxAdapter:
         await self._run("send-keys", "-t", target, "-H", *hex_args)
 
     async def resize_window(self, session: str, cols: int, rows: int) -> None:
+        # Pin manual sizing and disable the status bar first; existing
+        # sessions started before either became part of the create flow
+        # would otherwise inherit "latest" sizing (which reverts our
+        # explicit dimensions) and a one-row status bar (which steals
+        # the bottom of the pane from Codex's render area).
+        await self._run("set-option", "-t", session, "window-size", "manual")
+        await self._run("set-option", "-t", session, "status", "off")
         await self._run(
             "resize-window", "-t", session, "-x", str(cols), "-y", str(rows)
         )
+
+    async def resize_pane(self, pane: str, cols: int, rows: int) -> None:
+        await self._run("resize-pane", "-t", pane, "-x", str(cols), "-y", str(rows))
 
     async def interrupt(self, target: str) -> None:
         await self._run("send-keys", "-t", target, "C-c")
@@ -82,7 +103,15 @@ class TmuxAdapter:
         await self._run("send-keys", "-t", target, "Enter")
 
     async def pipe_output(self, target: str, path: Path) -> None:
-        command = f"cat >> {shlex.quote(str(path))}"
+        # `cat` switches to block buffering when stdout is a regular file,
+        # holding up to ~4 KB before flushing — which traps the trailing
+        # cursor-positioning bytes of every render in userland buffer
+        # and breaks the live-stream view. `dd` reads and writes via raw
+        # syscalls with no stdio buffer, so every chunk pipe-pane hands
+        # us reaches the log file immediately. Shell-level >> append is
+        # portable across BSD dd (macOS) and GNU dd (Linux); `oflag=` is
+        # GNU-only and fails silently on BSD.
+        command = f"dd 2>/dev/null >> {shlex.quote(str(path))}"
         await self._run("pipe-pane", "-o", "-t", target, command)
 
     async def stop_pipe(self, target: str) -> None:
@@ -95,6 +124,30 @@ class TmuxAdapter:
         return await self._run(
             "capture-pane", "-p", "-J", "-e", "-t", target, "-S", str(start_line)
         )
+
+    async def pane_screen_state(self, target: str) -> tuple[bool, int, int]:
+        """Return whether the pane is on the alternate screen and the
+        program's current cursor position (1-based row, col).
+
+        ``capture-pane`` only dumps cell contents; it omits both the
+        screen-buffer toggle and the cursor positioning sequence, so
+        callers seeding xterm need this state to recreate the same
+        visual context the program is running in.
+        """
+        output = await self._run(
+            "display-message",
+            "-p",
+            "-t",
+            target,
+            "#{alternate_on}|#{cursor_x}|#{cursor_y}",
+        )
+        alt_str, x_str, y_str = output.strip().split("|")
+        alt = alt_str == "1"
+        # tmux reports cursor coordinates as 0-based; the ANSI CUP
+        # sequence is 1-based.
+        col = int(x_str) + 1 if x_str.isdigit() else 1
+        row = int(y_str) + 1 if y_str.isdigit() else 1
+        return alt, col, row
 
     async def list_sessions(self) -> list[str]:
         output = await self._run("list-sessions", "-F", "#{session_name}")

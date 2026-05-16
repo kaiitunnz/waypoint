@@ -257,7 +257,22 @@ class TmuxPlugin:
         stored_args = state.get("launch_args") if isinstance(state, dict) else None
         if not isinstance(stored_args, list):
             stored_args = []
-        launch_args = self._resume_args(session.backend, thread_id, list(stored_args))
+        # A captured thread_id is only useful if the inner CLI has
+        # actually persisted the conversation to disk. ``claude
+        # --session-id <uuid>`` doesn't create the session file until
+        # the user sends a message — a terminate-before-first-message
+        # leaves the uuid stranded, and ``--resume`` would die with
+        # "No conversation found with session ID: …". Same shape for
+        # ``codex resume <uuid>``: no rollout file means no thread to
+        # resume. Fall back to verbatim launch args in that case.
+        effective_thread_id: str | None = None
+        if thread_id and self._conversation_exists(
+            session.backend, thread_id, session.cwd
+        ):
+            effective_thread_id = thread_id
+        launch_args = self._resume_args(
+            session.backend, effective_thread_id, list(stored_args)
+        )
 
         launch_target = runtime._find_launch_target(session.launch_target_id)
         try:
@@ -323,6 +338,36 @@ class TmuxPlugin:
         runtime._ensure_monitor(session.id)
         if session.backend == "codex" and not thread_id:
             self._spawn_codex_thread_id_watcher(runtime, session.id, session.cwd, now)
+
+    @staticmethod
+    def _conversation_exists(backend: str, thread_id: str, cwd: str) -> bool:
+        """Return True if the inner CLI has actually persisted ``thread_id``.
+
+        Both Claude and Codex defer conversation-file creation until
+        first input. A captured uuid is useless until that's happened
+        — passing ``--resume`` (or ``codex resume``) for a never-written
+        thread makes the CLI exit immediately with "no conversation
+        found". This check lets restore fall back to a verbatim launch
+        in that case, keeping the same uuid so a later reconnect can
+        resume once the user has actually conversed.
+        """
+        if backend == "claude_code":
+            # ~/.claude/projects/<dashed-cwd>/<uuid>.jsonl
+            dashed = cwd.replace("/", "-")
+            path = Path.home() / ".claude" / "projects" / dashed / f"{thread_id}.jsonl"
+            return path.is_file()
+        if backend == "codex":
+            # ~/.codex/sessions/YYYY/MM/DD/rollout-*-<uuid>.jsonl
+            home = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
+            sessions_dir = home / "sessions"
+            if not sessions_dir.is_dir():
+                return False
+            needle = f"-{thread_id}.jsonl"
+            for entry in sessions_dir.glob("*/*/*/rollout-*.jsonl"):
+                if entry.name.endswith(needle):
+                    return True
+            return False
+        return False
 
     def _resume_args(
         self, backend: str, thread_id: str | None, stored_args: list[str]

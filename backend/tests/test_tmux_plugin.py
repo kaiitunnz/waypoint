@@ -403,6 +403,9 @@ class _FakeRuntime:
         self.updates: list[dict[str, Any]] = []
         self.created: list[Any] = []
         self._session_dir_root: Path | None = None
+        # Per-call record so individual tests can assert that the
+        # tmux launch sites actually request a remote PTY.
+        self.command_calls: list[dict[str, Any]] = []
 
     def _find_launch_target(self, _lt_id: str | None) -> None:
         return None
@@ -416,6 +419,9 @@ class _FakeRuntime:
         *,
         allocate_tty: bool = False,
     ) -> list[str]:
+        self.command_calls.append(
+            {"backend": backend, "args": args, "allocate_tty": allocate_tty}
+        )
         return [backend, *args]
 
     def _ensure_monitor(self, _sid: str) -> None:
@@ -529,6 +535,10 @@ async def test_restore_session_claude_keeps_thread_id_across_terminate_cycles(
     assert state2["launch_args"] == ["--resume", uuid_str]
     assert state2["thread_id"] == uuid_str
 
+    # Both cycles must request a remote PTY — otherwise the remote
+    # claude flips to ``--print`` mode and errors on the missing stdin.
+    assert [call["allocate_tty"] for call in runtime.command_calls] == [True, True]
+
 
 @pytest.mark.asyncio
 async def test_restore_session_codex_drops_phantom_thread_id(
@@ -580,6 +590,7 @@ async def test_restore_session_codex_drops_phantom_thread_id(
 
     state = runtime.updates[-1]["transport_state"]
     assert "thread_id" not in state, state
+    assert runtime.command_calls[-1]["allocate_tty"] is True
 
 
 def _exited_attached_session(sid: str, tmp_path: Path) -> SessionRecord:
@@ -806,6 +817,9 @@ async def test_import_thread_via_resume_claude_builds_resume_command(
     assert record.transport_state["thread_id"] == uuid_str
     assert record.transport_state["launch_args"] == ["--resume", uuid_str]
     assert record.cwd == cwd
+    # The import path must request a remote PTY too — same TTY rules as
+    # create_session and restore.
+    assert runtime.command_calls[-1]["allocate_tty"] is True
 
 
 @pytest.mark.asyncio
@@ -848,6 +862,7 @@ async def test_import_thread_via_resume_codex_uses_resume_subcommand(
 
     assert captured_commands == [["codex", "resume", uuid_str]]
     assert record.transport_state["launch_args"] == ["resume", uuid_str]
+    assert runtime.command_calls[-1]["allocate_tty"] is True
 
 
 @pytest.mark.asyncio

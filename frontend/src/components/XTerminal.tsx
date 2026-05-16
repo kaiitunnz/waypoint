@@ -191,6 +191,12 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       term.options.theme = themeFor(theme);
     }, [theme]);
 
+    useEffect(() => {
+      const term = termRef.current;
+      if (!term) return;
+      term.options.disableStdin = readOnly;
+    }, [readOnly]);
+
     useImperativeHandle(ref, () => ({
       write: (data: string) => {
         termRef.current?.write(data);

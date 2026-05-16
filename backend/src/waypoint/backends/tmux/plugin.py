@@ -247,7 +247,17 @@ class TmuxPlugin:
                 )
             return
 
-        # EXITED reconnect path. Wipe whatever might still be running
+        # ATTACHED-TMUX reconnect: the user terminated a session we
+        # never launched, so the underlying pane is still alive (see
+        # the ``MANAGED``-only check in ``terminate_session``). The
+        # correct reconnect is to re-pipe to that same pane and
+        # reseat the monitor — *not* to kill the user's tmux session
+        # and spawn a fresh inner CLI.
+        if session.source == SessionSource.ATTACHED_TMUX:
+            await self._reattach_attached_tmux(runtime, session)
+            return
+
+        # MANAGED reconnect path. Wipe whatever might still be running
         # under the old tmux session name so the new ``new-session``
         # doesn't collide; ignore errors since the typical case is that
         # nothing is there.
@@ -357,6 +367,85 @@ class TmuxPlugin:
         if session.backend == "codex" and not effective_thread_id:
             self._spawn_codex_thread_id_watcher(
                 runtime, session.id, session.cwd, now, launch_target
+            )
+
+    async def _reattach_attached_tmux(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        """Re-pipe an externally-owned tmux pane after a Waypoint-side
+        terminate. We never owned the pane's lifecycle, so reconnect is
+        the inverse of ``terminate_session``: confirm the pane is still
+        alive, resume ``pipe-pane`` to the existing raw_log, and
+        reseat the monitor. The inner CLI keeps running with no
+        interruption.
+        """
+        state = session.transport_state
+        pane = state.get("tmux_pane") or state.get("tmux_session") or session.id
+        try:
+            target = await runtime.tmux.describe_target(pane)
+        except TmuxError as exc:
+            await runtime._record_system_event(
+                session.id,
+                f"Cannot reattach: tmux target lost ({exc})",
+                status=SessionStatus.EXITED,
+            )
+            return
+        if target.pane_dead:
+            await runtime._record_system_event(
+                session.id,
+                "Cannot reattach: tmux pane is dead",
+                status=SessionStatus.EXITED,
+            )
+            return
+        raw_log = Path(session.raw_log_path)
+        with suppress(OSError):
+            raw_log.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            await runtime.tmux.pipe_output(target.pane, raw_log)
+        except TmuxError as exc:
+            await runtime._record_system_event(
+                session.id,
+                f"Cannot reattach: pipe-output failed ({exc})",
+                status=SessionStatus.EXITED,
+            )
+            return
+        new_state: dict[str, Any] = {
+            "tmux_session": target.session,
+            "tmux_window": target.window,
+            "tmux_pane": target.pane,
+            "pid": target.pane_pid,
+        }
+        # Carry forward whatever the prior life captured. Codex sets
+        # ``thread_id`` from the rollout filename once the user first
+        # types — wiping it here would force the watcher below to
+        # re-poll for a uuid we already had.
+        prior_thread_id = state.get("thread_id")
+        if prior_thread_id:
+            new_state["thread_id"] = prior_thread_id
+        runtime.storage.update_session(
+            session.id,
+            transport_state=new_state,
+            status=SessionStatus.IDLE,
+        )
+        await runtime._record_system_event(
+            session.id,
+            f"Session reconnected (attached to tmux target {target.session})",
+            status=SessionStatus.IDLE,
+        )
+        runtime._ensure_monitor(session.id)
+        # Mirror the boot-replay / MANAGED reconnect branches: if this
+        # is a codex session that hadn't yet produced a rollout file
+        # before the prior terminate, the watcher we spawned then was
+        # cancelled. Respawn so the uuid gets captured when the file
+        # finally appears.
+        if session.backend == "codex" and not prior_thread_id:
+            launch_target = runtime._find_launch_target(session.launch_target_id)
+            self._spawn_codex_thread_id_watcher(
+                runtime,
+                session.id,
+                session.cwd,
+                datetime.now(UTC),
+                launch_target,
             )
 
     async def _conversation_exists(

@@ -345,22 +345,6 @@ html[data-theme="light"] .app-bar-status.open::before {
 }
 
 /* ─── Import / resume thread panel ─── */
-.launch-grid {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(0, 1fr);
-  align-items: start;
-}
-
-@media (min-width: 720px) {
-  .launch-grid {
-    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
-  }
-
-  .launch-grid > .import-thread-panel {
-    grid-column: 1 / -1;
-  }
-}
 
 .import-thread-header {
   align-items: start;
@@ -609,30 +593,27 @@ html[data-theme="light"] .import-thread-footer {
 }
 
 /* ---------- Resume thread panel (unified) ---------- */
-.resume-panel-header {
+/* Top row in the Resume launch mode: search + (optional) backend filter.
+   Search grows to fill the row; backend dropdown is right-aligned on
+   desktop, full-width on mobile. */
+.resume-filters {
   display: flex;
   flex-wrap: wrap;
+  gap: 10px;
   align-items: flex-end;
-  justify-content: space-between;
-  gap: 14px 24px;
 }
 
-.resume-panel-titles {
+.resume-filters-search {
+  flex: 1 1 220px;
   min-width: 0;
-  display: grid;
-  gap: 4px;
 }
 
-.resume-panel-titles h3,
-.resume-panel-titles p {
-  margin: 0;
+.resume-filters-backend {
+  width: min(100%, 200px);
+  flex: 0 0 auto;
 }
 
-.resume-panel-filter {
-  width: min(100%, 230px);
-}
-
-.resume-panel-filter select {
+.resume-filters-backend select {
   min-width: 0;
 }
 
@@ -6164,429 +6145,629 @@ html[data-theme="light"] .terminal {
   background: rgba(228, 222, 208, 0.7);
 }
 
-.terminal-shell {
-  position: relative;
+/* ─── Terminal session (redesigned) ───
+   Compact terminal-first layout: a thin .term-bar with controls, a
+   flex-grow .term-stage that hosts xterm, and a .term-keys footer for
+   the touch key bar. SessionHeader sits above (outside this wrapper)
+   so backend/transport/title-edit/thread-id stay visible on both the
+   chat-tab Terminal view and the terminal-only page. */
+.session-terminal {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  max-width: 100%;
+  height: min(78vh, 900px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   overflow: hidden;
-  padding: 16px;
-  background:
-    radial-gradient(1100px 420px at 20% 0%, rgba(200, 169, 106, 0.14), transparent 56%),
-    radial-gradient(820px 320px at 100% 0%, rgba(143, 179, 214, 0.1), transparent 58%),
-    linear-gradient(180deg, rgba(9, 12, 17, 0.98), rgba(6, 8, 12, 0.96));
-  border: 1px solid rgba(170, 182, 208, 0.18);
-  box-shadow: var(--shadow);
-  animation: terminal-shell-enter 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-soft);
 }
 
-html[data-theme="light"] .terminal-shell {
-  background:
-    radial-gradient(1100px 420px at 20% 0%, rgba(184, 130, 14, 0.14), transparent 56%),
-    radial-gradient(820px 320px at 100% 0%, rgba(47, 111, 158, 0.11), transparent 58%),
-    linear-gradient(180deg, rgba(255, 253, 247, 0.96), rgba(246, 240, 230, 0.96));
-  border-color: rgba(90, 78, 58, 0.18);
+/* Terminal-only sessions (no composer below) lock the pane to the
+   viewport once the user scrolls past the SessionHeader: position: sticky
+   keeps the pane glued to the top of the viewport while the page
+   scrolls underneath. dvh tracks the OS keyboard so the stage stays
+   above the keyboard on phones. */
+.session-terminal.is-locked {
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  max-height: 100dvh;
 }
 
-.terminal-shell::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    repeating-linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.03) 0,
-      rgba(255, 255, 255, 0.03) 1px,
-      transparent 1px,
-      transparent 4px
-    );
-  opacity: 0.18;
-  mix-blend-mode: screen;
+@media (max-width: 720px) {
+  .session-terminal {
+    height: calc(100dvh - 120px);
+    border-radius: var(--radius-sm);
+  }
+  .session-terminal.is-locked {
+    height: 100dvh;
+  }
 }
 
-html[data-theme="light"] .terminal-shell::before {
-  background:
-    repeating-linear-gradient(
-      180deg,
-      rgba(34, 24, 12, 0.035) 0,
-      rgba(34, 24, 12, 0.035) 1px,
-      transparent 1px,
-      transparent 5px
-    );
-  opacity: 0.24;
-  mix-blend-mode: multiply;
-}
-
-.terminal-shell > * {
-  position: relative;
-  z-index: 1;
-}
-
-.terminal-shell-header {
+.term-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  min-height: 48px;
+  background: rgba(8, 10, 14, 0.86);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  flex: 0 0 auto;
 }
 
-.terminal-shell-brand {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  min-width: 0;
+html[data-theme="light"] .term-bar {
+  background: rgba(255, 253, 247, 0.86);
 }
 
-.terminal-shell-mark {
-  width: 36px;
-  height: 36px;
+.term-bar-glyph {
+  width: 28px;
+  height: 28px;
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  border-radius: 12px;
-  border: 1px solid rgba(200, 169, 106, 0.22);
-  background:
-    linear-gradient(180deg, rgba(200, 169, 106, 0.2), rgba(143, 179, 214, 0.1)),
-    rgba(9, 12, 17, 0.7);
+  border-radius: 8px;
+  border: 1px solid rgba(200, 169, 106, 0.24);
+  background: linear-gradient(180deg, rgba(200, 169, 106, 0.18), rgba(143, 179, 214, 0.08));
   color: var(--accent-strong);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 10px 24px rgba(0, 0, 0, 0.24);
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
 }
 
-html[data-theme="light"] .terminal-shell-mark {
-  border-color: rgba(184, 130, 14, 0.2);
-  background:
-    linear-gradient(180deg, rgba(184, 130, 14, 0.16), rgba(47, 111, 158, 0.08)),
-    rgba(255, 255, 255, 0.86);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.48),
-    0 10px 24px rgba(60, 45, 20, 0.08);
+html[data-theme="light"] .term-bar-glyph {
+  border-color: rgba(184, 130, 14, 0.24);
+  background: linear-gradient(180deg, rgba(184, 130, 14, 0.16), rgba(47, 111, 158, 0.08));
 }
 
-.terminal-shell-heading {
-  min-width: 0;
-}
-
-.terminal-shell-kicker {
-  margin: 0 0 4px;
-  color: var(--accent-cool);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-
-.terminal-shell-heading h3 {
-  margin: 0;
+.term-bar-title {
+  color: var(--text-strong);
   font-family: var(--font-display);
-  font-size: 1.24rem;
+  font-size: 0.98rem;
   line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
-.terminal-shell-subtitle {
-  margin: 5px 0 0;
-  max-width: 62ch;
-  color: var(--muted);
-  font-size: 0.9rem;
-  line-height: 1.45;
+.term-bar-cwd {
+  color: var(--accent-strong);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
-.terminal-shell-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-  max-width: 100%;
+.term-bar-cwd::before {
+  content: "·";
+  margin: 0 8px;
+  color: var(--muted-soft);
 }
 
-.terminal-pill {
+.term-bar-status {
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
-  padding: 4px 10px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
+  gap: 6px;
   color: var(--muted);
-  font-family: var(--font-mono);
   font-size: 0.72rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-}
-
-html[data-theme="light"] .terminal-pill {
-  background: rgba(255, 255, 255, 0.55);
-}
-
-.terminal-pill-accent {
-  border-color: rgba(200, 169, 106, 0.24);
-  background: rgba(200, 169, 106, 0.08);
-  color: var(--accent-strong);
-}
-
-html[data-theme="light"] .terminal-pill-accent {
-  border-color: rgba(184, 130, 14, 0.22);
-  background: rgba(184, 130, 14, 0.08);
-}
-
-.terminal-shell-note {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-html[data-theme="light"] .terminal-shell-note {
-  background: rgba(255, 255, 255, 0.54);
-}
-
-.terminal-shell-note p {
-  margin: 0;
-  color: var(--text);
-  max-width: 68ch;
-  font-size: 0.88rem;
-  line-height: 1.45;
-}
-
-.terminal-shell-note-label {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--muted-soft);
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.terminal-shell-note-meta {
   flex: 0 0 auto;
-  text-align: right;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
 }
 
-.terminal-shell-note-quiet {
-  margin: 0;
-  padding-left: 16px;
-  padding-right: 16px;
-  border: 0;
-  color: var(--muted);
-  max-width: 42ch;
+.term-bar-status::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted-soft);
+  box-shadow: 0 0 0 3px rgba(111, 122, 140, 0.18);
 }
 
-.terminal-shell-actions {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+.term-bar-status.running::before {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(108, 201, 154, 0.18);
 }
 
-.terminal-action-row {
-  margin: 0;
+.term-bar-status.warn::before {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px rgba(217, 154, 74, 0.18);
 }
 
-.terminal-frame {
-  overflow: hidden;
-  border-radius: calc(var(--radius) + 2px);
-  border: 1px solid var(--line);
-  background:
-    linear-gradient(180deg, rgba(5, 7, 10, 0.96), rgba(8, 10, 14, 0.98));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.03),
-    0 14px 30px rgba(0, 0, 0, 0.22);
+.term-bar-status.danger::before {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgba(226, 108, 112, 0.18);
 }
 
-html[data-theme="light"] .terminal-frame {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(245, 241, 233, 0.94));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.56),
-    0 14px 30px rgba(60, 45, 20, 0.08);
-}
-
-.terminal-frame-topline {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.025);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 0.71rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-html[data-theme="light"] .terminal-frame-topline {
-  background: rgba(255, 255, 255, 0.44);
-}
-
-.terminal-frame-title {
-  color: var(--accent-strong);
-}
-
-.terminal-frame-meta {
+.term-bar-dims {
+  font-size: 0.7rem;
   color: var(--muted-soft);
+  letter-spacing: 0.06em;
+  flex: 0 0 auto;
 }
 
-.terminal-keys {
-  display: flex;
-  flex-wrap: wrap;
+.term-bar-spacer {
+  flex: 1 1 auto;
+}
+
+.term-bar-action {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.02);
-}
-
-html[data-theme="light"] .terminal-keys {
-  background: rgba(255, 255, 255, 0.42);
-}
-
-.terminal-key {
-  min-width: 40px;
-  min-height: 32px;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-strong);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 0.78rem;
-  letter-spacing: 0.04em;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+html[data-theme="light"] .term-bar-action {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.term-bar-action:hover {
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+html[data-theme="light"] .term-bar-action:hover {
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.term-bar-action.primary {
+  border-color: rgba(200, 169, 106, 0.5);
+  background: rgba(200, 169, 106, 0.16);
+  color: var(--accent-strong);
+}
+
+.term-bar-action.primary:hover {
+  background: rgba(200, 169, 106, 0.24);
+}
+
+html[data-theme="light"] .term-bar-action.primary {
+  border-color: rgba(184, 130, 14, 0.4);
+  background: rgba(184, 130, 14, 0.12);
+}
+
+.term-bar-action.danger {
+  border-color: rgba(226, 108, 112, 0.4);
+  color: var(--danger);
+}
+
+/* The .term-bar-overflow wraps the trigger and popover, mirroring
+   .composer-overflow on the chat composer so the two surfaces share
+   visual + structural vocabulary. We reuse .composer-overflow-trigger
+   and .composer-overflow-menu/-item styles directly; the only override
+   here flips the menu from "floats above" (composer is at the bottom of
+   the page) to "drops below" (term-bar is at the top of the pane). */
+.term-bar-overflow {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.term-bar-overflow-menu {
+  top: calc(100% + 8px);
+  bottom: auto;
+}
+
+.term-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  background:
+    radial-gradient(820px 320px at 20% 0%, rgba(200, 169, 106, 0.06), transparent 56%),
+    linear-gradient(180deg, rgba(5, 7, 10, 0.96), rgba(8, 10, 14, 0.98));
+  overflow: hidden;
+}
+
+html[data-theme="light"] .term-stage {
+  background:
+    radial-gradient(820px 320px at 20% 0%, rgba(184, 130, 14, 0.06), transparent 56%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(245, 241, 233, 0.94));
+}
+
+.term-stage-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  padding: 10px 12px;
+  overflow: hidden;
+  position: relative;
+}
+
+.term-stage-host .xterm,
+.term-stage-host .xterm-viewport,
+.term-stage-host .xterm-screen {
+  background: transparent !important;
+}
+
+.term-stage-host .xterm-viewport::-webkit-scrollbar {
+  width: 10px;
+}
+
+.term-stage-host .xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: var(--radius-pill);
+}
+
+.term-jump {
+  position: absolute;
+  bottom: 14px;
+  right: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-card);
+  color: var(--accent-strong);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  cursor: pointer;
+  box-shadow: var(--shadow-soft);
+  z-index: 6;
+  -webkit-tap-highlight-color: transparent;
+  animation: term-jump-in 200ms ease-out;
+}
+
+.term-jump:hover {
+  background: var(--bg-card-soft);
+  border-color: var(--accent);
+}
+
+@keyframes term-jump-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* The scroll cluster — relocated from middle-right to bottom-right so
+   it shares the corner with the jump pill and stays within thumb reach
+   on phones. When the jump pill is also visible the cluster sits just
+   above it (data-with-jump on the wrapper bumps bottom offset). */
+.term-scroll-cluster {
+  position: absolute;
+  right: 12px;
+  bottom: 14px;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 5;
+}
+
+.term-scroll-cluster[data-with-jump="true"] {
+  bottom: 64px;
+}
+
+@media (pointer: coarse) {
+  .term-scroll-cluster {
+    display: flex;
+  }
+}
+
+.term-scroll-cluster button {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.32);
+  transition: transform 60ms ease, background 120ms ease;
+}
+
+html[data-theme="light"] .term-scroll-cluster button {
+  box-shadow: 0 4px 12px rgba(90, 78, 58, 0.16);
+}
+
+.term-scroll-cluster button:active {
+  background: var(--bg-card-soft);
+  transform: scale(0.94);
+}
+
+/* Key bar pinned to the bottom of the stage. Horizontal scroll keeps it
+   to one row regardless of how many keys the backend adds. The flex
+   container must not wrap (a single visual row) and must allow itself
+   to shrink narrower than its content (min-width: 0) so the inner
+   overflow-x: auto kicks in instead of pushing the row out of the
+   .session-terminal box. */
+.term-keys {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  /* Bottom padding adds the iOS home-indicator safe-area inset on top of
+     the visual 8px so the keys never sit underneath the home bar. On
+     non-notched devices the inset is 0 and the bar looks unchanged. */
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.025);
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  min-width: 0;
+  max-width: 100%;
+  overscroll-behavior-x: contain;
+}
+
+.term-keys::-webkit-scrollbar {
+  display: none;
+}
+
+html[data-theme="light"] .term-keys {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.term-keys button {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 36px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
 }
 
-html[data-theme="light"] .terminal-key {
-  background: rgba(255, 255, 255, 0.7);
+html[data-theme="light"] .term-keys button {
+  background: rgba(255, 255, 255, 0.74);
 }
 
-.terminal-key:hover {
+.term-keys button:hover {
   border-color: var(--line-strong);
   background: rgba(255, 255, 255, 0.08);
 }
 
-.terminal-key:active {
+.term-keys button:active {
   transform: translateY(1px);
   border-color: var(--accent);
   background: rgba(200, 169, 106, 0.12);
 }
 
-html[data-theme="light"] .terminal-key:active {
-  background: rgba(184, 130, 14, 0.12);
+.term-keys button.is-backend-only {
+  border-color: rgba(143, 179, 214, 0.28);
+  color: var(--accent-cool);
+}
+
+.term-keys-sep {
+  width: 1px;
+  background: var(--line);
+  margin: 4px 4px;
+  flex: 0 0 auto;
 }
 
 @media (pointer: coarse) {
-  .terminal-key {
+  .term-keys button {
     min-width: 48px;
     min-height: 40px;
     font-size: 0.85rem;
   }
 }
 
-.terminal-viewport {
+/* ─── Launch panel (redesigned) ───
+   Single card with a New / Resume / Attach segmented mode chooser. The
+   body swaps content based on the selected mode. Launch-mode + custom
+   CLI args collapse into a single <details> beneath the form so most
+   users never see them. */
+.launch-card {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px;
+  box-shadow: var(--shadow-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .launch-card {
+    padding: 14px;
+  }
+}
+
+.launch-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.launch-card-titles h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.16rem;
+}
+
+.launch-card-titles p.muted {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.launch-mode {
   position: relative;
-  height: min(72vh, 860px);
-  padding: 10px 12px;
-  overflow: hidden;
-}
-
-.terminal-viewport .xterm,
-.terminal-viewport .xterm-viewport,
-.terminal-viewport .xterm-screen {
-  background: transparent !important;
-}
-
-.terminal-viewport .xterm-viewport::-webkit-scrollbar {
-  width: 10px;
-}
-
-.terminal-viewport .xterm-viewport::-webkit-scrollbar-thumb {
-  background: var(--line-strong);
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--bg-input);
+  border: 1px solid var(--line);
   border-radius: var(--radius-pill);
+  flex: 0 0 auto;
+  isolation: isolate;
+  /* --lm-left / --lm-width are set imperatively by the LaunchModeChooser
+     layout effect once the active button has rendered. The fallback
+     values keep the pill invisible on the first paint (width 0) so we
+     never see it sitting at 0,0 before the measurement runs. */
+  --lm-left: 0px;
+  --lm-width: 0px;
 }
 
-/* ─── Mobile scroll chips ───
-   xterm.js binds wheel events only — touch input never reaches the
-   pane on phones/tablets. We surface a pair of floating chips that
-   synthesize wheel-up/wheel-down (SGR mouse encoding) so the inner
-   TUI's own scroll handler responds. ``pointer: coarse`` keeps them
-   hidden on devices whose primary input is a mouse or trackpad. */
-.terminal-scroll-chips {
-  display: none;
-}
-
-@media (pointer: coarse) {
-  .terminal-scroll-chips {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    position: absolute;
-    right: 10px;
-    top: 50%;
-    transform: translateY(-50%);
-    z-index: 5;
-  }
-
-  .terminal-scroll-chip {
-    width: 44px;
-    height: 44px;
-    border-radius: var(--radius-pill);
-    background: var(--bg-card);
-    color: var(--text);
-    border: 1px solid var(--line-strong);
-    font-size: 18px;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    touch-action: manipulation;
-    -webkit-user-select: none;
-    user-select: none;
-    cursor: pointer;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
-    transition:
-      transform 60ms ease,
-      background 120ms ease;
-  }
-
-  html[data-theme="light"] .terminal-scroll-chip {
-    box-shadow: 0 4px 12px rgba(90, 78, 58, 0.16);
-  }
-
-  .terminal-scroll-chip:active {
-    background: var(--bg-card-soft);
-    transform: scale(0.94);
-  }
-}
-
-@keyframes terminal-shell-enter {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.launch-mode::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: var(--lm-left);
+  width: var(--lm-width);
+  background: var(--bg-card);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-soft);
+  z-index: 0;
+  transition:
+    left 180ms cubic-bezier(0.4, 0, 0.2, 1),
+    width 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .terminal-shell {
-    animation: none;
+  .launch-mode::before {
+    transition: none;
   }
+}
+
+@media (max-width: 720px) {
+  .launch-mode {
+    width: 100%;
+  }
+  .launch-mode button {
+    flex: 1 1 0;
+  }
+}
+
+.launch-mode button {
+  position: relative;
+  z-index: 1;
+  padding: 6px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition:
+    color 160ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 140ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.launch-mode button:hover:not(.active) {
+  color: var(--text);
+}
+
+.launch-mode button:active:not(.active) {
+  transform: scale(0.96);
+}
+
+.launch-mode button.active {
+  color: var(--accent-strong);
+  animation: launch-mode-pop 220ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes launch-mode-pop {
+  0% { transform: scale(0.97); }
+  55% { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .launch-mode button,
+  .launch-mode button.active {
+    animation: none;
+    transition: color 120ms ease;
+  }
+}
+
+.launch-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.launch-body-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+@media (min-width: 720px) {
+  .launch-body-grid.two-col {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    gap: 18px;
+  }
+}
+
+.launch-body-col {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  align-content: start;
+}
+
+.launch-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.launch-actions .grow {
+  flex: 1 1 auto;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+/* Launch-mode segmented control — content-width, not row-wide. The
+   ``.field`` ancestor is ``display: grid``; ``justify-self: start`` is
+   what actually keeps the segmented div from stretching to the full
+   row. ``align-self: flex-start`` does nothing here. */
+.launch-mode-field .launch-mode-segmented {
+  justify-self: start;
+  display: inline-flex;
+  width: auto;
 }
 
 .terminal pre {
@@ -7311,10 +7492,13 @@ html[data-theme="light"] .advanced-warning {
 }
 
 .search-bar input {
+  /* Height matches .field input/select/textarea (padding 11px 14px) so a
+     SearchInput sitting next to a Backend dropdown in the Resume filter
+     row aligns instead of looking ~10px shorter. */
   width: 100%;
-  padding: 6px 28px 6px 10px;
+  padding: 10px 32px 10px 12px;
   font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-size: 0.86rem;
   background: rgba(10, 13, 18, 0.35);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);

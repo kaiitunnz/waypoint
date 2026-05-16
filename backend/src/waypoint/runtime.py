@@ -106,6 +106,12 @@ class SessionRuntime:
             target.id: target for target in self.settings.ssh_targets if target.enabled
         }
         self.monitor_tasks: dict[str, asyncio.Task[None]] = {}
+        # Per-session helpers spawned by TmuxPlugin to capture the
+        # inner CLI's session/conversation id once the underlying app
+        # has materialized it on disk (Codex writes its rollout file
+        # only after the first user input). Stored here so terminate
+        # can cancel them alongside the pane monitor.
+        self._tmux_thread_id_watchers: dict[str, asyncio.Task[None]] = {}
         self._restore_tasks: set[asyncio.Task[None]] = set()
         self._completion_cache: dict[CompletionCacheKey, list[CommandCompletion]] = {}
         self._completion_cache_updated_at: dict[CompletionCacheKey, float] = {}
@@ -711,7 +717,7 @@ class SessionRuntime:
         # the session id is not tracked, so this is safe for clean EXITED
         # paths too.
         plugin = self.registry.plugin_for(session)
-        if not plugin.capabilities.is_structured:
+        if not plugin.capabilities.supports_reattach_after_exit:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="this session cannot be reattached after exit",
@@ -1316,14 +1322,32 @@ class SessionRuntime:
                         "error": str(exc),
                     },
                 )
-            self.storage.update_session(session.id, status=SessionStatus.EXITED)
+                await self._record_system_event(
+                    session.id,
+                    "Tmux target lost; session ended",
+                    status=SessionStatus.EXITED,
+                )
+                self.storage.update_session(session.id, status=SessionStatus.EXITED)
             return
         new_state = {**state, "pid": target_info.pane_pid}
-        updates: dict[str, Any] = {"transport_state": new_state}
         if target_info.pane_dead and session.status != SessionStatus.EXITED:
+            # Push an explicit event so the frontend can react
+            # immediately (offer the Reconnect affordance) instead of
+            # waiting for the next list-poll to discover the status
+            # flip. ``/exit`` inside the agent flows through this path.
             log.info(
                 "tmux pane reported dead",
                 extra={"session_id": session.id, "target": target},
             )
-            updates["status"] = SessionStatus.EXITED
-        self.storage.update_session(session.id, **updates)
+            await self._record_system_event(
+                session.id,
+                "Session exited (tmux pane closed)",
+                status=SessionStatus.EXITED,
+            )
+            self.storage.update_session(
+                session.id,
+                transport_state=new_state,
+                status=SessionStatus.EXITED,
+            )
+            return
+        self.storage.update_session(session.id, transport_state=new_state)

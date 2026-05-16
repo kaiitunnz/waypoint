@@ -990,7 +990,14 @@ async def test_reattach_terminates_before_restoring_codex(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_handle_input_rejects_reattach_for_tmux_session(tmp_path) -> None:
+async def test_handle_input_tmux_reattach_failure_surfaces_400(tmp_path) -> None:
+    # Tmux sessions are now reattachable — TmuxPlugin.restore_session
+    # spawns a fresh tmux session from stored launch args. In this
+    # test environment, no real ``tmux`` binary is available so the
+    # restore attempt fails inside the plugin, leaves the record in
+    # EXITED, and the post-restore guard in ``_reattach_session``
+    # surfaces a 400 rather than silently relaunching into a dead
+    # session.
     runtime, storage, settings = make_runtime(tmp_path)
     session = make_session(
         settings,

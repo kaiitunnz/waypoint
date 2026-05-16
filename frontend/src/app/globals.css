@@ -1215,6 +1215,11 @@ html[data-theme="light"] .session-pulse.reconnecting .session-pulse-dot {
   flex-wrap: wrap;
 }
 
+.session-loading {
+  padding: 24px 4px;
+  font-size: 0.92rem;
+}
+
 .tool-run-toggle {
   display: inline-flex;
   align-items: center;
@@ -6157,7 +6162,11 @@ html[data-theme="light"] .terminal {
   min-height: 0;
   width: 100%;
   max-width: 100%;
-  height: min(78vh, 900px);
+  /* Clamp against the actual viewport so a tall SessionHeader can't
+     push the pane off-screen. 78dvh is the usual cap; calc(100dvh -
+     160px) reserves space for header + page padding; 900px caps very
+     tall windows. */
+  height: min(78dvh, calc(100dvh - 160px), 900px);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
@@ -6179,6 +6188,9 @@ html[data-theme="light"] .terminal {
 
 @media (max-width: 720px) {
   .session-terminal {
+    /* 120px is the approximate SessionHeader height on mobile — if the
+       header grows, bump this or convert to a CSS variable surfaced
+       from a ResizeObserver. */
     height: calc(100dvh - 120px);
     border-radius: var(--radius-sm);
   }
@@ -6188,9 +6200,6 @@ html[data-theme="light"] .terminal {
 }
 
 .term-bar {
-  position: sticky;
-  top: 0;
-  z-index: 5;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -6207,90 +6216,6 @@ html[data-theme="light"] .terminal {
 
 html[data-theme="light"] .term-bar {
   background: rgba(255, 253, 247, 0.86);
-}
-
-.term-bar-glyph {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  border: 1px solid rgba(200, 169, 106, 0.24);
-  background: linear-gradient(180deg, rgba(200, 169, 106, 0.18), rgba(143, 179, 214, 0.08));
-  color: var(--accent-strong);
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
-  text-transform: lowercase;
-}
-
-html[data-theme="light"] .term-bar-glyph {
-  border-color: rgba(184, 130, 14, 0.24);
-  background: linear-gradient(180deg, rgba(184, 130, 14, 0.16), rgba(47, 111, 158, 0.08));
-}
-
-.term-bar-title {
-  color: var(--text-strong);
-  font-family: var(--font-display);
-  font-size: 0.98rem;
-  line-height: 1.1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-  flex: 0 1 auto;
-}
-
-.term-bar-cwd {
-  color: var(--accent-strong);
-  font-size: 0.74rem;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-  flex: 0 1 auto;
-}
-
-.term-bar-cwd::before {
-  content: "·";
-  margin: 0 8px;
-  color: var(--muted-soft);
-}
-
-.term-bar-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  flex: 0 0 auto;
-}
-
-.term-bar-status::before {
-  content: "";
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--muted-soft);
-  box-shadow: 0 0 0 3px rgba(111, 122, 140, 0.18);
-}
-
-.term-bar-status.running::before {
-  background: var(--success);
-  box-shadow: 0 0 0 3px rgba(108, 201, 154, 0.18);
-}
-
-.term-bar-status.warn::before {
-  background: var(--warn);
-  box-shadow: 0 0 0 3px rgba(217, 154, 74, 0.18);
-}
-
-.term-bar-status.danger::before {
-  background: var(--danger);
-  box-shadow: 0 0 0 3px rgba(226, 108, 112, 0.18);
 }
 
 .term-bar-dims {
@@ -6553,6 +6478,10 @@ html[data-theme="light"] .term-keys button {
 .term-keys button:hover {
   border-color: var(--line-strong);
   background: rgba(255, 255, 255, 0.08);
+}
+
+html[data-theme="light"] .term-keys button:hover {
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .term-keys button:active {

@@ -9,6 +9,11 @@ and disables every inline control knob (model/effort/permission mode)
 because no protocol is available to set them mid-session.
 """
 
+import asyncio
+import os
+import re
+import uuid
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Never
@@ -61,6 +66,7 @@ class TmuxPlugin:
     capabilities = BackendCapabilities(
         is_structured=False,
         supports_resume=True,
+        supports_reattach_after_exit=True,
         supports_set_model_inline=False,
         supports_set_effort_inline=False,
         supports_set_permission_mode_inline=False,
@@ -98,7 +104,29 @@ class TmuxPlugin:
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        return None
+        # Tear down the actual tmux session: stop the pipe-pane writer,
+        # kill the tmux session (which kills Codex/Claude inside it),
+        # and cancel the pane monitor task. Wrapped in suppressions so a
+        # partial teardown (e.g. tmux gone but monitor still alive)
+        # still cleans up the rest.
+        state = session.transport_state
+        target = state.get("tmux_pane") or state.get("tmux_session") or session.id
+        with suppress(TmuxError):
+            await runtime.tmux.stop_pipe(target)
+        tmux_session = state.get("tmux_session")
+        if session.source == SessionSource.MANAGED and tmux_session:
+            with suppress(TmuxError):
+                await runtime.tmux.kill_session(tmux_session)
+        monitor = runtime.monitor_tasks.pop(session.id, None)
+        if monitor is not None:
+            monitor.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await monitor
+        capture = runtime._tmux_thread_id_watchers.pop(session.id, None)
+        if capture is not None:
+            capture.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await capture
 
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -196,9 +224,253 @@ class TmuxPlugin:
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        # Tmux sessions are restored by re-attaching the pane monitor;
-        # there's no protocol round-trip to make here.
+        # Two flows reach here:
+        #
+        # 1. Boot-time replay (``SessionRuntime.start``): the tmux
+        #    process *should* still be alive — just re-attach the pane
+        #    monitor and resume the rollout-file watcher if applicable.
+        # 2. User-initiated reconnect of an EXITED session (via
+        #    ``/api/sessions/{id}/reattach``): spawn a fresh tmux
+        #    session, truncate the logs, and rewire transport_state to
+        #    point at the new pane. If we captured a thread_id during
+        #    the prior run, replay with the inner CLI's resume command
+        #    so the conversation continues.
+        state = session.transport_state
+        if session.status != SessionStatus.EXITED:
+            runtime._ensure_monitor(session.id)
+            if session.backend == "codex" and "thread_id" not in state:
+                self._spawn_codex_thread_id_watcher(
+                    runtime, session.id, session.cwd, session.created_at
+                )
+            return
+
+        # EXITED reconnect path. Wipe whatever might still be running
+        # under the old tmux session name so the new ``new-session``
+        # doesn't collide; ignore errors since the typical case is that
+        # nothing is there.
+        old_tmux_session = state.get("tmux_session")
+        if old_tmux_session:
+            with suppress(TmuxError):
+                await runtime.tmux.kill_session(old_tmux_session)
+
+        thread_id = state.get("thread_id") if isinstance(state, dict) else None
+        stored_args = state.get("launch_args") if isinstance(state, dict) else None
+        if not isinstance(stored_args, list):
+            stored_args = []
+        launch_args = self._resume_args(session.backend, thread_id, list(stored_args))
+
+        launch_target = runtime._find_launch_target(session.launch_target_id)
+        try:
+            command = runtime._command_for_backend(
+                session.backend, launch_args, launch_target, session.cwd
+            )
+        except HTTPException as exc:
+            await runtime._record_system_event(
+                session.id,
+                f"Failed to rebuild launch command for reconnect: {exc.detail}",
+                status=SessionStatus.EXITED,
+            )
+            return
+
+        raw_log = Path(session.raw_log_path)
+        structured_log = Path(session.structured_log_path)
+        # Truncate both logs for a clean slate — the renderer reseeds
+        # from a fresh capture-pane on every connect, and the structured
+        # event stream restarts at sequence 0 for the new conversation.
+        with suppress(OSError):
+            raw_log.parent.mkdir(parents=True, exist_ok=True)
+            raw_log.write_bytes(b"")
+        with suppress(OSError):
+            structured_log.parent.mkdir(parents=True, exist_ok=True)
+            structured_log.write_bytes(b"")
+        runtime.file_offsets.pop(session.id, None)
+
+        try:
+            target = await runtime.tmux.start_managed_session(
+                session.id, session.cwd, command
+            )
+            await runtime.tmux.pipe_output(target.pane, raw_log)
+        except TmuxError as exc:
+            await runtime._record_system_event(
+                session.id,
+                f"Failed to relaunch tmux session: {exc}",
+                status=SessionStatus.EXITED,
+            )
+            return
+
+        new_state: dict[str, Any] = {
+            "tmux_session": target.session,
+            "tmux_window": target.window,
+            "tmux_pane": target.pane,
+            "pid": target.pane_pid,
+            "launch_args": launch_args,
+        }
+        if thread_id:
+            new_state["thread_id"] = thread_id
+        runtime.storage.update_session(
+            session.id, transport_state=new_state, status=SessionStatus.STARTING
+        )
+        now = datetime.now(UTC)
+        message = (
+            f"Session reconnected (resumed thread {thread_id})"
+            if thread_id
+            else "Session reconnected (new thread)"
+        )
+        await runtime._record_system_event(
+            session.id, message, status=SessionStatus.STARTING
+        )
+        # Re-attach the monitor against the new pane.
         runtime._ensure_monitor(session.id)
+        if session.backend == "codex" and not thread_id:
+            self._spawn_codex_thread_id_watcher(runtime, session.id, session.cwd, now)
+
+    def _resume_args(
+        self, backend: str, thread_id: str | None, stored_args: list[str]
+    ) -> list[str]:
+        """Translate the original launch args into the inner CLI's resume form."""
+        if backend == "claude_code" and thread_id:
+            # The original args may already start with ``--session-id <uuid>``
+            # (inserted by ``create_session``). Strip it and substitute
+            # ``--resume <uuid>``; Claude treats the two flags as
+            # mutually exclusive.
+            scrubbed: list[str] = []
+            skip = 0
+            for arg in stored_args:
+                if skip:
+                    skip -= 1
+                    continue
+                if arg == "--session-id":
+                    skip = 1
+                    continue
+                scrubbed.append(arg)
+            return ["--resume", thread_id, *scrubbed]
+        if backend == "codex" and thread_id:
+            # ``codex resume <uuid>`` is a subcommand, not a flag. The
+            # rest of the original args go after it.
+            return ["resume", thread_id, *stored_args]
+        return list(stored_args)
+
+    def _spawn_codex_thread_id_watcher(
+        self,
+        runtime: "SessionRuntime",
+        session_id: str,
+        cwd: str,
+        since: datetime,
+    ) -> None:
+        """Spawn a one-shot task that captures Codex's session UUID.
+
+        Codex writes its rollout file to
+        ``$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<ts>-<UUID>.jsonl``
+        only after the first persist (typically the first user input),
+        and the UUID is embedded in the filename. The watcher polls
+        for that file and stores ``transport_state.thread_id`` when
+        found so a later reconnect can ``codex resume <uuid>``.
+
+        The interactive ``codex`` CLI exposes no session-id flag, so
+        capture has to happen post-launch.
+        """
+        if session_id in runtime._tmux_thread_id_watchers:
+            return
+        task = asyncio.create_task(
+            self._capture_codex_thread_id(runtime, session_id, cwd, since)
+        )
+        runtime._tmux_thread_id_watchers[session_id] = task
+
+    async def _capture_codex_thread_id(
+        self,
+        runtime: "SessionRuntime",
+        session_id: str,
+        cwd: str,
+        since: datetime,
+    ) -> None:
+        # Give up after this many seconds of polling; if the user never
+        # interacted, there's no thread to resume and a fresh launch on
+        # reconnect is the correct behavior anyway.
+        DEADLINE = 30 * 60  # 30 minutes
+        POLL_INTERVAL = 2.0
+        codex_home = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
+        sessions_dir = codex_home / "sessions"
+        since_ts = since.timestamp()
+        # Filename UUID matches the trailing ``<uuid>`` in
+        # ``rollout-YYYY-MM-DDThh-mm-ss-<UUID>.jsonl``.
+        uuid_re = re.compile(
+            r"rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-"
+            r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+            r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$"
+        )
+        elapsed = 0.0
+        try:
+            while elapsed < DEADLINE:
+                await asyncio.sleep(POLL_INTERVAL)
+                elapsed += POLL_INTERVAL
+                if not sessions_dir.is_dir():
+                    continue
+                best: tuple[float, str, Path] | None = None
+                # Codex shards by YYYY/MM/DD locally; scan two days back
+                # to cover near-midnight starts and DST oddness.
+                for entry in sessions_dir.glob("*/*/*/rollout-*.jsonl"):
+                    try:
+                        stat = entry.stat()
+                    except OSError:
+                        continue
+                    if stat.st_mtime < since_ts - 5:
+                        continue
+                    match = uuid_re.search(entry.name)
+                    if not match:
+                        continue
+                    # The first JSONL line is a SessionMeta header with
+                    # ``cwd``; confirm it matches before claiming this
+                    # file as ours, so concurrent codex sessions in
+                    # other directories don't get misattributed.
+                    if not self._codex_rollout_matches_cwd(entry, cwd):
+                        continue
+                    if best is None or stat.st_mtime > best[0]:
+                        best = (stat.st_mtime, match.group(1), entry)
+                if best is None:
+                    continue
+                session = runtime.storage.get_session(session_id)
+                if session is None:
+                    return
+                state = dict(session.transport_state or {})
+                if state.get("thread_id"):
+                    return
+                state["thread_id"] = best[1]
+                runtime.storage.update_session(session_id, transport_state=state)
+                return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # The watcher is best-effort. Don't crash the session over
+            # a missing rollout file or a JSON decode hiccup.
+            return
+        finally:
+            runtime._tmux_thread_id_watchers.pop(session_id, None)
+
+    @staticmethod
+    def _codex_rollout_matches_cwd(path: Path, cwd: str) -> bool:
+        try:
+            with path.open("r", encoding="utf-8", errors="ignore") as fh:
+                first_line = fh.readline()
+        except OSError:
+            return False
+        import json
+
+        try:
+            payload = json.loads(first_line)
+        except (json.JSONDecodeError, ValueError):
+            return False
+        # SessionMeta is either nested under "payload" or at the top
+        # level depending on Codex's rollout schema version. Check both.
+        for candidate in (
+            payload.get("payload"),
+            payload,
+        ):
+            if not isinstance(candidate, dict):
+                continue
+            recorded = candidate.get("cwd")
+            if isinstance(recorded, str) and recorded == cwd:
+                return True
+        return False
 
     async def list_threads(
         self,
@@ -252,8 +524,20 @@ class TmuxPlugin:
         # requested backend advertises. A backend without a cli_binary
         # (e.g. an HTTP-only OpenCode) can opt out of tmux fallback by
         # leaving the capability unset.
+        #
+        # Inner-backend resume support is dispatched here. Claude's CLI
+        # accepts ``--session-id <uuid>`` on launch, so we pre-generate
+        # the UUID and store it for the eventual reconnect path. Codex
+        # doesn't expose a session-id flag — its UUID is captured later
+        # by a watcher (see _watch_codex_thread_id) when the rollout
+        # file appears on disk.
+        launch_args = list(request.args)
+        thread_id: str | None = None
+        if request.backend == "claude_code":
+            thread_id = str(uuid.uuid4())
+            launch_args = ["--session-id", thread_id, *launch_args]
         command = runtime._command_for_backend(
-            request.backend, request.args, launch_target, request.cwd
+            request.backend, launch_args, launch_target, request.cwd
         )
         try:
             target = await runtime.tmux.start_managed_session(
@@ -265,6 +549,18 @@ class TmuxPlugin:
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
         now = datetime.now(UTC)
+        transport_state: dict[str, Any] = {
+            "tmux_session": target.session,
+            "tmux_window": target.window,
+            "tmux_pane": target.pane,
+            "pid": target.pane_pid,
+            # Stored so reconnect can replay verbatim launch args even
+            # when no thread_id was captured (or when the backend has no
+            # resume contract at all).
+            "launch_args": launch_args,
+        }
+        if thread_id is not None:
+            transport_state["thread_id"] = thread_id
         session = SessionRecord(
             id=session_id,
             backend=request.backend,
@@ -282,12 +578,7 @@ class TmuxPlugin:
             last_event_at=now,
             raw_log_path=str(raw_log),
             structured_log_path=str(structured_log),
-            transport_state={
-                "tmux_session": target.session,
-                "tmux_window": target.window,
-                "tmux_pane": target.pane,
-                "pid": target.pane_pid,
-            },
+            transport_state=transport_state,
         )
         runtime.storage.create_session(session)
         await runtime._record_system_event(
@@ -295,6 +586,8 @@ class TmuxPlugin:
             self.format_start_message(request.backend, launch_target, request.cwd),
         )
         runtime._ensure_monitor(session.id)
+        if request.backend == "codex":
+            self._spawn_codex_thread_id_watcher(runtime, session.id, session.cwd, now)
         return runtime.get_session(session.id)
 
 

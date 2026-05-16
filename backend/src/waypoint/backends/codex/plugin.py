@@ -102,6 +102,7 @@ class CodexPlugin:
     capabilities = BackendCapabilities(
         is_structured=True,
         supports_resume=False,
+        supports_reattach_after_exit=True,
         supports_set_model_inline=True,
         supports_set_effort_inline=True,
         supports_set_permission_mode_inline=True,

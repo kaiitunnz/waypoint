@@ -29,6 +29,12 @@ class SlashCommandSpec(_FrozenModel):
 class BackendCapabilities(_FrozenModel):
     is_structured: bool
     supports_resume: bool
+    # The plugin's ``restore_session`` knows how to bring an EXITED or
+    # ERROR record back to ``STARTING`` — by re-spawning the subprocess
+    # (structured plugins) or by relaunching a fresh tmux session with
+    # stored args (tmux fallback). Plugins without this capability are
+    # rejected from the reattach endpoint with a 400.
+    supports_reattach_after_exit: bool = False
     supports_terminate: bool = True
     supports_set_model_inline: bool = False
     supports_set_effort_inline: bool = False

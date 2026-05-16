@@ -37,6 +37,7 @@ from waypoint.schemas import (
     SessionModelRequest,
     SessionPermissionModeRequest,
     SessionPlanApprovalRequest,
+    SessionStatus,
     SessionTitleRequest,
     TerminalSnapshot,
 )
@@ -600,7 +601,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # seed from a stale capture and the stream would never produce
         # bytes. 4410 tells the frontend to surface the reconnect
         # button rather than auto-retry.
-        if session.status == "exited":
+        if session.status == SessionStatus.EXITED:
             await websocket.close(code=4410)
             return
         tmux_state = session.transport_state or {}
@@ -615,7 +616,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # so the timeout only matters when an unusual client connects.
         viewport_cols = 0
         viewport_rows = 0
-        with suppress(TimeoutError, json.JSONDecodeError, WebSocketDisconnect):
+        try:
             first = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
             handshake = json.loads(first)
             if handshake.get("type") == "resize":
@@ -630,6 +631,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             tmux_session, viewport_cols, viewport_rows
                         )
                         await adapter.resize_pane(pane, viewport_cols, viewport_rows)
+        except WebSocketDisconnect:
+            # Client closed during the handshake; nothing left to seed.
+            return
+        except (TimeoutError, json.JSONDecodeError):
+            # No handshake — fall through with default viewport.
+            pass
 
         # Give the pane process a beat to handle SIGWINCH and emit its
         # redraw before we capture — otherwise the seed reflects the stale
@@ -763,7 +770,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         current = context.runtime.get_session(session_id)
                     except HTTPException:
                         break
-                    if current.status == "exited":
+                    if current.status == SessionStatus.EXITED:
                         # Pane is gone; flush any pending diff, give
                         # xterm a beat to render it, then close the
                         # socket with a custom code so the frontend

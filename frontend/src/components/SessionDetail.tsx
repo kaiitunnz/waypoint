@@ -972,12 +972,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     session && (session.status === "exited" || session.status === "error"),
   );
   const terminalOnly = session?.transport === "tmux";
-  // Only structured transports can be brought back via the plugin's
-  // restore_session path. Tmux has no resume contract, so the backend
-  // hard-fails reattach there and the composer must follow suit.
-  const reattachable = Boolean(
-    session && fidelityFor(session.transport) === "structured",
-  );
+  // Structured plugins resume via their protocol; tmux relaunches a
+  // fresh tmux session from stored launch args (and a captured thread
+  // id when one was recorded). Both flows return the SessionRecord to
+  // a STARTING state.
+  const reattachable = Boolean(session);
   const dormantReattach = sessionExited && reattachable;
   // Block submission until the session record resolves — the parent renders
   // ReplyComposer eagerly to keep layout stable, so without this guard a fast
@@ -1060,6 +1059,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         },
         onAuthFailure: () => {
           handleAuthFailure();
+        },
+        onSessionExited: () => {
+          // The pane is gone (terminate / /exit / Codex crashed). Drop
+          // out of the auto-reconnect loop; the UI's Reconnect button
+          // is what spins up a fresh tmux session.
+          active = false;
         },
         onClose: () => {
           if (!active) return;

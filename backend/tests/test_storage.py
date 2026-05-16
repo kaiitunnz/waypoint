@@ -117,6 +117,30 @@ def test_storage_round_trips_pinned_at(tmp_path) -> None:
     assert unpinned.pinned_at is None
 
 
+def test_session_round_trip_persists_launch_mode(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="session-lm",
+        backend="codex",
+        source=SessionSource.MANAGED,
+        title="Codex via tmux",
+        cwd="/tmp",
+        launch_mode=LaunchMode.TMUX_WRAPPER,
+        status=SessionStatus.RUNNING,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="/tmp/raw.log",
+        structured_log_path="/tmp/events.jsonl",
+    )
+    storage.create_session(session)
+
+    loaded = storage.get_session("session-lm")
+    assert loaded is not None
+    assert loaded.launch_mode == LaunchMode.TMUX_WRAPPER
+
+
 def test_schedule_round_trip_persists_launch_mode(tmp_path) -> None:
     storage = Storage(tmp_path / "waypoint.db")
     now = datetime.now(UTC)

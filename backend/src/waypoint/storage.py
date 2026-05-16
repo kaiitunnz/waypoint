@@ -104,6 +104,7 @@ class Storage:
                 title TEXT NOT NULL,
                 cwd TEXT NOT NULL,
                 launch_target_id TEXT,
+                launch_mode TEXT NOT NULL DEFAULT 'auto',
                 repo_name TEXT,
                 branch TEXT,
                 status TEXT NOT NULL,
@@ -168,6 +169,7 @@ class Storage:
         self._ensure_column(
             "sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
         )
+        self._ensure_column("sessions", "launch_mode", "TEXT NOT NULL DEFAULT 'auto'")
         self._ensure_column("sessions", "context_usage", "TEXT")
         self._ensure_column("sessions", "rate_limit_usage", "TEXT")
         self._ensure_column(
@@ -185,11 +187,11 @@ class Storage:
             """
             INSERT INTO sessions (
                 id, backend, source, transport, title, cwd, launch_target_id,
-                repo_name, branch, status, created_at, updated_at, last_event_at,
-                raw_log_path, structured_log_path, transport_state, pinned_at,
-                permission_mode, model, effort, args, config_overrides, context_usage,
-                rate_limit_usage
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                launch_mode, repo_name, branch, status, created_at, updated_at,
+                last_event_at, raw_log_path, structured_log_path, transport_state,
+                pinned_at, permission_mode, model, effort, args, config_overrides,
+                context_usage, rate_limit_usage
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -199,6 +201,7 @@ class Storage:
                 session.title,
                 session.cwd,
                 session.launch_target_id,
+                session.launch_mode,
                 session.repo_name,
                 session.branch,
                 session.status,
@@ -603,6 +606,7 @@ class Storage:
             datetime.fromisoformat(raw_pinned_at) if raw_pinned_at else None
         )
         payload["status"] = SessionStatus(payload["status"])
+        payload["launch_mode"] = payload.get("launch_mode") or "auto"
         raw_state = payload.pop("transport_state", None) or "{}"
         try:
             decoded = json.loads(raw_state)

@@ -273,6 +273,7 @@ class TmuxPlugin:
             title=title,
             cwd=request.cwd,
             launch_target_id=launch_target.id if launch_target else None,
+            launch_mode=request.launch_mode,
             repo_name=git_meta.repo_name,
             branch=git_meta.branch,
             status=SessionStatus.STARTING,

@@ -321,15 +321,21 @@ class TmuxPlugin:
             "pid": target.pane_pid,
             "launch_args": launch_args,
         }
-        if thread_id:
-            new_state["thread_id"] = thread_id
+        # Only carry forward a thread id we successfully resumed. A
+        # phantom id (the inner CLI never persisted the conversation, or
+        # the file was deleted out of band) would defeat both the
+        # verbatim-launch fallback and the codex watcher-spawn guard
+        # below — better to drop it and let the next reconnect (or the
+        # watcher) capture a fresh id.
+        if effective_thread_id:
+            new_state["thread_id"] = effective_thread_id
         runtime.storage.update_session(
             session.id, transport_state=new_state, status=SessionStatus.STARTING
         )
         now = datetime.now(UTC)
         message = (
-            f"Session reconnected (resumed thread {thread_id})"
-            if thread_id
+            f"Session reconnected (resumed thread {effective_thread_id})"
+            if effective_thread_id
             else "Session reconnected (new thread)"
         )
         await runtime._record_system_event(
@@ -337,7 +343,7 @@ class TmuxPlugin:
         )
         # Re-attach the monitor against the new pane.
         runtime._ensure_monitor(session.id)
-        if session.backend == "codex" and not thread_id:
+        if session.backend == "codex" and not effective_thread_id:
             self._spawn_codex_thread_id_watcher(
                 runtime, session.id, session.cwd, now, launch_target
             )

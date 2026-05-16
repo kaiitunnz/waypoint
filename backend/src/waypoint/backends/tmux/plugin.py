@@ -12,6 +12,7 @@ because no protocol is available to set them mid-session.
 import asyncio
 import os
 import re
+import shlex
 import uuid
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -239,8 +240,9 @@ class TmuxPlugin:
         if session.status != SessionStatus.EXITED:
             runtime._ensure_monitor(session.id)
             if session.backend == "codex" and "thread_id" not in state:
+                lt = runtime._find_launch_target(session.launch_target_id)
                 self._spawn_codex_thread_id_watcher(
-                    runtime, session.id, session.cwd, session.created_at
+                    runtime, session.id, session.cwd, session.created_at, lt
                 )
             return
 
@@ -265,16 +267,15 @@ class TmuxPlugin:
         # "No conversation found with session ID: …". Same shape for
         # ``codex resume <uuid>``: no rollout file means no thread to
         # resume. Fall back to verbatim launch args in that case.
+        launch_target = runtime._find_launch_target(session.launch_target_id)
         effective_thread_id: str | None = None
-        if thread_id and self._conversation_exists(
-            session.backend, thread_id, session.cwd
+        if thread_id and await self._conversation_exists(
+            session.backend, thread_id, session.cwd, launch_target
         ):
             effective_thread_id = thread_id
         launch_args = self._resume_args(
             session.backend, effective_thread_id, list(stored_args)
         )
-
-        launch_target = runtime._find_launch_target(session.launch_target_id)
         try:
             command = runtime._command_for_backend(
                 session.backend, launch_args, launch_target, session.cwd
@@ -337,10 +338,17 @@ class TmuxPlugin:
         # Re-attach the monitor against the new pane.
         runtime._ensure_monitor(session.id)
         if session.backend == "codex" and not thread_id:
-            self._spawn_codex_thread_id_watcher(runtime, session.id, session.cwd, now)
+            self._spawn_codex_thread_id_watcher(
+                runtime, session.id, session.cwd, now, launch_target
+            )
 
-    @staticmethod
-    def _conversation_exists(backend: str, thread_id: str, cwd: str) -> bool:
+    async def _conversation_exists(
+        self,
+        backend: str,
+        thread_id: str,
+        cwd: str,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> bool:
         """Return True if the inner CLI has actually persisted ``thread_id``.
 
         Both Claude and Codex defer conversation-file creation until
@@ -350,24 +358,71 @@ class TmuxPlugin:
         found". This check lets restore fall back to a verbatim launch
         in that case, keeping the same uuid so a later reconnect can
         resume once the user has actually conversed.
+
+        For SSH-launched sessions the file lives on the remote host;
+        the check runs over SSH (cheap ``test -f`` / glob). OpenCode
+        sessions never use the tmux fallback (no ``cli_binary``), so
+        the backend dispatch falls through to ``False`` and the
+        verbatim-launch fallback covers them.
         """
         if backend == "claude_code":
             # ~/.claude/projects/<dashed-cwd>/<uuid>.jsonl
             dashed = cwd.replace("/", "-")
-            path = Path.home() / ".claude" / "projects" / dashed / f"{thread_id}.jsonl"
-            return path.is_file()
+            rel = f".claude/projects/{dashed}/{thread_id}.jsonl"
+            if launch_target is None:
+                return (Path.home() / rel).is_file()
+            return await self._ssh_test(launch_target, f"$HOME/{rel}")
         if backend == "codex":
-            # ~/.codex/sessions/YYYY/MM/DD/rollout-*-<uuid>.jsonl
-            home = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
-            sessions_dir = home / "sessions"
-            if not sessions_dir.is_dir():
-                return False
+            # $CODEX_HOME/sessions/YYYY/MM/DD/rollout-*-<uuid>.jsonl
             needle = f"-{thread_id}.jsonl"
-            for entry in sessions_dir.glob("*/*/*/rollout-*.jsonl"):
-                if entry.name.endswith(needle):
-                    return True
-            return False
+            if launch_target is None:
+                home = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
+                sessions_dir = home / "sessions"
+                if not sessions_dir.is_dir():
+                    return False
+                for entry in sessions_dir.glob("*/*/*/rollout-*.jsonl"):
+                    if entry.name.endswith(needle):
+                        return True
+                return False
+            stdout = await self._ssh_capture(
+                launch_target,
+                f'ls "${{CODEX_HOME:-$HOME/.codex}}/sessions/"*/*/*/rollout-*{needle} '
+                "2>/dev/null | head -n 1",
+            )
+            return bool(stdout.strip())
         return False
+
+    @staticmethod
+    async def _ssh_test(launch_target: SshLaunchTargetConfig, remote_path: str) -> bool:
+        """``ssh <host> test -f <path>`` — returns True on exit code 0."""
+        proc = await asyncio.create_subprocess_exec(
+            launch_target.ssh_bin,
+            *launch_target.ssh_args,
+            launch_target.ssh_destination,
+            f"test -f {shlex.quote(remote_path)}",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        return proc.returncode == 0
+
+    @staticmethod
+    async def _ssh_capture(
+        launch_target: SshLaunchTargetConfig, remote_cmd: str
+    ) -> str:
+        """``ssh <host> <cmd>`` — returns stdout (empty on non-zero exit)."""
+        proc = await asyncio.create_subprocess_exec(
+            launch_target.ssh_bin,
+            *launch_target.ssh_args,
+            launch_target.ssh_destination,
+            remote_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return ""
+        return stdout.decode("utf-8", errors="ignore")
 
     def _resume_args(
         self, backend: str, thread_id: str | None, stored_args: list[str]
@@ -401,6 +456,7 @@ class TmuxPlugin:
         session_id: str,
         cwd: str,
         since: datetime,
+        launch_target: SshLaunchTargetConfig | None,
     ) -> None:
         """Spawn a one-shot task that captures Codex's session UUID.
 
@@ -408,8 +464,9 @@ class TmuxPlugin:
         ``$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<ts>-<UUID>.jsonl``
         only after the first persist (typically the first user input),
         and the UUID is embedded in the filename. The watcher polls
-        for that file and stores ``transport_state.thread_id`` when
-        found so a later reconnect can ``codex resume <uuid>``.
+        for that file (locally or over SSH for remote launch targets)
+        and stores ``transport_state.thread_id`` when found so a later
+        reconnect can ``codex resume <uuid>``.
 
         The interactive ``codex`` CLI exposes no session-id flag, so
         capture has to happen post-launch.
@@ -417,9 +474,19 @@ class TmuxPlugin:
         if session_id in runtime._tmux_thread_id_watchers:
             return
         task = asyncio.create_task(
-            self._capture_codex_thread_id(runtime, session_id, cwd, since)
+            self._capture_codex_thread_id(
+                runtime, session_id, cwd, since, launch_target
+            )
         )
         runtime._tmux_thread_id_watchers[session_id] = task
+
+    # Filename UUID matches the trailing ``<uuid>`` in
+    # ``rollout-YYYY-MM-DDThh-mm-ss-<UUID>.jsonl``.
+    _ROLLOUT_UUID_RE = re.compile(
+        r"rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-"
+        r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+        r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$"
+    )
 
     async def _capture_codex_thread_id(
         self,
@@ -427,51 +494,27 @@ class TmuxPlugin:
         session_id: str,
         cwd: str,
         since: datetime,
+        launch_target: SshLaunchTargetConfig | None,
     ) -> None:
         # Give up after this many seconds of polling; if the user never
         # interacted, there's no thread to resume and a fresh launch on
         # reconnect is the correct behavior anyway.
         DEADLINE = 30 * 60  # 30 minutes
-        POLL_INTERVAL = 2.0
-        codex_home = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
-        sessions_dir = codex_home / "sessions"
-        since_ts = since.timestamp()
-        # Filename UUID matches the trailing ``<uuid>`` in
-        # ``rollout-YYYY-MM-DDThh-mm-ss-<UUID>.jsonl``.
-        uuid_re = re.compile(
-            r"rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-"
-            r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-            r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$"
-        )
+        # Polling interval: local fs is cheap, but the remote variant
+        # opens an SSH connection per tick, so back off there.
+        POLL_INTERVAL = 2.0 if launch_target is None else 10.0
         elapsed = 0.0
         try:
             while elapsed < DEADLINE:
                 await asyncio.sleep(POLL_INTERVAL)
                 elapsed += POLL_INTERVAL
-                if not sessions_dir.is_dir():
-                    continue
-                best: tuple[float, str, Path] | None = None
-                # Codex shards by YYYY/MM/DD locally; scan two days back
-                # to cover near-midnight starts and DST oddness.
-                for entry in sessions_dir.glob("*/*/*/rollout-*.jsonl"):
-                    try:
-                        stat = entry.stat()
-                    except OSError:
-                        continue
-                    if stat.st_mtime < since_ts - 5:
-                        continue
-                    match = uuid_re.search(entry.name)
-                    if not match:
-                        continue
-                    # The first JSONL line is a SessionMeta header with
-                    # ``cwd``; confirm it matches before claiming this
-                    # file as ours, so concurrent codex sessions in
-                    # other directories don't get misattributed.
-                    if not self._codex_rollout_matches_cwd(entry, cwd):
-                        continue
-                    if best is None or stat.st_mtime > best[0]:
-                        best = (stat.st_mtime, match.group(1), entry)
-                if best is None:
+                if launch_target is None:
+                    uuid_found = self._find_codex_thread_id_local(cwd, since)
+                else:
+                    uuid_found = await self._find_codex_thread_id_remote(
+                        cwd, since, launch_target
+                    )
+                if uuid_found is None:
                     continue
                 session = runtime.storage.get_session(session_id)
                 if session is None:
@@ -479,7 +522,7 @@ class TmuxPlugin:
                 state = dict(session.transport_state or {})
                 if state.get("thread_id"):
                     return
-                state["thread_id"] = best[1]
+                state["thread_id"] = uuid_found
                 runtime.storage.update_session(session_id, transport_state=state)
                 return
         except asyncio.CancelledError:
@@ -491,8 +534,114 @@ class TmuxPlugin:
         finally:
             runtime._tmux_thread_id_watchers.pop(session_id, None)
 
+    def _find_codex_thread_id_local(self, cwd: str, since: datetime) -> str | None:
+        codex_home = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
+        sessions_dir = codex_home / "sessions"
+        if not sessions_dir.is_dir():
+            return None
+        since_ts = since.timestamp()
+        best: tuple[float, str] | None = None
+        for entry in sessions_dir.glob("*/*/*/rollout-*.jsonl"):
+            try:
+                stat = entry.stat()
+            except OSError:
+                continue
+            if stat.st_mtime < since_ts - 5:
+                continue
+            match = self._ROLLOUT_UUID_RE.search(entry.name)
+            if not match:
+                continue
+            if not self._codex_rollout_matches_cwd(entry, cwd):
+                continue
+            if best is None or stat.st_mtime > best[0]:
+                best = (stat.st_mtime, match.group(1))
+        return best[1] if best else None
+
+    async def _find_codex_thread_id_remote(
+        self,
+        cwd: str,
+        since: datetime,
+        launch_target: SshLaunchTargetConfig,
+    ) -> str | None:
+        # Single SSH round-trip: list candidate rollout files and emit
+        # the filename + first JSONL line per file, tab-separated. The
+        # remote shell does the globbing; we filter in Python so the
+        # cwd-matching logic stays identical to the local path.
+        remote_cmd = (
+            'for f in "${CODEX_HOME:-$HOME/.codex}/sessions/"*/*/*/rollout-*.jsonl; '
+            "do "
+            '[ -f "$f" ] || continue; '
+            'printf "%s\\t" "$f"; '
+            'head -n1 "$f" 2>/dev/null; '
+            'printf "\\n"; '
+            "done 2>/dev/null"
+        )
+        stdout = await self._ssh_capture(launch_target, remote_cmd)
+        if not stdout:
+            return None
+        import json
+
+        since_ts = since.timestamp()
+        best: tuple[float, str] | None = None
+        for line in stdout.splitlines():
+            path, sep, header = line.partition("\t")
+            if not sep or not header.strip():
+                continue
+            # Filename embeds the timestamp the rollout was opened at;
+            # use that to filter out files older than the watcher start
+            # (no need for a stat round-trip).
+            match = self._ROLLOUT_UUID_RE.search(path)
+            if not match:
+                continue
+            ts = self._parse_rollout_timestamp(path)
+            if ts is not None and ts < since_ts - 5:
+                continue
+            try:
+                payload = json.loads(header.strip())
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if not self._payload_cwd_matches(payload, cwd):
+                continue
+            score = ts if ts is not None else since_ts
+            if best is None or score > best[0]:
+                best = (score, match.group(1))
+        return best[1] if best else None
+
     @staticmethod
-    def _codex_rollout_matches_cwd(path: Path, cwd: str) -> bool:
+    def _parse_rollout_timestamp(path: str) -> float | None:
+        """Extract the YYYY-MM-DDThh-mm-ss prefix from a rollout filename."""
+        match = re.search(
+            r"rollout-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-", path
+        )
+        if not match:
+            return None
+        try:
+            return datetime(
+                int(match.group(1)),
+                int(match.group(2)),
+                int(match.group(3)),
+                int(match.group(4)),
+                int(match.group(5)),
+                int(match.group(6)),
+            ).timestamp()
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _payload_cwd_matches(payload: Any, cwd: str) -> bool:
+        for candidate in (
+            payload.get("payload") if isinstance(payload, dict) else None,
+            payload if isinstance(payload, dict) else None,
+        ):
+            if not isinstance(candidate, dict):
+                continue
+            recorded = candidate.get("cwd")
+            if isinstance(recorded, str) and recorded == cwd:
+                return True
+        return False
+
+    @classmethod
+    def _codex_rollout_matches_cwd(cls, path: Path, cwd: str) -> bool:
         try:
             with path.open("r", encoding="utf-8", errors="ignore") as fh:
                 first_line = fh.readline()
@@ -505,17 +654,9 @@ class TmuxPlugin:
         except (json.JSONDecodeError, ValueError):
             return False
         # SessionMeta is either nested under "payload" or at the top
-        # level depending on Codex's rollout schema version. Check both.
-        for candidate in (
-            payload.get("payload"),
-            payload,
-        ):
-            if not isinstance(candidate, dict):
-                continue
-            recorded = candidate.get("cwd")
-            if isinstance(recorded, str) and recorded == cwd:
-                return True
-        return False
+        # level depending on Codex's rollout schema version. The
+        # ``_payload_cwd_matches`` helper checks both.
+        return cls._payload_cwd_matches(payload, cwd)
 
     async def list_threads(
         self,
@@ -632,7 +773,9 @@ class TmuxPlugin:
         )
         runtime._ensure_monitor(session.id)
         if request.backend == "codex":
-            self._spawn_codex_thread_id_watcher(runtime, session.id, session.cwd, now)
+            self._spawn_codex_thread_id_watcher(
+                runtime, session.id, session.cwd, now, launch_target
+            )
         return runtime.get_session(session.id)
 
 

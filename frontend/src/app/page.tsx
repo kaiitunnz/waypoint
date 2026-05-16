@@ -435,12 +435,14 @@ export default function HomePage() {
     backend: Backend,
     threadId: string,
     cwd: string,
+    launchMode: LaunchMode,
   ) {
     try {
       const payload = {
         thread_id: threadId,
         launch_target_id: activeLaunchTargetId || null,
         cwd,
+        launch_mode: launchMode,
       };
       const session = await importBackendThread(host, token, backend, payload);
       setSessions((current) => [

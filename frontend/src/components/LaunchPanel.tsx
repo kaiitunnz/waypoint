@@ -48,6 +48,7 @@ interface LaunchPanelProps {
     backend: Backend,
     threadId: string,
     cwd: string,
+    launchMode: LaunchMode,
   ) => Promise<void>;
   onAuthFailure?: () => void;
 }

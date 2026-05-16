@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { BackendCatalog } from "@/lib/backends";
 import { humaniseBackend } from "@/lib/backends";
 import { matchesQuery, parseQuery } from "@/lib/search";
-import { Backend } from "@/lib/types";
+import { Backend, LaunchMode } from "@/lib/types";
 
 import { SearchInput } from "./SearchInput";
 
@@ -30,7 +30,12 @@ interface ResumeThreadPanelProps {
   targetLabel: string | null;
   supportedBackends: Backend[];
   preferredBackend: Backend;
-  onImportThread: (backend: Backend, threadId: string, cwd: string) => Promise<void>;
+  onImportThread: (
+    backend: Backend,
+    threadId: string,
+    cwd: string,
+    launchMode: LaunchMode,
+  ) => Promise<void>;
   catalog?: BackendCatalog;
 }
 
@@ -120,6 +125,7 @@ export function ResumeThreadPanel({
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_DESKTOP);
   const [importingId, setImportingId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [launchMode, setLaunchMode] = useState<LaunchMode>("auto");
 
   const isExpanded = expanded || query.trim().length > 0;
 
@@ -175,7 +181,7 @@ export function ResumeThreadPanel({
   async function handleImport(thread: UnifiedThread) {
     setImportingId(thread.id);
     try {
-      await onImportThread(thread.backend, thread.id, thread.cwd);
+      await onImportThread(thread.backend, thread.id, thread.cwd, launchMode);
     } finally {
       setImportingId(null);
     }
@@ -223,6 +229,34 @@ export function ResumeThreadPanel({
         placeholder='Filter threads... (e.g. "title:bug AND branch:main")'
         showStatusExample={false}
       />
+
+      <div className="field resume-panel-launch-mode">
+        <span>Launch mode</span>
+        <div
+          className="segmented segmented-quiet"
+          role="radiogroup"
+          aria-label="Launch mode"
+        >
+          {(
+            [
+              ["auto", "Auto"],
+              ["direct", "Direct"],
+              ["tmux_wrapper", "Via tmux wrapper"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={launchMode === value}
+              className={`segmented-item ${launchMode === value ? "active" : ""}`}
+              onClick={() => setLaunchMode(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {loading ? (
         <p className="muted resume-panel-loading">Loading stored threads…</p>

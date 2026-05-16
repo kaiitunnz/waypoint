@@ -322,14 +322,24 @@ class TmuxPlugin:
             "pid": target.pane_pid,
             "launch_args": launch_args,
         }
-        # Only carry forward a thread id we successfully resumed. A
-        # phantom id (the inner CLI never persisted the conversation, or
-        # the file was deleted out of band) would defeat both the
-        # verbatim-launch fallback and the codex watcher-spawn guard
-        # below — better to drop it and let the next reconnect (or the
-        # watcher) capture a fresh id.
+        # Carry-forward rule depends on how the backend acquires its
+        # thread id:
+        #   - claude_code: the uuid is generated up-front and pinned in
+        #     ``stored_args`` via ``--session-id``. Keep ``thread_id``
+        #     even when the conversation file doesn't exist yet — the
+        #     next reconnect will re-check existence and choose between
+        #     ``--resume`` and the verbatim ``--session-id`` launch.
+        #     Dropping it would short-circuit the existence check and
+        #     leave us passing ``--session-id`` against an already-
+        #     materialised conversation.
+        #   - codex: the uuid is captured asynchronously by the watcher
+        #     from the rollout filename. A phantom id (file deleted
+        #     out of band) would suppress the watcher-spawn guard below
+        #     and the session could never re-acquire a real one.
         if effective_thread_id:
             new_state["thread_id"] = effective_thread_id
+        elif session.backend == "claude_code" and thread_id:
+            new_state["thread_id"] = thread_id
         runtime.storage.update_session(
             session.id, transport_state=new_state, status=SessionStatus.STARTING
         )

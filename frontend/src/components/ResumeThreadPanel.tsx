@@ -49,12 +49,7 @@ interface UnifiedThread extends ThreadSummary {
 }
 
 const COLLAPSED_VISIBLE = 2;
-// Desktop and mobile values are kept separate even when equal today —
-// future tuning may diverge them again, and the matchMedia hook below
-// already wires them.
-const PAGE_SIZE_DESKTOP = 5;
-const PAGE_SIZE_MOBILE = 5;
-const MOBILE_BREAKPOINT = "(max-width: 720px)";
+const PAGE_SIZE = 5;
 
 // 3-letter glyph used by the per-row index chip. Pulled from the
 // backend's capability descriptor (``badges.glyph``) when the catalog
@@ -127,22 +122,10 @@ export function ResumeThreadPanel({
   const [filterTouched, setFilterTouched] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_DESKTOP);
   const [importingId, setImportingId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
   const isExpanded = expanded || query.trim().length > 0;
-
-  // Tighter pagination on phones — 5 rows fits without forcing a long
-  // scroll inside an already-cramped viewport.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const mql = window.matchMedia(MOBILE_BREAKPOINT);
-    const sync = () => setPageSize(mql.matches ? PAGE_SIZE_MOBILE : PAGE_SIZE_DESKTOP);
-    sync();
-    mql.addEventListener("change", sync);
-    return () => mql.removeEventListener("change", sync);
-  }, []);
 
   // Auto-follow the launch form's backend selection until the user
   // explicitly picks an option; that lock stays for the session so the
@@ -166,16 +149,15 @@ export function ResumeThreadPanel({
     return list;
   }, [allThreads, filter, query]);
 
-  // Page reset whenever the filter, thread set, or page size changes
-  // underneath us (e.g. rotating phone landscape ⇄ portrait).
+  // Page reset whenever the filter or thread set changes underneath us.
   useEffect(() => {
     setPage(1);
-  }, [filter, filteredThreads.length, pageSize, query]);
+  }, [filter, filteredThreads.length, query]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredThreads.length / pageSize));
-  const pageStart = (page - 1) * pageSize;
+  const totalPages = Math.max(1, Math.ceil(filteredThreads.length / PAGE_SIZE));
+  const pageStart = (page - 1) * PAGE_SIZE;
   const visibleThreads = isExpanded
-    ? filteredThreads.slice(pageStart, pageStart + pageSize)
+    ? filteredThreads.slice(pageStart, pageStart + PAGE_SIZE)
     : filteredThreads.slice(0, COLLAPSED_VISIBLE);
 
   const loading = supportedBackends.some((id) => loadingByBackend[id]);
@@ -313,7 +295,7 @@ export function ResumeThreadPanel({
           {expanded && totalPages > 1 ? (
             <div className="import-thread-footer resume-thread-footer">
               <span>
-                {pageStart + 1}–{Math.min(filteredThreads.length, pageStart + pageSize)} of {filteredThreads.length}
+                {pageStart + 1}–{Math.min(filteredThreads.length, pageStart + PAGE_SIZE)} of {filteredThreads.length}
               </span>
               <div className="import-thread-pager">
                 <button
@@ -374,13 +356,19 @@ function formatRelativeTime(value: string): string {
   const then = new Date(value).getTime();
   const now = Date.now();
   const deltaSeconds = Math.round((then - now) / 1000);
+  // ``Intl.RelativeTimeFormat`` returns "this minute" for ``format(0,
+  // "minute")``, which reads as boilerplate for a row that just updated
+  // a few seconds ago. Short-circuit to a plain phrase below 60 s.
+  if (Math.abs(deltaSeconds) < 60) {
+    return "just now";
+  }
   const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
     ["day", 60 * 60 * 24],
     ["hour", 60 * 60],
     ["minute", 60],
   ];
   for (const [unit, seconds] of units) {
-    if (Math.abs(deltaSeconds) >= seconds || unit === "minute") {
+    if (Math.abs(deltaSeconds) >= seconds) {
       const amount = Math.round(deltaSeconds / seconds);
       return new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(
         amount,

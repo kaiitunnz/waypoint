@@ -700,19 +700,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         STATUS_CHECK_INTERVAL_POLLS = 50  # 50 * 20 ms = ~1 s
         frame_tracker = SyncFrameTracker()
 
+        async def emit_diff() -> None:
+            diff = renderer.render_diff()
+            if not diff:
+                return
+            # Wrap the diff in DECSET/DECRST 2026 so xterm.js v6
+            # batches every cell mutation into one animation frame.
+            with suppress(Exception):
+                await websocket.send_text("\x1b[?2026h" + diff + "\x1b[?2026l")
+
         async def stream_loop() -> None:
             offset = tail_offset
             frame_open_at: float | None = None
             poll_count = 0
-
-            async def emit_diff() -> None:
-                diff = renderer.render_diff()
-                if not diff:
-                    return
-                # Wrap the diff in DECSET/DECRST 2026 so xterm.js v6
-                # batches every cell mutation into one animation frame.
-                with suppress(Exception):
-                    await websocket.send_text("\x1b[?2026h" + diff + "\x1b[?2026l")
 
             while True:
                 chunk: bytes | None = None
@@ -828,6 +828,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     with suppress(TmuxError):
                         await adapter.resize_window(tmux_session, new_cols, new_rows)
                         await adapter.resize_pane(pane, new_cols, new_rows)
+                    # Resize invalidates the renderer's mirror and marks
+                    # every row dirty. If the pane is idle, the stream
+                    # loop has no chunk to react to and xterm would
+                    # keep showing reflowed-old content at the new
+                    # geometry until the next agent output. Emit the
+                    # fresh frame immediately so the new size paints
+                    # right away.
+                    await emit_diff()
 
         stream_task = asyncio.create_task(stream_loop())
         recv_task = asyncio.create_task(recv_loop())

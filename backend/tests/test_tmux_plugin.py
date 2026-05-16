@@ -7,14 +7,16 @@ Codex rollout-file watcher extracts a thread id from a filename.
 """
 
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
 from waypoint.backends.tmux.plugin import TmuxPlugin
 from waypoint.launch_targets import SshLaunchTargetConfig
+from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
 
 
 @pytest.fixture
@@ -338,3 +340,190 @@ async def _fake_sleep(_seconds: float) -> None:
     # Yield control once so the watcher's loop runs to next iteration
     # without burning wall-clock time.
     return None
+
+
+@dataclass
+class _PaneTarget:
+    session: str
+    window: str
+    pane: str
+    pane_pid: int
+
+
+class _FakeTmux:
+    async def kill_session(self, name: str) -> None:
+        return None
+
+    async def start_managed_session(
+        self, session_id: str, cwd: str, command: list[str]
+    ) -> _PaneTarget:
+        return _PaneTarget(
+            session=f"{session_id}-tmux",
+            window=f"{session_id}-w",
+            pane=f"{session_id}-p",
+            pane_pid=4242,
+        )
+
+    async def pipe_output(self, pane: str, log: Path) -> None:
+        return None
+
+
+class _FakeRuntime:
+    """Minimal runtime stub for ``TmuxPlugin.restore_session``."""
+
+    def __init__(self) -> None:
+        self.tmux = _FakeTmux()
+        self.file_offsets: dict[str, int] = {}
+        self._tmux_thread_id_watchers: dict[str, Any] = {}
+        self.updates: list[dict[str, Any]] = []
+
+    def _find_launch_target(self, _lt_id: str | None) -> None:
+        return None
+
+    def _command_for_backend(
+        self, backend: str, args: list[str], _lt: Any, _cwd: str
+    ) -> list[str]:
+        return ["claude", *args]
+
+    def _ensure_monitor(self, _sid: str) -> None:
+        return None
+
+    async def _record_system_event(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    class _Storage:
+        def __init__(self, parent: "_FakeRuntime") -> None:
+            self._parent = parent
+
+        def update_session(self, sid: str, **fields: Any) -> None:
+            self._parent.updates.append({"sid": sid, **fields})
+
+    @property
+    def storage(self) -> "_FakeRuntime._Storage":
+        return _FakeRuntime._Storage(self)
+
+
+def _exited_claude_session(sid: str, uuid_str: str, tmp_path: Path) -> SessionRecord:
+    now = datetime.now(UTC)
+    return SessionRecord(
+        id=sid,
+        backend="claude_code",
+        source=SessionSource.MANAGED,
+        transport="tmux",
+        title="t",
+        cwd="/Users/me/proj",
+        status=SessionStatus.EXITED,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        transport_state={
+            "tmux_session": f"{sid}-old",
+            "thread_id": uuid_str,
+            "launch_args": ["--session-id", uuid_str],
+        },
+        raw_log_path=str(tmp_path / f"{sid}.raw.log"),
+        structured_log_path=str(tmp_path / f"{sid}.events.jsonl"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_restore_session_claude_keeps_thread_id_across_terminate_cycles(
+    plugin: TmuxPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two-cycle reconnect for claude_code.
+
+    Cycle 1: user terminated before sending any message, so the
+    conversation file doesn't exist yet — restore falls back to a
+    verbatim ``--session-id <uuid>`` launch *but must preserve
+    transport_state.thread_id* so cycle 2 (after the user has typed
+    and the file now exists) can route through ``_conversation_exists``
+    and produce ``--resume <uuid>``.
+
+    Regression for the prior naive "drop thread_id on missing file"
+    fix, which broke cycle 2 by short-circuiting the existence check.
+    """
+    uuid_str = "00000000-0000-0000-0000-000000000001"
+    runtime = _FakeRuntime()
+
+    # Cycle 1 — conversation file absent.
+    async def absent(*_args: Any, **_kwargs: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(TmuxPlugin, "_conversation_exists", absent)
+    session_1 = _exited_claude_session("sess-1", uuid_str, tmp_path)
+    await plugin.restore_session(cast(Any, runtime), session_1)
+
+    cycle1 = runtime.updates[-1]
+    state1 = cycle1["transport_state"]
+    # Verbatim launch (--session-id still in stored args).
+    assert state1["launch_args"] == ["--session-id", uuid_str]
+    # CRITICAL: thread_id is preserved even though no resume happened.
+    assert state1["thread_id"] == uuid_str
+
+    # Cycle 2 — user has typed; conversation file now exists.
+    async def present(*_args: Any, **_kwargs: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(TmuxPlugin, "_conversation_exists", present)
+    session_2 = _exited_claude_session("sess-1", uuid_str, tmp_path)
+    await plugin.restore_session(cast(Any, runtime), session_2)
+
+    cycle2 = runtime.updates[-1]
+    state2 = cycle2["transport_state"]
+    # Now we route through --resume, not --session-id.
+    assert state2["launch_args"] == ["--resume", uuid_str]
+    assert state2["thread_id"] == uuid_str
+
+
+@pytest.mark.asyncio
+async def test_restore_session_codex_drops_phantom_thread_id(
+    plugin: TmuxPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phantom-id drop is still in force for codex.
+
+    Codex's uuid is captured by a post-launch watcher, not pinned in
+    stored_args. If the rollout file is gone, carrying the phantom id
+    forward would suppress the watcher-spawn guard and the session
+    could never re-acquire a real one.
+    """
+    uuid_str = "11111111-1111-1111-1111-111111111111"
+
+    async def absent(*_args: Any, **_kwargs: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(TmuxPlugin, "_conversation_exists", absent)
+    monkeypatch.setattr(
+        TmuxPlugin,
+        "_spawn_codex_thread_id_watcher",
+        lambda *_args, **_kwargs: None,
+    )
+
+    runtime = _FakeRuntime()
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="sess-codex",
+        backend="codex",
+        source=SessionSource.MANAGED,
+        transport="tmux",
+        title="t",
+        cwd="/Users/me/proj",
+        status=SessionStatus.EXITED,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        transport_state={
+            "tmux_session": "sess-codex-old",
+            "thread_id": uuid_str,
+            "launch_args": ["--foo"],
+        },
+        raw_log_path=str(tmp_path / "sess-codex.raw.log"),
+        structured_log_path=str(tmp_path / "sess-codex.events.jsonl"),
+    )
+    await plugin.restore_session(cast(Any, runtime), session)
+
+    state = runtime.updates[-1]["transport_state"]
+    assert "thread_id" not in state, state

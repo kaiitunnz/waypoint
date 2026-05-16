@@ -35,6 +35,26 @@ _PRIVATE_CSI_SGR_RE = re.compile(rb"\x1b\[[<>?][0-9;:]*m")
 # and gets handed to pyte unchanged rather than buffered forever.
 _MAX_PENDING_CSI = 64
 
+# DEC private modes we mirror from the pane stream to xterm.js. Pyte
+# never visibly interacts with these (mouse encoding, focus reporting,
+# bracketed paste are *input* concerns, not screen state), so they get
+# dropped between server and client unless we explicitly pass them
+# through. Without this, claude_code requests mouse mode at startup,
+# xterm.js never learns about it, and scroll wheel events fall on the
+# floor instead of reaching the TUI.
+_TRACKED_PRIVATE_MODES = frozenset(
+    {
+        1000,  # X10 mouse reporting
+        1002,  # button-event mouse tracking
+        1003,  # any-event mouse tracking
+        1004,  # focus in/out events
+        1006,  # SGR mouse encoding (modern, what xterm.js expects)
+        1015,  # URXVT mouse encoding (fallback some apps still set)
+        2004,  # bracketed paste
+    }
+)
+_PRIVATE_MODE_SET_RESET_RE = re.compile(rb"\x1b\[\?([0-9;]+)([hl])")
+
 
 def _csi_terminated(seq: bytes) -> bool:
     """True if ``seq`` (starting with ``ESC [``) contains a CSI final byte.
@@ -57,6 +77,7 @@ class TerminalRenderer(Protocol):
     def feed(self, data: bytes) -> None: ...
     def resize(self, cols: int, rows: int) -> None: ...
     def set_cursor(self, col: int, row: int) -> None: ...
+    def snoop_modes(self, data: bytes) -> None: ...
     def render_full(self) -> str: ...
     def render_diff(self) -> str: ...
 
@@ -151,6 +172,12 @@ class PyteRenderer:
         # Partial CSI held across ``feed`` boundaries so a private-SGR
         # split between chunks still gets stripped.
         self._pending: bytes = b""
+        # Tracked DEC private mode state — what the pane has actually
+        # requested vs what xterm.js has been told. Diffed between
+        # ``render_full`` / ``render_diff`` calls to mirror server-side
+        # mode changes to the client.
+        self._modes: dict[int, bool] = {}
+        self._emitted_modes: dict[int, bool] = {}
 
     def feed(self, data: bytes) -> None:
         buf = self._pending + data
@@ -165,7 +192,29 @@ class PyteRenderer:
                 self._pending = tail
                 buf = buf[:tail_idx]
         buf = _PRIVATE_CSI_SGR_RE.sub(b"", buf)
+        self._snoop_private_modes(buf)
         self._stream.feed(buf)
+
+    def snoop_modes(self, data: bytes) -> None:
+        """Update tracked private-mode state without driving the screen.
+
+        The WS handler calls this on the raw_log prefix it's about to
+        skip past (everything written before the client attached) so a
+        mid-session reconnect still recovers mouse/focus/paste mode that
+        the pane requested before we started reading the live tail.
+        """
+        self._snoop_private_modes(data)
+
+    def _snoop_private_modes(self, data: bytes) -> None:
+        for match in _PRIVATE_MODE_SET_RESET_RE.finditer(data):
+            on = match.group(2) == b"h"
+            for part in match.group(1).split(b";"):
+                try:
+                    mode = int(part)
+                except ValueError:
+                    continue
+                if mode in _TRACKED_PRIVATE_MODES:
+                    self._modes[mode] = on
 
     def set_cursor(self, col: int, row: int) -> None:
         """Force the cursor to (col, row), zero-based.
@@ -197,6 +246,10 @@ class PyteRenderer:
         if alt != self._alt_emitted:
             out.write("\x1b[?1049h" if alt else "\x1b[?1049l")
             self._alt_emitted = alt
+        # Mirror tracked private modes to xterm.js as part of the
+        # prelude so input encoding (mouse, focus, bracketed paste)
+        # is in sync before the user can interact.
+        self._emit_mode_changes(out, force_all=True)
         # Reset SGR, clear viewport, home cursor — guarantees a known
         # starting state before we paint each row.
         out.write("\x1b[0m\x1b[2J\x1b[H")
@@ -224,10 +277,20 @@ class PyteRenderer:
             self._screen.cursor.hidden,
         )
         dirty_rows = [r for r in self._screen.dirty if r < self.rows]
-        if not dirty_rows and cursor == self._last_cursor:
+
+        # Emit mode deltas before cells so xterm flips into mouse /
+        # focus / paste mode in the same frame as whatever content
+        # triggered the change. Compute this first because it's also
+        # part of the "should we short-circuit?" decision below.
+        mode_out = StringIO()
+        self._emit_mode_changes(mode_out, force_all=False)
+        mode_change_emitted = mode_out.tell() > 0
+
+        if not dirty_rows and cursor == self._last_cursor and not mode_change_emitted:
             return ""
 
         out = StringIO()
+        out.write(mode_out.getvalue())
         any_cell_change = False
         for row in sorted(dirty_rows):
             if self._emit_row_delta(out, row):
@@ -236,8 +299,13 @@ class PyteRenderer:
         # the mirror, suppress the diff entirely as long as the cursor
         # didn't move either — that is exactly Codex's "clear the
         # textbox border every frame" case, and emitting an empty diff
-        # would still trigger an xterm re-render.
-        if not any_cell_change and cursor == self._last_cursor:
+        # would still trigger an xterm re-render. Mode changes count as
+        # real work, so don't suppress when they're present.
+        if (
+            not any_cell_change
+            and cursor == self._last_cursor
+            and not mode_change_emitted
+        ):
             self._screen.dirty.clear()
             return ""
         self._paint_cursor(out)
@@ -246,6 +314,28 @@ class PyteRenderer:
 
     def _alt_active(self) -> bool:
         return bool(self._screen.mode & _ALT_SCREEN_MODES)
+
+    def _emit_mode_changes(self, out: StringIO, force_all: bool) -> None:
+        """Emit ``\\x1b[?Nh`` / ``\\x1b[?Nl`` for tracked-mode changes.
+
+        ``force_all`` re-emits the entire current mode state — used by
+        ``render_full`` on a fresh attach so xterm starts out in the
+        same modes the pane has. The diff form emits only modes whose
+        state differs from what xterm was last told.
+        """
+        for mode, on in self._modes.items():
+            if force_all or self._emitted_modes.get(mode) != on:
+                out.write(f"\x1b[?{mode}{'h' if on else 'l'}")
+                self._emitted_modes[mode] = on
+        if force_all:
+            # Cover the corner case where a mode was previously emitted
+            # as "on" but the pane has since dropped it from its state
+            # (e.g. via a reset). Without this the next render_full
+            # would silently leave xterm with the stale "on".
+            for mode in list(self._emitted_modes):
+                if mode not in self._modes and self._emitted_modes[mode]:
+                    out.write(f"\x1b[?{mode}l")
+                    self._emitted_modes[mode] = False
 
     def _emit_row_delta(self, out: StringIO, row: int) -> bool:
         """Emit ANSI for the cells in ``row`` that differ from the mirror.

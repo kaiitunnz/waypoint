@@ -12,6 +12,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from waypoint.schemas import LaunchMode
+
 
 class CodexThreadSummary(BaseModel):
     id: str
@@ -27,3 +29,9 @@ class CodexThreadSummary(BaseModel):
 class CodexThreadImportRequest(BaseModel):
     thread_id: str
     launch_target_id: str | None = None
+    # Mirrors ``SessionCreateRequest.launch_mode``: ``auto`` and
+    # ``direct`` resume via the structured Codex app-server protocol,
+    # while ``tmux_wrapper`` runs ``codex resume <uuid>`` inside a tmux
+    # pane. ``auto`` falls through to tmux when the structured plugin
+    # is not available for managed launch, matching create_session.
+    launch_mode: LaunchMode = LaunchMode.AUTO

@@ -397,6 +397,8 @@ class _FakeRuntime:
         self.file_offsets: dict[str, int] = {}
         self._tmux_thread_id_watchers: dict[str, Any] = {}
         self.updates: list[dict[str, Any]] = []
+        self.created: list[Any] = []
+        self._session_dir_root: Path | None = None
 
     def _find_launch_target(self, _lt_id: str | None) -> None:
         return None
@@ -404,7 +406,7 @@ class _FakeRuntime:
     def _command_for_backend(
         self, backend: str, args: list[str], _lt: Any, _cwd: str
     ) -> list[str]:
-        return ["claude", *args]
+        return [backend, *args]
 
     def _ensure_monitor(self, _sid: str) -> None:
         return None
@@ -412,12 +414,32 @@ class _FakeRuntime:
     async def _record_system_event(self, *args: Any, **kwargs: Any) -> None:
         return None
 
+    def _generate_session_id(self, backend: str) -> str:
+        return f"{backend}-fake"
+
+    def _session_dir(self, session_id: str) -> Path:
+        root = self._session_dir_root or Path("/tmp")
+        target = root / session_id
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+
+    def get_session(self, session_id: str) -> Any:
+        # Return the most-recently-created record; import_thread_via_resume
+        # uses this for its final ``return runtime.get_session(id)``.
+        for record in reversed(self.created):
+            if record.id == session_id:
+                return record
+        raise KeyError(session_id)
+
     class _Storage:
         def __init__(self, parent: "_FakeRuntime") -> None:
             self._parent = parent
 
         def update_session(self, sid: str, **fields: Any) -> None:
             self._parent.updates.append({"sid": sid, **fields})
+
+        def create_session(self, record: Any) -> None:
+            self._parent.created.append(record)
 
     @property
     def storage(self) -> "_FakeRuntime._Storage":
@@ -721,3 +743,131 @@ async def test_restore_session_attached_dead_pane_flips_back_to_exited(
     assert runtime.tmux.pipe_calls == []
     assert runtime.tmux.kill_calls == []
     assert runtime.updates == []
+
+
+@pytest.mark.asyncio
+async def test_import_thread_via_resume_claude_builds_resume_command(
+    plugin: TmuxPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Importing a Claude thread under ``launch_mode=tmux_wrapper``
+    must spawn a tmux session whose command is ``claude --resume <uuid>``
+    against the thread's cwd, with the same thread_id pinned in
+    ``transport_state``."""
+    uuid_str = "11111111-1111-1111-1111-111111111111"
+    cwd = "/Users/me/proj"
+
+    # Pretend the conversation file exists.
+    async def present(*_args: Any, **_kwargs: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(TmuxPlugin, "_conversation_exists", present)
+
+    runtime = _FakeRuntime()
+    runtime._session_dir_root = tmp_path
+
+    captured_commands: list[list[str]] = []
+    original_start = runtime.tmux.start_managed_session
+
+    async def start_capture(
+        session_id: str, cwd: str, command: list[str]
+    ) -> _PaneTarget:
+        captured_commands.append(command)
+        return await original_start(session_id, cwd, command)
+
+    runtime.tmux.start_managed_session = start_capture  # type: ignore[method-assign]
+
+    record = await plugin.import_thread_via_resume(
+        cast(Any, runtime),
+        backend="claude_code",
+        thread_id=uuid_str,
+        cwd=cwd,
+        launch_target_id=None,
+        title="resumed",
+    )
+
+    # Command should be ``claude --resume <uuid>`` — the fake
+    # ``_command_for_backend`` prepends the backend id, _resume_args
+    # produces the rest.
+    assert captured_commands == [["claude_code", "--resume", uuid_str]]
+    assert record.backend == "claude_code"
+    assert record.launch_mode == "tmux_wrapper"
+    assert record.transport_state["thread_id"] == uuid_str
+    assert record.transport_state["launch_args"] == ["--resume", uuid_str]
+    assert record.cwd == cwd
+
+
+@pytest.mark.asyncio
+async def test_import_thread_via_resume_codex_uses_resume_subcommand(
+    plugin: TmuxPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex's resume is a sub-command (``codex resume <uuid>``), not a
+    flag; the tmux import path must use it verbatim so the inner CLI
+    binds to the existing rollout."""
+    uuid_str = "22222222-2222-2222-2222-222222222222"
+
+    async def present(*_args: Any, **_kwargs: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(TmuxPlugin, "_conversation_exists", present)
+
+    runtime = _FakeRuntime()
+    runtime._session_dir_root = tmp_path
+    captured_commands: list[list[str]] = []
+    original_start = runtime.tmux.start_managed_session
+
+    async def start_capture(
+        session_id: str, cwd: str, command: list[str]
+    ) -> _PaneTarget:
+        captured_commands.append(command)
+        return await original_start(session_id, cwd, command)
+
+    runtime.tmux.start_managed_session = start_capture  # type: ignore[method-assign]
+
+    record = await plugin.import_thread_via_resume(
+        cast(Any, runtime),
+        backend="codex",
+        thread_id=uuid_str,
+        cwd="/Users/me/proj",
+        launch_target_id=None,
+        title="resumed",
+    )
+
+    assert captured_commands == [["codex", "resume", uuid_str]]
+    assert record.transport_state["launch_args"] == ["resume", uuid_str]
+
+
+@pytest.mark.asyncio
+async def test_import_thread_via_resume_refuses_when_conversation_missing(
+    plugin: TmuxPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No conversation file → no point launching tmux just to have the
+    inner CLI fail with "no such session". Surface a clear 400 instead.
+    """
+    from fastapi import HTTPException
+
+    async def absent(*_args: Any, **_kwargs: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(TmuxPlugin, "_conversation_exists", absent)
+
+    runtime = _FakeRuntime()
+    runtime._session_dir_root = tmp_path
+
+    with pytest.raises(HTTPException) as exc:
+        await plugin.import_thread_via_resume(
+            cast(Any, runtime),
+            backend="claude_code",
+            thread_id="ffffffff-ffff-ffff-ffff-ffffffffffff",
+            cwd="/Users/me/proj",
+            launch_target_id=None,
+            title="nope",
+        )
+    assert exc.value.status_code == 400
+    # No tmux session should have been created either.
+    assert runtime.created == []

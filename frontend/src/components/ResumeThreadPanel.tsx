@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { LaunchOptionsDetails } from "@/components/LaunchOptions";
 import type { BackendCatalog } from "@/lib/backends";
 import { humaniseBackend } from "@/lib/backends";
 import { matchesQuery, parseQuery } from "@/lib/search";
@@ -37,6 +38,8 @@ interface ResumeThreadPanelProps {
     launchMode: LaunchMode,
   ) => Promise<void>;
   catalog?: BackendCatalog;
+  launchMode: LaunchMode;
+  onLaunchModeChange: (mode: LaunchMode) => void;
 }
 
 type Filter = "all" | Backend;
@@ -72,6 +75,8 @@ export function ResumeThreadPanel({
   preferredBackend,
   onImportThread,
   catalog,
+  launchMode,
+  onLaunchModeChange,
 }: ResumeThreadPanelProps) {
   const dualBackend = supportedBackends.length >= 2;
 
@@ -125,7 +130,6 @@ export function ResumeThreadPanel({
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_DESKTOP);
   const [importingId, setImportingId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [launchMode, setLaunchMode] = useState<LaunchMode>("auto");
 
   const isExpanded = expanded || query.trim().length > 0;
 
@@ -175,8 +179,6 @@ export function ResumeThreadPanel({
     : filteredThreads.slice(0, COLLAPSED_VISIBLE);
 
   const loading = supportedBackends.some((id) => loadingByBackend[id]);
-  const totalForLabel = counts.all;
-  const subhead = subheadFor(totalForLabel, dualBackend, targetLabel);
 
   async function handleImport(thread: UnifiedThread) {
     setImportingId(thread.id);
@@ -194,14 +196,19 @@ export function ResumeThreadPanel({
   }
 
   return (
-    <section className="panel stack import-thread-panel resume-panel">
-      <div className="resume-panel-header">
-        <div className="resume-panel-titles">
-          <h3>Resume thread</h3>
-          <p className="muted">{subhead}</p>
+    <div className="launch-body resume-body">
+      <div className="resume-filters">
+        <div className="resume-filters-search">
+          <SearchInput
+            className="thread-panel-search"
+            value={query}
+            onChange={setQuery}
+            placeholder='Filter threads... (e.g. "title:bug AND branch:main")'
+            showStatusExample={false}
+          />
         </div>
         {dualBackend ? (
-          <label className="field resume-panel-filter">
+          <label className="field resume-filters-backend">
             <span>Backend</span>
             <select
               aria-label="Filter by backend"
@@ -222,41 +229,11 @@ export function ResumeThreadPanel({
         ) : null}
       </div>
 
-      <SearchInput
-        className="thread-panel-search"
-        value={query}
-        onChange={setQuery}
-        placeholder='Filter threads... (e.g. "title:bug AND branch:main")'
-        showStatusExample={false}
+      <LaunchOptionsDetails
+        mode="resume"
+        launchMode={launchMode}
+        onLaunchModeChange={onLaunchModeChange}
       />
-
-      <div className="field resume-panel-launch-mode">
-        <span>Launch mode</span>
-        <div
-          className="segmented segmented-quiet"
-          role="radiogroup"
-          aria-label="Launch mode"
-        >
-          {(
-            [
-              ["auto", "Auto"],
-              ["direct", "Direct"],
-              ["tmux_wrapper", "Via tmux wrapper"],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              role="radio"
-              aria-checked={launchMode === value}
-              className={`segmented-item ${launchMode === value ? "active" : ""}`}
-              onClick={() => setLaunchMode(value)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
 
       {loading ? (
         <p className="muted resume-panel-loading">Loading stored threads…</p>
@@ -377,24 +354,8 @@ export function ResumeThreadPanel({
           </button>
         </div>
       ) : null}
-    </section>
+    </div>
   );
-}
-
-function subheadFor(
-  total: number,
-  dualBackend: boolean,
-  targetLabel: string | null,
-): string {
-  if (total === 0) {
-    return targetLabel
-      ? `No stored sessions on ${targetLabel}`
-      : "No stored sessions yet";
-  }
-  const noun = total === 1 ? "session" : "sessions";
-  const span = dualBackend ? " across two backends" : "";
-  const where = targetLabel ? ` on ${targetLabel}` : "";
-  return `${total} ${noun}${span}${where}`;
 }
 
 function emptyHintFor(

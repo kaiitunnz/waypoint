@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { EffortPicker } from "@/components/EffortPicker";
+import { LaunchModeField } from "@/components/LaunchOptions";
 import { ModelPicker } from "@/components/ModelPicker";
 import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
 import type { BackendCatalog } from "@/lib/backends";
@@ -83,7 +84,8 @@ export function SchedulePanel({
   const capabilities = catalog.byId(backend)?.capabilities;
   const supportsCustomArgs = capabilities?.supports_custom_cli_args ?? false;
   const supportsConfigOverrides = capabilities?.supports_config_overrides ?? false;
-  const showAdvancedSection = supportsCustomArgs || supportsConfigOverrides;
+  // Advanced section is always shown — launch_mode lives in there now, so
+  // even backends without custom args / config overrides surface it.
 
   useEffect(() => setBackend(defaultBackend), [defaultBackend]);
   useEffect(() => setCwd(defaultCwd), [defaultCwd]);
@@ -236,27 +238,6 @@ export function SchedulePanel({
               ))}
             </select>
           </label>
-          <div className="field">
-            <span>Launch mode</span>
-            <div className="segmented segmented-quiet" role="radiogroup" aria-label="Launch mode">
-              {[
-                ["auto", "Auto"],
-                ["direct", "Direct"],
-                ["tmux_wrapper", "Via tmux wrapper"],
-              ].map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  role="radio"
-                  aria-checked={launchMode === value}
-                  className={`segmented-item ${launchMode === value ? "active" : ""}`}
-                  onClick={() => setLaunchMode(value as LaunchMode)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
           <WorkingDirectoryField
             cwd={cwd}
             onChange={setCwd}
@@ -303,24 +284,24 @@ export function SchedulePanel({
             disabled={busy}
           />
         </div>
-        {showAdvancedSection ? (
-          <div className={`advanced-section${showAdvanced ? " open" : ""}`}>
-            <button
-              type="button"
-              className="advanced-toggle"
-              onClick={() => setShowAdvanced((v) => !v)}
-              aria-expanded={showAdvanced}
-            >
-              <svg className="advanced-toggle-gear" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                <path d="M6 7.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" fill="currentColor" opacity="0.9"/>
-                <path fillRule="evenodd" clipRule="evenodd" d="M4.95.75h2.1l.3 1.2a3.75 3.75 0 0 1 .87.5l1.17-.39.75 1.3-1 .77v.87l1 .76-.75 1.3-1.17-.39a3.75 3.75 0 0 1-.87.5l-.3 1.2H4.95l-.3-1.2a3.75 3.75 0 0 1-.87-.5l-1.17.39-.75-1.3 1-.76V5.1l-1-.77.75-1.3 1.17.39a3.75 3.75 0 0 1 .87-.5l.3-1.17ZM6 4.125A1.875 1.875 0 1 0 6 7.876 1.875 1.875 0 0 0 6 4.124Z" fill="currentColor" opacity="0.55"/>
-              </svg>
-              <span className="advanced-toggle-label">Advanced</span>
-              <span className="advanced-toggle-chevron" aria-hidden="true" />
-            </button>
-            <div className="advanced-body">
-              <div className="advanced-body-inner">
-                {supportsCustomArgs ? (
+        <div className={`advanced-section${showAdvanced ? " open" : ""}`}>
+          <button
+            type="button"
+            className="advanced-toggle"
+            onClick={() => setShowAdvanced((v) => !v)}
+            aria-expanded={showAdvanced}
+          >
+            <svg className="advanced-toggle-gear" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="M6 7.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" fill="currentColor" opacity="0.9"/>
+              <path fillRule="evenodd" clipRule="evenodd" d="M4.95.75h2.1l.3 1.2a3.75 3.75 0 0 1 .87.5l1.17-.39.75 1.3-1 .77v.87l1 .76-.75 1.3-1.17-.39a3.75 3.75 0 0 1-.87.5l-.3 1.2H4.95l-.3-1.2a3.75 3.75 0 0 1-.87-.5l-1.17.39-.75-1.3 1-.76V5.1l-1-.77.75-1.3 1.17.39a3.75 3.75 0 0 1 .87-.5l.3-1.17ZM6 4.125A1.875 1.875 0 1 0 6 7.876 1.875 1.875 0 0 0 6 4.124Z" fill="currentColor" opacity="0.55"/>
+            </svg>
+            <span className="advanced-toggle-label">Advanced</span>
+            <span className="advanced-toggle-chevron" aria-hidden="true" />
+          </button>
+          <div className="advanced-body">
+            <div className="advanced-body-inner">
+              <LaunchModeField value={launchMode} onChange={setLaunchMode} />
+              {supportsCustomArgs ? (
                   <label className="field advanced-args-field">
                     <span>Custom CLI args</span>
                     <textarea
@@ -352,13 +333,14 @@ export function SchedulePanel({
                     />
                   </label>
                 ) : null}
-                <p className="advanced-warning">
-                  Passed directly to the CLI binary — use with caution.
-                </p>
-              </div>
+                {supportsCustomArgs || supportsConfigOverrides ? (
+                  <p className="advanced-warning">
+                    Passed directly to the CLI binary — use with caution.
+                  </p>
+                ) : null}
             </div>
           </div>
-        ) : null}
+        </div>
         <label className="field">
           <span>Initial prompt</span>
           <textarea

@@ -10,6 +10,7 @@ because no protocol is available to set them mid-session.
 """
 
 import asyncio
+import json
 import os
 import re
 import shlex
@@ -255,8 +256,8 @@ class TmuxPlugin:
             with suppress(TmuxError):
                 await runtime.tmux.kill_session(old_tmux_session)
 
-        thread_id = state.get("thread_id") if isinstance(state, dict) else None
-        stored_args = state.get("launch_args") if isinstance(state, dict) else None
+        thread_id = state.get("thread_id")
+        stored_args = state.get("launch_args")
         if not isinstance(stored_args, list):
             stored_args = []
         # A captured thread_id is only useful if the inner CLI has
@@ -600,7 +601,6 @@ class TmuxPlugin:
         stdout = await self._ssh_capture(launch_target, remote_cmd)
         if not stdout:
             return None
-        import json
 
         since_ts = since.timestamp()
         best: tuple[float, str] | None = None
@@ -668,7 +668,6 @@ class TmuxPlugin:
                 first_line = fh.readline()
         except OSError:
             return False
-        import json
 
         try:
             payload = json.loads(first_line)

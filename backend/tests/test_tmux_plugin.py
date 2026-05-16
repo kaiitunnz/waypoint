@@ -118,9 +118,12 @@ async def test_conversation_exists_routes_through_ssh_when_launch_target_set(
     # codex → _ssh_capture.
     calls: list[tuple[str, str]] = []
 
-    async def fake_ssh_test(target: object, remote_path: str) -> bool:
-        calls.append(("test", remote_path))
-        return remote_path.endswith("00000000-0000-0000-0000-000000000001.jsonl")
+    async def fake_ssh_test(target: object, remote_cmd: str) -> bool:
+        calls.append(("test", remote_cmd))
+        # The remote command embeds the uuid; the dedicated quoting
+        # test covers the shape of the command — this stub only cares
+        # about which uuid is being checked.
+        return "00000000-0000-0000-0000-000000000001.jsonl" in remote_cmd
 
     async def fake_ssh_capture(target: object, remote_cmd: str) -> str:
         calls.append(("capture", remote_cmd))

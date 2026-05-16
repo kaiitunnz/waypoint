@@ -14,6 +14,7 @@ export interface XTerminalHandle {
   cols(): number;
   rows(): number;
   focus(): void;
+  scrollToBottom(): void;
 }
 
 interface XTerminalProps {
@@ -21,6 +22,10 @@ interface XTerminalProps {
   readOnly?: boolean;
   onData?: (data: string) => void;
   onResize?: (size: { cols: number; rows: number }) => void;
+  // Fires whenever the user's distance from the live cursor changes. Used
+  // by SessionDetail to surface a "jump to live" pill once the viewport
+  // has slipped into the scrollback.
+  onScrollChange?: (isAtBottom: boolean) => void;
   className?: string;
 }
 
@@ -78,7 +83,7 @@ function themeFor(mode: "dark" | "light"): ITheme {
 
 export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
   function XTerminal(
-    { theme = "dark", readOnly = false, onData, onResize, className },
+    { theme = "dark", readOnly = false, onData, onResize, onScrollChange, className },
     ref,
   ) {
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -86,6 +91,8 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
     const fitRef = useRef<FitAddon | null>(null);
     const onDataRef = useRef(onData);
     const onResizeRef = useRef(onResize);
+    const onScrollChangeRef = useRef(onScrollChange);
+    const wasAtBottomRef = useRef(true);
 
     useEffect(() => {
       onDataRef.current = onData;
@@ -93,6 +100,9 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
     useEffect(() => {
       onResizeRef.current = onResize;
     }, [onResize]);
+    useEffect(() => {
+      onScrollChangeRef.current = onScrollChange;
+    }, [onScrollChange]);
 
     useEffect(() => {
       const host = containerRef.current;
@@ -130,6 +140,18 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       const onResizeSub = term.onResize(({ cols, rows }) => {
         onResizeRef.current?.({ cols, rows });
       });
+      // ``viewportY < baseY`` means the user is reading scrollback. Edge-
+      // trigger the callback only on transitions to avoid spamming React
+      // state on every scroll-tick.
+      const emitScrollState = () => {
+        const buf = term.buffer.active;
+        const atBottom = buf.viewportY >= buf.baseY;
+        if (atBottom !== wasAtBottomRef.current) {
+          wasAtBottomRef.current = atBottom;
+          onScrollChangeRef.current?.(atBottom);
+        }
+      };
+      const onScrollSub = term.onScroll(emitScrollState);
 
       // Initial fit can throw if the container is still 0-sized (animation,
       // hidden tab, etc.) — guard so we don't crash the React tree.
@@ -154,6 +176,7 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       return () => {
         onDataSub.dispose();
         onResizeSub.dispose();
+        onScrollSub.dispose();
         ro.disconnect();
         term.dispose();
         termRef.current = null;
@@ -185,6 +208,9 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       cols: () => termRef.current?.cols ?? 80,
       rows: () => termRef.current?.rows ?? 24,
       focus: () => termRef.current?.focus(),
+      scrollToBottom: () => {
+        termRef.current?.scrollToBottom();
+      },
     }));
 
     return (

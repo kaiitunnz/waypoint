@@ -4,6 +4,9 @@ import { useCallback, useEffect, useRef } from "react";
 
 interface TerminalScrollChipsProps {
   onWheel: (direction: "up" | "down") => void;
+  // When true, the cluster moves up to make room for the "Jump to live"
+  // pill sharing the bottom-right corner.
+  withJump?: boolean;
 }
 
 // First tap fires immediately; hold past REPEAT_DELAY then repeat at
@@ -13,7 +16,7 @@ interface TerminalScrollChipsProps {
 const REPEAT_DELAY_MS = 320;
 const REPEAT_INTERVAL_MS = 70;
 
-export function TerminalScrollChips({ onWheel }: TerminalScrollChipsProps) {
+export function TerminalScrollChips({ onWheel, withJump }: TerminalScrollChipsProps) {
   const delayRef = useRef<number | null>(null);
   const repeatRef = useRef<number | null>(null);
 
@@ -45,13 +48,13 @@ export function TerminalScrollChips({ onWheel }: TerminalScrollChipsProps) {
 
   return (
     <div
-      className="terminal-scroll-chips"
+      className="term-scroll-cluster"
+      data-with-jump={withJump ? "true" : undefined}
       role="group"
       aria-label="Terminal scroll"
     >
       <button
         type="button"
-        className="terminal-scroll-chip"
         onPointerDown={(e) => {
           e.preventDefault();
           start("up");
@@ -66,7 +69,6 @@ export function TerminalScrollChips({ onWheel }: TerminalScrollChipsProps) {
       </button>
       <button
         type="button"
-        className="terminal-scroll-chip"
         onPointerDown={(e) => {
           e.preventDefault();
           start("down");

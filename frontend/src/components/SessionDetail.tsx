@@ -55,8 +55,8 @@ import {
   type PlanViewModel,
 } from "@/lib/events";
 import { useTheme } from "@/lib/theme";
-import { TerminalScrollChips } from "@/components/TerminalScrollChips";
-import { XTerminal, type XTerminalHandle } from "@/components/XTerminal";
+import { SessionTerminalView } from "@/components/SessionTerminalView";
+import { type XTerminalHandle } from "@/components/XTerminal";
 import { ApprovalRequestCard, PlanApprovalCard } from "@/components/ApprovalCard";
 import {
   PendingUserInputCard,
@@ -1005,6 +1005,19 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const { theme } = useTheme();
   const terminalRef = useRef<XTerminalHandle | null>(null);
   const terminalSocketRef = useRef<WebSocket | null>(null);
+  // Bumped on every EXITED → live transition so the terminal-WS effect
+  // re-runs (closing the dead socket, opening a fresh one against the
+  // reborn tmux pane). Without it Reconnect leaves the pane stuck on
+  // the closed socket from the previous session — visible inputs go
+  // nowhere until the user refreshes the page.
+  const [terminalEpoch, setTerminalEpoch] = useState(0);
+  const prevSessionExitedRef = useRef(sessionExited);
+  useEffect(() => {
+    if (prevSessionExitedRef.current && !sessionExited) {
+      setTerminalEpoch((e) => e + 1);
+    }
+    prevSessionExitedRef.current = sessionExited;
+  }, [sessionExited]);
   // Push the latest REST snapshot to xterm whenever it changes (or when the
   // terminal tab mounts). For tmux sessions the WebSocket below seeds and
   // streams the pane directly, so skip the REST replay to avoid duplicating
@@ -1086,7 +1099,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       socket?.close();
       terminalSocketRef.current = null;
     };
-  }, [activeView, liveTmux, host, token, sessionId, handleAuthFailure]);
+  }, [activeView, liveTmux, host, token, sessionId, handleAuthFailure, terminalEpoch]);
 
   const handleTerminalInput = useCallback((data: string) => {
     const socket = terminalSocketRef.current;
@@ -1122,6 +1135,48 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     },
     [terminalDims, handleTerminalInput],
   );
+  const [termMenuOpen, setTermMenuOpen] = useState(false);
+  const [termAtBottom, setTermAtBottom] = useState(true);
+  const termMenuWrapRef = useRef<HTMLDivElement | null>(null);
+  // Click-outside + Escape close the overflow menu. Bound only while the
+  // menu is open so we don't pay the listener cost in the common case.
+  useEffect(() => {
+    if (!termMenuOpen) return;
+    function onPointerDown(event: PointerEvent) {
+      const wrap = termMenuWrapRef.current;
+      if (wrap && !wrap.contains(event.target as Node)) {
+        setTermMenuOpen(false);
+      }
+    }
+    function onKey(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setTermMenuOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [termMenuOpen]);
+  const handleJumpToLive = useCallback(() => {
+    terminalRef.current?.scrollToBottom();
+  }, []);
+  const handleTerminalScrollChange = useCallback((atBottom: boolean) => {
+    setTermAtBottom(atBottom);
+  }, []);
+  // "Refresh" on the terminal page means different things for live vs.
+  // read-only sessions: live tmux already streams every byte, so the
+  // useful refresh is bumping the WS epoch — that closes the current
+  // socket, opens a fresh one, and re-seeds the pane from the server's
+  // current state. For read-only snapshots we still hit the REST
+  // /snapshot endpoint to pull the latest capture.
+  const handleTerminalRefresh = useCallback(() => {
+    if (liveTmux) {
+      setTerminalEpoch((e) => e + 1);
+    } else {
+      void refreshSnapshot();
+    }
+  }, [liveTmux, refreshSnapshot]);
   const interruptSession = useCallback(() => {
     void runAction("interrupt");
   }, [runAction]);
@@ -1145,15 +1200,19 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         </div>
       ) : null}
       {session ? (
-        <SessionHeader 
-          session={session} 
-          connection={connection} 
-          modelOptions={modelOptions} 
+        <SessionHeader
+          session={session}
+          connection={connection}
+          modelOptions={modelOptions}
           onSetTitle={handleSetTitle}
         />
       ) : null}
       <div className="session-toolbar">
-        {!terminalOnly ? (
+        {terminalOnly ? (
+          <div className="segmented segmented-quiet" aria-label="View mode">
+            <span className="segmented-item active">Terminal</span>
+          </div>
+        ) : (
           <div className="segmented" role="tablist" aria-label="View">
             <button
               type="button"
@@ -1173,10 +1232,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
             >
               Terminal
             </button>
-          </div>
-        ) : (
-          <div className="segmented segmented-quiet" aria-label="View mode">
-            <span className="segmented-item active">Terminal</span>
           </div>
         )}
         {!terminalOnly && activeView === "chat" ? (
@@ -1303,145 +1358,31 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
             : null}
         </section>
       ) : (
-        <section className="panel terminal terminal-shell stack">
-          <div className="terminal-shell-header">
-            <div className="terminal-shell-brand">
-              <span className="terminal-shell-mark" aria-hidden="true">
-                ▣
-              </span>
-              <div className="terminal-shell-heading">
-                <p className="terminal-shell-kicker">Terminal render</p>
-                <h3>{session ? humaniseBackend(session.backend) : "Tmux session"}</h3>
-                <p className="terminal-shell-subtitle">
-                  {liveTmux
-                    ? "Live tmux pane — colors, cursor moves, and keystrokes all stream both ways. The composer is hidden because the terminal is the composer."
-                    : "Terminal capture from the session runtime."}
-                </p>
-              </div>
-            </div>
-            <div className="terminal-shell-badges" aria-label="Session metadata">
-              {session ? (
-                <>
-                  <span className="terminal-pill">{transportLabel(session.transport, catalog)}</span>
-                  <span className="terminal-pill">{fidelityFor(session.transport, catalog)}</span>
-                  <span className="terminal-pill">{session.status}</span>
-                  <span className="terminal-pill terminal-pill-accent">{session.cwd}</span>
-                </>
-              ) : (
-                <span className="terminal-pill">Waiting for session</span>
-              )}
-            </div>
-          </div>
-          <div className="terminal-shell-note">
-            <div>
-              <span className="terminal-shell-note-label">Mode</span>
-              <p>Terminal-only, optimized for TUI-driven agents such as Claude Code, Codex, and OpenCode.</p>
-            </div>
-            <div className="terminal-shell-note-meta">
-              <span className="terminal-shell-note-label">Updated</span>
-              <span>{session ? (snapshotLoading ? "refreshing" : formatRelativeTime(session.updated_at)) : "waiting"}</span>
-            </div>
-          </div>
-          <div className="terminal-shell-actions">
-            <div className="action-row terminal-action-row">
-              {liveTmux ? null : (
-                <button
-                  className="secondary"
-                  onClick={() => void refreshSnapshot()}
-                  type="button"
-                  disabled={snapshotLoading}
-                >
-                  {snapshotLoading ? "Refreshing…" : "Refresh"}
-                </button>
-              )}
-              {session && !sessionExited ? (
-                <button
-                  className="secondary"
-                  onClick={() => void interruptSession()}
-                  type="button"
-                >
-                  Interrupt
-                </button>
-              ) : null}
-              {canResume ? (
-                <button
-                  className="secondary"
-                  onClick={() => void resumeSession()}
-                  type="button"
-                >
-                  Resume
-                </button>
-              ) : null}
-              {dormantReattach ? (
-                <button
-                  className="secondary"
-                  onClick={() => void reattach()}
-                  type="button"
-                >
-                  Reconnect session
-                </button>
-              ) : null}
-              {session && !sessionExited ? (
-                <button
-                  className="secondary danger"
-                  onClick={() => void terminate()}
-                  type="button"
-                >
-                  Terminate
-                </button>
-              ) : null}
-              {sessionExited ? (
-                <button
-                  className="secondary danger"
-                  onClick={() => void removeFromList()}
-                  type="button"
-                >
-                  Delete transcript
-                </button>
-              ) : null}
-            </div>
-            <p className="terminal-shell-note terminal-shell-note-quiet">
-              {liveTmux
-                ? "Type directly into the terminal. Keystrokes, arrows, and Ctrl combinations stream to the pane; the pane streams back live."
-                : "Read-only terminal rendering. The output is intentionally not collapsed into chat bubbles."}
-            </p>
-          </div>
-          <div className="terminal-frame">
-            <div className="terminal-frame-topline">
-              <span className="terminal-frame-title">
-                {session ? `${session.backend} · ${session.transport}` : "tmux"}
-              </span>
-              <span className="terminal-frame-meta">
-                {liveTmux && terminalDims
-                  ? `${terminalDims.cols}×${terminalDims.rows} · `
-                  : ""}
-                {session
-                  ? snapshotLoading
-                    ? "refreshing capture"
-                    : formatRelativeTime(session.updated_at)
-                  : "awaiting capture"}
-              </span>
-            </div>
-            {liveTmux ? (
-              <TerminalKeyBar
-                onSend={handleTerminalInput}
-                backend={session?.backend ?? null}
-              />
-            ) : null}
-            <div className="terminal-viewport" role="log" aria-live="polite">
-              <XTerminal
-                ref={terminalRef}
-                theme={theme}
-                readOnly={!liveTmux}
-                onData={liveTmux ? handleTerminalInput : undefined}
-                onResize={handleTerminalResize}
-              />
-              {liveTmux ? (
-                <TerminalScrollChips onWheel={handleTerminalScrollChip} />
-              ) : null}
-            </div>
-          </div>
-        </section>
+        <SessionTerminalView
+          session={session}
+          liveTmux={liveTmux}
+          terminalRef={terminalRef}
+          theme={theme}
+          terminalDims={terminalDims}
+          snapshotLoading={snapshotLoading}
+          sessionExited={sessionExited}
+          dormantReattach={dormantReattach}
+          locked={terminalOnly}
+          termMenuOpen={termMenuOpen}
+          setTermMenuOpen={setTermMenuOpen}
+          termMenuWrapRef={termMenuWrapRef}
+          termAtBottom={termAtBottom}
+          onTerminalInput={handleTerminalInput}
+          onTerminalResize={handleTerminalResize}
+          onTerminalScrollChip={handleTerminalScrollChip}
+          onTerminalScrollChange={handleTerminalScrollChange}
+          onJumpToLive={handleJumpToLive}
+          onRefresh={handleTerminalRefresh}
+          onReattach={reattach}
+          onTerminate={terminate}
+          onRemoveFromList={removeFromList}
+          onSwitchSession={openSwitcher}
+        />
       )}
       {!terminalOnly && pendingApproval ? (
         <>
@@ -3279,66 +3220,6 @@ function sanitizeEvent(event: EventRecord): EventRecord {
     ...event,
     text: stripAnsi(event.text),
   };
-}
-
-// Common terminal control bytes that are awkward to type on touch
-// keyboards but routine for TUI agents. Each entry sends the literal
-// bytes to the pane via the existing input handler — Ctrl-* combinations
-// are encoded directly so the toolbar works even when the OS keyboard
-// doesn't expose a Ctrl modifier. ``backends`` (when set) restricts a
-// key to those backend ids; entries without it are universal.
-const TERMINAL_KEY_BAR: {
-  label: string;
-  data: string;
-  title: string;
-  backends?: string[];
-}[] = [
-  { label: "Esc", data: "\x1b", title: "Escape" },
-  { label: "Tab", data: "\t", title: "Tab" },
-  {
-    label: "⇧Tab",
-    data: "\x1b[Z",
-    title: "Shift-Tab (cycle modes)",
-    // CC uses Shift-Tab for permission-mode cycling; Codex's TUI also
-    // wires shift-tab → cycle mode in ``bottom_pane/footer.rs``. Other
-    // backends don't use this key on their primary surface, so we
-    // keep the chip out of their toolbar.
-    backends: ["claude_code", "codex"],
-  },
-  { label: "↵", data: "\n", title: "Newline (Ctrl-J)" },
-  { label: "↑", data: "\x1b[A", title: "Up" },
-  { label: "↓", data: "\x1b[B", title: "Down" },
-  { label: "←", data: "\x1b[D", title: "Left" },
-  { label: "→", data: "\x1b[C", title: "Right" },
-  { label: "^C", data: "\x03", title: "Ctrl-C (interrupt)" },
-];
-
-function TerminalKeyBar({
-  onSend,
-  backend,
-}: {
-  onSend: (data: string) => void;
-  backend: string | null | undefined;
-}) {
-  const keys = TERMINAL_KEY_BAR.filter(
-    (key) => !key.backends || (backend ? key.backends.includes(backend) : false),
-  );
-  return (
-    <div className="terminal-keys" role="group" aria-label="Send terminal keys">
-      {keys.map((key) => (
-        <button
-          key={key.label}
-          type="button"
-          className="terminal-key"
-          title={key.title}
-          aria-label={key.title}
-          onClick={() => onSend(key.data)}
-        >
-          {key.label}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 function stripAnsi(text: string): string {

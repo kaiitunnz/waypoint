@@ -351,11 +351,17 @@ class _PaneTarget:
     window: str
     pane: str
     pane_pid: int
+    pane_dead: bool = False
 
 
 class _FakeTmux:
+    def __init__(self) -> None:
+        self.kill_calls: list[str] = []
+        self.pipe_calls: list[tuple[str, Path]] = []
+        self.describe_pane_dead = False
+
     async def kill_session(self, name: str) -> None:
-        return None
+        self.kill_calls.append(name)
 
     async def start_managed_session(
         self, session_id: str, cwd: str, command: list[str]
@@ -368,7 +374,19 @@ class _FakeTmux:
         )
 
     async def pipe_output(self, pane: str, log: Path) -> None:
-        return None
+        self.pipe_calls.append((pane, log))
+
+    async def describe_target(self, target: str) -> _PaneTarget:
+        # Return the same pane id the caller passed in so the test
+        # can assert reattach went to the user's pane, not a fresh
+        # ``new-session``-spawned one.
+        return _PaneTarget(
+            session="user-tmux",
+            window="0",
+            pane=target,
+            pane_pid=9999,
+            pane_dead=self.describe_pane_dead,
+        )
 
 
 class _FakeRuntime:
@@ -530,3 +548,176 @@ async def test_restore_session_codex_drops_phantom_thread_id(
 
     state = runtime.updates[-1]["transport_state"]
     assert "thread_id" not in state, state
+
+
+def _exited_attached_session(sid: str, tmp_path: Path) -> SessionRecord:
+    now = datetime.now(UTC)
+    return SessionRecord(
+        id=sid,
+        backend="claude_code",
+        source=SessionSource.ATTACHED_TMUX,
+        transport="tmux",
+        title="t",
+        cwd="/Users/me/proj",
+        status=SessionStatus.EXITED,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        # ATTACHED sessions never get a ``launch_args`` — we attach
+        # rather than launch — and the pane id points at the user's
+        # external tmux pane.
+        transport_state={
+            "tmux_session": "user-tmux",
+            "tmux_window": "0",
+            "tmux_pane": "%42",
+            "pid": 1234,
+        },
+        raw_log_path=str(tmp_path / f"{sid}.raw.log"),
+        structured_log_path=str(tmp_path / f"{sid}.events.jsonl"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_restore_session_attached_repipes_and_does_not_kill(
+    plugin: TmuxPlugin, tmp_path: Path
+) -> None:
+    """ATTACHED-source reconnect must re-pipe to the user's existing
+    pane, not kill it and spawn a fresh inner CLI. Symptom of the
+    prior bug: clicking Reconnect on an attached session killed the
+    user's tmux and launched a brand-new Claude conversation.
+    """
+    runtime = _FakeRuntime()
+    session = _exited_attached_session("sess-att", tmp_path)
+    await plugin.restore_session(cast(Any, runtime), session)
+
+    # User's tmux session must NOT be killed.
+    assert runtime.tmux.kill_calls == [], runtime.tmux.kill_calls
+    # pipe-pane must be re-established against the user's pane.
+    assert len(runtime.tmux.pipe_calls) == 1
+    pane, log = runtime.tmux.pipe_calls[0]
+    assert pane == "%42"
+    assert log == Path(session.raw_log_path)
+    # Status update is IDLE (matching ``attach_tmux``), not STARTING,
+    # and transport_state retains the user's pane coordinates.
+    update = runtime.updates[-1]
+    assert update["status"] == SessionStatus.IDLE
+    assert update["transport_state"]["tmux_pane"] == "%42"
+    # No launch_args ever stored for attached sessions.
+    assert "launch_args" not in update["transport_state"]
+
+
+@pytest.mark.asyncio
+async def test_restore_session_attached_codex_respawns_thread_id_watcher(
+    plugin: TmuxPlugin, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An attached codex session that hadn't captured a thread_id
+    before terminate (user hadn't typed yet) loses its rollout
+    watcher at terminate. The reattach path must respawn it so the
+    uuid gets captured once the user does type."""
+    spawned: list[dict[str, Any]] = []
+
+    def fake_spawn(
+        self: TmuxPlugin,
+        runtime: Any,
+        session_id: str,
+        cwd: str,
+        since: Any,
+        launch_target: Any,
+    ) -> None:
+        spawned.append({"session_id": session_id, "cwd": cwd})
+
+    monkeypatch.setattr(TmuxPlugin, "_spawn_codex_thread_id_watcher", fake_spawn)
+
+    runtime = _FakeRuntime()
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="sess-codex-att",
+        backend="codex",
+        source=SessionSource.ATTACHED_TMUX,
+        transport="tmux",
+        title="t",
+        cwd="/Users/me/proj",
+        status=SessionStatus.EXITED,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        # No thread_id — user attached before first input.
+        transport_state={
+            "tmux_session": "user-tmux",
+            "tmux_window": "0",
+            "tmux_pane": "%99",
+            "pid": 1234,
+        },
+        raw_log_path=str(tmp_path / "sess-codex-att.raw.log"),
+        structured_log_path=str(tmp_path / "sess-codex-att.events.jsonl"),
+    )
+    await plugin.restore_session(cast(Any, runtime), session)
+
+    assert len(spawned) == 1, spawned
+    assert spawned[0]["session_id"] == "sess-codex-att"
+    assert spawned[0]["cwd"] == "/Users/me/proj"
+
+
+@pytest.mark.asyncio
+async def test_restore_session_attached_carries_forward_thread_id(
+    plugin: TmuxPlugin, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the attached codex session already captured a uuid in its
+    prior life, the reattach must preserve it (so codex's resume path
+    keeps the uuid) and must not redundantly spawn the watcher."""
+    spawned: list[Any] = []
+
+    def fake_spawn(*args: Any, **kwargs: Any) -> None:
+        spawned.append(args)
+
+    monkeypatch.setattr(TmuxPlugin, "_spawn_codex_thread_id_watcher", fake_spawn)
+
+    runtime = _FakeRuntime()
+    now = datetime.now(UTC)
+    uuid_str = "abcdef01-2345-6789-abcd-ef0123456789"
+    session = SessionRecord(
+        id="sess-codex-att-2",
+        backend="codex",
+        source=SessionSource.ATTACHED_TMUX,
+        transport="tmux",
+        title="t",
+        cwd="/Users/me/proj",
+        status=SessionStatus.EXITED,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        transport_state={
+            "tmux_session": "user-tmux",
+            "tmux_window": "0",
+            "tmux_pane": "%99",
+            "pid": 1234,
+            "thread_id": uuid_str,
+        },
+        raw_log_path=str(tmp_path / "sess-codex-att-2.raw.log"),
+        structured_log_path=str(tmp_path / "sess-codex-att-2.events.jsonl"),
+    )
+    await plugin.restore_session(cast(Any, runtime), session)
+
+    update = runtime.updates[-1]
+    assert update["transport_state"]["thread_id"] == uuid_str
+    assert spawned == []
+
+
+@pytest.mark.asyncio
+async def test_restore_session_attached_dead_pane_flips_back_to_exited(
+    plugin: TmuxPlugin, tmp_path: Path
+) -> None:
+    """If the user's external pane has died between terminate and
+    reconnect, we can't re-pipe to it — surface the failure as a
+    system event and leave the session EXITED rather than silently
+    spawning a fresh inner CLI under the same session id."""
+    runtime = _FakeRuntime()
+    runtime.tmux.describe_pane_dead = True
+    session = _exited_attached_session("sess-att-dead", tmp_path)
+    await plugin.restore_session(cast(Any, runtime), session)
+
+    # No pipe attempt, no kill, no storage update — reattach should
+    # bail before producing any user-visible state change.
+    assert runtime.tmux.pipe_calls == []
+    assert runtime.tmux.kill_calls == []
+    assert runtime.updates == []

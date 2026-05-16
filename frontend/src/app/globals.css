@@ -6516,6 +6516,62 @@ html[data-theme="light"] .terminal-key:active {
   border-radius: var(--radius-pill);
 }
 
+/* ─── Mobile scroll chips ───
+   xterm.js binds wheel events only — touch input never reaches the
+   pane on phones/tablets. We surface a pair of floating chips that
+   synthesize wheel-up/wheel-down (SGR mouse encoding) so the inner
+   TUI's own scroll handler responds. ``pointer: coarse`` keeps them
+   hidden on devices whose primary input is a mouse or trackpad. */
+.terminal-scroll-chips {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .terminal-scroll-chips {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 5;
+  }
+
+  .terminal-scroll-chip {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-pill);
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--line-strong);
+    font-size: 18px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    touch-action: manipulation;
+    -webkit-user-select: none;
+    user-select: none;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
+    transition:
+      transform 60ms ease,
+      background 120ms ease;
+  }
+
+  html[data-theme="light"] .terminal-scroll-chip {
+    box-shadow: 0 4px 12px rgba(90, 78, 58, 0.16);
+  }
+
+  .terminal-scroll-chip:active {
+    background: var(--bg-card-soft);
+    transform: scale(0.94);
+  }
+}
+
 @keyframes terminal-shell-enter {
   from {
     opacity: 0;

@@ -159,6 +159,7 @@ class SessionRecord(BaseModel):
     title: str
     cwd: str
     launch_target_id: str | None = None
+    launch_mode: LaunchMode = LaunchMode.AUTO
     repo_name: str | None = None
     branch: str | None = None
     status: SessionStatus

@@ -73,6 +73,7 @@ export interface SessionRecord {
   title: string;
   cwd: string;
   launch_target_id?: string | null;
+  launch_mode?: LaunchMode;
   repo_name?: string | null;
   branch?: string | null;
   status: SessionStatus;

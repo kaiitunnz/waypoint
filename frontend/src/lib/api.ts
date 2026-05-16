@@ -619,6 +619,9 @@ export function connectSessionSocket(
 interface TerminalSocketHandlers {
   onChunk: (text: string) => void;
   onAuthFailure?: () => void;
+  // Backend sends 4410 when the underlying tmux pane has exited. The
+  // user has to click Reconnect explicitly; we don't auto-retry.
+  onSessionExited?: () => void;
   onOpen?: () => void;
   onClose?: (event: CloseEvent) => void;
 }
@@ -642,6 +645,10 @@ export function connectTerminalSocket(
   socket.onclose = (event) => {
     if (event.code === 4401) {
       handlers.onAuthFailure?.();
+      return;
+    }
+    if (event.code === 4410) {
+      handlers.onSessionExited?.();
       return;
     }
     handlers.onClose?.(event);

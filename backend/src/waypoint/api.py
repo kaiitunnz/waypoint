@@ -596,6 +596,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if session.transport != "tmux":
             await websocket.close(code=4403)
             return
+        # Refuse to attach to an already-dead pane — the renderer would
+        # seed from a stale capture and the stream would never produce
+        # bytes. 4410 tells the frontend to surface the reconnect
+        # button rather than auto-retry.
+        if session.status == "exited":
+            await websocket.close(code=4410)
+            return
         tmux_state = session.transport_state or {}
         pane = tmux_state.get("tmux_pane") or session.id
         tmux_session = tmux_state.get("tmux_session") or session.id
@@ -686,11 +693,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # SYNC_HOLD_TIMEOUT is a defensive flush so a missing end
         # marker can't freeze the viewport indefinitely.
         SYNC_HOLD_TIMEOUT = 0.25
+        # Re-check the session record every N polls to detect ``EXITED``
+        # promptly (the monitor publishes a session_state event over the
+        # broadcast channel, but the terminal WS owns its own loop and
+        # we don't want to add a per-session subscription here).
+        STATUS_CHECK_INTERVAL_POLLS = 50  # 50 * 20 ms = ~1 s
         frame_tracker = SyncFrameTracker()
 
         async def stream_loop() -> None:
             offset = tail_offset
             frame_open_at: float | None = None
+            poll_count = 0
 
             async def emit_diff() -> None:
                 diff = renderer.render_diff()
@@ -743,6 +756,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         frame_open_at = None
                         await emit_diff()
 
+                poll_count += 1
+                if poll_count >= STATUS_CHECK_INTERVAL_POLLS:
+                    poll_count = 0
+                    try:
+                        current = context.runtime.get_session(session_id)
+                    except HTTPException:
+                        break
+                    if current.status == "exited":
+                        # Pane is gone; flush any pending diff, give
+                        # xterm a beat to render it, then close the
+                        # socket with a custom code so the frontend
+                        # stops auto-reconnecting and surfaces the
+                        # reconnect affordance instead.
+                        await emit_diff()
+                        with suppress(Exception):
+                            await websocket.close(code=4410)
+                        break
                 # 20ms keeps perceived latency below the threshold most
                 # users notice for typing echo without burning CPU on
                 # idle polling.

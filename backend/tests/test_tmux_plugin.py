@@ -248,6 +248,38 @@ async def test_capture_codex_thread_id_pulls_uuid_from_filename(
 
 
 @pytest.mark.asyncio
+async def test_conversation_exists_ssh_claude_command_leaves_home_unquoted(
+    plugin: TmuxPlugin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: ``shlex.quote`` over the whole remote path single-quoted
+    # ``$HOME`` and made the remote shell look for a literal ``$HOME``
+    # directory. The command we send must keep ``$HOME`` outside any
+    # single-quoted span so the remote shell expands it.
+    captured: list[str] = []
+
+    async def fake_ssh_test(target: object, remote_cmd: str) -> bool:
+        captured.append(remote_cmd)
+        return True
+
+    monkeypatch.setattr(TmuxPlugin, "_ssh_test", staticmethod(fake_ssh_test))
+    target = cast(SshLaunchTargetConfig, object())
+    await plugin._conversation_exists(
+        "claude_code",
+        "00000000-0000-0000-0000-000000000001",
+        "/Users/me/proj",
+        target,
+    )
+    assert len(captured) == 1
+    cmd = captured[0]
+    assert cmd.startswith("test -f ")
+    # ``$HOME`` must not be inside a single-quoted span, otherwise the
+    # remote shell sees the four literal characters instead of the
+    # home-dir path.
+    assert "'$HOME" not in cmd
+    assert "$HOME/" in cmd
+
+
+@pytest.mark.asyncio
 async def test_find_codex_thread_id_remote_parses_ssh_output(
     plugin: TmuxPlugin, monkeypatch: pytest.MonkeyPatch
 ) -> None:

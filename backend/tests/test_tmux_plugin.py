@@ -9,10 +9,12 @@ Codex rollout-file watcher extracts a thread id from a filename.
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from waypoint.backends.tmux.plugin import TmuxPlugin
+from waypoint.launch_targets import SshLaunchTargetConfig
 
 
 @pytest.fixture
@@ -61,7 +63,8 @@ def test_resume_args_unknown_backend_is_verbatim(plugin: TmuxPlugin) -> None:
     assert args == ["--foo"]
 
 
-def test_conversation_exists_claude_code(
+@pytest.mark.asyncio
+async def test_conversation_exists_claude_code_local(
     plugin: TmuxPlugin, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Claude stores conversations at
@@ -73,18 +76,19 @@ def test_conversation_exists_claude_code(
     project_dir.mkdir(parents=True)
     uuid_str = "00000000-0000-0000-0000-000000000001"
     (project_dir / f"{uuid_str}.jsonl").write_text("")
-    assert plugin._conversation_exists("claude_code", uuid_str, cwd) is True
+    assert await plugin._conversation_exists("claude_code", uuid_str, cwd, None) is True
     # Missing uuid (e.g., user terminated before first message) →
     # False, so restore falls back to a verbatim launch.
     assert (
-        plugin._conversation_exists(
-            "claude_code", "ffffffff-ffff-ffff-ffff-ffffffffffff", cwd
+        await plugin._conversation_exists(
+            "claude_code", "ffffffff-ffff-ffff-ffff-ffffffffffff", cwd, None
         )
         is False
     )
 
 
-def test_conversation_exists_codex(
+@pytest.mark.asyncio
+async def test_conversation_exists_codex_local(
     plugin: TmuxPlugin, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
@@ -92,13 +96,64 @@ def test_conversation_exists_codex(
     sessions_dir.mkdir(parents=True)
     uuid_str = "00000000-0000-0000-0000-000000000042"
     (sessions_dir / f"rollout-2026-05-16T10-00-00-{uuid_str}.jsonl").write_text("")
-    assert plugin._conversation_exists("codex", uuid_str, "/anywhere") is True
     assert (
-        plugin._conversation_exists(
-            "codex", "ffffffff-ffff-ffff-ffff-ffffffffffff", "/anywhere"
+        await plugin._conversation_exists("codex", uuid_str, "/anywhere", None) is True
+    )
+    assert (
+        await plugin._conversation_exists(
+            "codex", "ffffffff-ffff-ffff-ffff-ffffffffffff", "/anywhere", None
         )
         is False
     )
+
+
+@pytest.mark.asyncio
+async def test_conversation_exists_routes_through_ssh_when_launch_target_set(
+    plugin: TmuxPlugin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Verify the launch_target branch by stubbing the SSH helpers; we
+    # don't actually want to spawn ssh in a unit test. Claude → _ssh_test;
+    # codex → _ssh_capture.
+    calls: list[tuple[str, str]] = []
+
+    async def fake_ssh_test(target: object, remote_path: str) -> bool:
+        calls.append(("test", remote_path))
+        return remote_path.endswith("00000000-0000-0000-0000-000000000001.jsonl")
+
+    async def fake_ssh_capture(target: object, remote_cmd: str) -> str:
+        calls.append(("capture", remote_cmd))
+        if "found" in remote_cmd:
+            return "/remote/.codex/sessions/2026/05/16/rollout-2026-05-16T10-00-00-found.jsonl\n"
+        return ""
+
+    monkeypatch.setattr(TmuxPlugin, "_ssh_test", staticmethod(fake_ssh_test))
+    monkeypatch.setattr(TmuxPlugin, "_ssh_capture", staticmethod(fake_ssh_capture))
+
+    # ``_ssh_test`` is stubbed, so the actual SshLaunchTargetConfig
+    # is never touched — passing a sentinel via cast keeps mypy happy
+    # without forcing us to spin up a real launch-target fixture.
+    target = cast(SshLaunchTargetConfig, object())
+    cwd = "/remote/proj"
+    assert (
+        await plugin._conversation_exists(
+            "claude_code",
+            "00000000-0000-0000-0000-000000000001",
+            cwd,
+            target,
+        )
+        is True
+    )
+    assert (
+        await plugin._conversation_exists(
+            "claude_code",
+            "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            cwd,
+            target,
+        )
+        is False
+    )
+    # The SSH path was exercised for both calls.
+    assert [kind for kind, _ in calls] == ["test", "test"]
 
 
 def test_codex_rollout_matches_cwd_top_level(
@@ -185,10 +240,66 @@ async def test_capture_codex_thread_id_pulls_uuid_from_filename(
         "sess-1",
         cwd,
         datetime.now(UTC),
+        None,
     )
     assert captured["sess-1"] == {
         "transport_state": {"thread_id": uuid_str},
     }
+
+
+@pytest.mark.asyncio
+async def test_find_codex_thread_id_remote_parses_ssh_output(
+    plugin: TmuxPlugin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Stub _ssh_capture to return what the remote shell would print
+    # (filename + tab + first JSONL line, per rollout file).
+    uuid_str = "abcdef01-2345-6789-abcd-ef0123456789"
+    cwd = "/remote/proj"
+    captured_lines = (
+        "/remote/.codex/sessions/2099/01/01/"
+        f"rollout-2099-01-01T00-00-00-{uuid_str}.jsonl"
+        "\t"
+        f'{{"id": "{uuid_str}", "cwd": "{cwd}"}}\n'
+    )
+
+    async def fake_ssh_capture(target: object, remote_cmd: str) -> str:
+        return captured_lines
+
+    monkeypatch.setattr(TmuxPlugin, "_ssh_capture", staticmethod(fake_ssh_capture))
+    found = await plugin._find_codex_thread_id_remote(
+        cwd,
+        datetime(2026, 1, 1, tzinfo=UTC),
+        cast(SshLaunchTargetConfig, object()),
+    )
+    assert found == uuid_str
+
+
+@pytest.mark.asyncio
+async def test_find_codex_thread_id_remote_filters_by_cwd(
+    plugin: TmuxPlugin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Two files; only the second matches our cwd.
+    uuid_a = "11111111-1111-1111-1111-111111111111"
+    uuid_b = "22222222-2222-2222-2222-222222222222"
+    payload = (
+        f"/r/.codex/sessions/2099/01/01/rollout-2099-01-01T00-00-00-{uuid_a}.jsonl"
+        "\t"
+        f'{{"id": "{uuid_a}", "cwd": "/other/proj"}}\n'
+        f"/r/.codex/sessions/2099/01/01/rollout-2099-01-01T00-00-01-{uuid_b}.jsonl"
+        "\t"
+        f'{{"id": "{uuid_b}", "cwd": "/remote/proj"}}\n'
+    )
+
+    async def fake_ssh_capture(target: object, remote_cmd: str) -> str:
+        return payload
+
+    monkeypatch.setattr(TmuxPlugin, "_ssh_capture", staticmethod(fake_ssh_capture))
+    found = await plugin._find_codex_thread_id_remote(
+        "/remote/proj",
+        datetime(2026, 1, 1, tzinfo=UTC),
+        cast(SshLaunchTargetConfig, object()),
+    )
+    assert found == uuid_b
 
 
 async def _fake_sleep(_seconds: float) -> None:

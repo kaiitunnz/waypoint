@@ -31,9 +31,28 @@ import pyte
 # every written cell renders underlined in xterm. Strip these before
 # pyte sees them; xterm.js doesn't care about modifyOtherKeys either.
 _PRIVATE_CSI_SGR_RE = re.compile(rb"\x1b\[[<>?][0-9;:]*m")
-# Cap on a held partial CSI between feeds — anything longer is malformed
-# and gets handed to pyte unchanged rather than buffered forever.
+# Hold caps for an in-progress escape sequence between feeds. CSIs are
+# short by spec (params, intermediates, one final byte — always well
+# under 64 bytes); a longer "CSI" suggests malformed input and we'd
+# rather hand it to pyte than buffer indefinitely. DCS and OSC payloads
+# can be much larger — tmux's DCS-passthrough wraps OSC 52 clipboard
+# sets that can carry the user's whole selection, and an aggressive
+# 64-byte cap would chop those mid-base64 and feed the back half
+# through pyte as cell content (exactly the corruption the DCS strip
+# is here to prevent). 1 MiB matches tmux's own buffer-paste ceiling.
 _MAX_PENDING_CSI = 64
+_MAX_PENDING_NON_CSI = 1 << 20  # 1 MiB
+# DCS sequences (``ESC P ... ESC \``). Pyte's parser ignores DCS final
+# bytes and writes the payload straight into the screen as text — so
+# tmux's DCS-passthrough wrapper (``ESC P tmux; <doubled-esc payload>
+# ESC \``) splatters its inner OSC 52 base64 over whatever the cursor
+# is on, typically CC's textbox. Strip DCS entirely; nothing in our
+# pipeline interprets these.
+#
+# The middle group ``(?:\x1b\x1b[^\x1b]*)*`` is for tmux's "double the
+# inner ESC bytes" passthrough convention: an inner ``ESC X`` becomes
+# ``\x1b\x1b X`` and must not look like the terminator ``\x1b\\``.
+_DCS_RE = re.compile(rb"\x1bP[^\x1b]*(?:\x1b\x1b[^\x1b]*)*\x1b\\")
 
 # DEC private modes we mirror from the pane stream to xterm.js. Pyte
 # never visibly interacts with these (mouse encoding, focus reporting,
@@ -66,6 +85,91 @@ def _csi_terminated(seq: bytes) -> bool:
         if 0x40 <= byte <= 0x7E:
             return True
     return False
+
+
+def _partial_escape_at_tail(buf: bytes) -> int:
+    """Return the offset of an unterminated escape sequence at the tail.
+
+    Walks forward through ``buf`` parsing each ``ESC`` it sees against
+    its respective terminator rules. Returns the offset of the *last*
+    escape that didn't reach its terminator before the buffer ended,
+    or ``-1`` if every escape closed cleanly. The caller holds
+    ``buf[offset:]`` until the next feed completes the sequence.
+
+    Walking forward (rather than rfind) is necessary for DCS: tmux's
+    passthrough doubles inner ``ESC`` bytes, so the last ``ESC`` in a
+    truncated DCS isn't the start of a fresh escape — it's payload.
+    """
+    n = len(buf)
+    i = 0
+    while i < n:
+        if buf[i] != 0x1B:
+            i += 1
+            continue
+        start = i
+        if i + 1 >= n:
+            return start  # lone ESC at end
+        kind = buf[i + 1]
+        if kind == 0x5B:  # '[' — CSI
+            j = i + 2
+            terminated = False
+            while j < n:
+                if 0x40 <= buf[j] <= 0x7E:
+                    j += 1
+                    terminated = True
+                    break
+                j += 1
+            if not terminated:
+                return start
+            i = j
+        elif kind == 0x50:  # 'P' — DCS
+            j = i + 2
+            terminated = False
+            while j < n:
+                if buf[j] == 0x1B:
+                    if j + 1 >= n:
+                        return start  # ESC at end of buf
+                    if buf[j + 1] == 0x1B:
+                        # tmux-style doubled ESC inside the payload —
+                        # skip both bytes, terminator can't be here.
+                        j += 2
+                        continue
+                    if buf[j + 1] == 0x5C:  # '\\' — ST
+                        j += 2
+                        terminated = True
+                        break
+                    # Any other byte after a lone ESC is malformed
+                    # inside a DCS; treat as terminator-adjacent and
+                    # let the regex strip whatever it can.
+                    j += 2
+                    continue
+                j += 1
+            if not terminated:
+                return start
+            i = j
+        elif kind == 0x5D:  # ']' — OSC
+            j = i + 2
+            terminated = False
+            while j < n:
+                if buf[j] == 0x07:  # BEL
+                    j += 1
+                    terminated = True
+                    break
+                if buf[j] == 0x1B:
+                    if j + 1 < n and buf[j + 1] == 0x5C:
+                        j += 2
+                        terminated = True
+                        break
+                    if j + 1 >= n:
+                        return start
+                j += 1
+            if not terminated:
+                return start
+            i = j
+        else:
+            # Two-byte ESC sequences (``ESC =``, ``ESC c``, …).
+            i += 2
+    return -1
 
 
 class TerminalRenderer(Protocol):
@@ -182,16 +286,22 @@ class PyteRenderer:
     def feed(self, data: bytes) -> None:
         buf = self._pending + data
         self._pending = b""
-        # If the buffer's trailing ``ESC [`` hasn't seen a final byte
-        # yet, hold it for the next feed — otherwise the private-CSI
-        # regex below would miss a sequence split across chunks.
-        tail_idx = buf.rfind(b"\x1b[")
+        # Hold any in-progress CSI/DCS/OSC at the very end of the
+        # buffer so the strippers below can't miss a sequence that
+        # straddles a chunk boundary.
+        tail_idx = _partial_escape_at_tail(buf)
         if tail_idx != -1:
             tail = buf[tail_idx:]
-            if not _csi_terminated(tail) and len(tail) <= _MAX_PENDING_CSI:
+            kind = tail[1:2] if len(tail) >= 2 else b""
+            # CSIs are short by spec; DCS/OSC payloads (clipboard sets,
+            # terminfo queries) can be much larger and need their own
+            # window so a long sequence doesn't get truncated.
+            cap = _MAX_PENDING_CSI if kind == b"[" else _MAX_PENDING_NON_CSI
+            if len(tail) <= cap:
                 self._pending = tail
                 buf = buf[:tail_idx]
         buf = _PRIVATE_CSI_SGR_RE.sub(b"", buf)
+        buf = _DCS_RE.sub(b"", buf)
         self._snoop_private_modes(buf)
         self._stream.feed(buf)
 

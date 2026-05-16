@@ -525,25 +525,27 @@ class TmuxPlugin:
         elapsed = 0.0
         try:
             while elapsed < DEADLINE:
-                await asyncio.sleep(POLL_INTERVAL)
-                elapsed += POLL_INTERVAL
+                # Probe before sleeping so we don't waste POLL_INTERVAL
+                # in the case where the user has already typed and the
+                # rollout file exists when this watcher starts.
                 if launch_target is None:
                     uuid_found = self._find_codex_thread_id_local(cwd, since)
                 else:
                     uuid_found = await self._find_codex_thread_id_remote(
                         cwd, since, launch_target
                     )
-                if uuid_found is None:
-                    continue
-                session = runtime.storage.get_session(session_id)
-                if session is None:
+                if uuid_found is not None:
+                    session = runtime.storage.get_session(session_id)
+                    if session is None:
+                        return
+                    state = dict(session.transport_state or {})
+                    if state.get("thread_id"):
+                        return
+                    state["thread_id"] = uuid_found
+                    runtime.storage.update_session(session_id, transport_state=state)
                     return
-                state = dict(session.transport_state or {})
-                if state.get("thread_id"):
-                    return
-                state["thread_id"] = uuid_found
-                runtime.storage.update_session(session_id, transport_state=state)
-                return
+                await asyncio.sleep(POLL_INTERVAL)
+                elapsed += POLL_INTERVAL
         except asyncio.CancelledError:
             raise
         except Exception:

@@ -1,8 +1,17 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { EffortPicker } from "@/components/EffortPicker";
+import { LaunchOptionsDetails } from "@/components/LaunchOptions";
 import { ModelPicker } from "@/components/ModelPicker";
 import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
 import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
@@ -20,6 +29,8 @@ interface ThreadSummary {
   created_at: string;
   updated_at: string;
 }
+
+type PanelMode = "new" | "resume" | "attach";
 
 interface LaunchPanelProps {
   host: string;
@@ -70,6 +81,7 @@ export function LaunchPanel({
   onImportThread,
   onAuthFailure,
 }: LaunchPanelProps) {
+  const [mode, setMode] = useState<PanelMode>("new");
   const [backend, setBackend] = useState<Backend>(defaultBackend);
   const [cwd, setCwd] = useState(defaultCwd);
   const [title, setTitle] = useState("");
@@ -78,7 +90,6 @@ export function LaunchPanel({
   const [launchMode, setLaunchMode] = useState<LaunchMode>("auto");
   const [customArgsText, setCustomArgsText] = useState("");
   const [configOverridesText, setConfigOverridesText] = useState("");
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [modelInfo, setModelInfo] = useState<BackendModelListResponse | null>(null);
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [formBusy, setFormBusy] = useState(false);
@@ -86,7 +97,6 @@ export function LaunchPanel({
   const capabilities = catalog.byId(backend)?.capabilities;
   const supportsCustomArgs = capabilities?.supports_custom_cli_args ?? false;
   const supportsConfigOverrides = capabilities?.supports_config_overrides ?? false;
-  const showAdvancedSection = supportsCustomArgs || supportsConfigOverrides;
 
   const handleBackendChange = useCallback((nextBackend: Backend) => {
     setBackend(nextBackend);
@@ -113,7 +123,7 @@ export function LaunchPanel({
 
   const effortOptions = useMemo(() => {
     if (!modelInfo) return [];
-    
+
     const resolvedModelId = model || modelInfo.default_model_id;
     if (resolvedModelId) {
       const opt = modelInfo.models.find((entry) => entry.id === resolvedModelId);
@@ -121,7 +131,7 @@ export function LaunchPanel({
         return opt.supported_efforts ?? [];
       }
     }
-    
+
     // No explicit model picked and no default_model_id found — show the union
     // of every supported level so the picker still works against the backend's default model.
     const union = new Set<string>();
@@ -185,157 +195,87 @@ export function LaunchPanel({
     }
   }
 
+  const subhead = subheadFor(mode, targetLabel);
+
   return (
-    <section className="launch-grid">
-      <form className="panel stack" onSubmit={submitCreate}>
-        <div>
-          <h3>New session</h3>
-          <p className="muted">Launch through the wrapper for better transcript fidelity.</p>
+    <section className="launch-card" aria-label="Start a session">
+      <div className="launch-card-head">
+        <div className="launch-card-titles">
+          <h3>Start a session</h3>
+          <p className="muted">{subhead}</p>
         </div>
-        <label className="field">
-          <span>Backend</span>
-          <select value={backend} onChange={(event) => handleBackendChange(event.target.value as Backend)}>
-            {supportedBackends.map((id) => (
-              <option key={id} value={id}>
-                {catalog.byId(id)?.label ?? humaniseBackend(id)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="field">
-          <span>Launch mode</span>
-          <div className="segmented segmented-quiet" role="radiogroup" aria-label="Launch mode">
-            {[
-              ["auto", "Auto"],
-              ["direct", "Direct"],
-              ["tmux_wrapper", "Via tmux wrapper"],
-            ].map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                role="radio"
-                aria-checked={launchMode === value}
-                className={`segmented-item ${launchMode === value ? "active" : ""}`}
-                onClick={() => setLaunchMode(value as LaunchMode)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <WorkingDirectoryField
-          cwd={cwd}
-          onChange={setCwd}
-          targetLabel={targetLabel}
-          recentCwds={recentCwds}
-        />
-        <label className="field">
-          <span>Title</span>
-          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Optional" />
-        </label>
-        <ModelPicker
-          key={`${backend}:${launchTargetId ?? "local"}`}
-          host={host}
-          token={token}
-          backend={backend}
-          launchTargetId={launchTargetId}
-          value={model}
-          onChange={setModel}
-          onAuthFailure={onAuthFailure}
-          onModelsLoaded={handleModelsLoaded}
-          disabled={formBusy}
-          defaultModelLabel={modelInfo?.default_model_label ?? null}
-        />
-        <EffortPicker
-          options={effortOptions}
-          value={effort}
-          onChange={setEffort}
-          disabled={formBusy}
-        />
-        {showAdvancedSection ? (
-          <div className={`advanced-section${showAdvanced ? " open" : ""}`}>
-            <button
-              type="button"
-              className="advanced-toggle"
-              onClick={() => setShowAdvanced((v) => !v)}
-              aria-expanded={showAdvanced}
-            >
-              <svg className="advanced-toggle-gear" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                <path d="M6 7.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" fill="currentColor" opacity="0.9"/>
-                <path fillRule="evenodd" clipRule="evenodd" d="M4.95.75h2.1l.3 1.2a3.75 3.75 0 0 1 .87.5l1.17-.39.75 1.3-1 .77v.87l1 .76-.75 1.3-1.17-.39a3.75 3.75 0 0 1-.87.5l-.3 1.2H4.95l-.3-1.2a3.75 3.75 0 0 1-.87-.5l-1.17.39-.75-1.3 1-.76V5.1l-1-.77.75-1.3 1.17.39a3.75 3.75 0 0 1 .87-.5l.3-1.17ZM6 4.125A1.875 1.875 0 1 0 6 7.876 1.875 1.875 0 0 0 6 4.124Z" fill="currentColor" opacity="0.55"/>
-              </svg>
-              <span className="advanced-toggle-label">Advanced</span>
-              <span className="advanced-toggle-chevron" aria-hidden="true" />
-            </button>
-            <div className="advanced-body">
-              <div className="advanced-body-inner">
-                {supportsCustomArgs ? (
-                  <label className="field advanced-args-field">
-                    <span>Custom CLI args</span>
-                    <textarea
-                      rows={3}
-                      value={customArgsText}
-                      onChange={(e) => setCustomArgsText(e.target.value)}
-                      placeholder={"One flag per line, e.g.\n--dangerously-skip-permissions"}
-                      disabled={formBusy}
-                      spellCheck={false}
-                      autoCapitalize="none"
-                      autoComplete="off"
-                      autoCorrect="off"
-                    />
-                  </label>
-                ) : null}
-                {supportsConfigOverrides ? (
-                  <label className="field advanced-args-field">
-                    <span>Config overrides (key=value)</span>
-                    <textarea
-                      rows={3}
-                      value={configOverridesText}
-                      onChange={(e) => setConfigOverridesText(e.target.value)}
-                      placeholder={"One per line, e.g.\nmodel_reasoning_effort=\"high\""}
-                      disabled={formBusy}
-                      spellCheck={false}
-                      autoCapitalize="none"
-                      autoComplete="off"
-                      autoCorrect="off"
-                    />
-                  </label>
-                ) : null}
-                <p className="advanced-warning">
-                  Passed directly to the CLI binary — use with caution.
-                </p>
-              </div>
+        <LaunchModeChooser mode={mode} onChange={setMode} />
+      </div>
+
+      {mode === "new" ? (
+        <form className="launch-body" onSubmit={submitCreate}>
+          <div className="launch-body-grid two-col">
+            <div className="launch-body-col">
+              <label className="field">
+                <span>Backend</span>
+                <select value={backend} onChange={(event) => handleBackendChange(event.target.value as Backend)}>
+                  {supportedBackends.map((id) => (
+                    <option key={id} value={id}>
+                      {catalog.byId(id)?.label ?? humaniseBackend(id)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <WorkingDirectoryField
+                cwd={cwd}
+                onChange={setCwd}
+                targetLabel={targetLabel}
+                recentCwds={recentCwds}
+              />
+              <label className="field">
+                <span>Title</span>
+                <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Optional" />
+              </label>
+            </div>
+            <div className="launch-body-col">
+              <ModelPicker
+                key={`${backend}:${launchTargetId ?? "local"}`}
+                host={host}
+                token={token}
+                backend={backend}
+                launchTargetId={launchTargetId}
+                value={model}
+                onChange={setModel}
+                onAuthFailure={onAuthFailure}
+                onModelsLoaded={handleModelsLoaded}
+                disabled={formBusy}
+                defaultModelLabel={modelInfo?.default_model_label ?? null}
+              />
+              <EffortPicker
+                options={effortOptions}
+                value={effort}
+                onChange={setEffort}
+                disabled={formBusy}
+              />
             </div>
           </div>
-        ) : null}
-        <button className="primary" disabled={formBusy} type="submit">
-          Launch
-        </button>
-      </form>
-      <form className="panel stack" onSubmit={submitAttach}>
-        <div>
-          <h3>Attach tmux</h3>
-          <p className="muted">Observe an existing pane with raw terminal fallback.</p>
-        </div>
-        <label className="field">
-          <span>Tmux target</span>
-          <input value={tmuxTarget} onChange={(event) => setTmuxTarget(event.target.value)} placeholder="session:0.0" />
-        </label>
-        <label className="field">
-          <span>Backend hint</span>
-          <select value={backend} onChange={(event) => handleBackendChange(event.target.value as Backend)}>
-            {supportedBackends.map((id) => (
-              <option key={id} value={id}>
-                {catalog.byId(id)?.label ?? humaniseBackend(id)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button className="secondary" disabled={formBusy} type="submit">
-          Attach
-        </button>
-      </form>
-      {supportedBackends.length > 0 ? (
+          <LaunchOptionsDetails
+            mode="new"
+            launchMode={launchMode}
+            onLaunchModeChange={setLaunchMode}
+            supportsCustomArgs={supportsCustomArgs}
+            supportsConfigOverrides={supportsConfigOverrides}
+            customArgsText={customArgsText}
+            onCustomArgsChange={setCustomArgsText}
+            configOverridesText={configOverridesText}
+            onConfigOverridesChange={setConfigOverridesText}
+            formBusy={formBusy}
+          />
+          <div className="launch-actions">
+            <span className="grow muted">Launches through the wrapper for better transcript fidelity.</span>
+            <button className="primary" disabled={formBusy} type="submit">
+              Launch session
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      {mode === "resume" && supportedBackends.length > 0 ? (
         <ResumeThreadPanel
           threadsByBackend={threadsByBackend}
           loadingByBackend={loadingByBackend}
@@ -344,8 +284,125 @@ export function LaunchPanel({
           preferredBackend={backend}
           onImportThread={onImportThread}
           catalog={catalog}
+          launchMode={launchMode}
+          onLaunchModeChange={setLaunchMode}
         />
+      ) : null}
+
+      {mode === "attach" ? (
+        <form className="launch-body" onSubmit={submitAttach}>
+          <div className="launch-body-col">
+            <label className="field">
+              <span>Tmux target</span>
+              <input
+                value={tmuxTarget}
+                onChange={(event) => setTmuxTarget(event.target.value)}
+                placeholder="session:window.pane — e.g. main:0.0"
+              />
+            </label>
+            <label className="field">
+              <span>Backend hint</span>
+              <select value={backend} onChange={(event) => handleBackendChange(event.target.value as Backend)}>
+                {supportedBackends.map((id) => (
+                  <option key={id} value={id}>
+                    {catalog.byId(id)?.label ?? humaniseBackend(id)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="launch-actions">
+            <span className="grow muted">Waypoint will pipe the pane and forward keystrokes through xterm.</span>
+            <button className="primary" disabled={formBusy} type="submit">
+              Attach
+            </button>
+          </div>
+        </form>
       ) : null}
     </section>
   );
+}
+
+interface LaunchModeChooserProps {
+  mode: PanelMode;
+  onChange: (mode: PanelMode) => void;
+}
+
+const MODE_OPTIONS: Array<[PanelMode, string]> = [
+  ["new", "New"],
+  ["resume", "Resume"],
+  ["attach", "Attach"],
+];
+
+// Animated segmented control: a sliding pill backdrop tracks the active
+// button by measuring its offsetLeft/offsetWidth in a layout effect, then
+// setting CSS variables on the parent. The transition between positions
+// is a smooth spring curve, so flipping between New / Resume / Attach
+// feels alive rather than the old hard color flip.
+function LaunchModeChooser({ mode, onChange }: LaunchModeChooserProps) {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const buttonRefs = useRef<Record<PanelMode, HTMLButtonElement | null>>({
+    new: null,
+    resume: null,
+    attach: null,
+  });
+
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    const button = buttonRefs.current[mode];
+    if (!wrap || !button) return;
+    wrap.style.setProperty("--lm-left", `${button.offsetLeft}px`);
+    wrap.style.setProperty("--lm-width", `${button.offsetWidth}px`);
+  }, [mode]);
+
+  // Re-measure on window resize since labels can wrap on narrow widths.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    function onResize() {
+      const wrap = wrapRef.current;
+      const button = buttonRefs.current[mode];
+      if (!wrap || !button) return;
+      wrap.style.setProperty("--lm-left", `${button.offsetLeft}px`);
+      wrap.style.setProperty("--lm-width", `${button.offsetWidth}px`);
+    }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [mode]);
+
+  return (
+    <div
+      ref={wrapRef}
+      className="launch-mode"
+      role="tablist"
+      aria-label="Launch mode"
+    >
+      {MODE_OPTIONS.map(([value, label]) => (
+        <button
+          key={value}
+          ref={(node) => {
+            buttonRefs.current[value] = node;
+          }}
+          type="button"
+          role="tab"
+          aria-selected={mode === value}
+          className={mode === value ? "active" : ""}
+          onClick={() => onChange(value)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function subheadFor(mode: PanelMode, targetLabel: string | null): string {
+  const where = targetLabel ? ` on ${targetLabel}` : "";
+  switch (mode) {
+    case "new":
+      return `Spin up a new agent${where}.`;
+    case "resume":
+      return `Pick up a stored thread${where}.`;
+    case "attach":
+      return "Observe an existing tmux pane with raw terminal fallback.";
+  }
 }

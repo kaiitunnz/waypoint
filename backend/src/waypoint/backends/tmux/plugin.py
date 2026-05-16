@@ -371,7 +371,13 @@ class TmuxPlugin:
             rel = f".claude/projects/{dashed}/{thread_id}.jsonl"
             if launch_target is None:
                 return (Path.home() / rel).is_file()
-            return await self._ssh_test(launch_target, f"$HOME/{rel}")
+            # ``$HOME`` must be left *outside* the quoted arg so the
+            # remote shell expands it. shlex-quoting the whole path
+            # would single-quote the dollar and look for a literal
+            # ``$HOME`` directory.
+            return await self._ssh_test(
+                launch_target, f"test -f $HOME/{shlex.quote(rel)}"
+            )
         if backend == "codex":
             # $CODEX_HOME/sessions/YYYY/MM/DD/rollout-*-<uuid>.jsonl
             needle = f"-{thread_id}.jsonl"
@@ -393,13 +399,20 @@ class TmuxPlugin:
         return False
 
     @staticmethod
-    async def _ssh_test(launch_target: SshLaunchTargetConfig, remote_path: str) -> bool:
-        """``ssh <host> test -f <path>`` — returns True on exit code 0."""
+    async def _ssh_test(launch_target: SshLaunchTargetConfig, remote_cmd: str) -> bool:
+        """``ssh <host> <cmd>`` — returns True when the remote shell exits 0.
+
+        The caller builds the full command (matching ``_ssh_capture``)
+        so it can decide what to quote and what to leave for shell
+        expansion. The previous shape took a path and shlex-quoted it
+        wholesale, which single-quoted ``$HOME`` and broke remote
+        existence checks that depended on the expansion.
+        """
         proc = await asyncio.create_subprocess_exec(
             launch_target.ssh_bin,
             *launch_target.ssh_args,
             launch_target.ssh_destination,
-            f"test -f {shlex.quote(remote_path)}",
+            remote_cmd,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )

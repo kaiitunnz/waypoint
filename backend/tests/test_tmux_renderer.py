@@ -295,6 +295,69 @@ def test_snoop_modes_updates_state_without_pyte_screen() -> None:
     assert "visible" not in _strip_ansi(diff)
 
 
+def test_dcs_passthrough_is_stripped_before_pyte_writes_payload() -> None:
+    """tmux's DCS-passthrough wrapper (``\\x1bPtmux;\\x1b<inner>\\x1b\\``)
+    around an OSC 52 clipboard sequence is what reaches our renderer
+    when the user drag-selects inside CC: pyte doesn't recognise DCS
+    final-byte handling and writes the payload — ``tmux;]52;c;<base64>``
+    — straight into the screen, splattering CC's textbox.
+    """
+    osc52 = b"\x1b]52;c;SGVsbG8gV29ybGQ=\x07"
+    dcs = b"\x1bPtmux;\x1b" + osc52 + b"\x1b\\"
+    r = PyteRenderer(80, 3)
+    r.feed(b"prompt> ")
+    r.feed(dcs)
+    r.feed(b"after")
+    row = "".join(r._screen.buffer[0][c].data or " " for c in range(40)).rstrip()
+    assert row == "prompt> after", row
+
+
+def test_dcs_passthrough_split_across_feeds_is_still_stripped() -> None:
+    """A DCS that lands across a chunk boundary still has to get
+    stripped. The forward-walking tail finder must hold the partial
+    DCS even though its trailing bytes include the doubled-ESCs that
+    look like fresh ESC starts when searched right-to-left.
+    """
+    osc52 = b"\x1b]52;c;SGVsbG8gV29ybGQ=\x07"
+    dcs = b"\x1bPtmux;\x1b" + osc52 + b"\x1b\\"
+    for split in range(1, len(dcs)):
+        r = PyteRenderer(80, 3)
+        r.feed(b"prompt> " + dcs[:split])
+        r.feed(dcs[split:] + b"after")
+        row = "".join(r._screen.buffer[0][c].data or " " for c in range(40)).rstrip()
+        assert row == "prompt> after", f"split at {split}: row={row!r}"
+
+
+def test_long_dcs_payload_split_across_feeds_is_buffered() -> None:
+    """A realistic OSC 52 clipboard-set payload can be many KB —
+    larger than the short CSI hold cap. If we apply the same cap to
+    DCS/OSC, the back half of a split sequence gets fed to pyte as
+    cell content. Hold cap for DCS/OSC must accept payloads at least
+    as large as tmux's own buffer-paste ceiling.
+    """
+    # Pad the OSC 52 payload to 8 KiB of base64 to blow past the
+    # short CSI cap.
+    payload = b"A" * 8192
+    osc52 = b"\x1b]52;c;" + payload + b"\x07"
+    dcs = b"\x1bPtmux;\x1b" + osc52 + b"\x1b\\"
+    # Split at a point inside the payload — well past 64 bytes.
+    split = 2000
+    r = PyteRenderer(80, 3)
+    r.feed(b"prompt> " + dcs[:split])
+    r.feed(dcs[split:] + b"after")
+    row = "".join(r._screen.buffer[0][c].data or " " for c in range(80)).rstrip()
+    assert row == "prompt> after", row
+
+
+def test_bare_dcs_without_tmux_wrapper_also_stripped() -> None:
+    # Generic DCS (e.g. DECRQSS replies) — pyte would otherwise leak
+    # the payload as text.
+    r = PyteRenderer(40, 3)
+    r.feed(b"before\x1bP1$rmsomething\x1b\\after")
+    row = "".join(r._screen.buffer[0][c].data or " " for c in range(40)).rstrip()
+    assert row == "beforeafter", row
+
+
 def test_frame_tracker_detects_whole_markers() -> None:
     t = SyncFrameTracker()
     assert t.feed(b"hello") is False

@@ -59,15 +59,26 @@ const LIGHT_THEME: ITheme = {
   cursor: "#b8820e",
   cursorAccent: "#fffdf7",
   selectionBackground: "rgba(184, 130, 14, 0.22)",
-  black: "#1c1914",
+  // ``black`` doubles as the fill for inverse-video / SGR 40 highlight
+  // bars that TUI agents (codex, claude_code) draw around user input.
+  // Matching ``foreground`` paints those bars as near-pure black slabs
+  // on cream — visually loud. Soften to a warm dark brown so the bar
+  // reads as a quiet highlight while staying distinct from the cream
+  // page. Keep ``brightWhite`` (#0e0c09) as the true near-black for
+  // bold/emphasis where TUIs want maximum contrast.
+  black: "#3a3127",
   red: "#b83038",
   green: "#257a50",
   yellow: "#aa6618",
   blue: "#2f6f9e",
   magenta: "#7040b0",
   cyan: "#1e7a8e",
+  // ``white`` and ``brightBlack`` are the muted/dim slots TUIs use for
+  // hint text, scrollback chrome, and footnotes. ``#a09380`` washed out
+  // against cream; bump both toward darker tans so dim text stays
+  // legible without becoming as loud as the default foreground.
   white: "#6e6356",
-  brightBlack: "#a09380",
+  brightBlack: "#857868",
   brightRed: "#d04050",
   brightGreen: "#2e9866",
   brightYellow: "#c87a18",

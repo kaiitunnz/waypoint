@@ -290,7 +290,11 @@ class TmuxPlugin:
         )
         try:
             command = runtime._command_for_backend(
-                session.backend, launch_args, launch_target, session.cwd
+                session.backend,
+                launch_args,
+                launch_target,
+                session.cwd,
+                allocate_tty=True,
             )
         except HTTPException as exc:
             await runtime._record_system_event(
@@ -840,7 +844,11 @@ class TmuxPlugin:
             thread_id = str(uuid.uuid4())
             launch_args = ["--session-id", thread_id, *launch_args]
         command = runtime._command_for_backend(
-            request.backend, launch_args, launch_target, request.cwd
+            request.backend,
+            launch_args,
+            launch_target,
+            request.cwd,
+            allocate_tty=True,
         )
         try:
             target = await runtime.tmux.start_managed_session(
@@ -927,7 +935,7 @@ class TmuxPlugin:
         launch_args = self._resume_args(backend, thread_id, [])
         try:
             command = runtime._command_for_backend(
-                backend, launch_args, launch_target, cwd
+                backend, launch_args, launch_target, cwd, allocate_tty=True
             )
         except HTTPException:
             raise

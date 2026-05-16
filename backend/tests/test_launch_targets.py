@@ -141,6 +141,38 @@ def test_build_remote_exec_args_omits_cd_when_cwd_is_none(monkeypatch) -> None:
     assert "exec bash -s" in remote_command
 
 
+def test_build_remote_exec_args_allocates_tty_when_requested(monkeypatch) -> None:
+    """tmux-wrapped CLIs need a remote PTY: without it, ``claude`` flips
+    to ``--print`` mode and errors on the missing stdin, and ``bash -ilc``
+    warns about no job control. ``-tt`` forces allocation even though
+    SSH's own stdin (a tmux pane pipe) isn't a terminal."""
+    monkeypatch.setattr(
+        "waypoint.launch_targets.shutil.which", lambda _: "/usr/bin/ssh"
+    )
+    config = SshLaunchTargetConfig(
+        id="devbox",
+        name="Devbox",
+        ssh_destination="dev@example.com",
+        ssh_args=["-o", "ConnectTimeout=5"],
+    )
+
+    args = config.build_remote_exec_args(
+        ["claude", "--session-id", "abc"], "~/workspace", allocate_tty=True
+    )
+
+    assert args == (
+        "/usr/bin/ssh",
+        "-o",
+        "ConnectTimeout=5",
+        "-tt",
+        "dev@example.com",
+        args[-1],
+    )
+
+    no_tty = config.build_remote_exec_args(["claude"], "~/workspace")
+    assert "-tt" not in no_tty
+
+
 def test_remote_bin_for_falls_back_to_default(monkeypatch) -> None:
     config = SshLaunchTargetConfig(
         id="devbox",

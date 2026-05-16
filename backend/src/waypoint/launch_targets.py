@@ -132,7 +132,11 @@ class SshLaunchTargetConfig(BaseModel):
         return self.plugin_config(plugin_id).remote_bin or default
 
     def build_remote_exec_args(
-        self, command: list[str], cwd: str | None = None
+        self,
+        command: list[str],
+        cwd: str | None = None,
+        *,
+        allocate_tty: bool = False,
     ) -> tuple[str, ...]:
         """Build the SSH argv for a remote command.
 
@@ -143,6 +147,15 @@ class SshLaunchTargetConfig(BaseModel):
         thread enumerator reads ``$CLAUDE_CONFIG_DIR/projects/``), so a
         stale or deleted ``default_cwd`` on the SSH target can't break
         the call.
+
+        ``allocate_tty`` forces SSH to request a remote PTY (``-tt``).
+        Required for interactive CLIs that detect TTY-ness on stdin —
+        ``claude`` falls back to its non-interactive ``--print`` path
+        when stdin is a pipe, immediately errors out, and ``bash -ilc``
+        prints ``cannot set terminal process group`` warnings. Default
+        off because most callers (the rate-limit ``python3 -`` probe,
+        the codex App Server, opencode's HTTP launcher, the claude
+        thread enumerator) need stdin as a real pipe.
         """
         ssh_bin = _resolve_local_binary(self.ssh_bin)
         remote_parts: list[str] = []
@@ -155,7 +168,19 @@ class SshLaunchTargetConfig(BaseModel):
                 remote_parts.append(shlex.quote(f"{key}={value}"))
         remote_parts.append(shlex.join(command))
         remote_command = self.wrap_remote_command(" ".join(remote_parts))
-        return (ssh_bin, *self.ssh_args, self.ssh_destination, remote_command)
+        # Double ``-tt`` forces PTY allocation even when SSH's own stdin
+        # isn't a TTY (we're launched from inside a tmux pane via
+        # ``new-session``, which gives ssh a pipe). A single ``-t`` would
+        # warn ``Pseudo-terminal will not be allocated because stdin is
+        # not a terminal.`` and silently fall back to no-TTY.
+        tty_flag: tuple[str, ...] = ("-tt",) if allocate_tty else ()
+        return (
+            ssh_bin,
+            *self.ssh_args,
+            *tty_flag,
+            self.ssh_destination,
+            remote_command,
+        )
 
     def wrap_remote_command(self, command: str) -> str:
         """Wrap a remote command in the configured login-shell so rcfiles run."""

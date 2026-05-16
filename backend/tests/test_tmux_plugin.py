@@ -61,6 +61,46 @@ def test_resume_args_unknown_backend_is_verbatim(plugin: TmuxPlugin) -> None:
     assert args == ["--foo"]
 
 
+def test_conversation_exists_claude_code(
+    plugin: TmuxPlugin, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Claude stores conversations at
+    # ~/.claude/projects/<cwd-with-/-replaced-by-->/<uuid>.jsonl.
+    # Pivot HOME so the lookup hits our fixture tree.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cwd = "/Users/me/proj"
+    project_dir = tmp_path / ".claude" / "projects" / cwd.replace("/", "-")
+    project_dir.mkdir(parents=True)
+    uuid_str = "00000000-0000-0000-0000-000000000001"
+    (project_dir / f"{uuid_str}.jsonl").write_text("")
+    assert plugin._conversation_exists("claude_code", uuid_str, cwd) is True
+    # Missing uuid (e.g., user terminated before first message) →
+    # False, so restore falls back to a verbatim launch.
+    assert (
+        plugin._conversation_exists(
+            "claude_code", "ffffffff-ffff-ffff-ffff-ffffffffffff", cwd
+        )
+        is False
+    )
+
+
+def test_conversation_exists_codex(
+    plugin: TmuxPlugin, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    sessions_dir = tmp_path / "codex" / "sessions" / "2026" / "05" / "16"
+    sessions_dir.mkdir(parents=True)
+    uuid_str = "00000000-0000-0000-0000-000000000042"
+    (sessions_dir / f"rollout-2026-05-16T10-00-00-{uuid_str}.jsonl").write_text("")
+    assert plugin._conversation_exists("codex", uuid_str, "/anywhere") is True
+    assert (
+        plugin._conversation_exists(
+            "codex", "ffffffff-ffff-ffff-ffff-ffffffffffff", "/anywhere"
+        )
+        is False
+    )
+
+
 def test_codex_rollout_matches_cwd_top_level(
     plugin: TmuxPlugin, tmp_path: Path
 ) -> None:

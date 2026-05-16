@@ -417,13 +417,10 @@ class TmuxPlugin:
 
     @staticmethod
     async def _ssh_test(launch_target: SshLaunchTargetConfig, remote_cmd: str) -> bool:
-        """``ssh <host> <cmd>`` — returns True when the remote shell exits 0.
+        """``ssh <host> <cmd>`` — True when the remote shell exits 0.
 
-        The caller builds the full command (matching ``_ssh_capture``)
-        so it can decide what to quote and what to leave for shell
-        expansion. The previous shape took a path and shlex-quoted it
-        wholesale, which single-quoted ``$HOME`` and broke remote
-        existence checks that depended on the expansion.
+        The caller supplies the full remote command; quoting and shell
+        expansion are the caller's call.
         """
         proc = await asyncio.create_subprocess_exec(
             launch_target.ssh_bin,

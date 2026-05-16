@@ -112,9 +112,8 @@ export function LaunchPanel({
     setModelInfo(null);
   }, [defaultBackend]);
 
-  // Reset effort and model whenever the backend changes — supported levels can shift
-  // and an "xhigh" carried over from one backend would be invalid on the
-  // next. Also, models are entirely different per backend.
+  // An "xhigh" effort carried over from one backend would be invalid
+  // on the next, and per-backend model lists don't overlap.
   useEffect(() => {
     setEffort("");
     setModel("");
@@ -313,7 +312,11 @@ export function LaunchPanel({
           </div>
           <div className="launch-actions">
             <span className="grow muted">Waypoint will pipe the pane and forward keystrokes through xterm.</span>
-            <button className="primary" disabled={formBusy} type="submit">
+            <button
+              className="primary"
+              disabled={formBusy || !tmuxTarget.trim()}
+              type="submit"
+            >
               Attach
             </button>
           </div>
@@ -347,26 +350,22 @@ function LaunchModeChooser({ mode, onChange }: LaunchModeChooserProps) {
     attach: null,
   });
 
+  // ResizeObserver catches width changes from window resize, label
+  // content swaps, AND late-arriving web font swaps — the latter
+  // would otherwise leave the pill at the system-font measurement
+  // until the next mode click.
   useLayoutEffect(() => {
     const wrap = wrapRef.current;
     const button = buttonRefs.current[mode];
     if (!wrap || !button) return;
-    wrap.style.setProperty("--lm-left", `${button.offsetLeft}px`);
-    wrap.style.setProperty("--lm-width", `${button.offsetWidth}px`);
-  }, [mode]);
-
-  // Re-measure on window resize since labels can wrap on narrow widths.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    function onResize() {
-      const wrap = wrapRef.current;
-      const button = buttonRefs.current[mode];
-      if (!wrap || !button) return;
+    const sync = () => {
       wrap.style.setProperty("--lm-left", `${button.offsetLeft}px`);
       wrap.style.setProperty("--lm-width", `${button.offsetWidth}px`);
-    }
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(button);
+    return () => ro.disconnect();
   }, [mode]);
 
   return (

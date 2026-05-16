@@ -103,15 +103,20 @@ class TmuxAdapter:
         await self._run("send-keys", "-t", target, "Enter")
 
     async def pipe_output(self, target: str, path: Path) -> None:
-        # `cat` switches to block buffering when stdout is a regular file,
-        # holding up to ~4 KB before flushing — which traps the trailing
-        # cursor-positioning bytes of every render in userland buffer
-        # and breaks the live-stream view. `dd` reads and writes via raw
-        # syscalls with no stdio buffer, so every chunk pipe-pane hands
-        # us reaches the log file immediately. Shell-level >> append is
-        # portable across BSD dd (macOS) and GNU dd (Linux); `oflag=` is
-        # GNU-only and fails silently on BSD.
-        command = f"dd 2>/dev/null >> {shlex.quote(str(path))}"
+        # Plain ``cat`` is stdio-buffered (~4 KB) when stdout is a
+        # regular file, so it traps Codex's per-keystroke frames. We
+        # previously used ``dd`` because it bypasses stdio — but its
+        # default ``bs=512`` accumulates short reads into a full block
+        # before writing. Verified empirically: a 168-byte Codex frame
+        # writes nothing to the log file until ~512 bytes are in
+        # flight. The visible result is exactly the reported symptom —
+        # typing one character produces no re-render until enough more
+        # chars accumulate to fill the block. ``cat -u`` is the POSIX
+        # unbuffered mode ("write bytes from the input file to the
+        # standard output without delay as each is read") and writes
+        # every pipe-pane delivery immediately regardless of size.
+        # Supported on macOS BSD ``cat`` and GNU coreutils.
+        command = f"cat -u >> {shlex.quote(str(path))}"
         await self._run("pipe-pane", "-o", "-t", target, command)
 
     async def stop_pipe(self, target: str) -> None:

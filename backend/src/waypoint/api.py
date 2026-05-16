@@ -601,20 +601,83 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         adapter = context.runtime.tmux
         raw_log_path = Path(session.raw_log_path)
 
-        # Seed the client with the current pane state so reconnects don't
-        # leave the user staring at a blank emulator. capture-pane runs
-        # cheaply and bypasses replaying the entire pipe-pane log.
+        # Wait briefly for the client's initial resize so the capture-pane
+        # seed is rendered at the viewport's dimensions, not the pane's
+        # previous size. The frontend always sends a resize on socket open,
+        # so the timeout only matters when an unusual client connects.
+        viewport_cols = 0
+        viewport_rows = 0
+        with suppress(TimeoutError, json.JSONDecodeError, WebSocketDisconnect):
+            first = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+            handshake = json.loads(first)
+            if handshake.get("type") == "resize":
+                try:
+                    viewport_cols = int(handshake.get("cols", 0))
+                    viewport_rows = int(handshake.get("rows", 0))
+                except (TypeError, ValueError):
+                    viewport_cols = viewport_rows = 0
+                if viewport_cols > 0 and viewport_rows > 0:
+                    with suppress(TmuxError):
+                        await adapter.resize_window(
+                            tmux_session, viewport_cols, viewport_rows
+                        )
+                        await adapter.resize_pane(pane, viewport_cols, viewport_rows)
+
+        # Give the pane process a beat to handle SIGWINCH and emit its
+        # redraw before we capture — otherwise the seed reflects the stale
+        # pre-resize buffer (cursor at the old pane's bottom row, content
+        # clipped to the old size) and the live stream has to overpaint it.
+        if viewport_cols and viewport_rows:
+            await asyncio.sleep(0.1)
+
+        # Seed the client with the current pane content so the user sees
+        # something immediately on connect; everything past this point
+        # comes through the live pipe-pane stream. Codex (and similar
+        # agents) drives cursor visibility + positioning explicitly in
+        # its render output — see codex-rs/tui/src/custom_terminal.rs
+        # try_draw: it emits `\x1b[?25l` when no cursor is set and
+        # `show_cursor + set_cursor_position` otherwise. We deliberately
+        # don't inject alt-screen toggles, CUP, focus-in, or sync-output
+        # markers around the seed: the agent's own bytes are what the
+        # native tmux client renders, so anything extra here just fights
+        # the agent.
         try:
-            initial = await adapter.capture_snapshot(pane, start_line=-10000)
-            if initial:
-                await websocket.send_text(initial)
+            initial = await adapter.capture_snapshot(pane, start_line=0)
         except TmuxError:
-            pass
+            initial = ""
+        # capture-pane terminates its dump with a trailing newline; that
+        # LF (promoted to CRLF by xterm's convertEol) would scroll the
+        # screen by one row. Strip it so the seed ends at the last
+        # rendered cell.
+        initial = initial.rstrip("\r\n")
+        if initial:
+            with suppress(Exception):
+                await websocket.send_text(initial)
 
         tail_offset = raw_log_path.stat().st_size if raw_log_path.exists() else 0
 
+        # Synchronized-output begin / end (DECSET / DECRST 2026). ratatui
+        # apps like Codex bracket every render frame with these markers
+        # so a compliant terminal can defer paint until the whole frame
+        # arrives. xterm.js v6 accepts the sequences but doesn't actually
+        # buffer paints — and our tail polling can split a Codex frame
+        # across multiple WS messages, causing half-painted intermediate
+        # states. We buffer the byte stream between the markers ourselves
+        # so each frame reaches xterm in a single WS message; xterm's own
+        # render queue then batches it into one animation-frame paint.
+        SYNC_BEGIN = b"\x1b[?2026h"
+        SYNC_END = b"\x1b[?2026l"
+
         async def stream_loop() -> None:
             offset = tail_offset
+            pending = bytearray()
+            in_frame = False
+
+            async def emit(data: bytes) -> None:
+                if not data:
+                    return
+                await websocket.send_text(data.decode("utf-8", errors="replace"))
+
             while True:
                 chunk: bytes | None = None
                 try:
@@ -631,31 +694,101 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 except OSError:
                     break
                 if chunk:
-                    await websocket.send_text(chunk.decode("utf-8", errors="replace"))
-                await asyncio.sleep(0.05)
+                    cursor = 0
+                    while cursor < len(chunk):
+                        if in_frame:
+                            end = chunk.find(SYNC_END, cursor)
+                            if end == -1:
+                                pending.extend(chunk[cursor:])
+                                break
+                            pending.extend(chunk[cursor : end + len(SYNC_END)])
+                            await emit(bytes(pending))
+                            pending.clear()
+                            in_frame = False
+                            cursor = end + len(SYNC_END)
+                        else:
+                            start = chunk.find(SYNC_BEGIN, cursor)
+                            if start == -1:
+                                await emit(chunk[cursor:])
+                                break
+                            if start > cursor:
+                                await emit(chunk[cursor:start])
+                            pending.extend(SYNC_BEGIN)
+                            in_frame = True
+                            cursor = start + len(SYNC_BEGIN)
+                # 20ms keeps perceived latency below the threshold most
+                # users notice for typing echo without burning CPU on
+                # idle polling.
+                await asyncio.sleep(0.02)
 
         async def recv_loop() -> None:
+            # `tmux send-keys` forks a fresh tmux client per call
+            # (~30 ms each), so naively dispatching one send-keys per
+            # keystroke serialises typing behind subprocess overhead.
+            # Two-stage batching: drain any frames already queued in the
+            # WS (covers the case where send-keys was running while the
+            # user kept typing), then if we have pending input, wait a
+            # short additional window for more before flushing — that's
+            # what catches the common case of typing at ~100ms intervals
+            # so a four-letter burst becomes one send-keys.
+            INPUT_BATCH_WINDOW = 0.04  # 40ms — under perceived-lag threshold
             while True:
-                message = await websocket.receive_text()
-                try:
-                    payload = json.loads(message)
-                except json.JSONDecodeError:
-                    continue
-                kind = payload.get("type")
-                if kind == "input":
-                    data = payload.get("data", "")
-                    if isinstance(data, str) and data:
-                        with suppress(TmuxError):
-                            await adapter.send_bytes(pane, data.encode("utf-8"))
-                elif kind == "resize":
+                first = await websocket.receive_text()
+                frames = [first]
+                while True:
                     try:
-                        cols = int(payload.get("cols", 0))
-                        rows = int(payload.get("rows", 0))
-                    except (TypeError, ValueError):
-                        continue
-                    if cols > 0 and rows > 0:
-                        with suppress(TmuxError):
-                            await adapter.resize_window(tmux_session, cols, rows)
+                        frames.append(
+                            await asyncio.wait_for(websocket.receive_text(), timeout=0)
+                        )
+                    except TimeoutError:
+                        break
+
+                input_bytes = b""
+                resize_target: tuple[int, int] | None = None
+
+                def process(frame: str) -> None:
+                    nonlocal input_bytes, resize_target
+                    try:
+                        payload = json.loads(frame)
+                    except json.JSONDecodeError:
+                        return
+                    kind = payload.get("type")
+                    if kind == "input":
+                        data = payload.get("data", "")
+                        if isinstance(data, str) and data:
+                            input_bytes += data.encode("utf-8")
+                    elif kind == "resize":
+                        try:
+                            cols = int(payload.get("cols", 0))
+                            rows = int(payload.get("rows", 0))
+                        except (TypeError, ValueError):
+                            return
+                        if cols > 0 and rows > 0:
+                            resize_target = (cols, rows)
+
+                for frame in frames:
+                    process(frame)
+
+                # If the batch is input-only, wait briefly for further
+                # keystrokes before paying the send-keys fork.
+                while input_bytes and resize_target is None:
+                    try:
+                        more = await asyncio.wait_for(
+                            websocket.receive_text(),
+                            timeout=INPUT_BATCH_WINDOW,
+                        )
+                    except TimeoutError:
+                        break
+                    process(more)
+
+                if input_bytes:
+                    with suppress(TmuxError):
+                        await adapter.send_bytes(pane, input_bytes)
+                if resize_target is not None:
+                    cols, rows = resize_target
+                    with suppress(TmuxError):
+                        await adapter.resize_window(tmux_session, cols, rows)
+                        await adapter.resize_pane(pane, cols, rows)
 
         stream_task = asyncio.create_task(stream_loop())
         recv_task = asyncio.create_task(recv_loop())

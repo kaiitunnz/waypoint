@@ -62,7 +62,7 @@ ignore = [
 ]
 
 [tool.codespell]
-ignore-words-list = "pres"
+ignore-words-list = "pres,ratatui"
 skip = "*/package-lock.json,*.lock,*.png,*.jsonl,*.log"
 
 [tool.mypy]

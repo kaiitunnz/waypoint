@@ -973,16 +973,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     session && (session.status === "exited" || session.status === "error"),
   );
   const terminalOnly = session?.transport === "tmux";
-  // Structured plugins resume via their protocol; tmux relaunches a
-  // fresh tmux session from stored launch args (and a captured thread
-  // id when one was recorded). Both flows return the SessionRecord to
-  // a STARTING state.
-  const reattachable = Boolean(session);
-  const dormantReattach = sessionExited && reattachable;
-  // Block submission until the session record resolves — the parent renders
-  // ReplyComposer eagerly to keep layout stable, so without this guard a fast
-  // typist could fire requests against an unresolved session view.
-  const composerDisabled = !session || (sessionExited && !reattachable);
+  const dormantReattach = sessionExited;
+  const composerDisabled = !session || sessionExited;
   const composerPlaceholder = !session
     ? "Loading session…"
     : dormantReattach
@@ -995,21 +987,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const canResume = Boolean(
     session && supportsResume(session.transport) && !sessionExited,
   );
-  useEffect(() => {
-    if (terminalOnly) {
-      setView("terminal");
-    }
-  }, [terminalOnly]);
-  const activeView = terminalOnly ? "terminal" : view;
+  const activeView: ViewMode = terminalOnly ? "terminal" : view;
   const liveTmux = session?.transport === "tmux";
   const { theme } = useTheme();
   const terminalRef = useRef<XTerminalHandle | null>(null);
   const terminalSocketRef = useRef<WebSocket | null>(null);
   // Bumped on every EXITED → live transition so the terminal-WS effect
-  // re-runs (closing the dead socket, opening a fresh one against the
-  // reborn tmux pane). Without it Reconnect leaves the pane stuck on
-  // the closed socket from the previous session — visible inputs go
-  // nowhere until the user refreshes the page.
+  // re-runs against the reborn tmux pane instead of the closed socket.
   const [terminalEpoch, setTerminalEpoch] = useState(0);
   const prevSessionExitedRef = useRef(sessionExited);
   useEffect(() => {
@@ -1206,58 +1190,64 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           modelOptions={modelOptions}
           onSetTitle={handleSetTitle}
         />
+      ) : (
+        <div className="session-loading muted" role="status" aria-live="polite">
+          Loading session…
+        </div>
+      )}
+      {session ? (
+        <div className="session-toolbar">
+          {terminalOnly ? (
+            <div className="segmented segmented-quiet" aria-label="View mode">
+              <span className="segmented-item active">Terminal</span>
+            </div>
+          ) : (
+            <div className="segmented" role="tablist" aria-label="View">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeView === "chat"}
+                className={`segmented-item ${activeView === "chat" ? "active" : ""}`}
+                onClick={() => setView("chat")}
+              >
+                Chat
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeView === "terminal"}
+                className={`segmented-item ${activeView === "terminal" ? "active" : ""}`}
+                onClick={() => setView("terminal")}
+              >
+                Terminal
+              </button>
+            </div>
+          )}
+          {!terminalOnly && activeView === "chat" ? (
+            <div className="segmented segmented-quiet" role="radiogroup" aria-label="Event filter">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={filterMode === "important"}
+                className={`segmented-item ${filterMode === "important" ? "active" : ""}`}
+                onClick={() => { setFilterMode("important"); setToolRunsExpanded(false); }}
+              >
+                Important
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={filterMode === "all"}
+                className={`segmented-item ${filterMode === "all" ? "active" : ""}`}
+                onClick={() => { setFilterMode("all"); setToolRunsExpanded(true); }}
+              >
+                All events
+              </button>
+            </div>
+          ) : null}
+        </div>
       ) : null}
-      <div className="session-toolbar">
-        {terminalOnly ? (
-          <div className="segmented segmented-quiet" aria-label="View mode">
-            <span className="segmented-item active">Terminal</span>
-          </div>
-        ) : (
-          <div className="segmented" role="tablist" aria-label="View">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeView === "chat"}
-              className={`segmented-item ${activeView === "chat" ? "active" : ""}`}
-              onClick={() => setView("chat")}
-            >
-              Chat
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeView === "terminal"}
-              className={`segmented-item ${activeView === "terminal" ? "active" : ""}`}
-              onClick={() => setView("terminal")}
-            >
-              Terminal
-            </button>
-          </div>
-        )}
-        {!terminalOnly && activeView === "chat" ? (
-          <div className="segmented segmented-quiet" role="radiogroup" aria-label="Event filter">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={filterMode === "important"}
-              className={`segmented-item ${filterMode === "important" ? "active" : ""}`}
-              onClick={() => { setFilterMode("important"); setToolRunsExpanded(false); }}
-            >
-              Important
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={filterMode === "all"}
-              className={`segmented-item ${filterMode === "all" ? "active" : ""}`}
-              onClick={() => { setFilterMode("all"); setToolRunsExpanded(true); }}
-            >
-              All events
-            </button>
-          </div>
-        ) : null}
-      </div>
-      {!terminalOnly && activeView === "chat" ? (
+      {session && !terminalOnly && activeView === "chat" ? (
         <section className="stack transcript-stack">
           {hasOlderEvents ? (
             <div className="transcript-load-older">
@@ -1357,7 +1347,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
               ))
             : null}
         </section>
-      ) : (
+      ) : null}
+      {session && activeView === "terminal" ? (
         <SessionTerminalView
           session={session}
           liveTmux={liveTmux}
@@ -1383,7 +1374,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           onRemoveFromList={removeFromList}
           onSwitchSession={openSwitcher}
         />
-      )}
+      ) : null}
       {!terminalOnly && pendingApproval ? (
         <>
           {approvalCount > 1 ? (

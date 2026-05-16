@@ -1036,16 +1036,18 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     let attempt = 0;
 
     function connect() {
-      const term = terminalRef.current;
-      if (term) {
-        term.reset();
-      }
+      terminalRef.current?.reset();
       socket = connectTerminalSocket(host, token, sessionId, {
         onOpen: () => {
           attempt = 0;
           // Push the current viewport size so tmux resizes the pane to
           // match — otherwise xterm renders the seed at whatever pane size
-          // the agent last used.
+          // the agent last used. Read the live ref because the term may
+          // not have mounted at connect() time; the closure captured null
+          // would silently skip this resize and leave the pane stuck at
+          // xterm's default 80x24 if fit() produces the same dims and
+          // never fires onResize.
+          const term = terminalRef.current;
           const cols = term?.cols();
           const rows = term?.rows();
           if (cols && rows && socket?.readyState === WebSocket.OPEN) {

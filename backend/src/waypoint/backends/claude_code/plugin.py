@@ -60,6 +60,7 @@ from waypoint.schemas import (
     BackendModelOption,
     CommandCompletion,
     CompletionDispatch,
+    LaunchMode,
     SessionCreateRequest,
     SessionEnvelope,
     SessionInputRequest,
@@ -1016,11 +1017,6 @@ class ClaudeCodePlugin:
         runtime: "SessionRuntime",
         request: ClaudeThreadImportRequest,
     ) -> SessionRecord:
-        if self.adapter is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="claude adapter is not initialized",
-            )
         launch_target = runtime._resolve_launch_target(
             request.launch_target_id, self.id
         )
@@ -1032,6 +1028,8 @@ class ClaudeCodePlugin:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="claude thread already imported",
             )
+        # Resolve thread metadata first; cwd is needed for both the
+        # direct (Claude SDK) and tmux_wrapper paths.
         if launch_target is None:
             info = await asyncio.to_thread(find_local_claude_thread, request.thread_id)
         else:
@@ -1060,6 +1058,35 @@ class ClaudeCodePlugin:
         else:
             # Remote cwd lives on the SSH host; we can't stat it from here.
             cwd = info.cwd
+        # Launch-mode dispatch mirrors create_session: TMUX_WRAPPER
+        # always delegates; AUTO falls through when the structured
+        # plugin isn't available for managed launch.
+        if request.launch_mode == LaunchMode.TMUX_WRAPPER or (
+            request.launch_mode == LaunchMode.AUTO
+            and not self.is_available_for_managed_launch(runtime)
+        ):
+            from waypoint.backends.tmux.plugin import TmuxPlugin
+
+            fallback = runtime.registry.fallback_for_managed_launch()
+            if not isinstance(fallback, TmuxPlugin):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="tmux fallback launch is not available",
+                )
+            return await fallback.import_thread_via_resume(
+                runtime,
+                backend=self.id,
+                thread_id=request.thread_id,
+                cwd=cwd,
+                launch_target_id=request.launch_target_id,
+                title=info.title,
+            )
+        # Direct (structured-SDK) path requires the adapter.
+        if self.adapter is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="claude adapter is not initialized",
+            )
         session_id = runtime._generate_session_id(self.id)
         session_dir = runtime._session_dir(session_id)
         raw_log = session_dir / "raw.log"

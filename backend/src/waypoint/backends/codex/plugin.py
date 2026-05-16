@@ -54,6 +54,7 @@ from waypoint.schemas import (
     CommandCompletion,
     CompletionDispatch,
     EventRecord,
+    LaunchMode,
     SessionCreateRequest,
     SessionInputRequest,
     SessionRateLimitUsage,
@@ -1065,6 +1066,30 @@ class CodexPlugin:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="ephemeral codex threads cannot be imported",
+            )
+        # Launch-mode dispatch mirrors create_session: TMUX_WRAPPER
+        # always delegates; AUTO falls through when the structured
+        # plugin isn't available for managed launch. DIRECT runs the
+        # existing structured-resume path below.
+        if request.launch_mode == LaunchMode.TMUX_WRAPPER or (
+            request.launch_mode == LaunchMode.AUTO
+            and not self.is_available_for_managed_launch(runtime)
+        ):
+            from waypoint.backends.tmux.plugin import TmuxPlugin
+
+            fallback = runtime.registry.fallback_for_managed_launch()
+            if not isinstance(fallback, TmuxPlugin):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="tmux fallback launch is not available",
+                )
+            return await fallback.import_thread_via_resume(
+                runtime,
+                backend=self.id,
+                thread_id=request.thread_id,
+                cwd=_thread_cwd(thread),
+                launch_target_id=request.launch_target_id,
+                title=_thread_title(thread),
             )
         session_id = runtime._generate_session_id(self.id)
         session_dir = runtime._session_dir(session_id)

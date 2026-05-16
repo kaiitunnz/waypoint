@@ -27,10 +27,11 @@ from waypoint.backends.capabilities import BackendCapabilities, ModelSource
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.backends.tmux.adapter import TmuxError
-from waypoint.git_meta import GitMeta
+from waypoint.git_meta import GitMeta, resolve_git_meta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
     CommandCompletion,
+    LaunchMode,
     SessionCreateRequest,
     SessionRecord,
     SessionSource,
@@ -892,6 +893,99 @@ class TmuxPlugin:
             self._spawn_codex_thread_id_watcher(
                 runtime, session.id, session.cwd, now, launch_target
             )
+        return runtime.get_session(session.id)
+
+    async def import_thread_via_resume(
+        self,
+        runtime: "SessionRuntime",
+        *,
+        backend: str,
+        thread_id: str,
+        cwd: str,
+        launch_target_id: str | None,
+        title: str,
+    ) -> SessionRecord:
+        """Create a tmux-wrapped session that resumes an existing thread.
+
+        The structured-plugin ``import_thread`` calls this when the
+        user picks ``launch_mode=tmux_wrapper`` (or when ``auto``
+        decides the structured backend isn't available for managed
+        launch). The plugin owns the resume contract for each inner
+        CLI (``--resume <uuid>`` for claude, ``resume <uuid>``
+        sub-command for codex) so the structured plugins don't have
+        to know about it.
+        """
+        launch_target = runtime._find_launch_target(launch_target_id)
+        if not await self._conversation_exists(backend, thread_id, cwd, launch_target):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"no {backend} conversation file found for thread "
+                    f"{thread_id} — cannot resume via tmux"
+                ),
+            )
+        launch_args = self._resume_args(backend, thread_id, [])
+        try:
+            command = runtime._command_for_backend(
+                backend, launch_args, launch_target, cwd
+            )
+        except HTTPException:
+            raise
+        session_id = runtime._generate_session_id(backend)
+        session_dir = runtime._session_dir(session_id)
+        raw_log = session_dir / "raw.log"
+        structured_log = session_dir / "events.jsonl"
+        raw_log.parent.mkdir(parents=True, exist_ok=True)
+        raw_log.touch(exist_ok=True)
+        try:
+            target = await runtime.tmux.start_managed_session(session_id, cwd, command)
+            await runtime.tmux.pipe_output(target.pane, raw_log)
+        except TmuxError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        # ``resolve_git_meta`` is local-only; remote launch targets get
+        # an empty GitMeta and the frontend renders without repo/branch
+        # chips. The metadata is purely cosmetic for the session list.
+        git_meta = (
+            GitMeta(repo_name=None, branch=None)
+            if launch_target is not None
+            else await resolve_git_meta(cwd)
+        )
+        now = datetime.now(UTC)
+        transport_state: dict[str, Any] = {
+            "tmux_session": target.session,
+            "tmux_window": target.window,
+            "tmux_pane": target.pane,
+            "pid": target.pane_pid,
+            "launch_args": launch_args,
+            "thread_id": thread_id,
+        }
+        session = SessionRecord(
+            id=session_id,
+            backend=backend,
+            source=SessionSource.MANAGED,
+            transport=self.transport_id,
+            title=title,
+            cwd=cwd,
+            launch_target_id=launch_target.id if launch_target else None,
+            launch_mode=LaunchMode.TMUX_WRAPPER,
+            repo_name=git_meta.repo_name,
+            branch=git_meta.branch,
+            status=SessionStatus.STARTING,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            raw_log_path=str(raw_log),
+            structured_log_path=str(structured_log),
+            transport_state=transport_state,
+        )
+        runtime.storage.create_session(session)
+        await runtime._record_system_event(
+            session.id,
+            self.format_start_message(backend, launch_target, cwd),
+        )
+        runtime._ensure_monitor(session.id)
         return runtime.get_session(session.id)
 
 

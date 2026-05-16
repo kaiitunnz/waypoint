@@ -221,6 +221,80 @@ def test_private_csi_split_across_feeds_is_still_stripped() -> None:
     assert "hello" in _strip_ansi(out)
 
 
+def test_mode_passthrough_emits_mouse_modes_in_full_render() -> None:
+    """Mouse / focus / paste mode set by the pane must reach xterm so
+    the scroll wheel and bracketed-paste actually work."""
+    r = PyteRenderer(20, 2)
+    r.feed(b"\x1b[?1000h\x1b[?1002h\x1b[?1006hhello")
+    out = r.render_full()
+    assert "\x1b[?1000h" in out
+    assert "\x1b[?1002h" in out
+    assert "\x1b[?1006h" in out
+
+
+def test_mode_passthrough_handles_multi_mode_sets() -> None:
+    """``\\x1b[?1000;1002;1006h`` sets several modes at once — each
+    one needs to be mirrored to xterm individually."""
+    r = PyteRenderer(20, 2)
+    r.feed(b"\x1b[?1000;1002;1006hhello")
+    out = r.render_full()
+    for mode in (1000, 1002, 1006):
+        assert f"\x1b[?{mode}h" in out, out
+
+
+def test_mode_passthrough_diff_only_emits_changes() -> None:
+    r = PyteRenderer(20, 2)
+    r.feed(b"\x1b[?1006hhi")
+    r.render_full()  # baseline
+    # Same mode re-asserted: no delta.
+    r.feed(b"\x1b[?1006h")
+    diff = r.render_diff()
+    assert "\x1b[?1006h" not in diff
+    # Disabling it: delta must surface.
+    r.feed(b"\x1b[?1006l")
+    diff = r.render_diff()
+    assert "\x1b[?1006l" in diff
+
+
+def test_mode_passthrough_render_full_replays_off_for_dropped_modes() -> None:
+    """If a mode that was previously emitted is gone from the screen
+    state, the next ``render_full`` must explicitly disable it so xterm
+    doesn't stay stuck in a stale mouse mode."""
+    r = PyteRenderer(20, 2)
+    r.feed(b"\x1b[?1006h")
+    r.render_full()
+    r.feed(b"\x1b[?1006l")
+    out = r.render_full()
+    assert "\x1b[?1006l" in out
+
+
+def test_mode_passthrough_ignores_untracked_modes() -> None:
+    """``\\x1b[?12h`` (cursor blink) and the like aren't in our
+    passthrough scope — pyte may or may not understand them, but our
+    diff emit must not surface them."""
+    r = PyteRenderer(20, 2)
+    r.feed(b"\x1b[?12h\x1b[?7727hhi")
+    out = r.render_full()
+    assert "\x1b[?12h" not in out
+    assert "\x1b[?7727h" not in out
+
+
+def test_snoop_modes_updates_state_without_pyte_screen() -> None:
+    """``snoop_modes`` lets the WS handler recover mouse mode from the
+    raw_log prefix it's about to skip past, without disturbing the
+    capture-pane-seeded screen state."""
+    r = PyteRenderer(20, 2)
+    r.feed(b"visible")  # mimic the capture-pane seed
+    r.render_full()  # baseline mirror
+    # Prefix replay — only the mode bytes, no cell writes.
+    r.snoop_modes(b"\x1b[?1000h\x1b[?1006h")
+    diff = r.render_diff()
+    assert "\x1b[?1000h" in diff
+    assert "\x1b[?1006h" in diff
+    # And no spurious cell repaint slipped in.
+    assert "visible" not in _strip_ansi(diff)
+
+
 def test_frame_tracker_detects_whole_markers() -> None:
     t = SyncFrameTracker()
     assert t.feed(b"hello") is False

@@ -681,6 +681,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             _alt, cur_col, cur_row = await adapter.pane_screen_state(pane)
             renderer.set_cursor(cur_col - 1, cur_row - 1)
 
+        # Recover tracked private-mode state (mouse / focus / paste)
+        # from the raw_log prefix we're about to skip over. The pane
+        # typically requests these once at startup, so a small head-of-
+        # file scan covers the realistic case without blocking the WS
+        # on a multi-megabyte read.
+        PREFIX_SCAN_BYTES = 128 * 1024
+        with suppress(OSError):
+            if raw_log_path.exists():
+                with raw_log_path.open("rb") as fh:
+                    prefix_bytes = fh.read(PREFIX_SCAN_BYTES)
+                if prefix_bytes:
+                    renderer.snoop_modes(prefix_bytes)
+
         initial_frame = renderer.render_full()
         if initial_frame:
             with suppress(Exception):

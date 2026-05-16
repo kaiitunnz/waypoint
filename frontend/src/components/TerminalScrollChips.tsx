@@ -57,10 +57,14 @@ export function TerminalScrollChips({ onWheel, withJump }: TerminalScrollChipsPr
         type="button"
         onPointerDown={(e) => {
           e.preventDefault();
+          // setPointerCapture routes all subsequent pointer events to
+          // this button until release — a finger that drifts a few px
+          // off a 44px target during a hold keeps the repeat going
+          // instead of triggering pointerleave and aborting.
+          e.currentTarget.setPointerCapture(e.pointerId);
           start("up");
         }}
         onPointerUp={stop}
-        onPointerLeave={stop}
         onPointerCancel={stop}
         onContextMenu={(e) => e.preventDefault()}
         aria-label="Scroll up"
@@ -71,10 +75,10 @@ export function TerminalScrollChips({ onWheel, withJump }: TerminalScrollChipsPr
         type="button"
         onPointerDown={(e) => {
           e.preventDefault();
+          e.currentTarget.setPointerCapture(e.pointerId);
           start("down");
         }}
         onPointerUp={stop}
-        onPointerLeave={stop}
         onPointerCancel={stop}
         onContextMenu={(e) => e.preventDefault()}
         aria-label="Scroll down"

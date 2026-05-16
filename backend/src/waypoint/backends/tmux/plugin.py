@@ -520,24 +520,6 @@ class TmuxPlugin:
         return False
 
     @staticmethod
-    async def _ssh_test(launch_target: SshLaunchTargetConfig, remote_cmd: str) -> bool:
-        """``ssh <host> <cmd>`` — True when the remote shell exits 0.
-
-        The caller supplies the full remote command; quoting and shell
-        expansion are the caller's call.
-        """
-        proc = await asyncio.create_subprocess_exec(
-            launch_target.ssh_bin,
-            *launch_target.ssh_args,
-            launch_target.ssh_destination,
-            remote_cmd,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.wait()
-        return proc.returncode == 0
-
-    @staticmethod
     async def _ssh_capture(
         launch_target: SshLaunchTargetConfig, remote_cmd: str
     ) -> str:

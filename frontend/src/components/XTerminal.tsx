@@ -102,10 +102,19 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
           '"JetBrains Mono", "SFMono-Regular", "Menlo", "Consolas", monospace',
         fontSize: 13,
         lineHeight: 1.25,
-        cursorBlink: !readOnly,
-        cursorStyle: readOnly ? "underline" : "block",
+        // Many TUIs (Codex, Claude Code) park the cursor at the pane
+        // bottom between renders, which a blinking block makes very
+        // distracting whenever the agent re-renders. An underline
+        // without blink stays unobtrusive at idle and still tracks
+        // user input clearly when the agent moves it to the textbox.
+        cursorBlink: false,
+        cursorStyle: "underline",
         scrollback: 20000,
-        convertEol: false,
+        // tmux `capture-pane -p` outputs bare LF between rows while real
+        // pty streams (pipe-pane) emit CRLF; xterm's convertEol only
+        // promotes lone LF to CRLF and leaves CRLF alone, so this handles
+        // both sources without double-translation.
+        convertEol: true,
         allowProposedApi: true,
         disableStdin: readOnly,
         theme: themeFor(theme),
@@ -114,6 +123,19 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       term.loadAddon(fit);
       term.loadAddon(new WebLinksAddon());
       term.open(host);
+
+      // Subscribe before the first fit so the initial dimension change
+      // (default 80x24 → fitted size) actually reaches the parent. Then
+      // push the current dims unconditionally after setup; if fit() was
+      // a no-op (already at target size or threw on a 0-sized host) we
+      // still report what the terminal believes its size is.
+      const onDataSub = term.onData((data) => {
+        onDataRef.current?.(data);
+      });
+      const onResizeSub = term.onResize(({ cols, rows }) => {
+        onResizeRef.current?.({ cols, rows });
+      });
+
       // Initial fit can throw if the container is still 0-sized (animation,
       // hidden tab, etc.) — guard so we don't crash the React tree.
       try {
@@ -123,13 +145,7 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       }
       termRef.current = term;
       fitRef.current = fit;
-
-      const onDataSub = term.onData((data) => {
-        onDataRef.current?.(data);
-      });
-      const onResizeSub = term.onResize(({ cols, rows }) => {
-        onResizeRef.current?.({ cols, rows });
-      });
+      onResizeRef.current?.({ cols: term.cols, rows: term.rows });
 
       const ro = new ResizeObserver(() => {
         try {

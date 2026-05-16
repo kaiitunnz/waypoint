@@ -702,6 +702,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           backend: session.backend,
           cwd: session.cwd,
           launch_target_id: session.launch_target_id,
+          launch_mode: session.launch_mode ?? "auto",
           model: session.model,
           effort: session.effort,
           permission_mode: session.permission_mode,
@@ -1081,8 +1082,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }, []);
 
+  const [terminalDims, setTerminalDims] = useState<{ cols: number; rows: number } | null>(null);
   const handleTerminalResize = useCallback(
     ({ cols, rows }: { cols: number; rows: number }) => {
+      setTerminalDims({ cols, rows });
       const socket = terminalSocketRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: "resize", cols, rows }));
@@ -1312,14 +1315,16 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           </div>
           <div className="terminal-shell-actions">
             <div className="action-row terminal-action-row">
-              <button
-                className="secondary"
-                onClick={() => void refreshSnapshot()}
-                type="button"
-                disabled={snapshotLoading}
-              >
-                {snapshotLoading ? "Refreshing…" : "Refresh"}
-              </button>
+              {liveTmux ? null : (
+                <button
+                  className="secondary"
+                  onClick={() => void refreshSnapshot()}
+                  type="button"
+                  disabled={snapshotLoading}
+                >
+                  {snapshotLoading ? "Refreshing…" : "Refresh"}
+                </button>
+              )}
               {session && !sessionExited ? (
                 <button
                   className="secondary"
@@ -1378,6 +1383,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                 {session ? `${session.backend} · ${session.transport}` : "tmux"}
               </span>
               <span className="terminal-frame-meta">
+                {liveTmux && terminalDims
+                  ? `${terminalDims.cols}×${terminalDims.rows} · `
+                  : ""}
                 {session
                   ? snapshotLoading
                     ? "refreshing capture"
@@ -1394,7 +1402,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                 theme={theme}
                 readOnly={!liveTmux}
                 onData={liveTmux ? handleTerminalInput : undefined}
-                onResize={liveTmux ? handleTerminalResize : undefined}
+                onResize={handleTerminalResize}
               />
             </div>
           </div>

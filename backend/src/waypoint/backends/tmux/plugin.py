@@ -477,18 +477,28 @@ class TmuxPlugin:
         verbatim-launch fallback covers them.
         """
         if backend == "claude_code":
-            # ~/.claude/projects/<dashed-cwd>/<uuid>.jsonl
-            dashed = cwd.replace("/", "-")
-            rel = f".claude/projects/{dashed}/{thread_id}.jsonl"
+            # ~/.claude/projects/<dashed-absolute-cwd>/<uuid>.jsonl —
+            # but the dashed key uses claude's view of the absolute cwd,
+            # which may not match what we have on hand (SSH sessions
+            # carry the raw ``~/foo`` form; ``cd`` symlinks resolve on
+            # the remote). UUIDs are globally unique under projects/, so
+            # glob across all project dirs and pick the file by name.
+            needle = f"{thread_id}.jsonl"
             if launch_target is None:
-                return (Path.home() / rel).is_file()
-            # ``$HOME`` must be left *outside* the quoted arg so the
-            # remote shell expands it. shlex-quoting the whole path
+                projects = Path.home() / ".claude" / "projects"
+                if not projects.is_dir():
+                    return False
+                return any(projects.glob(f"*/{needle}"))
+            # ``$HOME`` must be left *outside* the quoted needle so the
+            # remote shell expands it; shlex-quoting the whole path
             # would single-quote the dollar and look for a literal
             # ``$HOME`` directory.
-            return await self._ssh_test(
-                launch_target, f"test -f $HOME/{shlex.quote(rel)}"
+            stdout = await self._ssh_capture(
+                launch_target,
+                f"ls $HOME/.claude/projects/*/{shlex.quote(needle)} "
+                "2>/dev/null | head -n 1",
             )
+            return bool(stdout.strip())
         if backend == "codex":
             # $CODEX_HOME/sessions/YYYY/MM/DD/rollout-*-<uuid>.jsonl
             needle = f"-{thread_id}.jsonl"

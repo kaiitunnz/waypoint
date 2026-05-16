@@ -114,27 +114,26 @@ async def test_conversation_exists_routes_through_ssh_when_launch_target_set(
     plugin: TmuxPlugin, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Verify the launch_target branch by stubbing the SSH helpers; we
-    # don't actually want to spawn ssh in a unit test. Claude → _ssh_test;
-    # codex → _ssh_capture.
+    # don't actually want to spawn ssh in a unit test. Both backends
+    # now go through ``_ssh_capture`` (claude globs project dirs since
+    # the dashed-cwd key can't be computed reliably for remote paths;
+    # codex always needed the rollout glob).
     calls: list[tuple[str, str]] = []
-
-    async def fake_ssh_test(target: object, remote_cmd: str) -> bool:
-        calls.append(("test", remote_cmd))
-        # The remote command embeds the uuid; the dedicated quoting
-        # test covers the shape of the command — this stub only cares
-        # about which uuid is being checked.
-        return "00000000-0000-0000-0000-000000000001.jsonl" in remote_cmd
 
     async def fake_ssh_capture(target: object, remote_cmd: str) -> str:
         calls.append(("capture", remote_cmd))
+        if "00000000-0000-0000-0000-000000000001" in remote_cmd:
+            return (
+                "/remote/.claude/projects/-remote-proj/"
+                "00000000-0000-0000-0000-000000000001.jsonl\n"
+            )
         if "found" in remote_cmd:
             return "/remote/.codex/sessions/2026/05/16/rollout-2026-05-16T10-00-00-found.jsonl\n"
         return ""
 
-    monkeypatch.setattr(TmuxPlugin, "_ssh_test", staticmethod(fake_ssh_test))
     monkeypatch.setattr(TmuxPlugin, "_ssh_capture", staticmethod(fake_ssh_capture))
 
-    # ``_ssh_test`` is stubbed, so the actual SshLaunchTargetConfig
+    # ``_ssh_capture`` is stubbed, so the actual SshLaunchTargetConfig
     # is never touched — passing a sentinel via cast keeps mypy happy
     # without forcing us to spin up a real launch-target fixture.
     target = cast(SshLaunchTargetConfig, object())
@@ -158,7 +157,7 @@ async def test_conversation_exists_routes_through_ssh_when_launch_target_set(
         is False
     )
     # The SSH path was exercised for both calls.
-    assert [kind for kind, _ in calls] == ["test", "test"]
+    assert [kind for kind, _ in calls] == ["capture", "capture"]
 
 
 def test_codex_rollout_matches_cwd_top_level(
@@ -259,14 +258,16 @@ async def test_conversation_exists_ssh_claude_command_leaves_home_unquoted(
     # Regression: ``shlex.quote`` over the whole remote path single-quoted
     # ``$HOME`` and made the remote shell look for a literal ``$HOME``
     # directory. The command we send must keep ``$HOME`` outside any
-    # single-quoted span so the remote shell expands it.
+    # single-quoted span so the remote shell expands it. Also asserts the
+    # query is a glob across ``projects/*`` so a mismatch between the
+    # raw ``~/foo`` cwd and claude's dashed key doesn't cause a miss.
     captured: list[str] = []
 
-    async def fake_ssh_test(target: object, remote_cmd: str) -> bool:
+    async def fake_ssh_capture(target: object, remote_cmd: str) -> str:
         captured.append(remote_cmd)
-        return True
+        return ""
 
-    monkeypatch.setattr(TmuxPlugin, "_ssh_test", staticmethod(fake_ssh_test))
+    monkeypatch.setattr(TmuxPlugin, "_ssh_capture", staticmethod(fake_ssh_capture))
     target = cast(SshLaunchTargetConfig, object())
     await plugin._conversation_exists(
         "claude_code",
@@ -276,12 +277,15 @@ async def test_conversation_exists_ssh_claude_command_leaves_home_unquoted(
     )
     assert len(captured) == 1
     cmd = captured[0]
-    assert cmd.startswith("test -f ")
+    assert cmd.startswith("ls $HOME/.claude/projects/*/")
     # ``$HOME`` must not be inside a single-quoted span, otherwise the
     # remote shell sees the four literal characters instead of the
     # home-dir path.
     assert "'$HOME" not in cmd
     assert "$HOME/" in cmd
+    # Unconditional glob over project dirs — the dashed-cwd key isn't
+    # embedded.
+    assert "/Users-me-proj/" not in cmd
 
 
 @pytest.mark.asyncio

@@ -1423,7 +1423,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
               </span>
             </div>
             {liveTmux ? (
-              <TerminalKeyBar onSend={handleTerminalInput} />
+              <TerminalKeyBar
+                onSend={handleTerminalInput}
+                backend={session?.backend ?? null}
+              />
             ) : null}
             <div className="terminal-viewport" role="log" aria-live="polite">
               <XTerminal
@@ -3282,10 +3285,27 @@ function sanitizeEvent(event: EventRecord): EventRecord {
 // keyboards but routine for TUI agents. Each entry sends the literal
 // bytes to the pane via the existing input handler — Ctrl-* combinations
 // are encoded directly so the toolbar works even when the OS keyboard
-// doesn't expose a Ctrl modifier.
-const TERMINAL_KEY_BAR: { label: string; data: string; title: string }[] = [
+// doesn't expose a Ctrl modifier. ``backends`` (when set) restricts a
+// key to those backend ids; entries without it are universal.
+const TERMINAL_KEY_BAR: {
+  label: string;
+  data: string;
+  title: string;
+  backends?: string[];
+}[] = [
   { label: "Esc", data: "\x1b", title: "Escape" },
   { label: "Tab", data: "\t", title: "Tab" },
+  {
+    label: "⇧Tab",
+    data: "\x1b[Z",
+    title: "Shift-Tab (cycle modes)",
+    // CC uses Shift-Tab for permission-mode cycling; Codex's TUI also
+    // wires shift-tab → cycle mode in ``bottom_pane/footer.rs``. Other
+    // backends don't use this key on their primary surface, so we
+    // keep the chip out of their toolbar.
+    backends: ["claude_code", "codex"],
+  },
+  { label: "↵", data: "\n", title: "Newline (Ctrl-J)" },
   { label: "↑", data: "\x1b[A", title: "Up" },
   { label: "↓", data: "\x1b[B", title: "Down" },
   { label: "←", data: "\x1b[D", title: "Left" },
@@ -3293,10 +3313,19 @@ const TERMINAL_KEY_BAR: { label: string; data: string; title: string }[] = [
   { label: "^C", data: "\x03", title: "Ctrl-C (interrupt)" },
 ];
 
-function TerminalKeyBar({ onSend }: { onSend: (data: string) => void }) {
+function TerminalKeyBar({
+  onSend,
+  backend,
+}: {
+  onSend: (data: string) => void;
+  backend: string | null | undefined;
+}) {
+  const keys = TERMINAL_KEY_BAR.filter(
+    (key) => !key.backends || (backend ? key.backends.includes(backend) : false),
+  );
   return (
     <div className="terminal-keys" role="group" aria-label="Send terminal keys">
-      {TERMINAL_KEY_BAR.map((key) => (
+      {keys.map((key) => (
         <button
           key={key.label}
           type="button"

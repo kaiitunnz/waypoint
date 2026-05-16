@@ -151,6 +151,76 @@ def test_sync_output_markers_are_ignored() -> None:
     assert "A" in text and "B" in text
 
 
+def test_private_csi_sgr_is_stripped_before_pyte_sees_it() -> None:
+    """``\\x1b[>4;2m`` (kitty keyboard / modifyOtherKeys mode-set) is a
+    private CSI — the ``>`` intermediate is supposed to mark it as
+    device-specific. Pyte ignores the intermediate and treats ``4``/``2``
+    as SGR params, latching ``underscore=True`` on every subsequent cell.
+    claude_code emits this at startup and almost never sends a full
+    ``\\x1b[0m`` reset (it toggles individual attrs), so without the
+    filter every line of text renders underlined in xterm.
+    """
+    r = PyteRenderer(20, 2)
+    r.feed(b"\x1b[>4;2mhello")
+    out = r.render_full()
+    # The emitted SGRs must not include the underline param 4 — if they
+    # do, pyte latched underscore on from the private CSI.
+    for sgr in re.findall(r"\x1b\[([0-9;]+)m", out):
+        params = sgr.split(";")
+        assert "4" not in params, f"underline leaked via private CSI: {sgr}"
+    assert "hello" in _strip_ansi(out)
+
+
+def test_private_csi_sgr_other_intermediates_also_stripped() -> None:
+    # Same shape with ``<`` / ``?`` intermediates: both are private and
+    # pyte mis-parses both. Belt-and-suspenders so future TUIs using
+    # other private-prefix mode-sets don't regress us.
+    for prefix in (b"<", b"?"):
+        r = PyteRenderer(20, 2)
+        r.feed(b"\x1b[" + prefix + b"4mhi")
+        out = r.render_full()
+        for sgr in re.findall(r"\x1b\[([0-9;]+)m", out):
+            assert "4" not in sgr.split(
+                ";"
+            ), f"underline leaked via private CSI with prefix {prefix!r}"
+
+
+def test_real_sgr_underline_still_works() -> None:
+    # The filter must only strip private-CSI SGRs, never the regular
+    # SGR form. Explicit ``\x1b[4m`` should still underline.
+    r = PyteRenderer(20, 2)
+    r.feed(b"\x1b[4munder\x1b[24m off")
+    out = r.render_full()
+    # At least one emitted SGR should carry the underline param.
+    sgrs = re.findall(r"\x1b\[([0-9;]+)m", out)
+    assert any("4" in s.split(";") for s in sgrs), out
+
+
+def test_dec_private_modes_not_affected() -> None:
+    # Alt-screen toggle uses the private intermediate ``?`` but ends in
+    # ``h`` / ``l`` — must not be stripped (the filter is anchored on
+    # the ``m`` final byte).
+    r = PyteRenderer(10, 2)
+    r.feed(b"main")
+    r.render_full()
+    r.feed(b"\x1b[?1049halt")
+    out = r.render_diff()
+    assert "\x1b[?1049h" in out
+
+
+def test_private_csi_split_across_feeds_is_still_stripped() -> None:
+    # The bootstrap ``\x1b[>4;2m`` could in principle arrive split if
+    # pipe-pane reads land mid-sequence. The tail-buffer must hold
+    # the partial CSI so the next feed can complete and strip it.
+    r = PyteRenderer(20, 2)
+    r.feed(b"\x1b[>4;2")  # no terminator yet
+    r.feed(b"mhello")
+    out = r.render_full()
+    for sgr in re.findall(r"\x1b\[([0-9;]+)m", out):
+        assert "4" not in sgr.split(";"), out
+    assert "hello" in _strip_ansi(out)
+
+
 def test_frame_tracker_detects_whole_markers() -> None:
     t = SyncFrameTracker()
     assert t.feed(b"hello") is False

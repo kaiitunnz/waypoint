@@ -14,10 +14,38 @@ the pyte backend can be swapped for libvterm/vterm later without
 touching the WS handler.
 """
 
+import re
 from io import StringIO
 from typing import Protocol
 
 import pyte
+
+# Private-CSI SGR-shape sequences like ``\x1b[>4;2m`` (kitty keyboard /
+# modifyOtherKeys mode-set, emitted by claude_code at startup). The
+# ``>`` / ``<`` / ``?`` intermediate is supposed to mark the CSI as
+# device-private, but pyte ignores it and treats the ``4``/``2`` as
+# regular SGR params — latching ``cursor.attrs.underscore = True`` on
+# the entire subsequent stream. claude_code rarely emits a full
+# ``\x1b[0m`` reset (it toggles individual attrs via ``\x1b[39m`` /
+# ``\x1b[22m`` / …), so the latched underline survives indefinitely and
+# every written cell renders underlined in xterm. Strip these before
+# pyte sees them; xterm.js doesn't care about modifyOtherKeys either.
+_PRIVATE_CSI_SGR_RE = re.compile(rb"\x1b\[[<>?][0-9;:]*m")
+# Cap on a held partial CSI between feeds — anything longer is malformed
+# and gets handed to pyte unchanged rather than buffered forever.
+_MAX_PENDING_CSI = 64
+
+
+def _csi_terminated(seq: bytes) -> bool:
+    """True if ``seq`` (starting with ``ESC [``) contains a CSI final byte.
+
+    CSI final bytes lie in ``0x40..0x7E``; bytes before that are params
+    (``0x30..0x3F``) or intermediates (``0x20..0x2F``).
+    """
+    for byte in seq[2:]:
+        if 0x40 <= byte <= 0x7E:
+            return True
+    return False
 
 
 class TerminalRenderer(Protocol):
@@ -120,9 +148,24 @@ class PyteRenderer:
         self._mirror: list[list[pyte.screens.Char | None]] = [
             [None] * cols for _ in range(rows)
         ]
+        # Partial CSI held across ``feed`` boundaries so a private-SGR
+        # split between chunks still gets stripped.
+        self._pending: bytes = b""
 
     def feed(self, data: bytes) -> None:
-        self._stream.feed(data)
+        buf = self._pending + data
+        self._pending = b""
+        # If the buffer's trailing ``ESC [`` hasn't seen a final byte
+        # yet, hold it for the next feed — otherwise the private-CSI
+        # regex below would miss a sequence split across chunks.
+        tail_idx = buf.rfind(b"\x1b[")
+        if tail_idx != -1:
+            tail = buf[tail_idx:]
+            if not _csi_terminated(tail) and len(tail) <= _MAX_PENDING_CSI:
+                self._pending = tail
+                buf = buf[:tail_idx]
+        buf = _PRIVATE_CSI_SGR_RE.sub(b"", buf)
+        self._stream.feed(buf)
 
     def set_cursor(self, col: int, row: int) -> None:
         """Force the cursor to (col, row), zero-based.

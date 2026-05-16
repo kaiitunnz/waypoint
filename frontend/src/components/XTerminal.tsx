@@ -102,19 +102,14 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
           '"JetBrains Mono", "SFMono-Regular", "Menlo", "Consolas", monospace',
         fontSize: 13,
         lineHeight: 1.25,
-        // Many TUIs (Codex, Claude Code) park the cursor at the pane
-        // bottom between renders, which a blinking block makes very
-        // distracting whenever the agent re-renders. An underline
-        // without blink stays unobtrusive at idle and still tracks
-        // user input clearly when the agent moves it to the textbox.
+        // The pane stream emits cell-level deltas with explicit CUP
+        // positioning for the cursor on every frame, so we never rely
+        // on xterm's own blink timer to advertise where the cursor is.
+        // A still underline reads as part of the TUI rather than the
+        // browser.
         cursorBlink: false,
         cursorStyle: "underline",
         scrollback: 20000,
-        // tmux `capture-pane -p` outputs bare LF between rows while real
-        // pty streams (pipe-pane) emit CRLF; xterm's convertEol only
-        // promotes lone LF to CRLF and leaves CRLF alone, so this handles
-        // both sources without double-translation.
-        convertEol: true,
         allowProposedApi: true,
         disableStdin: readOnly,
         theme: themeFor(theme),

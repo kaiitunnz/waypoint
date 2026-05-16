@@ -6,10 +6,6 @@ import { TerminalScrollChips } from "@/components/TerminalScrollChips";
 import { XTerminal, type XTerminalHandle } from "@/components/XTerminal";
 import { SessionRecord } from "@/lib/types";
 
-// Visual + textual parity with the composer-overflow menu on the chat
-// page — same trigger glyph, same labels, same per-row glyph slots and
-// danger styling. Keeps the two surfaces feeling like one app.
-
 interface SessionTerminalViewProps {
   session: SessionRecord | null;
   liveTmux: boolean;
@@ -74,11 +70,23 @@ export function SessionTerminalView({
   // We deliberately do NOT surface "Interrupt" here because the keybar's
   // ^C already sends SIGINT to the pane (the backend /interrupt action
   // for tmux just writes ^C anyway).
-  let primary: { label: string; onClick: () => void; tone?: "primary" } | null = null;
+  type PrimaryAction = {
+    kind: "refresh" | "reconnect";
+    label: string;
+    onClick: () => void;
+    tone?: "primary";
+  };
+  let primary: PrimaryAction | null = null;
   if (dormantReattach) {
-    primary = { label: "Reconnect", onClick: () => void onReattach(), tone: "primary" };
+    primary = {
+      kind: "reconnect",
+      label: "Reconnect",
+      onClick: () => void onReattach(),
+      tone: "primary",
+    };
   } else if (!liveTmux && session) {
     primary = {
+      kind: "refresh",
       label: snapshotLoading ? "Refreshing…" : "Refresh",
       onClick: onRefresh,
     };
@@ -107,7 +115,7 @@ export function SessionTerminalView({
             type="button"
             className={`term-bar-action ${primary.tone === "primary" ? "primary" : ""}`}
             onClick={primary.onClick}
-            disabled={snapshotLoading && primary.label.startsWith("Refresh")}
+            disabled={snapshotLoading && primary.kind === "refresh"}
           >
             {primary.label}
           </button>
@@ -125,7 +133,7 @@ export function SessionTerminalView({
           </button>
           {termMenuOpen ? (
             <div className="composer-overflow-menu term-bar-overflow-menu" role="menu">
-              {session && primary?.label !== "Refresh" ? (
+              {session && primary?.kind !== "refresh" ? (
                 <button
                   type="button"
                   role="menuitem"
@@ -140,7 +148,7 @@ export function SessionTerminalView({
                   Refresh
                 </button>
               ) : null}
-              {dormantReattach && primary?.label !== "Reconnect" ? (
+              {dormantReattach && primary?.kind !== "reconnect" ? (
                 <button
                   type="button"
                   role="menuitem"

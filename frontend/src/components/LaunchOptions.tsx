@@ -4,9 +4,7 @@ import { useState } from "react";
 
 import { LaunchMode } from "@/lib/types";
 
-// Inline gear icon — matches the one in SchedulePanel/LaunchPanel's pre-redesign
-// Advanced disclosure so the visual language stays uniform across forms.
-function GearGlyph() {
+export function GearGlyph() {
   return (
     <svg
       className="advanced-toggle-gear"

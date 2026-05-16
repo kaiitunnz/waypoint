@@ -55,6 +55,7 @@ import {
   type PlanViewModel,
 } from "@/lib/events";
 import { useTheme } from "@/lib/theme";
+import { TerminalScrollChips } from "@/components/TerminalScrollChips";
 import { XTerminal, type XTerminalHandle } from "@/components/XTerminal";
 import { ApprovalRequestCard, PlanApprovalCard } from "@/components/ApprovalCard";
 import {
@@ -1105,6 +1106,22 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     },
     [],
   );
+  const handleTerminalScrollChip = useCallback(
+    (direction: "up" | "down") => {
+      // SGR mouse encoding (mode 1006). Button 64 = wheel up, 65 =
+      // wheel down. Column/row are the cursor position the inner app
+      // attributes the wheel event to; centering on the viewport is
+      // a safe stand-in for "user's eye" without coupling to xterm's
+      // actual mouse position.
+      const cols = terminalDims?.cols ?? 80;
+      const rows = terminalDims?.rows ?? 24;
+      const col = Math.max(1, Math.floor(cols / 2));
+      const row = Math.max(1, Math.floor(rows / 2));
+      const button = direction === "up" ? 64 : 65;
+      handleTerminalInput(`\x1b[<${button};${col};${row}M`);
+    },
+    [terminalDims, handleTerminalInput],
+  );
   const interruptSession = useCallback(() => {
     void runAction("interrupt");
   }, [runAction]);
@@ -1416,6 +1433,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                 onData={liveTmux ? handleTerminalInput : undefined}
                 onResize={handleTerminalResize}
               />
+              {liveTmux ? (
+                <TerminalScrollChips onWheel={handleTerminalScrollChip} />
+              ) : null}
             </div>
           </div>
         </section>

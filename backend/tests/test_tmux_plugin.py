@@ -65,6 +65,30 @@ def test_resume_args_unknown_backend_is_verbatim(plugin: TmuxPlugin) -> None:
     assert args == ["--foo"]
 
 
+def test_resume_args_claude_does_not_double_inject_on_second_cycle(
+    plugin: TmuxPlugin,
+) -> None:
+    """Reconnect cycle N must not stack a fresh ``--resume`` on top of
+    the prior cycle's output. Without scrubbing the leading ``--resume``,
+    the stored ``launch_args`` would grow unboundedly across reconnects.
+    """
+    cycle1 = plugin._resume_args(
+        "claude_code", "abc-123", ["--session-id", "abc-123", "--model", "sonnet"]
+    )
+    assert cycle1 == ["--resume", "abc-123", "--model", "sonnet"]
+    cycle2 = plugin._resume_args("claude_code", "abc-123", cycle1)
+    assert cycle2 == ["--resume", "abc-123", "--model", "sonnet"]
+
+
+def test_resume_args_codex_does_not_double_inject_on_second_cycle(
+    plugin: TmuxPlugin,
+) -> None:
+    cycle1 = plugin._resume_args("codex", "abc-123", ["--model", "o3"])
+    assert cycle1 == ["resume", "abc-123", "--model", "o3"]
+    cycle2 = plugin._resume_args("codex", "abc-123", cycle1)
+    assert cycle2 == ["resume", "abc-123", "--model", "o3"]
+
+
 @pytest.mark.asyncio
 async def test_conversation_exists_claude_code_local(
     plugin: TmuxPlugin, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -896,3 +920,43 @@ async def test_import_thread_via_resume_refuses_when_conversation_missing(
     assert exc.value.status_code == 400
     # No tmux session should have been created either.
     assert runtime.created == []
+
+
+@pytest.mark.asyncio
+async def test_create_session_requests_remote_pty(
+    plugin: TmuxPlugin, tmp_path: Path
+) -> None:
+    """``create_session`` must request a remote PTY when building the
+    inner command. Without ``allocate_tty=True`` a remote claude flips
+    to ``--print`` mode and errors on the missing stdin TTY.
+    """
+    from waypoint.git_meta import GitMeta
+    from waypoint.schemas import LaunchMode, SessionCreateRequest
+
+    runtime = _FakeRuntime()
+    runtime._session_dir_root = tmp_path
+    request = SessionCreateRequest(
+        backend="claude_code",
+        cwd="/Users/me/proj",
+        args=["--model", "sonnet"],
+        launch_mode=LaunchMode.TMUX_WRAPPER,
+    )
+    record = await plugin.create_session(
+        cast(Any, runtime),
+        request,
+        session_id="sess-create",
+        launch_target=None,
+        title="t",
+        raw_log=tmp_path / "raw.log",
+        structured_log=tmp_path / "events.jsonl",
+        git_meta=GitMeta(repo_name=None, branch=None),
+        permission_mode=None,
+        resolved_model=None,
+        resolved_effort=None,
+    )
+
+    assert record.backend == "claude_code"
+    assert runtime.command_calls[-1]["allocate_tty"] is True
+    # Claude path pre-pins --session-id <uuid> ahead of the user's args.
+    assert runtime.command_calls[-1]["args"][0] == "--session-id"
+    assert runtime.command_calls[-1]["args"][-2:] == ["--model", "sonnet"]

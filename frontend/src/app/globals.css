@@ -992,13 +992,25 @@ html[data-theme="light"] .clipboard-prompt.is-copied {
   background: color-mix(in srgb, var(--success) 18%, rgba(247, 243, 235, 0.92));
 }
 
-/* Paste-confirmation variant has two interactive children (send + cancel),
-   so the wrapper itself isn't a tap target — drop the pointer cursor on
-   the wrapper and let the inner buttons own their own cursors. */
-.clipboard-prompt.is-paste {
+/* Pills with a dismiss control (paste-confirm, copy-confirm, copied
+   success) demote the wrapper to non-interactive — only the inner send
+   and dismiss buttons handle taps. */
+.clipboard-prompt:has(.clipboard-prompt__dismiss) {
   cursor: default;
   padding-right: 8px;
   gap: 10px;
+}
+
+/* The wrapper-level hover lift was paired with the wrapper itself being
+   the tap target. With a dismiss control present, the wrapper is no
+   longer interactive — drop the lift to avoid implying it is. */
+.clipboard-prompt:has(.clipboard-prompt__dismiss):hover {
+  transform: none;
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--accent) 28%, transparent),
+    0 12px 36px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.02);
 }
 
 .clipboard-prompt__send {
@@ -1035,6 +1047,9 @@ html[data-theme="light"] .clipboard-prompt.is-copied {
   margin-left: 2px;
   border-radius: 999px;
   cursor: pointer;
+  /* .is-copied sets pointer-events: none on the wrapper to keep the
+     success badge inert; the dismiss button still needs taps to land. */
+  pointer-events: auto;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   transition:

@@ -244,9 +244,8 @@ class TmuxPlugin:
         The wrapped CLI runs unmonitored — no per-session SDK adapter is
         watching it — so the structured backends' probe machinery never
         fires. Delegate to the inner plugin's account-level probe (same
-        upstream API call the structured adapter makes) and write the
-        snapshot directly onto the session record via the runtime's
-        session-update callback (persistence + WS broadcast in one hop).
+        upstream API call the structured adapter makes) and persist +
+        broadcast the snapshot via ``update_session_fields``.
         """
         inner = runtime.registry.get(session.backend)
         probe = getattr(inner, "probe_account_rate_limit", None)
@@ -270,10 +269,10 @@ class TmuxPlugin:
             return
         if snapshot is None:
             return
-        await runtime.session_update_callback()(
+        await runtime.update_session_fields(
             session.id,
-            {"rate_limit_usage": snapshot.model_dump(mode="json")},
-            True,
+            publish=True,
+            rate_limit_usage=snapshot.model_dump(mode="json"),
         )
 
     async def restore_session(

@@ -524,6 +524,46 @@ class TmuxPlugin:
             return ""
         return stdout.decode("utf-8", errors="ignore")
 
+    def _inner_cli_flags(
+        self,
+        backend: str,
+        *,
+        model: str | None,
+        effort: str | None,
+        permission_mode: str | None,
+    ) -> list[str]:
+        """Build launch-time flags for the wrapped CLI.
+
+        Mirrors the structured-launch flag set the user picks in
+        ``LaunchPanel``: model, effort, permission mode. The interactive
+        CLIs accept these at startup; subsequent swap requires relaunch,
+        not in scope for the tmux wrapper today.
+
+        Codex's CLI has no ``--effort`` flag (effort is selected through
+        the ``/model`` popup) so it's intentionally omitted; the caller
+        also nulls ``effort`` on the SessionRecord for codex tmux launches
+        to keep the UI consistent. Codex permission modes don't map
+        cleanly to ``-a``/``-s`` flags (``auto_review`` and ``plan`` are
+        collaboration-mode constructs, not pure approval policies), so
+        only the two unambiguous presets translate today.
+        """
+        flags: list[str] = []
+        if backend == "claude_code":
+            if model:
+                flags += ["--model", model]
+            if effort:
+                flags += ["--effort", effort]
+            if permission_mode:
+                flags += ["--permission-mode", permission_mode]
+        elif backend == "codex":
+            if model:
+                flags += ["-m", model]
+            if permission_mode == "default":
+                flags += ["-a", "on-request", "-s", "workspace-write"]
+            elif permission_mode == "full_access":
+                flags += ["--dangerously-bypass-approvals-and-sandbox"]
+        return flags
+
     def _resume_args(
         self, backend: str, thread_id: str | None, stored_args: list[str]
     ) -> list[str]:
@@ -822,7 +862,13 @@ class TmuxPlugin:
         # have a thread id ready for the reconnect path. Codex has no
         # equivalent flag — its uuid is captured asynchronously by
         # ``_spawn_codex_thread_id_watcher``.
-        launch_args = list(request.args)
+        inner_flags = self._inner_cli_flags(
+            request.backend,
+            model=resolved_model,
+            effort=resolved_effort,
+            permission_mode=permission_mode,
+        )
+        launch_args = [*inner_flags, *request.args]
         thread_id: str | None = None
         if request.backend == "claude_code":
             thread_id = str(uuid.uuid4())
@@ -874,6 +920,9 @@ class TmuxPlugin:
             raw_log_path=str(raw_log),
             structured_log_path=str(structured_log),
             transport_state=transport_state,
+            permission_mode=permission_mode,
+            model=resolved_model,
+            effort=resolved_effort if request.backend != "codex" else None,
         )
         runtime.storage.create_session(session)
         await runtime._record_system_event(

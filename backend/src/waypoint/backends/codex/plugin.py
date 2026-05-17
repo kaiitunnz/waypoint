@@ -101,6 +101,7 @@ class CodexPlugin:
     import_request_schema: type[BaseModel] | None = CodexThreadImportRequest
     config_schema: type[PluginConfig] = CodexPluginConfig
     launch_target_schema: type[PluginLaunchTargetConfig] = CodexLaunchTargetConfig
+    extra_env: dict[str, str] = {}
     capabilities = BackendCapabilities(
         is_structured=True,
         supports_resume=False,

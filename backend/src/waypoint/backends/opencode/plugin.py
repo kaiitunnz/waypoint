@@ -130,6 +130,7 @@ class OpenCodePlugin:
     import_request_schema: type[BaseModel] | None = OpenCodeThreadImportRequest
     config_schema: type[PluginConfig] = OpenCodePluginConfig
     launch_target_schema: type[PluginLaunchTargetConfig] = PluginLaunchTargetConfig
+    extra_env: dict[str, str] = {}
 
     capabilities = BackendCapabilities(
         is_structured=True,

@@ -137,6 +137,7 @@ class SshLaunchTargetConfig(BaseModel):
         cwd: str | None = None,
         *,
         allocate_tty: bool = False,
+        extra_env: dict[str, str] | None = None,
     ) -> tuple[str, ...]:
         """Build the SSH argv for a remote command.
 
@@ -158,13 +159,17 @@ class SshLaunchTargetConfig(BaseModel):
         thread enumerator) need stdin as a real pipe.
         """
         ssh_bin = _resolve_local_binary(self.ssh_bin)
+        # Plugin contributions (e.g. claude's ``CLAUDE_CODE_NO_FLICKER=1``)
+        # form the base; user-supplied ``remote_env`` overrides on key
+        # collision so explicit yaml config still wins.
+        merged_env = {**(extra_env or {}), **self.remote_env}
         remote_parts: list[str] = []
         if cwd:
             remote_parts.extend([f"cd {quote_remote_path(cwd)}", "&&"])
         remote_parts.append("exec")
-        if self.remote_env:
+        if merged_env:
             remote_parts.append("env")
-            for key, value in sorted(self.remote_env.items()):
+            for key, value in sorted(merged_env.items()):
                 remote_parts.append(shlex.quote(f"{key}={value}"))
         remote_parts.append(shlex.join(command))
         remote_command = self.wrap_remote_command(" ".join(remote_parts))

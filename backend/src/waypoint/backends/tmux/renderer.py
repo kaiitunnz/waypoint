@@ -20,47 +20,27 @@ from typing import Protocol
 
 import pyte
 
-# Private-CSI SGR-shape sequences like ``\x1b[>4;2m`` (kitty keyboard /
-# modifyOtherKeys mode-set, emitted by claude_code at startup). The
-# ``>`` / ``<`` / ``?`` intermediate is supposed to mark the CSI as
-# device-private, but pyte ignores it and treats the ``4``/``2`` as
-# regular SGR params — latching ``cursor.attrs.underscore = True`` on
-# the entire subsequent stream. claude_code rarely emits a full
-# ``\x1b[0m`` reset (it toggles individual attrs via ``\x1b[39m`` /
-# ``\x1b[22m`` / …), so the latched underline survives indefinitely and
-# every written cell renders underlined in xterm. Strip these before
-# pyte sees them; xterm.js doesn't care about modifyOtherKeys either.
+# Strip private-CSI SGR sequences like ``\x1b[>4;2m`` (modifyOtherKeys,
+# emitted by claude_code at startup). Pyte ignores the ``>``/``<``/``?``
+# intermediate and treats the params as regular SGR, latching
+# ``underscore=True`` for the rest of the stream.
 _PRIVATE_CSI_SGR_RE = re.compile(rb"\x1b\[[<>?][0-9;:]*m")
-# Hold caps for an in-progress escape sequence between feeds. CSIs are
-# short by spec (params, intermediates, one final byte — always well
-# under 64 bytes); a longer "CSI" suggests malformed input and we'd
-# rather hand it to pyte than buffer indefinitely. DCS and OSC payloads
-# can be much larger — tmux's DCS-passthrough wraps OSC 52 clipboard
-# sets that can carry the user's whole selection, and an aggressive
-# 64-byte cap would chop those mid-base64 and feed the back half
-# through pyte as cell content (exactly the corruption the DCS strip
-# is here to prevent). 1 MiB matches tmux's own buffer-paste ceiling.
+# Cap how much of a straddling escape we hold across feeds. CSIs are
+# always well under 64 bytes; DCS/OSC payloads carry clipboard writes
+# the size of a user selection, so they need the 1 MiB ceiling (tmux's
+# own buffer-paste cap) — a 64-byte clip would chop them mid-base64.
 _MAX_PENDING_CSI = 64
 _MAX_PENDING_NON_CSI = 1 << 20  # 1 MiB
-# DCS sequences (``ESC P ... ESC \``). Pyte's parser ignores DCS final
-# bytes and writes the payload straight into the screen as text — so
-# tmux's DCS-passthrough wrapper (``ESC P tmux; <doubled-esc payload>
-# ESC \``) splatters its inner OSC 52 base64 over whatever the cursor
-# is on, typically CC's textbox. Strip DCS entirely; nothing in our
-# pipeline interprets these.
-#
-# The middle group ``(?:\x1b\x1b[^\x1b]*)*`` is for tmux's "double the
-# inner ESC bytes" passthrough convention: an inner ``ESC X`` becomes
-# ``\x1b\x1b X`` and must not look like the terminator ``\x1b\\``.
+# Strip DCS sequences entirely. Pyte writes the payload to the screen
+# as text, so tmux's DCS-passthrough OSC 52 (``ESC P tmux; … ESC \``)
+# splatters base64 onto whatever the cursor is on. The middle group
+# tolerates tmux's "double the inner ESC bytes" passthrough convention.
 _DCS_RE = re.compile(rb"\x1bP[^\x1b]*(?:\x1b\x1b[^\x1b]*)*\x1b\\")
 
-# DEC private modes we mirror from the pane stream to xterm.js. Pyte
-# never visibly interacts with these (mouse encoding, focus reporting,
-# bracketed paste are *input* concerns, not screen state), so they get
-# dropped between server and client unless we explicitly pass them
-# through. Without this, claude_code requests mouse mode at startup,
-# xterm.js never learns about it, and scroll wheel events fall on the
-# floor instead of reaching the TUI.
+# DEC private modes we mirror from pane to xterm. Pyte doesn't surface
+# these (mouse/focus/paste are input concerns), so without an explicit
+# pass-through xterm never learns about mouse mode and scroll events
+# fall on the floor.
 _TRACKED_PRIVATE_MODES = frozenset(
     {
         1000,  # X10 mouse reporting
@@ -261,25 +241,14 @@ class PyteRenderer:
         # frame we emit will toggle to match the pane's actual state.
         self._alt_emitted = False
         self._last_cursor: tuple[int, int, bool] | None = None
-        # Mirror of what we've actually sent to xterm. pyte marks a row
-        # dirty whenever it sees a write *or* a clear (CSI K), so its
-        # ``dirty`` set is much broader than the cells that visibly
-        # change. Codex's per-keystroke frame, for example, clears all
-        # five textbox-border rows even though only one cell in row 16
-        # actually changes — repainting all five rows every frame is
-        # what produces the flicker. We diff each dirty row against
-        # this mirror so the emitted ANSI only touches cells whose
-        # final value differs from what xterm last drew.
+        # Mirror of what we've actually sent to xterm. pyte's ``dirty``
+        # set is much broader than the cells that visibly change —
+        # diffing against the mirror keeps emitted ANSI down to cells
+        # whose final value actually differs.
         self._mirror: list[list[pyte.screens.Char | None]] = [
             [None] * cols for _ in range(rows)
         ]
-        # Partial CSI held across ``feed`` boundaries so a private-SGR
-        # split between chunks still gets stripped.
         self._pending: bytes = b""
-        # Tracked DEC private mode state — what the pane has actually
-        # requested vs what xterm.js has been told. Diffed between
-        # ``render_full`` / ``render_diff`` calls to mirror server-side
-        # mode changes to the client.
         self._modes: dict[int, bool] = {}
         self._emitted_modes: dict[int, bool] = {}
 
@@ -557,6 +526,14 @@ class SyncFrameTracker:
         # How many bytes of the prefix we've matched so far.
         self._idx = 0
 
+    @staticmethod
+    def _is_param_byte(byte: int) -> bool:
+        # CSI parameter bytes per ECMA-48: 0x30-0x3F (digits + ; : < = > ?).
+        # We accept the digit/semicolon/colon subset so multi-param forms
+        # like ``\x1b[?2026;1h`` reach the h/l terminator instead of
+        # resetting the matcher mid-sequence.
+        return 0x30 <= byte <= 0x3B  # 0-9, ':', ';'
+
     def feed(self, chunk: bytes) -> bool:
         """Process ``chunk`` and return the final ``in_frame`` state."""
         prefix = self._PREFIX
@@ -567,6 +544,8 @@ class SyncFrameTracker:
                     self.in_frame = True
                 elif byte == 0x6C:  # 'l'
                     self.in_frame = False
+                elif self._is_param_byte(byte):
+                    continue
                 # Reset; if the rejected byte is itself ESC we still
                 # want to seed the next match below.
                 self._idx = 1 if byte == 0x1B else 0
@@ -609,6 +588,8 @@ class SyncFrameTracker:
                     self.in_frame = False
                     segments.append((chunk[seg_start : i + 1], True))
                     seg_start = i + 1
+                elif self._is_param_byte(byte):
+                    continue
                 self._idx = 1 if byte == 0x1B else 0
                 continue
             if byte == prefix[self._idx]:

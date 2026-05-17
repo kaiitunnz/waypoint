@@ -6371,6 +6371,13 @@ html[data-theme="light"] .xterm-rows span[style*="color: rgb(148, 148, 148)"],
 html[data-theme="light"] .xterm-rows span[style*="color:#949494"] {
   color: #6c665a !important;
 }
+/* CC code-identifier accent (xterm index 153, #afd7ff). The pale blue
+   sits below readable contrast against cream; bump to the light-theme
+   ``brightBlue`` so the colour cue survives without going slate. */
+html[data-theme="light"] .xterm-rows span[style*="color: rgb(175, 215, 255)"],
+html[data-theme="light"] .xterm-rows span[style*="color:#afd7ff"] {
+  color: #3a87ba !important;
+}
 
 .term-jump {
   position: absolute;

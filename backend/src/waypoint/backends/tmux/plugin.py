@@ -236,6 +236,46 @@ class TmuxPlugin:
     ) -> None:
         return None
 
+    async def refresh_rate_limit_usage(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        """Populate ``rate_limit_usage`` on tmux-wrapped sessions.
+
+        The wrapped CLI runs unmonitored — no per-session SDK adapter is
+        watching it — so the structured backends' probe machinery never
+        fires. Delegate to the inner plugin's account-level probe (same
+        upstream API call the structured adapter makes) and write the
+        snapshot directly onto the session record via the runtime's
+        session-update callback (persistence + WS broadcast in one hop).
+        """
+        inner = runtime.registry.get(session.backend)
+        probe = getattr(inner, "probe_account_rate_limit", None)
+        if probe is None:
+            return
+        launch_target = (
+            runtime._find_launch_target(session.launch_target_id)
+            if session.launch_target_id
+            else None
+        )
+        try:
+            if session.backend == "codex":
+                snapshot = await probe(runtime, launch_target, cwd=session.cwd)
+            else:
+                snapshot = await probe(runtime, launch_target)
+        except Exception:  # noqa: BLE001
+            log.exception(
+                "tmux rate-limit probe failed",
+                extra={"session_id": session.id, "inner": session.backend},
+            )
+            return
+        if snapshot is None:
+            return
+        await runtime.session_update_callback()(
+            session.id,
+            {"rate_limit_usage": snapshot.model_dump(mode="json")},
+            True,
+        )
+
     async def restore_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

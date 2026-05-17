@@ -699,3 +699,84 @@ def test_append_event_stamps_envelope_version(tmp_path) -> None:
     # Existing version isn't clobbered — replay paths can opt into a
     # newer schema without storage rewriting them.
     assert explicit.metadata["version"] == 2
+
+
+def test_storage_legacy_db_gets_launch_mode_column(tmp_path) -> None:
+    """A pre-launch_mode SQLite file gains the column with default 'auto'."""
+    import sqlite3
+
+    db_path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript("""
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            backend TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'managed',
+            title TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            launch_target_id TEXT,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_event_at TEXT NOT NULL,
+            raw_log_path TEXT NOT NULL,
+            structured_log_path TEXT NOT NULL,
+            transport_state TEXT NOT NULL DEFAULT '{}',
+            permission_mode TEXT,
+            model TEXT,
+            effort TEXT,
+            transport TEXT
+        );
+        CREATE TABLE scheduled_sessions (
+            id TEXT PRIMARY KEY,
+            backend TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            launch_target_id TEXT,
+            title TEXT,
+            args TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL,
+            scheduled_for TEXT NOT NULL,
+            spawned_session_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_error TEXT
+        );
+        CREATE TABLE events (
+            session_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            ts TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            text TEXT,
+            metadata TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (session_id, sequence)
+        );
+        """)
+    conn.commit()
+    conn.close()
+
+    Storage(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cols = {row[1]: row for row in conn.execute("PRAGMA table_info(sessions)")}
+        assert "launch_mode" in cols
+        sched_cols = {
+            row[1]: row for row in conn.execute("PRAGMA table_info(scheduled_sessions)")
+        }
+        assert "launch_mode" in sched_cols
+        # Inserting a row without specifying launch_mode should pick up the default.
+        now = datetime.now(UTC).isoformat()
+        conn.execute(
+            "INSERT INTO sessions (id, backend, title, cwd, status, created_at, "
+            "updated_at, last_event_at, raw_log_path, structured_log_path, transport) "
+            "VALUES (?, 'codex', 't', '/tmp', 'idle', ?, ?, ?, '/tmp/raw.log', "
+            "'/tmp/events.jsonl', 'codex_app_server')",
+            ("s1", now, now, now),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT launch_mode FROM sessions WHERE id = 's1'"
+        ).fetchone()
+        assert row[0] == LaunchMode.AUTO.value
+    finally:
+        conn.close()

@@ -61,6 +61,7 @@ from waypoint.schemas import (
     BackendModelOption,
     CommandCompletion,
     CompletionDispatch,
+    EventKind,
     LaunchMode,
     SessionCreateRequest,
     SessionEnvelope,
@@ -584,6 +585,42 @@ class ClaudeCodePlugin:
                 _format_claude_status(session, self.adapter),
                 status=session.status,
                 metadata={"builtin_command": "/status", "source": "waypoint"},
+            )
+            return runtime.get_session(session.id)
+        if command == "/copy":
+            # Claude's native /copy emits OSC 52 from the interactive TUI;
+            # the SDK's --print --output-format=stream-json mode never
+            # surfaces that escape, so the slash command is a silent no-op
+            # for structured sessions unless we intercept here. Tmux-
+            # wrapped sessions take a different maybe_handle_input path
+            # (tmux/plugin.py) where the CLI's OSC 52 reaches xterm
+            # directly, so this branch is structured-only by construction.
+            text = _last_assistant_text(runtime, session.id)
+            await runtime._record_user_event(
+                session.id,
+                request.text,
+                submit=request.submit,
+                status=session.status,
+            )
+            if text:
+                await runtime.broadcast.publish(
+                    SessionEnvelope(
+                        type="clipboard_copy",
+                        payload={"text": text},
+                    ),
+                    session_id=session.id,
+                )
+                note = (
+                    f"Copied last response to clipboard "
+                    f"({len(text)} chars, {text.count(chr(10)) + 1} lines)"
+                )
+            else:
+                note = "Nothing to copy — no assistant response yet."
+            await runtime._record_system_event(
+                session.id,
+                note,
+                status=session.status,
+                metadata={"builtin_command": "/copy", "source": "waypoint"},
             )
             return runtime.get_session(session.id)
         return None
@@ -1266,6 +1303,24 @@ def _first_slash_command(text: str) -> str | None:
     if not stripped.startswith("/"):
         return None
     return stripped.split(maxsplit=1)[0].lower()
+
+
+def _last_assistant_text(runtime: "SessionRuntime", session_id: str) -> str:
+    """Concatenate the assistant's most recent bubble into a single string.
+
+    ``list_events_by_message_count(message_limit=1)`` walks events
+    backward and returns events for exactly one logical anchor, so a
+    long-running transcript doesn't get fully loaded just to read the
+    last bubble. Streaming chunks within the bubble share ``item_id`` →
+    same anchor → all chunks are in the slice and join in order.
+    Returns empty when the latest anchor isn't an assistant message.
+    """
+    events = runtime.storage.list_events_by_message_count(session_id, message_limit=1)
+    return "".join(
+        event.text
+        for event in events
+        if event.kind == EventKind.AGENT_OUTPUT and event.text
+    )
 
 
 def _session_slash_commands(

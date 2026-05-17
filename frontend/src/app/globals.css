@@ -6364,7 +6364,8 @@ html[data-theme="light"] .xterm-rows span[style*="background-color:#444444"] {
   background-color: #b3ab99 !important;
 }
 html[data-theme="light"] .xterm-rows span[style*="color: rgb(255, 255, 255)"],
-html[data-theme="light"] .xterm-rows span[style*="color:#ffffff"] {
+html[data-theme="light"] .xterm-rows span[style*="color:#ffffff"],
+html[data-theme="light"] .xterm-rows span[style*="color:#fff;"] {
   color: #1c1914 !important;
 }
 html[data-theme="light"] .xterm-rows span[style*="color: rgb(148, 148, 148)"],
@@ -6377,6 +6378,28 @@ html[data-theme="light"] .xterm-rows span[style*="color:#949494"] {
 html[data-theme="light"] .xterm-rows span[style*="color: rgb(175, 215, 255)"],
 html[data-theme="light"] .xterm-rows span[style*="color:#afd7ff"] {
   color: #3a87ba !important;
+}
+/* Codex TUI accents. Codex emits 24-bit RGB for its model picker /
+   path / status text, and xterm v6 also inlines ANSI 3/6 as literal
+   ``#cdcd00`` / ``#00cdcd`` instead of consulting LIGHT_THEME.yellow
+   / cyan — same renderer behaviour we work around for the 256-color
+   indexed cells above. All four land below readable contrast on
+   cream; remap to the theme's yellow / green / cyan. */
+html[data-theme="light"] .xterm-rows span[style*="color: rgb(246, 226, 183)"],
+html[data-theme="light"] .xterm-rows span[style*="color:#f6e2b7"] {
+  color: #aa6618 !important;
+}
+html[data-theme="light"] .xterm-rows span[style*="color: rgb(171, 223, 167)"],
+html[data-theme="light"] .xterm-rows span[style*="color:#abdfa7"] {
+  color: #257a50 !important;
+}
+html[data-theme="light"] .xterm-rows span[style*="color: rgb(205, 205, 0)"],
+html[data-theme="light"] .xterm-rows span[style*="color:#cdcd00"] {
+  color: #aa6618 !important;
+}
+html[data-theme="light"] .xterm-rows span[style*="color: rgb(0, 205, 205)"],
+html[data-theme="light"] .xterm-rows span[style*="color:#00cdcd"] {
+  color: #1e7a8e !important;
 }
 
 .term-jump {

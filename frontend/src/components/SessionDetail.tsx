@@ -159,6 +159,33 @@ function copyTextSync(text: string): boolean {
   return ok;
 }
 
+// WebKit (desktop Safari + every iOS browser, since the App Store
+// requires WebKit) gates ``navigator.clipboard.readText()`` behind a
+// system "Paste" banner that the user must click to authorize. Other
+// browsers either cache the permission (Chromium) or expose it via a
+// URL-bar affordance (Firefox), so the one-tap path Just Works there.
+// We use this flag to decide whether to short-circuit straight to
+// sending or to stage the text behind a tap-to-confirm pill.
+function isSafariFamily(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  const iOS =
+    /\b(iPad|iPhone|iPod)\b/.test(ua) ||
+    (ua.includes("Mac") && (navigator.maxTouchPoints ?? 0) > 1);
+  if (iOS) return true;
+  return /Safari\//.test(ua) && !/Chrome|Chromium|Edg\/|OPR\//.test(ua);
+}
+
+// Bracketed-paste wraps the payload so TUIs that have enabled mode
+// 2004 treat the bytes as a single paste event rather than a stream of
+// keystrokes. Normalize ``\r\n`` and lone ``\r`` to ``\n`` first so a
+// stray CR can't fire a mid-paste submit on the way in. Wrapped CLIs
+// (CC, Codex, OpenCode) all enable mode 2004; raw shells will show the
+// literal escape codes, which is the documented trade-off.
+function wrapBracketedPaste(text: string): string {
+  return `\x1b[200~${text.replace(/\r\n?/g, "\n")}\x1b[201~`;
+}
+
 function mergeBuiltinFallback(
   backend: ReadonlyArray<CommandCompletion>,
 ): CommandCompletion[] {
@@ -234,6 +261,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   // per element, so consecutive /copies on the same DOM node would
   // otherwise silently swap text with no visible motion.
   const [clipboardSeq, setClipboardSeq] = useState(0);
+  // Paste-side mirror of the copy flow. On WebKit the readText prompt
+  // is a system-level "Paste" banner the user must approve, so even
+  // after we have the bytes we stage them behind a second tap-to-send
+  // pill that previews the char count. On Chromium/Firefox we skip
+  // the pill and send straight through.
+  const [pendingPaste, setPendingPaste] = useState<string | null>(null);
+  const [pasteSeq, setPasteSeq] = useState(0);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
@@ -1213,6 +1247,41 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }, []);
 
+  const requestPaste = useCallback(async () => {
+    setError("");
+    if (typeof navigator === "undefined" || !navigator.clipboard?.readText) {
+      setError("Clipboard read is unavailable in this browser");
+      return;
+    }
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      setError("Clipboard access blocked — approve the paste prompt and retry");
+      return;
+    }
+    if (!text) return;
+    if (isSafariFamily()) {
+      // Stash the raw text so the preview char count reflects what the
+      // user actually pasted; bracketed-paste wrapping happens at send
+      // time inside ``sendPendingPaste``.
+      setPendingPaste(text);
+      setPasteSeq((s) => s + 1);
+    } else {
+      handleTerminalInput(wrapBracketedPaste(text));
+    }
+  }, [handleTerminalInput]);
+
+  const sendPendingPaste = useCallback(() => {
+    if (pendingPaste === null) return;
+    handleTerminalInput(wrapBracketedPaste(pendingPaste));
+    setPendingPaste(null);
+  }, [pendingPaste, handleTerminalInput]);
+
+  const dismissPendingPaste = useCallback(() => {
+    setPendingPaste(null);
+  }, []);
+
   const [terminalDims, setTerminalDims] = useState<{ cols: number; rows: number } | null>(null);
   const handleTerminalResize = useCallback(
     ({ cols, rows }: { cols: number; rows: number }) => {
@@ -1488,6 +1557,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           rateLimitRefreshBusy={rateLimitRefreshBusy}
           onRateLimitRefresh={handleRateLimitRefresh}
           onTerminalInput={handleTerminalInput}
+          onRequestPaste={requestPaste}
           onTerminalResize={handleTerminalResize}
           onTerminalScrollChip={handleTerminalScrollChip}
           onTerminalScrollChange={handleTerminalScrollChange}
@@ -1570,7 +1640,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           </button>
         </div>
       ) : null}
-      {pendingClipboard !== null ? (
+      {pendingPaste === null && pendingClipboard !== null ? (
         <button
           key={`clipboard-pending-${clipboardSeq}`}
           type="button"
@@ -1604,7 +1674,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
             →
           </span>
         </button>
-      ) : clipboardCopied ? (
+      ) : pendingPaste === null && clipboardCopied ? (
         <div
           key={`clipboard-copied-${clipboardSeq}`}
           className="clipboard-prompt is-copied"
@@ -1628,6 +1698,52 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
             <span className="clipboard-prompt__label">Copied</span>
             <span className="clipboard-prompt__meta">paste anywhere</span>
           </span>
+        </div>
+      ) : null}
+      {pendingPaste !== null ? (
+        <div
+          key={`paste-pending-${pasteSeq}`}
+          className="clipboard-prompt is-paste"
+          role="dialog"
+          aria-label="Confirm paste"
+        >
+          <span className="clipboard-prompt__glyph" aria-hidden="true">
+            <svg
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3.5" y="3" width="9" height="11" rx="1.5" />
+              <path d="M6 3V2.25c0-.41.34-.75.75-.75h2.5c.41 0 .75.34.75.75V3" />
+              <path d="M8 6.25v4.25M6 8.5l2 2 2-2" />
+            </svg>
+          </span>
+          <button
+            type="button"
+            className="clipboard-prompt__send"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={sendPendingPaste}
+            aria-label={`Send ${pendingPaste.length} characters from clipboard`}
+          >
+            <span className="clipboard-prompt__label">Paste ready</span>
+            <span className="clipboard-prompt__meta">
+              {pendingPaste.length.toLocaleString()} chars · tap to send
+            </span>
+          </button>
+          <button
+            type="button"
+            className="clipboard-prompt__dismiss"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={dismissPendingPaste}
+            aria-label="Cancel paste"
+          >
+            ×
+          </button>
         </div>
       ) : null}
       {session && !terminalOnly ? (

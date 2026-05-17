@@ -57,6 +57,7 @@ import {
 } from "@/lib/events";
 import { useTheme } from "@/lib/theme";
 import { SessionTerminalView } from "@/components/SessionTerminalView";
+import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { type XTerminalHandle } from "@/components/XTerminal";
 import { ApprovalRequestCard, PlanApprovalCard } from "@/components/ApprovalCard";
 import {
@@ -68,24 +69,16 @@ import {
   type ToolPair,
 } from "@/components/TranscriptCard";
 import { useSwitcher } from "@/components/SwitcherProvider";
-import { UsageBar, UsageReadout } from "@/components/UsageReadout";
 import {
   BackendModelOption,
   BackendPermissionMode,
   CommandCompletion,
   EventRecord,
   SessionCommandInvocation,
-  SessionContextUsage,
   SessionEnvelope,
   SessionRecord,
   SessionTransport,
 } from "@/lib/types";
-import {
-  clampPercent,
-  formatRelativeTime,
-  formatTokens,
-  rateLimitUsageTone,
-} from "@/lib/usage";
 
 const COMPLETION_REFRESH_POLL_MS = 750;
 const COMPLETION_FETCH_DEBOUNCE_MS = 180;
@@ -136,47 +129,6 @@ const EFFORT_LABEL: Record<string, string> = {
   max: "Max",
 };
 
-function contextUsagePercent(usage: SessionContextUsage): number | null {
-  const windowTokens = usage.context_window_tokens;
-  if (!windowTokens || windowTokens <= 0) {
-    return null;
-  }
-  return Math.round((usage.used_tokens / windowTokens) * 100);
-}
-
-function contextUsageTone(percent: number | null): "good" | "warn" | "danger" {
-  if (percent === null) {
-    return "good";
-  }
-  if (percent >= 90) {
-    return "danger";
-  }
-  if (percent >= 70) {
-    return "warn";
-  }
-  return "good";
-}
-
-function contextUsageLabel(key: string): string {
-  switch (key) {
-    case "input_tokens":
-      return "Input";
-    case "cached_input_tokens":
-      return "Cached input";
-    case "output_tokens":
-      return "Output";
-    case "reasoning_output_tokens":
-      return "Reasoning";
-    case "reasoning_tokens":
-      return "Reasoning";
-    case "cache_read_tokens":
-      return "Cache read";
-    case "cache_write_tokens":
-      return "Cache write";
-    default:
-      return key.replaceAll("_", " ");
-  }
-}
 
 interface SessionDetailProps {
   host: string;
@@ -1402,6 +1354,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           setTermMenuOpen={setTermMenuOpen}
           termMenuWrapRef={termMenuWrapRef}
           termAtBottom={termAtBottom}
+          connection={connection}
+          rateLimitRefreshBusy={rateLimitRefreshBusy}
+          onRateLimitRefresh={handleRateLimitRefresh}
           onTerminalInput={handleTerminalInput}
           onTerminalResize={handleTerminalResize}
           onTerminalScrollChip={handleTerminalScrollChip}
@@ -1655,7 +1610,6 @@ const ReplyComposer = memo(function ReplyComposer({
   const [selectedCompletion, setSelectedCompletion] =
     useState<CommandCompletion | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
-  const [contextUsageOpen, setContextUsageOpen] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
   const [reattaching, setReattaching] = useState(false);
   // Pending effort for backends that need a session restart to apply (Claude)
@@ -1680,7 +1634,6 @@ const ReplyComposer = memo(function ReplyComposer({
   const suggestionsRef = useRef<HTMLUListElement | null>(null);
   const suggestionItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const overflowRef = useRef<HTMLDivElement | null>(null);
-  const contextUsageRef = useRef<HTMLDivElement | null>(null);
   const tuneRef = useRef<HTMLDivElement | null>(null);
 
   // Built-in slash commands are intercepted on the backend only for
@@ -1845,28 +1798,6 @@ const ReplyComposer = memo(function ReplyComposer({
       window.removeEventListener("keydown", onKey);
     };
   }, [overflowOpen]);
-
-  useEffect(() => {
-    if (!contextUsageOpen) {
-      return;
-    }
-    function onPointer(event: PointerEvent) {
-      if (!contextUsageRef.current) return;
-      if (contextUsageRef.current.contains(event.target as Node)) return;
-      setContextUsageOpen(false);
-    }
-    function onKey(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") {
-        setContextUsageOpen(false);
-      }
-    }
-    window.addEventListener("pointerdown", onPointer);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointerdown", onPointer);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [contextUsageOpen]);
 
   useEffect(() => {
     if (!tuneOpen) {
@@ -2068,72 +1999,6 @@ const ReplyComposer = memo(function ReplyComposer({
     effortRequiresConfirm &&
     pendingEffort !== null &&
     pendingEffort !== (currentEffort ?? "");
-  const contextUsage = session?.context_usage ?? null;
-  const rateLimitUsage = session?.rate_limit_usage ?? null;
-  const contextUsagePercentValue = contextUsage
-    ? contextUsagePercent(contextUsage)
-    : null;
-  const contextUsagePercentDisplay = clampPercent(contextUsagePercentValue);
-  const contextUsageToneValue = contextUsage
-    ? contextUsageTone(contextUsagePercentValue)
-    : "good";
-  const rateLimitUsageToneValue = rateLimitUsageTone(rateLimitUsage);
-  const contextUsageBreakdown = contextUsage
-    ? Object.entries(contextUsage.breakdown ?? {})
-    : [];
-  const contextUsageHasWindow =
-    contextUsage !== null &&
-    typeof contextUsage.context_window_tokens === "number" &&
-    contextUsage.context_window_tokens > 0;
-  const contextUsageWindowTokens = contextUsageHasWindow
-    ? contextUsage.context_window_tokens
-    : null;
-  const contextUsageWindowDisplay = contextUsageWindowTokens ?? 0;
-  const contextUsageSummary = contextUsage
-    ? contextUsageWindowTokens !== null && contextUsagePercentDisplay !== null
-      ? `${formatTokens(contextUsage.used_tokens)} / ${formatTokens(contextUsageWindowDisplay)} (${contextUsagePercentDisplay}%)`
-      : formatTokens(contextUsage.used_tokens)
-    : null;
-  const rateLimitUsageSummary = rateLimitUsage
-    ? rateLimitUsage.windows.length > 0
-      ? rateLimitUsage.windows
-          .map((window) => `${window.label} ${Math.round(window.used_percent)}%`)
-          .join(" · ")
-      : rateLimitUsage.notes?.length
-        ? rateLimitUsage.notes.join(" · ")
-        : null
-    : null;
-  const rateLimitSourceLabel = rateLimitUsage
-    ? rateLimitUsage.notes?.length
-      ? rateLimitUsage.notes.join(" · ")
-      : humaniseBackend(rateLimitUsage.source)
-    : "Unavailable";
-  const usageToneValue = (() => {
-    if (contextUsage === null) {
-      return rateLimitUsageToneValue;
-    }
-    if (rateLimitUsage === null) {
-      return contextUsageToneValue;
-    }
-    if (
-      contextUsageToneValue === "danger" ||
-      rateLimitUsageToneValue === "danger"
-    ) {
-      return "danger";
-    }
-    if (contextUsageToneValue === "warn" || rateLimitUsageToneValue === "warn") {
-      return "warn";
-    }
-    return "good";
-  })();
-  const showUsagePopover = contextUsage !== null || rateLimitUsage !== null;
-  const usagePopoverTitle = [
-    contextUsageSummary ? `Context ${contextUsageSummary}` : null,
-    rateLimitUsageSummary ? `Rate limits ${rateLimitUsageSummary}` : null,
-  ]
-    .filter((part): part is string => part !== null)
-    .join(" · ");
-
   const handleEffortSelect = (next: string) => {
     if (effortRequiresConfirm) {
       // Stage the pick locally; the parent's onEffortChange only fires after
@@ -2297,127 +2162,12 @@ const ReplyComposer = memo(function ReplyComposer({
           </div>
         ) : null}
         <div className="composer-toprow-trail">
-          {showUsagePopover ? (
-            <div className="composer-context" ref={contextUsageRef}>
-              <button
-                type="button"
-                className={`composer-connection composer-context-trigger tone-${usageToneValue} ${connection} ${contextUsageOpen ? "open" : ""}`}
-                title={
-                  usagePopoverTitle
-                    ? `Backend socket ${connection}. ${usagePopoverTitle}`
-                    : `Backend socket ${connection}. Click for usage details`
-                }
-                aria-live="polite"
-                aria-haspopup="dialog"
-                aria-expanded={contextUsageOpen}
-                aria-label={`Backend socket ${connection}. Usage details`}
-                onClick={() => setContextUsageOpen((open) => !open)}
-              >
-                {connection === "open"
-                  ? "live"
-                  : connection === "reconnecting"
-                    ? "reconnecting"
-                    : "connecting"}
-              </button>
-              {contextUsageOpen ? (
-                <div
-                  className={`usage-panel tone-${usageToneValue}`}
-                  role="dialog"
-                  aria-label="Usage details"
-                >
-                  <span className="usage-panel-rail" aria-hidden="true" />
-
-                  {contextUsage ? (
-                    <section className="usage-block">
-                      <header className="usage-block-head">
-                        <h3 className="usage-block-eyebrow">
-                          <span aria-hidden className="usage-block-mark">
-                            ◆
-                          </span>
-                          Context
-                        </h3>
-                        <span className="usage-block-tag">
-                          {humaniseBackend(contextUsage.source)}
-                        </span>
-                      </header>
-                      <div className="usage-block-body">
-                        <div className={`usage-numeral tone-${contextUsageToneValue}`}>
-                          <strong>
-                            {contextUsagePercentDisplay !== null
-                              ? contextUsagePercentDisplay
-                              : "—"}
-                          </strong>
-                          <em>%</em>
-                        </div>
-                        <div className="usage-block-stack">
-                          <p className="usage-line">
-                            <span>{formatTokens(contextUsage.used_tokens)}</span>
-                            <em>of</em>
-                            <span>
-                              {contextUsageWindowTokens !== null
-                                ? formatTokens(contextUsageWindowDisplay)
-                                : "—"}
-                            </span>
-                            <em>tokens</em>
-                          </p>
-                          <UsageBar
-                            percent={contextUsagePercentDisplay}
-                            tone={contextUsageToneValue}
-                            disabled={
-                              !contextUsageHasWindow ||
-                              contextUsagePercentDisplay === null
-                            }
-                          />
-                          <p className="usage-line-meta">
-                            <em>updated</em>
-                            <span title={new Date(contextUsage.updated_at).toLocaleString()}>
-                              {formatRelativeTime(contextUsage.updated_at)}
-                            </span>
-                          </p>
-                        </div>
-                      </div>
-                      {contextUsageBreakdown.length > 0 ? (
-                        <ul className="usage-chips">
-                          {contextUsageBreakdown.map(([key, value]) => (
-                            <li key={key}>
-                              <em>{contextUsageLabel(key)}</em>
-                              <strong>{formatTokens(value)}</strong>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
-                    </section>
-                  ) : null}
-
-                  {contextUsage && rateLimitUsage ? (
-                    <hr className="usage-divider" aria-hidden="true" />
-                  ) : null}
-
-                  {rateLimitUsage ? (
-                    <UsageReadout
-                      usage={rateLimitUsage}
-                      sourceLabel={rateLimitSourceLabel}
-                      onRefresh={onRateLimitRefresh}
-                      refreshing={rateLimitRefreshBusy}
-                    />
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <span
-              className={`composer-connection ${connection}`}
-              title={`Backend socket ${connection}`}
-              role="status"
-              aria-live="polite"
-            >
-              {connection === "open"
-                ? "live"
-                : connection === "reconnecting"
-                  ? "reconnecting"
-                  : "connecting"}
-            </span>
-          )}
+          <SessionUsagePill
+            session={session}
+            connection={connection}
+            onRateLimitRefresh={onRateLimitRefresh}
+            rateLimitRefreshBusy={rateLimitRefreshBusy}
+          />
         </div>
       </div>
       <div className="reply-textarea-wrap">

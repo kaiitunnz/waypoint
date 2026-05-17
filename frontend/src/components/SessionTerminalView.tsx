@@ -2,9 +2,12 @@
 
 import { Dispatch, MutableRefObject, SetStateAction } from "react";
 
+import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { TerminalScrollChips } from "@/components/TerminalScrollChips";
 import { XTerminal, type XTerminalHandle } from "@/components/XTerminal";
 import { SessionRecord } from "@/lib/types";
+
+type Connection = "idle" | "connecting" | "open" | "reconnecting";
 
 interface SessionTerminalViewProps {
   session: SessionRecord | null;
@@ -19,6 +22,9 @@ interface SessionTerminalViewProps {
   setTermMenuOpen: Dispatch<SetStateAction<boolean>>;
   termMenuWrapRef: MutableRefObject<HTMLDivElement | null>;
   termAtBottom: boolean;
+  connection: Connection;
+  rateLimitRefreshBusy: boolean;
+  onRateLimitRefresh: () => void | Promise<void>;
   // True on terminal-only (tmux) sessions where no composer follows — the
   // pane sticky-locks to the viewport bottom once the user scrolls past
   // the SessionHeader. Chat-capable Terminal tabs stay bounded so the
@@ -52,6 +58,9 @@ export function SessionTerminalView({
   setTermMenuOpen,
   termMenuWrapRef,
   termAtBottom,
+  connection,
+  rateLimitRefreshBusy,
+  onRateLimitRefresh,
   locked,
   onTerminalInput,
   onTerminalResize,
@@ -104,6 +113,12 @@ export function SessionTerminalView({
       aria-label="Terminal session"
     >
       <div className="term-bar">
+        <SessionUsagePill
+          session={session}
+          connection={connection}
+          onRateLimitRefresh={onRateLimitRefresh}
+          rateLimitRefreshBusy={rateLimitRefreshBusy}
+        />
         <span className="term-bar-spacer" />
         {liveTmux && terminalDims ? (
           <span className="term-bar-dims" aria-label="Pane dimensions">

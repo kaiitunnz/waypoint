@@ -1282,6 +1282,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     setPendingPaste(null);
   }, []);
 
+  const dismissClipboardPill = useCallback(() => {
+    setPendingClipboard(null);
+    setClipboardCopied(false);
+  }, []);
+
   const [terminalDims, setTerminalDims] = useState<{ cols: number; rows: number } | null>(null);
   const handleTerminalResize = useCallback(
     ({ cols, rows }: { cols: number; rows: number }) => {
@@ -1641,12 +1646,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
         </div>
       ) : null}
       {pendingPaste === null && pendingClipboard !== null ? (
-        <button
+        <div
           key={`clipboard-pending-${clipboardSeq}`}
-          type="button"
           className="clipboard-prompt"
-          onClick={copyPendingClipboard}
-          aria-label={`Copy ${pendingClipboard.length} characters to clipboard`}
+          role="dialog"
+          aria-label="Copy response to clipboard"
         >
           <span className="clipboard-prompt__glyph" aria-hidden="true">
             <svg
@@ -1664,16 +1668,28 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
               <path d="M6 7.5h4M6 10h4" />
             </svg>
           </span>
-          <span className="clipboard-prompt__body">
+          <button
+            type="button"
+            className="clipboard-prompt__send"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={copyPendingClipboard}
+            aria-label={`Copy ${pendingClipboard.length} characters to clipboard`}
+          >
             <span className="clipboard-prompt__label">Response ready</span>
             <span className="clipboard-prompt__meta">
               {pendingClipboard.length.toLocaleString()} chars · tap to copy
             </span>
-          </span>
-          <span className="clipboard-prompt__arrow" aria-hidden="true">
-            →
-          </span>
-        </button>
+          </button>
+          <button
+            type="button"
+            className="clipboard-prompt__dismiss"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={dismissClipboardPill}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
       ) : pendingPaste === null && clipboardCopied ? (
         <div
           key={`clipboard-copied-${clipboardSeq}`}
@@ -1698,6 +1714,15 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
             <span className="clipboard-prompt__label">Copied</span>
             <span className="clipboard-prompt__meta">paste anywhere</span>
           </span>
+          <button
+            type="button"
+            className="clipboard-prompt__dismiss"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={dismissClipboardPill}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
         </div>
       ) : null}
       {pendingPaste !== null ? (

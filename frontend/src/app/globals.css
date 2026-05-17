@@ -6345,6 +6345,33 @@ html[data-theme="light"] .term-stage {
   border-radius: var(--radius-pill);
 }
 
+/* Light theme — override xterm.js v6 inline color strings. v6's DOM
+   renderer writes inline ``background-color``/``color`` on each
+   indexed cell, bypassing the ``xterm-bg-*`` / ``xterm-fg-*`` class
+   rules that ``ITheme.extendedAnsi`` is supposed to drive — so the
+   bg-bar that claude_code draws around a user message (xterm index
+   237/238) and its pure-white emphasis text (index 231) render
+   straight from the default xterm 256-color palette against cream.
+   Two inline-style formats are emitted depending on which path
+   fires inside the row factory: ``rgb(R, G, B)`` with spaces, and
+   compact ``#hex``. Match both. */
+html[data-theme="light"] .xterm-rows span[style*="background-color: rgb(58, 58, 58)"],
+html[data-theme="light"] .xterm-rows span[style*="background-color:#3a3a3a"] {
+  background-color: #bcb4a1 !important;
+}
+html[data-theme="light"] .xterm-rows span[style*="background-color: rgb(68, 68, 68)"],
+html[data-theme="light"] .xterm-rows span[style*="background-color:#444444"] {
+  background-color: #b3ab99 !important;
+}
+html[data-theme="light"] .xterm-rows span[style*="color: rgb(255, 255, 255)"],
+html[data-theme="light"] .xterm-rows span[style*="color:#ffffff"] {
+  color: #1c1914 !important;
+}
+html[data-theme="light"] .xterm-rows span[style*="color: rgb(148, 148, 148)"],
+html[data-theme="light"] .xterm-rows span[style*="color:#949494"] {
+  color: #6c665a !important;
+}
+
 .term-jump {
   position: absolute;
   bottom: 14px;

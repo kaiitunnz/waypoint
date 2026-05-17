@@ -53,57 +53,6 @@ const DARK_THEME: ITheme = {
   brightWhite: "#f5f7fb",
 };
 
-// Build the 240-entry ``ITheme.extendedAnsi`` palette (indices 16–255)
-// for light mode. The xterm 256-color palette has two halves:
-//   • 16–231: a 6×6×6 RGB cube. Saturated cube cells (greens, blues,
-//     oranges, …) read fine on either theme, so we keep the standard
-//     values for almost the whole cube. The single exception is index
-//     231 (pure ``#ffffff``) which TUIs use for emphasis text — on
-//     cream it disappears, so we darken it to the default foreground.
-//   • 232–255: a 24-step grayscale ramp. TUIs (claude_code uses
-//     237/238 for the user-message highlight bar, 244/246 for muted
-//     text) treat "dark gray index" as a subtle background highlight
-//     and "light gray index" as muted/dim text. Both inversions
-//     happen against the cream page: harsh dark bars and washed-out
-//     pale text. Re-map the ramp to a *warm-cream* gradient that
-//     inverts the lightness so CC's dark bg-indices become soft
-//     near-cream tints, and CC's light fg-indices become readable
-//     medium-warm grays.
-function buildLightExtendedAnsi(): string[] {
-  const palette: string[] = [];
-  const cubeLevels = [0, 95, 135, 175, 215, 255];
-  for (let r = 0; r < 6; r++) {
-    for (let g = 0; g < 6; g++) {
-      for (let b = 0; b < 6; b++) {
-        palette.push(toHex(cubeLevels[r], cubeLevels[g], cubeLevels[b]));
-      }
-    }
-  }
-  // Override pure-white cube cell (index 231 in xterm, position 215 in
-  // extendedAnsi) so emphasis text renders as the default near-black fg
-  // instead of vanishing into the cream background.
-  palette[215] = "#1c1914";
-  // Inverted warm grayscale ramp: i=0 (xterm 232, originally darkest)
-  // is the lightest warm shade; i=23 (xterm 255, originally lightest)
-  // is the near-black warm shade.
-  const rampStart = { r: 232, g: 223, b: 200 };
-  const rampEnd = { r: 28, g: 25, b: 20 };
-  for (let i = 0; i < 24; i++) {
-    const t = i / 23;
-    const r = Math.round(rampStart.r * (1 - t) + rampEnd.r * t);
-    const g = Math.round(rampStart.g * (1 - t) + rampEnd.g * t);
-    const b = Math.round(rampStart.b * (1 - t) + rampEnd.b * t);
-    palette.push(toHex(r, g, b));
-  }
-  return palette;
-}
-
-function toHex(r: number, g: number, b: number): string {
-  return "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
-}
-
-const LIGHT_EXTENDED_ANSI = buildLightExtendedAnsi();
-
 const LIGHT_THEME: ITheme = {
   background: "#f7f3eb",
   foreground: "#1c1914",
@@ -126,7 +75,6 @@ const LIGHT_THEME: ITheme = {
   brightMagenta: "#8c52cc",
   brightCyan: "#2c98b0",
   brightWhite: "#0e0c09",
-  extendedAnsi: LIGHT_EXTENDED_ANSI,
 };
 
 function themeFor(mode: "dark" | "light"): ITheme {

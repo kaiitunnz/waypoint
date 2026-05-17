@@ -906,6 +906,195 @@ html[data-theme="light"] .secondary:hover:not(:disabled) {
   opacity: 1;
 }
 
+/* ─── Clipboard prompt ─── */
+/* Glass action card surfaced when /copy lands but the browser refused
+   an async clipboard write (Safari outside the user-gesture window).
+   The whole card is the tap target — single, hand-friendly affordance
+   that keeps the gesture chain unbroken when the user retries. */
+.clipboard-prompt {
+  position: sticky;
+  /* Add the safe-area inset so terminal-only sessions (no composer) don't
+     park the pill under the iOS home-indicator bar — matches the other
+     composer-anchored selectors. */
+  bottom: calc(
+    var(--composer-height, 24px) + 16px + env(safe-area-inset-bottom, 0px)
+  );
+  align-self: flex-end;
+  margin-left: auto;
+  margin-right: 4px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  max-width: max-content;
+  padding: 10px 16px 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, rgba(8, 11, 16, 0.78));
+  color: var(--text);
+  font-size: 0.88rem;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+  /* iOS: kill the 300 ms tap delay and the blue tap-highlight overlay
+     so the press feels native. */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--accent) 28%, transparent),
+    0 12px 36px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.02);
+  animation: clipboard-prompt-in 240ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  transition:
+    transform 140ms ease,
+    box-shadow 220ms ease,
+    border-color 220ms ease,
+    background 220ms ease;
+}
+
+html[data-theme="light"] .clipboard-prompt {
+  background: color-mix(in srgb, var(--accent) 14%, rgba(247, 243, 235, 0.92));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--accent) 35%, transparent),
+    0 12px 36px rgba(0, 0, 0, 0.1),
+    0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+.clipboard-prompt:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 75%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--accent) 40%, transparent),
+    0 18px 48px rgba(0, 0, 0, 0.55),
+    0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.clipboard-prompt:active {
+  transform: translateY(0) scale(0.985);
+  transition-duration: 80ms;
+}
+
+.clipboard-prompt:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 80%, transparent);
+  outline-offset: 3px;
+}
+
+.clipboard-prompt.is-copied {
+  border-color: color-mix(in srgb, var(--success) 55%, transparent);
+  background: color-mix(in srgb, var(--success) 16%, rgba(8, 11, 16, 0.78));
+  pointer-events: none;
+  cursor: default;
+}
+
+html[data-theme="light"] .clipboard-prompt.is-copied {
+  background: color-mix(in srgb, var(--success) 18%, rgba(247, 243, 235, 0.92));
+}
+
+.clipboard-prompt__glyph {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: color-mix(in srgb, var(--accent) 88%, white 20%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.clipboard-prompt.is-copied .clipboard-prompt__glyph {
+  background: color-mix(in srgb, var(--success) 30%, transparent);
+  color: color-mix(in srgb, var(--success) 92%, white 18%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 40%, transparent);
+  animation: clipboard-prompt-check 380ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+html[data-theme="light"] .clipboard-prompt__glyph {
+  color: color-mix(in srgb, var(--accent) 75%, black 15%);
+}
+
+html[data-theme="light"] .clipboard-prompt.is-copied .clipboard-prompt__glyph {
+  color: color-mix(in srgb, var(--success) 80%, black 12%);
+}
+
+.clipboard-prompt__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.clipboard-prompt__label {
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+
+.clipboard-prompt__meta {
+  font-family:
+    "JetBrains Mono", "SFMono-Regular", "Menlo", "Consolas", monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--text) 60%, transparent);
+  text-transform: lowercase;
+}
+
+.clipboard-prompt__arrow {
+  margin-left: 2px;
+  font-size: 1rem;
+  line-height: 1;
+  color: color-mix(in srgb, var(--accent) 85%, white 10%);
+  transition: transform 200ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+html[data-theme="light"] .clipboard-prompt__arrow {
+  color: color-mix(in srgb, var(--accent) 70%, black 10%);
+}
+
+.clipboard-prompt:hover .clipboard-prompt__arrow {
+  transform: translateX(4px);
+}
+
+@keyframes clipboard-prompt-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes clipboard-prompt-check {
+  0% {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .clipboard-prompt {
+    bottom: calc(
+      var(--composer-height, 24px) + 12px + env(safe-area-inset-bottom, 0px)
+    );
+    /* Stay content-sized on mobile too. Stretching to full width forced
+       ``justify-content: space-between``, which pinned the arrow to the
+       far edge and left a yawning gap next to the label. The pill reads
+       cleaner as a compact, right-anchored chip — just add a touch more
+       margin from the viewport edge. */
+    margin-right: 12px;
+  }
+}
+
 .error-banner {
   display: flex;
   align-items: flex-start;

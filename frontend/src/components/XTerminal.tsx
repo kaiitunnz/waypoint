@@ -153,6 +153,40 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       };
       const onScrollSub = term.onScroll(emitScrollState);
 
+      // OSC 52 is the terminal-clipboard protocol Claude Code (and Codex
+      // TUI) emit for `/copy`. Format: ``\x1b]52;<targets>;<payload>\x07``
+      // where ``<targets>`` is one or more of c (clipboard), p (primary),
+      // q (secondary), s (selection), 0–7 (cut buffers), and ``<payload>``
+      // is base64 (or "?" for a read query, which we ignore for security).
+      // Without this handler xterm.js drops the sequence silently and the
+      // user's `/copy` looks broken even though the CLI did its job.
+      const osc52Sub = term.parser.registerOscHandler(52, (data) => {
+        const sep = data.indexOf(";");
+        if (sep < 0) return true;
+        const payload = data.slice(sep + 1);
+        // "?" is a clipboard read; we deliberately don't surface page
+        // clipboard contents back to the wrapped CLI.
+        if (payload === "?" || payload === "") return true;
+        try {
+          const binary = atob(payload);
+          const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+          const text = new TextDecoder().decode(bytes);
+          navigator.clipboard?.writeText(text)?.catch(() => {
+            // Async write can reject when the clipboard API is gated
+            // (no transient activation, insecure context, missing
+            // permission). The CLI's /tmp/claude-<uid>/response.md is
+            // the documented fallback in those cases. The second ``?.``
+            // is load-bearing: without it, ``.catch`` runs on the
+            // optional chain's ``undefined`` result and throws.
+          });
+        } catch {
+          // Bad base64, missing clipboard API, or insecure context — silent
+          // fallback; the CLI also wrote /tmp/claude-<uid>/response.md for
+          // exactly this case.
+        }
+        return true;
+      });
+
       // Initial fit can throw if the container is still 0-sized (animation,
       // hidden tab, etc.) — guard so we don't crash the React tree.
       try {
@@ -177,6 +211,7 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
         onDataSub.dispose();
         onResizeSub.dispose();
         onScrollSub.dispose();
+        osc52Sub.dispose();
         ro.disconnect();
         term.dispose();
         termRef.current = null;

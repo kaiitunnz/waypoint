@@ -106,6 +106,59 @@ function completionCommand(entry: CommandCompletion): string {
   return `${entry.trigger}${entry.name}`;
 }
 
+// iOS Safari rejects ``navigator.clipboard.writeText`` even from inside a
+// click handler — the Promise microtask ends the transient activation
+// window before the write resolves. ``document.execCommand("copy")`` is
+// deprecated everywhere but remains the one synchronous clipboard write
+// that survives that gauntlet across iOS Safari, desktop Safari, and
+// modern Chromium.
+//
+// A contenteditable ``<div>`` is the right host: textarea's ``.value``
+// lives in an internal buffer (not DOM children), so
+// ``Range.selectNodeContents(textarea)`` selects nothing — execCommand
+// then reports success against an empty selection and the paste is
+// blank. The div holds the text in real text nodes; ``white-space: pre``
+// preserves newlines so multi-line ``/copy`` results survive intact.
+function copyTextSync(text: string): boolean {
+  if (typeof document === "undefined") return false;
+  const host = document.createElement("div");
+  host.textContent = text;
+  host.setAttribute("contenteditable", "true");
+  // ``left: -9999px`` keeps the node selectable but visually off-canvas
+  // (opacity 0 in the same coordinate space can still flash a focus
+  // ring on iOS). ``font-size: 16px`` prevents iOS's auto-zoom on
+  // focused editable fields. ``white-space: pre`` carries newlines.
+  host.style.cssText = [
+    "position:fixed",
+    "top:0",
+    "left:-9999px",
+    "width:1px",
+    "height:1px",
+    "white-space:pre",
+    "font-size:16px",
+    "user-select:text",
+    "-webkit-user-select:text",
+  ].join(";");
+  document.body.appendChild(host);
+  let ok = false;
+  const sel = window.getSelection();
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(host);
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  } finally {
+    sel?.removeAllRanges();
+    document.body.removeChild(host);
+  }
+  return ok;
+}
+
 function mergeBuiltinFallback(
   backend: ReadonlyArray<CommandCompletion>,
 ): CommandCompletion[] {
@@ -167,6 +220,20 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [filterMode, setFilterMode] = useState<FilterMode>("important");
   const [toolRunsExpanded, setToolRunsExpanded] = useState(false);
   const [error, setError] = useState("");
+  // Safari rejects ``navigator.clipboard.writeText`` outside a synchronous
+  // user-gesture handler, and the ``/copy`` clipboard payload arrives via
+  // a WS message (no surviving gesture). When the async write fails we
+  // stash the text and surface a tap-to-copy pill so the user's tap
+  // provides a fresh gesture; the retry uses ``document.execCommand`` so
+  // the write stays synchronous (no Promise microtask consuming the
+  // activation, which iOS Safari requires).
+  const [pendingClipboard, setPendingClipboard] = useState<string | null>(null);
+  const [clipboardCopied, setClipboardCopied] = useState(false);
+  // Bumped on every clipboard_copy envelope and on each successful copy
+  // so React remounts the pill — pure CSS ``animation`` only plays once
+  // per element, so consecutive /copies on the same DOM node would
+  // otherwise silently swap text with no visible motion.
+  const [clipboardSeq, setClipboardSeq] = useState(0);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
@@ -182,6 +249,39 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const [hasOlderEvents, setHasOlderEvents] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const { openSwitcher, setCurrentSession } = useSwitcher();
+  // Auto-dismiss the "Copied!" pill after a beat so it doesn't squat on
+  // the toast slot. The fallback "Tap to copy" toast stays until the user
+  // acts on it — clipboard access can't be reattempted programmatically
+  // and there's no point auto-hiding the only remaining affordance.
+  useEffect(() => {
+    if (!clipboardCopied) return;
+    const t = window.setTimeout(() => setClipboardCopied(false), 1800);
+    return () => window.clearTimeout(t);
+  }, [clipboardCopied]);
+  const copyPendingClipboard = useCallback(() => {
+    if (pendingClipboard === null) return;
+    if (copyTextSync(pendingClipboard)) {
+      setClipboardCopied(true);
+      setPendingClipboard(null);
+      setClipboardSeq((s) => s + 1);
+    }
+    // Sync path failed — the async API rarely fares better from here on
+    // iOS Safari, but try anyway as a courtesy. Leave the pill up either
+    // way so the user knows the copy didn't land.
+    else {
+      // Second ``?.`` is required: when ``navigator.clipboard`` is
+      // undefined the optional chain short-circuits to ``undefined`` and
+      // ``.then`` on that would throw uncaught.
+      navigator.clipboard?.writeText(pendingClipboard)?.then(
+        () => {
+          setClipboardCopied(true);
+          setPendingClipboard(null);
+          setClipboardSeq((s) => s + 1);
+        },
+        () => {},
+      );
+    }
+  }, [pendingClipboard]);
   // Tracks the smallest raw sequence ever received from the server. Distinct
   // from `events[0].sequence` because `mergeEvents` advances a coalesced
   // item's sequence to the *last* delta — using that as a cursor would
@@ -528,6 +628,36 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           }
           if (message.type === "session_state") {
             setSession(message.payload.session as SessionRecord);
+          }
+          if (message.type === "clipboard_copy") {
+            // Claude's /copy server-side interceptor (structured CC) and
+            // the tmux WS handler's OSC 52 extractor (tmux-wrapped CC)
+            // both publish through this envelope. Chromium accepts the
+            // async writeText; Safari rejects it because the keystroke's
+            // user activation has expired by the time the WS frame lands.
+            // On rejection we surface a tap-to-copy pill — the user's
+            // tap provides a fresh gesture for the synchronous retry.
+            const text = (message.payload as { text?: string }).text;
+            if (typeof text === "string" && text.length > 0) {
+              // New envelope replaces any in-flight confirm pill and
+              // bumps the key so the entry animation replays even when
+              // the previous /copy hasn't fully faded.
+              setClipboardCopied(false);
+              setClipboardSeq((s) => s + 1);
+              const writer = navigator.clipboard?.writeText(text);
+              if (writer) {
+                writer.then(
+                  () => {
+                    setClipboardCopied(true);
+                    setPendingClipboard(null);
+                    setClipboardSeq((s) => s + 1);
+                  },
+                  () => setPendingClipboard(text),
+                );
+              } else {
+                setPendingClipboard(text);
+              }
+            }
           }
           if (message.type === "auth_revoked") {
             handleAuthFailure();
@@ -1438,6 +1568,66 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           >
             ×
           </button>
+        </div>
+      ) : null}
+      {pendingClipboard !== null ? (
+        <button
+          key={`clipboard-pending-${clipboardSeq}`}
+          type="button"
+          className="clipboard-prompt"
+          onClick={copyPendingClipboard}
+          aria-label={`Copy ${pendingClipboard.length} characters to clipboard`}
+        >
+          <span className="clipboard-prompt__glyph" aria-hidden="true">
+            <svg
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3.5" y="3" width="9" height="11" rx="1.5" />
+              <path d="M6 3V2.25c0-.41.34-.75.75-.75h2.5c.41 0 .75.34.75.75V3" />
+              <path d="M6 7.5h4M6 10h4" />
+            </svg>
+          </span>
+          <span className="clipboard-prompt__body">
+            <span className="clipboard-prompt__label">Response ready</span>
+            <span className="clipboard-prompt__meta">
+              {pendingClipboard.length.toLocaleString()} chars · tap to copy
+            </span>
+          </span>
+          <span className="clipboard-prompt__arrow" aria-hidden="true">
+            →
+          </span>
+        </button>
+      ) : clipboardCopied ? (
+        <div
+          key={`clipboard-copied-${clipboardSeq}`}
+          className="clipboard-prompt is-copied"
+          role="status"
+        >
+          <span className="clipboard-prompt__glyph" aria-hidden="true">
+            <svg
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M3.5 8.5L6.5 11.5L12.5 5" />
+            </svg>
+          </span>
+          <span className="clipboard-prompt__body">
+            <span className="clipboard-prompt__label">Copied</span>
+            <span className="clipboard-prompt__meta">paste anywhere</span>
+          </span>
         </div>
       ) : null}
       {session && !terminalOnly ? (

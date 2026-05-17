@@ -271,6 +271,7 @@ export interface SessionEnvelope {
     | "session_state"
     | "terminal_snapshot_ready"
     | "auth_revoked"
-    | "schedule_list_update";
+    | "schedule_list_update"
+    | "clipboard_copy";
   payload: Record<string, unknown>;
 }

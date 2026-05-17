@@ -407,11 +407,17 @@ export default function HomePage() {
     }
   }
 
-  async function handleAttach(target: string, backendHint: Backend) {
+  async function handleAttach(
+    target: string,
+    backendHint: Backend,
+    title: string,
+  ) {
     try {
+      const trimmedTitle = title.trim();
       const session = await attachTmux(host, token, {
         tmux_target: target,
         backend_hint: backendHint,
+        ...(trimmedTitle ? { title: trimmedTitle } : {}),
       });
       setSessions((current) => [
         session,

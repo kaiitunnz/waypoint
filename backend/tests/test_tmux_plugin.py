@@ -89,6 +89,73 @@ def test_resume_args_codex_does_not_double_inject_on_second_cycle(
     assert cycle2 == ["resume", "abc-123", "--model", "o3"]
 
 
+@pytest.mark.parametrize(
+    "backend,model,effort,permission_mode,expected",
+    [
+        # Claude: each picked knob maps 1:1 to a flag.
+        ("claude_code", "opus", None, None, ["--model", "opus"]),
+        ("claude_code", None, "high", None, ["--effort", "high"]),
+        ("claude_code", None, None, "plan", ["--permission-mode", "plan"]),
+        (
+            "claude_code",
+            "opus",
+            "high",
+            "acceptEdits",
+            [
+                "--model",
+                "opus",
+                "--effort",
+                "high",
+                "--permission-mode",
+                "acceptEdits",
+            ],
+        ),
+        ("claude_code", None, None, None, []),
+        # Codex: only the model and the two unambiguous permission presets
+        # translate to launch flags. Effort and the collaboration-mode
+        # presets ("plan", "auto_review") have no CLI flag mapping and
+        # are intentionally dropped — the SessionRecord-side caller
+        # mirrors this by storing None for the unapplied fields.
+        ("codex", "gpt-5", None, None, ["-m", "gpt-5"]),
+        (
+            "codex",
+            None,
+            None,
+            "default",
+            ["-a", "on-request", "-s", "workspace-write"],
+        ),
+        (
+            "codex",
+            None,
+            None,
+            "full_access",
+            ["--dangerously-bypass-approvals-and-sandbox"],
+        ),
+        ("codex", None, "high", None, []),
+        ("codex", None, None, "plan", []),
+        ("codex", None, None, "auto_review", []),
+        ("codex", None, None, None, []),
+    ],
+)
+def test_inner_cli_flags(
+    plugin: TmuxPlugin,
+    backend: str,
+    model: str | None,
+    effort: str | None,
+    permission_mode: str | None,
+    expected: list[str],
+) -> None:
+    assert (
+        plugin._inner_cli_flags(
+            backend,
+            model=model,
+            effort=effort,
+            permission_mode=permission_mode,
+        )
+        == expected
+    )
+
+
 @pytest.mark.asyncio
 async def test_conversation_exists_claude_code_local(
     plugin: TmuxPlugin, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

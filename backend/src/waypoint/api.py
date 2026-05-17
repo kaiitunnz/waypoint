@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -45,6 +46,8 @@ from waypoint.settings import Settings, load_settings
 from waypoint.storage import Storage
 from waypoint.tailnet import fetch_snapshot
 from waypoint.usage_dashboard import build_dashboard
+
+log = logging.getLogger("waypoint.api")
 
 
 def _backend_descriptors(registry: BackendRegistry) -> list[dict[str, Any]]:
@@ -195,6 +198,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 detail=f"unknown backend: {backend}",
             )
         plugin = context.runtime.registry.get(backend)
+        if plugin.capabilities.is_fallback_for_managed_launch:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"{backend} is a managed-launch wrapper and "
+                    "cannot be requested as the target backend"
+                ),
+            )
         if not plugin.capabilities.supports_thread_import:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -664,6 +675,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             snapshot = await adapter.capture_snapshot(pane, start_line=0)
         except TmuxError:
             snapshot = ""
+        # capture-pane carries neither the alt-screen toggle nor cursor
+        # positioning. Probe tmux for both: a pane on the alt screen
+        # (Codex TUI mid-frame) needs us to flip pyte before feeding the
+        # snapshot, or the seed lands in pyte's normal buffer and the
+        # next agent frame paints over a blank alt screen.
+        alt_screen = False
+        cursor_pos: tuple[int, int] | None = None
+        with suppress(TmuxError):
+            alt_flag, cur_col, cur_row = await adapter.pane_screen_state(pane)
+            alt_screen = alt_flag
+            cursor_pos = (cur_col - 1, cur_row - 1)
+        if alt_screen:
+            renderer.feed(b"\x1b[?1049h")
         snapshot = snapshot.rstrip("\r\n")
         if snapshot:
             # ``capture-pane`` separates rows with bare LF, but pyte
@@ -674,12 +698,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "utf-8", errors="replace"
             )
             renderer.feed(seed_bytes)
-        # capture-pane carries no cursor positioning; pull the pane's
-        # actual cursor coords from tmux so the seed lands the cursor
-        # where Codex's next frame expects it.
-        with suppress(TmuxError):
-            _alt, cur_col, cur_row = await adapter.pane_screen_state(pane)
-            renderer.set_cursor(cur_col - 1, cur_row - 1)
+        if cursor_pos is not None:
+            renderer.set_cursor(*cursor_pos)
 
         # Recover tracked private-mode state (mouse / focus / paste)
         # from the raw_log prefix we're about to skip over. The pane
@@ -719,15 +739,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # we don't want to add a per-session subscription here).
         STATUS_CHECK_INTERVAL_POLLS = 50  # 50 * 20 ms = ~1 s
         frame_tracker = SyncFrameTracker()
+        # Both stream_loop (chunk arrivals, defensive flush) and
+        # recv_loop (post-resize repaint) call emit_diff. Without a
+        # lock, render_diff() updates from one task can interleave with
+        # send_text() suspensions in the other and corrupt the wire.
+        emit_lock = asyncio.Lock()
 
         async def emit_diff() -> None:
-            diff = renderer.render_diff()
-            if not diff:
-                return
-            # Wrap the diff in DECSET/DECRST 2026 so xterm.js v6
-            # batches every cell mutation into one animation frame.
-            with suppress(Exception):
-                await websocket.send_text("\x1b[?2026h" + diff + "\x1b[?2026l")
+            async with emit_lock:
+                diff = renderer.render_diff()
+                if not diff:
+                    return
+                # Wrap the diff in DECSET/DECRST 2026 so xterm.js v6
+                # batches every cell mutation into one animation frame.
+                with suppress(Exception):
+                    await websocket.send_text("\x1b[?2026h" + diff + "\x1b[?2026l")
 
         async def stream_loop() -> None:
             offset = tail_offset
@@ -784,11 +810,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     except HTTPException:
                         break
                     if current.status == SessionStatus.EXITED:
-                        # Pane is gone; flush any pending diff, give
-                        # xterm a beat to render it, then close the
-                        # socket with a custom code so the frontend
-                        # stops auto-reconnecting and surfaces the
-                        # reconnect affordance instead.
+                        # Flush any pending diff and close with a custom
+                        # code so the frontend stops auto-reconnecting
+                        # and surfaces the reconnect affordance instead.
                         await emit_diff()
                         with suppress(Exception):
                             await websocket.close(code=4410)
@@ -872,8 +896,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for task in (stream_task, recv_task):
                 if not task.done():
                     task.cancel()
-                with suppress(asyncio.CancelledError, Exception):
+                try:
                     await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    log.debug(
+                        "terminal-ws task raised during cleanup",
+                        exc_info=True,
+                    )
             with suppress(Exception):
                 await websocket.close()
 

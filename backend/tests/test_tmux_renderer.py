@@ -395,6 +395,15 @@ def test_frame_tracker_ignores_non_2026_csi_sharing_prefix() -> None:
     assert t.feed(b"\x1b[?2026h") is True
 
 
+def test_frame_tracker_accepts_multi_param_2026() -> None:
+    # ``\x1b[?2026;1h`` sets modes 2026 and 1 in one CSI per ECMA-48.
+    # The tracker should still recognise the frame open on the h
+    # terminator, not reset on the intervening ``;``.
+    t = SyncFrameTracker()
+    assert t.feed(b"\x1b[?2026;1h") is True
+    assert t.feed(b"\x1b[?2026;1l") is False
+
+
 def test_frame_tracker_split_at_frame_ends_one_frame() -> None:
     t = SyncFrameTracker()
     segs = t.split_at_frame_ends(b"\x1b[?2026hAAA\x1b[?2026l")

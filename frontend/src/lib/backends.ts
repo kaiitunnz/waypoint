@@ -135,6 +135,14 @@ export function supportsResume(
   return caps ? caps.supports_resume : FALLBACK_RESUMABLE.has(transport);
 }
 
+export function supportsReattachAfterExit(
+  backend: Backend,
+  catalog?: BackendCatalog,
+): boolean {
+  const caps = catalog?.byId(backend)?.capabilities;
+  return caps ? Boolean(caps.supports_reattach_after_exit) : false;
+}
+
 export function supportsStructuredApproval(
   transport: SessionTransport,
   catalog?: BackendCatalog,

@@ -166,6 +166,7 @@ export interface BackendCapabilities {
   supports_approval_note: boolean;
   supports_custom_cli_args: boolean;
   supports_config_overrides: boolean;
+  supports_reattach_after_exit: boolean;
   model_source: "static" | "live_rpc" | "none";
   approval_decisions: string[];
   effort_levels: string[];

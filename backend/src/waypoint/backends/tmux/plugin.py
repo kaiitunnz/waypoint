@@ -908,6 +908,18 @@ class TmuxPlugin:
             effort=resolved_effort,
             permission_mode=permission_mode,
         )
+        # Match the SessionRecord to what the wrapped CLI actually
+        # received. Codex's CLI has no --effort flag and only two of its
+        # waypoint permission presets map to launch flags, so storing the
+        # un-applied values would make the pill and launch-panel re-open
+        # lie about runtime behavior.
+        persisted_effort = resolved_effort if request.backend != "codex" else None
+        persisted_permission_mode = permission_mode
+        if request.backend == "codex" and permission_mode not in (
+            "default",
+            "full_access",
+        ):
+            persisted_permission_mode = None
         launch_args = [*inner_flags, *request.args]
         thread_id: str | None = None
         if request.backend == "claude_code":
@@ -960,9 +972,9 @@ class TmuxPlugin:
             raw_log_path=str(raw_log),
             structured_log_path=str(structured_log),
             transport_state=transport_state,
-            permission_mode=permission_mode,
+            permission_mode=persisted_permission_mode,
             model=resolved_model,
-            effort=resolved_effort if request.backend != "codex" else None,
+            effort=persisted_effort,
         )
         runtime.storage.create_session(session)
         await runtime._record_system_event(

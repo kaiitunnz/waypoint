@@ -1017,6 +1017,30 @@ async def test_handle_input_tmux_reattach_failure_surfaces_400(tmp_path) -> None
 
 
 @pytest.mark.asyncio
+async def test_handle_input_rejects_reattach_when_capability_disabled(
+    tmp_path, monkeypatch
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    plugin = _codex_plugin(runtime)
+    monkeypatch.setattr(
+        plugin,
+        "capabilities",
+        plugin.capabilities.model_copy(update={"supports_reattach_after_exit": False}),
+    )
+    session = make_session(
+        settings,
+        status=SessionStatus.EXITED,
+        thread_id="thread-resume",
+    )
+    storage.create_session(session)
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.handle_input("sess", SessionInputRequest(text="hi"))
+    assert exc.value.status_code == 400
+    assert "cannot be reattached" in exc.value.detail
+
+
+@pytest.mark.asyncio
 async def test_handle_input_rejects_reattach_when_thread_id_missing(tmp_path) -> None:
     from fastapi import HTTPException
 

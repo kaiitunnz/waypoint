@@ -112,6 +112,11 @@ class SessionRuntime:
         # only after the first user input). Stored here so terminate
         # can cancel them alongside the pane monitor.
         self._tmux_thread_id_watchers: dict[str, asyncio.Task[None]] = {}
+        # Periodic rate-limit refreshers spawned by TmuxPlugin. Structured
+        # backends start their own per-session probe inside the SDK adapter
+        # at create time; tmux-wrapped sessions have no adapter and need
+        # this fallback to keep the usage pill live.
+        self._tmux_rate_limit_watchers: dict[str, asyncio.Task[None]] = {}
         self._restore_tasks: set[asyncio.Task[None]] = set()
         self._completion_cache: dict[CompletionCacheKey, list[CommandCompletion]] = {}
         self._completion_cache_updated_at: dict[CompletionCacheKey, float] = {}

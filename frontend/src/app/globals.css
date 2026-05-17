@@ -6203,9 +6203,12 @@ html[data-theme="light"] .terminal {
    above the keyboard on phones. */
 .session-terminal.is-locked {
   position: sticky;
-  top: 0;
-  height: 100dvh;
-  max-height: 100dvh;
+  /* Push the pane below the iOS status bar / notch so the term-bar
+     buttons aren't tucked under the dynamic island. On non-notch
+     viewports the inset is 0, so this is a no-op. */
+  top: env(safe-area-inset-top, 0px);
+  height: calc(100dvh - env(safe-area-inset-top, 0px));
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px));
 }
 
 @media (max-width: 720px) {
@@ -6217,7 +6220,7 @@ html[data-theme="light"] .terminal {
     border-radius: var(--radius-sm);
   }
   .session-terminal.is-locked {
-    height: 100dvh;
+    height: calc(100dvh - env(safe-area-inset-top, 0px));
   }
 }
 
@@ -6321,6 +6324,33 @@ html[data-theme="light"] .term-bar-action.primary {
 .term-bar-overflow-menu {
   top: calc(100% + 8px);
   bottom: auto;
+}
+
+/* The usage pill in the term-bar lives at the top-left of the terminal
+   pane, so the popover must drop downward (the composer variant floats
+   up because it sits at the bottom of the chat surface). .session-terminal
+   has overflow: hidden, which would clip an upward-floating popover
+   entirely; dropping below renders the panel inside the pane's clipped
+   region instead. Anchor to the pill's left edge so a 440px panel
+   doesn't shoot off-screen leftward on a left-aligned trigger. */
+.term-bar .usage-panel {
+  top: calc(100% + 10px);
+  bottom: auto;
+  left: 0;
+  right: auto;
+  /* Above .term-stage's xterm canvases regardless of how their own
+     internal stacking contexts shake out. */
+  z-index: 50;
+}
+
+/* On narrow screens the 440px panel + left-anchor would clip the right
+   edge. Pin the right side too so the panel flexes within the term-bar's
+   width and the popover stays fully visible. */
+@media (max-width: 720px) {
+  .term-bar .usage-panel {
+    right: 8px;
+    width: auto;
+  }
 }
 
 .term-stage {

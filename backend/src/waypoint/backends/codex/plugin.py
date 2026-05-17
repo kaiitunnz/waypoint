@@ -48,6 +48,7 @@ from waypoint.backends.codex.schemas import (
 )
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
+from waypoint.backends.tmux.plugin import TmuxPlugin
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
@@ -1075,8 +1076,6 @@ class CodexPlugin:
             request.launch_mode == LaunchMode.AUTO
             and not self.is_available_for_managed_launch(runtime)
         ):
-            from waypoint.backends.tmux.plugin import TmuxPlugin
-
             fallback = runtime.registry.fallback_for_managed_launch()
             if not isinstance(fallback, TmuxPlugin):
                 raise HTTPException(

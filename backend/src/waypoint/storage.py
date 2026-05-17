@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
+
 from waypoint.schemas import (
     EventKind,
     EventRecord,
@@ -684,7 +686,7 @@ class Storage:
     def _serialize_field(self, value: Any) -> Any:
         if isinstance(value, datetime):
             return value.isoformat()
-        if hasattr(value, "model_dump"):
+        if isinstance(value, BaseModel):
             return json.dumps(value.model_dump(mode="json"))
         if isinstance(value, dict):
             return json.dumps(value)

@@ -29,7 +29,6 @@ export function WorkingDirectoryField({
         onChange={(event) => onChange(event.target.value)}
         placeholder={targetLabel ? "~" : undefined}
         list={hasRecents ? listId : undefined}
-        autoComplete="off"
       />
       {hasRecents ? (
         <datalist id={listId}>

@@ -21,7 +21,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from waypoint.auth import TokenStore, require_token
 from waypoint.backends import BackendRegistry
 from waypoint.backends.tmux.adapter import TmuxError
-from waypoint.backends.tmux.renderer import SyncFrameTracker, make_renderer
+from waypoint.backends.tmux.renderer import (
+    Osc52Extractor,
+    SyncFrameTracker,
+    make_renderer,
+)
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     LoginRequest,
@@ -739,6 +743,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # we don't want to add a per-session subscription here).
         STATUS_CHECK_INTERVAL_POLLS = 50  # 50 * 20 ms = ~1 s
         frame_tracker = SyncFrameTracker()
+        # Pyte absorbs OSC 52 silently — no diff bytes carry it onward —
+        # so the wrapped CLI's ``/copy`` (Claude) or clipboard write
+        # (Codex) never reaches xterm. Extract the payload upstream and
+        # forward it to the session-state socket so the frontend can
+        # call ``navigator.clipboard.writeText``.
+        osc52_extractor = Osc52Extractor()
         # Both stream_loop (chunk arrivals, defensive flush) and
         # recv_loop (post-resize repaint) call emit_diff. Without a
         # lock, render_diff() updates from one task can interleave with
@@ -777,6 +787,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     break
 
                 if chunk:
+                    for clipboard_text in osc52_extractor.feed(chunk):
+                        await context.runtime.broadcast.publish(
+                            SessionEnvelope(
+                                type="clipboard_copy",
+                                payload={"text": clipboard_text},
+                            ),
+                            session_id=session_id,
+                        )
                     # Split at every in→out frame transition so each
                     # closed frame gets its own diff emit, even when a
                     # single chunk contains multiple frames or

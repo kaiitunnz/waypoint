@@ -1,8 +1,13 @@
 """Tests for the server-side terminal renderer used by the tmux WS endpoint."""
 
+import base64
 import re
 
-from waypoint.backends.tmux.renderer import PyteRenderer, SyncFrameTracker
+from waypoint.backends.tmux.renderer import (
+    Osc52Extractor,
+    PyteRenderer,
+    SyncFrameTracker,
+)
 
 
 def _strip_ansi(text: str) -> str:
@@ -475,3 +480,84 @@ def test_frame_tracker_split_carries_state_across_calls() -> None:
     segs2 = t.split_at_frame_ends(b"BBB\x1b[?2026l")
     assert segs2 == [(b"BBB\x1b[?2026l", True)]
     assert t.in_frame is False
+
+
+def _osc52(text: str, terminator: bytes = b"\x07", target: bytes = b"c") -> bytes:
+    payload = base64.b64encode(text.encode("utf-8"))
+    return b"\x1b]52;" + target + b";" + payload + terminator
+
+
+def test_osc52_extractor_decodes_single_bel_terminated() -> None:
+    ex = Osc52Extractor()
+    text = "Hello, world!"
+    chunk = b"prefix " + _osc52(text) + b" trailing"
+    assert ex.feed(chunk) == [text]
+
+
+def test_osc52_extractor_decodes_st_terminator() -> None:
+    ex = Osc52Extractor()
+    text = "ST-terminated payload"
+    assert ex.feed(_osc52(text, terminator=b"\x1b\\")) == [text]
+
+
+def test_osc52_extractor_multiple_sequences_in_one_chunk() -> None:
+    ex = Osc52Extractor()
+    chunk = _osc52("first") + b"junk" + _osc52("second")
+    assert ex.feed(chunk) == ["first", "second"]
+
+
+def test_osc52_extractor_carries_partial_sequence_across_feeds() -> None:
+    ex = Osc52Extractor()
+    full = _osc52("hello across the boundary")
+    # Split mid-payload so the trailer (and most of the base64) arrives
+    # in the next feed.
+    head, tail = full[:12], full[12:]
+    assert ex.feed(head) == []
+    assert ex.feed(tail) == ["hello across the boundary"]
+
+
+def test_osc52_extractor_carries_partial_prefix_across_feeds() -> None:
+    """ESC `]` `5` arrives in feed N, `2;c;...` in feed N+1."""
+    ex = Osc52Extractor()
+    full = _osc52("split prefix")
+    # Cut inside the OSC prefix bytes ``\x1b]52;``.
+    head, tail = full[:3], full[3:]
+    assert ex.feed(head) == []
+    assert ex.feed(tail) == ["split prefix"]
+
+
+def test_osc52_extractor_ignores_clipboard_read_query() -> None:
+    ex = Osc52Extractor()
+    # ``?`` is a read query — must not be decoded or emitted.
+    assert ex.feed(b"\x1b]52;c;?\x07") == []
+
+
+def test_osc52_extractor_ignores_empty_payload() -> None:
+    ex = Osc52Extractor()
+    assert ex.feed(b"\x1b]52;c;\x07") == []
+
+
+def test_osc52_extractor_skips_invalid_base64() -> None:
+    ex = Osc52Extractor()
+    # ``$`` is not a base64 character — decode fails and the sequence
+    # is dropped without surfacing garbage.
+    assert ex.feed(b"\x1b]52;c;$$$$\x07") == []
+
+
+def test_osc52_extractor_handles_default_target() -> None:
+    """OSC 52 with empty targets (``;;<base64>``) is valid — should still decode."""
+    ex = Osc52Extractor()
+    payload = base64.b64encode(b"defaulted").decode("ascii")
+    chunk = f"\x1b]52;;{payload}\x07".encode()
+    assert ex.feed(chunk) == ["defaulted"]
+
+
+def test_osc52_extractor_unicode_payload() -> None:
+    ex = Osc52Extractor()
+    text = "日本語 🦀 ñ"
+    assert ex.feed(_osc52(text)) == [text]
+
+
+def test_osc52_extractor_no_sequence_returns_empty() -> None:
+    ex = Osc52Extractor()
+    assert ex.feed(b"just normal output\r\n") == []

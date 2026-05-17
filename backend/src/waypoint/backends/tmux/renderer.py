@@ -14,6 +14,8 @@ the pyte backend can be swapped for libvterm/vterm later without
 touching the WS handler.
 """
 
+import base64
+import binascii
 import re
 from io import StringIO
 from typing import Protocol
@@ -602,3 +604,100 @@ class SyncFrameTracker:
         if seg_start < len(chunk):
             segments.append((chunk[seg_start:], not self.in_frame))
         return segments
+
+
+class Osc52Extractor:
+    """Pull ``OSC 52`` clipboard-write payloads out of a pane byte stream.
+
+    Tmux-wrapped CLIs (Claude Code's ``/copy``, Codex's clipboard
+    integration) emit ``\\x1b]52;<targets>;<base64>\\x07`` to ask the
+    outer terminal to write to the system clipboard. Pyte sees those
+    bytes and quietly drops them — they never reach xterm.js — so for
+    the tmux transport the WS handler has to lift the payload out
+    upstream and forward it to the session-state socket as a typed
+    ``clipboard_copy`` envelope.
+
+    The extractor is stateful so a sequence split across two reads (a
+    20 ms poll boundary lands mid-base64 for large copies) still emits
+    once the trailer arrives.
+    """
+
+    _PREFIX = b"\x1b]52;"
+
+    def __init__(self) -> None:
+        self._pending: bytes = b""
+
+    def feed(self, chunk: bytes) -> list[str]:
+        """Return decoded clipboard text for every complete OSC 52 in
+        ``chunk`` (plus any sequence whose tail finally arrived).
+
+        Reads that contain no OSC 52 cost one ``bytes.find`` per call;
+        partial sequences are held verbatim across feeds, capped at
+        ``_MAX_PENDING_NON_CSI`` so a malformed unterminated payload
+        can't grow the buffer without bound.
+        """
+        buf = self._pending + chunk
+        self._pending = b""
+        results: list[str] = []
+        i = 0
+        n = len(buf)
+        while i < n:
+            start = buf.find(self._PREFIX, i)
+            if start < 0:
+                # No prefix in the remainder — but the very tail may be
+                # the first few bytes of a prefix that completes next
+                # feed, so hold up to ``len(prefix) - 1`` bytes.
+                tail_keep = min(n - i, len(self._PREFIX) - 1)
+                if tail_keep > 0:
+                    self._pending = buf[n - tail_keep :]
+                return results
+            payload_start = start + len(self._PREFIX)
+            j = payload_start
+            end = -1
+            next_i = -1
+            while j < n:
+                b = buf[j]
+                if b == 0x07:  # BEL
+                    end = j
+                    next_i = j + 1
+                    break
+                if b == 0x1B:  # ESC — only valid terminator is ESC \
+                    if j + 1 >= n:
+                        # ST split across feeds; hold from ``start``.
+                        break
+                    if buf[j + 1] == 0x5C:  # '\\'
+                        end = j
+                        next_i = j + 2
+                        break
+                    # Malformed (ESC followed by non-ST inside OSC). Cut
+                    # the sequence here so a stray ESC can't make us
+                    # buffer until ``_MAX_PENDING_NON_CSI``.
+                    end = j
+                    next_i = j + 1
+                    break
+                j += 1
+            if end < 0:
+                # Incomplete — keep the whole sequence; drop on overflow
+                # rather than letting a runaway tail wedge the buffer.
+                tail = buf[start:]
+                if len(tail) <= _MAX_PENDING_NON_CSI:
+                    self._pending = tail
+                return results
+            inner = buf[payload_start:end]
+            # Format is ``<targets>;<payload>``; the targets field can
+            # be empty (defaults to ``c``). ``?`` is a clipboard *read*
+            # query, which we ignore for security.
+            sep = inner.find(b";")
+            if sep >= 0:
+                payload = inner[sep + 1 :]
+                if payload and payload != b"?":
+                    try:
+                        decoded = base64.b64decode(payload, validate=False)
+                    except (binascii.Error, ValueError):
+                        decoded = b""
+                    if decoded:
+                        text = decoded.decode("utf-8", errors="replace")
+                        if text:
+                            results.append(text)
+            i = next_i
+        return results

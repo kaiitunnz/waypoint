@@ -11,6 +11,7 @@ because no protocol is available to set them mid-session.
 
 import asyncio
 import json
+import logging
 import os
 import re
 import shlex
@@ -41,6 +42,8 @@ from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
+
+log = logging.getLogger("waypoint.backends.tmux")
 
 
 def _unsupported(action: str) -> Never:
@@ -123,13 +126,21 @@ class TmuxPlugin:
         monitor = runtime.monitor_tasks.pop(session.id, None)
         if monitor is not None:
             monitor.cancel()
-            with suppress(asyncio.CancelledError, Exception):
+            try:
                 await monitor
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                log.debug("monitor task raised during terminate", exc_info=True)
         capture = runtime._tmux_thread_id_watchers.pop(session.id, None)
         if capture is not None:
             capture.cancel()
-            with suppress(asyncio.CancelledError, Exception):
+            try:
                 await capture
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                log.debug("thread-id watcher raised during terminate", exc_info=True)
 
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -337,20 +348,10 @@ class TmuxPlugin:
             "pid": target.pane_pid,
             "launch_args": launch_args,
         }
-        # Carry-forward rule depends on how the backend acquires its
-        # thread id:
-        #   - claude_code: the uuid is generated up-front and pinned in
-        #     ``stored_args`` via ``--session-id``. Keep ``thread_id``
-        #     even when the conversation file doesn't exist yet — the
-        #     next reconnect will re-check existence and choose between
-        #     ``--resume`` and the verbatim ``--session-id`` launch.
-        #     Dropping it would short-circuit the existence check and
-        #     leave us passing ``--session-id`` against an already-
-        #     materialised conversation.
-        #   - codex: the uuid is captured asynchronously by the watcher
-        #     from the rollout filename. A phantom id (file deleted
-        #     out of band) would suppress the watcher-spawn guard below
-        #     and the session could never re-acquire a real one.
+        # Keep claude's pre-generated uuid even when the conversation
+        # file doesn't exist yet — the next reconnect re-checks. Codex
+        # gets its uuid from the rollout watcher, so a phantom carry-
+        # forward would suppress the watcher-spawn guard below.
         if effective_thread_id:
             new_state["thread_id"] = effective_thread_id
         elif session.backend == "claude_code" and thread_id:
@@ -367,7 +368,6 @@ class TmuxPlugin:
         await runtime._record_system_event(
             session.id, message, status=SessionStatus.STARTING
         )
-        # Re-attach the monitor against the new pane.
         runtime._ensure_monitor(session.id)
         if session.backend == "codex" and not effective_thread_id:
             self._spawn_codex_thread_id_watcher(
@@ -420,10 +420,8 @@ class TmuxPlugin:
             "tmux_pane": target.pane,
             "pid": target.pane_pid,
         }
-        # Carry forward whatever the prior life captured. Codex sets
-        # ``thread_id`` from the rollout filename once the user first
-        # types — wiping it here would force the watcher below to
-        # re-poll for a uuid we already had.
+        # Carry forward any captured thread_id so the codex watcher
+        # below isn't asked to re-poll for a uuid we already had.
         prior_thread_id = state.get("thread_id")
         if prior_thread_id:
             new_state["thread_id"] = prior_thread_id
@@ -438,11 +436,8 @@ class TmuxPlugin:
             status=SessionStatus.IDLE,
         )
         runtime._ensure_monitor(session.id)
-        # Mirror the boot-replay / MANAGED reconnect branches: if this
-        # is a codex session that hadn't yet produced a rollout file
-        # before the prior terminate, the watcher we spawned then was
-        # cancelled. Respawn so the uuid gets captured when the file
-        # finally appears.
+        # Respawn the codex rollout watcher if we never captured a uuid
+        # — the prior watcher was cancelled by terminate_session.
         if session.backend == "codex" and not prior_thread_id:
             launch_target = runtime._find_launch_target(session.launch_target_id)
             self._spawn_codex_thread_id_watcher(
@@ -463,18 +458,9 @@ class TmuxPlugin:
         """Return True if the inner CLI has actually persisted ``thread_id``.
 
         Both Claude and Codex defer conversation-file creation until
-        first input. A captured uuid is useless until that's happened
-        — passing ``--resume`` (or ``codex resume``) for a never-written
-        thread makes the CLI exit immediately with "no conversation
-        found". This check lets restore fall back to a verbatim launch
-        in that case, keeping the same uuid so a later reconnect can
-        resume once the user has actually conversed.
-
-        For SSH-launched sessions the file lives on the remote host;
-        the check runs over SSH (cheap ``test -f`` / glob). OpenCode
-        sessions never use the tmux fallback (no ``cli_binary``), so
-        the backend dispatch falls through to ``False`` and the
-        verbatim-launch fallback covers them.
+        first input. Resuming a never-written thread makes the CLI exit
+        with "no conversation found"; the caller falls back to a
+        verbatim launch when this returns False.
         """
         if backend == "claude_code":
             # ~/.claude/projects/<dashed-absolute-cwd>/<uuid>.jsonl —
@@ -542,25 +528,29 @@ class TmuxPlugin:
     ) -> list[str]:
         """Translate the original launch args into the inner CLI's resume form."""
         if backend == "claude_code" and thread_id:
-            # The original args may already start with ``--session-id <uuid>``
-            # (inserted by ``create_session``). Strip it and substitute
-            # ``--resume <uuid>``; Claude treats the two flags as
-            # mutually exclusive.
+            # stored_args may carry ``--session-id <uuid>`` (the initial
+            # create form) or ``--resume <uuid>`` (the prior reconnect's
+            # output). Strip both so the new prefix doesn't compound on
+            # repeated reconnects.
             scrubbed: list[str] = []
             skip = 0
             for arg in stored_args:
                 if skip:
                     skip -= 1
                     continue
-                if arg == "--session-id":
+                if arg in ("--session-id", "--resume"):
                     skip = 1
                     continue
                 scrubbed.append(arg)
             return ["--resume", thread_id, *scrubbed]
         if backend == "codex" and thread_id:
-            # ``codex resume <uuid>`` is a subcommand, not a flag. The
-            # rest of the original args go after it.
-            return ["resume", thread_id, *stored_args]
+            # ``codex resume <uuid>`` is a subcommand, not a flag. Drop
+            # any prior ``resume <uuid>`` prefix so the new one doesn't
+            # compound across reconnects.
+            scrubbed = list(stored_args)
+            if len(scrubbed) >= 2 and scrubbed[0] == "resume":
+                scrubbed = scrubbed[2:]
+            return ["resume", thread_id, *scrubbed]
         return list(stored_args)
 
     def _spawn_codex_thread_id_watcher(
@@ -723,7 +713,13 @@ class TmuxPlugin:
 
     @staticmethod
     def _parse_rollout_timestamp(path: str) -> float | None:
-        """Extract the YYYY-MM-DDThh-mm-ss prefix from a rollout filename."""
+        """Extract the YYYY-MM-DDThh-mm-ss prefix from a rollout filename.
+
+        Codex writes the filename component in UTC
+        (``rollout/src/metadata.rs::parse_timestamp_to_utc``); building
+        an aware UTC datetime keeps comparisons against the watcher's
+        ``since`` (also UTC) consistent on non-UTC controllers.
+        """
         match = re.search(
             r"rollout-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-", path
         )
@@ -737,6 +733,7 @@ class TmuxPlugin:
                 int(match.group(4)),
                 int(match.group(5)),
                 int(match.group(6)),
+                tzinfo=UTC,
             ).timestamp()
         except ValueError:
             return None
@@ -817,19 +814,10 @@ class TmuxPlugin:
         resolved_model: str | None,
         resolved_effort: str | None,
     ) -> SessionRecord:
-        # Tmux fallback launches the actual backend binary inside a tmux
-        # pane and tails the pane log. The plugin doesn't pick the
-        # binary itself — it asks the registry for the cli_binary the
-        # requested backend advertises. A backend without a cli_binary
-        # (e.g. an HTTP-only OpenCode) can opt out of tmux fallback by
-        # leaving the capability unset.
-        #
-        # Inner-backend resume support is dispatched here. Claude's CLI
-        # accepts ``--session-id <uuid>`` on launch, so we pre-generate
-        # the UUID and store it for the eventual reconnect path. Codex
-        # doesn't expose a session-id flag — its UUID is captured later
-        # by a watcher (see _watch_codex_thread_id) when the rollout
-        # file appears on disk.
+        # Pre-generate Claude's session UUID via ``--session-id`` so we
+        # have a thread id ready for the reconnect path. Codex has no
+        # equivalent flag — its uuid is captured asynchronously by
+        # ``_spawn_codex_thread_id_watcher``.
         launch_args = list(request.args)
         thread_id: str | None = None
         if request.backend == "claude_code":

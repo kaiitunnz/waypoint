@@ -528,11 +528,12 @@ class SyncFrameTracker:
 
     @staticmethod
     def _is_param_byte(byte: int) -> bool:
-        # CSI parameter bytes per ECMA-48: 0x30-0x3F (digits + ; : < = > ?).
-        # We accept the digit/semicolon/colon subset so multi-param forms
-        # like ``\x1b[?2026;1h`` reach the h/l terminator instead of
-        # resetting the matcher mid-sequence.
-        return 0x30 <= byte <= 0x3B  # 0-9, ':', ';'
+        # Accept 0x30-0x3B (digits, ':', ';') so multi-param forms like
+        # ``\x1b[?2026;1h`` reach the h/l terminator. ECMA-48 also lists
+        # 0x3C-0x3F (``< = > ?``) as parameter bytes, but those are
+        # prefix indicators that can't legally reappear after the
+        # ``?2026`` we've already matched — so deliberately excluded.
+        return 0x30 <= byte <= 0x3B
 
     def feed(self, chunk: bytes) -> bool:
         """Process ``chunk`` and return the final ``in_frame`` state."""

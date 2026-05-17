@@ -102,6 +102,23 @@ def test_alt_screen_toggle_emits_buffer_switch() -> None:
     assert "\x1b[?1049l" in back
 
 
+def test_alt_screen_seed_mirrors_pane_buffer() -> None:
+    # Mirrors the api.py WS seed path: when ``pane_screen_state``
+    # reports the pane is on the alt buffer, we feed ``\x1b[?1049h``
+    # into the renderer before the ``capture-pane`` snapshot so the
+    # seed lands in pyte's alt buffer instead of bleeding into normal.
+    r = PyteRenderer(10, 3)
+    r.feed(b"\x1b[?1049h")
+    r.feed(b"alt-content")
+    out = r.render_full()
+    # The full render should advertise the alt-screen toggle and the
+    # snapshot text — without the seed-time toggle, the second
+    # assertion would still pass but xterm would paint the snapshot
+    # onto the normal buffer.
+    assert "\x1b[?1049h" in out
+    assert "alt-content" in _strip_ansi(out)
+
+
 def test_cursor_position_and_visibility() -> None:
     r = PyteRenderer(10, 3)
     r.feed(b"\x1b[2;5Hx")
@@ -402,6 +419,21 @@ def test_frame_tracker_accepts_multi_param_2026() -> None:
     t = SyncFrameTracker()
     assert t.feed(b"\x1b[?2026;1h") is True
     assert t.feed(b"\x1b[?2026;1l") is False
+
+
+def test_frame_tracker_multi_param_2026_across_chunk_boundary() -> None:
+    # The ``_is_param_byte`` branch also lives in ``split_at_frame_ends``;
+    # a chunk split between the ``;`` and the ``h`` would regress that
+    # path separately from the ``feed`` path covered above.
+    t = SyncFrameTracker()
+    t.split_at_frame_ends(b"\x1b[?2026;")
+    # Prefix matched but ``h``/``l`` hasn't arrived — frame not open.
+    assert t.in_frame is False
+    t.split_at_frame_ends(b"1hAAA")
+    # Carried-over state recognises the multi-param ``;1h`` terminator.
+    assert t.in_frame is True
+    t.split_at_frame_ends(b"\x1b[?2026;1l")
+    assert t.in_frame is False
 
 
 def test_frame_tracker_split_at_frame_ends_one_frame() -> None:

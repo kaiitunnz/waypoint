@@ -41,6 +41,7 @@ import {
   permissionModesFor,
   supportsApprovalNote,
   supportsPlanApproval,
+  supportsReattachAfterExit,
   supportsResume,
   supportsStructuredApproval,
   transportLabel,
@@ -764,12 +765,44 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       const ts = new Date().toISOString();
       setOptimisticMessages((prev) => [...prev, { tempId, text, ts, confirmed: false }]);
       try {
+        // Sending a message to an exited session restarts it: the placeholder
+        // "Session has exited — send a message to reattach…" promises this UX.
+        // Reattach first, then submit; both are sequenced so the input lands
+        // after the freshly-restored transport accepts stdin.
+        if (
+          session &&
+          (session.status === "exited" || session.status === "error") &&
+          supportsReattachAfterExit(session.backend, catalog)
+        ) {
+          try {
+            await postAction(host, token, sessionId, "reattach");
+          } catch (reattachError) {
+            if (isAuthError(reattachError)) {
+              handleAuthFailure();
+              return false;
+            }
+            setError(
+              reattachError instanceof Error
+                ? reattachError.message
+                : "failed to reconnect",
+            );
+            return false;
+          }
+        }
         return await submitInput(text, command);
       } finally {
         setOptimisticMessages((prev) => prev.filter((m) => m.tempId !== tempId));
       }
     },
-    [submitInput],
+    [
+      submitInput,
+      session,
+      catalog,
+      host,
+      token,
+      sessionId,
+      handleAuthFailure,
+    ],
   );
 
   const submitAskAnswer = useCallback(
@@ -973,8 +1006,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     session && (session.status === "exited" || session.status === "error"),
   );
   const terminalOnly = session?.transport === "tmux";
-  const dormantReattach = sessionExited;
-  const composerDisabled = !session || sessionExited;
+  const canReattachAfterExit = Boolean(
+    session && supportsReattachAfterExit(session.backend, catalog),
+  );
+  const dormantReattach = sessionExited && canReattachAfterExit;
+  const composerDisabled =
+    !session || (sessionExited && !canReattachAfterExit);
   const composerPlaceholder = !session
     ? "Loading session…"
     : dormantReattach

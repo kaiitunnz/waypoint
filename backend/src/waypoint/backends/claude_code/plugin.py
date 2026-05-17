@@ -257,6 +257,23 @@ class ClaudeCodePlugin:
         if self.adapter is not None:
             await self.adapter.force_refresh_rate_limit_usage(session.id)
 
+    async def probe_account_rate_limit(
+        self,
+        runtime: "SessionRuntime",
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> SessionRateLimitUsage | None:
+        """Fetch the account's current rate-limit snapshot without a session.
+
+        The upstream probe (HTTP call to api.anthropic.com via cached OAuth
+        creds) is account-scoped, not session-scoped — same call the
+        per-session adapter probe makes. Exposed so the tmux fallback can
+        populate ``rate_limit_usage`` for wrapped-claude sessions without
+        wiring them through the structured adapter.
+        """
+        if launch_target is None:
+            return await probe_claude_usage()
+        return await probe_claude_usage_remote(launch_target)
+
     def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
         # The Claude adapter is wired up lazily by setup() — if the
         # PreToolUse hook bundle failed to materialise we leave

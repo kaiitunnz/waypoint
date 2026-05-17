@@ -228,6 +228,30 @@ class CodexPlugin:
         if self.adapter is not None:
             await self.adapter.force_refresh_rate_limit_usage(session.id)
 
+    async def probe_account_rate_limit(
+        self,
+        runtime: "SessionRuntime",
+        launch_target: SshLaunchTargetConfig | None,
+        *,
+        cwd: str,
+    ) -> SessionRateLimitUsage | None:
+        """Fetch the account's current rate-limit snapshot without a session.
+
+        Exposed so the tmux fallback can populate ``rate_limit_usage`` for
+        wrapped-codex sessions without wiring them through the structured
+        adapter. ``cwd`` is forwarded to the local probe because codex's
+        ``/status`` PTY fallback needs a working directory.
+        """
+        if launch_target is None:
+            binary = (
+                self._config(runtime).local_bin
+                or self.capabilities.cli_binary
+                or "codex"
+            )
+            return await probe_codex_status(cwd=cwd, binary=binary)
+        binary = self.remote_executable(launch_target) or "codex"
+        return await probe_codex_usage_remote(launch_target, binary=binary)
+
     def register_routes(self, app: Any, context: Any) -> None:
         return None
 

@@ -101,6 +101,11 @@ export function LaunchPanel({
   const capabilities = catalog.byId(backend)?.capabilities;
   const supportsCustomArgs = capabilities?.supports_custom_cli_args ?? false;
   const supportsConfigOverrides = capabilities?.supports_config_overrides ?? false;
+  // Codex's CLI has no `--effort` flag, so a tmux-wrapped codex session
+  // can't honor an effort selection at launch time. Hide the picker
+  // instead of letting the user pick a value that silently drops.
+  const effortSupported = !(backend === "codex" && launchMode === "tmux_wrapper");
+
   const handleBackendChange = useCallback((nextBackend: Backend) => {
     setBackend(nextBackend);
     setModel("");
@@ -175,7 +180,7 @@ export function LaunchPanel({
         cwd,
         title,
         model.trim() || null,
-        effort.trim() || null,
+        effortSupported ? effort.trim() || null : null,
         launchMode,
         args,
         configOverrides,
@@ -249,12 +254,14 @@ export function LaunchPanel({
                 disabled={formBusy}
                 defaultModelLabel={modelInfo?.default_model_label ?? null}
               />
-              <EffortPicker
-                options={effortOptions}
-                value={effort}
-                onChange={setEffort}
-                disabled={formBusy}
-              />
+              {effortSupported ? (
+                <EffortPicker
+                  options={effortOptions}
+                  value={effort}
+                  onChange={setEffort}
+                  disabled={formBusy}
+                />
+              ) : null}
             </div>
           </div>
           <LaunchOptionsDetails

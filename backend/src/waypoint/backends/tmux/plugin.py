@@ -142,6 +142,15 @@ class TmuxPlugin:
                 pass
             except Exception:
                 log.debug("thread-id watcher raised during terminate", exc_info=True)
+        rl_watcher = runtime._tmux_rate_limit_watchers.pop(session.id, None)
+        if rl_watcher is not None:
+            rl_watcher.cancel()
+            try:
+                await rl_watcher
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                log.debug("rate-limit watcher raised during terminate", exc_info=True)
 
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -297,6 +306,7 @@ class TmuxPlugin:
                 self._spawn_codex_thread_id_watcher(
                     runtime, session.id, session.cwd, session.created_at, lt
                 )
+            self._spawn_rate_limit_watcher(runtime, session)
             return
 
         # ATTACHED-TMUX reconnect: the user terminated a session we
@@ -413,6 +423,7 @@ class TmuxPlugin:
             self._spawn_codex_thread_id_watcher(
                 runtime, session.id, session.cwd, now, launch_target
             )
+        self._spawn_rate_limit_watcher(runtime, session)
 
     async def _reattach_attached_tmux(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -487,6 +498,7 @@ class TmuxPlugin:
                 datetime.now(UTC),
                 launch_target,
             )
+        self._spawn_rate_limit_watcher(runtime, session)
 
     async def _conversation_exists(
         self,
@@ -665,6 +677,56 @@ class TmuxPlugin:
             )
         )
         runtime._tmux_thread_id_watchers[session_id] = task
+
+    def _spawn_rate_limit_watcher(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        """Run periodic rate-limit refreshes for a tmux-wrapped session.
+
+        Structured backends register a per-session probe inside their SDK
+        adapter, so their pill stays current without any explicit kick.
+        Tmux-wrapped sessions have no adapter, so this watcher fills the
+        gap — same cadence (300 s) as the SDK probes, and an immediate
+        first refresh so the pill populates within the first paint
+        instead of staying empty until the user clicks.
+        """
+        if session.id in runtime._tmux_rate_limit_watchers:
+            return
+        inner = runtime.registry.get(session.backend)
+        if getattr(inner, "probe_account_rate_limit", None) is None:
+            return
+        task = asyncio.create_task(self._rate_limit_refresh_loop(runtime, session.id))
+        runtime._tmux_rate_limit_watchers[session.id] = task
+
+    async def _rate_limit_refresh_loop(
+        self, runtime: "SessionRuntime", session_id: str
+    ) -> None:
+        # Match the 300 s interval the structured adapters use; the
+        # upstream rate-limit endpoints are account-scoped, so probing
+        # any faster doesn't surface fresher data.
+        REFRESH_INTERVAL = 300.0
+        try:
+            while True:
+                session = runtime.storage.get_session(session_id)
+                if session is None:
+                    return
+                # Mirrors the structured adapter's
+                # ``while state.session_id in self._sessions`` — those
+                # loops naturally terminate when the adapter drops the
+                # session on exit; here we have no adapter map to watch,
+                # so the storage status is the equivalent signal.
+                if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
+                    return
+                try:
+                    await self.refresh_rate_limit_usage(runtime, session)
+                except Exception:  # noqa: BLE001
+                    log.exception(
+                        "tmux rate-limit refresh loop probe failed",
+                        extra={"session_id": session_id},
+                    )
+                await asyncio.sleep(REFRESH_INTERVAL)
+        finally:
+            runtime._tmux_rate_limit_watchers.pop(session_id, None)
 
     # Filename UUID matches the trailing ``<uuid>`` in
     # ``rollout-YYYY-MM-DDThh-mm-ss-<UUID>.jsonl``.
@@ -985,6 +1047,7 @@ class TmuxPlugin:
             self._spawn_codex_thread_id_watcher(
                 runtime, session.id, session.cwd, now, launch_target
             )
+        self._spawn_rate_limit_watcher(runtime, session)
         return runtime.get_session(session.id)
 
     async def import_thread_via_resume(
@@ -1078,6 +1141,7 @@ class TmuxPlugin:
             self.format_start_message(backend, launch_target, cwd),
         )
         runtime._ensure_monitor(session.id)
+        self._spawn_rate_limit_watcher(runtime, session)
         return runtime.get_session(session.id)
 
 

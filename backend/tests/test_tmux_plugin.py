@@ -6,7 +6,9 @@ decide how reconnect rebuilds an inner CLI's command line and how the
 Codex rollout-file watcher extracts a thread id from a filename.
 """
 
+import asyncio
 import json
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -453,10 +455,14 @@ class _FakeTmux:
     def __init__(self) -> None:
         self.kill_calls: list[str] = []
         self.pipe_calls: list[tuple[str, Path]] = []
+        self.stop_pipe_calls: list[str] = []
         self.describe_pane_dead = False
 
     async def kill_session(self, name: str) -> None:
         self.kill_calls.append(name)
+
+    async def stop_pipe(self, target: str) -> None:
+        self.stop_pipe_calls.append(target)
 
     async def start_managed_session(
         self, session_id: str, cwd: str, command: list[str]
@@ -484,19 +490,45 @@ class _FakeTmux:
         )
 
 
+class _FakeRegistry:
+    """Stand-in for SessionRuntime.registry.
+
+    `_FakeRuntime` is used by the restore/create paths, which now ask
+    the registry for the inner plugin so they can spawn a rate-limit
+    refresh watcher. By default returns a bare object — no
+    ``probe_account_rate_limit`` — so the spawn early-exits without
+    scheduling a real task. Watcher-focused tests pass a real stub via
+    ``plugin_override`` to exercise the loop.
+    """
+
+    def __init__(self, plugin_override: Any = None) -> None:
+        self._override = plugin_override
+
+    def get(self, _backend: str) -> Any:
+        return self._override if self._override is not None else object()
+
+
 class _FakeRuntime:
     """Minimal runtime stub for ``TmuxPlugin.restore_session``."""
 
-    def __init__(self) -> None:
+    def __init__(self, inner_plugin: Any = None) -> None:
         self.tmux = _FakeTmux()
         self.file_offsets: dict[str, int] = {}
         self._tmux_thread_id_watchers: dict[str, Any] = {}
+        self._tmux_rate_limit_watchers: dict[str, Any] = {}
+        self.monitor_tasks: dict[str, Any] = {}
+        self.registry = _FakeRegistry(plugin_override=inner_plugin)
         self.updates: list[dict[str, Any]] = []
+        self.field_updates: list[dict[str, Any]] = []
         self.created: list[Any] = []
         self._session_dir_root: Path | None = None
         # Per-call record so individual tests can assert that the
         # tmux launch sites actually request a remote PTY.
         self.command_calls: list[dict[str, Any]] = []
+        # Watcher tests override entries here; the refresh loop reads
+        # via storage.get_session, so the storage stub returns whatever
+        # is set on this map.
+        self.sessions_by_id: dict[str, Any] = {}
 
     def _find_launch_target(self, _lt_id: str | None) -> None:
         return None
@@ -538,6 +570,11 @@ class _FakeRuntime:
                 return record
         raise KeyError(session_id)
 
+    async def update_session_fields(
+        self, session_id: str, *, publish: bool = True, **updates: Any
+    ) -> None:
+        self.field_updates.append({"sid": session_id, "publish": publish, **updates})
+
     class _Storage:
         def __init__(self, parent: "_FakeRuntime") -> None:
             self._parent = parent
@@ -547,6 +584,9 @@ class _FakeRuntime:
 
         def create_session(self, record: Any) -> None:
             self._parent.created.append(record)
+
+        def get_session(self, session_id: str) -> Any:
+            return self._parent.sessions_by_id.get(session_id)
 
     @property
     def storage(self) -> "_FakeRuntime._Storage":
@@ -1027,3 +1067,121 @@ async def test_create_session_requests_remote_pty(
     # Claude path pre-pins --session-id <uuid> ahead of the user's args.
     assert runtime.command_calls[-1]["args"][0] == "--session-id"
     assert runtime.command_calls[-1]["args"][-2:] == ["--model", "sonnet"]
+
+
+class _InnerPluginStub:
+    """Stub of the wrapped backend's plugin for rate-limit watcher tests.
+
+    Just the slice that ``_spawn_rate_limit_watcher`` and the refresh
+    loop reach: a ``probe_account_rate_limit`` coroutine that records
+    each call and a ``cli_binary`` attribute the codex branch reads.
+    """
+
+    cli_binary = "claude"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def probe_account_rate_limit(self, _runtime: Any, _launch_target: Any) -> Any:
+        self.calls += 1
+        from waypoint.schemas import SessionRateLimitUsage
+
+        return SessionRateLimitUsage(
+            source="claude_code",
+            updated_at=datetime.now(UTC),
+            windows=[],
+        )
+
+
+def _watcher_session(sid: str, status: SessionStatus = SessionStatus.STARTING):
+    now = datetime.now(UTC)
+    return SessionRecord(
+        id=sid,
+        backend="claude_code",
+        source=SessionSource.MANAGED,
+        transport="tmux",
+        title="t",
+        cwd="/Users/me/proj",
+        status=status,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path=f"/tmp/{sid}.raw.log",
+        structured_log_path=f"/tmp/{sid}.events.jsonl",
+    )
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_watcher_spawn_dedupes(plugin: TmuxPlugin) -> None:
+    """Spawning twice with the same session id leaves a single task on
+    the runtime's watcher map — the guard at the top of
+    ``_spawn_rate_limit_watcher`` short-circuits the second call."""
+    inner = _InnerPluginStub()
+    runtime = _FakeRuntime(inner_plugin=inner)
+    session = _watcher_session("sess-dedupe")
+    runtime.sessions_by_id[session.id] = session
+    plugin._spawn_rate_limit_watcher(cast(Any, runtime), session)
+    first = runtime._tmux_rate_limit_watchers[session.id]
+    plugin._spawn_rate_limit_watcher(cast(Any, runtime), session)
+    second = runtime._tmux_rate_limit_watchers[session.id]
+    assert first is second
+    first.cancel()
+    with suppress(asyncio.CancelledError):
+        await first
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_watcher_terminate_cancels_and_clears(
+    plugin: TmuxPlugin,
+) -> None:
+    """``terminate_session`` cancels the running watcher and pops its
+    entry from the map so a subsequent reattach can spawn a fresh one."""
+    inner = _InnerPluginStub()
+    runtime = _FakeRuntime(inner_plugin=inner)
+    session = _watcher_session("sess-term")
+    runtime.sessions_by_id[session.id] = session
+    plugin._spawn_rate_limit_watcher(cast(Any, runtime), session)
+    task = runtime._tmux_rate_limit_watchers[session.id]
+    # Let the first iteration run so the probe is observed.
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    await plugin.terminate_session(cast(Any, runtime), session)
+    assert session.id not in runtime._tmux_rate_limit_watchers
+    assert task.cancelled() or task.done()
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_watcher_stops_on_natural_exit(
+    plugin: TmuxPlugin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Natural transitions to EXITED (pane closed, CLI typed /exit) are
+    detected via storage status and break the loop without going through
+    ``terminate_session``."""
+    # Collapse the 300 s sleep so the loop's next iteration runs in the
+    # same event-loop tick the test status flip happens on.
+    real_sleep = asyncio.sleep
+
+    async def instant_sleep(_seconds: float) -> None:
+        await real_sleep(0)
+
+    monkeypatch.setattr("waypoint.backends.tmux.plugin.asyncio.sleep", instant_sleep)
+
+    inner = _InnerPluginStub()
+    runtime = _FakeRuntime(inner_plugin=inner)
+    session = _watcher_session("sess-natural-exit")
+    runtime.sessions_by_id[session.id] = session
+    plugin._spawn_rate_limit_watcher(cast(Any, runtime), session)
+    task = runtime._tmux_rate_limit_watchers[session.id]
+
+    # Yield repeatedly so the loop runs at least one full iteration.
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert inner.calls >= 1, "probe should have fired at least once"
+
+    # Flip status to EXITED without invoking terminate_session.
+    runtime.sessions_by_id[session.id] = _watcher_session(
+        session.id, status=SessionStatus.EXITED
+    )
+    # The loop's next iteration should observe the EXITED status and exit.
+    await asyncio.wait_for(task, timeout=1.0)
+    assert session.id not in runtime._tmux_rate_limit_watchers

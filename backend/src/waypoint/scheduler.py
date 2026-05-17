@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import logging
 import secrets
@@ -57,7 +55,7 @@ def validate_permission_mode_for_backend(backend: str, mode: str | None) -> str 
 class Scheduler:
     """Polls scheduled session entries and launches them when they come due."""
 
-    def __init__(self, runtime: SessionRuntime) -> None:
+    def __init__(self, runtime: "SessionRuntime") -> None:
         self._runtime = runtime
         self._task: asyncio.Task[None] | None = None
         self._wakeup = asyncio.Event()

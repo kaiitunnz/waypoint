@@ -44,6 +44,11 @@ class BackendPlugin(Protocol):
     # ``ssh_targets[*].plugin_configs.<plugin_id>``. Plugins without
     # per-target knobs beyond ``remote_bin`` point at the base class.
     launch_target_schema: type[PluginLaunchTargetConfig]
+    # Env vars the plugin requires on every tmux-wrapped CLI invocation
+    # (local and SSH-remote). Merged into the launch command in
+    # ``_command_for_backend``; the user-supplied target ``remote_env``
+    # overrides on key collision so explicit yaml config still wins.
+    extra_env: dict[str, str]
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
         """Return a TransportAdapter routing send/interrupt/etc. for this plugin."""

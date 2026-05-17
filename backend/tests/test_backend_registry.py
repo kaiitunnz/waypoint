@@ -31,6 +31,7 @@ class _StubPlugin:
     import_request_schema: type[BaseModel] | None = None
     config_schema: type[PluginConfig] = PluginConfig
     launch_target_schema: type[PluginLaunchTargetConfig] = PluginLaunchTargetConfig
+    extra_env: dict[str, str] = {}
     capabilities = BackendCapabilities(is_structured=False, supports_resume=False)
 
     def transport_view(self, runtime: Any) -> Any:

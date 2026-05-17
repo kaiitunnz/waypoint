@@ -173,6 +173,33 @@ def test_build_remote_exec_args_allocates_tty_when_requested(monkeypatch) -> Non
     assert "-tt" not in no_tty
 
 
+def test_build_remote_exec_args_merges_extra_env_with_target_env(monkeypatch) -> None:
+    """Plugin-contributed env (e.g. claude's CLAUDE_CODE_NO_FLICKER) merges
+    with the target's user-configured ``remote_env``; on key collision the
+    target wins so explicit yaml config still overrides plugin defaults."""
+    monkeypatch.setattr(
+        "waypoint.launch_targets.shutil.which", lambda _: "/usr/bin/ssh"
+    )
+    config = SshLaunchTargetConfig(
+        id="devbox",
+        name="Devbox",
+        ssh_destination="dev@example.com",
+        remote_env={"FOO": "from-target", "TARGET_ONLY": "1"},
+    )
+
+    args = config.build_remote_exec_args(
+        ["claude"],
+        "~/workspace",
+        extra_env={"FOO": "from-plugin", "PLUGIN_ONLY": "1"},
+    )
+
+    remote_command = args[-1]
+    assert "FOO=from-target" in remote_command
+    assert "FOO=from-plugin" not in remote_command
+    assert "TARGET_ONLY=1" in remote_command
+    assert "PLUGIN_ONLY=1" in remote_command
+
+
 def test_remote_bin_for_falls_back_to_default(monkeypatch) -> None:
     config = SshLaunchTargetConfig(
         id="devbox",

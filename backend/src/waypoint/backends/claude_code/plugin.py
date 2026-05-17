@@ -116,6 +116,12 @@ class ClaudeCodePlugin:
     import_request_schema: type[BaseModel] | None = ClaudeThreadImportRequest
     config_schema: type[PluginConfig] = ClaudeCodePluginConfig
     launch_target_schema: type[PluginLaunchTargetConfig] = ClaudeCodeLaunchTargetConfig
+    # Force the fullscreen Ink renderer. Claude's startup capability
+    # probe (DA1 / XTVERSION / DECRQM 2026) races SSH latency on remote
+    # tmux launches and falls back to an inline mode with no alt-screen
+    # and no mouse-tracking. The flag is safe locally too: the fullscreen
+    # renderer is what claude picks when detection succeeds.
+    extra_env = {"CLAUDE_CODE_NO_FLICKER": "1"}
     capabilities = BackendCapabilities(
         is_structured=True,
         supports_resume=False,

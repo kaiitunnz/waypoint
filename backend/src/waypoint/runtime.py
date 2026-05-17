@@ -1188,6 +1188,7 @@ class SessionRuntime:
         allocate_tty: bool = False,
     ) -> list[str]:
         plugin = self.registry.get(backend)
+        extra_env = plugin.extra_env
         if launch_target is None:
             executable = (
                 self.settings.plugin_config(backend).local_bin
@@ -1198,6 +1199,15 @@ class SessionRuntime:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"backend {backend} has no CLI binary configured",
                 )
+            if extra_env:
+                # ``env KEY=VAL ... cmd`` is portable across macOS/Linux
+                # and lets tmux's pane shell exec the CLI with the env
+                # var set, matching what we do over SSH.
+                env_prefix = [
+                    "env",
+                    *(f"{k}={v}" for k, v in sorted(extra_env.items())),
+                ]
+                return [*env_prefix, executable, *args]
             return [executable, *args]
         executable = plugin.remote_executable(launch_target)
         if not executable:
@@ -1210,6 +1220,7 @@ class SessionRuntime:
                 [executable, *args],
                 cwd or launch_target.default_cwd,
                 allocate_tty=allocate_tty,
+                extra_env=extra_env,
             )
         )
 

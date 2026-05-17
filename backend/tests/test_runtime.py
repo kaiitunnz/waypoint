@@ -277,6 +277,49 @@ def make_runtime(tmp_path) -> tuple[SessionRuntime, Storage, Settings]:
     return runtime, storage, settings
 
 
+def test_command_for_backend_local_injects_plugin_extra_env(tmp_path) -> None:
+    """Claude's plugin contributes ``CLAUDE_CODE_NO_FLICKER=1`` so the
+    fullscreen Ink renderer (alt-screen + mouse) kicks in even when
+    claude's own terminal-cap probe times out. The local launch path
+    has no SSH layer to inject env vars for us, so the runtime wraps
+    the command in ``env KEY=VAL …``."""
+    runtime, _, _ = make_runtime(tmp_path)
+    command = runtime._command_for_backend("claude_code", ["--session-id", "abc"])
+    assert command[0] == "env"
+    assert "CLAUDE_CODE_NO_FLICKER=1" in command
+    # The CLI binary follows the env prefix, with original args intact.
+    cli_idx = command.index("claude")
+    assert command[cli_idx:] == ["claude", "--session-id", "abc"]
+
+
+def test_command_for_backend_local_omits_env_wrapper_when_plugin_has_none(
+    tmp_path,
+) -> None:
+    """Plugins with empty ``extra_env`` shouldn't pay an ``env`` exec —
+    keep the local command minimal so behavior is unchanged for tmux /
+    codex / opencode."""
+    runtime, _, _ = make_runtime(tmp_path)
+    command = runtime._command_for_backend("codex", ["resume", "abc"])
+    assert command[0] != "env"
+    assert command == ["codex", "resume", "abc"]
+
+
+def test_command_for_backend_remote_forwards_plugin_extra_env(tmp_path) -> None:
+    runtime, _, _ = make_runtime(tmp_path)
+    target = SshLaunchTargetConfig(
+        id="devbox", name="Devbox", ssh_destination="dev@example.com"
+    )
+    command = runtime._command_for_backend(
+        "claude_code",
+        ["--session-id", "abc"],
+        launch_target=target,
+        cwd="~/workspace",
+        allocate_tty=True,
+    )
+    remote_command = command[-1]
+    assert "CLAUDE_CODE_NO_FLICKER=1" in remote_command
+
+
 def make_session(settings: Settings, **overrides) -> SessionRecord:
     session_dir = settings.sessions_dir / overrides.get("id", "sess")
     session_dir.mkdir(parents=True, exist_ok=True)

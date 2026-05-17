@@ -546,7 +546,10 @@ class TmuxPlugin:
         if backend == "codex" and thread_id:
             # ``codex resume <uuid>`` is a subcommand, not a flag. Drop
             # any prior ``resume <uuid>`` prefix so the new one doesn't
-            # compound across reconnects.
+            # compound across reconnects. Asymmetry with claude's
+            # flag-name scrub is deliberate: ``resume`` here is the
+            # subcommand position and a user can't legitimately place
+            # the literal string ``resume`` first via launch args.
             scrubbed = list(stored_args)
             if len(scrubbed) >= 2 and scrubbed[0] == "resume":
                 scrubbed = scrubbed[2:]

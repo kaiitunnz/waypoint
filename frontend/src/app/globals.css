@@ -992,6 +992,66 @@ html[data-theme="light"] .clipboard-prompt.is-copied {
   background: color-mix(in srgb, var(--success) 18%, rgba(247, 243, 235, 0.92));
 }
 
+/* Paste-confirmation variant has two interactive children (send + cancel),
+   so the wrapper itself isn't a tap target — drop the pointer cursor on
+   the wrapper and let the inner buttons own their own cursors. */
+.clipboard-prompt.is-paste {
+  cursor: default;
+  padding-right: 8px;
+  gap: 10px;
+}
+
+.clipboard-prompt__send {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.clipboard-prompt__send:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 80%, transparent);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+
+.clipboard-prompt__dismiss {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: color-mix(in srgb, var(--text) 55%, transparent);
+  font-size: 1.05rem;
+  line-height: 1;
+  padding: 6px 9px;
+  margin-left: 2px;
+  border-radius: 999px;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    color 140ms ease,
+    background 140ms ease;
+}
+
+.clipboard-prompt__dismiss:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.clipboard-prompt__dismiss:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 80%, transparent);
+  outline-offset: 2px;
+}
+
 .clipboard-prompt__glyph {
   display: grid;
   place-items: center;

@@ -31,6 +31,7 @@ interface SessionTerminalViewProps {
   // composer beneath remains visible.
   locked: boolean;
   onTerminalInput: (data: string) => void;
+  onRequestPaste: () => void;
   onTerminalResize: (size: { cols: number; rows: number }) => void;
   onTerminalScrollChip: (direction: "up" | "down") => void;
   onTerminalScrollChange: (atBottom: boolean) => void;
@@ -63,6 +64,7 @@ export function SessionTerminalView({
   onRateLimitRefresh,
   locked,
   onTerminalInput,
+  onRequestPaste,
   onTerminalResize,
   onTerminalScrollChip,
   onTerminalScrollChange,
@@ -249,6 +251,7 @@ export function SessionTerminalView({
       {liveTmux ? (
         <TerminalKeyBar
           onSend={onTerminalInput}
+          onRequestPaste={onRequestPaste}
           backend={session?.backend ?? null}
         />
       ) : null}
@@ -261,14 +264,17 @@ export function SessionTerminalView({
 // bytes to the pane via the existing input handler — Ctrl-* combinations
 // are encoded directly so the toolbar works even when the OS keyboard
 // doesn't expose a Ctrl modifier. ``backends`` (when set) restricts a
-// key to those backend ids; entries without it are universal.
-const TERMINAL_KEY_BAR: {
+// key to those backend ids; entries without it are universal. An entry
+// with ``action`` instead of ``data`` dispatches a richer handler (e.g.
+// reading the system clipboard) provided by the keybar host.
+type KeyBarEntry = {
   label: string;
-  data: string;
   title: string;
   backends?: string[];
   backendOnly?: boolean;
-}[] = [
+} & ({ data: string } | { action: "paste" });
+
+const TERMINAL_KEY_BAR: KeyBarEntry[] = [
   { label: "Esc", data: "\x1b", title: "Escape" },
   { label: "Tab", data: "\t", title: "Tab" },
   {
@@ -282,19 +288,28 @@ const TERMINAL_KEY_BAR: {
     backends: ["claude_code", "codex"],
     backendOnly: true,
   },
-  { label: "↵", data: "\n", title: "Newline (Ctrl-J)" },
+  { label: "Enter", data: "\r", title: "Enter (submit / select)" },
+  // ``⇧↵`` instead of plain ``↵`` so the glyph reads as "the
+  // shift-modified return key" — i.e. insert a newline in the composer
+  // rather than submit. CC and Codex both wire Ctrl-J (\n) to a
+  // soft-newline; the dedicated Enter chip above carries the submit
+  // semantics.
+  { label: "⇧↵", data: "\n", title: "Shift+Enter (newline)" },
   { label: "↑", data: "\x1b[A", title: "Up" },
   { label: "↓", data: "\x1b[B", title: "Down" },
   { label: "←", data: "\x1b[D", title: "Left" },
   { label: "→", data: "\x1b[C", title: "Right" },
+  { label: "Paste", action: "paste", title: "Paste from clipboard" },
   { label: "^C", data: "\x03", title: "Ctrl-C (interrupt)" },
 ];
 
 export function TerminalKeyBar({
   onSend,
+  onRequestPaste,
   backend,
 }: {
   onSend: (data: string) => void;
+  onRequestPaste: () => void;
   backend: string | null | undefined;
 }) {
   const keys = TERMINAL_KEY_BAR.filter(
@@ -315,7 +330,10 @@ export function TerminalKeyBar({
           // was elsewhere (e.g. the title editor or nowhere) it stays
           // put — tapping a key never pulls focus into the pane.
           onMouseDown={(event) => event.preventDefault()}
-          onClick={() => onSend(key.data)}
+          onClick={() => {
+            if ("action" in key && key.action === "paste") onRequestPaste();
+            else if ("data" in key) onSend(key.data);
+          }}
         >
           {key.label}
         </button>

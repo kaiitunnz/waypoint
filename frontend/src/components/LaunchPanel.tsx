@@ -54,7 +54,11 @@ interface LaunchPanelProps {
     args: string[],
     configOverrides: string[],
   ) => Promise<void>;
-  onAttach: (target: string, backendHint: Backend) => Promise<void>;
+  onAttach: (
+    target: string,
+    backendHint: Backend,
+    title: string,
+  ) => Promise<void>;
   onImportThread: (
     backend: Backend,
     threadId: string,
@@ -97,7 +101,6 @@ export function LaunchPanel({
   const capabilities = catalog.byId(backend)?.capabilities;
   const supportsCustomArgs = capabilities?.supports_custom_cli_args ?? false;
   const supportsConfigOverrides = capabilities?.supports_config_overrides ?? false;
-
   const handleBackendChange = useCallback((nextBackend: Backend) => {
     setBackend(nextBackend);
     setModel("");
@@ -187,8 +190,9 @@ export function LaunchPanel({
     event.preventDefault();
     setFormBusy(true);
     try {
-      await onAttach(tmuxTarget, backend);
+      await onAttach(tmuxTarget, backend, title);
       setTmuxTarget("");
+      setTitle("");
     } finally {
       setFormBusy(false);
     }
@@ -308,6 +312,14 @@ export function LaunchPanel({
                   </option>
                 ))}
               </select>
+            </label>
+            <label className="field">
+              <span>Title</span>
+              <input
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="Optional"
+              />
             </label>
           </div>
           <div className="launch-actions">

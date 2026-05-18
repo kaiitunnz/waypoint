@@ -3066,6 +3066,8 @@ html[data-theme="light"] .tool-call-run-children {
   padding: 6px 12px;
   background: rgba(15, 19, 27, 0.4);
   border-radius: var(--radius-sm);
+  min-width: 0;
+  overflow: hidden;
 }
 
 html[data-theme="light"] .approval-plan {
@@ -3157,6 +3159,14 @@ html[data-theme="light"] .approval-shell {
   line-height: 1.6;
   min-width: 0;
   max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.markdown-message table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .markdown-message > :first-child {

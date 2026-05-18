@@ -2232,6 +2232,87 @@ html[data-theme="light"] .transcript.codex.agent_output {
   font-variant-numeric: tabular-nums;
 }
 
+/* WhatsApp-style meta strip — identity badge, timestamp, and copy button
+ * absolutely positioned at the bubble's bottom-right corner. Paired with
+ * the inline `::after` reserve below, the last text line wraps around
+ * the meta so a single-line message stays a single row instead of
+ * gaining a dedicated footer row. */
+.transcript-meta {
+  position: absolute;
+  bottom: 6px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.transcript-meta .badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  opacity: 0.85;
+}
+
+.transcript-meta .role-time {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--muted-soft);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.transcript-meta .message-copy {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  opacity: 0.55;
+}
+
+.transcript:hover .transcript-meta .message-copy,
+.transcript:focus-within .transcript-meta .message-copy,
+.transcript-meta .message-copy:focus-visible {
+  opacity: 1;
+}
+
+/* Tighter padding for chat bubbles — the editorial 18px panel padding
+ * suits tool cards and disclosures but wastes space around plain text. */
+.transcript.codex.user_input,
+.transcript.codex.agent_output {
+  position: relative;
+  padding: 8px 14px;
+}
+
+/* Reserve inline space at the end of the last paragraph so the meta
+ * strip (absolutely positioned at the bottom-right) lands in cleared
+ * space rather than overlapping text. The width is `--meta-reserve`,
+ * set on the bubble at runtime by `useMetaReserve` to the meta's
+ * actual measured width + a 16px gap, so the browser's line-breaker
+ * decides crisply whether the last line has room for the meta or
+ * needs to wrap. The hardcoded fallback only applies during the
+ * first paint before the ResizeObserver fires. */
+.transcript.codex.user_input .markdown-message > p:last-child::after,
+.transcript.codex.agent_output .markdown-message > p:last-child::after {
+  content: "\200B";
+  display: inline-block;
+  width: var(--meta-reserve, 132px);
+  height: 1em;
+  vertical-align: bottom;
+  pointer-events: none;
+}
+
+/* When the message ends with a block-level child (code fence, list,
+ * table, etc.) the inline phantom doesn't apply, so reserve vertical
+ * space via padding so the meta clears the block. */
+.transcript.codex.user_input:has(.markdown-message > *:last-child:not(p)),
+.transcript.codex.agent_output:has(.markdown-message > *:last-child:not(p)),
+.transcript.codex.user_input.ask-answer-summary {
+  padding-bottom: 30px;
+}
+
 .message-copy {
   margin-left: auto;
   display: inline-flex;
@@ -2279,7 +2360,8 @@ html[data-theme="light"] .transcript.codex.agent_output {
 @media (hover: none) {
   /* No hover on touch — the button has to read clearly without the
    * brighten-on-hover step the desktop relies on. */
-  .message-copy {
+  .message-copy,
+  .transcript-meta .message-copy {
     opacity: 1;
   }
 }

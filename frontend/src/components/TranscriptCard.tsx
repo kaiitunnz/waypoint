@@ -1,4 +1,10 @@
-import { memo, useState } from "react";
+import {
+  memo,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 
 import { fidelityFor, transportLabel } from "@/lib/backends";
 import { EventRecord, SessionTransport } from "@/lib/types";
@@ -39,6 +45,32 @@ export interface AskAnswerEntry {
   notes?: string;
 }
 
+// Measure the meta strip's real width and surface it as `--meta-reserve`
+// on the bubble, so the inline phantom at the end of the last paragraph
+// can be sized to exactly the meta's footprint plus a small gap. With
+// this, the browser's line-breaker decides cleanly whether the meta fits
+// on the last line (no overlap) or has to wrap to its own row (no
+// hardcoded 116px guess that sometimes lets text bleed under the meta).
+function useMetaReserve(gap: number = 16) {
+  const metaRef = useRef<HTMLDivElement | null>(null);
+  const [width, setWidth] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const node = metaRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w > 0) setWidth(Math.ceil(w));
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  const style =
+    width != null
+      ? ({ "--meta-reserve": `${width + gap}px` } as CSSProperties)
+      : undefined;
+  return { metaRef, style };
+}
+
 export function PendingUserInputCard({
   text,
   ts,
@@ -48,15 +80,18 @@ export function PendingUserInputCard({
   ts: string;
   confirmed?: boolean;
 }) {
+  const { metaRef, style } = useMetaReserve();
   return (
     <article
       className={`panel transcript codex user_input${confirmed ? " pending-optimistic persisted" : " pending-optimistic"}`}
+      aria-label="Message from you"
+      style={style}
     >
-      <div className="transcript-role">
+      <MarkdownMessage text={text} />
+      <div ref={metaRef} className="transcript-meta">
         <span className="badge user">you</span>
         <span className="role-time">{formatTime(ts)}</span>
       </div>
-      <MarkdownMessage text={text} />
     </article>
   );
 }
@@ -138,31 +173,13 @@ function CodexCard({
       if (event.metadata?.kind === "ask_user_question_answer") {
         return <AskAnswerSummaryCard event={event} />;
       }
-      return (
-        <article className="panel transcript codex user_input">
-          <div className="transcript-role">
-            <span className="badge user">you</span>
-            <span className="role-time">{formatTime(event.ts)}</span>
-            <CopyMessageButton text={event.text} />
-          </div>
-          <MarkdownMessage text={event.text} />
-        </article>
-      );
+      return <UserMessageBubble event={event} />;
     }
     case "agent_output":
       if (event.metadata?.item_kind === "reasoning") {
         return <ReasoningDisclosure event={event} agentLabel={agentLabel} />;
       }
-      return (
-        <article className="panel transcript codex agent_output">
-          <div className="transcript-role">
-            <span className="badge agent">{agentLabel}</span>
-            <span className="role-time">{formatTime(event.ts)}</span>
-            <CopyMessageButton text={event.text} />
-          </div>
-          <MarkdownMessage text={event.text} />
-        </article>
-      );
+      return <AgentMessageBubble event={event} agentLabel={agentLabel} />;
     case "tool_call": {
       const ask = parseAskUserQuestion(event);
       if (ask) {
@@ -213,6 +230,48 @@ function CodexCard({
     default:
       return <HeuristicCard event={event} />;
   }
+}
+
+function UserMessageBubble({ event }: { event: EventRecord }) {
+  const { metaRef, style } = useMetaReserve();
+  return (
+    <article
+      className="panel transcript codex user_input"
+      aria-label="Message from you"
+      style={style}
+    >
+      <MarkdownMessage text={event.text} />
+      <div ref={metaRef} className="transcript-meta">
+        <span className="badge user">you</span>
+        <span className="role-time">{formatTime(event.ts)}</span>
+        <CopyMessageButton text={event.text} />
+      </div>
+    </article>
+  );
+}
+
+function AgentMessageBubble({
+  event,
+  agentLabel,
+}: {
+  event: EventRecord;
+  agentLabel: string;
+}) {
+  const { metaRef, style } = useMetaReserve();
+  return (
+    <article
+      className="panel transcript codex agent_output"
+      aria-label={`Message from ${agentLabel}`}
+      style={style}
+    >
+      <MarkdownMessage text={event.text} />
+      <div ref={metaRef} className="transcript-meta">
+        <span className="badge agent">{agentLabel}</span>
+        <span className="role-time">{formatTime(event.ts)}</span>
+        <CopyMessageButton text={event.text} />
+      </div>
+    </article>
+  );
 }
 
 function CommandStatusCard({
@@ -1039,12 +1098,10 @@ function AskAnswerSummaryCard({ event }: { event: EventRecord }) {
     .filter((item) => item.question);
 
   return (
-    <article className="panel transcript codex user_input ask-answer-summary">
-      <div className="transcript-role">
-        <span className="badge user">you</span>
-        <span className="badge neutral ask-answer-chip">answered</span>
-        <span className="role-time">{formatTime(event.ts)}</span>
-      </div>
+    <article
+      className="panel transcript codex user_input ask-answer-summary"
+      aria-label="Your answers"
+    >
       {answers.length > 0 ? (
         <ul className="ask-answer-list">
           {answers.map((entry, index) => (
@@ -1069,6 +1126,11 @@ function AskAnswerSummaryCard({ event }: { event: EventRecord }) {
         // rendering the raw `"Q"="A"` string Claude received.
         <pre className="ask-answer-fallback">{event.text}</pre>
       )}
+      <div className="transcript-meta">
+        <span className="badge user">you</span>
+        <span className="badge neutral ask-answer-chip">answered</span>
+        <span className="role-time">{formatTime(event.ts)}</span>
+      </div>
     </article>
   );
 }

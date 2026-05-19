@@ -43,9 +43,6 @@ def preflight_tailscale_command(command: str) -> None:
                 raise typer.Exit(code=1)
         return
 
-    # Docker is missing from here on. `status` is a read-only query — degrade
-    # gracefully so users can ask "is there a container?" on hosts without
-    # Docker installed.
     if command == "status":
         typer.echo("docker not installed; no tailscale container on this host.")
         raise typer.Exit(code=0)

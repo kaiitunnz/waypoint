@@ -118,6 +118,12 @@ When the frontend is opened from a phone, it now infers the backend URL from the
 - frontend: `http://100.x.y.z:3000`
 - inferred backend: `http://100.x.y.z:8787`
 
+### Multiple tailnets per host
+
+If one host must participate in more than one tailnet, run one Docker-backed Tailscale profile per tailnet. Each profile is a separate container and a separate Tailscale node.
+
+See [waypointctl/README.md](waypointctl/README.md) for the command syntax, configuration variables, and startup checks.
+
 ## Local stack supervisor
 
 `waypointctl` is the canonical way to run the local stack. It's an installable

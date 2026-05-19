@@ -23,6 +23,7 @@ from waypointctl.paths import (
 from waypointctl.process import is_pid_running, read_pid_file, running_pid
 from waypointctl.protocol import DaemonResult
 from waypointctl.stack import WaypointStack
+from waypointctl.tailscale import preflight_tailscale_command, run_tailscale_helper
 
 app = typer.Typer(
     add_completion=False, no_args_is_help=True, help="Waypoint control plane"
@@ -32,6 +33,13 @@ daemon_app = typer.Typer(
     add_completion=False, no_args_is_help=True, help="Manage the local waypointd daemon"
 )
 app.add_typer(daemon_app, name="daemon")
+
+tailscale_app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    help="Manage Docker-backed tailnet sidecars",
+)
+app.add_typer(tailscale_app, name="tailscale")
 
 
 def _ctx_home(ctx: typer.Context) -> Path:
@@ -116,6 +124,38 @@ def doctor(ctx: typer.Context) -> None:
     typer.echo(f"WAYPOINTCTL_STATE_DIR={resolve_state_dir()}")
     typer.echo(f"daemon socket={waypoint_socket_path()}")
     typer.echo(f"daemon for this home={'yes' if daemon_available(home) else 'no'}")
+
+
+@tailscale_app.command("up")
+def tailscale_up(
+    ctx: typer.Context,
+    profile: str = typer.Argument(..., help="Tailnet profile name."),
+) -> None:
+    _run_tailscale_command(ctx, "up", profile)
+
+
+@tailscale_app.command("down")
+def tailscale_down(
+    ctx: typer.Context,
+    profile: str = typer.Argument(..., help="Tailnet profile name."),
+) -> None:
+    _run_tailscale_command(ctx, "down", profile)
+
+
+@tailscale_app.command("status")
+def tailscale_status(
+    ctx: typer.Context,
+    profile: str = typer.Argument(..., help="Tailnet profile name."),
+) -> None:
+    _run_tailscale_command(ctx, "status", profile)
+
+
+@tailscale_app.command("logs")
+def tailscale_logs(
+    ctx: typer.Context,
+    profile: str = typer.Argument(..., help="Tailnet profile name."),
+) -> None:
+    _run_tailscale_command(ctx, "logs", profile)
 
 
 @daemon_app.command("start")
@@ -240,6 +280,12 @@ def _run_in_process(home: Path, command: str, args: list[str]) -> None:
         if result.message:
             typer.echo(result.message, err=True)
         raise typer.Exit(code=1)
+
+
+def _run_tailscale_command(ctx: typer.Context, command: str, profile: str) -> None:
+    home = _ctx_home(ctx)
+    preflight_tailscale_command(command)
+    run_tailscale_helper(home, command, profile)
 
 
 def _should_use_daemon(home: Path) -> bool:

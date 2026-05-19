@@ -381,6 +381,47 @@ def test_helper_does_not_expand_shell_substitutions_in_dotenv(
     assert "-e TS_HOSTNAME=waypoint-${USER}" in text
 
 
+def test_helper_strips_whitespace_around_unquoted_dotenv_values(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = _make_repo(tmp_path / "repo")
+    _copy_tailscale_script(repo)
+    (repo / ".env").write_text(
+        "TS_AUTHKEY=   tskey-auth-trimmed   \n"
+        'TS_HOSTNAME="  wp-keep-inner-spaces  "\n'
+        "TS_IMAGE=tailscale/tailscale:stable\n",
+        encoding="utf-8",
+    )
+    log_file = tmp_path / "docker.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_docker(bin_dir, log_file)
+
+    bash = shutil.which("bash") or "/bin/bash"
+    completed = subprocess.run(
+        [
+            bash,
+            str(repo / "scripts" / "waypoint_tailscale.sh"),
+            "up",
+            "profile-a",
+        ],
+        cwd=repo,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "WAYPOINTCTL_STATE_DIR": str(tmp_path / "state"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    text = log_file.read_text(encoding="utf-8")
+    assert "-e TS_AUTHKEY=tskey-auth-trimmed" in text
+    assert "-e TS_HOSTNAME=  wp-keep-inner-spaces  " in text
+
+
 def test_helper_rejects_degenerate_profile_names(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

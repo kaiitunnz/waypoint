@@ -89,6 +89,7 @@ Copy the repo-root [`.env.example`](../.env.example) to `.env`, then set:
 - `TS_AUTHKEY` for `tailscale up`
 - `TS_HOSTNAME` to override the node name
 - `TS_IMAGE` to override the container image
+- `TS_HOST_ALIAS` to override the in-container alias for the host (defaults to `host.docker.internal`; change it on hosts where `--add-host …:host-gateway` resolves differently)
 
 The helper reads the same repo-root `.env` that the rest of `waypointctl` loads.
 Each profile keeps its Docker/Tailscale state under `~/.waypoint/tailscale/<profile>/`.

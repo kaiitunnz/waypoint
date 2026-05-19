@@ -105,6 +105,32 @@ def test_preflight_prompts_when_docker_and_tailscale_are_present(
     ]
 
 
+def test_preflight_aborts_when_user_declines_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        tailscale_module,
+        "detect_tool_availability",
+        lambda: ToolAvailability(True, True),
+    )
+
+    class _FakeStdin:
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr(tailscale_module.sys, "stdin", _FakeStdin())
+    monkeypatch.setattr(
+        tailscale_module.typer,
+        "confirm",
+        lambda _message, *, default=False: False,
+    )
+
+    with pytest.raises(tailscale_module.typer.Exit) as excinfo:
+        tailscale_module.preflight_tailscale_command("up")
+
+    assert excinfo.value.exit_code == 1
+
+
 def test_preflight_aborts_when_tailscale_exists_but_docker_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -218,19 +244,21 @@ def test_tailscale_up_uses_repo_dotenv_and_routes_to_helper(
     assert captured["image"] == "tailscale/tailscale:stable"
 
 
-def test_tailscale_status_routes_to_helper(
+@pytest.mark.parametrize("command", ["down", "status", "logs"])
+def test_tailscale_verbs_route_to_helper(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    command: str,
 ) -> None:
     home = _make_repo(tmp_path / "repo")
 
     captured: dict[str, object] = {}
 
     def fake_run_tailscale_helper(
-        resolved_home: Path, command: str, profile: str
+        resolved_home: Path, helper_command: str, profile: str
     ) -> None:
         captured["home"] = resolved_home
-        captured["command"] = command
+        captured["command"] = helper_command
         captured["profile"] = profile
 
     monkeypatch.setattr(
@@ -241,12 +269,12 @@ def test_tailscale_status_routes_to_helper(
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["--home", str(home), "tailscale", "status", "profile-a"],
+        ["--home", str(home), "tailscale", command, "profile-a"],
     )
 
     assert result.exit_code == 0
     assert captured["home"] == home
-    assert captured["command"] == "status"
+    assert captured["command"] == command
     assert captured["profile"] == "profile-a"
 
 

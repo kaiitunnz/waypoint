@@ -276,6 +276,47 @@ def test_helper_up_uses_repo_dotenv_and_exposes_ports(
     assert "tailscale container ready: waypoint-tailscale-profile-a" in completed.stdout
 
 
+def test_helper_does_not_expand_shell_substitutions_in_dotenv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = _make_repo(tmp_path / "repo")
+    _copy_tailscale_script(repo)
+    (repo / ".env").write_text(
+        'TS_AUTHKEY="$(echo HACKED)"\n'
+        "TS_HOSTNAME='waypoint-${USER}'\n"
+        "TS_IMAGE=tailscale/tailscale:stable\n",
+        encoding="utf-8",
+    )
+    log_file = tmp_path / "docker.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_docker(bin_dir, log_file)
+
+    bash = shutil.which("bash") or "/bin/bash"
+    completed = subprocess.run(
+        [
+            bash,
+            str(repo / "scripts" / "waypoint_tailscale.sh"),
+            "up",
+            "profile-a",
+        ],
+        cwd=repo,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "WAYPOINTCTL_STATE_DIR": str(tmp_path / "state"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    text = log_file.read_text(encoding="utf-8")
+    assert "-e TS_AUTHKEY=$(echo HACKED)" in text
+    assert "-e TS_HOSTNAME=waypoint-${USER}" in text
+
+
 def test_helper_requires_docker_when_binary_is_missing(
     tmp_path: Path,
 ) -> None:

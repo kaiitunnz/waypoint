@@ -230,6 +230,10 @@ main() {
     esac
   done
 
+  if [[ -z "$(slugify_profile "${profile}")" ]]; then
+    die "invalid profile name: ${profile}"
+  fi
+
   case "${command}" in
     up) cmd_up "${profile}" ;;
     down) cmd_down "${profile}" ;;

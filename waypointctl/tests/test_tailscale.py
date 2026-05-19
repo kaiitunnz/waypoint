@@ -317,6 +317,44 @@ def test_helper_does_not_expand_shell_substitutions_in_dotenv(
     assert "-e TS_HOSTNAME=waypoint-${USER}" in text
 
 
+def test_helper_rejects_degenerate_profile_names(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = _make_repo(tmp_path / "repo")
+    _copy_tailscale_script(repo)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_file = tmp_path / "docker.log"
+    _write_fake_docker(bin_dir, log_file)
+
+    bash = shutil.which("bash") or "/bin/bash"
+    completed = subprocess.run(
+        [bash, str(repo / "scripts" / "waypoint_tailscale.sh"), "status", "---"],
+        cwd=repo,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "WAYPOINTCTL_STATE_DIR": str(tmp_path / "state"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert "invalid profile name: ---" in completed.stderr
+
+
+def _path_without_docker() -> str:
+    real_docker = shutil.which("docker")
+    skip = str(Path(real_docker).parent) if real_docker else None
+    return os.pathsep.join(
+        entry
+        for entry in os.environ["PATH"].split(os.pathsep)
+        if entry and entry != skip
+    )
+
+
 def test_helper_requires_docker_when_binary_is_missing(
     tmp_path: Path,
 ) -> None:
@@ -326,13 +364,13 @@ def test_helper_requires_docker_when_binary_is_missing(
         [
             bash,
             str(repo / "scripts" / "waypoint_tailscale.sh"),
-            "status",
+            "down",
             "profile-a",
         ],
         cwd=repo,
         env={
             **os.environ,
-            "PATH": str(tmp_path / "empty-bin"),
+            "PATH": _path_without_docker(),
             "WAYPOINTCTL_STATE_DIR": str(tmp_path / "state"),
         },
         capture_output=True,

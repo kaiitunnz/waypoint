@@ -93,12 +93,11 @@ Copy the repo-root [`.env.example`](../.env.example) to `.env`, then set:
 The helper reads the same repo-root `.env` that the rest of `waypointctl` loads.
 Each profile keeps its Docker/Tailscale state under `~/.waypoint/tailscale/<profile>/`.
 
-On `up`, `waypointctl` checks whether Docker and Tailscale are installed locally:
+Each verb runs a preflight that checks whether Docker and Tailscale are installed locally:
 
-- Docker + Tailscale installed: prompt before proceeding with Docker deployment
-- Docker installed, Tailscale missing: proceed with Docker deployment
-- Tailscale installed, Docker missing: abort and report that Docker is missing
-- neither installed: abort and tell you to install either Docker or Tailscale
+- Docker installed: the verb runs. `up` additionally prompts for interactive confirmation when Tailscale is also installed, so you opt in to the Docker path rather than reaching for the host-level `tailscale` binary.
+- Docker missing, command is `status`: degrade gracefully — print `docker not installed; no tailscale container on this host.` and exit 0. `status` is a read-only query and should not error on hosts that have never used the helper.
+- Docker missing, command is `up`/`down`/`logs`: abort with a message identifying what's wrong. `logs` uses a verb-specific message; `up`/`down` say either "Docker is missing" (if Tailscale is present) or "install either Docker or Tailscale" (if neither is).
 
 ## Daemon mode
 

@@ -130,9 +130,45 @@ def test_preflight_aborts_when_neither_tool_exists(
     )
 
     with pytest.raises(tailscale_module.typer.Exit) as excinfo:
-        tailscale_module.preflight_tailscale_command("status")
+        tailscale_module.preflight_tailscale_command("up")
 
     assert excinfo.value.exit_code == 1
+
+
+def test_preflight_status_succeeds_when_docker_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        tailscale_module,
+        "detect_tool_availability",
+        lambda: ToolAvailability(docker=False, tailscale=False),
+    )
+
+    with pytest.raises(tailscale_module.typer.Exit) as excinfo:
+        tailscale_module.preflight_tailscale_command("status")
+
+    assert excinfo.value.exit_code == 0
+    captured = capsys.readouterr()
+    assert "docker not installed" in captured.out
+
+
+def test_preflight_logs_aborts_when_docker_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        tailscale_module,
+        "detect_tool_availability",
+        lambda: ToolAvailability(docker=False, tailscale=True),
+    )
+
+    with pytest.raises(tailscale_module.typer.Exit) as excinfo:
+        tailscale_module.preflight_tailscale_command("logs")
+
+    assert excinfo.value.exit_code == 1
+    captured = capsys.readouterr()
+    assert "Docker is required to read container logs." in captured.err
 
 
 def test_tailscale_up_uses_repo_dotenv_and_routes_to_helper(

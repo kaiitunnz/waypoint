@@ -26,8 +26,9 @@ def tailscale_helper_script(home: Path) -> Path:
 
 def preflight_tailscale_command(command: str) -> None:
     availability = detect_tool_availability()
-    if availability.docker and availability.tailscale:
-        if command == "up":
+
+    if availability.docker:
+        if availability.tailscale and command == "up":
             if not sys.stdin.isatty():
                 typer.echo(
                     "Docker and Tailscale are installed, but this command needs an "
@@ -42,8 +43,16 @@ def preflight_tailscale_command(command: str) -> None:
                 raise typer.Exit(code=1)
         return
 
-    if availability.docker:
-        return
+    # Docker is missing from here on. `status` is a read-only query — degrade
+    # gracefully so users can ask "is there a container?" on hosts without
+    # Docker installed.
+    if command == "status":
+        typer.echo("docker not installed; no tailscale container on this host.")
+        raise typer.Exit(code=0)
+
+    if command == "logs":
+        typer.echo("Docker is required to read container logs.", err=True)
+        raise typer.Exit(code=1)
 
     if availability.tailscale:
         typer.echo(

@@ -40,6 +40,7 @@ State (PID files, logs, default data dirs) lives under
 ~/.waypoint/
 ├── run/           waypointd.{sock,pid}, {backend,frontend,caffeinate}.{pid,started-this-run}
 ├── logs/          waypointd.log, backend.log, frontend.log
+├── tailscale/     Docker-backed tailnet state
 ├── backend-data/  (default; overridable via WAYPOINT_STACK_BACKEND_DATA_DIR)
 └── uv-cache/      (default; overridable via WAYPOINT_STACK_UV_CACHE_DIR)
 ```
@@ -71,6 +72,33 @@ are not supported.
 | `WAYPOINT_STACK_UV_CACHE_DIR` | `<state-dir>/uv-cache` | Backend `UV_CACHE_DIR`. |
 | `WAYPOINT_STACK_FORCE_FRONTEND_BUILD` | `0` | When `1`, always rebuild the frontend before `npm run start`. |
 | `WAYPOINT_STACK_CAFFEINATE` | `1` | macOS only: hold a `caffeinate -i -s` for the lifetime of the stack. |
+
+## Multiple tailnets per host
+
+`waypointctl tailscale` manages Docker-backed Tailscale profiles for hosts that must participate in multiple tailnets. Each profile maps to one container and one tailnet node:
+
+```
+waypointctl tailscale up <profile>
+waypointctl tailscale down <profile>
+waypointctl tailscale status <profile>
+waypointctl tailscale logs <profile>
+```
+
+Copy the repo-root [`.env.example`](../.env.example) to `.env`, then set:
+
+- `TS_AUTHKEY` for `tailscale up`
+- `TS_HOSTNAME` to override the node name
+- `TS_IMAGE` to override the container image
+
+The helper reads the same repo-root `.env` that the rest of `waypointctl` loads.
+Each profile keeps its Docker/Tailscale state under `~/.waypoint/tailscale/<profile>/`.
+
+On `up`, `waypointctl` checks whether Docker and Tailscale are installed locally:
+
+- Docker + Tailscale installed: prompt before proceeding with Docker deployment
+- Docker installed, Tailscale missing: proceed with Docker deployment
+- Tailscale installed, Docker missing: abort and report that Docker is missing
+- neither installed: abort and tell you to install either Docker or Tailscale
 
 ## Daemon mode
 

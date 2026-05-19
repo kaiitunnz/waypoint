@@ -58,12 +58,13 @@ load_repo_env() {
     key="${line%%=*}"
     value="${line#*=}"
     [[ "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-    if [[ ${#value} -ge 2 ]]; then
-      if [[ "${value:0:1}" == "${dq}" && "${value: -1}" == "${dq}" ]]; then
-        value="${value:1:${#value}-2}"
-      elif [[ "${value:0:1}" == "${sq}" && "${value: -1}" == "${sq}" ]]; then
-        value="${value:1:${#value}-2}"
-      fi
+    if [[ ${#value} -ge 2 && "${value:0:1}" == "${dq}" && "${value: -1}" == "${dq}" ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ ${#value} -ge 2 && "${value:0:1}" == "${sq}" && "${value: -1}" == "${sq}" ]]; then
+      value="${value:1:${#value}-2}"
+    else
+      value="${value#"${value%%[![:space:]]*}"}"
+      value="${value%"${value##*[![:space:]]}"}"
     fi
     export "${key}=${value}"
   done < "${env_file}"

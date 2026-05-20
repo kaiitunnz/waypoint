@@ -19,11 +19,9 @@ export function backendPortFromUrl(url: string | null | undefined): number | nul
   if (!url) return null;
   try {
     const parsed = new URL(url);
-    if (parsed.port) {
-      const parsedPort = Number.parseInt(parsed.port, 10);
-      return Number.isFinite(parsedPort) ? parsedPort : null;
-    }
-    return parsed.protocol === "https:" ? 443 : parsed.protocol === "http:" ? 80 : null;
+    if (!parsed.port) return null;
+    const parsedPort = Number.parseInt(parsed.port, 10);
+    return Number.isFinite(parsedPort) ? parsedPort : null;
   } catch {
     return null;
   }

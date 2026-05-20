@@ -21,7 +21,7 @@ def test_send_input_uses_literal_mode_and_submit() -> None:
     ]
 
 
-def test_send_input_preserves_multiline_text() -> None:
+def test_send_input_sends_multiline_text_as_single_submission() -> None:
     commands: list[tuple[str, ...]] = []
 
     async def fake_run(*args: str) -> str:
@@ -33,9 +33,12 @@ def test_send_input_preserves_multiline_text() -> None:
 
     asyncio.run(adapter.send_input("%2", "first line\nsecond line", submit=True))
 
+    # Embedded newlines emit as Ctrl-J (soft newline) so the TUI treats
+    # the whole block as one multi-line message terminated by the final
+    # Enter that ``submit=True`` adds.
     assert commands == [
         ("send-keys", "-t", "%2", "-l", "--", "first line"),
-        ("send-keys", "-t", "%2", "Enter"),
+        ("send-keys", "-t", "%2", "C-j"),
         ("send-keys", "-t", "%2", "-l", "--", "second line"),
         ("send-keys", "-t", "%2", "Enter"),
     ]

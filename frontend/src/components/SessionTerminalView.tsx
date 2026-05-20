@@ -1,8 +1,9 @@
 "use client";
 
-import { Dispatch, MutableRefObject, SetStateAction } from "react";
+import { Dispatch, MutableRefObject, SetStateAction, useCallback, useState } from "react";
 
 import { SessionUsagePill } from "@/components/SessionUsagePill";
+import { TerminalCompose } from "@/components/TerminalCompose";
 import { TerminalScrollChips } from "@/components/TerminalScrollChips";
 import { XTerminal, type XTerminalHandle } from "@/components/XTerminal";
 import { SessionRecord } from "@/lib/types";
@@ -31,6 +32,9 @@ interface SessionTerminalViewProps {
   // composer beneath remains visible.
   locked: boolean;
   onTerminalInput: (data: string) => void;
+  // Returns false when the WS isn't open so the composer can keep the
+  // draft and surface a "reconnecting" hint instead of dropping it.
+  onTerminalSubmit: (text: string) => boolean;
   onRequestPaste: () => void;
   onTerminalResize: (size: { cols: number; rows: number }) => void;
   onTerminalScrollChip: (direction: "up" | "down") => void;
@@ -64,6 +68,7 @@ export function SessionTerminalView({
   onRateLimitRefresh,
   locked,
   onTerminalInput,
+  onTerminalSubmit,
   onRequestPaste,
   onTerminalResize,
   onTerminalScrollChip,
@@ -109,9 +114,20 @@ export function SessionTerminalView({
     void cb();
   };
 
+  const [composeOpen, setComposeOpen] = useState(false);
+  // The compose drawer collapses back to a hairline handle when the
+  // session isn't live, so we don't carry stale "open" state across a
+  // disconnect / view switch.
+  const composeEnabled = liveTmux;
+  const refocusTerminal = useCallback(() => {
+    terminalRef.current?.focus();
+  }, [terminalRef]);
+
   return (
     <section
-      className={`session-terminal ${locked ? "is-locked" : ""}`}
+      className={`session-terminal ${locked ? "is-locked" : ""} ${
+        composeEnabled && composeOpen ? "has-compose-open" : ""
+      }`}
       aria-label="Terminal session"
     >
       <div className="term-bar">
@@ -253,6 +269,15 @@ export function SessionTerminalView({
           onSend={onTerminalInput}
           onRequestPaste={onRequestPaste}
           backend={session?.backend ?? null}
+        />
+      ) : null}
+      {composeEnabled ? (
+        <TerminalCompose
+          onSubmit={onTerminalSubmit}
+          expanded={composeOpen}
+          onExpandedChange={setComposeOpen}
+          connection={connection}
+          refocusTerminal={refocusTerminal}
         />
       ) : null}
     </section>

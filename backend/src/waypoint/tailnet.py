@@ -105,7 +105,7 @@ async def _run_status(argv: list[str]) -> TailnetSnapshot:
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await process.communicate()
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, OSError) as exc:
         return TailnetSnapshot(
             available=False, error=f"failed to spawn {argv[0]}: {exc}"
         )

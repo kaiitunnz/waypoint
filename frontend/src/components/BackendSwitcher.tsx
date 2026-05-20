@@ -4,7 +4,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { isAuthError, probeBackend } from "@/lib/api";
 import { LaunchTargetSummary } from "@/lib/types";
-import { BackendOption, buildBackendOptions, fetchBackendTailnetSnapshot, TailnetSnapshot } from "@/lib/tailnet";
+import {
+  backendPortFromUrl,
+  BackendOption,
+  buildBackendOptions,
+  DEFAULT_BACKEND_PORT,
+  fetchBackendTailnetSnapshot,
+  TailnetSnapshot,
+} from "@/lib/tailnet";
 
 interface BackendSwitcherProps {
   host: string;
@@ -38,9 +45,10 @@ export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch
 
   const pageHost = typeof window === "undefined" ? "localhost" : window.location.hostname || "localhost";
 
+  const backendPort = backendPortFromUrl(host) ?? DEFAULT_BACKEND_PORT;
   const hostOptions = useMemo<BackendOption[]>(
-    () => buildBackendOptions(pageHost, snapshot),
-    [pageHost, snapshot],
+    () => buildBackendOptions(pageHost, snapshot, backendPort),
+    [pageHost, snapshot, backendPort],
   );
 
   const pickerOptions = useMemo<PickerOption[]>(

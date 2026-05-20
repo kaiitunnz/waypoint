@@ -4,8 +4,10 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { probeBackend } from "@/lib/api";
 import {
+  backendPortFromUrl,
   BackendOption,
   buildBackendOptions,
+  DEFAULT_BACKEND_PORT,
   fetchLocalTailnetSnapshot,
   TailnetSnapshot,
 } from "@/lib/tailnet";
@@ -33,9 +35,10 @@ export function LoginForm({ defaultHost, onSubmit }: LoginFormProps) {
 
   const pageHost = typeof window === "undefined" ? "localhost" : window.location.hostname || "localhost";
 
+  const backendPort = backendPortFromUrl(defaultHost) ?? DEFAULT_BACKEND_PORT;
   const options = useMemo<BackendOption[]>(
-    () => buildBackendOptions(pageHost, snapshot),
-    [pageHost, snapshot],
+    () => buildBackendOptions(pageHost, snapshot, backendPort),
+    [pageHost, snapshot, backendPort],
   );
 
   const loadSnapshot = async (signal?: AbortSignal) => {

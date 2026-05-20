@@ -6995,6 +6995,11 @@ html[data-theme="light"] .term-keys button:hover {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
+  /* Anchor for popovers that escape ``.term-compose-inner``'s
+     ``overflow: hidden`` (slash suggestions, usage-pill panel) — both
+     render outside the clipped subtree but absolutely-positioned
+     against this element so they float just above the drawer. */
+  position: relative;
   border-top: 1px solid var(--line);
   background: linear-gradient(
     180deg,
@@ -7150,24 +7155,46 @@ html[data-theme="light"] .term-compose-handle:hover {
   flex: 1 1 auto;
 }
 
-/* The usage pill lives at the left edge of the drawer's meta row. The
-   composer default anchors the popover to the right (it grows leftward
-   from a pill that sits at the right of the chat composer), which here
-   would shoot 440px off-screen to the left of the pane. Anchor the
-   panel to the pill's left edge so it grows rightward, and bump it
-   above the textarea above (z-index 50 matches the term-bar variant). */
-.term-compose .usage-panel {
-  left: 0;
+/* SessionUsagePill portals its panel into ``.term-compose`` to escape
+   the ``overflow: hidden`` on ``.term-compose-inner`` (without the
+   portal the panel is clipped at the textarea boundary regardless of
+   z-index). Once portaled, the panel positions against the drawer's
+   outer box: float upward above the drawer, anchor to the left to
+   match the pill's left-aligned home in the meta row, and float over
+   the term-stage above the drawer. */
+.term-compose > .usage-panel {
+  left: 8px;
   right: auto;
+  bottom: calc(100% + 8px);
   z-index: 50;
 }
 
 /* On narrow screens the 440px panel would overflow the right edge of
    the pane; pin the right side so it flexes within the drawer width. */
 @media (max-width: 720px) {
-  .term-compose .usage-panel {
+  .term-compose > .usage-panel {
     right: 8px;
     width: auto;
+  }
+}
+
+/* The slash-suggestions list also escapes the clipped subtree by
+   rendering as a child of ``.term-compose``. Its default anchoring
+   (``left: 0; right: 0; bottom: calc(100% + 6px)``) places it above
+   the textarea but inside the clipped wrapper — here it instead
+   floats above the entire drawer, aligned with the textarea inset
+   inside. */
+.term-compose > .slash-suggestions {
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% + 6px);
+  z-index: 50;
+}
+
+@media (max-width: 720px) {
+  .term-compose > .slash-suggestions {
+    left: 8px;
+    right: 8px;
   }
 }
 

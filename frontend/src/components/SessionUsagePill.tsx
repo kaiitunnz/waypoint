@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { UsageBar, UsageReadout } from "@/components/UsageReadout";
 import { humaniseBackend } from "@/lib/backends";
@@ -19,6 +20,12 @@ interface SessionUsagePillProps {
   connection: Connection;
   onRateLimitRefresh: () => void | Promise<void>;
   rateLimitRefreshBusy: boolean;
+  // When provided, the popover panel is portaled into this element
+  // instead of rendering as a sibling of the trigger button. Used by
+  // the tmux quick-compose drawer where the trigger lives inside an
+  // ``overflow: hidden`` ancestor — portaling escapes the clip so the
+  // panel can float above the drawer.
+  popoverContainer?: HTMLElement | null;
 }
 
 export function SessionUsagePill({
@@ -26,15 +33,22 @@ export function SessionUsagePill({
   connection,
   onRateLimitRefresh,
   rateLimitRefreshBusy,
+  popoverContainer,
 }: SessionUsagePillProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
     function onDocClick(event: MouseEvent) {
-      if (!wrapRef.current) return;
-      if (wrapRef.current.contains(event.target as Node)) return;
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (wrapRef.current?.contains(target)) return;
+      // Once portaled, the panel is no longer a descendant of the
+      // wrapper — check it separately so clicks inside the panel
+      // don't dismiss it.
+      if (panelRef.current?.contains(target)) return;
       setOpen(false);
     }
     document.addEventListener("mousedown", onDocClick);
@@ -120,6 +134,9 @@ export function SessionUsagePill({
     );
   }
 
+  const renderPanel = (node: React.ReactNode): React.ReactNode =>
+    popoverContainer ? createPortal(node, popoverContainer) : node;
+
   return (
     <div className="composer-context" ref={wrapRef}>
       <button
@@ -142,8 +159,9 @@ export function SessionUsagePill({
             ? "reconnecting"
             : "connecting"}
       </button>
-      {open ? (
+      {open ? renderPanel(
         <div
+          ref={panelRef}
           className={`usage-panel tone-${usageToneValue}`}
           role="dialog"
           aria-label="Usage details"

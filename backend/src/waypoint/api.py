@@ -861,6 +861,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
                 input_bytes = b""
                 resize_target: tuple[int, int] | None = None
+                # Whole-message submissions from the quick-compose drawer.
+                # Kept separate from ``input_bytes`` so each one round-trips
+                # through ``send_input`` (which appends Enter when
+                # ``submit`` is true) instead of being concatenated with
+                # raw keystrokes.
+                submits: list[tuple[str, bool]] = []
 
                 for frame in frames:
                     try:
@@ -872,6 +878,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         data = payload.get("data", "")
                         if isinstance(data, str) and data:
                             input_bytes += data.encode("utf-8")
+                    elif kind == "input_submit":
+                        text = payload.get("text", "")
+                        if not isinstance(text, str):
+                            continue
+                        submit = bool(payload.get("submit", True))
+                        if text or submit:
+                            submits.append((text, submit))
                     elif kind == "resize":
                         try:
                             r_cols = int(payload.get("cols", 0))
@@ -884,6 +897,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if input_bytes:
                     with suppress(TmuxError):
                         await adapter.send_bytes(pane, input_bytes)
+                for text, submit in submits:
+                    with suppress(TmuxError):
+                        await adapter.send_input(pane, text, submit=submit)
                 if resize_target is not None:
                     new_cols, new_rows = resize_target
                     renderer.resize(new_cols, new_rows)

@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any
 
 import pytest
@@ -234,12 +235,49 @@ async def test_fetch_snapshot_reports_no_sidecar_when_docker_present_but_no_cont
     snapshot = await fetch_snapshot()
 
     assert snapshot.available is False
-    assert snapshot.error == "tailscale binary not found on PATH"
+    assert snapshot.error == "no waypoint tailscale sidecar running"
+
+
+@pytest.mark.asyncio
+async def test_fetch_snapshot_surfaces_docker_ps_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tailnet.os.path, "exists", lambda _path: False)
+
+    def fake_which(name: str) -> str | None:
+        return "/usr/local/bin/docker" if name == "docker" else None
+
+    monkeypatch.setattr(tailnet.shutil, "which", fake_which)
+
+    calls: list[tuple[str, ...]] = []
+    plans: dict[tuple[str, ...], _FakeProcess] = {
+        (
+            "/usr/local/bin/docker",
+            "ps",
+            "--filter",
+            "label=waypoint.role=tailscale",
+            "--filter",
+            "status=running",
+            "--format",
+            "{{.Names}}",
+        ): _FakeProcess(stderr=b"Cannot connect to the Docker daemon", returncode=1),
+    }
+    monkeypatch.setattr(
+        tailnet.asyncio,
+        "create_subprocess_exec",
+        _exec_recorder(plans, calls),
+    )
+
+    snapshot = await fetch_snapshot()
+
+    assert snapshot.available is False
+    assert snapshot.error == "Cannot connect to the Docker daemon"
 
 
 @pytest.mark.asyncio
 async def test_fetch_snapshot_picks_first_when_multiple_sidecars(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setattr(tailnet.os.path, "exists", lambda _path: False)
 
@@ -276,7 +314,13 @@ async def test_fetch_snapshot_picks_first_when_multiple_sidecars(
         _exec_recorder(plans, calls),
     )
 
-    snapshot = await fetch_snapshot()
+    with caplog.at_level(logging.WARNING, logger="waypoint.tailnet"):
+        snapshot = await fetch_snapshot()
 
     assert snapshot.available is True
     assert calls[1][2] == "waypoint-tailscale-a"
+    assert any(
+        "multiple tailscale sidecars" in record.message
+        and record.levelname == "WARNING"
+        for record in caplog.records
+    )

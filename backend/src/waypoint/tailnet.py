@@ -43,24 +43,27 @@ async def fetch_snapshot() -> TailnetSnapshot:
     if binary is not None:
         return await _run_status([binary, "status", "--json"])
 
-    container = await _find_sidecar_container()
-    if container is None:
+    docker = shutil.which("docker")
+    if docker is None:
         return TailnetSnapshot(
             available=False, error="tailscale binary not found on PATH"
         )
-    docker = shutil.which("docker")
-    if docker is None:
-        return TailnetSnapshot(available=False, error="docker binary not found on PATH")
+
+    container, lookup_error = await _find_sidecar_container(docker)
+    if lookup_error is not None:
+        return TailnetSnapshot(available=False, error=lookup_error)
+    if container is None:
+        return TailnetSnapshot(
+            available=False, error="no waypoint tailscale sidecar running"
+        )
+
     return await _run_status(
         [docker, "exec", container, "tailscale", "status", "--json"]
     )
 
 
-async def _find_sidecar_container() -> str | None:
-    """Return the first running `waypoint.role=tailscale` container, if any."""
-    docker = shutil.which("docker")
-    if docker is None:
-        return None
+async def _find_sidecar_container(docker: str) -> tuple[str | None, str | None]:
+    """Return (container_name, error). `error` is set only when `docker ps` itself fails."""
     try:
         process = await asyncio.create_subprocess_exec(
             docker,
@@ -74,21 +77,24 @@ async def _find_sidecar_container() -> str | None:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await process.communicate()
-    except (FileNotFoundError, OSError):
-        return None
+        stdout, stderr = await process.communicate()
+    except (FileNotFoundError, OSError) as exc:
+        return None, f"failed to run docker ps: {exc}"
     if process.returncode != 0:
-        return None
+        message = (
+            stderr.decode().strip() or f"docker ps exited with {process.returncode}"
+        )
+        return None, message
     names = [line for line in stdout.decode().splitlines() if line.strip()]
     if not names:
-        return None
+        return None, None
     if len(names) > 1:
         log.warning(
             "multiple tailscale sidecars running (%s); using %s",
             ", ".join(names),
             names[0],
         )
-    return names[0]
+    return names[0], None
 
 
 async def _run_status(argv: list[str]) -> TailnetSnapshot:
@@ -107,7 +113,7 @@ async def _run_status(argv: list[str]) -> TailnetSnapshot:
         message = (
             stderr.decode().strip() or f"{argv[0]} exited with {process.returncode}"
         )
-        log.warning("tailscale status failed: %s", message)
+        log.warning("%s failed: %s", argv[0], message)
         return TailnetSnapshot(available=False, error=message)
     try:
         payload = json.loads(stdout.decode() or "{}")

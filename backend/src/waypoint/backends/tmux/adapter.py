@@ -180,10 +180,17 @@ class TmuxAdapter:
         return stdout.decode()
 
     async def _send_literal_text(self, target: str, text: str) -> None:
+        # Embedded newlines go in as Ctrl-J (literal LF) so a multi-line
+        # message lands as one submission terminated by the caller's
+        # optional trailing ``Enter`` (the ``submit`` flag on
+        # ``send_input``). Splitting on ``Enter`` instead would submit
+        # each line as a separate message — Claude Code, Codex, and
+        # OpenCode all treat ``\r`` as accept-line and ``\n`` (Ctrl-J,
+        # same byte the keybar's ``⇧↵`` chip emits) as soft newline.
         normalized = text.replace("\r\n", "\n").replace("\r", "\n")
         lines = normalized.split("\n")
         for index, line in enumerate(lines):
             if line:
                 await self._run("send-keys", "-t", target, "-l", "--", line)
             if index < len(lines) - 1:
-                await self._run("send-keys", "-t", target, "Enter")
+                await self._run("send-keys", "-t", target, "C-j")

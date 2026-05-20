@@ -1,4 +1,5 @@
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 
 
@@ -23,7 +24,7 @@ def needs_install(home: Path) -> bool:
     return False
 
 
-def run_install(frontend_dir: Path, log_path: Path) -> int:
+def run_install(frontend_dir: Path, log_path: Path, env: Mapping[str, str]) -> int:
     command = (
         ["npm", "ci"]
         if (frontend_dir / "package-lock.json").exists()
@@ -33,6 +34,7 @@ def run_install(frontend_dir: Path, log_path: Path) -> int:
         proc = subprocess.run(
             command,
             cwd=frontend_dir,
+            env=dict(env),
             stdin=subprocess.DEVNULL,
             stdout=log_file,
             stderr=subprocess.STDOUT,

@@ -130,6 +130,84 @@ def test_stop_runs_all_services(state_dir: Path, tmp_path: Path) -> None:
     assert caffeinate.calls == ["stop"]
 
 
+def test_start_target_backend_skips_frontend(state_dir: Path, tmp_path: Path) -> None:
+    stack = WaypointStack(_build_config(tmp_path, state_dir))
+    backend, frontend, caffeinate = _install_stubs(stack)
+
+    result = stack.start(lambda *_: None, "backend")
+
+    assert result.ok is True
+    assert backend.calls == ["start"]
+    assert frontend.calls == []
+    assert caffeinate.calls == ["start"]
+
+
+def test_start_target_frontend_skips_backend(state_dir: Path, tmp_path: Path) -> None:
+    stack = WaypointStack(_build_config(tmp_path, state_dir))
+    backend, frontend, caffeinate = _install_stubs(stack)
+
+    result = stack.start(lambda *_: None, "frontend")
+
+    assert result.ok is True
+    assert backend.calls == []
+    assert frontend.calls == ["start"]
+    assert caffeinate.calls == ["start"]
+
+
+def test_start_unknown_target(state_dir: Path, tmp_path: Path) -> None:
+    stack = WaypointStack(_build_config(tmp_path, state_dir))
+    backend, frontend, caffeinate = _install_stubs(stack)
+    result = stack.start(lambda *_: None, "teleporter")
+    assert result.ok is False
+    assert "unknown service" in result.message
+    assert backend.calls == []
+    assert frontend.calls == []
+    assert caffeinate.calls == []
+
+
+def test_stop_target_backend_leaves_frontend_and_caffeinate(
+    state_dir: Path, tmp_path: Path
+) -> None:
+    stack = WaypointStack(_build_config(tmp_path, state_dir))
+    backend, frontend, caffeinate = _install_stubs(stack)
+
+    result = stack.stop(lambda *_: None, "backend")
+
+    assert result.ok is True
+    assert backend.calls == ["stop"]
+    assert frontend.calls == []
+    assert caffeinate.calls == []
+
+
+def test_stop_unknown_target(state_dir: Path, tmp_path: Path) -> None:
+    stack = WaypointStack(_build_config(tmp_path, state_dir))
+    backend, frontend, caffeinate = _install_stubs(stack)
+    result = stack.stop(lambda *_: None, "teleporter")
+    assert result.ok is False
+    assert backend.calls == []
+    assert frontend.calls == []
+    assert caffeinate.calls == []
+
+
+def test_start_partial_failure_only_stops_started_in_target(
+    state_dir: Path, tmp_path: Path
+) -> None:
+    """A failed `start backend` must not stop an already-running frontend."""
+    stack = WaypointStack(_build_config(tmp_path, state_dir))
+    backend, frontend, caffeinate = _install_stubs(stack)
+    frontend.started_marker_value = True  # pretend frontend was already running
+
+    def failing_start(log):  # type: ignore[no-untyped-def]
+        return ServiceResult(ok=False, message="backend failed")
+
+    backend.start = failing_start  # type: ignore[method-assign]
+
+    result = stack.start(lambda *_: None, "backend")
+
+    assert result.ok is False
+    assert frontend.calls == []  # cleanup did not touch frontend
+
+
 def test_restart_target_backend(state_dir: Path, tmp_path: Path) -> None:
     stack = WaypointStack(_build_config(tmp_path, state_dir))
     backend, frontend, caffeinate = _install_stubs(stack)

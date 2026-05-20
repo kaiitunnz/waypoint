@@ -117,11 +117,13 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
                 self._send_log(DaemonLog(stream=stream, line=line))
 
         if request.command == "start":
-            result = stack.start(log)
+            target = request.args[0] if request.args else "all"
+            result = stack.start(log, target)
         elif request.command == "status":
             result = stack.status(log)
         elif request.command == "stop":
-            result = stack.stop(log)
+            target = request.args[0] if request.args else "all"
+            result = stack.stop(log, target)
         elif request.command == "restart":
             target = request.args[0] if request.args else "all"
             result = stack.restart(target, log)
@@ -162,9 +164,10 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
                 stack.restart(target, file_log)
 
         elif command == "stop":
+            target = request.args[0] if request.args else "all"
 
             def worker() -> None:
-                stack.stop(file_log)
+                stack.stop(file_log, target)
 
         else:
             self._send_result(

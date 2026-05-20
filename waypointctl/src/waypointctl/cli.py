@@ -264,9 +264,11 @@ def _run_in_process(home: Path, command: str, args: list[str]) -> None:
         typer.echo(line, err=(stream == "stderr"))
 
     if command == "start":
-        result = stack.start(log)
+        target = args[0] if args else "all"
+        result = stack.start(log, target)
     elif command == "stop":
-        result = stack.stop(log)
+        target = args[0] if args else "all"
+        result = stack.stop(log, target)
     elif command == "restart":
         target = args[0] if args else "all"
         result = stack.restart(target, log)

@@ -22,41 +22,47 @@ class WaypointStack:
         self.frontend = FrontendService(config)
         self.caffeinate = CaffeinateService(config)
 
-    def start(self, log: LogFn) -> ServiceResult:
-        services = (self.backend, self.frontend)
+    def start(self, log: LogFn, target: str = "all") -> ServiceResult:
+        services = self._select(target)
+        if services is None:
+            return ServiceResult(ok=False, message=f"unknown service: {target}")
         for svc in services:
             svc.started_marker.unlink(missing_ok=True)
 
         results = self._parallel(services, "start", log)
         if any(not r.ok for r in results):
-            self._stop_started(log)
+            self._stop_started(services, log)
             return _aggregate(results)
 
         self.caffeinate.start(log)
         self._emit_status(log)
         return ServiceResult(ok=True)
 
-    def stop(self, log: LogFn) -> ServiceResult:
-        results = self._parallel(
-            (self.caffeinate, self.frontend, self.backend), "stop", log
+    def stop(self, log: LogFn, target: str = "all") -> ServiceResult:
+        services = self._select(target)
+        if services is None:
+            return ServiceResult(ok=False, message=f"unknown service: {target}")
+        # Caffeinate spans the whole stack — only stop it on `stop all`.
+        targets: tuple[ManagedService, ...] = (
+            (self.caffeinate, *services) if target in {"all", ""} else services
         )
+        results = self._parallel(targets, "stop", log)
         return _aggregate(results)
 
     def restart(self, target: str, log: LogFn) -> ServiceResult:
+        if self._select(target) is None:
+            return ServiceResult(ok=False, message=f"unknown service: {target}")
+        self.stop(log, target)
+        return self.start(log, target)
+
+    def _select(self, target: str) -> tuple[ManagedService, ...] | None:
         if target == "backend":
-            self.backend.stop(log)
-            result = self.backend.start(log)
-            self._emit_status(log)
-            return result
+            return (self.backend,)
         if target == "frontend":
-            self.frontend.stop(log)
-            result = self.frontend.start(log)
-            self._emit_status(log)
-            return result
+            return (self.frontend,)
         if target in {"all", ""}:
-            self.stop(log)
-            return self.start(log)
-        return ServiceResult(ok=False, message=f"unknown service: {target}")
+            return (self.backend, self.frontend)
+        return None
 
     def status(self, log: LogFn) -> ServiceResult:
         self._emit_status(log)
@@ -85,8 +91,8 @@ class WaypointStack:
         if cf_status.state == "running":
             log("stdout", _format_status(cf_status))
 
-    def _stop_started(self, log: LogFn) -> None:
-        for svc in (self.backend, self.frontend):
+    def _stop_started(self, services: tuple[ManagedService, ...], log: LogFn) -> None:
+        for svc in services:
             if svc.started_marker.exists():
                 svc.stop(log)
 

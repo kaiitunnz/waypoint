@@ -21,7 +21,7 @@ export function backendPortFromUrl(url: string | null | undefined): number | nul
     const parsed = new URL(url);
     if (!parsed.port) return null;
     const parsedPort = Number.parseInt(parsed.port, 10);
-    return Number.isFinite(parsedPort) ? parsedPort : null;
+    return Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : null;
   } catch {
     return null;
   }

@@ -40,26 +40,72 @@ def _resolve_binary() -> str | None:
 
 async def fetch_snapshot() -> TailnetSnapshot:
     binary = _resolve_binary()
-    if binary is None:
+    if binary is not None:
+        return await _run_status([binary, "status", "--json"])
+
+    container = await _find_sidecar_container()
+    if container is None:
         return TailnetSnapshot(
             available=False, error="tailscale binary not found on PATH"
         )
+    docker = shutil.which("docker")
+    if docker is None:
+        return TailnetSnapshot(available=False, error="docker binary not found on PATH")
+    return await _run_status(
+        [docker, "exec", container, "tailscale", "status", "--json"]
+    )
+
+
+async def _find_sidecar_container() -> str | None:
+    """Return the first running `waypoint.role=tailscale` container, if any."""
+    docker = shutil.which("docker")
+    if docker is None:
+        return None
     try:
         process = await asyncio.create_subprocess_exec(
-            binary,
-            "status",
-            "--json",
+            docker,
+            "ps",
+            "--filter",
+            "label=waypoint.role=tailscale",
+            "--filter",
+            "status=running",
+            "--format",
+            "{{.Names}}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await process.communicate()
+    except (FileNotFoundError, OSError):
+        return None
+    if process.returncode != 0:
+        return None
+    names = [line for line in stdout.decode().splitlines() if line.strip()]
+    if not names:
+        return None
+    if len(names) > 1:
+        log.warning(
+            "multiple tailscale sidecars running (%s); using %s",
+            ", ".join(names),
+            names[0],
+        )
+    return names[0]
+
+
+async def _run_status(argv: list[str]) -> TailnetSnapshot:
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await process.communicate()
     except FileNotFoundError as exc:
         return TailnetSnapshot(
-            available=False, error=f"failed to spawn tailscale: {exc}"
+            available=False, error=f"failed to spawn {argv[0]}: {exc}"
         )
     if process.returncode != 0:
         message = (
-            stderr.decode().strip() or f"tailscale exited with {process.returncode}"
+            stderr.decode().strip() or f"{argv[0]} exited with {process.returncode}"
         )
         log.warning("tailscale status failed: %s", message)
         return TailnetSnapshot(available=False, error=message)

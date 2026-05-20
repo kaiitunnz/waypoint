@@ -161,13 +161,18 @@ class FrontendService(ManagedService):
 
         frontend_dir = self.config.home / "frontend"
         port_env = str(self.config.frontend_port)
+        backend_port_env = str(self.config.backend_port)
 
         if self.config.frontend_dev:
             log(
                 "stdout",
                 f"starting frontend in development mode on 0.0.0.0:{port_env}",
             )
-            env = dict(self.config.child_env, PORT=port_env)
+            env = dict(
+                self.config.child_env,
+                PORT=port_env,
+                NEXT_PUBLIC_BACKEND_PORT=backend_port_env,
+            )
             pid = spawn_detached(
                 ["npm", "run", "dev"],
                 cwd=frontend_dir,
@@ -176,22 +181,30 @@ class FrontendService(ManagedService):
             )
         else:
             if frontend_build.is_fresh(
-                self.config.home, force=self.config.force_frontend_build
+                self.config.home,
+                backend_port=self.config.backend_port,
+                force=self.config.force_frontend_build,
             ):
                 log("stdout", "frontend build up to date, skipping rebuild")
             else:
                 log("stdout", "building frontend")
-                build_rc = self._run_build(frontend_dir, port_env)
+                build_rc = self._run_build(frontend_dir, port_env, backend_port_env)
                 if build_rc != 0:
                     log("stderr", "frontend build failed")
                     _emit_recent_log(self.log_path, log)
                     return ServiceResult(
                         ok=False, message=f"frontend build exited with {build_rc}"
                     )
-                frontend_build.record_build_ref(self.config.home)
+                frontend_build.record_build(
+                    self.config.home, backend_port=self.config.backend_port
+                )
 
             log("stdout", f"starting frontend on 0.0.0.0:{port_env}")
-            env = dict(self.config.child_env, PORT=port_env)
+            env = dict(
+                self.config.child_env,
+                PORT=port_env,
+                NEXT_PUBLIC_BACKEND_PORT=backend_port_env,
+            )
             pid = spawn_detached(
                 ["npm", "run", "start"],
                 cwd=frontend_dir,
@@ -212,8 +225,14 @@ class FrontendService(ManagedService):
 
         return ServiceResult(ok=True)
 
-    def _run_build(self, frontend_dir: Path, port_env: str) -> int:
-        env = dict(self.config.child_env, PORT=port_env)
+    def _run_build(
+        self, frontend_dir: Path, port_env: str, backend_port_env: str
+    ) -> int:
+        env = dict(
+            self.config.child_env,
+            PORT=port_env,
+            NEXT_PUBLIC_BACKEND_PORT=backend_port_env,
+        )
         with self.log_path.open("a", encoding="utf-8") as log_file:
             proc = subprocess.run(
                 ["npm", "run", "build"],

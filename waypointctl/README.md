@@ -63,7 +63,7 @@ are not supported.
 | `WAYPOINTCTL_STATE_DIR` | `~/.waypoint` | Root of the state tree. |
 | `WAYPOINTCTL_DAEMON` | unset | When `1`, route every command through `waypointd` (auto-starting it if needed). |
 | `WAYPOINT_STACK_BACKEND_HOST` | `0.0.0.0` | Backend bind host. |
-| `WAYPOINT_STACK_BACKEND_PORT` | `8787` | Backend port. |
+| `WAYPOINT_STACK_BACKEND_PORT` | `8787` | Backend port. Also forwarded to the frontend build as `NEXT_PUBLIC_BACKEND_PORT` so the picker infers the right URL; the cached build is invalidated when this changes. |
 | `WAYPOINT_STACK_CONFIG` | `backend/waypoint.yaml` | Path to backend config (relative paths resolve under `--home`). |
 | `WAYPOINT_STACK_BACKEND_DATA_DIR` | `<state-dir>/backend-data` | Backend data directory. |
 | `WAYPOINT_STACK_FRONTEND_PORT` | `3000` | Frontend port. |

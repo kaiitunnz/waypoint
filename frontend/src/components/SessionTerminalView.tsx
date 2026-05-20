@@ -11,6 +11,9 @@ import { SessionRecord } from "@/lib/types";
 type Connection = "idle" | "connecting" | "open" | "reconnecting";
 
 interface SessionTerminalViewProps {
+  host: string;
+  token: string;
+  sessionId: string;
   session: SessionRecord | null;
   liveTmux: boolean;
   terminalRef: MutableRefObject<XTerminalHandle | null>;
@@ -51,6 +54,9 @@ interface SessionTerminalViewProps {
 }
 
 export function SessionTerminalView({
+  host,
+  token,
+  sessionId,
   session,
   liveTmux,
   terminalRef,
@@ -273,6 +279,9 @@ export function SessionTerminalView({
       ) : null}
       {composeEnabled ? (
         <TerminalCompose
+          host={host}
+          token={token}
+          sessionId={sessionId}
           session={session}
           onSubmit={onTerminalSubmit}
           expanded={composeOpen}

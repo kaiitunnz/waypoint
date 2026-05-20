@@ -10,13 +10,18 @@ import {
   useState,
 } from "react";
 
+import { CommandSuggestions } from "@/components/CommandSuggestions";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { COMPOSER_MIN_HEIGHT, SHORTCUT_IS_MAC } from "@/lib/composer";
+import { useCommandCompletions } from "@/lib/composer-completions";
 import type { SessionRecord } from "@/lib/types";
 
 type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
 
 interface TerminalComposeProps {
+  host: string;
+  token: string;
+  sessionId: string;
   session: SessionRecord | null;
   // ``onSubmit`` returns false when the socket isn't open so we can leave
   // the draft in place and surface a hint without throwing it away.
@@ -36,6 +41,9 @@ const HEIGHT_FALLBACK = 132;
 const HEIGHT_MAX = 320;
 
 export function TerminalCompose({
+  host,
+  token,
+  sessionId,
   session,
   onSubmit,
   expanded,
@@ -53,6 +61,32 @@ export function TerminalCompose({
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const handleRef = useRef<HTMLButtonElement | null>(null);
+
+  // ``/new`` is a Waypoint frontend command that only makes sense on
+  // structured sessions; the tmux composer just forwards keystrokes
+  // straight to the wrapped CLI, so we opt out of the local fallback
+  // and surface only the backend-provided completions (CC built-ins,
+  // workspace skills, etc.).
+  const {
+    suggestions,
+    suggestionsOpen,
+    activeIndex,
+    setActiveIndex,
+    listRef: suggestionsRef,
+    itemRefs: suggestionItemRefs,
+    applySuggestion,
+    handleSuggestionKey,
+    reset: resetCompletions,
+  } = useCommandCompletions({
+    host,
+    token,
+    sessionId,
+    draft,
+    setDraft,
+    enabled: expanded,
+    localFallback: [],
+    textareaRef,
+  });
 
   // Restore the desktop height preference on mount; mobile media query
   // hides the resize handle so the persisted value is harmless there.
@@ -86,16 +120,22 @@ export function TerminalCompose({
     if (ok) {
       setDraft("");
       setHint(null);
+      resetCompletions();
     } else {
       setHint("Socket not open — try again in a moment");
     }
     // The send call resolves synchronously (it's just a WebSocket.send),
     // but we briefly hold the disabled state so the user gets feedback.
     window.setTimeout(() => setSending(false), 120);
-  }, [draft, connected, onSubmit]);
+  }, [draft, connected, onSubmit, resetCompletions]);
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      // The suggestions menu owns Tab/Enter/Arrows/Esc when open, so
+      // Esc-to-dismiss takes precedence over Esc-to-collapse-drawer.
+      if (handleSuggestionKey(event)) {
+        return;
+      }
       if (event.key === "Escape") {
         event.preventDefault();
         onExpandedChange(false);
@@ -108,7 +148,7 @@ export function TerminalCompose({
       event.preventDefault();
       send();
     },
-    [send, onExpandedChange, refocusTerminal],
+    [handleSuggestionKey, send, onExpandedChange, refocusTerminal],
   );
 
   const toggle = useCallback(() => {
@@ -197,6 +237,16 @@ export function TerminalCompose({
               aria-label="Message to send to terminal"
               tabIndex={expanded ? 0 : -1}
             />
+            {suggestionsOpen ? (
+              <CommandSuggestions
+                ref={suggestionsRef}
+                suggestions={suggestions}
+                activeIndex={activeIndex}
+                itemRefs={suggestionItemRefs}
+                onApply={applySuggestion}
+                onHover={setActiveIndex}
+              />
+            ) : null}
           </div>
           <div className="term-compose-meta">
             <SessionUsagePill

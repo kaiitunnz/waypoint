@@ -1511,6 +1511,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       ) : null}
       {session && activeView === "terminal" ? (
         <SessionTerminalView
+          host={host}
+          token={token}
+          sessionId={sessionId}
           session={session}
           liveTmux={liveTmux}
           terminalRef={terminalRef}

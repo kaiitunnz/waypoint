@@ -273,10 +273,13 @@ export function SessionTerminalView({
       ) : null}
       {composeEnabled ? (
         <TerminalCompose
+          session={session}
           onSubmit={onTerminalSubmit}
           expanded={composeOpen}
           onExpandedChange={setComposeOpen}
           connection={connection}
+          rateLimitRefreshBusy={rateLimitRefreshBusy}
+          onRateLimitRefresh={onRateLimitRefresh}
           refocusTerminal={refocusTerminal}
         />
       ) : null}

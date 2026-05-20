@@ -208,6 +208,21 @@ class TmuxPlugin:
         prefix: str = "",
         force_refresh: bool = False,
     ) -> list[CommandCompletion]:
+        # Tmux is a transport, not a backend in the user-visible sense:
+        # the wrapped CLI (Claude Code, Codex, OpenCode, …) is what
+        # actually interprets slash commands. Delegate so the quick
+        # compose surfaces the wrapped backend's built-ins and any
+        # workspace skills it advertises. Pure-tmux sessions (rare —
+        # ``backend == "tmux"``) fall back to the local static list.
+        if session.backend != self.id and runtime.registry.has_backend(session.backend):
+            wrapped = runtime.registry.get(session.backend)
+            return await wrapped.list_command_completions(
+                runtime,
+                session,
+                trigger=trigger,
+                prefix=prefix,
+                force_refresh=force_refresh,
+            )
         if trigger != "/":
             return []
         return static_slash_completions(self.id, self.capabilities, prefix=prefix)

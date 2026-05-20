@@ -7150,6 +7150,27 @@ html[data-theme="light"] .term-compose-handle:hover {
   flex: 1 1 auto;
 }
 
+/* The usage pill lives at the left edge of the drawer's meta row. The
+   composer default anchors the popover to the right (it grows leftward
+   from a pill that sits at the right of the chat composer), which here
+   would shoot 440px off-screen to the left of the pane. Anchor the
+   panel to the pill's left edge so it grows rightward, and bump it
+   above the textarea above (z-index 50 matches the term-bar variant). */
+.term-compose .usage-panel {
+  left: 0;
+  right: auto;
+  z-index: 50;
+}
+
+/* On narrow screens the 440px panel would overflow the right edge of
+   the pane; pin the right side so it flexes within the drawer width. */
+@media (max-width: 720px) {
+  .term-compose .usage-panel {
+    right: 8px;
+    width: auto;
+  }
+}
+
 .term-compose-hint {
   font-family: var(--font-mono);
   font-size: 0.72rem;

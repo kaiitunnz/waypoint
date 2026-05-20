@@ -193,7 +193,8 @@ export function writeUsageDashboardOpen(open: boolean): void {
 function inferBackendHost(): string {
   const protocol = window.location.protocol === "https:" ? "https:" : "http:";
   const hostname = window.location.hostname || "127.0.0.1";
-  return `${protocol}//${hostname}:8787`;
+  const port = process.env.NEXT_PUBLIC_BACKEND_PORT || "8787";
+  return `${protocol}//${hostname}:${port}`;
 }
 
 function readLaunchTargetSelections(): Record<string, string> {

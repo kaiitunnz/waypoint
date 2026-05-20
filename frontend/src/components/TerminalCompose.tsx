@@ -61,6 +61,19 @@ export function TerminalCompose({
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const handleRef = useRef<HTMLButtonElement | null>(null);
+  // Host for popovers that need to escape ``.term-compose-inner``'s
+  // ``overflow: hidden`` clip (the grid-row open animation requires it).
+  // The slash-suggestions list and the SessionUsagePill panel both
+  // anchor against this element, which is the outer drawer container
+  // and lives outside the clipped subtree.
+  const composeRef = useRef<HTMLElement | null>(null);
+  // ``popoverContainer`` only takes effect once the section ref is
+  // attached, which happens on first commit. Mirror it into state so
+  // SessionUsagePill re-renders with a valid host after mount.
+  const [popoverHost, setPopoverHost] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setPopoverHost(composeRef.current);
+  }, []);
 
   // ``/new`` is a Waypoint frontend command that only makes sense on
   // structured sessions; the tmux composer just forwards keystrokes
@@ -199,6 +212,7 @@ export function TerminalCompose({
 
   return (
     <section
+      ref={composeRef}
       className={`term-compose ${expanded ? "is-open" : "is-closed"}`}
       aria-label="Quick compose"
     >
@@ -237,16 +251,6 @@ export function TerminalCompose({
               aria-label="Message to send to terminal"
               tabIndex={expanded ? 0 : -1}
             />
-            {suggestionsOpen ? (
-              <CommandSuggestions
-                ref={suggestionsRef}
-                suggestions={suggestions}
-                activeIndex={activeIndex}
-                itemRefs={suggestionItemRefs}
-                onApply={applySuggestion}
-                onHover={setActiveIndex}
-              />
-            ) : null}
           </div>
           <div className="term-compose-meta">
             <SessionUsagePill
@@ -254,6 +258,7 @@ export function TerminalCompose({
               connection={connection}
               onRateLimitRefresh={onRateLimitRefresh}
               rateLimitRefreshBusy={rateLimitRefreshBusy}
+              popoverContainer={popoverHost}
             />
             {hint ? (
               <span className="term-compose-hint" role="status">
@@ -277,6 +282,16 @@ export function TerminalCompose({
           </div>
         </div>
       </div>
+      {suggestionsOpen ? (
+        <CommandSuggestions
+          ref={suggestionsRef}
+          suggestions={suggestions}
+          activeIndex={activeIndex}
+          itemRefs={suggestionItemRefs}
+          onApply={applySuggestion}
+          onHover={setActiveIndex}
+        />
+      ) : null}
     </section>
   );
 }

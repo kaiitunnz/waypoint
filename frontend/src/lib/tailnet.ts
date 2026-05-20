@@ -15,6 +15,20 @@ export interface TailnetSnapshot {
 
 export const DEFAULT_BACKEND_PORT = 8787;
 
+export function backendPortFromUrl(url: string | null | undefined): number | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.port) {
+      const parsedPort = Number.parseInt(parsed.port, 10);
+      return Number.isFinite(parsedPort) ? parsedPort : null;
+    }
+    return parsed.protocol === "https:" ? 443 : parsed.protocol === "http:" ? 80 : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchLocalTailnetSnapshot(signal?: AbortSignal): Promise<TailnetSnapshot> {
   const response = await fetch("/api/tailnet/peers", { cache: "no-store", signal });
   if (!response.ok) {

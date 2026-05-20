@@ -23,7 +23,6 @@ import {
   fetchBackendModels,
   fetchEvents,
   fetchSession,
-  fetchSessionCompletionsResponse,
   fetchTerminalSnapshot,
   forkSession,
   isAuthError,
@@ -49,6 +48,7 @@ import {
 } from "@/lib/backends";
 import { clearToken } from "@/lib/store";
 import { COMPOSER_MIN_HEIGHT, SHORTCUT_IS_MAC } from "@/lib/composer";
+import { useCommandCompletions } from "@/lib/composer-completions";
 import {
   isPlanEvent,
   itemIdForEvent,
@@ -59,6 +59,7 @@ import {
 import { useTheme } from "@/lib/theme";
 import { SessionTerminalView } from "@/components/SessionTerminalView";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
+import { CommandSuggestions } from "@/components/CommandSuggestions";
 import { type XTerminalHandle } from "@/components/XTerminal";
 import { ApprovalRequestCard, PlanApprovalCard } from "@/components/ApprovalCard";
 import {
@@ -73,39 +74,12 @@ import { useSwitcher } from "@/components/SwitcherProvider";
 import {
   BackendModelOption,
   BackendPermissionMode,
-  CommandCompletion,
   EventRecord,
   SessionCommandInvocation,
   SessionEnvelope,
   SessionRecord,
   SessionTransport,
 } from "@/lib/types";
-
-const COMPLETION_REFRESH_POLL_MS = 750;
-const COMPLETION_FETCH_DEBOUNCE_MS = 180;
-
-// `/new` is universal across every backend, so it stays visible during
-// the debounced fetch or if the request fails. `/fork` is gated on
-// per-plugin `supports_fork` capability and is left to the backend
-// response — showing it locally would surface it for tmux sessions
-// where the action would 400 on submit.
-const LOCAL_BUILTIN_FALLBACK: ReadonlyArray<CommandCompletion> = [
-  {
-    id: "waypoint:builtin:new",
-    trigger: "/",
-    replacement: "/new ",
-    name: "new",
-    description: "Start a new session with the same settings",
-    kind: "session_control",
-    source: "waypoint",
-    dispatch: "frontend_control",
-    metadata: {},
-  },
-];
-
-function completionCommand(entry: CommandCompletion): string {
-  return `${entry.trigger}${entry.name}`;
-}
 
 // iOS Safari rejects ``navigator.clipboard.writeText`` even from inside a
 // click handler — the Promise microtask ends the transient activation
@@ -185,19 +159,6 @@ function isSafariFamily(): boolean {
 // literal escape codes, which is the documented trade-off.
 function wrapBracketedPaste(text: string): string {
   return `\x1b[200~${text.replace(/\r\n?/g, "\n")}\x1b[201~`;
-}
-
-function mergeBuiltinFallback(
-  backend: ReadonlyArray<CommandCompletion>,
-): CommandCompletion[] {
-  const seen = new Set(backend.map(completionCommand));
-  const merged = [...backend];
-  for (const entry of LOCAL_BUILTIN_FALLBACK) {
-    if (!seen.has(completionCommand(entry))) {
-      merged.push(entry);
-    }
-  }
-  return merged;
 }
 
 const EFFORT_LABEL: Record<string, string> = {
@@ -1939,13 +1900,6 @@ const ReplyComposer = memo(function ReplyComposer({
 }: ReplyComposerProps) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const [suggestionIndex, setSuggestionIndex] = useState(0);
-  const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
-  const [backendCompletions, setBackendCompletions] = useState<
-    CommandCompletion[]
-  >([]);
-  const [selectedCompletion, setSelectedCompletion] =
-    useState<CommandCompletion | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
   const [reattaching, setReattaching] = useState(false);
@@ -1968,8 +1922,6 @@ const ReplyComposer = memo(function ReplyComposer({
   }, []);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composerRef = useRef<HTMLElement | null>(null);
-  const suggestionsRef = useRef<HTMLUListElement | null>(null);
-  const suggestionItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const overflowRef = useRef<HTMLDivElement | null>(null);
   const tuneRef = useRef<HTMLDivElement | null>(null);
 
@@ -1980,112 +1932,26 @@ const ReplyComposer = memo(function ReplyComposer({
   const supportsSlash =
     transport !== null && fidelityFor(transport) === "structured";
 
-  const completionHead = draft.split(/\s/, 1)[0];
-  const completionTrigger = completionHead.startsWith("/")
-    ? "/"
-    : completionHead.startsWith("$")
-      ? "$"
-      : null;
-  const suggestions = supportsSlash && !suggestionsDismissed
-    ? (completionTrigger === "/"
-        ? mergeBuiltinFallback(backendCompletions)
-        : backendCompletions
-      ).filter(
-        (entry) =>
-          completionTrigger !== null &&
-          completionCommand(entry).startsWith(completionHead),
-      )
-    : [];
-  const suggestionsOpen = suggestions.length > 0 && /^\S+$/.test(draft);
-  const activeIndex = Math.min(suggestionIndex, Math.max(0, suggestions.length - 1));
-
-  useEffect(() => {
-    if (!supportsSlash || completionTrigger === null) {
-      setBackendCompletions([]);
-      return;
-    }
-    const controller = new AbortController();
-    let debounceTimer: number | null = null;
-    let pollTimer: number | null = null;
-    const loadCompletions = () => {
-      debounceTimer = null;
-      fetchSessionCompletionsResponse(
-        host,
-        token,
-        sessionId,
-        completionTrigger,
-        completionHead,
-        false,
-        controller.signal,
-      )
-        .then((payload) => {
-          if (controller.signal.aborted) {
-            return;
-          }
-          setBackendCompletions(payload.completions);
-          if (payload.refreshing) {
-            pollTimer = window.setTimeout(
-              loadCompletions,
-              COMPLETION_REFRESH_POLL_MS,
-            );
-          }
-        })
-        .catch((error) => {
-          if (error instanceof DOMException && error.name === "AbortError") {
-            return;
-          }
-          setBackendCompletions([]);
-        });
-    };
-    debounceTimer = window.setTimeout(
-      loadCompletions,
-      COMPLETION_FETCH_DEBOUNCE_MS,
-    );
-    return () => {
-      controller.abort();
-      if (debounceTimer !== null) {
-        window.clearTimeout(debounceTimer);
-      }
-      if (pollTimer !== null) {
-        window.clearTimeout(pollTimer);
-      }
-    };
-  }, [host, token, sessionId, supportsSlash, completionTrigger, completionHead]);
-
-  useEffect(() => {
-    setSuggestionIndex(0);
-  }, [completionHead]);
-
-  useEffect(() => {
-    if (!suggestionsOpen) return;
-    const active = suggestionItemRefs.current[activeIndex];
-    const list = suggestionsRef.current;
-    if (!active || !list) return;
-    const activeTop = active.offsetTop;
-    const activeBottom = activeTop + active.offsetHeight;
-    const visibleTop = list.scrollTop;
-    const visibleBottom = visibleTop + list.clientHeight;
-    if (activeTop < visibleTop) {
-      list.scrollTop = activeTop;
-    } else if (activeBottom > visibleBottom) {
-      list.scrollTop = activeBottom - list.clientHeight;
-    }
-  }, [activeIndex, suggestionsOpen, suggestions.length]);
-
-  useEffect(() => {
-    if (!draft.startsWith("/") && !draft.startsWith("$")) {
-      setSuggestionsDismissed(false);
-    }
-  }, [draft]);
-
-  useEffect(() => {
-    if (
-      selectedCompletion &&
-      !draft.startsWith(completionCommand(selectedCompletion))
-    ) {
-      setSelectedCompletion(null);
-    }
-  }, [draft, selectedCompletion]);
+  const {
+    suggestions,
+    suggestionsOpen,
+    activeIndex,
+    setActiveIndex,
+    listRef: suggestionsRef,
+    itemRefs: suggestionItemRefs,
+    applySuggestion,
+    selectedCommandInvocation,
+    handleSuggestionKey,
+    reset: resetCompletions,
+  } = useCommandCompletions({
+    host,
+    token,
+    sessionId,
+    draft,
+    setDraft,
+    enabled: supportsSlash,
+    textareaRef,
+  });
 
   // Publish the composer's actual height as a CSS custom property so the
   // transcript end-spacer and floating "Jump to latest" pill can position
@@ -2198,34 +2064,6 @@ const ReplyComposer = memo(function ReplyComposer({
     handle.addEventListener("pointercancel", finishDrag);
   };
 
-  function selectedCommandInvocation(text: string): SessionCommandInvocation | undefined {
-    if (!selectedCompletion || selectedCompletion.dispatch === "frontend_control") {
-      return undefined;
-    }
-    const command = completionCommand(selectedCompletion);
-    if (text !== command && !text.startsWith(`${command} `)) {
-      return undefined;
-    }
-    return {
-      completion_id: selectedCompletion.id,
-      name: selectedCompletion.name,
-      arguments: text.slice(command.length).trim(),
-      dispatch: selectedCompletion.dispatch,
-      metadata: selectedCompletion.metadata,
-    };
-  }
-
-  function applySuggestion(index: number) {
-    const chosen = suggestions[index];
-    if (!chosen) {
-      return;
-    }
-    setDraft(chosen.replacement);
-    setSelectedCompletion(chosen);
-    setSuggestionsDismissed(true);
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  }
-
   async function handleSend() {
     const text = draft.trim();
     if (!text) {
@@ -2233,10 +2071,10 @@ const ReplyComposer = memo(function ReplyComposer({
     }
     setSending(true);
     setDraft("");
-    setSelectedCompletion(null);
-    setSuggestionsDismissed(false);
+    const invocation = selectedCommandInvocation(text);
+    resetCompletions();
     try {
-      const sent = await onSend(text, selectedCommandInvocation(text));
+      const sent = await onSend(text, invocation);
       if (!sent) {
         setDraft(text);
       }
@@ -2260,30 +2098,8 @@ const ReplyComposer = memo(function ReplyComposer({
       }
       return;
     }
-    if (suggestionsOpen) {
-      if (
-        event.key === "Tab" ||
-        (event.key === "Enter" && !(event.metaKey || event.ctrlKey) && !event.shiftKey)
-      ) {
-        event.preventDefault();
-        applySuggestion(activeIndex);
-        return;
-      }
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setSuggestionIndex((index) => Math.min(suggestions.length - 1, index + 1));
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setSuggestionIndex((index) => Math.max(0, index - 1));
-        return;
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setSuggestionsDismissed(true);
-        return;
-      }
+    if (handleSuggestionKey(event)) {
+      return;
     }
     // Treat Cmd+Enter (mac) and Ctrl+Enter (windows/linux) as the send
     // shortcut. Plain Enter inserts a newline as expected.
@@ -2521,34 +2337,14 @@ const ReplyComposer = memo(function ReplyComposer({
           aria-label="Reply"
         />
         {suggestionsOpen ? (
-          <ul className="slash-suggestions" role="listbox" ref={suggestionsRef}>
-            {suggestions.map((entry, index) => (
-              <li key={entry.id}>
-                <button
-                  ref={(node) => {
-                    suggestionItemRefs.current[index] = node;
-                  }}
-                  type="button"
-                  role="option"
-                  aria-selected={index === activeIndex}
-                  className={`slash-suggestion ${index === activeIndex ? "active" : ""}`}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    applySuggestion(index);
-                  }}
-                  onMouseEnter={() => setSuggestionIndex(index)}
-                >
-                  <span className="slash-name">
-                    {completionCommand(entry)}
-                    {entry.argument_hint ? (
-                      <span className="slash-hint">{entry.argument_hint}</span>
-                    ) : null}
-                  </span>
-                  <span className="slash-desc">{entry.description}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <CommandSuggestions
+            ref={suggestionsRef}
+            suggestions={suggestions}
+            activeIndex={activeIndex}
+            itemRefs={suggestionItemRefs}
+            onApply={applySuggestion}
+            onHover={setActiveIndex}
+          />
         ) : null}
       </div>
       <div className="composer-actions">

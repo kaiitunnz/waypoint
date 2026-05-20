@@ -10,17 +10,22 @@ import {
   useState,
 } from "react";
 
+import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { COMPOSER_MIN_HEIGHT, SHORTCUT_IS_MAC } from "@/lib/composer";
+import type { SessionRecord } from "@/lib/types";
 
 type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
 
 interface TerminalComposeProps {
+  session: SessionRecord | null;
   // ``onSubmit`` returns false when the socket isn't open so we can leave
   // the draft in place and surface a hint without throwing it away.
   onSubmit: (text: string) => boolean;
   expanded: boolean;
   onExpandedChange: (next: boolean) => void;
   connection: ConnectionState;
+  rateLimitRefreshBusy: boolean;
+  onRateLimitRefresh: () => void | Promise<void>;
   // Focus target when the user dismisses the drawer via Escape — the
   // xterm canvas, so typing resumes inside the pane.
   refocusTerminal: () => void;
@@ -31,10 +36,13 @@ const HEIGHT_FALLBACK = 132;
 const HEIGHT_MAX = 320;
 
 export function TerminalCompose({
+  session,
   onSubmit,
   expanded,
   onExpandedChange,
   connection,
+  rateLimitRefreshBusy,
+  onRateLimitRefresh,
   refocusTerminal,
 }: TerminalComposeProps) {
   const regionId = useId();
@@ -61,14 +69,6 @@ export function TerminalCompose({
       // localStorage can throw in private windows — fall back to default.
     }
   }, []);
-
-  // Auto-focus the textarea on expand; return focus to the handle when
-  // the drawer collapses so keyboard users don't lose their place.
-  useEffect(() => {
-    if (expanded) {
-      textareaRef.current?.focus();
-    }
-  }, [expanded]);
 
   const dirty = draft.trim().length > 0;
   const connected = connection === "open";
@@ -193,31 +193,18 @@ export function TerminalCompose({
                 if (hint) setHint(null);
               }}
               onKeyDown={handleKeyDown}
-              placeholder="Type a message — sent in one shot to the pane"
+              placeholder="Type a message"
               aria-label="Message to send to terminal"
               tabIndex={expanded ? 0 : -1}
             />
           </div>
           <div className="term-compose-meta">
-            <span
-              className={`composer-connection term-compose-connection ${
-                connection === "open"
-                  ? "open"
-                  : connection === "reconnecting"
-                    ? "reconnecting"
-                    : connection === "connecting"
-                      ? "connecting"
-                      : ""
-              }`}
-            >
-              {connection === "open"
-                ? "connected"
-                : connection === "reconnecting"
-                  ? "reconnecting"
-                  : connection === "connecting"
-                    ? "connecting"
-                    : "idle"}
-            </span>
+            <SessionUsagePill
+              session={session}
+              connection={connection}
+              onRateLimitRefresh={onRateLimitRefresh}
+              rateLimitRefreshBusy={rateLimitRefreshBusy}
+            />
             {hint ? (
               <span className="term-compose-hint" role="status">
                 {hint}

@@ -7150,14 +7150,6 @@ html[data-theme="light"] .term-compose-handle:hover {
   flex: 1 1 auto;
 }
 
-/* The .composer-connection chip reused here was sized for the chat
-   composer's top row; trim the padding so it sits comfortably in a
-   denser meta row. */
-.term-compose-connection {
-  padding: 3px 9px;
-  font-size: 0.68rem;
-}
-
 .term-compose-hint {
   font-family: var(--font-mono);
   font-size: 0.72rem;

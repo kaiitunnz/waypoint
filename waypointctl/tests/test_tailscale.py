@@ -34,16 +34,21 @@ def _write_fake_docker(
     log_file: Path,
     *,
     backend_state: str = "Running",
+    container_exists: bool = False,
 ) -> Path:
     docker = bin_dir / "docker"
     log_path = shlex.quote(str(log_file))
+    inspect_exit = "0" if container_exists else "1"
     docker.write_text(
         f"""#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' "$*" >> {log_path}
 case "$1" in
   inspect)
-    exit 1
+    if [[ "${{2:-}}" == "-f" ]]; then
+      printf 'true\\n'
+    fi
+    exit {inspect_exit}
     ;;
   run)
     printf 'fake-container-id\\n'
@@ -473,6 +478,82 @@ def test_helper_aborts_and_dumps_logs_when_state_stays_needs_login(
     assert "rm -f waypoint-tailscale-profile-a" in docker_log
     # tailscale serve must NOT run while state is NeedsLogin
     assert "tailscale serve" not in docker_log
+
+
+def test_helper_down_removes_container(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = _make_repo(tmp_path / "repo")
+    _copy_tailscale_script(repo)
+    log_file = tmp_path / "docker.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_docker(bin_dir, log_file, container_exists=True)
+
+    bash = shutil.which("bash") or "/bin/bash"
+    completed = subprocess.run(
+        [
+            bash,
+            str(repo / "scripts" / "waypoint_tailscale.sh"),
+            "down",
+            "profile-a",
+        ],
+        cwd=repo,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "WAYPOINTCTL_STATE_DIR": str(tmp_path / "state"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    docker_log = log_file.read_text(encoding="utf-8")
+    assert "rm -f waypoint-tailscale-profile-a" in docker_log
+    assert "stop waypoint-tailscale-profile-a" not in docker_log
+    assert (
+        "tailscale container removed: waypoint-tailscale-profile-a" in completed.stdout
+    )
+
+
+def test_helper_down_is_idempotent_when_container_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = _make_repo(tmp_path / "repo")
+    _copy_tailscale_script(repo)
+    log_file = tmp_path / "docker.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_docker(bin_dir, log_file, container_exists=False)
+
+    bash = shutil.which("bash") or "/bin/bash"
+    completed = subprocess.run(
+        [
+            bash,
+            str(repo / "scripts" / "waypoint_tailscale.sh"),
+            "down",
+            "profile-a",
+        ],
+        cwd=repo,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "WAYPOINTCTL_STATE_DIR": str(tmp_path / "state"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    docker_log = log_file.read_text(encoding="utf-8")
+    assert "rm -f" not in docker_log
+    assert (
+        "tailscale container not found: waypoint-tailscale-profile-a"
+        in completed.stdout
+    )
 
 
 def test_helper_rejects_degenerate_profile_names(

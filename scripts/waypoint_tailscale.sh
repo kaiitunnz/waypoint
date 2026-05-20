@@ -193,8 +193,11 @@ cmd_down() {
     echo "tailscale container not found: ${name}"
     return 0
   fi
-  docker stop "${name}" >/dev/null
-  echo "tailscale container stopped: ${name}"
+  # Tailnet identity lives in the mounted state dir, so removing the
+  # container is safe — the next `up` rebuilds rather than starting a
+  # potentially stale stopped container.
+  docker rm -f "${name}" >/dev/null
+  echo "tailscale container removed: ${name}"
 }
 
 cmd_status() {

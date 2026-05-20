@@ -12,12 +12,13 @@ usage() {
 Usage: scripts/waypoint_tailscale.sh <up|down|status|logs> <profile>
 
 Environment:
-  WAYPOINTCTL_STATE_DIR        Root of Waypoint control-plane state
-  WAYPOINT_STACK_BACKEND_PORT  Backend HTTP port to expose through Tailscale
-  WAYPOINT_STACK_FRONTEND_PORT Frontend HTTP port to expose through Tailscale
-  TS_AUTHKEY                   Required for `up`; read from the repo-root `.env`
-  TS_HOSTNAME                  Optional node name; defaults to waypoint-<profile>
-  TS_IMAGE                     Optional Tailscale image; defaults to tailscale/tailscale:latest
+  WAYPOINTCTL_STATE_DIR              Root of Waypoint control-plane state
+  WAYPOINT_STACK_BACKEND_PORT        Backend HTTP port to expose through Tailscale
+  WAYPOINT_STACK_FRONTEND_PORT       Frontend HTTP port to expose through Tailscale
+  WAYPOINT_TAILSCALE_READY_ATTEMPTS  Seconds to wait for BackendState=Running (default: 60)
+  TS_AUTHKEY                         Required for `up`; read from the repo-root `.env`
+  TS_HOSTNAME                        Optional node name; defaults to waypoint-<profile>
+  TS_IMAGE                           Optional Tailscale image; defaults to tailscale/tailscale:latest
 
 The helper reads the repo-root `.env` if present, matching waypointctl.
 EOF
@@ -106,15 +107,29 @@ run_container() {
 
 wait_until_ready() {
   local name="$1"
-  local attempts="${2:-60}"
+  local attempts="${2:-${WAYPOINT_TAILSCALE_READY_ATTEMPTS:-60}}"
   local i
   for ((i = 1; i <= attempts; i++)); do
-    if docker exec "${name}" tailscale status --json >/dev/null 2>&1; then
+    # `tailscale status --json` exits 0 as soon as the daemon answers,
+    # including in NeedsLogin/Starting. Block on BackendState=Running so
+    # we don't race `tailscale serve` against an unauthenticated node.
+    if docker exec "${name}" tailscale status --json 2>/dev/null \
+      | grep -q '"BackendState":[[:space:]]*"Running"'; then
       return 0
     fi
     sleep 1
   done
   return 1
+}
+
+rollback_container() {
+  local name="$1"
+  {
+    echo "--- last 50 lines of docker logs for ${name} ---"
+    docker logs --tail 50 "${name}" 2>&1 || true
+    echo "--- end docker logs ---"
+  } >&2
+  docker rm -f "${name}" >/dev/null 2>&1 || true
 }
 
 configure_serves() {
@@ -154,12 +169,12 @@ cmd_up() {
   fi
 
   if ! wait_until_ready "${name}"; then
-    [[ "${started_now}" -eq 1 ]] && docker rm -f "${name}" >/dev/null 2>&1 || true
+    [[ "${started_now}" -eq 1 ]] && rollback_container "${name}"
     die "Timed out waiting for ${name} to join the tailnet."
   fi
 
   if ! configure_serves "${name}" "${FRONTEND_PORT}" "${BACKEND_PORT}"; then
-    [[ "${started_now}" -eq 1 ]] && docker rm -f "${name}" >/dev/null 2>&1 || true
+    [[ "${started_now}" -eq 1 ]] && rollback_container "${name}"
     die "Failed to configure Tailscale Serve for ${name}."
   fi
 

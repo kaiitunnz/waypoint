@@ -29,7 +29,12 @@ def _copy_tailscale_script(repo: Path) -> Path:
     return target
 
 
-def _write_fake_docker(bin_dir: Path, log_file: Path) -> Path:
+def _write_fake_docker(
+    bin_dir: Path,
+    log_file: Path,
+    *,
+    backend_state: str = "Running",
+) -> Path:
     docker = bin_dir / "docker"
     log_path = shlex.quote(str(log_file))
     docker.write_text(
@@ -48,6 +53,9 @@ case "$1" in
     ;;
   exec)
     if [[ "${{3:-}}" == "tailscale" && "${{4:-}}" == "status" ]]; then
+      if [[ "${{5:-}}" == "--json" ]]; then
+        printf '{{"BackendState":"{backend_state}"}}\\n'
+      fi
       exit 0
     fi
     if [[ "${{3:-}}" == "tailscale" && "${{4:-}}" == "serve" ]]; then
@@ -59,6 +67,10 @@ case "$1" in
     exit 0
     ;;
   logs)
+    printf 'fake container log line\\n'
+    exit 0
+    ;;
+  rm)
     exit 0
     ;;
   *)
@@ -420,6 +432,47 @@ def test_helper_strips_whitespace_around_unquoted_dotenv_values(
     text = log_file.read_text(encoding="utf-8")
     assert "-e TS_AUTHKEY=tskey-auth-trimmed" in text
     assert "-e TS_HOSTNAME=  wp-keep-inner-spaces  " in text
+
+
+def test_helper_aborts_and_dumps_logs_when_state_stays_needs_login(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = _make_repo(tmp_path / "repo")
+    _copy_tailscale_script(repo)
+    (repo / ".env").write_text("TS_AUTHKEY=tskey-auth-stuck\n", encoding="utf-8")
+    log_file = tmp_path / "docker.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_docker(bin_dir, log_file, backend_state="NeedsLogin")
+
+    bash = shutil.which("bash") or "/bin/bash"
+    completed = subprocess.run(
+        [
+            bash,
+            str(repo / "scripts" / "waypoint_tailscale.sh"),
+            "up",
+            "profile-a",
+        ],
+        cwd=repo,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "WAYPOINTCTL_STATE_DIR": str(tmp_path / "state"),
+            "WAYPOINT_TAILSCALE_READY_ATTEMPTS": "2",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert "Timed out waiting for waypoint-tailscale-profile-a" in completed.stderr
+    assert "last 50 lines of docker logs" in completed.stderr
+    assert "fake container log line" in completed.stderr
+    docker_log = log_file.read_text(encoding="utf-8")
+    assert "rm -f waypoint-tailscale-profile-a" in docker_log
+    # tailscale serve must NOT run while state is NeedsLogin
+    assert "tailscale serve" not in docker_log
 
 
 def test_helper_rejects_degenerate_profile_names(

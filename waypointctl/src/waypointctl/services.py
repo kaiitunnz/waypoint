@@ -175,6 +175,8 @@ class FrontendService(ManagedService):
                     ok=False,
                     message=f"frontend dependency install exited with {install_rc}",
                 )
+        else:
+            log("stdout", "frontend dependencies up to date")
 
         if self.config.frontend_dev:
             log(

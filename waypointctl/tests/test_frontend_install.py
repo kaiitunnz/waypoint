@@ -65,14 +65,24 @@ def test_run_install_prefers_npm_ci(tmp_path: Path, monkeypatch) -> None:
     def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
         captured["cmd"] = cmd
         captured["cwd"] = kwargs.get("cwd")
+        captured["env"] = kwargs.get("env")
+        captured["stdin"] = kwargs.get("stdin")
+        captured["stderr"] = kwargs.get("stderr")
+        stdout = kwargs.get("stdout")
+        if stdout is not None:
+            stdout.write("npm output\n")
         return subprocess.CompletedProcess(cmd, 0)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    rc = run_install(frontend, log_path)
+    rc = run_install(frontend, log_path, {"FOO": "bar"})
     assert rc == 0
     assert captured["cmd"] == ["npm", "ci"]
     assert captured["cwd"] == frontend
+    assert captured["env"] == {"FOO": "bar"}
+    assert captured["stdin"] is subprocess.DEVNULL
+    assert captured["stderr"] is subprocess.STDOUT
+    assert log_path.read_text() == "npm output\n"
 
 
 def test_run_install_falls_back_to_npm_install_without_lockfile(
@@ -90,7 +100,7 @@ def test_run_install_falls_back_to_npm_install_without_lockfile(
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    rc = run_install(frontend, log_path)
+    rc = run_install(frontend, log_path, {})
     assert rc == 0
     assert captured["cmd"] == ["npm", "install"]
 
@@ -105,5 +115,5 @@ def test_run_install_returns_nonzero_on_failure(tmp_path: Path, monkeypatch) -> 
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    rc = run_install(frontend, log_path)
+    rc = run_install(frontend, log_path, {})
     assert rc == 7

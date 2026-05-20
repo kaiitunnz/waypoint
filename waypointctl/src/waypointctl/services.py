@@ -165,7 +165,9 @@ class FrontendService(ManagedService):
 
         if frontend_install.needs_install(self.config.home):
             log("stdout", "installing frontend dependencies")
-            install_rc = frontend_install.run_install(frontend_dir, self.log_path)
+            install_rc = frontend_install.run_install(
+                frontend_dir, self.log_path, self.config.child_env
+            )
             if install_rc != 0:
                 log("stderr", "frontend dependency install failed")
                 _emit_recent_log(self.log_path, log)

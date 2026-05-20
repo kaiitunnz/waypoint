@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from waypointctl import frontend_build
+from waypointctl import frontend_build, frontend_install
 from waypointctl.config import StackConfig
 from waypointctl.health import http_ok, wait_for_http
 from waypointctl.net import port_in_use
@@ -162,6 +162,17 @@ class FrontendService(ManagedService):
         frontend_dir = self.config.home / "frontend"
         port_env = str(self.config.frontend_port)
         backend_port_env = str(self.config.backend_port)
+
+        if frontend_install.needs_install(self.config.home):
+            log("stdout", "installing frontend dependencies")
+            install_rc = frontend_install.run_install(frontend_dir, self.log_path)
+            if install_rc != 0:
+                log("stderr", "frontend dependency install failed")
+                _emit_recent_log(self.log_path, log)
+                return ServiceResult(
+                    ok=False,
+                    message=f"frontend dependency install exited with {install_rc}",
+                )
 
         if self.config.frontend_dev:
             log(

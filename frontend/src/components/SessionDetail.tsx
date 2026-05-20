@@ -48,6 +48,7 @@ import {
   useBackendCatalog,
 } from "@/lib/backends";
 import { clearToken } from "@/lib/store";
+import { COMPOSER_MIN_HEIGHT, SHORTCUT_IS_MAC } from "@/lib/composer";
 import {
   isPlanEvent,
   itemIdForEvent,
@@ -226,12 +227,6 @@ type ConnectionState = "connecting" | "open" | "reconnecting";
 // sensible for the very first paint before the observer fires.
 const COMPOSER_HEIGHT_FALLBACK = 220;
 const COMPOSER_HEIGHT_STORAGE_KEY = "waypoint-composer-height";
-// Mirrors the mobile min-height in globals.css so the resized desktop
-// composer can never shrink below what mobile already enforces.
-const COMPOSER_MIN_HEIGHT = 56;
-const SHORTCUT_IS_MAC =
-  typeof navigator !== "undefined" &&
-  /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
@@ -1247,6 +1242,16 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     }
   }, []);
 
+  // Whole-message submission from the quick-compose drawer — the backend
+  // appends Enter when ``submit`` is true so each call lands as one
+  // logical message rather than a stream of keystrokes.
+  const handleTerminalSubmit = useCallback((text: string) => {
+    const socket = terminalSocketRef.current;
+    if (socket?.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify({ type: "input_submit", text, submit: true }));
+    return true;
+  }, []);
+
   const requestPaste = useCallback(async () => {
     setError("");
     if (typeof navigator === "undefined" || !navigator.clipboard?.readText) {
@@ -1562,6 +1567,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           rateLimitRefreshBusy={rateLimitRefreshBusy}
           onRateLimitRefresh={handleRateLimitRefresh}
           onTerminalInput={handleTerminalInput}
+          onTerminalSubmit={handleTerminalSubmit}
           onRequestPaste={requestPaste}
           onTerminalResize={handleTerminalResize}
           onTerminalScrollChip={handleTerminalScrollChip}

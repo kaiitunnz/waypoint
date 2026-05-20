@@ -6982,6 +6982,209 @@ html[data-theme="light"] .term-keys button:hover {
   }
 }
 
+/* ─── Terminal quick-compose drawer ───
+   Hangs off the bottom edge of .session-terminal, below .term-keys. The
+   collapsed state is a thin ledge with a centered sheet-handle pill —
+   tapping it reveals a textarea + Send that round-trips one whole
+   message to the tmux pane (vs. the per-keystroke forwarding the bar
+   above does). Reuses .composer-textarea, .composer-connection,
+   .composer-shortcut, .composer-resize-handle, and the `primary send`
+   button styling from the chat composer so the two surfaces share a
+   visual vocabulary. */
+.term-compose {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+  background: linear-gradient(
+    180deg,
+    rgba(20, 24, 33, 0.78),
+    rgba(12, 15, 22, 0.9)
+  );
+  /* The handle row owns the home-indicator inset on iOS so the
+     tappable pill never sits under the system gesture area. The
+     keybar above drops its own inset (rule below) so the gap shows up
+     in exactly one place. */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+html[data-theme="light"] .term-compose {
+  background: linear-gradient(
+    180deg,
+    rgba(248, 245, 238, 0.92),
+    rgba(240, 236, 226, 0.96)
+  );
+}
+
+/* When the drawer is rendered (liveTmux only), the keybar's own
+   safe-area inset would double-pad the gesture area. Flatten it so
+   the gap lives on .term-compose where the visible anchor is. */
+.session-terminal:has(.term-compose) .term-keys {
+  padding-bottom: 8px;
+}
+
+/* The handle ledge is the only chrome visible in the collapsed state.
+   ~14px tall with a centered 28×3 pill — deliberately quiet so the
+   default terminal aesthetic is preserved. */
+.term-compose-handle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 14px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 120ms ease;
+}
+
+.term-compose-handle:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+html[data-theme="light"] .term-compose-handle:hover {
+  background: rgba(0, 0, 0, 0.025);
+}
+
+.term-compose-handle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 75%, transparent);
+  outline-offset: -3px;
+  border-radius: 4px;
+}
+
+.term-compose-handle-pill {
+  display: block;
+  width: 28px;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+  transition:
+    background 160ms ease,
+    transform 200ms cubic-bezier(0.2, 0, 0, 1),
+    width 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.term-compose-handle:hover .term-compose-handle-pill {
+  background: color-mix(in srgb, var(--accent) 58%, transparent);
+  width: 36px;
+}
+
+.term-compose.is-open .term-compose-handle-pill {
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+  width: 36px;
+}
+
+/* The shell animates rows 0fr → 1fr so the drawer slides open without
+   reflowing the page. ``min-height: 0`` on the inner container is
+   required for the row-grid trick to clip cleanly. */
+.term-compose-shell {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.term-compose.is-open .term-compose-shell {
+  grid-template-rows: 1fr;
+}
+
+.term-compose-inner {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 10px;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.term-compose.is-open .term-compose-inner {
+  opacity: 1;
+  transition-delay: 80ms;
+}
+
+.term-compose-field {
+  position: relative;
+}
+
+/* The reused .composer-resize-handle sits on the top edge of the
+   textarea on desktop; the existing @media (pointer: coarse) rule on
+   the base class hides it on touch. We override the absolute offset
+   to align with the textarea's own top edge instead of the parent
+   .composer's top edge. */
+.term-compose-resize {
+  top: -6px;
+}
+
+.term-compose-textarea {
+  min-height: 72px;
+  max-height: min(36dvh, 320px);
+  /* 16px suppresses iOS Safari's auto-zoom on focus. */
+  font-size: 16px;
+}
+
+@media (min-width: 721px) {
+  .term-compose-textarea {
+    font-size: 0.92rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .term-compose-textarea {
+    max-height: min(28dvh, 220px);
+  }
+}
+
+.term-compose-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.term-compose-meta-spacer {
+  flex: 1 1 auto;
+}
+
+/* The .composer-connection chip reused here was sized for the chat
+   composer's top row; trim the padding so it sits comfortably in a
+   denser meta row. */
+.term-compose-connection {
+  padding: 3px 9px;
+  font-size: 0.68rem;
+}
+
+.term-compose-hint {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--warn, var(--accent));
+}
+
+@media (max-width: 480px) {
+  .term-compose-shortcut {
+    display: none;
+  }
+}
+
+.term-compose-send {
+  /* The .primary.send base lives in the chat composer's rules; we just
+     tighten the padding for the smaller drawer footprint. */
+  padding: 6px 14px;
+  font-size: 0.82rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .term-compose-shell,
+  .term-compose-inner,
+  .term-compose-handle-pill {
+    transition: none;
+  }
+}
+
 /* ─── Launch panel (redesigned) ───
    Single card with a New / Resume / Attach segmented mode chooser. The
    body swaps content based on the selected mode. Launch-mode + custom

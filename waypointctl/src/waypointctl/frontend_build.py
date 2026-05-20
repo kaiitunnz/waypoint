@@ -11,13 +11,20 @@ BUILD_INPUTS_RELATIVE: tuple[str, ...] = (
 )
 
 
-def is_fresh(home: Path, *, force: bool = False) -> bool:
+def is_fresh(home: Path, *, backend_port: int, force: bool = False) -> bool:
     if force:
         return False
 
     next_dir = home / "frontend" / ".next"
     marker = next_dir / "BUILD_ID"
     if not marker.exists():
+        return False
+
+    # NEXT_PUBLIC_* env vars are baked into the bundle at build time.
+    # A cached build with a different port serves a stale value to the
+    # client, so the port is part of the cache key.
+    port_marker = next_dir / "BUILD_BACKEND_PORT"
+    if not port_marker.exists() or _read_ref(port_marker) != str(backend_port):
         return False
 
     ref_file = next_dir / "BUILD_REF"
@@ -33,6 +40,14 @@ def is_fresh(home: Path, *, force: bool = False) -> bool:
             record_build_ref(home)
 
     return not _has_newer_input(home, marker)
+
+
+def record_build(home: Path, *, backend_port: int) -> None:
+    record_build_ref(home)
+    port_marker = home / "frontend" / ".next" / "BUILD_BACKEND_PORT"
+    if not port_marker.parent.exists():
+        return
+    port_marker.write_text(f"{backend_port}\n", encoding="utf-8")
 
 
 def record_build_ref(home: Path) -> None:

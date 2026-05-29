@@ -125,6 +125,7 @@ async def test_list_commands_reads_server_command_registry() -> None:
     class _FakeClient:
         async def get(self, path, params=None):
             assert path == "/command"
+            assert params == {"directory": "/tmp"}
             return [{"name": "review", "description": "Review changes"}]
 
     adapter._client = _FakeClient()  # type: ignore[assignment]

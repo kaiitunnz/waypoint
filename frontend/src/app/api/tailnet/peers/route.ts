@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import { NextResponse } from "next/server";
 
@@ -7,6 +9,19 @@ export const dynamic = "force-dynamic";
 
 const MACOS_FALLBACK_BIN = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
 const SUBPROCESS_TIMEOUT_MS = 4000;
+// Mirrors backend/src/waypoint/tailnet.py: when the web tier has no local
+// tailscale CLI (e.g. it runs as a host process while tailscale lives in a
+// sidecar container), discover peers by exec'ing into the labelled sidecar.
+const ROLE_LABEL = "waypoint.role=tailscale";
+// Multiple Waypoint deployments (and unrelated containers) can share the
+// role=tailscale label on one host. The sidecar this deployment owns is
+// resolved from the waypointctl state tree (mirrors waypoint.tailnet):
+// `waypoint_tailscale.sh` records the active profile under
+// `$WAYPOINTCTL_STATE_DIR/tailscale` and names each container by slug.
+const STATE_DIR_ENV = "WAYPOINTCTL_STATE_DIR";
+const DEFAULT_STATE_DIR = "~/.waypoint";
+const ACTIVE_PROFILE_FILE = "active-profile";
+const CONTAINER_PREFIX = "waypoint-tailscale-";
 
 interface TailnetPeer {
   name: string;
@@ -24,18 +39,44 @@ interface TailnetSnapshot {
 }
 
 export async function GET(): Promise<NextResponse> {
-  const binary = await resolveBinary();
-  if (binary === null) {
-    return NextResponse.json(unavailable("tailscale binary not found on PATH"));
-  }
   try {
-    const raw = await runTailscaleStatus(binary);
-    const payload = JSON.parse(raw) as Record<string, unknown>;
-    return NextResponse.json(parseSnapshot(payload));
+    return NextResponse.json(await fetchSnapshot());
   } catch (error) {
     const message = error instanceof Error ? error.message : "tailscale status failed";
     return NextResponse.json(unavailable(message));
   }
+}
+
+async function fetchSnapshot(): Promise<TailnetSnapshot> {
+  const binary = await resolveBinary();
+  if (binary !== null) {
+    return snapshotFromStatus(await runCommand(binary, ["status", "--json"]));
+  }
+
+  const docker = await firstResolvable("docker");
+  if (docker === null) {
+    return unavailable("tailscale binary not found on PATH");
+  }
+
+  const { container, error } = await selectSidecarContainer(docker);
+  if (container === null) {
+    return unavailable(error ?? "no waypoint tailscale sidecar running");
+  }
+
+  return snapshotFromStatus(
+    await runCommand(docker, ["exec", container, "tailscale", "status", "--json"]),
+  );
+}
+
+function snapshotFromStatus(raw: string): TailnetSnapshot {
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(raw || "{}") as Record<string, unknown>;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "invalid JSON";
+    return unavailable(`could not parse tailscale output: ${message}`);
+  }
+  return parseSnapshot(payload);
 }
 
 async function resolveBinary(): Promise<string | null> {
@@ -47,6 +88,100 @@ async function resolveBinary(): Promise<string | null> {
     return MACOS_FALLBACK_BIN;
   }
   return null;
+}
+
+// Resolve the tailscale sidecar this deployment owns. Mirrors the backend's
+// _select_sidecar_container: foreign role=tailscale sidecars are excluded by
+// cross-checking the running containers against this deployment's state tree —
+// the most recently up-ed profile (active-profile marker) wins, falling back to
+// the newest owned-and-running sidecar.
+async function selectSidecarContainer(
+  docker: string,
+): Promise<{ container: string | null; error: string | null }> {
+  const { names: running, error } = await listContainers(docker, [
+    `label=${ROLE_LABEL}`,
+    "status=running",
+  ]);
+  if (error !== null) {
+    return { container: null, error };
+  }
+  if (running.length === 0) {
+    return { container: null, error: "no waypoint tailscale sidecar running" };
+  }
+
+  const root = tailscaleStateRoot();
+
+  const active = readActiveProfile(root);
+  if (active) {
+    const name = `${CONTAINER_PREFIX}${active}`;
+    if (running.includes(name)) {
+      return { container: name, error: null };
+    }
+  }
+
+  // `running` is newest-first (docker ps order), so the first owned entry is
+  // the most recently created sidecar this deployment controls.
+  const owned = ownedContainerNames(root);
+  const ownedRunning = running.find((name) => owned.has(name));
+  if (ownedRunning !== undefined) {
+    return { container: ownedRunning, error: null };
+  }
+
+  return {
+    container: null,
+    error: `no tailscale sidecar for this deployment is running (state dir ${root}); run \`waypointctl tailscale up <profile>\``,
+  };
+}
+
+function tailscaleStateRoot(): string {
+  const raw = (process.env[STATE_DIR_ENV] ?? "").trim() || DEFAULT_STATE_DIR;
+  const expanded = raw === "~" || raw.startsWith("~/") ? join(homedir(), raw.slice(1)) : raw;
+  return join(expanded, "tailscale");
+}
+
+function readActiveProfile(root: string): string | null {
+  try {
+    return readFileSync(join(root, ACTIVE_PROFILE_FILE), "utf-8").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function ownedContainerNames(root: string): Set<string> {
+  try {
+    return new Set(
+      readdirSync(root, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => `${CONTAINER_PREFIX}${entry.name}`),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+async function listContainers(
+  docker: string,
+  filters: string[],
+): Promise<{ names: string[]; error: string | null }> {
+  const args = ["ps"];
+  for (const spec of filters) {
+    args.push("--filter", spec);
+  }
+  args.push("--format", "{{.Names}}");
+  let stdout: string;
+  try {
+    stdout = await runCommand(docker, args);
+  } catch (error) {
+    return {
+      names: [],
+      error: error instanceof Error ? error.message : "docker ps failed",
+    };
+  }
+  const names = stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  return { names, error: null };
 }
 
 function firstResolvable(name: string): Promise<string | null> {
@@ -68,14 +203,14 @@ function firstResolvable(name: string): Promise<string | null> {
   });
 }
 
-function runTailscaleStatus(binary: string): Promise<string> {
+function runCommand(command: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(binary, ["status", "--json"], { stdio: ["ignore", "pipe", "pipe"] });
+    const proc = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
       proc.kill("SIGTERM");
-      reject(new Error("tailscale status timed out"));
+      reject(new Error(`${command} timed out`));
     }, SUBPROCESS_TIMEOUT_MS);
     proc.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
@@ -93,7 +228,7 @@ function runTailscaleStatus(binary: string): Promise<string> {
         resolve(stdout);
         return;
       }
-      reject(new Error(stderr.trim() || `tailscale exited with ${code}`));
+      reject(new Error(stderr.trim() || `${command} exited with ${code}`));
     });
   });
 }

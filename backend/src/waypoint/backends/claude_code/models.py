@@ -8,15 +8,16 @@ binary; bumped manually when a new alias ships. Codex has a runtime
 from waypoint.schemas import BackendModelOption
 
 # Effort levels gated by the binary's per-model checks (`vy`/`L4_`/`k4_`):
-# opus-4-6/4-7 and sonnet-4-6 expose the full set; haiku and older opus/sonnet
-# don't accept --effort at all.
+# opus-4-6/4-7/4-8 and sonnet-4-6 expose the full set; haiku and older
+# opus/sonnet don't accept --effort at all.
 CLAUDE_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh")
 
 # Claude's CLI only exposes a small fixed catalog of aliases. The adapter may
 # see either the human-facing alias (``opus[1m]``) or a resolved API model id
-# (``claude-opus-4-7``); normalize both to the same family so the context window
+# (``claude-opus-4-8``); normalize both to the same family so the context window
 # lookup stays stable.
 CLAUDE_MODEL_ALIASES: dict[str, str] = {
+    "claude-opus-4-8": "opus",
     "claude-opus-4-7": "opus",
     "claude-sonnet-4-6": "sonnet",
     "claude-sonnet-4-5": "sonnet",
@@ -34,7 +35,7 @@ CLAUDE_CONTEXT_WINDOWS: dict[str, int] = {
 DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
     BackendModelOption(
         id="opus",
-        label="Opus 4.7",
+        label="Opus 4.8",
         description="Most capable for complex work",
         supported_efforts=list(CLAUDE_EFFORT_LEVELS),
         default_effort="high",
@@ -53,7 +54,7 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
     ),
     BackendModelOption(
         id="opus[1m]",
-        label="Opus 4.7 (1M context)",
+        label="Opus 4.8 (1M context)",
         description="Long sessions with large codebases",
         is_default=True,
         supported_efforts=list(CLAUDE_EFFORT_LEVELS),

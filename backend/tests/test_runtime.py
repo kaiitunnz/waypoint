@@ -3027,7 +3027,7 @@ async def test_list_backend_models_returns_curated_claude_list(tmp_path) -> None
     # Default falls back to the entry flagged is_default in the curated list
     # when no plugin_configs.claude_code.default_model_id override is present.
     assert response["default_model_id"] == "opus[1m]"
-    assert response["default_model_label"] == "Opus 4.7 (1M context)"
+    assert response["default_model_label"] == "Opus 4.8 (1M context)"
 
 
 @pytest.mark.asyncio
@@ -3041,7 +3041,7 @@ async def test_list_backend_models_honours_default_models_override(tmp_path) -> 
     runtime = SessionRuntime(settings, storage)
     response = await runtime.list_backend_models("claude_code")
     assert response["default_model_id"] == "opus"
-    assert response["default_model_label"] == "Opus 4.7"
+    assert response["default_model_label"] == "Opus 4.8"
 
 
 def _seed_session_with_events(

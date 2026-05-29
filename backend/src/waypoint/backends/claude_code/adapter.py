@@ -364,7 +364,7 @@ class ClaudeCliAdapter:
         Wire format documented in tmp/docs/BACKEND_CONTROL_PROTOCOLS.md. Pass
         ``model=None`` to revert to the session default. The CLI accepts both
         shortened aliases (``opus``, ``sonnet``, ``haiku``) and full first-party
-        IDs (``claude-opus-4-7``); append ``[1m]`` for 1M-context variants.
+        IDs (``claude-opus-4-8``); append ``[1m]`` for 1M-context variants.
         """
         request_id = f"set-model-{uuid.uuid4()}"
         payload: dict[str, Any] = {"subtype": "set_model"}

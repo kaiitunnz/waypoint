@@ -12,7 +12,11 @@ import {
 
 import { CommandSuggestions } from "@/components/CommandSuggestions";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
-import { COMPOSER_MIN_HEIGHT, SHORTCUT_IS_MAC } from "@/lib/composer";
+import {
+  COMPOSER_MIN_HEIGHT,
+  SHORTCUT_IS_MAC,
+  type TerminalSubmitResult,
+} from "@/lib/composer";
 import { useCommandCompletions } from "@/lib/composer-completions";
 import type { SessionRecord } from "@/lib/types";
 
@@ -23,9 +27,12 @@ interface TerminalComposeProps {
   token: string;
   sessionId: string;
   session: SessionRecord | null;
-  // ``onSubmit`` returns false when the socket isn't open so we can leave
-  // the draft in place and surface a hint without throwing it away.
-  onSubmit: (text: string) => boolean;
+  // Resolves a ``TerminalSubmitResult``: ``socket-closed`` keeps the draft
+  // and surfaces a retry hint, ``command-error`` keeps it silently (the host
+  // already reported the error), ``ok`` clears it. Async because Waypoint
+  // control commands (``/new``) are handled by the host rather than the
+  // socket, so a submit can succeed even while the WS is reconnecting.
+  onSubmit: (text: string) => Promise<TerminalSubmitResult>;
   expanded: boolean;
   onExpandedChange: (next: boolean) => void;
   connection: ConnectionState;
@@ -75,11 +82,11 @@ export function TerminalCompose({
     setPopoverHost(composeRef.current);
   }, []);
 
-  // ``/new`` is a Waypoint frontend command that only makes sense on
-  // structured sessions; the tmux composer just forwards keystrokes
-  // straight to the wrapped CLI, so we opt out of the local fallback
-  // and surface only the backend-provided completions (CC built-ins,
-  // workspace skills, etc.).
+  // ``/new`` is a Waypoint control command the host intercepts (see
+  // ``handleTerminalSubmit``) rather than forwarding to the wrapped CLI, so
+  // we keep the default local fallback to surface it instantly. ``/fork`` is
+  // not offered here — the backend omits it from tmux completions. Other
+  // entries come from the wrapped backend (CC built-ins, workspace skills).
   const {
     suggestions,
     suggestionsOpen,
@@ -97,7 +104,6 @@ export function TerminalCompose({
     draft,
     setDraft,
     enabled: expanded,
-    localFallback: [],
     textareaRef,
   });
 
@@ -121,25 +127,31 @@ export function TerminalCompose({
   const connected = connection === "open";
   const canSend = expanded && connected && dirty && !sending;
 
-  const send = useCallback(() => {
+  const send = useCallback(async () => {
     const text = draft;
     if (!text.trim()) return;
-    if (!connected) {
-      setHint("Reconnecting — try again in a moment");
-      return;
-    }
+    // No connection gate here: control commands like ``/new`` are handled by
+    // the host and don't need the socket, so ``onSubmit`` decides whether the
+    // WS was actually required.
     setSending(true);
-    const ok = onSubmit(text);
-    if (ok) {
-      setDraft("");
-      setHint(null);
-      resetCompletions();
-    } else {
-      setHint("Socket not open — try again in a moment");
+    try {
+      const result = await onSubmit(text);
+      if (result === "ok") {
+        setDraft("");
+        setHint(null);
+        resetCompletions();
+      } else if (result === "socket-closed") {
+        setHint(
+          connected
+            ? "Socket not open — try again in a moment"
+            : "Reconnecting — try again in a moment",
+        );
+      }
+      // ``command-error``: the host already surfaced the error; keep the draft.
+    } finally {
+      // Briefly hold the disabled state so the user gets feedback.
+      window.setTimeout(() => setSending(false), 120);
     }
-    // The send call resolves synchronously (it's just a WebSocket.send),
-    // but we briefly hold the disabled state so the user gets feedback.
-    window.setTimeout(() => setSending(false), 120);
   }, [draft, connected, onSubmit, resetCompletions]);
 
   const handleKeyDown = useCallback(

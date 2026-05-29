@@ -1,11 +1,20 @@
 import json
-import logging
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from waypoint import tailnet
 from waypoint.tailnet import _parse_snapshot, fetch_snapshot
+
+
+@pytest.fixture(autouse=True)
+def tailscale_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point sidecar resolution at an empty per-test state tree and return it."""
+    monkeypatch.setenv(tailnet.STATE_DIR_ENV, str(tmp_path))
+    root = tmp_path / "tailscale"
+    root.mkdir()
+    return root
 
 
 def test_parse_snapshot_orders_self_then_online_then_offline() -> None:
@@ -141,6 +150,7 @@ async def test_fetch_snapshot_prefers_host_binary(
 @pytest.mark.asyncio
 async def test_fetch_snapshot_falls_back_to_docker_exec(
     monkeypatch: pytest.MonkeyPatch,
+    tailscale_state: Path,
 ) -> None:
     monkeypatch.setattr(tailnet.os.path, "exists", lambda _path: False)
 
@@ -152,6 +162,7 @@ async def test_fetch_snapshot_falls_back_to_docker_exec(
         return None
 
     monkeypatch.setattr(tailnet.shutil, "which", fake_which)
+    (tailscale_state / "active-profile").write_text("nat\n", encoding="utf-8")
 
     payload = _running_payload("waypoint-nat")
     calls: list[tuple[str, ...]] = []
@@ -274,21 +285,8 @@ async def test_fetch_snapshot_surfaces_docker_ps_error(
     assert snapshot.error == "Cannot connect to the Docker daemon"
 
 
-@pytest.mark.asyncio
-async def test_fetch_snapshot_picks_first_when_multiple_sidecars(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    monkeypatch.setattr(tailnet.os.path, "exists", lambda _path: False)
-
-    def fake_which(name: str) -> str | None:
-        return "/usr/local/bin/docker" if name == "docker" else None
-
-    monkeypatch.setattr(tailnet.shutil, "which", fake_which)
-
-    payload = _running_payload("waypoint-a")
-    calls: list[tuple[str, ...]] = []
-    plans: dict[tuple[str, ...], _FakeProcess] = {
+def _ps_plan(stdout: bytes) -> tuple[tuple[str, ...], _FakeProcess]:
+    return (
         (
             "/usr/local/bin/docker",
             "ps",
@@ -298,29 +296,123 @@ async def test_fetch_snapshot_picks_first_when_multiple_sidecars(
             "status=running",
             "--format",
             "{{.Names}}",
-        ): _FakeProcess(stdout=b"waypoint-tailscale-a\nwaypoint-tailscale-b\n"),
-        (
-            "/usr/local/bin/docker",
-            "exec",
-            "waypoint-tailscale-a",
-            "tailscale",
-            "status",
-            "--json",
-        ): _FakeProcess(stdout=json.dumps(payload).encode()),
-    }
-    monkeypatch.setattr(
-        tailnet.asyncio,
-        "create_subprocess_exec",
-        _exec_recorder(plans, calls),
+        ),
+        _FakeProcess(stdout=stdout),
     )
 
-    with caplog.at_level(logging.WARNING, logger="waypoint.tailnet"):
-        snapshot = await fetch_snapshot()
+
+def _exec_plan(
+    container: str, payload: dict[str, Any]
+) -> tuple[tuple[str, ...], _FakeProcess]:
+    return (
+        ("/usr/local/bin/docker", "exec", container, "tailscale", "status", "--json"),
+        _FakeProcess(stdout=json.dumps(payload).encode()),
+    )
+
+
+def _docker_only_which(name: str) -> str | None:
+    return "/usr/local/bin/docker" if name == "docker" else None
+
+
+@pytest.mark.asyncio
+async def test_fetch_snapshot_uses_active_profile_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    tailscale_state: Path,
+) -> None:
+    monkeypatch.setattr(tailnet.os.path, "exists", lambda _path: False)
+    monkeypatch.setattr(tailnet.shutil, "which", _docker_only_which)
+    (tailscale_state / "active-profile").write_text("b\n", encoding="utf-8")
+
+    calls: list[tuple[str, ...]] = []
+    plans = dict(
+        [
+            _ps_plan(b"waypoint-tailscale-a\nwaypoint-tailscale-b\n"),
+            _exec_plan("waypoint-tailscale-b", _running_payload("node-b")),
+        ]
+    )
+    monkeypatch.setattr(
+        tailnet.asyncio, "create_subprocess_exec", _exec_recorder(plans, calls)
+    )
+
+    snapshot = await fetch_snapshot()
 
     assert snapshot.available is True
-    assert calls[1][2] == "waypoint-tailscale-a"
-    assert any(
-        "multiple tailscale sidecars" in record.message
-        and record.levelname == "WARNING"
-        for record in caplog.records
+    assert calls[1][2] == "waypoint-tailscale-b"
+
+
+@pytest.mark.asyncio
+async def test_fetch_snapshot_falls_back_to_newest_owned_when_no_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    tailscale_state: Path,
+) -> None:
+    monkeypatch.setattr(tailnet.os.path, "exists", lambda _path: False)
+    monkeypatch.setattr(tailnet.shutil, "which", _docker_only_which)
+    (tailscale_state / "a").mkdir()
+    (tailscale_state / "b").mkdir()
+
+    calls: list[tuple[str, ...]] = []
+    # docker ps is newest-first, so the first owned entry is the most recent.
+    plans = dict(
+        [
+            _ps_plan(b"waypoint-tailscale-b\nwaypoint-tailscale-a\n"),
+            _exec_plan("waypoint-tailscale-b", _running_payload("node-b")),
+        ]
     )
+    monkeypatch.setattr(
+        tailnet.asyncio, "create_subprocess_exec", _exec_recorder(plans, calls)
+    )
+
+    snapshot = await fetch_snapshot()
+
+    assert snapshot.available is True
+    assert calls[1][2] == "waypoint-tailscale-b"
+
+
+@pytest.mark.asyncio
+async def test_fetch_snapshot_ignores_foreign_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tailnet.os.path, "exists", lambda _path: False)
+    monkeypatch.setattr(tailnet.shutil, "which", _docker_only_which)
+
+    calls: list[tuple[str, ...]] = []
+    # A running role=tailscale container exists, but it is not under this
+    # deployment's (empty) state tree, so it must not be queried.
+    plans = dict([_ps_plan(b"someone-elses-tailscale\n")])
+    monkeypatch.setattr(
+        tailnet.asyncio, "create_subprocess_exec", _exec_recorder(plans, calls)
+    )
+
+    snapshot = await fetch_snapshot()
+
+    assert snapshot.available is False
+    assert "this deployment" in (snapshot.error or "")
+    assert all(call[1] != "exec" for call in calls)
+
+
+@pytest.mark.asyncio
+async def test_fetch_snapshot_falls_back_when_active_profile_container_stopped(
+    monkeypatch: pytest.MonkeyPatch,
+    tailscale_state: Path,
+) -> None:
+    monkeypatch.setattr(tailnet.os.path, "exists", lambda _path: False)
+    monkeypatch.setattr(tailnet.shutil, "which", _docker_only_which)
+    # Marker names a profile whose container is no longer running.
+    (tailscale_state / "active-profile").write_text("gone\n", encoding="utf-8")
+    (tailscale_state / "live").mkdir()
+
+    calls: list[tuple[str, ...]] = []
+    plans = dict(
+        [
+            _ps_plan(b"waypoint-tailscale-live\n"),
+            _exec_plan("waypoint-tailscale-live", _running_payload("node-live")),
+        ]
+    )
+    monkeypatch.setattr(
+        tailnet.asyncio, "create_subprocess_exec", _exec_recorder(plans, calls)
+    )
+
+    snapshot = await fetch_snapshot()
+
+    assert snapshot.available is True
+    assert calls[1][2] == "waypoint-tailscale-live"

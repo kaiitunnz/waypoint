@@ -9,6 +9,7 @@ import {
   buildBackendOptions,
   DEFAULT_BACKEND_PORT,
   fetchLocalTailnetSnapshot,
+  sameBackendUrl,
   TailnetSnapshot,
 } from "@/lib/tailnet";
 
@@ -31,7 +32,9 @@ export function LoginForm({ defaultHost, onSubmit }: LoginFormProps) {
   const [busy, setBusy] = useState(false);
   const [probe, setProbe] = useState<ProbeStatus>("idle");
   const probeAbortRef = useRef<AbortController | null>(null);
-  const initializedRef = useRef(false);
+  // Stop the selection-sync effect from overriding an explicit user choice once
+  // they've interacted with the dropdown.
+  const userTouchedRef = useRef(false);
 
   const pageHost = typeof window === "undefined" ? "localhost" : window.location.hostname || "localhost";
 
@@ -60,12 +63,11 @@ export function LoginForm({ defaultHost, onSubmit }: LoginFormProps) {
   }, []);
 
   useEffect(() => {
-    if (initializedRef.current || snapshotLoading) {
+    if (snapshotLoading || userTouchedRef.current) {
       return;
     }
-    initializedRef.current = true;
     if (defaultHost) {
-      const matched = options.find((option) => option.url === defaultHost);
+      const matched = options.find((option) => sameBackendUrl(option.url, defaultHost));
       if (matched) {
         setSelection(matched.url);
         return;
@@ -143,7 +145,13 @@ export function LoginForm({ defaultHost, onSubmit }: LoginFormProps) {
             {snapshotLoading ? "Refreshing…" : "Refresh"}
           </button>
         </span>
-        <select value={selection} onChange={(event) => setSelection(event.target.value)}>
+        <select
+          value={selection}
+          onChange={(event) => {
+            userTouchedRef.current = true;
+            setSelection(event.target.value);
+          }}
+        >
           {options.map((option) => (
             <option key={option.url} value={option.url}>
               {option.label}

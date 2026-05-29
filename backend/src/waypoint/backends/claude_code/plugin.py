@@ -1111,8 +1111,7 @@ class ClaudeCodePlugin:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=(
-                        f"claude thread cwd {info.cwd} no longer exists; "
-                        "cannot resume"
+                        f"claude thread cwd {info.cwd} no longer exists; cannot resume"
                     ),
                 )
             cwd = str(cwd_path)

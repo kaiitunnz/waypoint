@@ -176,6 +176,13 @@ function CodexCard({
       return <UserMessageBubble event={event} />;
     }
     case "agent_output":
+      // A blank agent message — e.g. a whitespace-only OpenCode text part —
+      // carries nothing to render and would collapse to a zero-width bubble
+      // whose absolutely-positioned meta strip overflows (the timestamp wraps
+      // one character per line). Drop it.
+      if (!event.text.trim()) {
+        return null;
+      }
       if (event.metadata?.item_kind === "reasoning") {
         return <ReasoningDisclosure event={event} agentLabel={agentLabel} />;
       }

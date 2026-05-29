@@ -15,6 +15,29 @@ export interface TailnetSnapshot {
 
 export const DEFAULT_BACKEND_PORT = 8787;
 
+// Two backend URLs address the same backend when their host and port match,
+// ignoring protocol (http vs https) and a missing explicit default port.
+// Selection matching compares on this canonical key rather than the raw string.
+export function sameBackendUrl(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  if (!a || !b) {
+    return false;
+  }
+  return canonicalBackendKey(a) === canonicalBackendKey(b);
+}
+
+function canonicalBackendKey(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const port = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+    return `${parsed.hostname.toLowerCase()}:${port}`;
+  } catch {
+    return url.trim().toLowerCase().replace(/\/+$/, "");
+  }
+}
+
 export function backendPortFromUrl(url: string | null | undefined): number | null {
   if (!url) return null;
   try {

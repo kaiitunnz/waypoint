@@ -10,6 +10,7 @@ import {
   buildBackendOptions,
   DEFAULT_BACKEND_PORT,
   fetchBackendTailnetSnapshot,
+  sameBackendUrl,
   TailnetSnapshot,
 } from "@/lib/tailnet";
 
@@ -42,6 +43,9 @@ export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch
   const probeAbortRef = useRef<AbortController | null>(null);
   const onAuthFailureRef = useRef(onAuthFailure);
   useEffect(() => { onAuthFailureRef.current = onAuthFailure; });
+  // Reset each time the panel opens so a stale snapshot or a re-rendered prop
+  // can't override the choice the user makes while the panel is open.
+  const userTouchedRef = useRef(false);
 
   const pageHost = typeof window === "undefined" ? "localhost" : window.location.hostname || "localhost";
 
@@ -63,7 +67,7 @@ export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch
     [hostOptions, launchTargets],
   );
 
-  const hostLabel = hostOptions.find((option) => option.url === host)?.label ?? host;
+  const hostLabel = hostOptions.find((option) => sameBackendUrl(option.url, host))?.label ?? host;
   const activeTarget = launchTargets.find((target) => target.id === targetId) ?? null;
   const currentLabel = activeTarget ? `${hostLabel} / SSH: ${activeTarget.name}` : hostLabel;
 
@@ -87,14 +91,18 @@ export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch
   }, [open, host, token]);
 
   useEffect(() => {
-    if (!open) {
+    userTouchedRef.current = false;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || userTouchedRef.current) {
       return;
     }
     if (targetId && launchTargets.some((target) => target.id === targetId)) {
       setSelection(`${TARGET_PREFIX}${targetId}`);
       return;
     }
-    const matched = hostOptions.find((option) => option.url === host);
+    const matched = hostOptions.find((option) => sameBackendUrl(option.url, host));
     if (matched) {
       setSelection(matched.url);
       return;
@@ -105,7 +113,7 @@ export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch
 
   const selectedTargetId = selection.startsWith(TARGET_PREFIX) ? selection.slice(TARGET_PREFIX.length) : "";
   const activeHost = selection === CUSTOM_VALUE || selection.startsWith(TARGET_PREFIX) ? customOrCurrentHost(selection, customHost, host) : selection;
-  const dirty = activeHost !== host || selectedTargetId !== targetId;
+  const dirty = !sameBackendUrl(activeHost, host) || selectedTargetId !== targetId;
 
   useEffect(() => {
     probeAbortRef.current?.abort();
@@ -158,7 +166,13 @@ export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch
       </p>
       <label className="field">
         <span>Backend</span>
-        <select value={selection} onChange={(event) => setSelection(event.target.value)}>
+        <select
+          value={selection}
+          onChange={(event) => {
+            userTouchedRef.current = true;
+            setSelection(event.target.value);
+          }}
+        >
           {pickerOptions.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}

@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import shutil
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -12,6 +13,16 @@ log = logging.getLogger("waypoint.tailnet")
 
 DEFAULT_PORT = 8787
 MACOS_FALLBACK_BIN = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+ROLE_LABEL = "waypoint.role=tailscale"
+# Multiple Waypoint deployments (and unrelated containers) can share the
+# role=tailscale label on one host. The sidecar this deployment owns is
+# resolved from the waypointctl state tree rather than a dedicated env var:
+# `waypoint_tailscale.sh` records the active profile under
+# ``$WAYPOINTCTL_STATE_DIR/tailscale`` and names each container by slug.
+STATE_DIR_ENV = "WAYPOINTCTL_STATE_DIR"
+DEFAULT_STATE_DIR = "~/.waypoint"
+ACTIVE_PROFILE_FILE = "active-profile"
+CONTAINER_PREFIX = "waypoint-tailscale-"
 
 
 class TailnetPeer(BaseModel):
@@ -49,52 +60,98 @@ async def fetch_snapshot() -> TailnetSnapshot:
             available=False, error="tailscale binary not found on PATH"
         )
 
-    container, lookup_error = await _find_sidecar_container(docker)
-    if lookup_error is not None:
-        return TailnetSnapshot(available=False, error=lookup_error)
+    container, lookup_error = await _select_sidecar_container(docker)
     if container is None:
-        return TailnetSnapshot(
-            available=False, error="no waypoint tailscale sidecar running"
-        )
+        return TailnetSnapshot(available=False, error=lookup_error)
 
     return await _run_status(
         [docker, "exec", container, "tailscale", "status", "--json"]
     )
 
 
-async def _find_sidecar_container(docker: str) -> tuple[str | None, str | None]:
-    """Return (container_name, error). `error` is set only when `docker ps` itself fails."""
+async def _select_sidecar_container(docker: str) -> tuple[str | None, str | None]:
+    """Resolve the tailscale sidecar this deployment owns.
+
+    Foreign ``role=tailscale`` sidecars sharing the host are excluded by
+    cross-checking the running containers against this deployment's state tree:
+    the most recently ``up``-ed profile (the ``active-profile`` marker) wins,
+    falling back to the newest owned-and-running sidecar. Returns
+    ``(container, None)`` on success or ``(None, error)``.
+    """
+    running, error = await _list_containers(
+        docker, [f"label={ROLE_LABEL}", "status=running"]
+    )
+    if error is not None:
+        return None, error
+    if not running:
+        return None, "no waypoint tailscale sidecar running"
+
+    root = _tailscale_state_root()
+
+    active = _read_active_profile(root)
+    if active is not None:
+        name = f"{CONTAINER_PREFIX}{active}"
+        if name in running:
+            return name, None
+
+    # `running` is newest-first (docker ps order), so the first owned entry is
+    # the most recently created sidecar this deployment controls.
+    owned = _owned_container_names(root)
+    for name in running:
+        if name in owned:
+            return name, None
+
+    return None, (
+        f"no tailscale sidecar for this deployment is running (state dir {root}); "
+        "run `waypointctl tailscale up <profile>`"
+    )
+
+
+def _tailscale_state_root() -> Path:
+    raw = os.environ.get(STATE_DIR_ENV) or DEFAULT_STATE_DIR
+    return Path(raw).expanduser() / "tailscale"
+
+
+def _read_active_profile(root: Path) -> str | None:
+    try:
+        text = (root / ACTIVE_PROFILE_FILE).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return text or None
+
+
+def _owned_container_names(root: Path) -> set[str]:
+    try:
+        entries = list(root.iterdir())
+    except OSError:
+        return set()
+    return {f"{CONTAINER_PREFIX}{entry.name}" for entry in entries if entry.is_dir()}
+
+
+async def _list_containers(
+    docker: str, filters: list[str]
+) -> tuple[list[str], str | None]:
+    """Return (names, error). `error` is set only when `docker ps` itself fails."""
+    argv = [docker, "ps"]
+    for spec in filters:
+        argv += ["--filter", spec]
+    argv += ["--format", "{{.Names}}"]
     try:
         process = await asyncio.create_subprocess_exec(
-            docker,
-            "ps",
-            "--filter",
-            "label=waypoint.role=tailscale",
-            "--filter",
-            "status=running",
-            "--format",
-            "{{.Names}}",
+            *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await process.communicate()
     except (FileNotFoundError, OSError) as exc:
-        return None, f"failed to run docker ps: {exc}"
+        return [], f"failed to run docker ps: {exc}"
     if process.returncode != 0:
         message = (
             stderr.decode().strip() or f"docker ps exited with {process.returncode}"
         )
-        return None, message
+        return [], message
     names = [line for line in stdout.decode().splitlines() if line.strip()]
-    if not names:
-        return None, None
-    if len(names) > 1:
-        log.warning(
-            "multiple tailscale sidecars running (%s); using %s",
-            ", ".join(names),
-            names[0],
-        )
-    return names[0], None
+    return names, None
 
 
 async def _run_status(argv: list[str]) -> TailnetSnapshot:

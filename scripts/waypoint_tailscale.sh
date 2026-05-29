@@ -3,6 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE_ROOT="${WAYPOINTCTL_STATE_DIR:-${HOME}/.waypoint}/tailscale"
+# Records the most recently `up`-ed profile so peer discovery (backend +
+# frontend) can resolve the sidecar this deployment owns without a dedicated
+# env var. Read by waypoint.tailnet and the frontend's tailnet route.
+ACTIVE_PROFILE_FILE="${STATE_ROOT}/active-profile"
 BACKEND_PORT="${WAYPOINT_STACK_BACKEND_PORT:-8787}"
 FRONTEND_PORT="${WAYPOINT_STACK_FRONTEND_PORT:-3000}"
 HOST_ALIAS="${TS_HOST_ALIAS:-host.docker.internal}"
@@ -178,6 +182,8 @@ cmd_up() {
     die "Failed to configure Tailscale Serve for ${name}."
   fi
 
+  printf '%s\n' "${slug}" > "${ACTIVE_PROFILE_FILE}"
+
   echo "tailscale container ready: ${name}"
   echo "profile: ${slug}"
   echo "frontend: https://${node_name}:${FRONTEND_PORT}"
@@ -197,6 +203,10 @@ cmd_down() {
   # container is safe — the next `up` rebuilds rather than starting a
   # potentially stale stopped container.
   docker rm -f "${name}" >/dev/null
+  if [[ -f "${ACTIVE_PROFILE_FILE}" \
+    && "$(cat "${ACTIVE_PROFILE_FILE}" 2>/dev/null || true)" == "$(slugify_profile "${profile}")" ]]; then
+    rm -f "${ACTIVE_PROFILE_FILE}"
+  fi
   echo "tailscale container removed: ${name}"
 }
 

@@ -233,7 +233,7 @@ def _render_remote_file_write(quoted_path: str, content: str) -> str:
     """Emit a heredoc that writes `content` to `quoted_path` (already
     shell-quoted) without any expansion."""
     delimiter = f"__WAYPOINT_{secrets.token_hex(8)}__"
-    return f"cat > {quoted_path} <<'{delimiter}'\n" f"{content}\n" f"{delimiter}"
+    return f"cat > {quoted_path} <<'{delimiter}'\n{content}\n{delimiter}"
 
 
 def _random_reverse_tunnel_port() -> int:

@@ -1014,11 +1014,15 @@ class OpenCodeAdapter:
     async def list_commands(self, session_id: str) -> list[dict[str, Any]]:
         if not self._started:
             await self.start()
-        if session_id not in self._sessions:
+        state = self._sessions.get(session_id)
+        if state is None:
             raise OpenCodeError(f"session not found: {session_id}")
         client = self._require_client()
         try:
-            data = await client.get("/command")
+            # Scope discovery to the session's directory so project-local
+            # skills and commands resolve; without it the server falls back to
+            # its own process cwd and misses project-scoped skills.
+            data = await client.get("/command", params={"directory": state.cwd})
         except Exception as exc:
             raise OpenCodeError(f"failed to list commands: {exc}") from exc
         return data if isinstance(data, list) else []

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from codex_app_server.client import AppServerClient
+from openai_codex.client import CodexClient
 
 from waypoint.backends.codex.adapter import (
     CodexAppServerAdapter,
@@ -36,7 +36,7 @@ class FakeTurnStartResponse:
     turn: FakeTurn
 
 
-class FakeAppServerClient:
+class FakeCodexClient:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
         self.notifications: asyncio.Queue[Any] = asyncio.Queue()
@@ -45,6 +45,8 @@ class FakeAppServerClient:
         self.initialized = False
         self.closed = False
         self.start_model: str | None = None
+        self.turn_notification_ids: list[str] = []
+        self.unregistered_turn_notification_ids: list[str] = []
 
     def start(self) -> None:
         self.started = True
@@ -117,7 +119,17 @@ class FakeAppServerClient:
         self.calls.append(("turn_interrupt", (thread_id, turn_id)))
 
     def next_notification(self) -> Any:
-        # Synchronous call in adapter goes through asyncio.to_thread so this
+        return self._next_notification()
+
+    def next_turn_notification(self, turn_id: str) -> Any:
+        self.turn_notification_ids.append(turn_id)
+        return self._next_notification()
+
+    def unregister_turn_notifications(self, turn_id: str) -> None:
+        self.unregistered_turn_notification_ids.append(turn_id)
+
+    def _next_notification(self) -> Any:
+        # Synchronous calls in adapter go through asyncio.to_thread so this
         # blocks the worker thread until a notification is enqueued.
         loop = asyncio.new_event_loop()
         try:
@@ -138,7 +150,7 @@ def make_adapter(
     async def emit(session_id, kind, text, metadata, status):
         emitted.append((session_id, kind, text, metadata, status))
 
-    fake = FakeAppServerClient()
+    fake = FakeCodexClient()
 
     def factory(cwd, approval_handler):
         fake.approval_handler = approval_handler
@@ -176,7 +188,7 @@ async def test_start_session_uses_factory_override() -> None:
     emitted: list = []
     adapter, fake = make_adapter(emitted)
 
-    override = FakeAppServerClient()
+    override = FakeCodexClient()
 
     def override_factory(cwd, approval_handler):
         override.approval_handler = approval_handler
@@ -265,7 +277,7 @@ async def test_list_models_uses_transient_client() -> None:
     emitted: list = []
     adapter, _ = make_adapter(emitted)
 
-    transient = FakeAppServerClient()
+    transient = FakeCodexClient()
 
     def transient_factory(cwd, approval_handler):
         transient.approval_handler = approval_handler
@@ -420,8 +432,12 @@ async def test_send_input_after_interrupt_starts_fresh_turn() -> None:
     assert state.active_turn_id is None
     assert state.stream_task is None
     assert "sess" in adapter._sessions
+    assert fake.turn_notification_ids == ["turn-1"]
+    assert fake.unregistered_turn_notification_ids == ["turn-1"]
 
     fake.calls.clear()
+    fake.turn_notification_ids.clear()
+    fake.unregistered_turn_notification_ids.clear()
     await adapter.send_input("sess", "second")
 
     methods = [call[0] for call in fake.calls]
@@ -526,7 +542,7 @@ async def test_terminate_session_closes_client_and_drops_state() -> None:
     assert "sess" not in adapter._sessions
     assert fake.closed is True
     # turn_interrupt must NOT be issued during termination — the in-flight
-    # next_notification holds the transport lock, so doing so deadlocks. The
+    # next_*_notification holds the transport lock, so doing so deadlocks. The
     # client.close() above is what unblocks the streaming task.
     assert all(call[0] != "turn_interrupt" for call in fake.calls)
 
@@ -600,6 +616,8 @@ async def test_streamed_tool_result_suppresses_duplicate_completed_event() -> No
     tool_results = [entry for entry in emitted if entry[1] == EventKind.TOOL_RESULT]
     assert len(tool_results) == 1
     assert tool_results[0][2] == "line one\n"
+    assert fake.turn_notification_ids == ["turn-1", "turn-1", "turn-1"]
+    assert fake.unregistered_turn_notification_ids == ["turn-1"]
 
 
 @pytest.mark.asyncio
@@ -931,16 +949,16 @@ async def test_context_usage_snapshot_deduplicates_repeated_updates() -> None:
         calls.append((session_id, updates, publish))
         return None
 
-    fake = FakeAppServerClient()
+    fake = FakeCodexClient()
     adapter = CodexAppServerAdapter(
         _emit,
         on_session_update=on_session_update,
-        client_factory=lambda *_: cast(AppServerClient, fake),
+        client_factory=lambda *_: cast(CodexClient, fake),
     )
     state = CodexSessionState(
         session_id="sess",
         cwd="/tmp",
-        client=cast(AppServerClient, fake),
+        client=cast(CodexClient, fake),
         transport_lock=asyncio.Lock(),
         thread_id="thread-1",
     )

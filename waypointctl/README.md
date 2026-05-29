@@ -40,7 +40,7 @@ State (PID files, logs, default data dirs) lives under
 ~/.waypoint/
 ├── run/           waypointd.{sock,pid}, {backend,frontend,caffeinate}.{pid,started-this-run}
 ├── logs/          waypointd.log, backend.log, frontend.log
-├── tailscale/     Docker-backed tailnet state
+├── tailscale/     Docker-backed tailnet state (per-profile dirs + `active-profile` marker)
 ├── backend-data/  (default; overridable via WAYPOINT_STACK_BACKEND_DATA_DIR)
 └── uv-cache/      (default; overridable via WAYPOINT_STACK_UV_CACHE_DIR)
 ```

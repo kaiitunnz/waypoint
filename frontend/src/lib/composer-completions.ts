@@ -75,7 +75,27 @@ export function useCommandCompletions({
   const listRef = useRef<HTMLUListElement | null>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
-  const completionHead = draft.split(/\s/, 1)[0];
+  // Caret position drives which word is being completed, so a ``/`` or ``$``
+  // typed mid-prompt triggers suggestions just like one at the start. Kept in
+  // state (synced from the textarea) so the active-word memo recomputes as the
+  // caret moves, not only as ``draft`` changes.
+  const [caret, setCaret] = useState(0);
+
+  useEffect(() => {
+    const el = textareaRef?.current;
+    if (!el) return;
+    const sync = () => setCaret(el.selectionStart ?? el.value.length);
+    const events = ["input", "keyup", "mouseup", "focus", "select"] as const;
+    events.forEach((name) => el.addEventListener(name, sync));
+    return () => events.forEach((name) => el.removeEventListener(name, sync));
+  }, [textareaRef]);
+
+  // The word under the caret: the run of non-whitespace it sits in. With no
+  // textarea wired we can't track the caret, so fall back to the draft end
+  // (trailing-word completion) rather than silently disabling suggestions.
+  const caretPos = textareaRef ? Math.min(caret, draft.length) : draft.length;
+  const [wordStart] = wordRangeAt(draft, caretPos);
+  const completionHead = draft.slice(wordStart, caretPos);
   const completionTrigger = completionHead.startsWith("/")
     ? "/"
     : completionHead.startsWith("$")
@@ -100,7 +120,10 @@ export function useCommandCompletions({
     suggestionsDismissed,
   ]);
 
-  const suggestionsOpen = suggestions.length > 0 && /^\S+$/.test(draft);
+  // ``suggestions`` is already empty unless the caret sits on a ``/``/``$``
+  // word, so its presence is the open condition — no whole-draft test that
+  // would suppress mid-prompt triggers.
+  const suggestionsOpen = suggestions.length > 0;
   const activeIndex = Math.min(
     suggestionIndex,
     Math.max(0, suggestions.length - 1),
@@ -174,10 +197,12 @@ export function useCommandCompletions({
   }, [activeIndex, suggestionsOpen, suggestions.length]);
 
   useEffect(() => {
-    if (!draft.startsWith("/") && !draft.startsWith("$")) {
+    // Re-arm once the caret leaves the trigger word, so a fresh ``/``/``$``
+    // re-opens the list after a prior Escape.
+    if (completionTrigger === null) {
       setSuggestionsDismissed(false);
     }
-  }, [draft]);
+  }, [completionTrigger]);
 
   useEffect(() => {
     if (
@@ -191,11 +216,28 @@ export function useCommandCompletions({
   function applySuggestion(index: number) {
     const chosen = suggestions[index];
     if (!chosen) return;
-    setDraft(chosen.replacement);
+    // Replace the whole word the caret is in (its run on both sides), not the
+    // entire draft, so mid-prompt completions leave surrounding text intact.
+    const pos = textareaRef ? Math.min(caret, draft.length) : draft.length;
+    const [wordStart, wordEnd] = wordRangeAt(draft, pos);
+    // Replacements carry a trailing space; drop a redundant one from the tail
+    // so completing inside "see /to|do here" doesn't double the gap.
+    const tail = draft.slice(wordEnd);
+    const joinedTail =
+      chosen.replacement.endsWith(" ") && tail.startsWith(" ") ? tail.slice(1) : tail;
+    const next = draft.slice(0, wordStart) + chosen.replacement + joinedTail;
+    const nextCaret = wordStart + chosen.replacement.length;
+    setDraft(next);
+    setCaret(nextCaret);
     setSelectedCompletion(chosen);
     setSuggestionsDismissed(true);
     if (textareaRef) {
-      requestAnimationFrame(() => textareaRef.current?.focus());
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(nextCaret, nextCaret);
+      });
     }
   }
 
@@ -269,6 +311,16 @@ export function useCommandCompletions({
     handleSuggestionKey,
     reset,
   };
+}
+
+// The [start, end) bounds of the non-whitespace word that ``pos`` sits in (or
+// at the edge of). Empty run when ``pos`` is on whitespace.
+function wordRangeAt(text: string, pos: number): [number, number] {
+  let start = pos;
+  while (start > 0 && !/\s/.test(text[start - 1])) start--;
+  let end = pos;
+  while (end < text.length && !/\s/.test(text[end])) end++;
+  return [start, end];
 }
 
 function mergeLocalFallback(

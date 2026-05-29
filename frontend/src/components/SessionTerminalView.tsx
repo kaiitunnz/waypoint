@@ -6,6 +6,7 @@ import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { TerminalCompose } from "@/components/TerminalCompose";
 import { TerminalScrollChips } from "@/components/TerminalScrollChips";
 import { XTerminal, type XTerminalHandle } from "@/components/XTerminal";
+import type { TerminalSubmitResult } from "@/lib/composer";
 import { SessionRecord } from "@/lib/types";
 
 type Connection = "idle" | "connecting" | "open" | "reconnecting";
@@ -35,9 +36,11 @@ interface SessionTerminalViewProps {
   // composer beneath remains visible.
   locked: boolean;
   onTerminalInput: (data: string) => void;
-  // Returns false when the WS isn't open so the composer can keep the
-  // draft and surface a "reconnecting" hint instead of dropping it.
-  onTerminalSubmit: (text: string) => boolean;
+  // Resolves a ``TerminalSubmitResult`` so the composer can keep the draft
+  // and surface a retry hint when the WS is closed, stay silent when a
+  // control command reported its own error, or clear it on success. Async
+  // because Waypoint control commands (e.g. ``/new``) are handled here.
+  onTerminalSubmit: (text: string) => Promise<TerminalSubmitResult>;
   onRequestPaste: () => void;
   onTerminalResize: (size: { cols: number; rows: number }) => void;
   onTerminalScrollChip: (direction: "up" | "down") => void;

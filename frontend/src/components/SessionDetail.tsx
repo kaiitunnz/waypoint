@@ -47,7 +47,11 @@ import {
   useBackendCatalog,
 } from "@/lib/backends";
 import { clearToken } from "@/lib/store";
-import { COMPOSER_MIN_HEIGHT, SHORTCUT_IS_MAC } from "@/lib/composer";
+import {
+  COMPOSER_MIN_HEIGHT,
+  SHORTCUT_IS_MAC,
+  type TerminalSubmitResult,
+} from "@/lib/composer";
 import { useCommandCompletions } from "@/lib/composer-completions";
 import {
   isPlanEvent,
@@ -760,6 +764,74 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     return () => observer.disconnect();
   }, [view, scrollToBottom]);
 
+  // Waypoint-level slash commands (``/new``, ``/fork``) are intercepted on
+  // the frontend rather than forwarded to the backend — they're the only
+  // ``frontend_control`` completions in the system. Both composers route
+  // through here so terminal sessions get the same behaviour as chat ones.
+  // Returns ``"handled"`` / ``"error"`` when the text was a control command,
+  // or ``null`` when the caller should fall through to its normal send path.
+  // ``allowFork`` is false for tmux, whose backend can't fork.
+  const runFrontendControlCommand = useCallback(
+    async (
+      text: string,
+      opts?: { allowFork?: boolean },
+    ): Promise<"handled" | "error" | null> => {
+      if (!session) return null;
+      const allowFork = opts?.allowFork ?? true;
+
+      const newArgs = matchControlCommand(text, "new");
+      if (newArgs !== null) {
+        try {
+          const created = await createSession(host, token, {
+            backend: session.backend,
+            cwd: session.cwd,
+            launch_target_id: session.launch_target_id,
+            launch_mode: session.launch_mode ?? "auto",
+            model: session.model,
+            effort: session.effort,
+            permission_mode: session.permission_mode,
+            args: session.args,
+            config_overrides: session.config_overrides,
+          });
+          if (newArgs) {
+            await sendInput(host, token, created.id, newArgs);
+          }
+          router.push(`/session/${created.id}`);
+          return "handled";
+        } catch (e) {
+          if (isAuthError(e)) {
+            handleAuthFailure();
+            return "error";
+          }
+          setError(e instanceof Error ? e.message : "failed to create session");
+          return "error";
+        }
+      }
+
+      const forkArgs = allowFork ? matchControlCommand(text, "fork") : null;
+      if (forkArgs !== null) {
+        try {
+          const forked = await forkSession(host, token, sessionId);
+          if (forkArgs) {
+            await sendInput(host, token, forked.id, forkArgs);
+          }
+          router.push(`/session/${forked.id}`);
+          return "handled";
+        } catch (e) {
+          if (isAuthError(e)) {
+            handleAuthFailure();
+            return "error";
+          }
+          setError(e instanceof Error ? e.message : "failed to fork session");
+          return "error";
+        }
+      }
+
+      return null;
+    },
+    [session, host, token, sessionId, router, handleAuthFailure],
+  );
+
   const submitInput = useCallback(async (
     text: string,
     command?: SessionCommandInvocation,
@@ -767,55 +839,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
     if (!text.trim()) {
       return false;
     }
-    
-    if (text.startsWith("/new")) {
-      if (!session) return false;
-      const trailing = text.slice(4).trim();
-      try {
-        const created = await createSession(host, token, {
-          backend: session.backend,
-          cwd: session.cwd,
-          launch_target_id: session.launch_target_id,
-          launch_mode: session.launch_mode ?? "auto",
-          model: session.model,
-          effort: session.effort,
-          permission_mode: session.permission_mode,
-          args: session.args,
-          config_overrides: session.config_overrides,
-        });
-        if (trailing) {
-          await sendInput(host, token, created.id, trailing);
-        }
-        router.push(`/session/${created.id}`);
-        return true;
-      } catch (e) {
-        if (isAuthError(e)) {
-          handleAuthFailure();
-          return false;
-        }
-        setError(e instanceof Error ? e.message : "failed to create session");
-        return false;
-      }
-    }
 
-    if (text.startsWith("/fork")) {
-      if (!session) return false;
-      const trailing = text.slice(5).trim();
-      try {
-        const forked = await forkSession(host, token, sessionId);
-        if (trailing) {
-          await sendInput(host, token, forked.id, trailing);
-        }
-        router.push(`/session/${forked.id}`);
-        return true;
-      } catch (e) {
-        if (isAuthError(e)) {
-          handleAuthFailure();
-          return false;
-        }
-        setError(e instanceof Error ? e.message : "failed to fork session");
-        return false;
-      }
+    const handled = await runFrontendControlCommand(text);
+    if (handled !== null) {
+      return handled === "handled";
     }
 
     try {
@@ -829,7 +856,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       setError(sendError instanceof Error ? sendError.message : "failed to send input");
       return false;
     }
-  }, [handleAuthFailure, host, token, sessionId, session, router]);
+  }, [runFrontendControlCommand, handleAuthFailure, host, token, sessionId]);
 
   const onSendWithOptimistic = useCallback(
     async (text: string, command?: SessionCommandInvocation) => {
@@ -1205,13 +1232,19 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
 
   // Whole-message submission from the quick-compose drawer — the backend
   // appends Enter when ``submit`` is true so each call lands as one
-  // logical message rather than a stream of keystrokes.
-  const handleTerminalSubmit = useCallback((text: string) => {
+  // logical message rather than a stream of keystrokes. ``/new`` is caught
+  // here as a Waypoint control command instead of being typed into the
+  // wrapped CLI; ``/fork`` is excluded because tmux sessions can't fork.
+  const handleTerminalSubmit = useCallback(async (text: string): Promise<TerminalSubmitResult> => {
+    const handled = await runFrontendControlCommand(text, { allowFork: false });
+    if (handled !== null) {
+      return handled === "handled" ? "ok" : "command-error";
+    }
     const socket = terminalSocketRef.current;
-    if (socket?.readyState !== WebSocket.OPEN) return false;
+    if (socket?.readyState !== WebSocket.OPEN) return "socket-closed";
     socket.send(JSON.stringify({ type: "input_submit", text, submit: true }));
-    return true;
-  }, []);
+    return "ok";
+  }, [runFrontendControlCommand]);
 
   const requestPaste = useCallback(async () => {
     setError("");
@@ -3027,6 +3060,16 @@ function SessionHeader({
       </div>
     </header>
   );
+}
+
+// Match a Waypoint control command (e.g. ``/new``) and return its trailing
+// argument string, or null when the text isn't that command. The trailing
+// space requirement keeps ``/news`` from being read as ``/new``.
+function matchControlCommand(text: string, name: string): string | null {
+  const command = `/${name}`;
+  if (text === command) return "";
+  if (text.startsWith(`${command} `)) return text.slice(command.length + 1).trim();
+  return null;
 }
 
 function formatCwdSegments(cwd: string): string[] {

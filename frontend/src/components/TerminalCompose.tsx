@@ -125,7 +125,10 @@ export function TerminalCompose({
 
   const dirty = draft.trim().length > 0;
   const connected = connection === "open";
-  const canSend = expanded && connected && dirty && !sending;
+  // Not gated on ``connected``: control commands like ``/new`` work without
+  // the socket, and ``send`` surfaces a retry hint for plain text when the WS
+  // is closed — so the button mirrors the ⌘↵ path rather than greying out.
+  const canSend = expanded && dirty && !sending;
 
   const send = useCallback(async () => {
     const text = draft;

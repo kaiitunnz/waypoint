@@ -84,10 +84,24 @@ export function useCommandCompletions({
   useEffect(() => {
     const el = textareaRef?.current;
     if (!el) return;
-    const sync = () => setCaret(el.selectionStart ?? el.value.length);
+    let frame = 0;
+    // Defer to the next frame: calling setState synchronously inside a native
+    // ``input`` listener on a *controlled* textarea races React's value
+    // reconciliation — it re-renders with the pre-update ``draft`` and resets
+    // the field, dropping the just-typed character. By the next frame the
+    // controlled value has committed, so reading ``selectionStart`` is safe.
+    const sync = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() =>
+        setCaret(el.selectionStart ?? el.value.length),
+      );
+    };
     const events = ["input", "keyup", "mouseup", "focus", "select"] as const;
     events.forEach((name) => el.addEventListener(name, sync));
-    return () => events.forEach((name) => el.removeEventListener(name, sync));
+    return () => {
+      cancelAnimationFrame(frame);
+      events.forEach((name) => el.removeEventListener(name, sync));
+    };
   }, [textareaRef]);
 
   // The word under the caret: the run of non-whitespace it sits in. With no

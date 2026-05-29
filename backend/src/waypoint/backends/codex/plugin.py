@@ -16,8 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from codex_app_server.client import AppServerClient
 from fastapi import HTTPException, status
+from openai_codex.client import CodexClient
 from pydantic import BaseModel, Field
 
 from waypoint.backends.capabilities import (
@@ -885,7 +885,7 @@ class CodexPlugin:
         self,
         runtime: "SessionRuntime",
         launch_target_id: str | None,
-        operation: Callable[[AppServerClient], Awaitable[Any]],
+        operation: Callable[[CodexClient], Awaitable[Any]],
     ) -> Any:
         default_cwd = self.client_cwd(runtime, launch_target_id)
         client_factory: ClientFactory = (
@@ -908,7 +908,7 @@ class CodexPlugin:
     ) -> Any:
         runtime._resolve_launch_target(launch_target_id, self.id)
 
-        async def operation(client: AppServerClient) -> Any:
+        async def operation(client: CodexClient) -> Any:
             response = await asyncio.to_thread(client.thread_read, thread_id, False)
             return response.thread
 
@@ -966,7 +966,7 @@ class CodexPlugin:
                 continue
             imported.add((session.launch_target_id, thread_id))
 
-        async def operation(client: AppServerClient) -> list[Any]:
+        async def operation(client: CodexClient) -> list[Any]:
             threads: list[Any] = []
             cursor: str | None = None
             while True:

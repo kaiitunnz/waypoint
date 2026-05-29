@@ -3,11 +3,11 @@
 The generic SSH primitives (``build_remote_exec_args``,
 ``wrap_remote_command``) live on ``SshLaunchTargetConfig``; everything
 codex-shaped — building the ``codex app-server --listen stdio://`` argv
-and wrapping it in an ``AppServerClient`` factory — lives here so
+and wrapping it in an ``CodexClient`` factory — lives here so
 ``launch_targets.py`` stays plugin-agnostic.
 """
 
-from codex_app_server.client import AppServerClient, AppServerConfig
+from openai_codex.client import CodexClient, CodexConfig
 
 from waypoint.backends.codex.adapter import ApprovalCallback, ClientFactory
 from waypoint.launch_targets import SshLaunchTargetConfig
@@ -52,10 +52,10 @@ def build_remote_codex_client_factory(
     cli_args: tuple[str, ...] = (),
     config_overrides: tuple[str, ...] = (),
 ) -> ClientFactory:
-    def factory(cwd: str, approval_handler: ApprovalCallback) -> AppServerClient:
+    def factory(cwd: str, approval_handler: ApprovalCallback) -> CodexClient:
         launch_cwd = cwd or target.default_cwd
-        return AppServerClient(
-            config=AppServerConfig(
+        return CodexClient(
+            config=CodexConfig(
                 launch_args_override=build_codex_launch_args(
                     target, launch_cwd, cli_args, config_overrides
                 ),

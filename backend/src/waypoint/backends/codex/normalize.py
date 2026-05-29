@@ -15,7 +15,7 @@ its own `metadata.method` / `metadata.payload` envelope keys.
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
-from codex_app_server.models import UnknownNotification
+from openai_codex.models import UnknownNotification
 
 from waypoint.backends.diff_preview import (
     DiffPreviewPayload,

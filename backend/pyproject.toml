@@ -11,7 +11,7 @@ requires-python = ">=3.12"
 dependencies = [
   "aiohttp>=3.10.0",
   "fastapi>=0.116.0",
-  "openai-codex-app-server-sdk",
+  "openai-codex",
   "pydantic>=2.11.0",
   "pyte>=0.8.2",
   "PyYAML>=6.0.0",
@@ -42,7 +42,7 @@ asyncio_mode = "auto"
 where = ["src"]
 
 [tool.uv.sources]
-openai-codex-app-server-sdk = { path = "../3rdparty/codex/sdk/python" }
+openai-codex = { path = "../3rdparty/codex/sdk/python" }
 
 [tool.black]
 target-version = ["py312"]

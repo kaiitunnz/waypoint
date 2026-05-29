@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import shutil
 import threading
 from collections.abc import Awaitable, Callable, Coroutine
 from contextlib import suppress
@@ -11,8 +10,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from codex_app_server.client import AppServerClient, AppServerConfig
-from codex_app_server.generated.v2_all import ModelListResponse, SkillsListResponse
+from openai_codex.client import CodexClient, CodexConfig, _resolve_codex_bin
+from openai_codex.generated.v2_all import ModelListResponse, SkillsListResponse
 
 from waypoint.backends.codex.normalize import (
     diff_preview_for_approval,
@@ -39,7 +38,7 @@ ApprovalDecisionHandler = Callable[
     Coroutine[Any, Any, None],
 ]
 ApprovalCallback = Callable[[str, dict[str, Any] | None], dict[str, Any]]
-ClientFactory = Callable[[str, ApprovalCallback], AppServerClient]
+ClientFactory = Callable[[str, ApprovalCallback], CodexClient]
 SessionUpdateCallback = Callable[[str, dict[str, Any], bool], Awaitable[Any]]
 
 
@@ -66,15 +65,9 @@ def _extract_tool_name(item_type: str | None, item: dict[str, Any]) -> str | Non
     return None
 
 
-def default_client_factory(
-    cwd: str, approval_handler: ApprovalCallback
-) -> AppServerClient:
-    codex_bin = shutil.which("codex")
-    if codex_bin is None:
-        raise RuntimeError("codex binary not found on PATH")
-    return AppServerClient(
-        config=AppServerConfig(
-            codex_bin=codex_bin,
+def default_client_factory(cwd: str, approval_handler: ApprovalCallback) -> CodexClient:
+    return CodexClient(
+        config=CodexConfig(
             cwd=cwd,
             client_name="waypoint",
             client_title="Waypoint",
@@ -94,7 +87,7 @@ def _apply_codex_args(
     so the lists were already baked in by ``build_remote_codex_client_factory``
     before this function is called — return remote factories as-is.
 
-    Local launches normally use ``AppServerConfig`` (which only exposes a
+    Local launches normally use ``CodexConfig`` (which only exposes a
     ``config_overrides`` slot, not raw flags). When *cli_args* is non-empty
     we have to fall back to ``launch_args_override`` and assemble the argv
     ourselves so the raw flags reach codex; otherwise we use the simpler
@@ -106,18 +99,15 @@ def _apply_codex_args(
         # Remote factory — args were baked in at construction; return as-is.
         return base
 
-    def _local(cwd: str, approval_handler: ApprovalCallback) -> AppServerClient:
-        codex_bin = shutil.which("codex")
-        if codex_bin is None:
-            raise RuntimeError("codex binary not found on PATH")
+    def _local(cwd: str, approval_handler: ApprovalCallback) -> CodexClient:
         if cli_args:
-            argv: list[str] = [codex_bin]
+            argv: list[str] = [str(_resolve_codex_bin(CodexConfig()))]
             argv.extend(cli_args)
             for kv in config_overrides:
                 argv.extend(["--config", kv])
             argv.extend(["app-server", "--listen", "stdio://"])
-            return AppServerClient(
-                config=AppServerConfig(
+            return CodexClient(
+                config=CodexConfig(
                     launch_args_override=tuple(argv),
                     cwd=cwd,
                     client_name="waypoint",
@@ -125,9 +115,8 @@ def _apply_codex_args(
                 ),
                 approval_handler=approval_handler,
             )
-        return AppServerClient(
-            config=AppServerConfig(
-                codex_bin=codex_bin,
+        return CodexClient(
+            config=CodexConfig(
                 cwd=cwd,
                 client_name="waypoint",
                 client_title="Waypoint",
@@ -151,7 +140,7 @@ class PendingApproval:
 class CodexSessionState:
     session_id: str
     cwd: str
-    client: AppServerClient
+    client: CodexClient
     transport_lock: asyncio.Lock
     thread_id: str
     active_turn_id: str | None = None
@@ -594,11 +583,11 @@ class CodexAppServerAdapter:
             state.pending_approval.response = {"decision": "decline"}
             state.pending_approval.event.set()
         # Close the client first. The streaming task is parked in an
-        # uncancellable `asyncio.to_thread(next_notification)` while holding
+        # uncancellable `asyncio.to_thread(next_*_notification)` while holding
         # `state.transport_lock`; sending turn_interrupt would deadlock waiting
         # for the same lock, and `await stream_task` cannot proceed until the
         # blocking thread returns. Closing the transport drops EOF on the
-        # codex stdio pipes, which unblocks `next_notification` and makes both
+        # codex stdio pipes, which unblocks notification reads and makes both
         # the lock release and the cancel observable.
         try:
             await asyncio.to_thread(state.client.close)
@@ -614,7 +603,7 @@ class CodexAppServerAdapter:
         try:
             while True:
                 notification = await self._call_client(
-                    state, state.client.next_notification
+                    state, state.client.next_turn_notification, turn_id
                 )
                 payload = payload_to_dict(notification.payload)
                 if notification.method == "thread/tokenUsage/updated":
@@ -704,6 +693,9 @@ class CodexAppServerAdapter:
                 {"status": SessionStatus.ERROR},
                 SessionStatus.ERROR,
             )
+        finally:
+            with suppress(Exception):
+                state.client.unregister_turn_notifications(turn_id)
 
     async def _stream_compact(self, state: CodexSessionState) -> None:
         try:

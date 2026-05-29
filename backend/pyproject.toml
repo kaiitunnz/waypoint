@@ -41,6 +41,12 @@ asyncio_mode = "auto"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.uv]
+# The vendored Codex SDK pins openai-codex-cli-bin==0.132.0, which has no glibc
+# wheel; 0.133.0 is the first release with manylinux wheels. Override so Linux
+# deploys resolve.
+override-dependencies = ["openai-codex-cli-bin==0.133.0"]
+
 [tool.uv.sources]
 openai-codex = { path = "../3rdparty/codex/sdk/python" }
 

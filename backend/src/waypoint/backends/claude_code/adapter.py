@@ -679,9 +679,11 @@ class ClaudeCliAdapter:
     ) -> list[dict[str, Any]] | None:
         """Build ``permission_updates`` for a "for-session"/"always" allow.
 
-        Rather than hardcode rule shapes per tool, relay the binary's own
-        ``permission_suggestions`` (it proposes the exact rule/mode it would
-        apply) so a re-run of the same tool/workflow isn't re-prompted.
+        Relays the binary's own ``permission_suggestions`` verbatim. Currently
+        dormant: ``claude_code`` advertises only one-shot approve/decline
+        because the binary ignores these ``permission_updates`` in ``-p`` mode
+        (see the ``approval_decisions`` note in plugin.py). Kept as scaffolding
+        for when in-session suppression is implemented adapter-side.
         """
         lowered = decision.strip().lower()
         if lowered not in ("acceptforsession", "acceptalways"):

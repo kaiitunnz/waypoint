@@ -146,6 +146,9 @@ class OpenCodePlugin:
         supports_slash_compact=True,
         supports_approval_note=True,
         supports_custom_cli_args=True,
+        # OpenCode's "always" reply is surfaced as "approve for session"; it
+        # has no decision distinct from that, so no acceptAlways.
+        approval_decisions=("approve", "acceptForSession", "decline"),
         permission_modes=OPENCODE_PERMISSION_MODES,
         effort_levels=(),
         model_source=ModelSource.LIVE_RPC,

@@ -35,6 +35,12 @@ from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_AUTO_APPROVE_MODES,
     CLAUDE_PERMISSION_MODES,
 )
+from waypoint.backends.diff_preview import (
+    ChangeType,
+    build_preview,
+    file_from_old_new,
+    unavailable_file,
+)
 from waypoint.schemas import (
     EventKind,
     SessionContextUsage,
@@ -129,6 +135,23 @@ def _apply_plan_edit(content: str, tool_name: str, tool_input: dict[str, Any]) -
     return content
 
 
+def _apply_edit(content: str, edit: dict[str, Any]) -> str:
+    """Apply a single Edit/MultiEdit patch, raising ``ValueError`` on mismatch.
+
+    Used to render a full-context diff preview from the current file content.
+    """
+    old = edit.get("old_string")
+    new = edit.get("new_string")
+    if not isinstance(old, str) or not isinstance(new, str):
+        raise ValueError("edit payload did not include old_string/new_string")
+    if old == "":
+        raise ValueError("edit payload old_string was empty")
+    if old not in content:
+        raise ValueError("old_string was not found in the current file")
+    count = -1 if bool(edit.get("replace_all", False)) else 1
+    return content.replace(old, new, count)
+
+
 def _is_plan_file_path(path: str) -> bool:
     if not path:
         return False
@@ -158,30 +181,11 @@ LaunchFactory = Callable[
     "ClaudeLaunchSpec",
 ]
 
-# Tools we surface to the user for approval. Other tools (Read, Grep, Glob, ...)
-# are left to Claude's own permission policy.
-GATED_TOOLS = (
-    "Bash",
-    "Edit",
-    "Write",
-    "MultiEdit",
-    "NotebookEdit",
-    "Task",
-    "WebFetch",
-    "WebSearch",
-    # ExitPlanMode is the tool Claude calls to present a plan in plan mode —
-    # the user must approve it before plan mode actually exits. Must mirror
-    # claude_runtime.GATED_TOOLS_REGEX (the regex written into the hook
-    # settings file at session start).
-    "ExitPlanMode",
-    # AskUserQuestion has shouldDefer:true + requiresUserInteraction:true.
-    # In `-p` mode without a hook to block it, the binary auto-rejects the
-    # tool with "User declined to answer questions" before Waypoint can
-    # surface the question to the user. Routing it through PreToolUse keeps
-    # the binary parked until respond_to_ask_question resolves the future.
-    "AskUserQuestion",
-)
-GATED_TOOLS_REGEX = "^(?:" + "|".join(GATED_TOOLS) + ")$"
+# Which tools require approval is decided by the binary's own permission
+# policy: with `--permission-prompt-tool stdio` it emits a `can_use_tool`
+# control_request for every tool that would otherwise prompt (Bash, Edit,
+# Write, …, plus ExitPlanMode, AskUserQuestion, and Workflow). Read/Grep/Glob
+# and friends are auto-allowed and never reach us.
 
 
 STDERR_TAIL_LINES = 50
@@ -191,7 +195,11 @@ STDERR_TAIL_LINES = 50
 class ClaudePendingApproval:
     tool_use_id: str
     payload: dict[str, Any]
-    future: asyncio.Future[dict[str, str]]
+    # ``request_id`` of the binary's ``can_use_tool`` control_request; the
+    # decision is delivered by writing a ``control_response`` carrying it back
+    # over stdin (there is no future to resolve — the stdout reader must never
+    # block waiting on a user decision).
+    request_id: str
 
 
 @dataclass
@@ -262,10 +270,6 @@ class ClaudeCliAdapter:
     def __init__(
         self,
         emit_event: EmitEvent,
-        hook_settings_path: Path,
-        hook_secret: str,
-        hook_url: str,
-        default_hook_timeout_seconds: int,
         binary: str | None = None,
         launch_factory: LaunchFactory | None = None,
         on_init: InitCallback | None = None,
@@ -273,10 +277,6 @@ class ClaudeCliAdapter:
         default_model_id: str | None = None,
     ) -> None:
         self._emit_event = emit_event
-        self._hook_settings_path = hook_settings_path
-        self._hook_secret = hook_secret
-        self._hook_url = hook_url
-        self._default_hook_timeout_seconds = default_hook_timeout_seconds
         self._binary = binary
         self._launch_factory = launch_factory
         self._on_init = on_init
@@ -579,16 +579,23 @@ class ClaudeCliAdapter:
                     break
         if pending is None or tool_use_id is None:
             return False
-        if not pending.future.done():
-            pending.future.set_result(
-                {
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": (
-                        f"User has answered your questions: {answer_text}. "
-                        "You can now continue with the user's answers in mind."
-                    ),
-                }
-            )
+        # Deny the tool and carry the answer in the message — the binary reads
+        # that string as the tool_result, matching its own
+        # "User has answered your questions: …" shape.
+        await self._write_permission_response(
+            state,
+            pending.request_id,
+            "deny",
+            (
+                pending.payload.get("tool_input")
+                if isinstance(pending.payload.get("tool_input"), dict)
+                else None
+            ),
+            (
+                f"User has answered your questions: {answer_text}. "
+                "You can now continue with the user's answers in mind."
+            ),
+        )
         state.pending.pop(tool_use_id, None)
         return True
 
@@ -623,28 +630,62 @@ class ClaudeCliAdapter:
 
         mapped = self._map_decision(decision)
         tool_name = pending.payload.get("tool_name")
+        tool_input = pending.payload.get("tool_input")
+        tool_input_dict = tool_input if isinstance(tool_input, dict) else None
         # ExitPlanMode is special: in `-p` mode the binary's tool echoes the
         # dialog title ("Exit plan mode?") as the result, which Claude reads as
-        # "dismissed" even when the user accepted. Block the tool with deny and
-        # carry the verdict in the reason so Claude proceeds correctly. On
-        # accept we also flip the binary out of plan mode via control_request,
-        # mirroring what the TUI does after the dialog returns.
+        # "dismissed" even when the user accepted. Deny the tool and carry the
+        # verdict in the message so Claude proceeds correctly. On accept we
+        # also flip the binary out of plan mode via control_request, mirroring
+        # what the TUI does after the dialog returns.
         if tool_name == "ExitPlanMode":
             response = await self._exit_plan_mode_response(
                 state, mapped, pending.payload, text
             )
+            await self._write_permission_response(
+                state,
+                pending.request_id,
+                response["permissionDecision"],
+                tool_input_dict,
+                response["permissionDecisionReason"],
+            )
+        elif mapped == "allow":
+            await self._write_permission_response(
+                state,
+                pending.request_id,
+                "allow",
+                tool_input_dict,
+                permission_updates=self._permission_updates_for(
+                    decision, pending.payload
+                ),
+            )
         else:
-            reason = "approved by user" if mapped == "allow" else "denied by user"
+            reason = "denied by user"
             if text:
                 reason = f"{reason}\n\nUser note:\n{text}"
-            response = {
-                "permissionDecision": mapped,
-                "permissionDecisionReason": reason,
-            }
-        if not pending.future.done():
-            pending.future.set_result(response)
+            await self._write_permission_response(
+                state, pending.request_id, "deny", tool_input_dict, reason
+            )
         state.pending.pop(approval_id, None)
         return True
+
+    def _permission_updates_for(
+        self, decision: str, payload: dict[str, Any]
+    ) -> list[dict[str, Any]] | None:
+        """Build ``permission_updates`` for a "for-session"/"always" allow.
+
+        Rather than hardcode rule shapes per tool, relay the binary's own
+        ``permission_suggestions`` (it proposes the exact rule/mode it would
+        apply) so a re-run of the same tool/workflow isn't re-prompted.
+        """
+        lowered = decision.strip().lower()
+        if lowered not in ("acceptforsession", "acceptalways"):
+            return None
+        suggestions = payload.get("permission_suggestions")
+        if not isinstance(suggestions, list):
+            return None
+        updates = [s for s in suggestions if isinstance(s, dict)]
+        return updates or None
 
     async def _exit_plan_mode_response(
         self,
@@ -708,38 +749,55 @@ class ClaudeCliAdapter:
             "permissionDecisionReason": reason,
         }
 
-    async def await_approval(self, payload: dict[str, Any]) -> dict[str, str]:
-        waypoint_session_id = str(payload.get("waypoint_session_id") or "")
-        tool_use_id = str(payload.get("tool_use_id") or "")
-        if not waypoint_session_id or not tool_use_id:
-            return {
-                "permissionDecision": "ask",
-                "permissionDecisionReason": "missing identifiers",
+    async def _handle_can_use_tool(
+        self, state: ClaudeSessionState, event: dict[str, Any]
+    ) -> None:
+        """Handle a ``can_use_tool`` control_request from the binary.
+
+        This is the single tool-approval entry point (it replaces the former
+        PreToolUse HTTP hook). It must never block the stdout reader: it
+        either writes an immediate ``control_response`` (auto-approve by
+        mode) or registers a pending approval and returns, leaving the
+        decision to ``respond_to_approval`` / ``respond_to_ask_question``.
+        """
+        request = event.get("request") or {}
+        request_id = event.get("request_id")
+        tool_name = request.get("tool_name")
+        tool_use_id = str(request.get("tool_use_id") or "")
+        raw_input = request.get("input")
+        tool_input_dict = raw_input if isinstance(raw_input, dict) else None
+        if not isinstance(request_id, str) or not tool_use_id:
+            await self._write_permission_response(
+                state, request_id, "deny", tool_input_dict, "missing identifiers"
+            )
+            return
+        # Normalized payload reused by the diff/emit/approval-text helpers,
+        # mirroring the shape the former hook produced.
+        payload: dict[str, Any] = {
+            "waypoint_session_id": state.session_id,
+            "tool_name": tool_name,
+            "tool_input": tool_input_dict if tool_input_dict is not None else raw_input,
+            "tool_use_id": tool_use_id,
+            "permission_suggestions": request.get("permission_suggestions"),
+        }
+        # The binary's can_use_tool input carries only the raw tool args, so
+        # we build the diff preview here (full-context locally; synthesized
+        # from old_string/new_string for remote sessions whose files we
+        # can't read).
+        diff_preview = self._diff_preview_from_input(
+            tool_name, tool_input_dict, state.cwd
+        )
+        if diff_preview is not None:
+            payload["diff_preview"] = diff_preview
+            state.file_edit_preview_metadata[tool_use_id] = {
+                "tool_name": tool_name,
+                "tool_input": payload["tool_input"],
+                "diff_preview": diff_preview,
             }
-        tool_name = payload.get("tool_name")
         async with self._approval_lock:
-            state = self._sessions.get(waypoint_session_id)
-            if state is None:
-                return {
-                    "permissionDecision": "ask",
-                    "permissionDecisionReason": "session not active",
-                }
-            # Honor the session's permission_mode at the hook layer. Claude's
-            # permission_mode is an internal hint that only kicks in when no
-            # hook is wired; with Waypoint's PreToolUse hook always installed,
-            # the mode never gets consulted unless we do it here.
-            tool_input = payload.get("tool_input")
-            tool_input_dict = tool_input if isinstance(tool_input, dict) else None
-            diff_preview = payload.get("diff_preview")
-            if isinstance(diff_preview, dict):
-                state.file_edit_preview_metadata[tool_use_id] = {
-                    "tool_name": payload.get("tool_name"),
-                    "tool_input": payload.get("tool_input"),
-                    "diff_preview": diff_preview,
-                }
             # AskUserQuestion always surfaces to the user — auto-approving any
-            # mode would let the binary's defer path auto-decline before the
-            # answer arrives.
+            # mode would let the binary's defer path decline before the answer
+            # arrives.
             if tool_name == "AskUserQuestion":
                 auto = None
             else:
@@ -766,7 +824,14 @@ class ClaudeCliAdapter:
                                 state.last_plan_content, tool_name, tool_input_dict
                             )
                 await self._emit_tool_diff_preview(state, payload)
-                return auto
+                await self._write_permission_response(
+                    state,
+                    request_id,
+                    auto["permissionDecision"],
+                    tool_input_dict,
+                    auto["permissionDecisionReason"],
+                )
+                return
 
             # Inject the saved plan text into ExitPlanMode so the frontend can
             # render it inside the approval card.
@@ -778,10 +843,9 @@ class ClaudeCliAdapter:
                     tool_input_dict["plan"] = state.last_plan_content
                 else:
                     try:
-                        plan_text = Path(state.last_plan_path).read_text(
+                        tool_input_dict["plan"] = Path(state.last_plan_path).read_text(
                             encoding="utf-8"
                         )
-                        tool_input_dict["plan"] = plan_text
                     except Exception as exc:
                         log.warning(
                             "failed to read plan file for ExitPlanMode approval card",
@@ -789,48 +853,149 @@ class ClaudeCliAdapter:
                         )
 
             if tool_use_id in state.pending:
-                # Hook was retried for the same tool call. Reuse the existing future.
-                pending = state.pending[tool_use_id]
-            else:
-                future: asyncio.Future[dict[str, str]] = (
-                    asyncio.get_running_loop().create_future()
+                # Binary re-sent the same tool call; refresh the request_id so
+                # the eventual response targets the live control_request.
+                state.pending[tool_use_id].request_id = request_id
+                return
+            state.pending[tool_use_id] = ClaudePendingApproval(
+                tool_use_id=tool_use_id, payload=payload, request_id=request_id
+            )
+            await self._emit_tool_diff_preview(state, payload)
+            # AskUserQuestion's tool_call event already renders the question
+            # UI in the transcript via parseAskUserQuestion; emitting a
+            # separate APPROVAL_REQUEST card would show the prompt twice. Only
+            # register the pending entry so respond_to_ask_question answers it.
+            if tool_name != "AskUserQuestion":
+                await self._emit_event(
+                    state.session_id,
+                    EventKind.APPROVAL_REQUEST,
+                    format_approval_text(payload),
+                    {
+                        "tool_name": tool_name,
+                        "tool_input": payload["tool_input"],
+                        "approval_id": tool_use_id,
+                        "method": "can_use_tool",
+                        "status": SessionStatus.WAITING_INPUT,
+                        **(
+                            {
+                                "permission_suggestions": payload[
+                                    "permission_suggestions"
+                                ]
+                            }
+                            if payload.get("permission_suggestions")
+                            else {}
+                        ),
+                        **(
+                            {"diff_preview": payload["diff_preview"]}
+                            if isinstance(payload.get("diff_preview"), dict)
+                            else {}
+                        ),
+                    },
+                    SessionStatus.WAITING_INPUT,
                 )
-                pending = ClaudePendingApproval(
-                    tool_use_id=tool_use_id, payload=payload, future=future
-                )
-                state.pending[tool_use_id] = pending
-                await self._emit_tool_diff_preview(state, payload)
-                # AskUserQuestion's tool_call event already renders the
-                # question UI in the transcript via parseAskUserQuestion;
-                # emitting a separate APPROVAL_REQUEST card would show the
-                # same prompt twice. Only register the future so
-                # respond_to_ask_question can resolve it.
-                if tool_name != "AskUserQuestion":
-                    await self._emit_event(
-                        waypoint_session_id,
-                        EventKind.APPROVAL_REQUEST,
-                        format_approval_text(payload),
-                        {
-                            "tool_name": payload.get("tool_name"),
-                            "tool_input": payload.get("tool_input"),
-                            "approval_id": tool_use_id,
-                            "method": "PreToolUse",
-                            "status": SessionStatus.WAITING_INPUT,
-                            **(
-                                {"diff_preview": payload["diff_preview"]}
-                                if isinstance(payload.get("diff_preview"), dict)
-                                else {}
-                            ),
-                        },
-                        SessionStatus.WAITING_INPUT,
-                    )
-        # No deadline on user response. The future is resolved by
-        # respond_to_approval / respond_to_ask_question, or cancelled
-        # via terminate_session if the session ends. The hook script's
-        # own urlopen timeout (WAYPOINT_HOOK_TIMEOUT, sourced from
-        # ClaudeCodePluginConfig.hook_timeout_seconds) is the only
-        # network-liveness ceiling.
-        return await pending.future
+
+    async def _write_control_response(
+        self,
+        state: ClaudeSessionState,
+        request_id: object,
+        response_body: dict[str, Any],
+    ) -> None:
+        """Write a ``control_response`` envelope to the binary's stdin."""
+        if not isinstance(request_id, str):
+            return
+        if state.process.stdin is None or state.process.stdin.is_closing():
+            return
+        envelope = {
+            "type": "control_response",
+            "response": {"request_id": request_id, **response_body},
+        }
+        line = (json.dumps(envelope) + "\n").encode("utf-8")
+        state.process.stdin.write(line)
+        with suppress(BrokenPipeError, ConnectionResetError):
+            await state.process.stdin.drain()
+
+    async def _write_permission_response(
+        self,
+        state: ClaudeSessionState,
+        request_id: object,
+        decision: str,
+        tool_input: dict[str, Any] | None,
+        reason: str = "",
+        permission_updates: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Answer a ``can_use_tool`` request with an allow/deny PermissionResult."""
+        if decision == "allow":
+            result: dict[str, Any] = {
+                "behavior": "allow",
+                "updatedInput": tool_input or {},
+            }
+            if permission_updates:
+                result["permission_updates"] = permission_updates
+        else:
+            result = {"behavior": "deny", "message": reason or "denied by user"}
+        await self._write_control_response(
+            state, request_id, {"subtype": "success", "response": result}
+        )
+
+    def _diff_preview_from_input(
+        self,
+        tool_name: object,
+        tool_input: dict[str, Any] | None,
+        cwd: str,
+    ) -> dict[str, Any] | None:
+        if tool_name not in ("Edit", "Write", "MultiEdit") or tool_input is None:
+            return None
+        path_text = tool_input.get("file_path") or tool_input.get("path")
+        if not isinstance(path_text, str) or not path_text:
+            return None
+        # Read the current file for a full-context diff when it's reachable
+        # (local sessions). For remote sessions the file lives on the SSH
+        # target and isn't readable here, so fall back to a diff synthesized
+        # from the tool input itself.
+        resolved = Path(path_text).expanduser()
+        if not resolved.is_absolute() and cwd:
+            resolved = Path(cwd).expanduser() / resolved
+        old = ""
+        readable = False
+        try:
+            if resolved.exists():
+                old = resolved.read_text(encoding="utf-8")
+                readable = True
+        except OSError:
+            readable = False
+        try:
+            change_type: ChangeType
+            if tool_name == "Write":
+                new = str(tool_input.get("content") or "")
+                change_type = "update" if readable and old else "add"
+                if not readable:
+                    old = ""
+            elif tool_name == "Edit":
+                if readable:
+                    new = _apply_edit(old, tool_input)
+                else:
+                    old = str(tool_input.get("old_string") or "")
+                    new = str(tool_input.get("new_string") or "")
+                change_type = "update"
+            else:  # MultiEdit
+                edits = [
+                    e for e in (tool_input.get("edits") or []) if isinstance(e, dict)
+                ]
+                if readable:
+                    new = old
+                    for edit in edits:
+                        new = _apply_edit(new, edit)
+                else:
+                    old = "\n".join(str(e.get("old_string") or "") for e in edits)
+                    new = "\n".join(str(e.get("new_string") or "") for e in edits)
+                change_type = "update"
+        except ValueError as exc:
+            preview = build_preview("proposed", [unavailable_file(path_text, str(exc))])
+            return preview.model_dump(mode="json") if preview else None
+        preview = build_preview(
+            "proposed", [file_from_old_new(path_text, old, new, change_type)]
+        )
+        return preview.model_dump(mode="json") if preview else None
 
     async def _emit_tool_diff_preview(
         self, state: ClaudeSessionState, payload: dict[str, Any]
@@ -891,15 +1056,13 @@ class ClaudeCliAdapter:
             state.rate_limit_refresh_task.cancel()
             with suppress(asyncio.CancelledError):
                 await state.rate_limit_refresh_task
-        # Resolve any pending approvals as deny so the hook unblocks.
+        # Deny any pending approvals so the binary unblocks the parked tool
+        # call before we tear the process down (best-effort; the stdin may
+        # already be gone).
         for pending in list(state.pending.values()):
-            if not pending.future.done():
-                pending.future.set_result(
-                    {
-                        "permissionDecision": "deny",
-                        "permissionDecisionReason": "session terminated",
-                    }
-                )
+            await self._write_permission_response(
+                state, pending.request_id, "deny", None, "session terminated"
+            )
         state.pending.clear()
         # Cancel any in-flight control_request awaiters so set_permission_mode
         # callers don't hang past session shutdown.
@@ -1031,8 +1194,11 @@ class ClaudeCliAdapter:
             "--output-format=stream-json",
             "--include-hook-events",
             "--verbose",
-            "--settings",
-            str(self._hook_settings_path),
+            # Route tool permission prompts over the stdio control protocol as
+            # `can_use_tool` control_requests (valid only with `-p`). This is
+            # the single approval channel — see `_handle_can_use_tool`.
+            "--permission-prompt-tool",
+            "stdio",
             "--permission-mode",
             cli_mode,
         ]
@@ -1058,10 +1224,9 @@ class ClaudeCliAdapter:
             args.extend(custom_args)
         env = {
             **os.environ,
-            "WAYPOINT_HOOK_URL": self._hook_url,
-            "WAYPOINT_HOOK_SECRET": self._hook_secret,
-            "WAYPOINT_SESSION_ID": session_id,
-            "WAYPOINT_HOOK_TIMEOUT": str(self._default_hook_timeout_seconds),
+            # Enable the dynamic-workflow feature so the Workflow tool is
+            # available and routes its approval through `can_use_tool`.
+            "CLAUDE_CODE_WORKFLOWS": "1",
         }
         return ClaudeLaunchSpec(
             args=args,
@@ -1197,6 +1362,19 @@ class ClaudeCliAdapter:
         event_type = event.get("type")
         if event_type == "control_response":
             self._handle_control_response(state, event)
+            return
+        if event_type == "control_request":
+            request = event.get("request") or {}
+            if request.get("subtype") == "can_use_tool":
+                await self._handle_can_use_tool(state, event)
+            else:
+                # Acknowledge other inbound control_requests so the binary
+                # doesn't park waiting on us; we don't implement them.
+                await self._write_control_response(
+                    state,
+                    event.get("request_id"),
+                    {"subtype": "error", "error": "unsupported control_request"},
+                )
             return
         if event_type == "system":
             await self._handle_system(state, event)
@@ -1527,7 +1705,15 @@ class ClaudeCliAdapter:
 
     def _map_decision(self, decision: str) -> str:
         lowered = decision.strip().lower()
-        if lowered in {"approve", "accept", "yes", "y", "allow", "acceptforsession"}:
+        if lowered in {
+            "approve",
+            "accept",
+            "yes",
+            "y",
+            "allow",
+            "acceptforsession",
+            "acceptalways",
+        }:
             return "allow"
         return "deny"
 

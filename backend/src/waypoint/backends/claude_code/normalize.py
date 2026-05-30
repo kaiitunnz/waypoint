@@ -84,6 +84,10 @@ def format_approval_text(payload: dict[str, Any]) -> str:
     if tool_name == "NotebookEdit":
         path = str(tool_input.get("notebook_path") or "").strip()
         return f"Approve NotebookEdit on {path}" if path else "Approve NotebookEdit"
+    if tool_name in {"Workflow", "RunWorkflow"}:
+        # The workflow script is rendered in the approval card body; keep this
+        # prompt compact to avoid duplicating it.
+        return "Approve dynamic workflow"
     return f"Approve {tool_name}: {json.dumps(tool_input)[:240]}"
 
 

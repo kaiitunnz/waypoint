@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
 from waypoint.backends.capabilities import (
@@ -39,13 +39,13 @@ from waypoint.backends.claude_code.rate_limits import (
     probe_claude_usage_remote,
 )
 from waypoint.backends.claude_code.remote import build_remote_claude_launch_factory
-from waypoint.backends.claude_code.runtime_hook import (
-    ClaudeHookBundle,
-    ensure_claude_hook_bundle,
-)
 from waypoint.backends.claude_code.schemas import (
     ClaudeThreadImportRequest,
     ClaudeThreadSummary,
+)
+from waypoint.backends.claude_code.support import (
+    ClaudeSupportBundle,
+    ensure_claude_support_bundle,
 )
 from waypoint.backends.claude_code.threads import (
     ClaudeThreadInfo,
@@ -92,21 +92,16 @@ class ClaudeCodePluginConfig(PluginConfig):
         default_factory=lambda: list(DEFAULT_CLAUDE_MODELS)
     )
     default_model_id: str | None = Field(default_factory=claude_default_model_id)
-    # Network-failure ceiling (seconds) for the PreToolUse hook's HTTP
-    # request — *not* a deadline on user response time, which is
-    # unbounded. Sized as the upper bound for "the SSH reverse tunnel
-    # is wedged, give up and let Claude defer to its policy". Per-target
-    # overrides live on ``ClaudeCodeLaunchTargetConfig``.
+    # Deprecated no-op: tool approval moved from the PreToolUse HTTP hook to
+    # the `can_use_tool` control protocol, which has no network timeout.
+    # Retained so existing configs that still set it keep loading.
     hook_timeout_seconds: int = Field(default=3600, ge=1)
 
 
 class ClaudeCodeLaunchTargetConfig(PluginLaunchTargetConfig):
-    """Per-target overrides for Claude Code on an SSH launch target.
+    """Per-target overrides for Claude Code on an SSH launch target."""
 
-    ``hook_timeout_seconds=None`` (the default) falls through to the
-    plugin-global ``ClaudeCodePluginConfig.hook_timeout_seconds``.
-    """
-
+    # Deprecated no-op; see ``ClaudeCodePluginConfig.hook_timeout_seconds``.
     hook_timeout_seconds: int | None = Field(default=None, ge=1)
 
 
@@ -137,6 +132,10 @@ class ClaudeCodePlugin:
         supports_slash_compact=False,
         supports_approval_note=True,
         supports_custom_cli_args=True,
+        # `acceptForSession`/`acceptAlways` relay the binary's own
+        # permission_suggestions (e.g. addRules / setMode) so a re-run of the
+        # same tool or workflow isn't re-prompted.
+        approval_decisions=("approve", "acceptForSession", "acceptAlways", "decline"),
         permission_modes=CLAUDE_PERMISSION_MODE_SPECS,
         effort_levels=CLAUDE_EFFORT_LEVELS,
         model_source=ModelSource.STATIC,
@@ -147,7 +146,7 @@ class ClaudeCodePlugin:
 
     def __init__(self) -> None:
         self.adapter: ClaudeCliAdapter | None = None
-        self.hook: ClaudeHookBundle | None = None
+        self.support: ClaudeSupportBundle | None = None
         self.thread_enumerator: RemoteClaudeThreadEnumerator | None = None
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
@@ -158,41 +157,36 @@ class ClaudeCodePlugin:
         return ClaudeTransport(runtime, self)
 
     def setup(self, runtime: "SessionRuntime") -> None:
-        # Build the PreToolUse webhook bundle, the CLI adapter, and the
-        # remote thread enumerator — collectively the "claude side" of
-        # the runtime. Resilient to ensure_claude_hook_bundle failing
-        # (read-only data dir, missing scripts, etc.); we log and
-        # leave self.adapter=None so the runtime keeps working without
-        # Claude support and the tmux fallback path takes over.
+        # Build the host-side support bundle, the CLI adapter, and the remote
+        # thread enumerator — collectively the "claude side" of the runtime.
+        # Resilient to ensure_claude_support_bundle failing (read-only data
+        # dir, missing scripts, etc.); we log and leave self.adapter=None so
+        # the runtime keeps working without Claude support and the tmux
+        # fallback path takes over.
         try:
-            hook = ensure_claude_hook_bundle(runtime.settings.data_dir)
+            support = ensure_claude_support_bundle(runtime.settings.data_dir)
         except Exception:  # noqa: BLE001
-            log.exception("claude hook bundle setup failed; claude support disabled")
-            self.hook = None
+            log.exception("claude support bundle setup failed; claude support disabled")
+            self.support = None
             self.adapter = None
             self.thread_enumerator = None
             return
-        self.hook = hook
-        hook_url = f"http://127.0.0.1:{runtime.settings.port}"
+        self.support = support
         self.adapter = ClaudeCliAdapter(
             runtime._emit_adapter_event,
-            hook_settings_path=hook.settings_path,
-            hook_secret=hook.secret,
-            hook_url=hook_url,
-            default_hook_timeout_seconds=self._config(runtime).hook_timeout_seconds,
             on_init=runtime.handle_completion_source_init,
             on_session_update=runtime.session_update_callback(),
             default_model_id=self._config(runtime).default_model_id,
         )
         self.thread_enumerator = RemoteClaudeThreadEnumerator(
-            hook.thread_enumerator_path
+            support.thread_enumerator_path
         )
 
     async def shutdown(self, runtime: "SessionRuntime") -> None:
         if self.adapter is not None:
             await self.adapter.shutdown()
             self.adapter = None
-        self.hook = None
+        self.support = None
         self.thread_enumerator = None
 
     def _require_adapter(self) -> ClaudeCliAdapter:
@@ -300,32 +294,10 @@ class ClaudeCodePlugin:
             self.thread_enumerator.invalidate(session.launch_target_id)
 
     def register_routes(self, app: FastAPI, context: Any) -> None:
-        # Mount the PreToolUse approval webhook here so api.py stays
-        # backend-agnostic. The hook itself runs inside the Claude CLI
-        # subprocess and POSTs back to /api/internal/hooks/claude/approval
-        # with a shared secret; a third backend has no business
-        # registering the same route.
-        @app.post("/api/internal/hooks/claude/approval")
-        async def claude_hook_approval(request: Request) -> Any:
-            secret = request.headers.get("x-waypoint-hook-secret", "")
-            hook = self.hook
-            if hook is None or not hook.secret or secret != hook.secret:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="invalid hook secret",
-                )
-            if self.adapter is None:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="claude adapter is not initialized",
-                )
-            try:
-                payload = await request.json()
-            except ValueError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail="invalid json"
-                ) from exc
-            return await self.adapter.await_approval(payload)
+        # Tool approval now rides the `can_use_tool` control protocol over the
+        # CLI's stdio stream (see adapter._handle_can_use_tool), so the backend
+        # no longer mounts a PreToolUse approval webhook.
+        return
 
     def validate_permission_mode(self, mode: str | None) -> str | None:
         if mode is None or mode == "":
@@ -359,24 +331,6 @@ class ClaudeCodePlugin:
                     return target_config.cli_args + custom_args
             return list(custom_args)
         return self._config(runtime).cli_args + custom_args
-
-    def _resolve_hook_timeout(
-        self,
-        runtime: "SessionRuntime",
-        launch_target_id: str | None,
-    ) -> int:
-        plugin_default = self._config(runtime).hook_timeout_seconds
-        if not launch_target_id:
-            return plugin_default
-        launch_target = runtime._find_launch_target(launch_target_id)
-        if launch_target is None:
-            return plugin_default
-        target_config = launch_target.plugin_config(self.id)
-        if isinstance(target_config, ClaudeCodeLaunchTargetConfig):
-            override = target_config.hook_timeout_seconds
-            if override is not None:
-                return override
-        return plugin_default
 
     def static_model_options(self, runtime: "SessionRuntime") -> list[Any]:
         # Plugin config carries the (configurable) Claude model catalogue.
@@ -930,15 +884,9 @@ class ClaudeCodePlugin:
 
     def launch_factory(self, runtime: "SessionRuntime", launch_target_id: str | None):
         launch_target = runtime._find_launch_target(launch_target_id)
-        if launch_target is None or self.hook is None or self.adapter is None:
+        if launch_target is None or self.adapter is None:
             return None
-        return build_remote_claude_launch_factory(
-            launch_target,
-            hook_script_path=self.hook.hook_script_path,
-            hook_secret=self.hook.secret,
-            local_backend_port=runtime.settings.port,
-            hook_timeout_seconds=self._resolve_hook_timeout(runtime, launch_target_id),
-        )
+        return build_remote_claude_launch_factory(launch_target)
 
     def generate_session_id(self) -> str:
         return str(uuid.uuid4())

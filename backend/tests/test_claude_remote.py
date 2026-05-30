@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from waypoint.backends.claude_code.remote import (
     build_remote_claude_launch_factory,
     build_remote_thread_enumeration_args,
@@ -7,14 +5,11 @@ from waypoint.backends.claude_code.remote import (
 from waypoint.launch_targets import SshLaunchTargetConfig
 
 
-def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
-    monkeypatch, tmp_path: Path
+def test_remote_claude_launch_factory_uses_stdio_permission_protocol(
+    monkeypatch,
 ) -> None:
     monkeypatch.setattr(
         "waypoint.launch_targets.shutil.which", lambda _: "/usr/bin/ssh"
-    )
-    monkeypatch.setattr(
-        "waypoint.backends.claude_code.remote.secrets.randbelow", lambda _: 1234
     )
     config = SshLaunchTargetConfig(
         id="devbox",
@@ -23,16 +18,8 @@ def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
         remote_env={"OPENAI_API_KEY": "sk-test"},
         plugin_configs={"claude_code": {"remote_bin": "/opt/claude/bin/claude"}},
     )
-    hook_script = tmp_path / "hook.py"
-    hook_script.write_text("#!/usr/bin/env python3\nprint('hook')\n", encoding="utf-8")
 
-    factory = build_remote_claude_launch_factory(
-        config,
-        hook_script_path=hook_script,
-        hook_secret="secret-123",
-        local_backend_port=8787,
-        hook_timeout_seconds=3600,
-    )
+    factory = build_remote_claude_launch_factory(config)
     launch = factory(
         "claude-sess",
         "~/workspace",
@@ -47,10 +34,11 @@ def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
 
     assert launch.cwd is None
     assert launch.env is None
-    # SSH-layer liveness probes (~3 min detection floor) sit immediately
-    # after the binary, before user ssh_args, so first-value-wins keeps
-    # them authoritative against any user override.
-    assert launch.args[:12] == [
+    # SSH-layer liveness probes (~3 min detection floor) sit immediately after
+    # the binary, before user ssh_args, so first-value-wins keeps them
+    # authoritative against any user override. No reverse tunnel: tool approval
+    # now rides the session's stdio stream, not an HTTP hook.
+    assert launch.args[:8] == [
         "/usr/bin/ssh",
         "-o",
         "ConnectTimeout=15",
@@ -58,29 +46,20 @@ def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
         "ServerAliveInterval=30",
         "-o",
         "ServerAliveCountMax=6",
-        "-o",
-        "ExitOnForwardFailure=yes",
-        "-R",
-        "21234:127.0.0.1:8787",
         "dev@example.com",
     ]
-    remote_command = launch.args[12]
-    assert 'WAYPOINT_DIR="$HOME/.waypoint/claude/claude-sess"' in remote_command
-    assert 'mkdir -p "$WAYPOINT_DIR"' in remote_command
-    assert "claude_pretool_hook.py" in remote_command
-    assert "claude_settings.json" in remote_command
-    # The hook command path placeholder must be substituted via sed so claude
-    # gets an absolute path (it does not expand `~` itself).
-    assert "__WAYPOINT_HOOK_PATH__" in remote_command
-    assert (
-        'sed -i.bak "s|__WAYPOINT_HOOK_PATH__|$WAYPOINT_DIR/claude_pretool_hook.py|g"'
-        in remote_command
-    )
-    assert '--settings "$WAYPOINT_DIR/claude_settings.json"' in remote_command
-    assert "WAYPOINT_HOOK_URL=http://127.0.0.1:21234" in remote_command
-    assert "WAYPOINT_HOOK_SECRET=secret-123" in remote_command
-    assert "WAYPOINT_SESSION_ID=claude-sess" in remote_command
-    assert "WAYPOINT_HOOK_TIMEOUT=3600" in remote_command
+    assert "-R" not in launch.args
+    assert "ExitOnForwardFailure=yes" not in launch.args
+    remote_command = launch.args[-1]
+    # No PreToolUse hook bootstrap is shipped anymore.
+    assert "claude_pretool_hook.py" not in remote_command
+    assert "claude_settings.json" not in remote_command
+    assert "WAYPOINT_HOOK" not in remote_command
+    assert "WAYPOINT_DIR" not in remote_command
+    assert "--settings" not in remote_command
+    # Approval rides the stdio control protocol; workflows are enabled.
+    assert "--permission-prompt-tool stdio" in remote_command
+    assert "CLAUDE_CODE_WORKFLOWS=1" in remote_command
     assert "OPENAI_API_KEY=sk-test" in remote_command
     assert "/opt/claude/bin/claude -p" in remote_command
     assert "--resume claude-uuid" in remote_command
@@ -89,14 +68,9 @@ def test_remote_claude_launch_factory_builds_reverse_tunnel_and_hook_bootstrap(
     assert "--model" not in remote_command
 
 
-def test_remote_claude_launch_factory_appends_model_flag(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_remote_claude_launch_factory_appends_model_flag(monkeypatch) -> None:
     monkeypatch.setattr(
         "waypoint.launch_targets.shutil.which", lambda _: "/usr/bin/ssh"
-    )
-    monkeypatch.setattr(
-        "waypoint.backends.claude_code.remote.secrets.randbelow", lambda _: 1234
     )
     config = SshLaunchTargetConfig(
         id="devbox",
@@ -104,16 +78,8 @@ def test_remote_claude_launch_factory_appends_model_flag(
         ssh_destination="dev@example.com",
         plugin_configs={"claude_code": {"remote_bin": "/opt/claude/bin/claude"}},
     )
-    hook_script = tmp_path / "hook.py"
-    hook_script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
 
-    factory = build_remote_claude_launch_factory(
-        config,
-        hook_script_path=hook_script,
-        hook_secret="secret-123",
-        local_backend_port=8787,
-        hook_timeout_seconds=3600,
-    )
+    factory = build_remote_claude_launch_factory(config)
     launch = factory(
         "claude-sess",
         "~/workspace",
@@ -125,7 +91,7 @@ def test_remote_claude_launch_factory_appends_model_flag(
         [],
         None,
     )
-    assert "--model opus" in launch.args[12]
+    assert "--model opus" in launch.args[-1]
 
 
 def test_build_remote_thread_enumeration_args_wraps_in_bash_and_passes_env(

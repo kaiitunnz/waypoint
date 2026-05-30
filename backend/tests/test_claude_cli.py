@@ -1,5 +1,4 @@
 import asyncio
-import importlib.util
 import json
 from pathlib import Path
 from typing import Any
@@ -17,16 +16,6 @@ from waypoint.backends.claude_code.models import (
 )
 from waypoint.backends.claude_code.plugin import ClaudeCodePluginConfig
 from waypoint.schemas import EventKind, SessionStatus
-
-
-def _load_claude_hook_module() -> Any:
-    script = Path(__file__).resolve().parents[1] / "scripts" / "claude_pretool_hook.py"
-    spec = importlib.util.spec_from_file_location("claude_pretool_hook_test", script)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
 
 
 class FakeStream:
@@ -92,10 +81,6 @@ def _make_adapter(
 
     return ClaudeCliAdapter(
         emit,
-        hook_settings_path=Path("/tmp/waypoint-test-settings.json"),
-        hook_secret="test-secret",
-        hook_url="http://127.0.0.1:8787",
-        default_hook_timeout_seconds=3600,
         on_session_update=update if session_updates is not None else None,
     )
 
@@ -115,6 +100,31 @@ def _attach_state(
     )
     adapter._sessions[session_id] = state
     return state, process
+
+
+def _can_use_tool_event(payload: dict[str, Any], request_id: str = "req-1") -> dict:
+    """Build a `can_use_tool` control_request from a hook-style payload."""
+    request: dict[str, Any] = {
+        "subtype": "can_use_tool",
+        "tool_name": payload.get("tool_name"),
+        "tool_use_id": payload.get("tool_use_id"),
+        "input": payload.get("tool_input"),
+    }
+    if payload.get("permission_suggestions") is not None:
+        request["permission_suggestions"] = payload["permission_suggestions"]
+    return {"type": "control_request", "request_id": request_id, "request": request}
+
+
+def _permission_results(process: Any) -> list[dict[str, Any]]:
+    """PermissionResults from every control_response written to the binary."""
+    results: list[dict[str, Any]] = []
+    for line in process.stdin.writes:
+        obj = json.loads(line.decode("utf-8").strip())
+        if obj.get("type") == "control_response":
+            result = obj["response"].get("response")
+            if isinstance(result, dict):
+                results.append(result)
+    return results
 
 
 @pytest.mark.asyncio
@@ -187,114 +197,70 @@ async def test_dispatch_user_tool_result_emits_event() -> None:
 
 
 @pytest.mark.asyncio
-async def test_await_approval_resolves_via_respond() -> None:
+async def test_can_use_tool_resolves_via_respond() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)
-    _attach_state(adapter)
+    state, process = _attach_state(adapter)
     payload = {
-        "waypoint_session_id": "sess",
         "tool_use_id": "toolu_1",
         "tool_name": "Bash",
         "tool_input": {"command": "ls"},
     }
-
-    async def resolver() -> None:
-        # Wait until adapter has registered the pending approval.
-        for _ in range(50):
-            if adapter.has_pending_approval("sess"):
-                break
-            await asyncio.sleep(0.01)
-        await adapter.respond_to_approval("sess", "approve")
-
-    decision_task = asyncio.create_task(adapter.await_approval(payload))
-    await resolver()
-    decision = await decision_task
-    assert decision["permissionDecision"] == "allow"
-    # Pending was emitted as APPROVAL_REQUEST
+    await adapter._handle_can_use_tool(state, _can_use_tool_event(payload))
+    # Pending was registered and surfaced as APPROVAL_REQUEST; no response yet.
+    assert adapter.has_pending_approval("sess")
     assert emitted[0][1] == EventKind.APPROVAL_REQUEST
+    assert not _permission_results(process)
+
+    assert await adapter.respond_to_approval("sess", "approve")
+    results = _permission_results(process)
+    assert results[-1] == {"behavior": "allow", "updatedInput": {"command": "ls"}}
+    assert not adapter.has_pending_approval("sess")
 
 
 @pytest.mark.asyncio
-async def test_await_approval_preserves_hook_diff_preview() -> None:
+async def test_can_use_tool_generates_edit_diff_preview() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)
-    _attach_state(adapter)
+    state, process = _attach_state(adapter)
     payload = {
-        "waypoint_session_id": "sess",
         "tool_use_id": "toolu_1",
         "tool_name": "Edit",
-        "tool_input": {"file_path": "/tmp/app.py"},
-        "diff_preview": {
-            "schema_version": 1,
-            "phase": "proposed",
-            "files": [
-                {
-                    "path": "/tmp/app.py",
-                    "change_type": "update",
-                    "diff": "--- /tmp/app.py\n+++ /tmp/app.py\n@@ -1 +1 @@\n-old\n+new\n",
-                    "additions": 1,
-                    "deletions": 1,
-                    "truncated": False,
-                    "binary": False,
-                    "unavailable_reason": None,
-                }
-            ],
-            "total_additions": 1,
-            "total_deletions": 1,
-            "truncated": False,
+        "tool_input": {
+            "file_path": "/tmp/app.py",
+            "old_string": "old",
+            "new_string": "new",
         },
     }
+    await adapter._handle_can_use_tool(state, _can_use_tool_event(payload))
+    await adapter.respond_to_approval("sess", "decline")
 
-    async def resolver() -> None:
-        for _ in range(50):
-            if adapter.has_pending_approval("sess"):
-                break
-            await asyncio.sleep(0.01)
-        await adapter.respond_to_approval("sess", "decline")
-
-    decision_task = asyncio.create_task(adapter.await_approval(payload))
-    await resolver()
-    await decision_task
-
+    # The adapter synthesizes the diff from the tool input (no file read), then
+    # surfaces it both as a TOOL_RESULT preview and on the approval card.
     assert emitted[0][1] == EventKind.TOOL_RESULT
     assert emitted[0][3]["diff_preview"]["files"][0]["path"] == "/tmp/app.py"
     assert emitted[1][1] == EventKind.APPROVAL_REQUEST
     assert emitted[1][3]["diff_preview"]["files"][0]["path"] == "/tmp/app.py"
+    assert _permission_results(process)[-1]["behavior"] == "deny"
 
 
 @pytest.mark.asyncio
-async def test_user_tool_result_inherits_hook_diff_preview() -> None:
+async def test_user_tool_result_inherits_generated_diff_preview() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)
-    state, _ = _attach_state(adapter)
+    state, process = _attach_state(adapter)
     state.permission_mode = "acceptEdits"
     payload = {
-        "waypoint_session_id": "sess",
         "tool_use_id": "toolu_1",
         "tool_name": "Edit",
-        "tool_input": {"file_path": "/tmp/app.py"},
-        "diff_preview": {
-            "schema_version": 1,
-            "phase": "proposed",
-            "files": [
-                {
-                    "path": "/tmp/app.py",
-                    "change_type": "update",
-                    "diff": "--- /tmp/app.py\n+++ /tmp/app.py\n@@ -1 +1 @@\n-old\n+new\n",
-                    "additions": 1,
-                    "deletions": 1,
-                    "truncated": False,
-                    "binary": False,
-                    "unavailable_reason": None,
-                }
-            ],
-            "total_additions": 1,
-            "total_deletions": 1,
-            "truncated": False,
+        "tool_input": {
+            "file_path": "/tmp/app.py",
+            "old_string": "old",
+            "new_string": "new",
         },
     }
 
-    decision = await adapter.await_approval(payload)
+    await adapter._handle_can_use_tool(state, _can_use_tool_event(payload))
     await adapter._dispatch(
         state,
         {
@@ -311,30 +277,26 @@ async def test_user_tool_result_inherits_hook_diff_preview() -> None:
         },
     )
 
-    assert decision["permissionDecision"] == "allow"
+    assert _permission_results(process)[-1]["behavior"] == "allow"
     assert emitted[-1][1] == EventKind.TOOL_RESULT
     assert emitted[-1][3]["tool_name"] == "Edit"
-    assert emitted[-1][3]["tool_input"] == {"file_path": "/tmp/app.py"}
+    assert emitted[-1][3]["tool_input"]["file_path"] == "/tmp/app.py"
     assert emitted[-1][3]["diff_preview"]["files"][0]["path"] == "/tmp/app.py"
 
 
-def test_claude_hook_builds_edit_diff_preview(tmp_path: Path) -> None:
-    hook = _load_claude_hook_module()
+def test_diff_preview_from_input_reads_local_file(tmp_path: Path) -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
     target = tmp_path / "app.py"
     target.write_text("old\n", encoding="utf-8")
 
-    preview = hook.build_diff_preview(
-        {
-            "cwd": str(tmp_path),
-            "tool_name": "Edit",
-            "tool_input": {
-                "file_path": "app.py",
-                "old_string": "old\n",
-                "new_string": "new\n",
-            },
-        }
+    preview = adapter._diff_preview_from_input(
+        "Edit",
+        {"file_path": "app.py", "old_string": "old\n", "new_string": "new\n"},
+        str(tmp_path),
     )
 
+    assert preview is not None
     assert preview["phase"] == "proposed"
     assert preview["files"][0]["path"] == "app.py"
     assert preview["files"][0]["additions"] == 1
@@ -342,13 +304,21 @@ def test_claude_hook_builds_edit_diff_preview(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_await_approval_returns_ask_for_unknown_session() -> None:
+async def test_can_use_tool_denies_when_identifiers_missing() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)
-    decision = await adapter.await_approval(
-        {"waypoint_session_id": "nope", "tool_use_id": "x"}
+    state, process = _attach_state(adapter)
+    # A can_use_tool request with no tool_use_id can't be tracked; deny it.
+    await adapter._handle_can_use_tool(
+        state,
+        {
+            "type": "control_request",
+            "request_id": "req-1",
+            "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {}},
+        },
     )
-    assert decision["permissionDecision"] == "ask"
+    assert _permission_results(process)[-1]["behavior"] == "deny"
+    assert not adapter.has_pending_approval("sess")
 
 
 @pytest.mark.asyncio
@@ -356,20 +326,19 @@ async def test_terminate_session_closes_stdin_and_resolves_pending(monkeypatch) 
     emitted: list = []
     adapter = _make_adapter(emitted)
     state, process = _attach_state(adapter)
-    # Set up a pending approval that would otherwise block forever.
-    future: asyncio.Future = asyncio.get_running_loop().create_future()
+    # A pending approval should be denied (control_response) on teardown so the
+    # binary unblocks the parked tool call.
     from waypoint.backends.claude_code.adapter import ClaudePendingApproval
 
     state.pending["toolu_1"] = ClaudePendingApproval(
-        tool_use_id="toolu_1", payload={}, future=future
+        tool_use_id="toolu_1", payload={}, request_id="req-1"
     )
     handled = await adapter.terminate_session("sess")
     assert handled is True
     assert "sess" not in adapter._sessions
     assert process.terminated is True
+    assert _permission_results(process)[-1]["behavior"] == "deny"
     assert process.stdin.closed is True
-    assert future.done()
-    assert future.result()["permissionDecision"] == "deny"
 
 
 def test_map_decision_table() -> None:
@@ -672,65 +641,66 @@ async def test_watch_process_emits_error_event_with_stderr_tail() -> None:
 
 
 @pytest.mark.asyncio
-async def test_await_approval_auto_allows_in_auto_mode() -> None:
+async def test_can_use_tool_auto_allows_in_auto_mode() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)
-    state, _ = _attach_state(adapter)
+    state, process = _attach_state(adapter)
     state.permission_mode = "auto"
 
-    decision = await adapter.await_approval(
-        {
-            "waypoint_session_id": "sess",
-            "tool_use_id": "tu-1",
-            "tool_name": "Bash",
-            "tool_input": {"command": "rm -rf /"},
-        }
+    await adapter._handle_can_use_tool(
+        state,
+        _can_use_tool_event(
+            {
+                "tool_use_id": "tu-1",
+                "tool_name": "Bash",
+                "tool_input": {"command": "rm -rf /"},
+            }
+        ),
     )
 
-    assert decision == {
-        "permissionDecision": "allow",
-        "permissionDecisionReason": "auto-approved by mode=auto",
+    assert _permission_results(process)[-1] == {
+        "behavior": "allow",
+        "updatedInput": {"command": "rm -rf /"},
     }
-    # Auto-approved hooks should never surface an approval card.
+    # Auto-approved tools should never surface an approval card.
     assert not any(item[1] == EventKind.APPROVAL_REQUEST for item in emitted)
     assert not state.pending
 
 
 @pytest.mark.asyncio
-async def test_await_approval_accept_edits_only_auto_allows_edit_tools() -> None:
+async def test_can_use_tool_accept_edits_only_auto_allows_edit_tools() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)
-    state, _ = _attach_state(adapter)
+    state, process = _attach_state(adapter)
     state.permission_mode = "acceptEdits"
 
-    edit_decision = await adapter.await_approval(
-        {
-            "waypoint_session_id": "sess",
-            "tool_use_id": "tu-edit",
-            "tool_name": "Edit",
-            "tool_input": {"file_path": "/tmp/x.py"},
-        }
+    await adapter._handle_can_use_tool(
+        state,
+        _can_use_tool_event(
+            {
+                "tool_use_id": "tu-edit",
+                "tool_name": "Edit",
+                "tool_input": {"file_path": "/tmp/x.py"},
+            }
+        ),
     )
-    assert edit_decision["permissionDecision"] == "allow"
+    assert _permission_results(process)[-1]["behavior"] == "allow"
 
     # Bash still surfaces the approval card so the user can intervene.
-    bash_task = asyncio.create_task(
-        adapter.await_approval(
+    await adapter._handle_can_use_tool(
+        state,
+        _can_use_tool_event(
             {
-                "waypoint_session_id": "sess",
                 "tool_use_id": "tu-bash",
                 "tool_name": "Bash",
                 "tool_input": {"command": "rm -rf /"},
-            }
-        )
+            },
+            request_id="req-bash",
+        ),
     )
-    await asyncio.sleep(0)
     assert "tu-bash" in state.pending
-    state.pending["tu-bash"].future.set_result(
-        {"permissionDecision": "deny", "permissionDecisionReason": "user said no"}
-    )
-    bash_decision = await bash_task
-    assert bash_decision["permissionDecision"] == "deny"
+    await adapter.respond_to_approval("sess", "decline", approval_id="tu-bash")
+    assert _permission_results(process)[-1]["behavior"] == "deny"
 
 
 @pytest.mark.asyncio
@@ -789,36 +759,31 @@ def test_claude_cli_mode_for_maps_waypoint_to_cli_values() -> None:
 
 
 @pytest.mark.asyncio
-async def test_await_approval_for_ask_user_question_skips_approval_card() -> None:
-    """AskUserQuestion goes through the PreToolUse hook so the binary blocks
-    waiting for our verdict, but the question UI is already rendered via
-    the tool_call event — emitting an APPROVAL_REQUEST too would surface
-    the same prompt twice."""
+async def test_ask_user_question_skips_approval_card() -> None:
+    """AskUserQuestion goes through can_use_tool so the binary blocks waiting
+    for our verdict, but the question UI is already rendered via the tool_call
+    event — emitting an APPROVAL_REQUEST too would surface it twice."""
     emitted: list = []
     adapter = _make_adapter(emitted)
-    _attach_state(adapter)
+    state, process = _attach_state(adapter)
 
     payload = {
-        "waypoint_session_id": "sess",
         "tool_use_id": "toolu_ask",
         "tool_name": "AskUserQuestion",
         "tool_input": {"questions": [{"question": "ok?", "options": []}]},
     }
-    decision_task = asyncio.create_task(adapter.await_approval(payload))
-    for _ in range(50):
-        if adapter.has_pending_ask_question("sess"):
-            break
-        await asyncio.sleep(0.01)
+    await adapter._handle_can_use_tool(state, _can_use_tool_event(payload))
     assert adapter.has_pending_ask_question("sess")
     assert not any(item[1] == EventKind.APPROVAL_REQUEST for item in emitted)
+    assert not _permission_results(process)
+
     handled = await adapter.respond_to_ask_question(
         "sess", "**Plan target**: Trivial wrapper-test plan", "toolu_ask"
     )
     assert handled is True
-    decision = await decision_task
-    assert decision == {
-        "permissionDecision": "deny",
-        "permissionDecisionReason": (
+    assert _permission_results(process)[-1] == {
+        "behavior": "deny",
+        "message": (
             "User has answered your questions: "
             "**Plan target**: Trivial wrapper-test plan. "
             "You can now continue with the user's answers in mind."
@@ -845,19 +810,13 @@ async def test_ask_user_question_never_auto_approves_in_auto_mode() -> None:
     state.permission_mode = "auto"
 
     payload = {
-        "waypoint_session_id": "sess",
         "tool_use_id": "toolu_ask",
         "tool_name": "AskUserQuestion",
         "tool_input": {"questions": []},
     }
-    task = asyncio.create_task(adapter.await_approval(payload))
-    for _ in range(50):
-        if adapter.has_pending_ask_question("sess"):
-            break
-        await asyncio.sleep(0.01)
+    await adapter._handle_can_use_tool(state, _can_use_tool_event(payload))
     assert adapter.has_pending_ask_question("sess")
     await adapter.respond_to_ask_question("sess", "answer", "toolu_ask")
-    await task
 
 
 @pytest.mark.asyncio
@@ -885,21 +844,23 @@ async def test_plan_mode_auto_approves_plan_file_write_and_captures_path() -> No
     path must be captured so ExitPlanMode can echo it back."""
     emitted: list = []
     adapter = _make_adapter(emitted)
-    state, _ = _attach_state(adapter)
+    state, process = _attach_state(adapter)
     state.permission_mode = "plan"
 
-    decision = await adapter.await_approval(
-        {
-            "waypoint_session_id": "sess",
-            "tool_use_id": "toolu_write",
-            "tool_name": "Write",
-            "tool_input": {
-                "file_path": "/Users/me/.claude/plans/my-plan.md",
-                "content": "# plan",
-            },
-        }
+    await adapter._handle_can_use_tool(
+        state,
+        _can_use_tool_event(
+            {
+                "tool_use_id": "toolu_write",
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": "/Users/me/.claude/plans/my-plan.md",
+                    "content": "# plan",
+                },
+            }
+        ),
     )
-    assert decision["permissionDecision"] == "allow"
+    assert _permission_results(process)[-1]["behavior"] == "allow"
     assert state.last_plan_path == "/Users/me/.claude/plans/my-plan.md"
     # Approval card must NOT have been emitted for the meta-write.
     assert not any(item[1] == EventKind.APPROVAL_REQUEST for item in emitted)
@@ -911,24 +872,19 @@ async def test_plan_mode_does_not_auto_approve_non_plan_writes() -> None:
     approval card; only the binary's own plan-file path is implicit."""
     emitted: list = []
     adapter = _make_adapter(emitted)
-    state, _ = _attach_state(adapter)
+    state, process = _attach_state(adapter)
     state.permission_mode = "plan"
 
     payload = {
-        "waypoint_session_id": "sess",
         "tool_use_id": "toolu_write_src",
         "tool_name": "Write",
         "tool_input": {"file_path": "/repo/src/main.py", "content": "x"},
     }
-    task = asyncio.create_task(adapter.await_approval(payload))
-    for _ in range(50):
-        if adapter.has_pending_approval("sess"):
-            break
-        await asyncio.sleep(0.01)
+    await adapter._handle_can_use_tool(state, _can_use_tool_event(payload))
     assert adapter.has_pending_approval("sess")
     assert state.last_plan_path is None
     await adapter.respond_to_approval("sess", "decline")
-    await task
+    assert _permission_results(process)[-1]["behavior"] == "deny"
 
 
 @pytest.mark.asyncio
@@ -942,7 +898,7 @@ async def test_exit_plan_mode_approval_blocks_tool_and_switches_mode(
     model sees the same context the native tool_result would carry."""
     emitted: list = []
     adapter = _make_adapter(emitted)
-    state, _ = _attach_state(adapter)
+    state, process = _attach_state(adapter)
     state.permission_mode = "plan"
     state.last_plan_path = "/Users/me/.claude/plans/my-plan.md"
 
@@ -956,21 +912,17 @@ async def test_exit_plan_mode_approval_blocks_tool_and_switches_mode(
 
     plan_body = "## Plan\n1. Read files\n2. Apply edits"
     payload = {
-        "waypoint_session_id": "sess",
         "tool_use_id": "toolu_plan",
         "tool_name": "ExitPlanMode",
         "tool_input": {"plan": plan_body},
     }
-    decision_task = asyncio.create_task(adapter.await_approval(payload))
-    for _ in range(50):
-        if adapter.has_pending_approval("sess"):
-            break
-        await asyncio.sleep(0.01)
+    await adapter._handle_can_use_tool(state, _can_use_tool_event(payload))
+    assert adapter.has_pending_approval("sess")
     await adapter.respond_to_approval("sess", "approve")
-    decision = await decision_task
 
-    reason = decision["permissionDecisionReason"]
-    assert decision["permissionDecision"] == "deny"
+    result = _permission_results(process)[-1]
+    assert result["behavior"] == "deny"
+    reason = result["message"]
     assert "approved your plan" in reason
     assert "start coding" in reason
     assert "/Users/me/.claude/plans/my-plan.md" in reason
@@ -1001,18 +953,12 @@ async def test_exit_plan_mode_restores_pre_plan_mode(monkeypatch) -> None:
     monkeypatch.setattr(adapter, "set_permission_mode", fake_set_mode)
 
     payload = {
-        "waypoint_session_id": "sess",
         "tool_use_id": "toolu_plan",
         "tool_name": "ExitPlanMode",
         "tool_input": {"plan": "## Plan"},
     }
-    task = asyncio.create_task(adapter.await_approval(payload))
-    for _ in range(50):
-        if adapter.has_pending_approval("sess"):
-            break
-        await asyncio.sleep(0.01)
+    await adapter._handle_can_use_tool(state, _can_use_tool_event(payload))
     await adapter.respond_to_approval("sess", "approve")
-    await task
 
     assert mode_calls == ["acceptEdits"]
     # pre_plan_mode is consumed; subsequent plan toggles will record fresh.
@@ -1077,25 +1023,21 @@ async def test_set_model_sends_control_request_and_mirrors_state() -> None:
 async def test_exit_plan_mode_decline_keeps_plan_mode() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)
-    state, _ = _attach_state(adapter)
+    state, process = _attach_state(adapter)
     state.permission_mode = "plan"
 
     payload = {
-        "waypoint_session_id": "sess",
         "tool_use_id": "toolu_plan",
         "tool_name": "ExitPlanMode",
         "tool_input": {"plan": "## Plan\n- step"},
     }
-    decision_task = asyncio.create_task(adapter.await_approval(payload))
-    for _ in range(50):
-        if adapter.has_pending_approval("sess"):
-            break
-        await asyncio.sleep(0.01)
+    await adapter._handle_can_use_tool(state, _can_use_tool_event(payload))
+    assert adapter.has_pending_approval("sess")
     await adapter.respond_to_approval("sess", "decline")
-    decision = await decision_task
 
-    assert decision["permissionDecision"] == "deny"
-    assert "declined your plan" in decision["permissionDecisionReason"]
+    result = _permission_results(process)[-1]
+    assert result["behavior"] == "deny"
+    assert "declined your plan" in result["message"]
     assert state.permission_mode == "plan"
 
 
@@ -1117,6 +1059,11 @@ def test_build_local_launch_spec_uses_session_cli_mode(monkeypatch) -> None:
     idx = args.index("--permission-mode")
     assert args[idx + 1] == "plan"
     assert "--model" not in args
+    # Tool approval rides the stdio control protocol, not the PreToolUse hook.
+    assert "--permission-prompt-tool" in args
+    assert args[args.index("--permission-prompt-tool") + 1] == "stdio"
+    assert "--settings" not in args
+    assert spec.env is not None and spec.env.get("CLAUDE_CODE_WORKFLOWS") == "1"
 
 
 def test_build_local_launch_spec_emits_model_flag(monkeypatch) -> None:

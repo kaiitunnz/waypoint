@@ -171,6 +171,12 @@ export function ApprovalRequestCard({
           onSelect: (note) => onDecide("acceptForSession", note, approvalId),
         },
         {
+          id: "acceptAlways",
+          label: "Always allow",
+          className: "secondary",
+          onSelect: (note) => onDecide("acceptAlways", note, approvalId),
+        },
+        {
           id: "decline",
           label: "Decline",
           className: "secondary",
@@ -295,6 +301,9 @@ function approvalCopyText(
   if (toolName === "Bash" && typeof toolInput?.command === "string") {
     return toolInput.command as string;
   }
+  if (isApprovalWorkflowTool(toolName) && typeof toolInput?.script === "string") {
+    return toolInput.script as string;
+  }
   return eventText;
 }
 
@@ -358,6 +367,16 @@ function ApprovalCardBody({
       </>
     );
   }
+  if (isApprovalWorkflowTool(toolName) && typeof toolInput?.script === "string") {
+    return (
+      <>
+        <p className="approval-prompt">
+          Review this dynamic workflow before it runs
+        </p>
+        <pre className="approval-shell">{toolInput.script as string}</pre>
+      </>
+    );
+  }
   if (isApprovalFileEditTool(toolName)) {
     const path = approvalFileEditPath(toolInput);
     return (
@@ -397,6 +416,10 @@ function isApprovalFileEditTool(toolName: string | null): boolean {
     toolName === "Write" ||
     toolName === "NotebookEdit"
   );
+}
+
+function isApprovalWorkflowTool(toolName: string | null): boolean {
+  return toolName === "Workflow" || toolName === "RunWorkflow";
 }
 
 function approvalFileEditPath(toolInput: Record<string, unknown> | null): string | null {

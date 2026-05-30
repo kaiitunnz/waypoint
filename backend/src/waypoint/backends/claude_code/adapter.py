@@ -220,6 +220,11 @@ class ClaudeSessionState:
     wait_task: asyncio.Task[None]
     pending: dict[str, ClaudePendingApproval] = field(default_factory=dict)
     emitted_diff_preview_tool_ids: set[str] = field(default_factory=set)
+    # tool_use_ids whose tool_call we deliberately suppressed (ExitPlanMode):
+    # the binary still echoes a tool_result for them — our injected
+    # approve/decline verdict — which would otherwise render as an orphan
+    # 0-call tool run. Suppress that result's display too.
+    suppressed_result_tool_use_ids: set[str] = field(default_factory=set)
     file_edit_preview_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
     last_message_text: dict[str, str] = field(default_factory=dict)
     terminal_fragments: list[str] = field(default_factory=list)
@@ -1535,7 +1540,10 @@ class ClaudeCliAdapter:
                     # The plan is rendered as a markdown agent_output text
                     # block above and the approval card represents the gate —
                     # an extra tool_call disclosure with the JSON payload is
-                    # noise.
+                    # noise. Suppress the echoed tool_result too (our verdict
+                    # message) so it doesn't render as an orphan tool run.
+                    if tool_use_id:
+                        state.suppressed_result_tool_use_ids.add(tool_use_id)
                     continue
                 input_text = json.dumps(block.get("input") or {}, indent=2)
                 await self._emit_event(
@@ -1571,6 +1579,11 @@ class ClaudeCliAdapter:
             if block.get("type") != "tool_result":
                 continue
             tool_use_id = str(block.get("tool_use_id") or "")
+            if tool_use_id and tool_use_id in state.suppressed_result_tool_use_ids:
+                # Echoed verdict for an ExitPlanMode approval; the plan card and
+                # the agent's next message already convey the outcome.
+                state.suppressed_result_tool_use_ids.discard(tool_use_id)
+                continue
             content = block.get("content")
             text = stringify_tool_result(content)
             is_error = bool(block.get("is_error"))

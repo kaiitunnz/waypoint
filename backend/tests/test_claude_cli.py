@@ -732,6 +732,66 @@ async def test_dispatch_assistant_skips_exit_plan_mode_tool_call() -> None:
     assert emitted[0][2] == plan_text
 
 
+@pytest.mark.asyncio
+async def test_exit_plan_mode_outcome_tool_result_is_suppressed() -> None:
+    """The ExitPlanMode tool_call is suppressed, so the binary's echoed verdict
+    tool_result must be too — otherwise it renders as an orphan 0-call tool run
+    (the plan card + the agent's next message already convey the outcome)."""
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    await adapter._dispatch(
+        state,
+        {
+            "type": "assistant",
+            "message": {
+                "id": "m1",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_plan",
+                        "name": "ExitPlanMode",
+                        "input": {"plan": "## P"},
+                    }
+                ],
+            },
+        },
+    )
+    await adapter._dispatch(
+        state,
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_plan",
+                        "content": "User has approved your plan.",
+                    }
+                ]
+            },
+        },
+    )
+    assert not any(item[1] == EventKind.TOOL_RESULT for item in emitted)
+    # A subsequent real tool's result is unaffected.
+    await adapter._dispatch(
+        state,
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_other",
+                        "content": "ok",
+                    }
+                ]
+            },
+        },
+    )
+    assert any(item[1] == EventKind.TOOL_RESULT for item in emitted)
+
+
 def test_format_approval_text_omits_plan_body() -> None:
     """Approval card stays compact; the plan is rendered above as agent_output."""
     from waypoint.backends.claude_code.normalize import format_approval_text

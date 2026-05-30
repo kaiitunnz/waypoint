@@ -32,7 +32,7 @@ Waypoint speaks to Claude Code, Codex, and OpenCode through wire formats that ch
 
 | Agent       | Tested versions   | Wire entry point                                                     | Notes                                                                                       |
 | ----------- | ----------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Claude Code | `2.1.123`-`2.1.136` | `claude -p --input-format=stream-json --output-format=stream-json`   | Relies on `--include-hook-events`, the `system/status`/`compact_boundary` events, and `--session-id`/`--resume`. |
+| Claude Code | `2.1.157` | `claude -p --input-format=stream-json --output-format=stream-json --permission-prompt-tool stdio` | Approvals ride the `can_use_tool` control protocol; `CLAUDE_CODE_WORKFLOWS=1` enables the Workflow tool. Also relies on `--include-hook-events`, the `system/status`/`compact_boundary` events, and `--session-id`/`--resume`. |
 | Codex CLI   | `0.125.0`-`0.129.0` | `codex app-server --listen stdio://`                                 | Driven via the vendored Python SDK in `3rdparty/codex/sdk/python` (`thread_*` / `turn_*` RPCs). |
 | Codex SDK   | `0.116.0a1`       | `3rdparty/codex/` submodule pin                                      | Bumped together with Codex CLI; track via `git submodule update --remote 3rdparty/codex`.   |
 | OpenCode   | `1.14.30`        | `opencode serve` with REST + SSE API                             | HTTP-based; discovers models from `/provider`. |
@@ -41,7 +41,7 @@ To extend this matrix:
 
 1. Update the row above with the new tested version.
 2. Re-run the integration paths that touch the wire format:
-   - Claude: `backend/src/waypoint/backends/claude_code/normalize.py` (status / compact / rate-limit / approval / content-block helpers) and `adapter.py`'s `_handle_*` stream handlers; hook bootstrap in `backends/claude_code/runtime_hook.py` + `server_config.py::_build_remote_claude_command`.
+   - Claude: `backend/src/waypoint/backends/claude_code/normalize.py` (status / compact / rate-limit / approval / content-block helpers) and `adapter.py`'s `_handle_*` stream handlers, plus `_handle_can_use_tool` for tool approval over the control protocol; remote launch in `backends/claude_code/remote.py::_build_remote_claude_command`.
    - Codex: `backend/src/waypoint/backends/codex/normalize.py::map_notification` and the SDK calls in `backends/codex/adapter.py::CodexAppServerAdapter`.
    - OpenCode: `backend/src/waypoint/backends/opencode/normalize.py::map_event` and the HTTP/SSE adapter in `backends/opencode/adapter.py::OpenCodeAdapter`.
 3. If a bump breaks an event shape, prefer adding a branch in the relevant `normalize.py` over hard-pinning.

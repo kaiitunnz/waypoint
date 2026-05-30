@@ -132,10 +132,12 @@ export function ApprovalRequestCard({
   event,
   onDecide,
   supportsNote = false,
+  decisions,
 }: {
   event: EventRecord;
   onDecide: (decision: string, text?: string, approvalId?: string) => void | Promise<void>;
   supportsNote?: boolean;
+  decisions?: readonly string[];
 }) {
   const diffPreview = parseEvent(event).diffPreview;
   const toolName = normalizeToolName(
@@ -150,6 +152,10 @@ export function ApprovalRequestCard({
     typeof event.metadata?.approval_id === "string"
       ? (event.metadata.approval_id as string)
       : undefined;
+  // Escalation decisions are backend-specific; only render the ones the
+  // session's backend honours. Approve/Decline/Cancel are universal — every
+  // backend maps them to allow/deny — so they always show.
+  const allowed = new Set(decisions ?? []);
 
   return (
     <SharedApprovalCard
@@ -164,18 +170,28 @@ export function ApprovalRequestCard({
           className: "primary",
           onSelect: (note) => onDecide("accept", note, approvalId),
         },
-        {
-          id: "acceptForSession",
-          label: "Approve for session",
-          className: "secondary",
-          onSelect: (note) => onDecide("acceptForSession", note, approvalId),
-        },
-        {
-          id: "acceptAlways",
-          label: "Always allow",
-          className: "secondary",
-          onSelect: (note) => onDecide("acceptAlways", note, approvalId),
-        },
+        ...(allowed.has("acceptForSession")
+          ? [
+              {
+                id: "acceptForSession",
+                label: "Approve for session",
+                className: "secondary" as const,
+                onSelect: (note?: string) =>
+                  onDecide("acceptForSession", note, approvalId),
+              },
+            ]
+          : []),
+        ...(allowed.has("acceptAlways")
+          ? [
+              {
+                id: "acceptAlways",
+                label: "Always allow",
+                className: "secondary" as const,
+                onSelect: (note?: string) =>
+                  onDecide("acceptAlways", note, approvalId),
+              },
+            ]
+          : []),
         {
           id: "decline",
           label: "Decline",

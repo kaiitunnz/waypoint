@@ -132,10 +132,12 @@ class ClaudeCodePlugin:
         supports_slash_compact=False,
         supports_approval_note=True,
         supports_custom_cli_args=True,
-        # `acceptForSession`/`acceptAlways` relay the binary's own
-        # permission_suggestions (e.g. addRules / setMode) so a re-run of the
-        # same tool or workflow isn't re-prompted.
-        approval_decisions=("approve", "acceptForSession", "acceptAlways", "decline"),
+        # One-shot approve/decline only. The binary ignores the can_use_tool
+        # response's permission_updates in -p mode (verified against v2.1.157:
+        # addRules/setMode neither suppress re-prompts nor persist to settings),
+        # so "approve for session"/"always allow" would be dead buttons. Re-add
+        # once in-session suppression is implemented adapter-side.
+        approval_decisions=("approve", "decline"),
         permission_modes=CLAUDE_PERMISSION_MODE_SPECS,
         effort_levels=CLAUDE_EFFORT_LEVELS,
         model_source=ModelSource.STATIC,

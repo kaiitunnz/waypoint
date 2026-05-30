@@ -35,6 +35,7 @@ import {
   setSessionTitle,
 } from "@/lib/api";
 import {
+  approvalDecisionsFor,
   fidelityFor,
   humaniseBackend,
   permissionModesFor,
@@ -1608,6 +1609,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
             event={pendingApproval}
             onDecide={submitApproval}
             supportsNote={session ? supportsApprovalNote(session.backend, catalog) : false}
+            decisions={session ? approvalDecisionsFor(session.backend, catalog) : undefined}
           />
         </>
       ) : null}

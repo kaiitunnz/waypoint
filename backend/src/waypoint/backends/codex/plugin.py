@@ -117,6 +117,9 @@ class CodexPlugin:
         supports_approval_note=False,
         supports_custom_cli_args=True,
         supports_config_overrides=True,
+        # Codex honours "approve for session" on tool approvals
+        # (adapter._map_decision) but has no persistent "always" decision.
+        approval_decisions=("approve", "acceptForSession", "decline"),
         permission_modes=CODEX_PERMISSION_MODE_SPECS,
         effort_levels=(),  # discovered per-model from `model/list`
         model_source=ModelSource.LIVE_RPC,

@@ -159,9 +159,9 @@ def _is_plan_file_path(path: str) -> bool:
 
 
 # Maps a Waypoint per-session mode to the value the Claude CLI accepts on
-# `--permission-mode`. `auto` and `dontAsk` are Waypoint-side hook
-# short-circuits with no Claude equivalent — we launch Claude in `default`
-# and let the hook auto-allow gated tools.
+# `--permission-mode`. `auto` and `dontAsk` are Waypoint-side short-circuits
+# with no Claude equivalent — we launch Claude in `default` and auto-allow
+# gated `can_use_tool` requests in `_auto_approve_for_mode`.
 def claude_cli_mode_for(mode: str) -> str:
     if mode in {"auto", "dontAsk"}:
         return "default"
@@ -352,11 +352,11 @@ class ClaudeCliAdapter:
             request_id,
             {"subtype": "set_permission_mode", "mode": mode},
         )
-        # Mirror the new mode locally so await_approval can short-circuit
-        # without consulting the database on every PreToolUse hit. When
-        # transitioning into plan from any other mode, also record the
-        # outgoing mode so ExitPlanMode approval can restore it instead of
-        # always dropping to default.
+        # Mirror the new mode locally so _handle_can_use_tool can auto-approve
+        # without consulting the database on every request. When transitioning
+        # into plan from any other mode, also record the outgoing mode so
+        # ExitPlanMode approval can restore it instead of always dropping to
+        # default.
         state = self._sessions.get(session_id)
         if state is not None:
             if mode == "plan" and state.permission_mode != "plan":
@@ -560,13 +560,13 @@ class ClaudeCliAdapter:
         answer_text: str,
         tool_use_id: str | None = None,
     ) -> bool:
-        """Resolve a PreToolUse hook waiting on AskUserQuestion.
+        """Answer an AskUserQuestion parked on a ``can_use_tool`` request.
 
-        AskUserQuestion is gated through the same hook flow as approvals so
-        the binary doesn't auto-decline. Once the user answers, we return
-        `permissionDecision: deny` with the answer payload as the reason —
-        that string becomes the tool_result Claude reads, matching the
-        binary's own `User has answered your questions: …` shape.
+        AskUserQuestion arrives over the same ``can_use_tool`` channel as
+        approvals so the binary doesn't auto-decline. Once the user answers,
+        we deny the tool and carry the answer payload as the message — that
+        string becomes the tool_result Claude reads, matching the binary's
+        own `User has answered your questions: …` shape.
         """
         state = self._sessions.get(session_id)
         if state is None or not state.pending:
@@ -1022,7 +1022,7 @@ class ClaudeCliAdapter:
             EventKind.TOOL_RESULT,
             f"{tool_name} diff preview",
             {
-                "method": "PreToolUse.diff_preview",
+                "method": "can_use_tool.diff_preview",
                 "item_id": tool_use_id,
                 "tool_name": tool_name,
                 "tool_input": payload.get("tool_input"),

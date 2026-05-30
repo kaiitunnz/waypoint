@@ -272,10 +272,10 @@ class ClaudeCodePlugin:
         return await probe_claude_usage_remote(launch_target)
 
     def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
-        # The Claude adapter is wired up lazily by setup() — if the
-        # PreToolUse hook bundle failed to materialise we leave
-        # self.adapter=None and the runtime falls through to the tmux
-        # plugin so the user still gets a session.
+        # The Claude adapter is wired up lazily by setup() — if the support
+        # bundle failed to materialise we leave self.adapter=None and the
+        # runtime falls through to the tmux plugin so the user still gets a
+        # session.
         return self.adapter is not None
 
     def remote_executable(self, launch_target: SshLaunchTargetConfig) -> str:

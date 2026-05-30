@@ -42,7 +42,7 @@ backend/src/waypoint/
     │   ├── normalize.py      ← stream-json → EventEnvelope helpers
     │   ├── permission_modes.py
     │   ├── models.py         ← static model alias table
-    │   ├── runtime_hook.py   ← PreToolUse webhook bundle
+    │   ├── support.py        ← host-side support bundle (thread enumerator)
     │   ├── threads.py        ← local thread enumeration
     │   └── threads_remote.py ← SSH thread enumeration
     ├── codex/
@@ -145,12 +145,13 @@ async def create_session(
 ```
 
 - `setup(runtime)` runs once during `SessionRuntime.__init__`. Build any
-  external resources here (Claude does its PreToolUse hook bundle).
+  external resources here (Claude resolves its host-side support bundle).
   Resilient to missing prerequisites: log and bail without raising so a
   partial install still boots.
 - `register_routes(app, context)` runs once during `create_app`. Mount
-  any backend-specific FastAPI routes here (Claude registers
-  `/api/internal/hooks/claude/approval`).
+  any backend-specific FastAPI routes here. (Claude needs none: tool
+  approval rides the `can_use_tool` control protocol over the CLI's stdio
+  stream, not an HTTP webhook.)
 - `create_session` owns the spawn flow: write the `SessionRecord`,
   bring up the protocol process, swallow startup errors as
   `HTTPException(400)`, and return the persisted record. The runtime
@@ -405,8 +406,8 @@ When Claude or Codex ships a new protocol message:
 - [`backend/src/waypoint/backends/bootstrap.py`](../backend/src/waypoint/backends/bootstrap.py)
   — `build_default_registry()` is the registration entry point.
 - [`backend/src/waypoint/backends/claude_code/plugin.py`](../backend/src/waypoint/backends/claude_code/plugin.py)
-  — full reference plugin (static models, hook bundle, route
-  registration).
+  — full reference plugin (static models, stdio control-protocol approval,
+  support bundle).
 - [`backend/src/waypoint/backends/codex/plugin.py`](../backend/src/waypoint/backends/codex/plugin.py)
   — full reference plugin (live model RPC, slash routing).
 - [`frontend/src/lib/backends.ts`](../frontend/src/lib/backends.ts)

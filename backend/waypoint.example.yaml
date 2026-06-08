@@ -43,6 +43,21 @@ plugin_configs:
     # cli_args:
     #   - "--max-iterations=50"
 
+# Personal-assistant singleton. Omit this block entirely to disable it.
+# When present (and `enabled` is not false) the runtime keeps a single
+# long-lived session of `backend` alive, reachable from the assistant UI
+# page. It can answer host-environment questions, inspect Waypoint
+# sessions, and manage them via the `waypoint sessions` CLI. `model`,
+# `effort`, and `permission_mode` seed the thread; the UI can override
+# them live. Switching `backend` replaces the thread on next restart.
+# assistant:
+#   enabled: true
+#   backend: claude_code          # defaults to `default_backend`
+#   model: opus                   # must exist in the backend's catalogue
+#   effort: high                  # ignored by backends without an effort knob
+#   cwd: ~/                       # home, so it can inspect the host
+#   permission_mode: bypassPermissions  # defaults to the backend's most permissive mode
+
 ssh_targets:
   - id: devbox
     name: SSH coding backend

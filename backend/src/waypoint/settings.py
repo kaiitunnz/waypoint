@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from waypoint.backends.plugin_config import PluginConfig
 from waypoint.backends.registry import get_registry
@@ -67,6 +67,31 @@ def _default_backend_id() -> str:
     return plugins[0].id if plugins else "tmux"
 
 
+class AssistantConfig(BaseModel):
+    """Configuration for the personal-assistant singleton session.
+
+    The assistant is a long-lived session of an ordinary coding backend
+    (chosen by ``backend``, falling back to ``default_backend``) that the
+    runtime creates and keeps alive on its own. ``model`` / ``effort`` /
+    ``permission_mode`` seed the initial thread; the user can override them
+    live from the assistant UI, so these are defaults, not a lockdown.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    # ``None`` resolves to the top-level ``default_backend`` at bootstrap.
+    backend: BackendId | None = None
+    model: str | None = None
+    effort: str | None = None
+    # Home by default so the assistant can answer host-environment
+    # questions; cwd is not required to be a repo.
+    cwd: str = "~/"
+    # Defaults to the backend's most permissive mode at bootstrap (an
+    # assistant that prompts for every action is unusable as a chat).
+    permission_mode: str | None = None
+
+
 class Settings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8787
@@ -97,6 +122,10 @@ class Settings(BaseModel):
     # surfaces N visible bubbles regardless of how many raw events the
     # backend emitted per message.
     chat_page_messages: int = Field(default=20, ge=1, le=200)
+    # Personal-assistant singleton. ``None`` (the default) means no
+    # assistant is created. A present block is enabled unless it sets
+    # ``enabled: false``.
+    assistant: AssistantConfig | None = None
 
     @field_validator("plugin_configs", mode="before")
     @classmethod
@@ -133,6 +162,16 @@ class Settings(BaseModel):
         if cfg is not None:
             return cfg
         return get_registry().get(plugin_id).config_schema()
+
+    def assistant_backend(self) -> str | None:
+        """Effective backend id for the assistant, or ``None`` when disabled.
+
+        Falls back to ``default_backend`` when the assistant block omits an
+        explicit ``backend``.
+        """
+        if self.assistant is None or not self.assistant.enabled:
+            return None
+        return self.assistant.backend or self.default_backend
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

@@ -145,6 +145,101 @@ def test_load_settings_parses_plugin_configs(
     assert [model.id for model in claude_config.models] == ["opus"]
 
 
+def test_assistant_defaults_to_none_when_block_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "waypoint.yaml"
+    config_file.write_text("default_backend: codex\n", encoding="utf-8")
+    monkeypatch.setattr(settings_module, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
+    settings = load_settings()
+    assert settings.assistant is None
+    assert settings.assistant_backend() is None
+
+
+def test_assistant_block_enables_and_resolves_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "waypoint.yaml"
+    config_file.write_text(
+        "\n".join(
+            [
+                "default_backend: codex",
+                "assistant:",
+                "  model: opus",
+                "  effort: high",
+                "  permission_mode: bypassPermissions",
+                "  backend: claude_code",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings_module, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
+    settings = load_settings()
+    assert settings.assistant is not None
+    assert settings.assistant.enabled is True
+    assert settings.assistant_backend() == "claude_code"
+
+
+def test_assistant_backend_falls_back_to_default_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "waypoint.yaml"
+    config_file.write_text(
+        "default_backend: claude_code\nassistant:\n  model: opus\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings_module, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
+    settings = load_settings()
+    assert settings.assistant_backend() == "claude_code"
+
+
+def test_assistant_disabled_block_resolves_to_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "waypoint.yaml"
+    config_file.write_text(
+        "default_backend: codex\nassistant:\n  enabled: false\n  backend: claude_code\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings_module, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
+    settings = load_settings()
+    assert settings.assistant is not None
+    assert settings.assistant.enabled is False
+    assert settings.assistant_backend() is None
+
+
+def test_assistant_rejects_unknown_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "waypoint.yaml"
+    config_file.write_text(
+        "assistant:\n  backend: not_a_backend\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings_module, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
+    with pytest.raises(ValidationError):
+        load_settings()
+
+
+def test_assistant_rejects_unknown_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "waypoint.yaml"
+    config_file.write_text(
+        "assistant:\n  bogus: 1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings_module, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
+    with pytest.raises(ValidationError):
+        load_settings()
+
+
 def test_load_settings_rejects_unknown_plugin_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

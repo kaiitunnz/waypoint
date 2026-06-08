@@ -152,6 +152,10 @@ class TmuxPlugin:
             except Exception:
                 log.debug("rate-limit watcher raised during terminate", exc_info=True)
 
+    def native_thread_id(self, session: SessionRecord) -> str | None:
+        thread_id = session.transport_state.get("thread_id")
+        return thread_id if isinstance(thread_id, str) else None
+
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

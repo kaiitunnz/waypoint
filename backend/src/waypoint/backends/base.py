@@ -284,6 +284,16 @@ class BackendPlugin(Protocol):
         """
         ...
 
+    def native_thread_id(self, session: SessionRecord) -> str | None:
+        """Return the backend-native thread/conversation id, if any.
+
+        Generic code never reads ``transport_state`` keys directly; this
+        exposes the id a user would pass to the raw CLI (e.g. ``claude
+        --resume <id>``) so it can be surfaced for recovery. Plugins
+        without a resumable native id return ``None``.
+        """
+        ...
+
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

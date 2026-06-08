@@ -41,6 +41,10 @@ SessionTransportId = Annotated[str, BeforeValidator(_validate_transport_id)]
 class SessionSource(StrEnum):
     MANAGED = "managed"
     ATTACHED_TMUX = "attached_tmux"
+    # The personal-assistant singleton. Created and kept alive by the
+    # runtime, protected from deletion/termination via the public API,
+    # and surfaced on its own UI page rather than the session list.
+    ASSISTANT = "assistant"
 
 
 class LaunchMode(StrEnum):
@@ -215,6 +219,16 @@ class LaunchTargetSummary(BaseModel):
     default_cwd: str | None = None
 
 
+class AssistantSummary(BaseModel):
+    session_id: str
+    backend: BackendId
+    # Backend-native conversation id (e.g. the value for `claude --resume`).
+    # Surfaced alongside ``session_id`` so a user can recover the thread
+    # outside the app. ``None`` when the backend has no resumable id.
+    native_thread_id: str | None = None
+    status: SessionStatus
+
+
 class MeResponse(BaseModel):
     authenticated: bool = True
     default_backend: BackendId = "codex"
@@ -224,6 +238,9 @@ class MeResponse(BaseModel):
     # consumers (the frontend's bootstrap, auth shell) hydrate the
     # backend picker without a second round-trip.
     backends: list[dict[str, Any]] = Field(default_factory=list)
+    # The personal-assistant singleton, when enabled. The frontend uses
+    # this to locate and render the dedicated assistant page.
+    assistant: AssistantSummary | None = None
 
 
 class EventsPageResponse(BaseModel):

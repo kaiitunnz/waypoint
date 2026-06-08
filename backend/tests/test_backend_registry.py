@@ -46,6 +46,9 @@ class _StubPlugin:
     async def terminate_session(self, runtime: Any, session: Any) -> None:
         return None
 
+    def native_thread_id(self, session: Any) -> str | None:
+        return None
+
     def on_session_deleted(self, runtime: Any, session: Any) -> None:
         return None
 

@@ -133,6 +133,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             default_cwd=context.settings.default_cwd,
             launch_targets=context.runtime.launch_target_summaries(),
             backends=_backend_descriptors(context.runtime.registry),
+            assistant=context.runtime.assistant_summary(),
         )
 
     @app.get("/api/backends")

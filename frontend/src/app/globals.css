@@ -8498,3 +8498,203 @@ html[data-theme="light"]
     display: none;
   }
 }
+
+/* ─── Personal assistant ─── */
+.assistant-nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: var(--accent-strong);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+.assistant-nav-link:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: var(--accent);
+}
+
+.assistant-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.assistant-banner-lead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.assistant-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-strong);
+  font-size: 1.1rem;
+}
+
+.assistant-banner-eyebrow {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  color: var(--text-strong);
+  letter-spacing: 0.02em;
+}
+
+.assistant-banner-note {
+  margin: 2px 0 0;
+  color: var(--muted-soft);
+  font-size: 0.82rem;
+}
+
+.assistant-status {
+  margin-left: auto;
+  align-self: flex-start;
+  padding: 4px 11px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.assistant-status-running,
+.assistant-status-starting {
+  color: var(--accent-cool);
+  border-color: color-mix(in srgb, var(--accent-cool) 45%, var(--line));
+}
+
+.assistant-status-idle {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 45%, var(--line));
+}
+
+.assistant-status-waiting_input,
+.assistant-status-interrupted {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+}
+
+.assistant-status-error {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+}
+
+.assistant-ids {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.assistant-id {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.assistant-id-label {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.assistant-id-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  padding: 6px 10px;
+  background: var(--bg-card-soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.18s ease;
+}
+
+.assistant-id-value:hover {
+  border-color: var(--accent);
+}
+
+.assistant-id-value code {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-id-copy {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+
+.assistant-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  padding: 40px 24px;
+}
+
+.assistant-empty h2 {
+  margin: 0;
+}
+
+.assistant-empty .muted {
+  max-width: 46ch;
+}
+
+.assistant-glyph-lg {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  font-size: 1.7rem;
+}
+
+.assistant-snippet {
+  width: 100%;
+  max-width: 420px;
+  margin: 4px 0 0;
+  padding: 14px 16px;
+  text-align: left;
+  background: var(--bg-card-soft);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow-x: auto;
+}
+
+.assistant-snippet code {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text);
+  white-space: pre;
+}

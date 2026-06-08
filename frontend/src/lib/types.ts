@@ -4,7 +4,7 @@
 // hand-mirroring per-backend constants.
 export type Backend = string;
 export type SessionTransport = string;
-export type SessionSource = "managed" | "attached_tmux";
+export type SessionSource = "managed" | "attached_tmux" | "assistant";
 export type LaunchMode = "auto" | "direct" | "tmux_wrapper";
 export type SessionStatus =
   | "starting"
@@ -185,12 +185,20 @@ export interface BackendDescriptor {
   capabilities: BackendCapabilities;
 }
 
+export interface AssistantSummary {
+  session_id: string;
+  backend: Backend;
+  native_thread_id: string | null;
+  status: SessionStatus;
+}
+
 export interface MeResponse {
   authenticated: boolean;
   default_backend: Backend;
   default_cwd: string;
   launch_targets: LaunchTargetSummary[];
   backends?: BackendDescriptor[];
+  assistant?: AssistantSummary | null;
 }
 
 export interface EventsPage {

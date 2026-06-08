@@ -23,6 +23,7 @@ from waypoint.git_meta import resolve_git_meta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.scheduler import Scheduler
 from waypoint.schemas import (
+    AssistantSummary,
     CommandCompletion,
     EventKind,
     EventRecord,
@@ -45,6 +46,36 @@ from waypoint.transports import TransportAdapter
 
 TMUX_TRANSPORT_ID = "tmux"
 COMPLETION_REFRESH_INTERVAL_SECONDS = 30.0
+
+# Opening message sent to a freshly created assistant thread. Delivered as
+# the first user turn because backends expose no generic system-prompt
+# channel; phrased so the model absorbs its role without burning a turn on
+# a monologue. References the `waypoint` CLI, which the runtime expects on
+# the assistant process's PATH.
+ASSISTANT_CHARTER = """\
+You are the Waypoint personal assistant — a single, long-lived thread the \
+user talks to from a dedicated page in the Waypoint app.
+
+Your job:
+- Answer questions about this host machine. You have full shell access in \
+this session; run commands to inspect the environment, files, processes, \
+and tooling rather than guessing.
+- Ground answers in the user's Waypoint coding sessions (the agents they \
+run). Inspect and manage them with the `waypoint` CLI, which is on your \
+PATH:
+  - `waypoint sessions list` — all sessions and their status.
+  - `waypoint sessions show <id>` — details of one session.
+  - `waypoint sessions events <id>` — a session's transcript.
+  - `waypoint sessions start --backend <id> --cwd <path>` — launch a new agent.
+  - `waypoint sessions send <id> <text>` — send a message to a session.
+  - `waypoint sessions interrupt|terminate <id>` — control a session.
+  Run `waypoint sessions --help` for the full surface. Prefer the CLI over \
+guessing about session state.
+
+Be concise and act before narrating. Do not take destructive or \
+irreversible actions (terminating sessions, deleting files) without \
+confirming with the user first. Acknowledge briefly, then wait for the \
+user's first question."""
 
 log = logging.getLogger("waypoint.runtime")
 
@@ -124,6 +155,10 @@ class SessionRuntime:
             CompletionCacheKey, asyncio.Task[list[CommandCompletion]]
         ] = {}
         self.file_offsets: dict[str, int] = {}
+        # Id of the personal-assistant singleton, populated by
+        # ``_ensure_assistant_session`` during ``start``. ``None`` when the
+        # assistant is disabled or its bootstrap failed.
+        self.assistant_session_id: str | None = None
         self.registry = registry or get_registry()
         self._transports: dict[str, TransportAdapter] = {
             plugin.transport_id: plugin.transport_view(self)
@@ -152,6 +187,13 @@ class SessionRuntime:
             )
             self._restore_tasks.add(task)
             task.add_done_callback(self._restore_tasks.discard)
+        # Bring up the personal-assistant singleton after scheduling
+        # restores so a still-alive assistant is reused rather than
+        # recreated. A bootstrap failure must never abort startup.
+        try:
+            await self._ensure_assistant_session()
+        except Exception:
+            log.exception("failed to ensure the assistant session")
         await self.scheduler.start()
 
     async def stop(self) -> None:
@@ -288,6 +330,109 @@ class SessionRuntime:
         )
         self._warm_command_completions(session)
         return session
+
+    async def _ensure_assistant_session(self) -> None:
+        """Create / reuse / replace the personal-assistant singleton.
+
+        Reuses a still-alive assistant whose backend matches the
+        configured one. Otherwise demotes any stale assistant rows to
+        ``MANAGED`` (preserving their transcripts as ordinary sessions —
+        never destructive) and creates a fresh assistant. When the
+        assistant is disabled, all assistant rows are released back to
+        ``MANAGED`` and no singleton is tracked.
+        """
+        target_backend = self.settings.assistant_backend()
+        existing = [
+            session
+            for session in self.storage.list_sessions()
+            if session.source == SessionSource.ASSISTANT
+        ]
+        if target_backend is None:
+            for session in existing:
+                self.storage.update_session(
+                    session.id, source=SessionSource.MANAGED, pinned_at=None
+                )
+            self.assistant_session_id = None
+            return
+        live = next(
+            (
+                session
+                for session in existing
+                if session.backend == target_backend
+                and session.status not in {SessionStatus.EXITED, SessionStatus.ERROR}
+            ),
+            None,
+        )
+        if live is not None:
+            self.assistant_session_id = live.id
+            for session in existing:
+                if session.id != live.id:
+                    self.storage.update_session(
+                        session.id, source=SessionSource.MANAGED, pinned_at=None
+                    )
+            return
+        for session in existing:
+            self.storage.update_session(
+                session.id, source=SessionSource.MANAGED, pinned_at=None
+            )
+        created = await self._create_assistant_session(target_backend)
+        self.assistant_session_id = created.id
+
+    async def _create_assistant_session(self, backend: str) -> SessionRecord:
+        assistant = self.settings.assistant
+        assert assistant is not None  # guarded by assistant_backend()
+        plugin = self.registry.get(backend)
+        permission_mode = (
+            plugin.validate_permission_mode(assistant.permission_mode)
+            if assistant.permission_mode
+            else None
+        )
+        request = SessionCreateRequest(
+            backend=backend,
+            cwd=assistant.cwd,
+            title="Personal Assistant",
+            model=assistant.model,
+            effort=assistant.effort,
+            permission_mode=permission_mode,
+        )
+        session = await self.create_session(request)
+        promoted = self.storage.update_session(
+            session.id,
+            source=SessionSource.ASSISTANT,
+            pinned_at=datetime.now(UTC),
+        )
+        await self._send_assistant_charter(promoted)
+        return promoted
+
+    async def _send_assistant_charter(self, session: SessionRecord) -> None:
+        """Seed a fresh assistant thread with its role. Best-effort."""
+        try:
+            await self.handle_input(
+                session.id, SessionInputRequest(text=ASSISTANT_CHARTER, submit=True)
+            )
+        except Exception:
+            log.exception(
+                "failed to send assistant charter",
+                extra={"session_id": session.id},
+            )
+
+    def is_assistant_session(self, session: SessionRecord) -> bool:
+        return session.source == SessionSource.ASSISTANT
+
+    def assistant_summary(self) -> AssistantSummary | None:
+        session_id = self.assistant_session_id
+        if session_id is None:
+            return None
+        session = self.storage.get_session(session_id)
+        if session is None:
+            return None
+        plugin = self.registry.plugin_for(session)
+        return AssistantSummary(
+            session_id=session.id,
+            backend=session.backend,
+            native_thread_id=plugin.native_thread_id(session),
+            status=session.status,
+        )
 
     async def fork_session(self, session_id: str) -> SessionRecord:
         session = self.get_session(session_id)
@@ -682,6 +827,11 @@ class SessionRuntime:
 
     async def terminate(self, session_id: str) -> SessionRecord:
         session = self.get_session(session_id)
+        if session.source == SessionSource.ASSISTANT:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="the assistant session cannot be terminated",
+            )
         if session.status == SessionStatus.EXITED:
             return session
         # Route through the plugin (not the transport) so a session whose
@@ -750,6 +900,11 @@ class SessionRuntime:
 
     async def delete(self, session_id: str, *, force: bool = False) -> None:
         session = self.get_session(session_id)
+        if session.source == SessionSource.ASSISTANT:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="the assistant session cannot be deleted",
+            )
         if session.status != SessionStatus.EXITED:
             if force:
                 # Last-resort path for sessions whose adapter is wedged

@@ -30,7 +30,7 @@ from waypoint.schemas import (
     SessionSource,
     SessionStatus,
 )
-from waypoint.settings import Settings
+from waypoint.settings import AssistantConfig, Settings
 from waypoint.storage import Storage
 
 
@@ -3182,3 +3182,183 @@ async def test_refresh_rate_limit_usage_runs_probe_inline_for_codex(
 
     assert fake.register_rate_limit_calls == [session.id]
     assert fake.force_refresh_rate_limit_calls == [session.id]
+
+
+def _make_assistant_row(storage, settings, *, session_id, backend, status, transport):
+    session = make_session(
+        settings,
+        id=session_id,
+        backend=backend,
+        transport=transport,
+        status=status,
+    )
+    storage.create_session(session)
+    return storage.update_session(
+        session_id, source=SessionSource.ASSISTANT, pinned_at=datetime.now(UTC)
+    )
+
+
+@pytest.mark.asyncio
+async def test_assistant_disabled_demotes_existing_rows(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    settings.assistant = None
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-assistant",
+        backend="codex",
+        status=SessionStatus.IDLE,
+        transport="codex_app_server",
+    )
+
+    await runtime._ensure_assistant_session()
+
+    assert runtime.assistant_session_id is None
+    demoted = storage.get_session("codex-assistant")
+    assert demoted is not None
+    assert demoted.source == SessionSource.MANAGED
+    assert demoted.pinned_at is None
+
+
+@pytest.mark.asyncio
+async def test_assistant_reuses_live_matching_session(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(backend="codex")
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-assistant",
+        backend="codex",
+        status=SessionStatus.IDLE,
+        transport="codex_app_server",
+    )
+
+    async def _fail_create(backend: str) -> Any:  # pragma: no cover - must not run
+        raise AssertionError("should not recreate a live assistant")
+
+    runtime._create_assistant_session = _fail_create  # type: ignore[method-assign]
+
+    await runtime._ensure_assistant_session()
+
+    assert runtime.assistant_session_id == "codex-assistant"
+    kept = storage.get_session("codex-assistant")
+    assert kept is not None
+    assert kept.source == SessionSource.ASSISTANT
+
+
+@pytest.mark.asyncio
+async def test_assistant_recreates_when_backend_changes(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(backend="claude_code")
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-assistant",
+        backend="codex",
+        status=SessionStatus.IDLE,
+        transport="codex_app_server",
+    )
+
+    async def _fake_create(backend: str) -> SessionRecord:
+        assert backend == "claude_code"
+        return _make_assistant_row(
+            storage,
+            settings,
+            session_id="claude-assistant",
+            backend="claude_code",
+            status=SessionStatus.STARTING,
+            transport="claude_cli",
+        )
+
+    runtime._create_assistant_session = _fake_create  # type: ignore[method-assign]
+
+    await runtime._ensure_assistant_session()
+
+    assert runtime.assistant_session_id == "claude-assistant"
+    old = storage.get_session("codex-assistant")
+    assert old is not None
+    assert old.source == SessionSource.MANAGED
+
+
+@pytest.mark.asyncio
+async def test_assistant_recreates_when_prior_thread_exited(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(backend="codex")
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-dead",
+        backend="codex",
+        status=SessionStatus.EXITED,
+        transport="codex_app_server",
+    )
+
+    async def _fake_create(backend: str) -> SessionRecord:
+        return _make_assistant_row(
+            storage,
+            settings,
+            session_id="codex-fresh",
+            backend="codex",
+            status=SessionStatus.STARTING,
+            transport="codex_app_server",
+        )
+
+    runtime._create_assistant_session = _fake_create  # type: ignore[method-assign]
+
+    await runtime._ensure_assistant_session()
+
+    assert runtime.assistant_session_id == "codex-fresh"
+    dead = storage.get_session("codex-dead")
+    assert dead is not None
+    assert dead.source == SessionSource.MANAGED
+
+
+@pytest.mark.asyncio
+async def test_delete_and_terminate_protect_assistant(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-assistant",
+        backend="codex",
+        status=SessionStatus.IDLE,
+        transport="codex_app_server",
+    )
+
+    with pytest.raises(HTTPException) as delete_exc:
+        await runtime.delete("codex-assistant")
+    assert delete_exc.value.status_code == 403
+
+    with pytest.raises(HTTPException) as terminate_exc:
+        await runtime.terminate("codex-assistant")
+    assert terminate_exc.value.status_code == 403
+
+    assert storage.get_session("codex-assistant") is not None
+
+
+@pytest.mark.asyncio
+async def test_assistant_summary_reports_native_thread_id(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-assistant",
+        backend="codex",
+        status=SessionStatus.IDLE,
+        transport="codex_app_server",
+    )
+    runtime.assistant_session_id = "codex-assistant"
+
+    summary = runtime.assistant_summary()
+
+    assert summary is not None
+    assert summary.session_id == "codex-assistant"
+    assert summary.backend == "codex"
+    assert summary.native_thread_id == "thread-1"
+    assert summary.status == SessionStatus.IDLE
+
+
+def test_assistant_summary_is_none_when_untracked(tmp_path) -> None:
+    runtime, _, _ = make_runtime(tmp_path)
+    assert runtime.assistant_session_id is None
+    assert runtime.assistant_summary() is None

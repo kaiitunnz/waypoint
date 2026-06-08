@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -45,6 +46,7 @@ import {
 } from "@/lib/store";
 import { isManagedLaunchWrapper, useBackendCatalog } from "@/lib/backends";
 import {
+  AssistantSummary,
   Backend,
   BackendDescriptor,
   LaunchTargetSummary,
@@ -108,6 +110,7 @@ export default function HomePage() {
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [assistant, setAssistant] = useState<AssistantSummary | null>(null);
   const [error, setError] = useState("");
   const [connection, setConnection] = useState<ConnectionState>("idle");
   const [defaultBackend, setDefaultBackend] = useState<Backend>("codex");
@@ -189,6 +192,7 @@ export default function HomePage() {
         setDefaultBackend(me.default_backend);
         setDefaultCwd(me.default_cwd || "~/");
         setLaunchTargets(me.launch_targets);
+        setAssistant(me.assistant ?? null);
         if (me.backends && me.backends.length > 0) {
           setBackendDescriptors(me.backends);
         }
@@ -701,6 +705,11 @@ export default function HomePage() {
         <div className="app-bar-meta">
           <span className={`app-bar-status ${connection}`}>{connectionLabel}</span>
           {host ? <span className="muted">{host}</span> : null}
+          {token && assistant ? (
+            <Link className="assistant-nav-link" href="/assistant">
+              <span aria-hidden="true">✦</span> Assistant
+            </Link>
+          ) : null}
           <ThemeToggle />
         </div>
       </header>
@@ -768,7 +777,7 @@ export default function HomePage() {
       ) : null}
       {token ? (
         <SessionList
-          sessions={sessions}
+          sessions={sessions.filter((session) => session.source !== "assistant")}
           onDelete={handleDelete}
           onDeleteExited={handleDeleteExited}
           onTerminate={handleTerminate}

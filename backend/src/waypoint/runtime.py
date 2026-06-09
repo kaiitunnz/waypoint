@@ -380,6 +380,10 @@ class SessionRuntime:
                 )
             self.assistant_session_id = None
             return
+        # Refresh the charter files on every boot so a redeploy updates them
+        # even when the live thread is reused below. The running agent only
+        # re-reads AGENTS.md / CLAUDE.md when its thread is next recreated.
+        self._prepare_assistant_workspace()
         # Reuse only a thread that matches the configured backend, is alive,
         # and already lives in the managed workspace — the last clause
         # migrates assistants created by older builds (different cwd, charter

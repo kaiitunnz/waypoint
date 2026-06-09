@@ -52,7 +52,9 @@ unaffected.
 
 ### Controls (assistant page)
 
-The settings popover next to the composer exposes the assistant's lifecycle:
+The **settings popover** (⚙, next to the composer) holds configuration. Changing
+the backend or picking a thread there stages an inline confirm, since both
+replace the conversation:
 
 - **Switch backend** — rebuild the assistant on a different coding agent. The
   conversation cannot migrate between backends, so this starts a fresh thread
@@ -62,12 +64,16 @@ The settings popover next to the composer exposes the assistant's lifecycle:
   imported as-is: it resumes its own conversation and working directory, so the
   assistant charter — which lives in the managed workspace — does **not** apply.
   Offered only for backends that support thread discovery and import.
+- **Model / effort / permission mode** — applied live to the running thread; no
+  context is lost.
+
+The **overflow menu** (⋯) holds the standalone lifecycle actions, mirroring
+where ordinary sessions keep terminate/delete:
+
 - **Clear context** — start a fresh thread on the same backend.
 - **Terminate / Reattach** — stop the thread (keeping it the pinned singleton)
   and later revive the same conversation. Reattach is offered only when the
   backend can resume after exit.
-- **Model / effort / permission mode** — applied live to the running thread; no
-  context is lost.
 
 Switching backend, attaching a thread, and clearing context all replace the
 current conversation: the previous thread is **demoted to an ordinary stopped

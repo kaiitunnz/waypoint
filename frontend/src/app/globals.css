@@ -8500,25 +8500,55 @@ html[data-theme="light"]
 }
 
 /* ─── Personal assistant ─── */
-.assistant-nav-link {
+/* Floating action button, fixed to the bottom-right of the home page for
+   one-tap access. Collapses to a circular glyph on narrow/touch viewports. */
+.assistant-fab {
+  position: fixed;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  z-index: 40;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
+  gap: 9px;
+  padding: 12px 18px;
   border-radius: var(--radius-pill);
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: var(--bg-card);
   color: var(--accent-strong);
   font-family: var(--font-mono);
-  font-size: 0.74rem;
+  font-size: 0.78rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   text-decoration: none;
-  transition: border-color 0.18s ease, background 0.18s ease;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(8px);
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
 }
 
-.assistant-nav-link:hover {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+.assistant-fab:hover {
+  transform: translateY(-2px);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
   border-color: var(--accent);
+}
+
+.assistant-fab-glyph {
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+@media (max-width: 640px) {
+  .assistant-fab {
+    padding: 0;
+    width: 52px;
+    height: 52px;
+    justify-content: center;
+  }
+  .assistant-fab-label {
+    display: none;
+  }
+  .assistant-fab-glyph {
+    font-size: 1.3rem;
+  }
 }
 
 .assistant-banner {

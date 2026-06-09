@@ -1985,6 +1985,7 @@ const ReplyComposer = memo(function ReplyComposer({
     "switch" | "clear" | null
   >(null);
   const [pendingBackend, setPendingBackend] = useState<Backend | null>(null);
+  const [assistantError, setAssistantError] = useState<string | null>(null);
   // Pending effort for backends that need a session restart to apply (Claude)
   // — staged here until the user confirms via the Apply button. `null` means
   // no pending change.
@@ -2261,12 +2262,17 @@ const ReplyComposer = memo(function ReplyComposer({
   const runAssistantAction = async (action: () => Promise<void> | void) => {
     if (assistantBusy) return;
     setAssistantBusy(true);
+    setAssistantError(null);
     try {
       await action();
-    } finally {
-      setAssistantBusy(false);
+      // Only dismiss the confirm on success; on failure keep the selection and
+      // the error visible so the user can retry or cancel.
       setAssistantConfirm(null);
       setPendingBackend(null);
+    } catch (err) {
+      setAssistantError(err instanceof Error ? err.message : "Action failed");
+    } finally {
+      setAssistantBusy(false);
     }
   };
   const assistantExited = Boolean(
@@ -2333,6 +2339,7 @@ const ReplyComposer = memo(function ReplyComposer({
                       value={pendingBackend ?? session.backend}
                       onChange={(event) => {
                         const next = event.target.value;
+                        setAssistantError(null);
                         if (next === session.backend) {
                           setPendingBackend(null);
                           setAssistantConfirm((mode) =>
@@ -2430,6 +2437,11 @@ const ReplyComposer = memo(function ReplyComposer({
                 ) : null}
                 {assistantOps ? (
                   <div className="composer-tune-lifecycle">
+                    {assistantError ? (
+                      <p className="composer-tune-error" role="alert">
+                        {assistantError}
+                      </p>
+                    ) : null}
                     {assistantConfirm === "switch" && pendingBackend ? (
                       <div className="composer-tune-confirm">
                         <p>
@@ -2445,6 +2457,7 @@ const ReplyComposer = memo(function ReplyComposer({
                             onClick={() => {
                               setPendingBackend(null);
                               setAssistantConfirm(null);
+                              setAssistantError(null);
                             }}
                             disabled={assistantBusy}
                           >
@@ -2474,7 +2487,10 @@ const ReplyComposer = memo(function ReplyComposer({
                           <button
                             type="button"
                             className="composer-tune-confirm-cancel"
-                            onClick={() => setAssistantConfirm(null)}
+                            onClick={() => {
+                              setAssistantConfirm(null);
+                              setAssistantError(null);
+                            }}
                             disabled={assistantBusy}
                           >
                             Cancel

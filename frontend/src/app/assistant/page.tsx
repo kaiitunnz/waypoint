@@ -123,8 +123,13 @@ export default function AssistantPage() {
       try {
         setAssistant(await run());
       } catch (err) {
-        if (isAuthError(err)) handleAuthFailure();
-        else console.error(err);
+        if (isAuthError(err)) {
+          handleAuthFailure();
+          return;
+        }
+        // Surface to the composer's lifecycle footer so a failed switch /
+        // terminate / reattach isn't silently dropped.
+        throw err;
       }
     },
     [handleAuthFailure],

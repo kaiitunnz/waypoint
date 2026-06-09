@@ -1,4 +1,5 @@
 import asyncio
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,7 +16,7 @@ from waypoint.backends.codex.permission_modes import (
 )
 from waypoint.backends.codex.schemas import CodexThreadImportRequest
 from waypoint.launch_targets import SshLaunchTargetConfig
-from waypoint.runtime import ASSISTANT_CHARTER, SessionRuntime
+from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     CommandCompletion,
     CompletionDispatch,
@@ -3374,16 +3375,27 @@ def test_assistant_summary_is_none_when_untracked(tmp_path) -> None:
     assert runtime.assistant_summary() is None
 
 
-def test_prepare_assistant_workspace_writes_charter_files(tmp_path) -> None:
+def test_prepare_assistant_workspace_links_tracked_assets(tmp_path) -> None:
     runtime, _, settings = make_runtime(tmp_path)
     workspace = runtime._prepare_assistant_workspace()
     workspace_path = Path(workspace)
+    repo_root = Path(__file__).resolve().parents[2]
+
     assert workspace_path == settings.data_dir / "assistant"
-    for name in ("AGENTS.md", "CLAUDE.md"):
-        text = (workspace_path / name).read_text(encoding="utf-8")
-        assert "Waypoint personal assistant" in text
-        assert "waypoint sessions list" in text
-        assert "waypointctl restart" in text
+    assert (workspace_path / "AGENTS.md").is_symlink()
+    assert (workspace_path / "AGENTS.md").resolve() == (
+        repo_root / ".agents" / "assistant" / "AGENTS.md"
+    )
+    assert (workspace_path / "CLAUDE.md").is_symlink()
+    assert (workspace_path / "CLAUDE.md").resolve() == (
+        repo_root / ".agents" / "assistant" / "CLAUDE.md"
+    )
+    assert (workspace_path / ".agents" / "skills").is_symlink()
+    assert (workspace_path / ".agents" / "skills").resolve() == (
+        repo_root / ".agents" / "skills"
+    )
+    assert os.readlink(workspace_path / ".claude" / "skills") == "../.agents/skills"
+    assert os.readlink(workspace_path / ".codex" / "skills") == "../.agents/skills"
 
 
 @pytest.mark.asyncio
@@ -3424,15 +3436,15 @@ async def test_assistant_recreates_when_cwd_is_not_workspace(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_assistant_refreshes_charter_files_on_reuse(tmp_path) -> None:
-    # A reused live thread still gets its workspace charter files rewritten to
-    # the current charter on boot, without recreating the thread.
+async def test_assistant_refreshes_asset_links_on_reuse(tmp_path) -> None:
+    # A reused live thread still gets its workspace asset links repaired on
+    # boot, without recreating the thread.
     runtime, storage, settings = make_runtime(tmp_path)
     settings.assistant = AssistantConfig(backend="codex")
     workspace = runtime._assistant_workspace_dir()
     workspace.mkdir(parents=True, exist_ok=True)
     for name in ("AGENTS.md", "CLAUDE.md"):
-        (workspace / name).write_text("stale charter", encoding="utf-8")
+        (workspace / name).write_text("stale bootstrap", encoding="utf-8")
     _make_assistant_row(
         storage,
         settings,
@@ -3453,8 +3465,11 @@ async def test_assistant_refreshes_charter_files_on_reuse(tmp_path) -> None:
     await runtime._ensure_assistant_session()
 
     assert runtime.assistant_session_id == "codex-assistant"
-    for name in ("AGENTS.md", "CLAUDE.md"):
-        assert (workspace / name).read_text(encoding="utf-8") == ASSISTANT_CHARTER
+    assert (workspace / "AGENTS.md").is_symlink()
+    assert (workspace / "CLAUDE.md").is_symlink()
+    assert "Waypoint personal assistant" in (workspace / "AGENTS.md").read_text(
+        encoding="utf-8"
+    )
 
 
 @pytest.mark.asyncio

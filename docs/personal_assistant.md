@@ -31,20 +31,22 @@ The block is enabled by default when present — set `enabled: false` to keep th
 config but turn the assistant off.
 
 The assistant always runs in a managed working directory (`<data_dir>/assistant`),
-so it has no `cwd` setting. Its charter is written there as `AGENTS.md` /
-`CLAUDE.md` and loaded silently by the backend as project context — there is no
-visible bootstrap message in the transcript. The working directory is only a
-scratch cwd; shell access reaches the whole host, so host inspection is
-unaffected.
+so it has no `cwd` setting. The runtime links repo-tracked assistant assets into
+that directory: `AGENTS.md`, `CLAUDE.md`, `.agents/skills`, `.claude/skills`,
+and `.codex/skills`. The bootstrap files stay small and point the agent at the
+local `waypoint` and `waypointctl` skills, which hold the detailed operational
+workflows. There is no visible bootstrap message in the transcript. The working
+directory is only a scratch cwd; shell access reaches the whole host, so host
+inspection is unaffected.
 
 ## Lifecycle
 
-- On startup the runtime reuses any still-alive assistant thread that lives in
-  the managed workspace, **regardless of its backend**. The live thread is the
-  source of truth, so a backend chosen from the UI survives a redeploy. The
-  `assistant` block in `waypoint.yaml` only seeds the *first* creation; editing
-  `assistant.backend` later has no effect while a thread exists — clear the
-  context to re-seed.
+- On startup the runtime refreshes the assistant workspace asset links, then
+  reuses any still-alive assistant thread that lives in the managed workspace,
+  **regardless of its backend**. The live thread is the source of truth, so a
+  backend chosen from the UI survives a redeploy. The `assistant` block in
+  `waypoint.yaml` only seeds the *first* creation; editing `assistant.backend`
+  later has no effect while a thread exists — clear the context to re-seed.
 - If no live thread exists (first boot, or the previous one exited), a fresh
   thread is created from the `waypoint.yaml` defaults.
 - The assistant cannot be **deleted**, and the generic session terminate/delete
@@ -90,9 +92,15 @@ Both the Waypoint session id and the backend-native thread id (e.g. the value
 for `claude --resume`) are surfaced on the assistant page and via `/api/me`, so
 the thread can be recovered outside the app if needed.
 
+Asset updates do **not** recreate or demote the live assistant. Backends are
+expected to pick up updated `AGENTS.md`, `CLAUDE.md`, and skill files from the
+workspace themselves.
+
 ## Managing sessions: the `waypoint sessions` CLI
 
-The assistant manages your coding sessions through the `waypoint` CLI, which
+The `waypoint` skill is the authoritative assistant workflow for this CLI.
+At a high level, the assistant manages your coding sessions through the
+`waypoint` CLI, which
 talks to the running server over HTTP (distinct from the in-process `waypoint
 session` commands):
 

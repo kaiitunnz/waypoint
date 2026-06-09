@@ -14,6 +14,7 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
+from waypoint.assistant_assets import ensure_assistant_assets
 from waypoint.backends import BackendRegistry, get_registry
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
@@ -47,61 +48,6 @@ from waypoint.transports import TransportAdapter
 TMUX_TRANSPORT_ID = "tmux"
 COMPLETION_REFRESH_INTERVAL_SECONDS = 30.0
 
-# The assistant's charter. Written into AGENTS.md / CLAUDE.md in the
-# assistant's managed working directory so the backend loads it silently as
-# project context — no visible first message, no wasted startup turn.
-# References the `waypoint` / `waypointctl` CLIs, which the runtime expects on
-# the assistant process's PATH.
-ASSISTANT_CHARTER = """\
-# Waypoint personal assistant
-
-You are the Waypoint personal assistant — a single, long-lived thread the
-user talks to from a dedicated page in the Waypoint app. These are standing
-instructions; act on them whenever the user writes to you.
-
-Your job:
-- Answer questions about this host machine. You have full shell access; run
-  commands to inspect the environment, files, processes, and tooling rather
-  than guessing. Your working directory is a scratch space — operate across
-  the host as needed.
-- Ground answers in the user's Waypoint coding sessions (the agents they
-  run). Inspect and manage them with the `waypoint` CLI, which is on your
-  PATH:
-  - `waypoint sessions list` — all sessions and their status.
-  - `waypoint sessions show <id>` — details of one session.
-  - `waypoint sessions events <id>` — a session's transcript.
-  - `waypoint sessions start --backend <id> --cwd <path>` — launch a new agent.
-  - `waypoint sessions send <id> <text>` — send a message to a session.
-  - `waypoint sessions interrupt|terminate <id>` — control a session.
-  Run `waypoint sessions --help` for the full surface. Prefer the CLI over
-  guessing about session state.
-
-Managing your own deployment — you run on this Waypoint stack and can update
-it with `waypointctl` (the stack supervisor) and `uv`, both on your PATH.
-These commands affect the deployment you are running on, so treat them as
-confirm-first. In particular, restarting the backend interrupts every running
-session, including you — your current turn ends and the user has to reconnect.
-- Update from the remote: the repo is at `$WAYPOINT_HOME`. First check it is
-  safe with `git -C "$WAYPOINT_HOME" status`; if the tree is dirty or not on
-  `main`, stop and tell the user rather than pulling. Otherwise
-  `git -C "$WAYPOINT_HOME" pull --ff-only origin main`.
-- Apply changed dependencies: if the pull touched backend deps,
-  `cd "$WAYPOINT_HOME/backend" && uv sync`. Frontend deps install on
-  `waypointctl start`. If `waypointctl/` itself changed, reinstall it with
-  `uv tool install "$WAYPOINT_HOME/waypointctl" --reinstall` (use --reinstall,
-  not --force: it rebuilds from source even though the version is unchanged).
-- Restart to apply: a frontend-only change is safe via
-  `waypointctl restart frontend`. For a backend (or full-stack) change, first
-  review active work with `waypoint sessions list`, surface anything running
-  or waiting on input, get the user's confirmation, then
-  `waypointctl restart backend` (or `waypointctl restart` for both) — expect
-  your own connection to drop and that you cannot observe completion.
-- Verify with `waypointctl status` and `waypointctl logs backend` (or
-  `frontend`).
-
-Be concise and act before narrating. Do not take destructive or irreversible
-actions (terminating sessions, deleting files, pulling updates, restarting the
-stack) without confirming with the user first."""
 
 log = logging.getLogger("waypoint.runtime")
 
@@ -380,9 +326,9 @@ class SessionRuntime:
                 )
             self.assistant_session_id = None
             return
-        # Refresh the charter files on every boot so a redeploy updates them
-        # even when the live thread is reused below. The running agent only
-        # re-reads AGENTS.md / CLAUDE.md when its thread is next recreated.
+        # Refresh assistant workspace asset links on every boot so repo
+        # updates to AGENTS.md / CLAUDE.md / skills are visible to backends
+        # without recreating the live thread.
         self._prepare_assistant_workspace()
         # Reuse any live assistant that already lives in the managed workspace,
         # regardless of its backend: the live thread is the source of truth, so
@@ -390,7 +336,7 @@ class SessionRuntime:
         # only seeds the first-ever creation below; later YAML edits to
         # ``assistant.backend`` are ignored while a thread exists (clear context
         # to re-seed). The cwd clause migrates assistants created by older builds
-        # (different cwd, charter sent as a visible message) to a fresh,
+        # (different cwd, bootstrap instructions sent as a visible message) to a fresh,
         # silently-chartered thread.
         workspace = str(self._assistant_workspace_dir())
         live = next(
@@ -458,17 +404,14 @@ class SessionRuntime:
         return self.settings.data_dir / "assistant"
 
     def _prepare_assistant_workspace(self) -> str:
-        """Materialise the assistant's working dir and its charter files.
+        """Ensure the assistant's working dir and repo-tracked assets exist.
 
-        The charter ships as ``AGENTS.md`` / ``CLAUDE.md`` (read silently by
-        the backend as project context) rather than a visible first message.
-        The directory is a scratch cwd — shell access reaches the whole host
-        regardless — so host inspection is unaffected.
+        The bootstrap files and skills are linked from the repo by default so
+        updates are cheap and visible to backends that reload project context.
+        The directory is a scratch cwd; shell access reaches the whole host.
         """
         workspace = self._assistant_workspace_dir()
-        workspace.mkdir(parents=True, exist_ok=True)
-        for name in ("AGENTS.md", "CLAUDE.md"):
-            (workspace / name).write_text(ASSISTANT_CHARTER, encoding="utf-8")
+        ensure_assistant_assets(workspace, config_path=self.settings.config_path)
         return str(workspace)
 
     def is_assistant_session(self, session: SessionRecord) -> bool:

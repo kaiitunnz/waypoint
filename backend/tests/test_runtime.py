@@ -3380,6 +3380,7 @@ def test_prepare_assistant_workspace_writes_charter_files(tmp_path) -> None:
         text = (workspace_path / name).read_text(encoding="utf-8")
         assert "Waypoint personal assistant" in text
         assert "waypoint sessions list" in text
+        assert "waypointctl restart" in text
 
 
 @pytest.mark.asyncio

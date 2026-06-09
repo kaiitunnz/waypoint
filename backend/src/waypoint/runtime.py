@@ -543,7 +543,14 @@ class SessionRuntime:
             permission_mode = (
                 permission_mode if permission_mode is not None else old.permission_mode
             )
-        if old is not None:
+        # Spawn the replacement before touching the current thread so a failed
+        # launch (e.g. a misconfigured backend) leaves the live, pinned
+        # assistant intact rather than orphaning the pointer at a stopped row.
+        created = await self._create_assistant_session(
+            chosen, model=model, effort=effort, permission_mode=permission_mode
+        )
+        self.assistant_session_id = created.id
+        if old is not None and old.id != created.id:
             # Release the protection guard, then best-effort stop the old thread.
             # The demoted row lingers as a normal stopped session so its
             # transcript is preserved.
@@ -552,10 +559,6 @@ class SessionRuntime:
             )
             with suppress(Exception):
                 await self.terminate(old.id)
-        created = await self._create_assistant_session(
-            chosen, model=model, effort=effort, permission_mode=permission_mode
-        )
-        self.assistant_session_id = created.id
         return self._require_assistant_summary()
 
     async def terminate_assistant(self) -> AssistantSummary:

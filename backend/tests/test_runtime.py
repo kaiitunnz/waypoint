@@ -3184,7 +3184,9 @@ async def test_refresh_rate_limit_usage_runs_probe_inline_for_codex(
     assert fake.force_refresh_rate_limit_calls == [session.id]
 
 
-def _make_assistant_row(storage, settings, *, session_id, backend, status, transport):
+def _make_assistant_row(
+    storage, settings, *, session_id, backend, status, transport, cwd=None
+):
     session = make_session(
         settings,
         id=session_id,
@@ -3193,9 +3195,13 @@ def _make_assistant_row(storage, settings, *, session_id, backend, status, trans
         status=status,
     )
     storage.create_session(session)
-    return storage.update_session(
-        session_id, source=SessionSource.ASSISTANT, pinned_at=datetime.now(UTC)
-    )
+    updates: dict[str, Any] = {
+        "source": SessionSource.ASSISTANT,
+        "pinned_at": datetime.now(UTC),
+    }
+    if cwd is not None:
+        updates["cwd"] = cwd
+    return storage.update_session(session_id, **updates)
 
 
 @pytest.mark.asyncio
@@ -3231,6 +3237,7 @@ async def test_assistant_reuses_live_matching_session(tmp_path) -> None:
         backend="codex",
         status=SessionStatus.IDLE,
         transport="codex_app_server",
+        cwd=str(runtime._assistant_workspace_dir()),
     )
 
     async def _fail_create(backend: str) -> Any:  # pragma: no cover - must not run
@@ -3373,3 +3380,40 @@ def test_prepare_assistant_workspace_writes_charter_files(tmp_path) -> None:
         text = (workspace_path / name).read_text(encoding="utf-8")
         assert "Waypoint personal assistant" in text
         assert "waypoint sessions list" in text
+
+
+@pytest.mark.asyncio
+async def test_assistant_recreates_when_cwd_is_not_workspace(tmp_path) -> None:
+    # A live, backend-matching assistant from an older build (cwd not the
+    # managed workspace) is migrated: demoted and recreated fresh.
+    runtime, storage, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(backend="codex")
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-legacy",
+        backend="codex",
+        status=SessionStatus.IDLE,
+        transport="codex_app_server",
+        cwd="/home/someone",
+    )
+
+    async def _fake_create(backend: str) -> SessionRecord:
+        return _make_assistant_row(
+            storage,
+            settings,
+            session_id="codex-fresh",
+            backend="codex",
+            status=SessionStatus.STARTING,
+            transport="codex_app_server",
+            cwd=str(runtime._assistant_workspace_dir()),
+        )
+
+    runtime._create_assistant_session = _fake_create  # type: ignore[method-assign]
+
+    await runtime._ensure_assistant_session()
+
+    assert runtime.assistant_session_id == "codex-fresh"
+    legacy = storage.get_session("codex-legacy")
+    assert legacy is not None
+    assert legacy.source == SessionSource.MANAGED

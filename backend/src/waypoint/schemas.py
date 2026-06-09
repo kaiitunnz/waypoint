@@ -227,6 +227,19 @@ class AssistantSummary(BaseModel):
     # outside the app. ``None`` when the backend has no resumable id.
     native_thread_id: str | None = None
     status: SessionStatus
+    # Whether the backend can revive this thread after it exits. Drives the
+    # assistant UI's choice between offering Reattach and only Clear context.
+    supports_reattach: bool = False
+
+
+class AssistantResetRequest(BaseModel):
+    # Rebuild the assistant on a fresh thread. ``backend`` switches the coding
+    # agent (``None`` keeps the current one); the rest seed the new thread,
+    # where ``None`` means the backend's default.
+    backend: BackendId | None = None
+    model: str | None = None
+    effort: str | None = None
+    permission_mode: str | None = None
 
 
 class MeResponse(BaseModel):

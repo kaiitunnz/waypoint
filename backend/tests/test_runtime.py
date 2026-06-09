@@ -3240,7 +3240,9 @@ async def test_assistant_reuses_live_matching_session(tmp_path) -> None:
         cwd=str(runtime._assistant_workspace_dir()),
     )
 
-    async def _fail_create(backend: str) -> Any:  # pragma: no cover - must not run
+    async def _fail_create(
+        backend: str, **_kwargs: Any
+    ) -> Any:  # pragma: no cover - must not run
         raise AssertionError("should not recreate a live assistant")
 
     runtime._create_assistant_session = _fail_create  # type: ignore[method-assign]
@@ -3254,7 +3256,10 @@ async def test_assistant_reuses_live_matching_session(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_assistant_recreates_when_backend_changes(tmp_path) -> None:
+async def test_assistant_reuses_live_session_across_backend_mismatch(tmp_path) -> None:
+    # Durable reuse: the live thread is the source of truth, so a backend
+    # switched from the UI survives a redeploy even when waypoint.yaml still
+    # names a different backend. YAML only seeds the first-ever creation.
     runtime, storage, settings = make_runtime(tmp_path)
     settings.assistant = AssistantConfig(backend="claude_code")
     _make_assistant_row(
@@ -3264,27 +3269,21 @@ async def test_assistant_recreates_when_backend_changes(tmp_path) -> None:
         backend="codex",
         status=SessionStatus.IDLE,
         transport="codex_app_server",
+        cwd=str(runtime._assistant_workspace_dir()),
     )
 
-    async def _fake_create(backend: str) -> SessionRecord:
-        assert backend == "claude_code"
-        return _make_assistant_row(
-            storage,
-            settings,
-            session_id="claude-assistant",
-            backend="claude_code",
-            status=SessionStatus.STARTING,
-            transport="claude_cli",
-        )
+    async def _fail_create(backend: str, **_kwargs: Any) -> Any:
+        raise AssertionError("should reuse the live assistant, not recreate")
 
-    runtime._create_assistant_session = _fake_create  # type: ignore[method-assign]
+    runtime._create_assistant_session = _fail_create  # type: ignore[method-assign]
 
     await runtime._ensure_assistant_session()
 
-    assert runtime.assistant_session_id == "claude-assistant"
-    old = storage.get_session("codex-assistant")
-    assert old is not None
-    assert old.source == SessionSource.MANAGED
+    assert runtime.assistant_session_id == "codex-assistant"
+    kept = storage.get_session("codex-assistant")
+    assert kept is not None
+    assert kept.source == SessionSource.ASSISTANT
+    assert kept.backend == "codex"
 
 
 @pytest.mark.asyncio
@@ -3300,7 +3299,7 @@ async def test_assistant_recreates_when_prior_thread_exited(tmp_path) -> None:
         transport="codex_app_server",
     )
 
-    async def _fake_create(backend: str) -> SessionRecord:
+    async def _fake_create(backend: str, **_kwargs: Any) -> SessionRecord:
         return _make_assistant_row(
             storage,
             settings,
@@ -3363,6 +3362,10 @@ async def test_assistant_summary_reports_native_thread_id(tmp_path) -> None:
     assert summary.backend == "codex"
     assert summary.native_thread_id == "thread-1"
     assert summary.status == SessionStatus.IDLE
+    assert (
+        summary.supports_reattach
+        == runtime.registry.get("codex").capabilities.supports_reattach_after_exit
+    )
 
 
 def test_assistant_summary_is_none_when_untracked(tmp_path) -> None:
@@ -3399,7 +3402,7 @@ async def test_assistant_recreates_when_cwd_is_not_workspace(tmp_path) -> None:
         cwd="/home/someone",
     )
 
-    async def _fake_create(backend: str) -> SessionRecord:
+    async def _fake_create(backend: str, **_kwargs: Any) -> SessionRecord:
         return _make_assistant_row(
             storage,
             settings,
@@ -3440,7 +3443,9 @@ async def test_assistant_refreshes_charter_files_on_reuse(tmp_path) -> None:
         cwd=str(workspace),
     )
 
-    async def _fail_create(backend: str) -> Any:  # pragma: no cover - must reuse
+    async def _fail_create(
+        backend: str, **_kwargs: Any
+    ) -> Any:  # pragma: no cover - must reuse
         raise AssertionError("should reuse the live thread, not recreate")
 
     runtime._create_assistant_session = _fail_create  # type: ignore[method-assign]
@@ -3450,3 +3455,145 @@ async def test_assistant_refreshes_charter_files_on_reuse(tmp_path) -> None:
     assert runtime.assistant_session_id == "codex-assistant"
     for name in ("AGENTS.md", "CLAUDE.md"):
         assert (workspace / name).read_text(encoding="utf-8") == ASSISTANT_CHARTER
+
+
+@pytest.mark.asyncio
+async def test_reset_assistant_rebuilds_thread_and_keeps_old(tmp_path) -> None:
+    # Switch backends: the old thread is demoted to a normal stopped session
+    # (transcript preserved, never deleted) and a fresh thread becomes the
+    # singleton.
+    runtime, storage, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(backend="codex")
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-old",
+        backend="codex",
+        status=SessionStatus.IDLE,
+        transport="codex_app_server",
+        cwd=str(runtime._assistant_workspace_dir()),
+    )
+    runtime.assistant_session_id = "codex-old"
+
+    terminated: list[str] = []
+
+    async def _fake_terminate(session_id: str) -> SessionRecord:
+        terminated.append(session_id)
+        return storage.update_session(session_id, status=SessionStatus.EXITED)
+
+    runtime.terminate = _fake_terminate  # type: ignore[method-assign]
+
+    async def _fake_create(
+        backend: str, *, model: Any, effort: Any, permission_mode: Any
+    ) -> SessionRecord:
+        assert backend == "claude_code"
+        return _make_assistant_row(
+            storage,
+            settings,
+            session_id="claude-new",
+            backend="claude_code",
+            status=SessionStatus.STARTING,
+            transport="claude_cli",
+            cwd=str(runtime._assistant_workspace_dir()),
+        )
+
+    runtime._create_assistant_session = _fake_create  # type: ignore[method-assign]
+
+    summary = await runtime.reset_assistant(backend="claude_code")
+
+    assert summary.session_id == "claude-new"
+    assert runtime.assistant_session_id == "claude-new"
+    assert terminated == ["codex-old"]
+    old = storage.get_session("codex-old")
+    assert old is not None
+    assert old.source == SessionSource.MANAGED
+    assert old.pinned_at is None
+
+
+@pytest.mark.asyncio
+async def test_reset_assistant_unknown_backend_404(tmp_path) -> None:
+    runtime, _, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(backend="codex")
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.reset_assistant(backend="nope")
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_reset_assistant_disabled_409(tmp_path) -> None:
+    runtime, _, settings = make_runtime(tmp_path)
+    settings.assistant = None
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.reset_assistant()
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_terminate_assistant_keeps_singleton(tmp_path, monkeypatch) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-assistant",
+        backend="codex",
+        status=SessionStatus.IDLE,
+        transport="codex_app_server",
+    )
+    runtime.assistant_session_id = "codex-assistant"
+
+    async def _noop(rt: Any, sess: Any) -> None:
+        return None
+
+    monkeypatch.setattr(runtime.registry.get("codex"), "terminate_session", _noop)
+
+    summary = await runtime.terminate_assistant()
+
+    assert summary.status == SessionStatus.EXITED
+    row = storage.get_session("codex-assistant")
+    assert row is not None
+    # Still the protected singleton, so reattach can revive the same thread.
+    assert row.source == SessionSource.ASSISTANT
+    assert row.status == SessionStatus.EXITED
+
+
+@pytest.mark.asyncio
+async def test_reattach_assistant_revives_thread(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-assistant",
+        backend="codex",
+        status=SessionStatus.EXITED,
+        transport="codex_app_server",
+    )
+    runtime.assistant_session_id = "codex-assistant"
+
+    reattached: list[str] = []
+
+    async def _fake_reattach(session_id: str) -> SessionRecord:
+        reattached.append(session_id)
+        return storage.update_session(session_id, status=SessionStatus.RUNNING)
+
+    runtime.reattach = _fake_reattach  # type: ignore[method-assign]
+
+    summary = await runtime.reattach_assistant()
+
+    assert reattached == ["codex-assistant"]
+    assert summary.status == SessionStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_assistant_lifecycle_409_when_untracked(tmp_path) -> None:
+    runtime, _, _ = make_runtime(tmp_path)
+    assert runtime.assistant_session_id is None
+
+    with pytest.raises(HTTPException) as terminate_exc:
+        await runtime.terminate_assistant()
+    assert terminate_exc.value.status_code == 409
+
+    with pytest.raises(HTTPException) as reattach_exc:
+        await runtime.reattach_assistant()
+    assert reattach_exc.value.status_code == 409

@@ -28,6 +28,8 @@ from waypoint.backends.tmux.renderer import (
 )
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
+    AssistantResetRequest,
+    AssistantSummary,
     LoginRequest,
     MeResponse,
     ScheduleCreateRequest,
@@ -135,6 +137,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             backends=_backend_descriptors(context.runtime.registry),
             assistant=context.runtime.assistant_summary(),
         )
+
+    @app.post("/api/assistant/reset", response_model=AssistantSummary)
+    async def assistant_reset(
+        body: AssistantResetRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> AssistantSummary:
+        # Rebuild the assistant on a fresh thread — clear context (same backend)
+        # or switch backends. The old thread is demoted to a normal stopped
+        # session, never deleted.
+        return await context.runtime.reset_assistant(
+            backend=body.backend,
+            model=body.model,
+            effort=body.effort,
+            permission_mode=body.permission_mode,
+        )
+
+    @app.post("/api/assistant/terminate", response_model=AssistantSummary)
+    async def assistant_terminate(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> AssistantSummary:
+        return await context.runtime.terminate_assistant()
+
+    @app.post("/api/assistant/reattach", response_model=AssistantSummary)
+    async def assistant_reattach(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> AssistantSummary:
+        return await context.runtime.reattach_assistant()
 
     @app.get("/api/backends")
     async def list_backends(

@@ -384,17 +384,20 @@ class SessionRuntime:
         # even when the live thread is reused below. The running agent only
         # re-reads AGENTS.md / CLAUDE.md when its thread is next recreated.
         self._prepare_assistant_workspace()
-        # Reuse only a thread that matches the configured backend, is alive,
-        # and already lives in the managed workspace — the last clause
-        # migrates assistants created by older builds (different cwd, charter
-        # sent as a visible message) to a fresh, silently-chartered thread.
+        # Reuse any live assistant that already lives in the managed workspace,
+        # regardless of its backend: the live thread is the source of truth, so
+        # a backend switched from the UI survives a redeploy. ``assistant_backend()``
+        # only seeds the first-ever creation below; later YAML edits to
+        # ``assistant.backend`` are ignored while a thread exists (clear context
+        # to re-seed). The cwd clause migrates assistants created by older builds
+        # (different cwd, charter sent as a visible message) to a fresh,
+        # silently-chartered thread.
         workspace = str(self._assistant_workspace_dir())
         live = next(
             (
                 session
                 for session in existing
-                if session.backend == target_backend
-                and session.status not in {SessionStatus.EXITED, SessionStatus.ERROR}
+                if session.status not in {SessionStatus.EXITED, SessionStatus.ERROR}
                 and session.cwd == workspace
             ),
             None,
@@ -411,16 +414,28 @@ class SessionRuntime:
             self.storage.update_session(
                 session.id, source=SessionSource.MANAGED, pinned_at=None
             )
-        created = await self._create_assistant_session(target_backend)
+        assistant = self.settings.assistant
+        assert assistant is not None  # guarded by target_backend is not None
+        created = await self._create_assistant_session(
+            target_backend,
+            model=assistant.model,
+            effort=assistant.effort,
+            permission_mode=assistant.permission_mode,
+        )
         self.assistant_session_id = created.id
 
-    async def _create_assistant_session(self, backend: str) -> SessionRecord:
-        assistant = self.settings.assistant
-        assert assistant is not None  # guarded by assistant_backend()
+    async def _create_assistant_session(
+        self,
+        backend: str,
+        *,
+        model: str | None,
+        effort: str | None,
+        permission_mode: str | None,
+    ) -> SessionRecord:
         plugin = self.registry.get(backend)
-        permission_mode = (
-            plugin.validate_permission_mode(assistant.permission_mode)
-            if assistant.permission_mode
+        validated_mode = (
+            plugin.validate_permission_mode(permission_mode)
+            if permission_mode
             else None
         )
         workspace = self._prepare_assistant_workspace()
@@ -428,9 +443,9 @@ class SessionRuntime:
             backend=backend,
             cwd=workspace,
             title="Personal Assistant",
-            model=assistant.model,
-            effort=assistant.effort,
-            permission_mode=permission_mode,
+            model=model,
+            effort=effort,
+            permission_mode=validated_mode,
         )
         session = await self.create_session(request)
         return self.storage.update_session(
@@ -472,7 +487,92 @@ class SessionRuntime:
             backend=session.backend,
             native_thread_id=plugin.native_thread_id(session),
             status=session.status,
+            supports_reattach=plugin.capabilities.supports_reattach_after_exit,
         )
+
+    def _require_assistant_summary(self) -> AssistantSummary:
+        summary = self.assistant_summary()
+        if summary is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="the assistant is disabled",
+            )
+        return summary
+
+    async def reset_assistant(
+        self,
+        *,
+        backend: str | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+        permission_mode: str | None = None,
+    ) -> AssistantSummary:
+        """Rebuild the assistant on a fresh thread (clear context / switch backend).
+
+        The previous thread is demoted to an ordinary stopped session so its
+        transcript survives in the normal session list — it is never deleted.
+        Because boot reuses whatever thread is live, the chosen backend persists
+        across redeploys.
+        """
+        target_backend = self.settings.assistant_backend()
+        if target_backend is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="the assistant is disabled",
+            )
+        chosen = backend or target_backend
+        if not self.registry.has_backend(chosen):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"unknown backend: {chosen}",
+            )
+        old_id = self.assistant_session_id
+        if old_id is not None and self.storage.get_session(old_id) is not None:
+            # Release the protection guard, then best-effort stop the old thread.
+            # The demoted row lingers as a normal stopped session so its
+            # transcript is preserved.
+            self.storage.update_session(
+                old_id, source=SessionSource.MANAGED, pinned_at=None
+            )
+            with suppress(Exception):
+                await self.terminate(old_id)
+        created = await self._create_assistant_session(
+            chosen, model=model, effort=effort, permission_mode=permission_mode
+        )
+        self.assistant_session_id = created.id
+        return self._require_assistant_summary()
+
+    async def terminate_assistant(self) -> AssistantSummary:
+        """Stop the assistant thread while keeping it the pinned singleton.
+
+        Unlike clearing context, the native thread and transcript are kept so
+        ``reattach_assistant`` can resume the same conversation.
+        """
+        session_id = self.assistant_session_id
+        if session_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="the assistant is disabled",
+            )
+        session = self.get_session(session_id)
+        if session.status != SessionStatus.EXITED:
+            plugin = self.registry.plugin_for(session)
+            await plugin.terminate_session(self, session)
+            await self._record_system_event(
+                session.id, "Assistant terminated", status=SessionStatus.EXITED
+            )
+            self.storage.update_session(session.id, status=SessionStatus.EXITED)
+        return self._require_assistant_summary()
+
+    async def reattach_assistant(self) -> AssistantSummary:
+        session_id = self.assistant_session_id
+        if session_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="the assistant is disabled",
+            )
+        await self.reattach(session_id)
+        return self._require_assistant_summary()
 
     async def fork_session(self, session_id: str) -> SessionRecord:
         session = self.get_session(session_id)

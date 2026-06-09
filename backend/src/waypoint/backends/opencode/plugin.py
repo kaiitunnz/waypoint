@@ -610,8 +610,9 @@ class OpenCodePlugin:
             existing.cancel()
 
     def native_thread_id(self, session: SessionRecord) -> str | None:
-        thread_id = session.transport_state.get("thread_id")
-        return thread_id if isinstance(thread_id, str) else None
+        # OpenCode keys its native conversation id as ``opencode_session_id``.
+        session_id = session.transport_state.get("opencode_session_id")
+        return session_id if isinstance(session_id, str) else None
 
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord

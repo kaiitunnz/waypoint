@@ -14,7 +14,7 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
-from waypoint.assistant_assets import ensure_assistant_assets
+from waypoint.assistant_assets import AssistantAssetError, ensure_assistant_assets
 from waypoint.backends import BackendRegistry, get_registry
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
@@ -328,8 +328,15 @@ class SessionRuntime:
             return
         # Refresh assistant workspace asset links on every boot so repo
         # updates to AGENTS.md / CLAUDE.md / skills are visible to backends
-        # without recreating the live thread.
-        self._prepare_assistant_workspace()
+        # without recreating the live thread. If the refresh fails, keep a
+        # healthy live assistant tracked rather than making asset validation a
+        # new availability gate for an existing thread.
+        asset_error: Exception | None = None
+        try:
+            self._prepare_assistant_workspace()
+        except (AssistantAssetError, OSError) as exc:
+            asset_error = exc
+            log.warning("failed to refresh assistant workspace assets", exc_info=True)
         # Reuse any live assistant that already lives in the managed workspace,
         # regardless of its backend: the live thread is the source of truth, so
         # a backend switched from the UI survives a redeploy. ``assistant_backend()``
@@ -356,6 +363,8 @@ class SessionRuntime:
                         session.id, source=SessionSource.MANAGED, pinned_at=None
                     )
             return
+        if asset_error is not None:
+            raise asset_error
         for session in existing:
             self.storage.update_session(
                 session.id, source=SessionSource.MANAGED, pinned_at=None

@@ -182,6 +182,11 @@ interface SessionDetailProps {
   token: string;
   sessionId: string;
   onAuthFailure?: () => void;
+  // Renders the persistent personal-assistant variant: suppresses task-session
+  // chrome (cwd, transport/source badges, rename) and destructive/branching
+  // actions (terminate, delete, /new, /fork), and shows a capability-led empty
+  // state instead of "Waiting for the agent…".
+  assistant?: boolean;
 }
 
 type ViewMode = "chat" | "terminal";
@@ -197,7 +202,7 @@ const COMPOSER_HEIGHT_STORAGE_KEY = "waypoint-composer-height";
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 
-export function SessionDetail({ host, token, sessionId, onAuthFailure }: SessionDetailProps) {
+export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant = false }: SessionDetailProps) {
   const router = useRouter();
   const catalog = useBackendCatalog(host || null, token || null, null);
   const [session, setSession] = useState<SessionRecord | null>(null);
@@ -775,12 +780,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
   const runFrontendControlCommand = useCallback(
     async (
       text: string,
-      opts?: { allowFork?: boolean },
+      opts?: { allowFork?: boolean; allowNew?: boolean },
     ): Promise<"handled" | "error" | null> => {
       if (!session) return null;
       const allowFork = opts?.allowFork ?? true;
+      const allowNew = opts?.allowNew ?? true;
 
-      const newArgs = matchControlCommand(text, "new");
+      const newArgs = allowNew ? matchControlCommand(text, "new") : null;
       if (newArgs !== null) {
         try {
           const created = await createSession(host, token, {
@@ -841,7 +847,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       return false;
     }
 
-    const handled = await runFrontendControlCommand(text);
+    // The persistent assistant isn't a launchpad — `/new` and `/fork` would
+    // spawn stray managed sessions, so let them flow to the agent as text.
+    const handled = await runFrontendControlCommand(text, {
+      allowFork: !assistant,
+      allowNew: !assistant,
+    });
     if (handled !== null) {
       return handled === "handled";
     }
@@ -857,7 +868,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
       setError(sendError instanceof Error ? sendError.message : "failed to send input");
       return false;
     }
-  }, [runFrontendControlCommand, handleAuthFailure, host, token, sessionId]);
+  }, [runFrontendControlCommand, handleAuthFailure, host, token, sessionId, assistant]);
 
   const onSendWithOptimistic = useCallback(
     async (text: string, command?: SessionCommandInvocation) => {
@@ -1384,6 +1395,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           connection={connection}
           modelOptions={modelOptions}
           onSetTitle={handleSetTitle}
+          assistant={assistant}
         />
       ) : (
         <div className="session-loading muted" role="status" aria-live="polite">
@@ -1522,7 +1534,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
                 );
               })
             : session && optimisticMessages.length === 0 && !pendingPlanApprovalEvent
-              ? (
+              ? assistant && session.status !== "exited" ? (
+                <AssistantWelcome onPick={onSendWithOptimistic} />
+              ) : (
                 <TranscriptEmpty
                   status={session.status}
                   filterMode={filterMode}
@@ -1837,6 +1851,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure }: Session
           onSwitchSession={openSwitcher}
           onSend={onSendWithOptimistic}
           onTerminate={terminate}
+          assistant={assistant}
         />
       ) : null}
     </section>
@@ -1890,6 +1905,7 @@ interface ReplyComposerProps {
   onSwitchSession: () => void;
   onSend: (text: string, command?: SessionCommandInvocation) => Promise<boolean>;
   onTerminate: () => void | Promise<void>;
+  assistant: boolean;
 }
 
 const ReplyComposer = memo(function ReplyComposer({
@@ -1935,6 +1951,7 @@ const ReplyComposer = memo(function ReplyComposer({
   onSwitchSession,
   onSend,
   onTerminate,
+  assistant,
 }: ReplyComposerProps) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -2490,8 +2507,12 @@ const ReplyComposer = memo(function ReplyComposer({
                       {toolRunsExpanded ? "Collapse tools" : "Expand tools"}
                     </button>
                   ) : null}
-                  <div className="composer-overflow-separator" />
-                  {canTerminate ? (
+                  {/* The assistant is a protected singleton — no terminate or
+                      delete (the backend rejects both anyway). */}
+                  {!assistant && (canTerminate || canDelete) ? (
+                    <div className="composer-overflow-separator" />
+                  ) : null}
+                  {!assistant && canTerminate ? (
                     <button
                       type="button"
                       role="menuitem"
@@ -2505,7 +2526,7 @@ const ReplyComposer = memo(function ReplyComposer({
                       Terminate session
                     </button>
                   ) : null}
-                  {canDelete ? (
+                  {!assistant && canDelete ? (
                     <button
                       type="button"
                       role="menuitem"
@@ -2946,11 +2967,13 @@ function SessionHeader({
   connection,
   modelOptions,
   onSetTitle,
+  assistant = false,
 }: {
   session: SessionRecord;
   connection: ConnectionState;
   modelOptions: BackendModelOption[];
   onSetTitle?: (title: string) => void | Promise<void>;
+  assistant?: boolean;
 }) {
   const cwdSegments = formatCwdSegments(session.cwd);
   const target = session.launch_target_id ?? null;
@@ -2998,7 +3021,7 @@ function SessionHeader({
           ) : (
             <>
               <h2 className="session-header-title">{session.title}</h2>
-              {onSetTitle ? (
+              {onSetTitle && !assistant ? (
                 <button
                   className="link-button edit-title-btn"
                   type="button"
@@ -3022,27 +3045,35 @@ function SessionHeader({
           </span>
         </span>
       </div>
-      <p className="session-header-cwd" title={session.cwd}>
-        {cwdSegments.map((segment, index) => (
-          <span key={index}>
-            {index > 0 ? <span className="cwd-sep" aria-hidden>/</span> : null}
-            <span className={index === cwdSegments.length - 1 ? "cwd-leaf" : "cwd-segment"}>
-              {segment}
+      {/* cwd / transport / source frame a task session; for the persistent
+          assistant they're noise — keep just which backend + model answers. */}
+      {!assistant ? (
+        <p className="session-header-cwd" title={session.cwd}>
+          {cwdSegments.map((segment, index) => (
+            <span key={index}>
+              {index > 0 ? <span className="cwd-sep" aria-hidden>/</span> : null}
+              <span className={index === cwdSegments.length - 1 ? "cwd-leaf" : "cwd-segment"}>
+                {segment}
+              </span>
             </span>
-          </span>
-        ))}
-        {target ? <span className="session-header-target"> · {target}</span> : null}
-      </p>
+          ))}
+          {target ? <span className="session-header-target"> · {target}</span> : null}
+        </p>
+      ) : null}
       <div className="session-header-tags">
         <span className={`badge ${session.backend}`}>
           {humaniseBackend(session.backend)}
         </span>
-        <span className={`badge transport ${session.transport}`}>
-          {transportLabel(session.transport)}
-        </span>
-        <span className={`badge fidelity ${fidelityFor(session.transport)}`}>
-          {fidelityFor(session.transport)}
-        </span>
+        {!assistant ? (
+          <>
+            <span className={`badge transport ${session.transport}`}>
+              {transportLabel(session.transport)}
+            </span>
+            <span className={`badge fidelity ${fidelityFor(session.transport)}`}>
+              {fidelityFor(session.transport)}
+            </span>
+          </>
+        ) : null}
         {session.model ? (
           <span className="badge model" title={`Model: ${session.model}`}>
             {modelOptions.find((opt) => opt.id === session.model)?.label ?? session.model}
@@ -3053,14 +3084,57 @@ function SessionHeader({
             {session.effort}
           </span>
         ) : null}
-        <span className="session-header-meta">
-          {sourceLabel}
-          {typeof session.transport_state?.thread_id === "string"
-            ? ` · ${session.transport_state.thread_id}`
-            : null}
-        </span>
+        {!assistant ? (
+          <span className="session-header-meta">
+            {sourceLabel}
+            {typeof session.transport_state?.thread_id === "string"
+              ? ` · ${session.transport_state.thread_id}`
+              : null}
+          </span>
+        ) : null}
       </div>
     </header>
+  );
+}
+
+// The assistant's two value props — host Q&A and session management — are
+// invisible in a blank chat, so the empty thread leads with tappable example
+// prompts that send on tap.
+const ASSISTANT_EXAMPLE_PROMPTS = [
+  "List my Waypoint sessions and their status",
+  "What's using CPU and memory on this host right now?",
+  "Summarize what my running agents are working on",
+  "Which sessions are idle or exited?",
+];
+
+function AssistantWelcome({
+  onPick,
+}: {
+  onPick: (text: string) => void | Promise<unknown>;
+}) {
+  return (
+    <div className="assistant-welcome">
+      <span className="assistant-welcome-glyph" aria-hidden="true">
+        ✦
+      </span>
+      <p className="assistant-welcome-title">Ask your assistant</p>
+      <p className="assistant-welcome-sub">
+        It can answer questions about this host and inspect or manage your
+        Waypoint sessions. Try one:
+      </p>
+      <div className="assistant-welcome-prompts">
+        {ASSISTANT_EXAMPLE_PROMPTS.map((prompt) => (
+          <button
+            key={prompt}
+            type="button"
+            className="assistant-welcome-prompt"
+            onClick={() => void onPick(prompt)}
+          >
+            {prompt}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 

@@ -8,6 +8,7 @@ from typing import Any, cast
 import pytest
 from fastapi import HTTPException
 
+from waypoint.assistant_assets import AssistantAssetError
 from waypoint.backends.claude_code.permission_modes import CLAUDE_AUTO_APPROVE_MODES
 from waypoint.backends.claude_code.schemas import ClaudeThreadImportRequest
 from waypoint.backends.claude_code.threads import ClaudeThreadInfo
@@ -3375,7 +3376,11 @@ def test_assistant_summary_is_none_when_untracked(tmp_path) -> None:
     assert runtime.assistant_summary() is None
 
 
-def test_prepare_assistant_workspace_links_tracked_assets(tmp_path) -> None:
+def test_prepare_assistant_workspace_links_tracked_assets(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.delenv("WAYPOINT_ASSISTANT_ASSETS_ROOT", raising=False)
+    monkeypatch.delenv("WAYPOINT_HOME", raising=False)
     runtime, _, settings = make_runtime(tmp_path)
     workspace = runtime._prepare_assistant_workspace()
     workspace_path = Path(workspace)
@@ -3396,6 +3401,42 @@ def test_prepare_assistant_workspace_links_tracked_assets(tmp_path) -> None:
     )
     assert os.readlink(workspace_path / ".claude" / "skills") == "../.agents/skills"
     assert os.readlink(workspace_path / ".codex" / "skills") == "../.agents/skills"
+
+
+@pytest.mark.asyncio
+async def test_assistant_reuses_live_thread_when_asset_refresh_fails(
+    tmp_path, monkeypatch
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(backend="codex")
+    workspace = runtime._assistant_workspace_dir()
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-assistant",
+        backend="codex",
+        status=SessionStatus.IDLE,
+        transport="codex_app_server",
+        cwd=str(workspace),
+    )
+
+    def _fail_prepare() -> str:
+        raise AssistantAssetError("bad assets")
+
+    async def _fail_create(
+        backend: str, **_kwargs: Any
+    ) -> Any:  # pragma: no cover - must reuse
+        raise AssertionError("should reuse the live thread, not recreate")
+
+    monkeypatch.setattr(runtime, "_prepare_assistant_workspace", _fail_prepare)
+    runtime._create_assistant_session = _fail_create  # type: ignore[method-assign]
+
+    await runtime._ensure_assistant_session()
+
+    assert runtime.assistant_session_id == "codex-assistant"
+    kept = storage.get_session("codex-assistant")
+    assert kept is not None
+    assert kept.source == SessionSource.ASSISTANT
 
 
 @pytest.mark.asyncio
@@ -3436,7 +3477,9 @@ async def test_assistant_recreates_when_cwd_is_not_workspace(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_assistant_refreshes_asset_links_on_reuse(tmp_path) -> None:
+async def test_assistant_refreshes_asset_links_on_reuse(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("WAYPOINT_ASSISTANT_ASSETS_ROOT", raising=False)
+    monkeypatch.delenv("WAYPOINT_HOME", raising=False)
     # A reused live thread still gets its workspace asset links repaired on
     # boot, without recreating the thread.
     runtime, storage, settings = make_runtime(tmp_path)

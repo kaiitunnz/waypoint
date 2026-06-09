@@ -47,35 +47,38 @@ from waypoint.transports import TransportAdapter
 TMUX_TRANSPORT_ID = "tmux"
 COMPLETION_REFRESH_INTERVAL_SECONDS = 30.0
 
-# Opening message sent to a freshly created assistant thread. Delivered as
-# the first user turn because backends expose no generic system-prompt
-# channel; phrased so the model absorbs its role without burning a turn on
-# a monologue. References the `waypoint` CLI, which the runtime expects on
-# the assistant process's PATH.
+# The assistant's charter. Written into AGENTS.md / CLAUDE.md in the
+# assistant's managed working directory so the backend loads it silently as
+# project context — no visible first message, no wasted startup turn.
+# References the `waypoint` CLI, which the runtime expects on the assistant
+# process's PATH.
 ASSISTANT_CHARTER = """\
-You are the Waypoint personal assistant — a single, long-lived thread the \
-user talks to from a dedicated page in the Waypoint app.
+# Waypoint personal assistant
+
+You are the Waypoint personal assistant — a single, long-lived thread the
+user talks to from a dedicated page in the Waypoint app. These are standing
+instructions; act on them whenever the user writes to you.
 
 Your job:
-- Answer questions about this host machine. You have full shell access in \
-this session; run commands to inspect the environment, files, processes, \
-and tooling rather than guessing.
-- Ground answers in the user's Waypoint coding sessions (the agents they \
-run). Inspect and manage them with the `waypoint` CLI, which is on your \
-PATH:
+- Answer questions about this host machine. You have full shell access; run
+  commands to inspect the environment, files, processes, and tooling rather
+  than guessing. Your working directory is a scratch space — operate across
+  the host as needed.
+- Ground answers in the user's Waypoint coding sessions (the agents they
+  run). Inspect and manage them with the `waypoint` CLI, which is on your
+  PATH:
   - `waypoint sessions list` — all sessions and their status.
   - `waypoint sessions show <id>` — details of one session.
   - `waypoint sessions events <id>` — a session's transcript.
   - `waypoint sessions start --backend <id> --cwd <path>` — launch a new agent.
   - `waypoint sessions send <id> <text>` — send a message to a session.
   - `waypoint sessions interrupt|terminate <id>` — control a session.
-  Run `waypoint sessions --help` for the full surface. Prefer the CLI over \
-guessing about session state.
+  Run `waypoint sessions --help` for the full surface. Prefer the CLI over
+  guessing about session state.
 
-Be concise and act before narrating. Do not take destructive or \
-irreversible actions (terminating sessions, deleting files) without \
-confirming with the user first. Acknowledge briefly, then wait for the \
-user's first question."""
+Be concise and act before narrating. Do not take destructive or irreversible
+actions (terminating sessions, deleting files) without confirming with the
+user first."""
 
 log = logging.getLogger("waypoint.runtime")
 
@@ -387,34 +390,35 @@ class SessionRuntime:
             if assistant.permission_mode
             else None
         )
+        workspace = self._prepare_assistant_workspace()
         request = SessionCreateRequest(
             backend=backend,
-            cwd=assistant.cwd,
+            cwd=workspace,
             title="Personal Assistant",
             model=assistant.model,
             effort=assistant.effort,
             permission_mode=permission_mode,
         )
         session = await self.create_session(request)
-        promoted = self.storage.update_session(
+        return self.storage.update_session(
             session.id,
             source=SessionSource.ASSISTANT,
             pinned_at=datetime.now(UTC),
         )
-        await self._send_assistant_charter(promoted)
-        return promoted
 
-    async def _send_assistant_charter(self, session: SessionRecord) -> None:
-        """Seed a fresh assistant thread with its role. Best-effort."""
-        try:
-            await self.handle_input(
-                session.id, SessionInputRequest(text=ASSISTANT_CHARTER, submit=True)
-            )
-        except Exception:
-            log.exception(
-                "failed to send assistant charter",
-                extra={"session_id": session.id},
-            )
+    def _prepare_assistant_workspace(self) -> str:
+        """Materialise the assistant's working dir and its charter files.
+
+        The charter ships as ``AGENTS.md`` / ``CLAUDE.md`` (read silently by
+        the backend as project context) rather than a visible first message.
+        The directory is a scratch cwd — shell access reaches the whole host
+        regardless — so host inspection is unaffected.
+        """
+        workspace = self.settings.data_dir / "assistant"
+        workspace.mkdir(parents=True, exist_ok=True)
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            (workspace / name).write_text(ASSISTANT_CHARTER, encoding="utf-8")
+        return str(workspace)
 
     def is_assistant_session(self, session: SessionRecord) -> bool:
         return session.source == SessionSource.ASSISTANT

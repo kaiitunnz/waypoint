@@ -84,11 +84,9 @@ class AssistantConfig(BaseModel):
     backend: BackendId | None = None
     model: str | None = None
     effort: str | None = None
-    # Home by default so the assistant can answer host-environment
-    # questions; cwd is not required to be a repo.
-    cwd: str = "~/"
-    # Defaults to the backend's most permissive mode at bootstrap (an
-    # assistant that prompts for every action is unusable as a chat).
+    # Permission mode passed through to the backend. ``None`` lets the
+    # backend pick its default (which usually prompts for approvals — set an
+    # autonomous mode here for an unattended assistant).
     permission_mode: str | None = None
 
 

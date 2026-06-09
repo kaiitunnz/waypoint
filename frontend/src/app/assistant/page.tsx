@@ -131,9 +131,15 @@ export default function AssistantPage() {
               </span>
             </div>
             <div className="assistant-ids">
-              <CopyField label="session id" value={assistant.session_id} />
+              {/* Lead with the backend's own session/thread id (the one you'd
+                  pass to `claude --resume` etc.); keep the Waypoint id for the
+                  CLI and URL. */}
+              <CopyField
+                label="session id"
+                value={assistant.native_thread_id ?? assistant.session_id}
+              />
               {assistant.native_thread_id ? (
-                <CopyField label="thread id" value={assistant.native_thread_id} />
+                <CopyField label="waypoint id" value={assistant.session_id} />
               ) : null}
             </div>
           </section>

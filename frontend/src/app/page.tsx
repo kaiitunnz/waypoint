@@ -705,11 +705,6 @@ export default function HomePage() {
         <div className="app-bar-meta">
           <span className={`app-bar-status ${connection}`}>{connectionLabel}</span>
           {host ? <span className="muted">{host}</span> : null}
-          {token && assistant ? (
-            <Link className="assistant-nav-link" href="/assistant">
-              <span aria-hidden="true">✦</span> Assistant
-            </Link>
-          ) : null}
           <ThemeToggle />
         </div>
       </header>
@@ -784,6 +779,18 @@ export default function HomePage() {
           onSetPinned={handleSetPinned}
           onSetTitle={handleSetTitle}
         />
+      ) : null}
+      {token && assistant ? (
+        <Link
+          className="assistant-fab"
+          href="/assistant"
+          aria-label="Open personal assistant"
+        >
+          <span className="assistant-fab-glyph" aria-hidden="true">
+            ✦
+          </span>
+          <span className="assistant-fab-label">Assistant</span>
+        </Link>
       ) : null}
     </main>
   );

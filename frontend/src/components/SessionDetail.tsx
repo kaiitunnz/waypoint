@@ -184,8 +184,8 @@ const EFFORT_LABEL: Record<string, string> = {
 export interface AssistantThreadOption {
   id: string;
   title: string;
-  // ISO timestamp of last activity — the assistant titles every thread
-  // "Personal Assistant", so the picker leans on this to tell them apart.
+  // ISO timestamp of last activity — the assistant's own threads share the
+  // "Personal Assistant" title, so the picker leans on this to tell them apart.
   updatedAt: string;
   // First-message snippet when the backend provides one; another distinguisher.
   preview: string | null;

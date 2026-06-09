@@ -24,6 +24,17 @@ import { AssistantSummary, Backend, BackendDescriptor, SessionStatus } from "@/l
 
 type LoadState = "loading" | "ready" | "disabled" | "error";
 
+// Thread summaries differ per backend: claude/codex send ISO datetimes, while
+// opencode sends epoch milliseconds. Normalise to an ISO string the relative-
+// time formatter can parse; return "" when there's no usable timestamp.
+function toIsoTimestamp(value: string | number | null | undefined): string {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const ms = value < 1e12 ? value * 1000 : value;
+    return new Date(ms).toISOString();
+  }
+  return typeof value === "string" ? value : "";
+}
+
 const STATUS_LABELS: Record<SessionStatus, string> = {
   starting: "Starting…",
   idle: "Ready",
@@ -156,14 +167,14 @@ export default function AssistantPage() {
         try {
           const threads = await fetchBackendThreads<{
             id: string;
-            title: string;
-            updated_at: string;
-            preview: string | null;
+            title?: string | null;
+            updated_at?: string | number | null;
+            preview?: string | null;
           }>(host, token, backend);
           return threads.map((thread) => ({
             id: thread.id,
-            title: thread.title,
-            updatedAt: thread.updated_at,
+            title: thread.title || thread.id,
+            updatedAt: toIsoTimestamp(thread.updated_at),
             preview: thread.preview ?? null,
           }));
         } catch (err) {

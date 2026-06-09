@@ -2441,14 +2441,19 @@ const ReplyComposer = memo(function ReplyComposer({
                       disabled={assistantBusy}
                     >
                       <option value="">— Start fresh —</option>
-                      {threadOptions.map((thread) => (
-                        <option key={thread.id} value={thread.id}>
-                          {`${thread.title || thread.id} · ${formatRelativeTime(
-                            thread.updatedAt,
-                          )}`}
-                          {thread.preview ? ` — ${thread.preview}` : ""}
-                        </option>
-                      ))}
+                      {threadOptions.map((thread) => {
+                        const when = thread.updatedAt
+                          ? formatRelativeTime(thread.updatedAt)
+                          : "";
+                        const parts = [thread.title || thread.id];
+                        if (when && when !== "Unknown") parts.push(when);
+                        if (thread.preview) parts.push(thread.preview);
+                        return (
+                          <option key={thread.id} value={thread.id}>
+                            {parts.join(" · ")}
+                          </option>
+                        );
+                      })}
                     </select>
                   </label>
                 ) : null}

@@ -3703,3 +3703,117 @@ async def test_assistant_lifecycle_409_when_untracked(tmp_path) -> None:
     with pytest.raises(HTTPException) as reattach_exc:
         await runtime.reattach_assistant()
     assert reattach_exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_attach_assistant_adopts_imported_thread(tmp_path, monkeypatch) -> None:
+    # Adopting an existing thread imports it, pins it as the assistant, and
+    # demotes the previous thread to a normal stopped session.
+    runtime, storage, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(backend="codex")
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-old",
+        backend="codex",
+        status=SessionStatus.IDLE,
+        transport="codex_app_server",
+        cwd=str(runtime._assistant_workspace_dir()),
+    )
+    runtime.assistant_session_id = "codex-old"
+
+    async def _fake_terminate(session_id: str) -> SessionRecord:
+        return storage.update_session(session_id, status=SessionStatus.EXITED)
+
+    runtime.terminate = _fake_terminate  # type: ignore[method-assign]
+
+    async def _fake_import(rt: Any, request: Any) -> SessionRecord:
+        assert request.thread_id == "thread-xyz"
+        # import_thread persists a MANAGED session living in the thread's own cwd.
+        session = make_session(
+            settings,
+            id="codex-imported",
+            backend="codex",
+            transport="codex_app_server",
+            status=SessionStatus.STARTING,
+        )
+        storage.create_session(session)
+        return session
+
+    monkeypatch.setattr(runtime.registry.get("codex"), "import_thread", _fake_import)
+
+    summary = await runtime.attach_assistant(backend="codex", thread_id="thread-xyz")
+
+    assert summary.session_id == "codex-imported"
+    assert runtime.assistant_session_id == "codex-imported"
+    adopted = storage.get_session("codex-imported")
+    assert adopted is not None
+    assert adopted.source == SessionSource.ASSISTANT
+    assert adopted.pinned_at is not None
+    old = storage.get_session("codex-old")
+    assert old is not None
+    assert old.source == SessionSource.MANAGED
+    assert old.pinned_at is None
+
+
+@pytest.mark.asyncio
+async def test_attach_assistant_keeps_current_when_import_fails(
+    tmp_path, monkeypatch
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(backend="codex")
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-live",
+        backend="codex",
+        status=SessionStatus.IDLE,
+        transport="codex_app_server",
+        cwd=str(runtime._assistant_workspace_dir()),
+    )
+    runtime.assistant_session_id = "codex-live"
+
+    async def _boom(rt: Any, request: Any) -> SessionRecord:
+        raise HTTPException(status_code=404, detail="thread not found")
+
+    monkeypatch.setattr(runtime.registry.get("codex"), "import_thread", _boom)
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.attach_assistant(backend="codex", thread_id="missing")
+    assert exc.value.status_code == 404
+    assert runtime.assistant_session_id == "codex-live"
+    row = storage.get_session("codex-live")
+    assert row is not None
+    assert row.source == SessionSource.ASSISTANT
+    assert row.status == SessionStatus.IDLE
+
+
+@pytest.mark.asyncio
+async def test_attach_assistant_unsupported_backend_400(tmp_path) -> None:
+    # tmux is the managed-launch fallback and cannot import threads.
+    runtime, _, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(backend="codex")
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.attach_assistant(backend="tmux", thread_id="x")
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_attach_assistant_unknown_backend_404(tmp_path) -> None:
+    runtime, _, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(backend="codex")
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.attach_assistant(backend="nope", thread_id="x")
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_attach_assistant_disabled_409(tmp_path) -> None:
+    runtime, _, settings = make_runtime(tmp_path)
+    settings.assistant = None
+
+    with pytest.raises(HTTPException) as exc:
+        await runtime.attach_assistant(backend="codex", thread_id="x")
+    assert exc.value.status_code == 409

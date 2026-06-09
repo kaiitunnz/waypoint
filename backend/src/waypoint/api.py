@@ -28,6 +28,7 @@ from waypoint.backends.tmux.renderer import (
 )
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
+    AssistantAttachRequest,
     AssistantResetRequest,
     AssistantSummary,
     LoginRequest,
@@ -151,6 +152,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             model=body.model,
             effort=body.effort,
             permission_mode=body.permission_mode,
+        )
+
+    @app.post("/api/assistant/attach", response_model=AssistantSummary)
+    async def assistant_attach(
+        body: AssistantAttachRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> AssistantSummary:
+        # Adopt an existing backend-native thread as the assistant, replacing the
+        # current thread (which is demoted to a normal stopped session).
+        return await context.runtime.attach_assistant(
+            backend=body.backend,
+            thread_id=body.thread_id,
+            launch_target_id=body.launch_target_id,
         )
 
     @app.post("/api/assistant/terminate", response_model=AssistantSummary)

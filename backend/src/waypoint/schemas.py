@@ -242,6 +242,14 @@ class AssistantResetRequest(BaseModel):
     permission_mode: str | None = None
 
 
+class AssistantAttachRequest(BaseModel):
+    # Adopt an existing backend-native thread as the assistant. ``thread_id`` is
+    # the value surfaced by GET /api/backends/{backend}/threads.
+    backend: BackendId
+    thread_id: str
+    launch_target_id: str | None = None
+
+
 class MeResponse(BaseModel):
     authenticated: bool = True
     default_backend: BackendId = "codex"

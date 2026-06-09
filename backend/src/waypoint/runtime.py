@@ -550,16 +550,73 @@ class SessionRuntime:
             chosen, model=model, effort=effort, permission_mode=permission_mode
         )
         self.assistant_session_id = created.id
-        if old is not None and old.id != created.id:
-            # Release the protection guard, then best-effort stop the old thread.
-            # The demoted row lingers as a normal stopped session so its
-            # transcript is preserved.
-            self.storage.update_session(
-                old.id, source=SessionSource.MANAGED, pinned_at=None
-            )
-            with suppress(Exception):
-                await self.terminate(old.id)
+        await self._retire_previous_assistant(old, created.id)
         return self._require_assistant_summary()
+
+    async def attach_assistant(
+        self,
+        *,
+        backend: str,
+        thread_id: str,
+        launch_target_id: str | None = None,
+    ) -> AssistantSummary:
+        """Adopt an existing backend-native thread as the assistant singleton.
+
+        The thread is imported as-is — it resumes its own conversation and
+        working directory, so the assistant charter (which lives in the managed
+        workspace) does not apply. The previous thread is demoted to an ordinary
+        stopped session, never deleted. Because the imported thread lives outside
+        the managed workspace, a redeploy will not re-adopt it and falls back to
+        a fresh assistant.
+        """
+        if self.settings.assistant_backend() is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="the assistant is disabled",
+            )
+        if not self.registry.has_backend(backend):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"unknown backend: {backend}",
+            )
+        plugin = self.registry.get(backend)
+        schema = plugin.import_request_schema
+        if not plugin.capabilities.supports_thread_import or schema is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"thread import is not supported for {backend}",
+            )
+        old_id = self.assistant_session_id
+        old = self.storage.get_session(old_id) if old_id is not None else None
+        # Import before touching the current thread so a failed import (unknown
+        # thread, already imported) leaves the live assistant intact.
+        request = schema.model_validate(
+            {"thread_id": thread_id, "launch_target_id": launch_target_id}
+        )
+        imported = await plugin.import_thread(self, request)
+        adopted = self.storage.update_session(
+            imported.id, source=SessionSource.ASSISTANT, pinned_at=datetime.now(UTC)
+        )
+        self.assistant_session_id = adopted.id
+        await self._retire_previous_assistant(old, adopted.id)
+        return self._require_assistant_summary()
+
+    async def _retire_previous_assistant(
+        self, old: SessionRecord | None, new_id: str
+    ) -> None:
+        """Demote the prior assistant thread to a normal stopped session.
+
+        Releases the protection guard, then best-effort stops it. The demoted
+        row lingers in the normal session list so its transcript is preserved —
+        it is never deleted.
+        """
+        if old is None or old.id == new_id:
+            return
+        self.storage.update_session(
+            old.id, source=SessionSource.MANAGED, pinned_at=None
+        )
+        with suppress(Exception):
+            await self.terminate(old.id)
 
     async def terminate_assistant(self) -> AssistantSummary:
         """Stop the assistant thread while keeping it the pinned singleton.

@@ -1879,6 +1879,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onSwitchSession={openSwitcher}
           onSend={onSendWithOptimistic}
           onTerminate={terminate}
+          onError={setError}
           assistant={assistant}
           assistantControls={assistantControls}
         />
@@ -1934,6 +1935,7 @@ interface ReplyComposerProps {
   onSwitchSession: () => void;
   onSend: (text: string, command?: SessionCommandInvocation) => Promise<boolean>;
   onTerminate: () => void | Promise<void>;
+  onError: (message: string) => void;
   assistant: boolean;
   assistantControls: AssistantControls | null;
 }
@@ -1981,6 +1983,7 @@ const ReplyComposer = memo(function ReplyComposer({
   onSwitchSession,
   onSend,
   onTerminate,
+  onError,
   assistant,
   assistantControls,
 }: ReplyComposerProps) {
@@ -1993,13 +1996,15 @@ const ReplyComposer = memo(function ReplyComposer({
   // action (backend switch / attach thread / clear) is awaiting an inline
   // confirm.
   const [assistantBusy, setAssistantBusy] = useState(false);
+  // Confirm state for the dropdown-driven actions in the settings popover
+  // (switch backend / attach thread). Clear context and terminate / reattach
+  // live in the ⋯ overflow menu and confirm via window.confirm instead.
   const [assistantConfirm, setAssistantConfirm] = useState<
-    "switch" | "attach" | "clear" | null
+    "switch" | "attach" | null
   >(null);
   const [pendingBackend, setPendingBackend] = useState<Backend | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState("");
   const [threadOptions, setThreadOptions] = useState<AssistantThreadOption[]>([]);
-  const [assistantError, setAssistantError] = useState<string | null>(null);
   // Pending effort for backends that need a session restart to apply (Claude)
   // — staged here until the user confirms via the Apply button. `null` means
   // no pending change.
@@ -2306,16 +2311,16 @@ const ReplyComposer = memo(function ReplyComposer({
   const runAssistantAction = async (action: () => Promise<void> | void) => {
     if (assistantBusy) return;
     setAssistantBusy(true);
-    setAssistantError(null);
+    onError("");
     try {
       await action();
-      // Only dismiss the confirm on success; on failure keep the selection and
-      // the error visible so the user can retry or cancel.
+      // Only dismiss the confirm on success; on failure keep the selection so
+      // the user can retry or cancel.
       setAssistantConfirm(null);
       setPendingBackend(null);
       setSelectedThreadId("");
     } catch (err) {
-      setAssistantError(err instanceof Error ? err.message : "Action failed");
+      onError(err instanceof Error ? err.message : "Action failed");
     } finally {
       setAssistantBusy(false);
     }
@@ -2384,7 +2389,7 @@ const ReplyComposer = memo(function ReplyComposer({
                       value={pendingBackend ?? session.backend}
                       onChange={(event) => {
                         const next = event.target.value;
-                        setAssistantError(null);
+                        onError("");
                         // Threads are per-backend; drop any thread selection.
                         setSelectedThreadId("");
                         if (next === session.backend) {
@@ -2415,7 +2420,7 @@ const ReplyComposer = memo(function ReplyComposer({
                       value={selectedThreadId}
                       onChange={(event) => {
                         const id = event.target.value;
-                        setAssistantError(null);
+                        onError("");
                         setSelectedThreadId(id);
                         if (id) {
                           setAssistantConfirm("attach");
@@ -2513,163 +2518,94 @@ const ReplyComposer = memo(function ReplyComposer({
                     </button>
                   </div>
                 ) : null}
-                {assistantOps ? (
+                {assistantOps &&
+                assistantConfirm === "switch" &&
+                pendingBackend ? (
                   <div className="composer-tune-lifecycle">
-                    {assistantError ? (
-                      <p className="composer-tune-error" role="alert">
-                        {assistantError}
+                    <div className="composer-tune-confirm">
+                      <p>
+                        Switch to{" "}
+                        <strong>{humaniseBackend(pendingBackend)}</strong>? This
+                        starts a new conversation; the current one is kept as a
+                        stopped session.
                       </p>
-                    ) : null}
-                    {assistantConfirm === "switch" && pendingBackend ? (
-                      <div className="composer-tune-confirm">
-                        <p>
-                          Switch to{" "}
-                          <strong>{humaniseBackend(pendingBackend)}</strong>? This
-                          starts a new conversation; the current one is kept as a
-                          stopped session.
-                        </p>
-                        <div className="composer-tune-confirm-actions">
-                          <button
-                            type="button"
-                            className="composer-tune-confirm-cancel"
-                            onClick={() => {
-                              setPendingBackend(null);
-                              setAssistantConfirm(null);
-                              setAssistantError(null);
-                            }}
-                            disabled={assistantBusy}
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="button"
-                            className="composer-tune-confirm-apply"
-                            onClick={() =>
-                              void runAssistantAction(() =>
-                                assistantOps.onSwitchBackend(pendingBackend),
-                              )
-                            }
-                            disabled={assistantBusy}
-                          >
-                            {assistantBusy ? "Switching…" : "Switch backend"}
-                          </button>
-                        </div>
-                      </div>
-                    ) : assistantConfirm === "attach" &&
-                      selectedThreadId &&
-                      assistantTargetBackend ? (
-                      <div className="composer-tune-confirm">
-                        <p>
-                          Attach to{" "}
-                          <strong>
-                            {threadOptions.find((t) => t.id === selectedThreadId)
-                              ?.title || selectedThreadId}
-                          </strong>
-                          ? This replaces the current conversation, which is kept
-                          as a stopped session.
-                        </p>
-                        <div className="composer-tune-confirm-actions">
-                          <button
-                            type="button"
-                            className="composer-tune-confirm-cancel"
-                            onClick={() => {
-                              setSelectedThreadId("");
-                              setAssistantConfirm(
-                                pendingBackend &&
-                                  pendingBackend !== session?.backend
-                                  ? "switch"
-                                  : null,
-                              );
-                              setAssistantError(null);
-                            }}
-                            disabled={assistantBusy}
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="button"
-                            className="composer-tune-confirm-apply"
-                            onClick={() =>
-                              void runAssistantAction(() =>
-                                assistantOps.onAttachThread(
-                                  assistantTargetBackend,
-                                  selectedThreadId,
-                                ),
-                              )
-                            }
-                            disabled={assistantBusy}
-                          >
-                            {assistantBusy ? "Attaching…" : "Attach thread"}
-                          </button>
-                        </div>
-                      </div>
-                    ) : assistantConfirm === "clear" ? (
-                      <div className="composer-tune-confirm">
-                        <p>
-                          Clear the conversation? The current thread is kept as a
-                          stopped session you can revisit.
-                        </p>
-                        <div className="composer-tune-confirm-actions">
-                          <button
-                            type="button"
-                            className="composer-tune-confirm-cancel"
-                            onClick={() => {
-                              setAssistantConfirm(null);
-                              setAssistantError(null);
-                            }}
-                            disabled={assistantBusy}
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="button"
-                            className="composer-tune-confirm-apply is-danger"
-                            onClick={() =>
-                              void runAssistantAction(assistantOps.onClearContext)
-                            }
-                            disabled={assistantBusy}
-                          >
-                            {assistantBusy ? "Clearing…" : "Clear context"}
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="composer-tune-lifecycle-actions">
+                      <div className="composer-tune-confirm-actions">
                         <button
                           type="button"
-                          className="composer-tune-lifecycle-btn"
-                          onClick={() => setAssistantConfirm("clear")}
+                          className="composer-tune-confirm-cancel"
+                          onClick={() => {
+                            setPendingBackend(null);
+                            setAssistantConfirm(null);
+                            onError("");
+                          }}
                           disabled={assistantBusy}
                         >
-                          Clear context
+                          Cancel
                         </button>
-                        {assistantExited ? (
-                          assistantOps.supportsReattach ? (
-                            <button
-                              type="button"
-                              className="composer-tune-lifecycle-btn"
-                              onClick={() =>
-                                void runAssistantAction(assistantOps.onReattach)
-                              }
-                              disabled={assistantBusy}
-                            >
-                              {assistantBusy ? "Reconnecting…" : "Reattach"}
-                            </button>
-                          ) : null
-                        ) : (
-                          <button
-                            type="button"
-                            className="composer-tune-lifecycle-btn is-danger"
-                            onClick={() =>
-                              void runAssistantAction(assistantOps.onTerminate)
-                            }
-                            disabled={assistantBusy}
-                          >
-                            {assistantBusy ? "Stopping…" : "Terminate"}
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          className="composer-tune-confirm-apply"
+                          onClick={() =>
+                            void runAssistantAction(() =>
+                              assistantOps.onSwitchBackend(pendingBackend),
+                            )
+                          }
+                          disabled={assistantBusy}
+                        >
+                          {assistantBusy ? "Switching…" : "Switch backend"}
+                        </button>
                       </div>
-                    )}
+                    </div>
+                  </div>
+                ) : assistantOps &&
+                  assistantConfirm === "attach" &&
+                  selectedThreadId &&
+                  assistantTargetBackend ? (
+                  <div className="composer-tune-lifecycle">
+                    <div className="composer-tune-confirm">
+                      <p>
+                        Attach to{" "}
+                        <strong>
+                          {threadOptions.find((t) => t.id === selectedThreadId)
+                            ?.title || selectedThreadId}
+                        </strong>
+                        ? This replaces the current conversation, which is kept as
+                        a stopped session.
+                      </p>
+                      <div className="composer-tune-confirm-actions">
+                        <button
+                          type="button"
+                          className="composer-tune-confirm-cancel"
+                          onClick={() => {
+                            setSelectedThreadId("");
+                            setAssistantConfirm(
+                              pendingBackend && pendingBackend !== session?.backend
+                                ? "switch"
+                                : null,
+                            );
+                            onError("");
+                          }}
+                          disabled={assistantBusy}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="composer-tune-confirm-apply"
+                          onClick={() =>
+                            void runAssistantAction(() =>
+                              assistantOps.onAttachThread(
+                                assistantTargetBackend,
+                                selectedThreadId,
+                              ),
+                            )
+                          }
+                          disabled={assistantBusy}
+                        >
+                          {assistantBusy ? "Attaching…" : "Attach thread"}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -2781,7 +2717,7 @@ const ReplyComposer = memo(function ReplyComposer({
                     <span className="glyph">↻</span>
                     Refresh
                   </button>
-                  {canReattach ? (
+                  {!assistant && canReattach ? (
                     <button
                       type="button"
                       role="menuitem"
@@ -2856,6 +2792,70 @@ const ReplyComposer = memo(function ReplyComposer({
                       <span className="glyph">✕</span>
                       Delete transcript
                     </button>
+                  ) : null}
+                  {/* The assistant is a protected singleton, so instead of
+                      terminate/delete it gets its own lifecycle actions here:
+                      clear context (fresh thread) and a stop/revive toggle. */}
+                  {assistant && assistantOps ? (
+                    <>
+                      <div className="composer-overflow-separator" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="composer-overflow-item danger"
+                        disabled={assistantBusy}
+                        onClick={() => {
+                          setOverflowOpen(false);
+                          if (
+                            window.confirm(
+                              "Clear the assistant's context? The current thread is kept as a stopped session.",
+                            )
+                          ) {
+                            void runAssistantAction(assistantOps.onClearContext);
+                          }
+                        }}
+                      >
+                        <span className="glyph">✦</span>
+                        Clear context
+                      </button>
+                      {assistantExited ? (
+                        assistantOps.supportsReattach ? (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="composer-overflow-item"
+                            disabled={assistantBusy}
+                            onClick={() => {
+                              setOverflowOpen(false);
+                              void runAssistantAction(assistantOps.onReattach);
+                            }}
+                          >
+                            <span className="glyph">↺</span>
+                            Reattach assistant
+                          </button>
+                        ) : null
+                      ) : (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="composer-overflow-item danger"
+                          disabled={assistantBusy}
+                          onClick={() => {
+                            setOverflowOpen(false);
+                            if (
+                              window.confirm(
+                                "Terminate the assistant? You can reattach it later to resume this conversation.",
+                              )
+                            ) {
+                              void runAssistantAction(assistantOps.onTerminate);
+                            }
+                          }}
+                        >
+                          <span className="glyph">⏻</span>
+                          Terminate assistant
+                        </button>
+                      )}
+                    </>
                   ) : null}
                 </div>
               ) : null}

@@ -3461,7 +3461,7 @@ async def test_assistant_refreshes_charter_files_on_reuse(tmp_path) -> None:
 async def test_reset_assistant_rebuilds_thread_and_keeps_old(tmp_path) -> None:
     # Switch backends: the old thread is demoted to a normal stopped session
     # (transcript preserved, never deleted) and a fresh thread becomes the
-    # singleton.
+    # singleton. Backend-specific config does NOT carry to the new backend.
     runtime, storage, settings = make_runtime(tmp_path)
     settings.assistant = AssistantConfig(backend="codex")
     _make_assistant_row(
@@ -3473,6 +3473,9 @@ async def test_reset_assistant_rebuilds_thread_and_keeps_old(tmp_path) -> None:
         transport="codex_app_server",
         cwd=str(runtime._assistant_workspace_dir()),
     )
+    storage.update_session(
+        "codex-old", model="gpt-5", effort="high", permission_mode="full-access"
+    )
     runtime.assistant_session_id = "codex-old"
 
     terminated: list[str] = []
@@ -3483,10 +3486,14 @@ async def test_reset_assistant_rebuilds_thread_and_keeps_old(tmp_path) -> None:
 
     runtime.terminate = _fake_terminate  # type: ignore[method-assign]
 
+    captured: dict[str, Any] = {}
+
     async def _fake_create(
         backend: str, *, model: Any, effort: Any, permission_mode: Any
     ) -> SessionRecord:
-        assert backend == "claude_code"
+        captured.update(
+            backend=backend, model=model, effort=effort, permission_mode=permission_mode
+        )
         return _make_assistant_row(
             storage,
             settings,
@@ -3504,10 +3511,75 @@ async def test_reset_assistant_rebuilds_thread_and_keeps_old(tmp_path) -> None:
     assert summary.session_id == "claude-new"
     assert runtime.assistant_session_id == "claude-new"
     assert terminated == ["codex-old"]
+    # New backend starts from its own defaults — codex's model/effort/mode do
+    # not transfer to claude_code.
+    assert captured == {
+        "backend": "claude_code",
+        "model": None,
+        "effort": None,
+        "permission_mode": None,
+    }
     old = storage.get_session("codex-old")
     assert old is not None
     assert old.source == SessionSource.MANAGED
     assert old.pinned_at is None
+
+
+@pytest.mark.asyncio
+async def test_reset_assistant_clear_context_inherits_live_config(tmp_path) -> None:
+    # Clearing context (no backend arg) keeps the live thread's backend and its
+    # tuned config rather than reverting to waypoint.yaml / backend defaults.
+    runtime, storage, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(
+        backend="claude_code", model="opus", effort="low"
+    )
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-live",
+        backend="codex",
+        status=SessionStatus.IDLE,
+        transport="codex_app_server",
+        cwd=str(runtime._assistant_workspace_dir()),
+    )
+    storage.update_session(
+        "codex-live", model="gpt-5", effort="high", permission_mode="full-access"
+    )
+    runtime.assistant_session_id = "codex-live"
+
+    async def _fake_terminate(session_id: str) -> SessionRecord:
+        return storage.update_session(session_id, status=SessionStatus.EXITED)
+
+    runtime.terminate = _fake_terminate  # type: ignore[method-assign]
+
+    captured: dict[str, Any] = {}
+
+    async def _fake_create(
+        backend: str, *, model: Any, effort: Any, permission_mode: Any
+    ) -> SessionRecord:
+        captured.update(
+            backend=backend, model=model, effort=effort, permission_mode=permission_mode
+        )
+        return _make_assistant_row(
+            storage,
+            settings,
+            session_id="codex-fresh",
+            backend=backend,
+            status=SessionStatus.STARTING,
+            transport="codex_app_server",
+            cwd=str(runtime._assistant_workspace_dir()),
+        )
+
+    runtime._create_assistant_session = _fake_create  # type: ignore[method-assign]
+
+    await runtime.reset_assistant()
+
+    assert captured == {
+        "backend": "codex",
+        "model": "gpt-5",
+        "effort": "high",
+        "permission_mode": "full-access",
+    }
 
 
 @pytest.mark.asyncio

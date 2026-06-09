@@ -57,6 +57,11 @@ The settings popover next to the composer exposes the assistant's lifecycle:
 - **Switch backend** — rebuild the assistant on a different coding agent. The
   conversation cannot migrate between backends, so this starts a fresh thread
   at the new backend's default model/effort/permission mode.
+- **Resume thread** — attach the assistant to an existing backend-native thread
+  (one discovered by the chosen backend's thread enumeration). The thread is
+  imported as-is: it resumes its own conversation and working directory, so the
+  assistant charter — which lives in the managed workspace — does **not** apply.
+  Offered only for backends that support thread discovery and import.
 - **Clear context** — start a fresh thread on the same backend.
 - **Terminate / Reattach** — stop the thread (keeping it the pinned singleton)
   and later revive the same conversation. Reattach is offered only when the
@@ -64,13 +69,16 @@ The settings popover next to the composer exposes the assistant's lifecycle:
 - **Model / effort / permission mode** — applied live to the running thread; no
   context is lost.
 
-Switching backend and clearing context discard the conversation: the previous
-thread is **demoted to an ordinary stopped session** (its transcript is
-preserved and it becomes deletable), never destroyed.
+Switching backend, attaching a thread, and clearing context all replace the
+current conversation: the previous thread is **demoted to an ordinary stopped
+session** (its transcript is preserved and it becomes deletable), never
+destroyed.
 
 A terminated assistant survives reattach only within the running deployment; a
 redeploy cannot reattach an exited thread, so it demotes that thread to a normal
-stopped session and creates a fresh assistant.
+stopped session and creates a fresh assistant. Likewise, an attached thread
+lives outside the managed workspace, so a redeploy will not re-adopt it — it is
+demoted and a fresh assistant is created from the `waypoint.yaml` defaults.
 
 Both the Waypoint session id and the backend-native thread id (e.g. the value
 for `claude --resume`) are surfaced on the assistant page and via `/api/me`, so

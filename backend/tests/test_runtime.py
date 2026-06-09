@@ -3583,6 +3583,40 @@ async def test_reset_assistant_clear_context_inherits_live_config(tmp_path) -> N
 
 
 @pytest.mark.asyncio
+async def test_reset_assistant_keeps_current_thread_when_create_fails(tmp_path) -> None:
+    # A failed launch (e.g. switching to a misconfigured backend) must leave the
+    # live assistant intact rather than orphaning the pointer at a stopped row.
+    runtime, storage, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(backend="codex")
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-live",
+        backend="codex",
+        status=SessionStatus.IDLE,
+        transport="codex_app_server",
+        cwd=str(runtime._assistant_workspace_dir()),
+    )
+    runtime.assistant_session_id = "codex-live"
+
+    async def _boom(
+        backend: str, *, model: Any, effort: Any, permission_mode: Any
+    ) -> SessionRecord:
+        raise RuntimeError("spawn failed")
+
+    runtime._create_assistant_session = _boom  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError):
+        await runtime.reset_assistant(backend="claude_code")
+
+    assert runtime.assistant_session_id == "codex-live"
+    row = storage.get_session("codex-live")
+    assert row is not None
+    assert row.source == SessionSource.ASSISTANT
+    assert row.status == SessionStatus.IDLE
+
+
+@pytest.mark.asyncio
 async def test_reset_assistant_unknown_backend_404(tmp_path) -> None:
     runtime, _, settings = make_runtime(tmp_path)
     settings.assistant = AssistantConfig(backend="codex")

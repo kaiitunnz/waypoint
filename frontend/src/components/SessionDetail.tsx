@@ -62,6 +62,7 @@ import {
   type PlanViewModel,
 } from "@/lib/events";
 import { useTheme } from "@/lib/theme";
+import { formatRelativeTime } from "@/lib/usage";
 import { SessionTerminalView } from "@/components/SessionTerminalView";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { CommandSuggestions } from "@/components/CommandSuggestions";
@@ -183,6 +184,11 @@ const EFFORT_LABEL: Record<string, string> = {
 export interface AssistantThreadOption {
   id: string;
   title: string;
+  // ISO timestamp of last activity — the assistant titles every thread
+  // "Personal Assistant", so the picker leans on this to tell them apart.
+  updatedAt: string;
+  // First-message snippet when the backend provides one; another distinguisher.
+  preview: string | null;
 }
 
 // Assistant-only lifecycle actions surfaced inside the composer settings
@@ -2437,7 +2443,10 @@ const ReplyComposer = memo(function ReplyComposer({
                       <option value="">— Start fresh —</option>
                       {threadOptions.map((thread) => (
                         <option key={thread.id} value={thread.id}>
-                          {thread.title || thread.id}
+                          {`${thread.title || thread.id} · ${formatRelativeTime(
+                            thread.updatedAt,
+                          )}`}
+                          {thread.preview ? ` — ${thread.preview}` : ""}
                         </option>
                       ))}
                     </select>
@@ -2802,7 +2811,7 @@ const ReplyComposer = memo(function ReplyComposer({
                       <button
                         type="button"
                         role="menuitem"
-                        className="composer-overflow-item danger"
+                        className="composer-overflow-item warn"
                         disabled={assistantBusy}
                         onClick={() => {
                           setOverflowOpen(false);

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import { SessionDetail } from "@/components/SessionDetail";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { fetchMe, isAuthError } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
 import { clearToken, readHost, readToken } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
 import { AssistantSummary } from "@/lib/types";
@@ -17,7 +18,8 @@ type LoadState = "loading" | "ready" | "disabled" | "error";
 function CopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
   const copy = useCallback(() => {
-    void navigator.clipboard?.writeText(value).then(() => {
+    void copyText(value).then((ok) => {
+      if (!ok) return;
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1400);
     });

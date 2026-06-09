@@ -22,7 +22,6 @@ assistant:
   backend: claude_code                # defaults to `default_backend`
   model: opus                         # must exist in the backend's catalogue
   effort: high                        # ignored by backends without an effort knob
-  cwd: ~/                             # home, so it can inspect the host
   permission_mode: bypassPermissions  # see the security note below
 ```
 
@@ -30,6 +29,13 @@ assistant:
 live from the assistant page, so treat them as defaults rather than a lockdown.
 The block is enabled by default when present — set `enabled: false` to keep the
 config but turn the assistant off.
+
+The assistant always runs in a managed working directory (`<data_dir>/assistant`),
+so it has no `cwd` setting. Its charter is written there as `AGENTS.md` /
+`CLAUDE.md` and loaded silently by the backend as project context — there is no
+visible bootstrap message in the transcript. The working directory is only a
+scratch cwd; shell access reaches the whole host, so host inspection is
+unaffected.
 
 ## Lifecycle
 

@@ -55,8 +55,7 @@ plugin_configs:
 #   backend: claude_code          # defaults to `default_backend`
 #   model: opus                   # must exist in the backend's catalogue
 #   effort: high                  # ignored by backends without an effort knob
-#   cwd: ~/                       # home, so it can inspect the host
-#   permission_mode: bypassPermissions  # defaults to the backend's most permissive mode
+#   permission_mode: bypassPermissions  # backend default (usually prompts) if unset
 
 ssh_targets:
   - id: devbox

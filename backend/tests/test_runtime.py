@@ -3362,3 +3362,14 @@ def test_assistant_summary_is_none_when_untracked(tmp_path) -> None:
     runtime, _, _ = make_runtime(tmp_path)
     assert runtime.assistant_session_id is None
     assert runtime.assistant_summary() is None
+
+
+def test_prepare_assistant_workspace_writes_charter_files(tmp_path) -> None:
+    runtime, _, settings = make_runtime(tmp_path)
+    workspace = runtime._prepare_assistant_workspace()
+    workspace_path = Path(workspace)
+    assert workspace_path == settings.data_dir / "assistant"
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        text = (workspace_path / name).read_text(encoding="utf-8")
+        assert "Waypoint personal assistant" in text
+        assert "waypoint sessions list" in text

@@ -3,6 +3,7 @@ repos:
     rev: 8.0.1
     hooks:
       - id: isort
+        files: ^backend/
 
   - repo: https://github.com/psf/black
     rev: 26.3.1

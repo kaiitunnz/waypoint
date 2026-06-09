@@ -157,10 +157,14 @@ export default function AssistantPage() {
           const threads = await fetchBackendThreads<{
             id: string;
             title: string;
+            updated_at: string;
+            preview: string | null;
           }>(host, token, backend);
           return threads.map((thread) => ({
             id: thread.id,
             title: thread.title,
+            updatedAt: thread.updated_at,
+            preview: thread.preview ?? null,
           }));
         } catch (err) {
           if (isAuthError(err)) handleAuthFailure();

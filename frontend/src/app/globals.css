@@ -6026,6 +6026,29 @@ html[data-theme="light"] .composer-overflow-item.danger:hover:not(:disabled) {
   color: var(--danger);
 }
 
+.composer-overflow-item.warn {
+  color: var(--warn);
+  background: rgba(217, 154, 74, 0.08);
+  border-color: rgba(217, 154, 74, 0.32);
+}
+
+html[data-theme="light"] .composer-overflow-item.warn {
+  background: rgba(170, 102, 24, 0.08);
+}
+
+.composer-overflow-item.warn:hover:not(:disabled) {
+  background: rgba(217, 154, 74, 0.18);
+  border-color: rgba(217, 154, 74, 0.5);
+}
+
+html[data-theme="light"] .composer-overflow-item.warn:hover:not(:disabled) {
+  background: rgba(170, 102, 24, 0.16);
+}
+
+.composer-overflow-item.warn .glyph {
+  color: var(--warn);
+}
+
 .composer-overflow-item:disabled {
   opacity: 0.45;
   cursor: default;

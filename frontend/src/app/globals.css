@@ -5716,6 +5716,13 @@ html[data-theme="light"] .composer-tune-restart-apply {
   border-top: 1px solid var(--line);
 }
 
+.composer-tune-error {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--danger);
+}
+
 .composer-tune-lifecycle-actions {
   display: flex;
   flex-wrap: wrap;

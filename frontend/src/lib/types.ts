@@ -202,6 +202,12 @@ export interface AssistantResetRequest {
   permission_mode?: string | null;
 }
 
+export interface AssistantAttachRequest {
+  backend: Backend;
+  thread_id: string;
+  launch_target_id?: string | null;
+}
+
 export interface MeResponse {
   authenticated: boolean;
   default_backend: Backend;

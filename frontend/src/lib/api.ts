@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AssistantAttachRequest,
   AssistantResetRequest,
   AssistantSummary,
   Backend,
@@ -103,6 +104,23 @@ export async function resetAssistant(
     body: JSON.stringify(body),
   });
   await ensureOk(response, "failed to reset assistant");
+  return (await response.json()) as AssistantSummary;
+}
+
+export async function attachAssistant(
+  host: string,
+  token: string,
+  body: AssistantAttachRequest,
+): Promise<AssistantSummary> {
+  const response = await fetch(`${host}/api/assistant/attach`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  await ensureOk(response, "failed to attach thread");
   return (await response.json()) as AssistantSummary;
 }
 

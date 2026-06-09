@@ -87,7 +87,7 @@ cd backend
 
 Backend config precedence:
 
-- CLI flags such as `waypoint serve --host ... --port ... --config ...`
+- CLI flags such as `waypoint --config ... serve --host ... --port ...` (`--config` is a top-level option, before the command)
 - `WAYPOINT_*` environment variables (set in your shell, systemd unit, or LaunchAgent)
 - values from `backend/waypoint.yaml`
 - built-in defaults

@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  AssistantResetRequest,
+  AssistantSummary,
   Backend,
   BackendDescriptor,
   BackendModelListResponse,
@@ -85,6 +87,47 @@ export async function fetchMe(host: string, token: string): Promise<MeResponse> 
   });
   await ensureOk(response, "failed to fetch backend settings");
   return (await response.json()) as MeResponse;
+}
+
+export async function resetAssistant(
+  host: string,
+  token: string,
+  body: AssistantResetRequest = {},
+): Promise<AssistantSummary> {
+  const response = await fetch(`${host}/api/assistant/reset`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  await ensureOk(response, "failed to reset assistant");
+  return (await response.json()) as AssistantSummary;
+}
+
+export async function terminateAssistant(
+  host: string,
+  token: string,
+): Promise<AssistantSummary> {
+  const response = await fetch(`${host}/api/assistant/terminate`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, "failed to terminate assistant");
+  return (await response.json()) as AssistantSummary;
+}
+
+export async function reattachAssistant(
+  host: string,
+  token: string,
+): Promise<AssistantSummary> {
+  const response = await fetch(`${host}/api/assistant/reattach`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, "failed to reattach assistant");
+  return (await response.json()) as AssistantSummary;
 }
 
 export async function fetchBackends(

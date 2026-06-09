@@ -190,6 +190,16 @@ export interface AssistantSummary {
   backend: Backend;
   native_thread_id: string | null;
   status: SessionStatus;
+  // Whether the backend can revive the thread after it exits — drives the
+  // choice between offering Reattach and only Clear context.
+  supports_reattach: boolean;
+}
+
+export interface AssistantResetRequest {
+  backend?: Backend;
+  model?: string | null;
+  effort?: string | null;
+  permission_mode?: string | null;
 }
 
 export interface MeResponse {

@@ -77,6 +77,8 @@ import {
 } from "@/components/TranscriptCard";
 import { useSwitcher } from "@/components/SwitcherProvider";
 import {
+  Backend,
+  BackendDescriptor,
   BackendModelOption,
   BackendPermissionMode,
   EventRecord,
@@ -177,6 +179,19 @@ const EFFORT_LABEL: Record<string, string> = {
 };
 
 
+// Assistant-only lifecycle actions surfaced inside the composer settings
+// popover (backend switch + clear context + terminate/reattach). The owning
+// page wires these to /api/assistant/* and refreshes itself afterwards; when
+// absent, the composer renders no assistant controls.
+export interface AssistantControls {
+  backends: BackendDescriptor[];
+  supportsReattach: boolean;
+  onSwitchBackend: (backend: Backend) => Promise<void> | void;
+  onClearContext: () => Promise<void> | void;
+  onTerminate: () => Promise<void> | void;
+  onReattach: () => Promise<void> | void;
+}
+
 interface SessionDetailProps {
   host: string;
   token: string;
@@ -187,6 +202,8 @@ interface SessionDetailProps {
   // actions (terminate, delete, /new, /fork), and shows a capability-led empty
   // state instead of "Waiting for the agent…".
   assistant?: boolean;
+  // Assistant lifecycle handlers; only meaningful when `assistant` is set.
+  assistantControls?: AssistantControls | null;
 }
 
 type ViewMode = "chat" | "terminal";
@@ -202,7 +219,7 @@ const COMPOSER_HEIGHT_STORAGE_KEY = "waypoint-composer-height";
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 
-export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant = false }: SessionDetailProps) {
+export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant = false, assistantControls = null }: SessionDetailProps) {
   const router = useRouter();
   const catalog = useBackendCatalog(host || null, token || null, null);
   const [session, setSession] = useState<SessionRecord | null>(null);
@@ -1852,6 +1869,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onSend={onSendWithOptimistic}
           onTerminate={terminate}
           assistant={assistant}
+          assistantControls={assistantControls}
         />
       ) : null}
     </section>
@@ -1906,6 +1924,7 @@ interface ReplyComposerProps {
   onSend: (text: string, command?: SessionCommandInvocation) => Promise<boolean>;
   onTerminate: () => void | Promise<void>;
   assistant: boolean;
+  assistantControls: AssistantControls | null;
 }
 
 const ReplyComposer = memo(function ReplyComposer({
@@ -1952,12 +1971,20 @@ const ReplyComposer = memo(function ReplyComposer({
   onSend,
   onTerminate,
   assistant,
+  assistantControls,
 }: ReplyComposerProps) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
   const [reattaching, setReattaching] = useState(false);
+  // Assistant lifecycle UI: an in-flight action and which context-discarding
+  // action (backend switch / clear) is awaiting an inline confirm.
+  const [assistantBusy, setAssistantBusy] = useState(false);
+  const [assistantConfirm, setAssistantConfirm] = useState<
+    "switch" | "clear" | null
+  >(null);
+  const [pendingBackend, setPendingBackend] = useState<Backend | null>(null);
   // Pending effort for backends that need a session restart to apply (Claude)
   // — staged here until the user confirms via the Apply button. `null` means
   // no pending change.
@@ -2225,7 +2252,26 @@ const ReplyComposer = memo(function ReplyComposer({
     await onEffortChange(value);
   };
 
-  const tuneVisible = modeOptions.length > 0 || hasModelPicker || hasEffortPicker;
+  const assistantOps = assistant ? assistantControls : null;
+  const tuneVisible =
+    modeOptions.length > 0 ||
+    hasModelPicker ||
+    hasEffortPicker ||
+    assistantOps !== null;
+  const runAssistantAction = async (action: () => Promise<void> | void) => {
+    if (assistantBusy) return;
+    setAssistantBusy(true);
+    try {
+      await action();
+    } finally {
+      setAssistantBusy(false);
+      setAssistantConfirm(null);
+      setPendingBackend(null);
+    }
+  };
+  const assistantExited = Boolean(
+    session && (session.status === "exited" || session.status === "error"),
+  );
   const tuneSummary = (() => {
     const parts: string[] = [];
     if (modeOptions.length > 0) {
@@ -2280,6 +2326,33 @@ const ReplyComposer = memo(function ReplyComposer({
                 role="dialog"
                 aria-label="Session settings"
               >
+                {assistantOps && session ? (
+                  <label className="composer-tune-field">
+                    <span>Backend</span>
+                    <select
+                      value={pendingBackend ?? session.backend}
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        if (next === session.backend) {
+                          setPendingBackend(null);
+                          setAssistantConfirm((mode) =>
+                            mode === "switch" ? null : mode,
+                          );
+                          return;
+                        }
+                        setPendingBackend(next);
+                        setAssistantConfirm("switch");
+                      }}
+                      disabled={assistantBusy}
+                    >
+                      {assistantOps.backends.map((backend) => (
+                        <option key={backend.id} value={backend.id}>
+                          {backend.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 {modeOptions.length > 0 ? (
                   <label className="composer-tune-field">
                     <span>Permission mode</span>
@@ -2353,6 +2426,108 @@ const ReplyComposer = memo(function ReplyComposer({
                     >
                       {effortBusy ? "Restarting…" : "Apply restart"}
                     </button>
+                  </div>
+                ) : null}
+                {assistantOps ? (
+                  <div className="composer-tune-lifecycle">
+                    {assistantConfirm === "switch" && pendingBackend ? (
+                      <div className="composer-tune-confirm">
+                        <p>
+                          Switch to{" "}
+                          <strong>{humaniseBackend(pendingBackend)}</strong>? This
+                          starts a new conversation; the current one is kept as a
+                          stopped session.
+                        </p>
+                        <div className="composer-tune-confirm-actions">
+                          <button
+                            type="button"
+                            className="composer-tune-confirm-cancel"
+                            onClick={() => {
+                              setPendingBackend(null);
+                              setAssistantConfirm(null);
+                            }}
+                            disabled={assistantBusy}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            className="composer-tune-confirm-apply"
+                            onClick={() =>
+                              void runAssistantAction(() =>
+                                assistantOps.onSwitchBackend(pendingBackend),
+                              )
+                            }
+                            disabled={assistantBusy}
+                          >
+                            {assistantBusy ? "Switching…" : "Switch backend"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : assistantConfirm === "clear" ? (
+                      <div className="composer-tune-confirm">
+                        <p>
+                          Clear the conversation? The current thread is kept as a
+                          stopped session you can revisit.
+                        </p>
+                        <div className="composer-tune-confirm-actions">
+                          <button
+                            type="button"
+                            className="composer-tune-confirm-cancel"
+                            onClick={() => setAssistantConfirm(null)}
+                            disabled={assistantBusy}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            className="composer-tune-confirm-apply is-danger"
+                            onClick={() =>
+                              void runAssistantAction(assistantOps.onClearContext)
+                            }
+                            disabled={assistantBusy}
+                          >
+                            {assistantBusy ? "Clearing…" : "Clear context"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="composer-tune-lifecycle-actions">
+                        <button
+                          type="button"
+                          className="composer-tune-lifecycle-btn"
+                          onClick={() => setAssistantConfirm("clear")}
+                          disabled={assistantBusy}
+                        >
+                          Clear context
+                        </button>
+                        {assistantExited ? (
+                          assistantOps.supportsReattach ? (
+                            <button
+                              type="button"
+                              className="composer-tune-lifecycle-btn"
+                              onClick={() =>
+                                void runAssistantAction(assistantOps.onReattach)
+                              }
+                              disabled={assistantBusy}
+                            >
+                              {assistantBusy ? "Reconnecting…" : "Reattach"}
+                            </button>
+                          ) : null
+                        ) : (
+                          <button
+                            type="button"
+                            className="composer-tune-lifecycle-btn is-danger"
+                            onClick={() =>
+                              void runAssistantAction(assistantOps.onTerminate)
+                            }
+                            disabled={assistantBusy}
+                          >
+                            {assistantBusy ? "Stopping…" : "Terminate"}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ) : null}
               </div>

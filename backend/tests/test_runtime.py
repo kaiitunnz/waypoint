@@ -15,7 +15,7 @@ from waypoint.backends.codex.permission_modes import (
 )
 from waypoint.backends.codex.schemas import CodexThreadImportRequest
 from waypoint.launch_targets import SshLaunchTargetConfig
-from waypoint.runtime import SessionRuntime
+from waypoint.runtime import ASSISTANT_CHARTER, SessionRuntime
 from waypoint.schemas import (
     CommandCompletion,
     CompletionDispatch,
@@ -3418,3 +3418,35 @@ async def test_assistant_recreates_when_cwd_is_not_workspace(tmp_path) -> None:
     legacy = storage.get_session("codex-legacy")
     assert legacy is not None
     assert legacy.source == SessionSource.MANAGED
+
+
+@pytest.mark.asyncio
+async def test_assistant_refreshes_charter_files_on_reuse(tmp_path) -> None:
+    # A reused live thread still gets its workspace charter files rewritten to
+    # the current charter on boot, without recreating the thread.
+    runtime, storage, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(backend="codex")
+    workspace = runtime._assistant_workspace_dir()
+    workspace.mkdir(parents=True, exist_ok=True)
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        (workspace / name).write_text("stale charter", encoding="utf-8")
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-assistant",
+        backend="codex",
+        status=SessionStatus.IDLE,
+        transport="codex_app_server",
+        cwd=str(workspace),
+    )
+
+    async def _fail_create(backend: str) -> Any:  # pragma: no cover - must reuse
+        raise AssertionError("should reuse the live thread, not recreate")
+
+    runtime._create_assistant_session = _fail_create  # type: ignore[method-assign]
+
+    await runtime._ensure_assistant_session()
+
+    assert runtime.assistant_session_id == "codex-assistant"
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        assert (workspace / name).read_text(encoding="utf-8") == ASSISTANT_CHARTER

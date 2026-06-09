@@ -357,12 +357,18 @@ class SessionRuntime:
                 )
             self.assistant_session_id = None
             return
+        # Reuse only a thread that matches the configured backend, is alive,
+        # and already lives in the managed workspace — the last clause
+        # migrates assistants created by older builds (different cwd, charter
+        # sent as a visible message) to a fresh, silently-chartered thread.
+        workspace = str(self._assistant_workspace_dir())
         live = next(
             (
                 session
                 for session in existing
                 if session.backend == target_backend
                 and session.status not in {SessionStatus.EXITED, SessionStatus.ERROR}
+                and session.cwd == workspace
             ),
             None,
         )
@@ -406,6 +412,9 @@ class SessionRuntime:
             pinned_at=datetime.now(UTC),
         )
 
+    def _assistant_workspace_dir(self) -> Path:
+        return self.settings.data_dir / "assistant"
+
     def _prepare_assistant_workspace(self) -> str:
         """Materialise the assistant's working dir and its charter files.
 
@@ -414,7 +423,7 @@ class SessionRuntime:
         The directory is a scratch cwd — shell access reaches the whole host
         regardless — so host inspection is unaffected.
         """
-        workspace = self.settings.data_dir / "assistant"
+        workspace = self._assistant_workspace_dir()
         workspace.mkdir(parents=True, exist_ok=True)
         for name in ("AGENTS.md", "CLAUDE.md"):
             (workspace / name).write_text(ASSISTANT_CHARTER, encoding="utf-8")

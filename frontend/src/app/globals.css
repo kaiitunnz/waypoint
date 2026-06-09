@@ -8513,7 +8513,12 @@ html[data-theme="light"]
   padding: 12px 18px;
   border-radius: var(--radius-pill);
   border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line));
-  background: var(--bg-card);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 12%, var(--bg-card)),
+      var(--bg-card)
+    );
   color: var(--accent-strong);
   font-family: var(--font-mono);
   font-size: 0.78rem;
@@ -8522,18 +8527,50 @@ html[data-theme="light"]
   text-decoration: none;
   box-shadow: var(--shadow);
   backdrop-filter: blur(8px);
-  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+  transition:
+    transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1),
+    border-color 0.16s ease,
+    background 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 .assistant-fab:hover {
   transform: translateY(-2px);
-  background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-card));
   border-color: var(--accent);
+  box-shadow:
+    var(--shadow),
+    0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.assistant-fab:active {
+  transform: translateY(0);
 }
 
 .assistant-fab-glyph {
   font-size: 1.05rem;
   line-height: 1;
+  /* A slow, low-key shimmer signals the assistant is "alive" without
+     drawing the eye away from the primary session deck. */
+  animation: assistant-glyph-shimmer 4.2s ease-in-out infinite;
+}
+
+@keyframes assistant-glyph-shimmer {
+  0%,
+  100% {
+    opacity: 0.78;
+    transform: scale(1) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12) rotate(18deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-fab-glyph {
+    animation: none;
+  }
 }
 
 @media (max-width: 640px) {
@@ -8552,53 +8589,87 @@ html[data-theme="light"]
 }
 
 .assistant-banner {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 16px 18px;
-  background: var(--bg-card);
+  gap: 16px;
+  padding: 18px 20px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 7%, var(--bg-card)),
+      var(--bg-card) 55%
+    );
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+/* A thin accent rail along the top edge marks this as the assistant's own
+   surface and ties it to the gold accent without competing with content. */
+.assistant-banner::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--accent) 70%, transparent) 30%,
+    color-mix(in srgb, var(--accent-cool) 60%, transparent) 75%,
+    transparent
+  );
+  opacity: 0.7;
 }
 
 .assistant-banner-lead {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
 }
 
 .assistant-glyph {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   flex: none;
   border-radius: 11px;
   background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
   color: var(--accent-strong);
   font-size: 1.1rem;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.assistant-banner-text {
+  min-width: 0;
 }
 
 .assistant-banner-eyebrow {
   margin: 0;
-  font-family: var(--font-mono);
-  font-size: 0.92rem;
+  font-family: var(--font-display);
+  font-size: 1.04rem;
   color: var(--text-strong);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
 }
 
 .assistant-banner-note {
-  margin: 2px 0 0;
+  margin: 3px 0 0;
   color: var(--muted-soft);
   font-size: 0.82rem;
+  line-height: 1.4;
 }
 
 .assistant-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   margin-left: auto;
   align-self: flex-start;
-  padding: 4px 11px;
+  padding: 4px 12px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--line);
   font-family: var(--font-mono);
@@ -8606,12 +8677,29 @@ html[data-theme="light"]
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
+  white-space: nowrap;
+}
+
+.assistant-status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
 }
 
 .assistant-status-running,
 .assistant-status-starting {
   color: var(--accent-cool);
   border-color: color-mix(in srgb, var(--accent-cool) 45%, var(--line));
+}
+
+.assistant-status-running::before,
+.assistant-status-starting::before {
+  animation: pulse-running 1.8s ease-in-out infinite;
+  background: var(--accent-cool);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-cool) 50%, transparent);
 }
 
 .assistant-status-idle {
@@ -8625,9 +8713,20 @@ html[data-theme="light"]
   border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
 }
 
+.assistant-status-waiting_input::before,
+.assistant-status-interrupted::before {
+  animation: pulse-warn 1.8s ease-in-out infinite;
+}
+
 .assistant-status-error {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-status::before {
+    animation: none !important;
+  }
 }
 
 .assistant-ids {
@@ -8639,8 +8738,9 @@ html[data-theme="light"]
 .assistant-id {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
+  flex: 1;
 }
 
 .assistant-id-label {
@@ -8654,18 +8754,28 @@ html[data-theme="light"]
 .assistant-id-value {
   display: inline-flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
   max-width: 100%;
-  padding: 6px 10px;
+  padding: 8px 10px 8px 12px;
   background: var(--bg-card-soft);
   border: 1px solid var(--line);
   border-radius: 10px;
   cursor: pointer;
-  transition: border-color 0.18s ease;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease;
 }
 
 .assistant-id-value:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-card-soft));
+}
+
+.assistant-id-value:focus-visible {
+  outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .assistant-id-value code {
@@ -8679,52 +8789,115 @@ html[data-theme="light"]
 
 .assistant-id-copy {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-family: var(--font-mono);
   font-size: 0.62rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--accent-strong);
+  transition: color 0.18s ease;
+}
+
+/* Leading caret marks the chip as the copy affordance; flips to a check
+   on success, swapping to the success token for an unmistakable cue. */
+.assistant-id-copy::before {
+  content: "⧉";
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
+.assistant-id-copy.is-copied {
+  color: var(--success);
+}
+
+.assistant-id-copy.is-copied::before {
+  content: "✓";
 }
 
 .assistant-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   text-align: center;
-  padding: 40px 24px;
+  padding: 48px 24px;
 }
 
 .assistant-empty h2 {
   margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.22rem;
+  color: var(--text-strong);
 }
 
 .assistant-empty .muted {
   max-width: 46ch;
+  line-height: 1.5;
 }
 
 .assistant-glyph-lg {
-  width: 52px;
-  height: 52px;
-  border-radius: 16px;
-  font-size: 1.7rem;
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  font-size: 1.8rem;
+  /* Soft accent halo grounds the empty/disabled state and echoes the
+     page's radial atmosphere. */
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--accent) 20%, transparent),
+    0 0 0 8px color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .assistant-snippet {
   width: 100%;
-  max-width: 420px;
-  margin: 4px 0 0;
-  padding: 14px 16px;
+  max-width: 440px;
+  margin: 6px 0 0;
+  padding: 16px 18px;
   text-align: left;
-  background: var(--bg-card-soft);
+  background: var(--bg-input);
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow-x: auto;
+  box-shadow: var(--shadow-soft);
 }
 
 .assistant-snippet code {
   font-family: var(--font-mono);
   font-size: 0.8rem;
+  line-height: 1.6;
   color: var(--text);
   white-space: pre;
+}
+
+/* Loading state — a calm spinner in the accent tone, matching the
+   page's other in-flight indicators. */
+.assistant-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 56px 24px;
+  color: var(--muted);
+}
+
+.assistant-spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-top-color: var(--accent-strong);
+  animation: assistant-spin 0.8s linear infinite;
+}
+
+@keyframes assistant-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-spinner {
+    animation: none;
+  }
 }

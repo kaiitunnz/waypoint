@@ -31,10 +31,14 @@ function CopyField({ label, value }: { label: string; value: string }) {
         className="assistant-id-value"
         onClick={copy}
         title={`Copy ${label}`}
+        aria-label={copied ? `${label} copied` : `Copy ${label}`}
         type="button"
       >
         <code>{value}</code>
-        <span className="assistant-id-copy" aria-hidden="true">
+        <span
+          className={`assistant-id-copy${copied ? " is-copied" : ""}`}
+          aria-hidden="true"
+        >
           {copied ? "copied" : "copy"}
         </span>
       </button>
@@ -122,10 +126,11 @@ export default function AssistantPage() {
               <span className="assistant-glyph" aria-hidden="true">
                 ✦
               </span>
-              <div>
+              <div className="assistant-banner-text">
                 <p className="assistant-banner-eyebrow">{assistant.backend}</p>
                 <p className="assistant-banner-note">
-                  One persistent thread. Recover it anytime with the ids below.
+                  One persistent thread. Recover it anytime with the session id
+                  below.
                 </p>
               </div>
               <span className={`assistant-status assistant-status-${assistant.status}`}>
@@ -173,13 +178,17 @@ export default function AssistantPage() {
       ) : null}
 
       {state === "loading" ? (
-        <section className="panel bordered assistant-empty">
+        <section className="panel bordered assistant-loading" aria-busy="true">
+          <span className="assistant-spinner" aria-hidden="true" />
           <p className="muted">Loading assistant…</p>
         </section>
       ) : null}
 
       {state === "error" ? (
         <section className="panel bordered assistant-empty">
+          <span className="assistant-glyph assistant-glyph-lg" aria-hidden="true">
+            ✦
+          </span>
           <h2>Couldn’t load the assistant</h2>
           <p className="muted">
             The backend didn’t respond. Check that Waypoint is running, then{" "}

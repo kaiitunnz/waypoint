@@ -179,17 +179,28 @@ const EFFORT_LABEL: Record<string, string> = {
 };
 
 
+// An existing backend-native thread the assistant can adopt.
+export interface AssistantThreadOption {
+  id: string;
+  title: string;
+}
+
 // Assistant-only lifecycle actions surfaced inside the composer settings
-// popover (backend switch + clear context + terminate/reattach). The owning
-// page wires these to /api/assistant/* and refreshes itself afterwards; when
-// absent, the composer renders no assistant controls.
+// popover (backend switch + attach existing thread + clear context +
+// terminate/reattach). The owning page wires these to /api/assistant/* and
+// refreshes itself afterwards; when absent, the composer renders no assistant
+// controls.
 export interface AssistantControls {
   backends: BackendDescriptor[];
   supportsReattach: boolean;
   onSwitchBackend: (backend: Backend) => Promise<void> | void;
+  onAttachThread: (backend: Backend, threadId: string) => Promise<void> | void;
   onClearContext: () => Promise<void> | void;
   onTerminate: () => Promise<void> | void;
   onReattach: () => Promise<void> | void;
+  // Lists importable threads for a backend (empty when discovery unsupported or
+  // it fails); used to populate the "resume an existing thread" picker.
+  listThreads: (backend: Backend) => Promise<AssistantThreadOption[]>;
 }
 
 interface SessionDetailProps {
@@ -1979,12 +1990,15 @@ const ReplyComposer = memo(function ReplyComposer({
   const [tuneOpen, setTuneOpen] = useState(false);
   const [reattaching, setReattaching] = useState(false);
   // Assistant lifecycle UI: an in-flight action and which context-discarding
-  // action (backend switch / clear) is awaiting an inline confirm.
+  // action (backend switch / attach thread / clear) is awaiting an inline
+  // confirm.
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [assistantConfirm, setAssistantConfirm] = useState<
-    "switch" | "clear" | null
+    "switch" | "attach" | "clear" | null
   >(null);
   const [pendingBackend, setPendingBackend] = useState<Backend | null>(null);
+  const [selectedThreadId, setSelectedThreadId] = useState("");
+  const [threadOptions, setThreadOptions] = useState<AssistantThreadOption[]>([]);
   const [assistantError, setAssistantError] = useState<string | null>(null);
   // Pending effort for backends that need a session restart to apply (Claude)
   // — staged here until the user confirms via the Apply button. `null` means
@@ -2259,6 +2273,36 @@ const ReplyComposer = memo(function ReplyComposer({
     hasModelPicker ||
     hasEffortPicker ||
     assistantOps !== null;
+  // Backend the assistant controls target — the picked one, or the current.
+  const assistantTargetBackend = pendingBackend ?? session?.backend ?? null;
+  const assistantTargetCaps =
+    assistantOps && assistantTargetBackend
+      ? assistantOps.backends.find((b) => b.id === assistantTargetBackend)
+          ?.capabilities
+      : undefined;
+  const assistantCanAttach = Boolean(
+    assistantTargetCaps?.supports_thread_discovery &&
+      assistantTargetCaps?.supports_thread_import,
+  );
+  // Load resumable threads for the target backend when the popover is open.
+  useEffect(() => {
+    if (
+      !tuneOpen ||
+      !assistantOps ||
+      !assistantCanAttach ||
+      !assistantTargetBackend
+    ) {
+      setThreadOptions([]);
+      return;
+    }
+    let cancelled = false;
+    void assistantOps.listThreads(assistantTargetBackend).then((threads) => {
+      if (!cancelled) setThreadOptions(threads);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tuneOpen, assistantOps, assistantCanAttach, assistantTargetBackend]);
   const runAssistantAction = async (action: () => Promise<void> | void) => {
     if (assistantBusy) return;
     setAssistantBusy(true);
@@ -2269,6 +2313,7 @@ const ReplyComposer = memo(function ReplyComposer({
       // the error visible so the user can retry or cancel.
       setAssistantConfirm(null);
       setPendingBackend(null);
+      setSelectedThreadId("");
     } catch (err) {
       setAssistantError(err instanceof Error ? err.message : "Action failed");
     } finally {
@@ -2340,11 +2385,11 @@ const ReplyComposer = memo(function ReplyComposer({
                       onChange={(event) => {
                         const next = event.target.value;
                         setAssistantError(null);
+                        // Threads are per-backend; drop any thread selection.
+                        setSelectedThreadId("");
                         if (next === session.backend) {
                           setPendingBackend(null);
-                          setAssistantConfirm((mode) =>
-                            mode === "switch" ? null : mode,
-                          );
+                          setAssistantConfirm(null);
                           return;
                         }
                         setPendingBackend(next);
@@ -2355,6 +2400,39 @@ const ReplyComposer = memo(function ReplyComposer({
                       {assistantOps.backends.map((backend) => (
                         <option key={backend.id} value={backend.id}>
                           {backend.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                {assistantOps &&
+                session &&
+                assistantCanAttach &&
+                threadOptions.length > 0 ? (
+                  <label className="composer-tune-field">
+                    <span>Resume thread</span>
+                    <select
+                      value={selectedThreadId}
+                      onChange={(event) => {
+                        const id = event.target.value;
+                        setAssistantError(null);
+                        setSelectedThreadId(id);
+                        if (id) {
+                          setAssistantConfirm("attach");
+                        } else {
+                          setAssistantConfirm(
+                            pendingBackend && pendingBackend !== session.backend
+                              ? "switch"
+                              : null,
+                          );
+                        }
+                      }}
+                      disabled={assistantBusy}
+                    >
+                      <option value="">— Start fresh —</option>
+                      {threadOptions.map((thread) => (
+                        <option key={thread.id} value={thread.id}>
+                          {thread.title || thread.id}
                         </option>
                       ))}
                     </select>
@@ -2474,6 +2552,54 @@ const ReplyComposer = memo(function ReplyComposer({
                             disabled={assistantBusy}
                           >
                             {assistantBusy ? "Switching…" : "Switch backend"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : assistantConfirm === "attach" &&
+                      selectedThreadId &&
+                      assistantTargetBackend ? (
+                      <div className="composer-tune-confirm">
+                        <p>
+                          Attach to{" "}
+                          <strong>
+                            {threadOptions.find((t) => t.id === selectedThreadId)
+                              ?.title || selectedThreadId}
+                          </strong>
+                          ? This replaces the current conversation, which is kept
+                          as a stopped session.
+                        </p>
+                        <div className="composer-tune-confirm-actions">
+                          <button
+                            type="button"
+                            className="composer-tune-confirm-cancel"
+                            onClick={() => {
+                              setSelectedThreadId("");
+                              setAssistantConfirm(
+                                pendingBackend &&
+                                  pendingBackend !== session?.backend
+                                  ? "switch"
+                                  : null,
+                              );
+                              setAssistantError(null);
+                            }}
+                            disabled={assistantBusy}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            className="composer-tune-confirm-apply"
+                            onClick={() =>
+                              void runAssistantAction(() =>
+                                assistantOps.onAttachThread(
+                                  assistantTargetBackend,
+                                  selectedThreadId,
+                                ),
+                              )
+                            }
+                            disabled={assistantBusy}
+                          >
+                            {assistantBusy ? "Attaching…" : "Attach thread"}
                           </button>
                         </div>
                       </div>

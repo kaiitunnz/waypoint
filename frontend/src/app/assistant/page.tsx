@@ -3,11 +3,13 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AssistantControls, SessionDetail } from "@/components/SessionDetail";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
+  attachAssistant,
+  fetchBackendThreads,
   fetchMe,
   isAuthError,
   reattachAssistant,
@@ -135,6 +137,47 @@ export default function AssistantPage() {
     [handleAuthFailure],
   );
 
+  // Memoised so its identity is stable across renders — the composer keys a
+  // thread-fetch effect on it.
+  const controls = useMemo<AssistantControls>(
+    () => ({
+      backends,
+      supportsReattach: assistant?.supports_reattach ?? false,
+      onSwitchBackend: (backend: Backend) =>
+        applyControl(() => resetAssistant(host, token, { backend })),
+      onAttachThread: (backend: Backend, threadId: string) =>
+        applyControl(() =>
+          attachAssistant(host, token, { backend, thread_id: threadId }),
+        ),
+      onClearContext: () => applyControl(() => resetAssistant(host, token, {})),
+      onTerminate: () => applyControl(() => terminateAssistant(host, token)),
+      onReattach: () => applyControl(() => reattachAssistant(host, token)),
+      listThreads: async (backend: Backend) => {
+        try {
+          const threads = await fetchBackendThreads<{
+            id: string;
+            title: string;
+          }>(host, token, backend);
+          return threads.map((thread) => ({
+            id: thread.id,
+            title: thread.title,
+          }));
+        } catch (err) {
+          if (isAuthError(err)) handleAuthFailure();
+          return [];
+        }
+      },
+    }),
+    [
+      backends,
+      assistant?.supports_reattach,
+      host,
+      token,
+      applyControl,
+      handleAuthFailure,
+    ],
+  );
+
   return (
     <main className="page-shell has-composer">
       <header className="app-bar">
@@ -201,20 +244,7 @@ export default function AssistantPage() {
               sessionId={assistant.session_id}
               onAuthFailure={handleAuthFailure}
               assistant
-              assistantControls={
-                {
-                  backends,
-                  supportsReattach: assistant.supports_reattach,
-                  onSwitchBackend: (backend: Backend) =>
-                    applyControl(() => resetAssistant(host, token, { backend })),
-                  onClearContext: () =>
-                    applyControl(() => resetAssistant(host, token, {})),
-                  onTerminate: () =>
-                    applyControl(() => terminateAssistant(host, token)),
-                  onReattach: () =>
-                    applyControl(() => reattachAssistant(host, token)),
-                } satisfies AssistantControls
-              }
+              assistantControls={controls}
             />
           ) : null}
         </>

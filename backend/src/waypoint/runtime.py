@@ -509,6 +509,12 @@ class SessionRuntime:
     ) -> AssistantSummary:
         """Rebuild the assistant on a fresh thread (clear context / switch backend).
 
+        Clearing context keeps the *current* thread's backend and live config
+        (model / effort / permission mode), so a context wipe doesn't silently
+        revert tuning done from the UI; only an explicit ``backend`` switch
+        overrides them, since model/effort are backend-specific. waypoint.yaml
+        only seeds the first creation, when no live thread exists.
+
         The previous thread is demoted to an ordinary stopped session so its
         transcript survives in the normal session list — it is never deleted.
         Because boot reuses whatever thread is live, the chosen backend persists
@@ -520,22 +526,32 @@ class SessionRuntime:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="the assistant is disabled",
             )
-        chosen = backend or target_backend
+        old_id = self.assistant_session_id
+        old = self.storage.get_session(old_id) if old_id is not None else None
+        chosen = backend or (old.backend if old is not None else target_backend)
         if not self.registry.has_backend(chosen):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"unknown backend: {chosen}",
             )
-        old_id = self.assistant_session_id
-        if old_id is not None and self.storage.get_session(old_id) is not None:
+        # Inherit the live thread's config when staying on the same backend;
+        # an explicit request value always wins. A backend switch starts from
+        # that backend's defaults because model/effort don't transfer.
+        if old is not None and chosen == old.backend:
+            model = model if model is not None else old.model
+            effort = effort if effort is not None else old.effort
+            permission_mode = (
+                permission_mode if permission_mode is not None else old.permission_mode
+            )
+        if old is not None:
             # Release the protection guard, then best-effort stop the old thread.
             # The demoted row lingers as a normal stopped session so its
             # transcript is preserved.
             self.storage.update_session(
-                old_id, source=SessionSource.MANAGED, pinned_at=None
+                old.id, source=SessionSource.MANAGED, pinned_at=None
             )
             with suppress(Exception):
-                await self.terminate(old_id)
+                await self.terminate(old.id)
         created = await self._create_assistant_session(
             chosen, model=model, effort=effort, permission_mode=permission_mode
         )

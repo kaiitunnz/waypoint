@@ -5708,6 +5708,138 @@ html[data-theme="light"] .composer-tune-restart-apply {
   cursor: progress;
 }
 
+/* Assistant lifecycle footer (backend switch / clear context / terminate). */
+.composer-tune-lifecycle {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.composer-tune-lifecycle-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.composer-tune-lifecycle-btn {
+  flex: 1 1 auto;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  padding: 7px 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-strong);
+  background: rgba(8, 11, 16, 0.5);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+html[data-theme="light"] .composer-tune-lifecycle-btn {
+  background: rgba(235, 230, 218, 0.7);
+}
+
+.composer-tune-lifecycle-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.composer-tune-lifecycle-btn:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.composer-tune-lifecycle-btn.is-danger {
+  border-color: rgba(214, 92, 92, 0.5);
+  color: var(--danger);
+}
+
+.composer-tune-lifecycle-btn.is-danger:hover:not(:disabled) {
+  background: rgba(214, 92, 92, 0.14);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.composer-tune-confirm {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: rgba(8, 11, 16, 0.4);
+}
+
+html[data-theme="light"] .composer-tune-confirm {
+  background: rgba(235, 230, 218, 0.6);
+}
+
+.composer-tune-confirm p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.composer-tune-confirm strong {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.composer-tune-confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.composer-tune-confirm-cancel,
+.composer-tune-confirm-apply {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  padding: 7px 12px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.composer-tune-confirm-cancel {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+}
+
+.composer-tune-confirm-cancel:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.composer-tune-confirm-apply {
+  border: 1px solid var(--accent);
+  background: rgba(200, 169, 106, 0.2);
+  color: var(--accent-strong);
+}
+
+.composer-tune-confirm-apply:hover:not(:disabled) {
+  background: rgba(200, 169, 106, 0.3);
+}
+
+.composer-tune-confirm-apply.is-danger {
+  border-color: rgba(214, 92, 92, 0.55);
+  background: rgba(214, 92, 92, 0.18);
+  color: var(--danger);
+}
+
+.composer-tune-confirm-apply.is-danger:hover:not(:disabled) {
+  background: rgba(214, 92, 92, 0.28);
+}
+
+.composer-tune-confirm-cancel:disabled,
+.composer-tune-confirm-apply:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
 .composer-shortcut {
   font-family: var(--font-mono);
   font-size: 0.7rem;

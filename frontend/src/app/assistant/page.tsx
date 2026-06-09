@@ -5,14 +5,20 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { SessionDetail } from "@/components/SessionDetail";
+import { AssistantControls, SessionDetail } from "@/components/SessionDetail";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { fetchMe, isAuthError } from "@/lib/api";
+import {
+  fetchMe,
+  isAuthError,
+  reattachAssistant,
+  resetAssistant,
+  terminateAssistant,
+} from "@/lib/api";
 import { humaniseBackend } from "@/lib/backends";
 import { copyText } from "@/lib/clipboard";
 import { clearToken, readHost, readToken } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
-import { AssistantSummary, SessionStatus } from "@/lib/types";
+import { AssistantSummary, Backend, BackendDescriptor, SessionStatus } from "@/lib/types";
 
 type LoadState = "loading" | "ready" | "disabled" | "error";
 
@@ -63,6 +69,7 @@ export default function AssistantPage() {
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
   const [assistant, setAssistant] = useState<AssistantSummary | null>(null);
+  const [backends, setBackends] = useState<BackendDescriptor[]>([]);
   const [state, setState] = useState<LoadState>("loading");
 
   const handleAuthFailure = useCallback(() => {
@@ -85,6 +92,7 @@ export default function AssistantPage() {
     fetchMe(currentHost, currentToken)
       .then((me) => {
         if (!active) return;
+        setBackends(me.backends ?? []);
         if (me.assistant) {
           setAssistant(me.assistant);
           setState("ready");
@@ -106,6 +114,21 @@ export default function AssistantPage() {
   }, [router, handleAuthFailure]);
 
   useEffect(() => load(), [load]);
+
+  // Run a lifecycle action and adopt the returned summary. Switching backend /
+  // clearing context changes the session id, which remounts SessionDetail via
+  // its key; terminate / reattach keep the id and just refresh the banner.
+  const applyControl = useCallback(
+    async (run: () => Promise<AssistantSummary>) => {
+      try {
+        setAssistant(await run());
+      } catch (err) {
+        if (isAuthError(err)) handleAuthFailure();
+        else console.error(err);
+      }
+    },
+    [handleAuthFailure],
+  );
 
   return (
     <main className="page-shell has-composer">
@@ -167,11 +190,26 @@ export default function AssistantPage() {
           </section>
           {host && token ? (
             <SessionDetail
+              key={assistant.session_id}
               host={host}
               token={token}
               sessionId={assistant.session_id}
               onAuthFailure={handleAuthFailure}
               assistant
+              assistantControls={
+                {
+                  backends,
+                  supportsReattach: assistant.supports_reattach,
+                  onSwitchBackend: (backend: Backend) =>
+                    applyControl(() => resetAssistant(host, token, { backend })),
+                  onClearContext: () =>
+                    applyControl(() => resetAssistant(host, token, {})),
+                  onTerminate: () =>
+                    applyControl(() => terminateAssistant(host, token)),
+                  onReattach: () =>
+                    applyControl(() => reattachAssistant(host, token)),
+                } satisfies AssistantControls
+              }
             />
           ) : null}
         </>

@@ -8,12 +8,23 @@ import { useCallback, useEffect, useState } from "react";
 import { SessionDetail } from "@/components/SessionDetail";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { fetchMe, isAuthError } from "@/lib/api";
+import { humaniseBackend } from "@/lib/backends";
 import { copyText } from "@/lib/clipboard";
 import { clearToken, readHost, readToken } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
-import { AssistantSummary } from "@/lib/types";
+import { AssistantSummary, SessionStatus } from "@/lib/types";
 
 type LoadState = "loading" | "ready" | "disabled" | "error";
+
+const STATUS_LABELS: Record<SessionStatus, string> = {
+  starting: "Starting…",
+  idle: "Ready",
+  waiting_input: "Waiting on you",
+  running: "Working…",
+  interrupted: "Interrupted",
+  exited: "Stopped",
+  error: "Error",
+};
 
 function CopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
@@ -60,16 +71,17 @@ export default function AssistantPage() {
     router.replace("/");
   }, [router]);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     const currentHost = readHost();
     const currentToken = readToken();
     setHost(currentHost);
     setToken(currentToken);
     if (!currentHost || !currentToken) {
       router.replace("/");
-      return;
+      return () => {};
     }
     let active = true;
+    setState("loading");
     fetchMe(currentHost, currentToken)
       .then((me) => {
         if (!active) return;
@@ -92,6 +104,8 @@ export default function AssistantPage() {
       active = false;
     };
   }, [router, handleAuthFailure]);
+
+  useEffect(() => load(), [load]);
 
   return (
     <main className="page-shell has-composer">
@@ -121,26 +135,30 @@ export default function AssistantPage() {
 
       {state === "ready" && assistant ? (
         <>
-          <section className="assistant-banner" aria-label="Assistant thread details">
+          <section className="assistant-banner" aria-label="Assistant details">
             <div className="assistant-banner-lead">
               <span className="assistant-glyph" aria-hidden="true">
                 ✦
               </span>
               <div className="assistant-banner-text">
-                <p className="assistant-banner-eyebrow">{assistant.backend}</p>
+                <p className="assistant-banner-eyebrow">
+                  {humaniseBackend(assistant.backend)}
+                </p>
                 <p className="assistant-banner-note">
-                  One persistent thread. Recover it anytime with the session id
-                  below.
+                  Your persistent assistant — ask about this host or your running
+                  sessions.
                 </p>
               </div>
-              <span className={`assistant-status assistant-status-${assistant.status}`}>
-                {assistant.status.replace("_", " ")}
+              <span
+                className={`assistant-status assistant-status-${assistant.status}`}
+              >
+                {STATUS_LABELS[assistant.status] ?? assistant.status}
               </span>
             </div>
-            <div className="assistant-ids">
-              {/* The backend's own session/thread id (the one you'd pass to
-                  `claude --resume` etc.), falling back to the Waypoint id only
-                  when the backend exposes none. */}
+            {/* The backend's own session/thread id (for `claude --resume` and
+                the like) is a recovery fallback, not headline info — keep it as
+                a quiet footnote. */}
+            <div className="assistant-banner-foot">
               <CopyField
                 label="session id"
                 value={assistant.native_thread_id ?? assistant.session_id}
@@ -153,6 +171,7 @@ export default function AssistantPage() {
               token={token}
               sessionId={assistant.session_id}
               onAuthFailure={handleAuthFailure}
+              assistant
             />
           ) : null}
         </>
@@ -165,15 +184,19 @@ export default function AssistantPage() {
           </span>
           <h2>No assistant configured</h2>
           <p className="muted">
-            Add an <code>assistant</code> block to <code>waypoint.yaml</code> and
-            restart the backend to bring up your personal assistant.
+            Your assistant isn’t set up yet. On the host, add an{" "}
+            <code>assistant</code> block to <code>waypoint.yaml</code> and restart
+            the backend.
           </p>
-          <pre className="assistant-snippet">
-            <code>{`assistant:
+          <details className="assistant-snippet-details">
+            <summary>Show config example</summary>
+            <pre className="assistant-snippet">
+              <code>{`assistant:
   backend: claude_code
   model: opus
   permission_mode: bypassPermissions`}</code>
-          </pre>
+            </pre>
+          </details>
         </section>
       ) : null}
 
@@ -191,12 +214,12 @@ export default function AssistantPage() {
           </span>
           <h2>Couldn’t load the assistant</h2>
           <p className="muted">
-            The backend didn’t respond. Check that Waypoint is running, then{" "}
-            <Link className="back-link" href="/assistant">
-              retry
-            </Link>
-            .
+            The backend didn’t respond. Check that Waypoint is running, then
+            retry.
           </p>
+          <button type="button" className="primary" onClick={() => load()}>
+            Retry
+          </button>
         </section>
       ) : null}
     </main>

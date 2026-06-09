@@ -26,6 +26,8 @@ Use GitHub Issues directly for active bugs and feature requests.
 - `frontend/` — Next.js PWA client
 - `3rdparty/codex/` — pinned Codex submodule used for the local app-server SDK
 
+A single long-lived **personal assistant** thread — which answers host questions, grounds itself in your running sessions, and manages them via the `waypoint sessions` CLI — can be enabled in `waypoint.yaml`; see [`docs/personal_assistant.md`](docs/personal_assistant.md).
+
 ## Supported agent versions
 
 Waypoint speaks to Claude Code, Codex, and OpenCode through wire formats that change between releases (stream-json envelopes, codex app-server RPCs, hook-event shapes, REST/SSE event streams). Bumps outside the tested range are likely to work but are not guaranteed.

@@ -39,13 +39,38 @@ unaffected.
 
 ## Lifecycle
 
-- On startup the runtime reuses a still-alive assistant whose backend matches
-  the configured one.
-- If the configured backend changed, or the previous thread exited and cannot
-  be reattached, a fresh thread is created. The previous thread is **demoted to
-  an ordinary session** (its transcript is preserved and it becomes deletable),
-  never destroyed.
-- The assistant cannot be deleted or terminated through the API.
+- On startup the runtime reuses any still-alive assistant thread that lives in
+  the managed workspace, **regardless of its backend**. The live thread is the
+  source of truth, so a backend chosen from the UI survives a redeploy. The
+  `assistant` block in `waypoint.yaml` only seeds the *first* creation; editing
+  `assistant.backend` later has no effect while a thread exists — clear the
+  context to re-seed.
+- If no live thread exists (first boot, or the previous one exited), a fresh
+  thread is created from the `waypoint.yaml` defaults.
+- The assistant cannot be **deleted**, and the generic session terminate/delete
+  endpoints reject it (it is a protected singleton).
+
+### Controls (assistant page)
+
+The settings popover next to the composer exposes the assistant's lifecycle:
+
+- **Switch backend** — rebuild the assistant on a different coding agent. The
+  conversation cannot migrate between backends, so this starts a fresh thread
+  at the new backend's default model/effort/permission mode.
+- **Clear context** — start a fresh thread on the same backend.
+- **Terminate / Reattach** — stop the thread (keeping it the pinned singleton)
+  and later revive the same conversation. Reattach is offered only when the
+  backend can resume after exit.
+- **Model / effort / permission mode** — applied live to the running thread; no
+  context is lost.
+
+Switching backend and clearing context discard the conversation: the previous
+thread is **demoted to an ordinary stopped session** (its transcript is
+preserved and it becomes deletable), never destroyed.
+
+A terminated assistant survives reattach only within the running deployment; a
+redeploy cannot reattach an exited thread, so it demotes that thread to a normal
+stopped session and creates a fresh assistant.
 
 Both the Waypoint session id and the backend-native thread id (e.g. the value
 for `claude --resume`) are surfaced on the assistant page and via `/api/me`, so

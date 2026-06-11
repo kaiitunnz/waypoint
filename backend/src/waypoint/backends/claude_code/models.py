@@ -9,8 +9,9 @@ from waypoint.schemas import BackendModelOption
 
 # Effort levels gated by the binary's per-model checks (`vy`/`L4_`/`k4_`):
 # opus-4-6/4-7/4-8 and sonnet-4-6 expose the full set; haiku and older
-# opus/sonnet don't accept --effort at all.
+# opus/sonnet don't accept --effort at all. Fable 5 adds `max`.
 CLAUDE_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh")
+CLAUDE_FABLE_EFFORT_LEVELS: tuple[str, ...] = CLAUDE_EFFORT_LEVELS + ("max",)
 
 # Claude's CLI only exposes a small fixed catalog of aliases. The adapter may
 # see either the human-facing alias (``opus[1m]``) or a resolved API model id
@@ -22,14 +23,17 @@ CLAUDE_MODEL_ALIASES: dict[str, str] = {
     "claude-sonnet-4-6": "sonnet",
     "claude-sonnet-4-5": "sonnet",
     "claude-haiku-4-5": "haiku",
+    "claude-fable-5": "fable",
 }
 
 CLAUDE_CONTEXT_WINDOWS: dict[str, int] = {
     "opus": 200_000,
     "sonnet": 200_000,
     "haiku": 200_000,
+    "fable": 200_000,
     "opus[1m]": 1_000_000,
     "sonnet[1m]": 1_000_000,
+    "fable[1m]": 1_000_000,
 }
 
 DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
@@ -67,6 +71,20 @@ DEFAULT_CLAUDE_MODELS: tuple[BackendModelOption, ...] = (
         supported_efforts=list(CLAUDE_EFFORT_LEVELS),
         default_effort="high",
     ),
+    BackendModelOption(
+        id="fable",
+        label="Fable 5",
+        description="Most capable for the hardest, longest-running tasks",
+        supported_efforts=list(CLAUDE_FABLE_EFFORT_LEVELS),
+        default_effort="high",
+    ),
+    BackendModelOption(
+        id="fable[1m]",
+        label="Fable 5 (1M context)",
+        description="Longest sessions with very large codebases",
+        supported_efforts=list(CLAUDE_FABLE_EFFORT_LEVELS),
+        default_effort="high",
+    ),
 )
 
 
@@ -87,6 +105,8 @@ def normalize_claude_model_id(model: str | None) -> str | None:
         return "sonnet"
     if candidate.startswith("claude-haiku-"):
         return "haiku"
+    if candidate.startswith("claude-fable-"):
+        return "fable"
     return candidate
 
 

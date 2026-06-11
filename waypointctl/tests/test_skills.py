@@ -11,7 +11,9 @@ from waypointctl.cli import app
 
 
 def _make_repo(
-    home: Path, *, skills: tuple[str, ...] = ("waypoint-subagents",)
+    home: Path,
+    *,
+    skills: tuple[str, ...] = ("waypoint-subagents", "waypoint-comms"),
 ) -> Path:
     (home / "backend").mkdir(parents=True)
     (home / "frontend").mkdir()
@@ -125,6 +127,18 @@ def test_helper_install_status_uninstall_roundtrip(tmp_path: Path) -> None:
     removed = _run_script(repo, "uninstall", "--skill-dir", str(dest))
     assert removed.returncode == 0
     assert not link.exists()
+
+
+def test_helper_default_installs_both_skills(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path / "repo")
+    _copy_skills_script(repo)
+    dest = tmp_path / "dest"
+
+    result = _run_script(repo, "install", "--skill-dir", str(dest))
+
+    assert result.returncode == 0
+    assert (dest / "waypoint-subagents").is_symlink()
+    assert (dest / "waypoint-comms").is_symlink()
 
 
 def test_helper_install_is_idempotent(tmp_path: Path) -> None:

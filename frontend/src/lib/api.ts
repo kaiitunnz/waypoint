@@ -7,6 +7,8 @@ import {
   Backend,
   BackendDescriptor,
   BackendModelListResponse,
+  BoardChannel,
+  BoardEntry,
   EventRecord,
   EventsPage,
   MeResponse,
@@ -530,6 +532,88 @@ export async function clearScheduleHistory(host: string, token: string): Promise
   await ensureOk(response, "failed to clear schedule history");
   const payload = (await response.json()) as { removed?: number };
   return payload.removed ?? 0;
+}
+
+export async function fetchBoardChannels(
+  host: string,
+  token: string,
+): Promise<BoardChannel[]> {
+  const response = await fetch(`${host}/api/board`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch board channels");
+  const payload = await response.json();
+  return (payload.channels ?? []) as BoardChannel[];
+}
+
+export async function fetchBoardEntries(
+  host: string,
+  token: string,
+  channel: string,
+  options: { since?: number; key?: string } = {},
+): Promise<BoardEntry[]> {
+  const params = new URLSearchParams();
+  if (options.since !== undefined) {
+    params.set("since", String(options.since));
+  }
+  if (options.key !== undefined) {
+    params.set("key", options.key);
+  }
+  const suffix = params.size ? `?${params.toString()}` : "";
+  const response = await fetch(
+    `${host}/api/board/${encodeURIComponent(channel)}${suffix}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    },
+  );
+  await ensureOk(response, "failed to fetch board entries");
+  const payload = await response.json();
+  return (payload.entries ?? []) as BoardEntry[];
+}
+
+export async function postBoardEntry(
+  host: string,
+  token: string,
+  channel: string,
+  body: { text: string; key?: string | null; metadata?: Record<string, unknown> },
+): Promise<BoardEntry> {
+  const response = await fetch(
+    `${host}/api/board/${encodeURIComponent(channel)}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text: body.text,
+        key: body.key ?? null,
+        metadata: body.metadata ?? {},
+      }),
+    },
+  );
+  await ensureOk(response, "failed to post board entry");
+  const payload = await response.json();
+  return payload.entry as BoardEntry;
+}
+
+export async function clearBoardChannel(
+  host: string,
+  token: string,
+  channel: string,
+): Promise<number> {
+  const response = await fetch(
+    `${host}/api/board/${encodeURIComponent(channel)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  await ensureOk(response, "failed to clear board channel");
+  const payload = (await response.json()) as { cleared?: number };
+  return payload.cleared ?? 0;
 }
 
 export async function deleteSession(host: string, token: string, sessionId: string): Promise<void> {

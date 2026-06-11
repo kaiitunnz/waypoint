@@ -780,17 +780,31 @@ export default function HomePage() {
           onSetTitle={handleSetTitle}
         />
       ) : null}
-      {token && assistant ? (
-        <Link
-          className="assistant-fab"
-          href="/assistant"
-          aria-label="Open personal assistant"
-        >
-          <span className="assistant-fab-glyph" aria-hidden="true">
-            ✦
-          </span>
-          <span className="assistant-fab-label">Assistant</span>
-        </Link>
+      {token ? (
+        <div className="fab-stack">
+          <Link
+            className="board-fab"
+            href="/board"
+            aria-label="Open shared blackboard"
+          >
+            <span className="board-fab-glyph" aria-hidden="true">
+              ▤
+            </span>
+            <span className="board-fab-label">Board</span>
+          </Link>
+          {assistant ? (
+            <Link
+              className="assistant-fab"
+              href="/assistant"
+              aria-label="Open personal assistant"
+            >
+              <span className="assistant-fab-glyph" aria-hidden="true">
+                ✦
+              </span>
+              <span className="assistant-fab-label">Assistant</span>
+            </Link>
+          ) : null}
+        </div>
       ) : null}
     </main>
   );

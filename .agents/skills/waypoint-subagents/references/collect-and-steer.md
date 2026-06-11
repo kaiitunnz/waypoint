@@ -31,17 +31,15 @@ immediately; it does not wait for the child to finish the new turn.
 ## Answer an approval
 
 A child sitting in `waiting_input` may be blocked on an approval rather than
-asking you for more work. Read the pending request from its events first, then:
+asking you for more work:
 
 ```bash
-waypoint sessions approve <session-id> <decision>
-waypoint sessions approve <session-id> <decision> --approval-id <id>
-waypoint sessions approve <session-id> <decision> --text <message>
+waypoint sessions approve <session-id> <decision> [--approval-id <id>] [--text <message>]
 ```
 
-Pass `--approval-id` when multiple approvals are pending. Do not auto-approve
-destructive, privileged, or unclear requests on a child's behalf — surface them
-to the user, exactly as you would for your own session.
+See `references/permissions.md` for reading the pending request, the
+backend-specific `<decision>` values, tool-use vs. plan approvals, and choosing a
+child's permission mode at spawn time so it stalls less often.
 
 ## Interrupt a stuck child
 

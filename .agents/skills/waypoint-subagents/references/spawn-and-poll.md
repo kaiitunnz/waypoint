@@ -18,6 +18,8 @@ waypoint sessions start \
   should inherit your own working directory.
 - Always set the `subagent:` title prefix so the session is recognizable as one
   you own.
+- The child **inherits your permission mode** automatically; pass
+  `--permission-mode` only to override it. See `references/permissions.md`.
 - Capture the returned session id. Keep it for the rest of the turn.
 
 Then send the task as the first input:

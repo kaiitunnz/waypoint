@@ -35,8 +35,41 @@ def _config(tmp_path: Path) -> Path:
 def test_help_lists_command_groups() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for name in ("serve", "doctor", "backends", "reset", "session", "sessions"):
+    for name in (
+        "serve",
+        "doctor",
+        "backends",
+        "reset",
+        "session",
+        "sessions",
+        "board",
+    ):
         assert name in result.stdout
+
+
+def test_board_help_lists_commands() -> None:
+    result = runner.invoke(app, ["board", "--help"])
+    assert result.exit_code == 0
+    for name in ("post", "read", "channels", "clear"):
+        assert name in result.stdout
+
+
+def test_board_post_rejects_malformed_meta(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "board",
+            "post",
+            "topic:x",
+            "hello",
+            "--meta",
+            "novalue",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "key=value" in result.output
 
 
 def test_config_is_a_top_level_option(tmp_path: Path) -> None:

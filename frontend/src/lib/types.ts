@@ -288,6 +288,22 @@ export interface BackendModelListResponse {
   supports_free_text?: boolean;
 }
 
+export interface BoardEntry {
+  id: number;
+  channel: string;
+  author_session_id?: string | null;
+  key?: string | null;
+  text: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface BoardChannel {
+  channel: string;
+  entry_count: number;
+  last_created_at: string;
+}
+
 export interface SessionEnvelope {
   type:
     | "session_list_update"
@@ -296,6 +312,7 @@ export interface SessionEnvelope {
     | "terminal_snapshot_ready"
     | "auth_revoked"
     | "schedule_list_update"
+    | "board_update"
     | "clipboard_copy";
   payload: Record<string, unknown>;
 }

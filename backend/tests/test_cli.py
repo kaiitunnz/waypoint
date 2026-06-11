@@ -35,7 +35,7 @@ def _config(tmp_path: Path) -> Path:
 def test_help_lists_command_groups() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for name in ("serve", "doctor", "reset", "session", "sessions"):
+    for name in ("serve", "doctor", "backends", "reset", "session", "sessions"):
         assert name in result.stdout
 
 

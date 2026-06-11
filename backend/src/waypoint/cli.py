@@ -128,6 +128,12 @@ def doctor(ctx: typer.Context) -> None:
 
 
 @app.command()
+def backends(ctx: typer.Context) -> None:
+    """List backends and their capabilities (permission modes, approval decisions)."""
+    _emit(_settings_from_ctx(ctx), lambda c: {"backends": c.list_backends()})
+
+
+@app.command()
 def reset(
     ctx: typer.Context,
     yes: Annotated[
@@ -326,6 +332,22 @@ def sessions_terminate(
 ) -> None:
     """Terminate a session."""
     _emit(_settings_from_ctx(ctx), lambda c: {"session": c.terminate(session_id)})
+
+
+@sessions_app.command("delete")
+def sessions_delete(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Drop the record even if graceful terminate fails (wedged adapter).",
+        ),
+    ] = False,
+) -> None:
+    """Terminate (if needed) and remove a session record."""
+    _emit(_settings_from_ctx(ctx), lambda c: c.delete(session_id, force=force))
 
 
 @sessions_app.command("approve")

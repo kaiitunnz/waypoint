@@ -30,11 +30,20 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
             return httpx.Response(401, json={"detail": "invalid token"})
         if request.url.path == "/api/sessions" and request.method == "GET":
             return httpx.Response(200, json={"sessions": [{"id": "s1"}]})
+        if request.url.path == "/api/backends" and request.method == "GET":
+            return httpx.Response(
+                200, json={"backends": [{"id": "claude_code"}, {"id": "codex"}]}
+            )
         if request.url.path == "/api/sessions" and request.method == "POST":
             payload = json.loads(request.content)
             return httpx.Response(200, json={"session": {"id": "new", **payload}})
         if request.url.path == "/api/sessions/s1/input":
             return httpx.Response(200, json={"session": {"id": "s1"}})
+        if request.url.path.startswith("/api/sessions/") and request.method == "DELETE":
+            state["delete_force"] = request.url.params.get("force")
+            return httpx.Response(
+                200, json={"deleted": request.url.path.rsplit("/", 1)[-1]}
+            )
         if request.url.path == "/api/sessions/missing":
             return httpx.Response(404, json={"detail": "session not found"})
         return httpx.Response(200, json={"session": {"id": "ok"}})
@@ -57,6 +66,23 @@ def test_uses_explicit_env_token_without_login(
     with _client(_settings(tmp_path), state) as client:
         assert client.list_sessions() == [{"id": "s1"}]
     assert state["logins"] == 0
+
+
+def test_list_backends(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        assert client.list_backends() == [{"id": "claude_code"}, {"id": "codex"}]
+
+
+def test_delete_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        assert client.delete("s1") == {"deleted": "s1"}
+        assert state["delete_force"] is None
+        assert client.delete("s1", force=True) == {"deleted": "s1"}
+        assert state["delete_force"] == "true"
 
 
 def test_reads_cached_token_file(

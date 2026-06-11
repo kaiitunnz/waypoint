@@ -135,6 +135,12 @@ class WaypointClient:
         ).json()["session"]
         return data
 
+    def list_backends(self) -> list[dict[str, Any]]:
+        data: list[dict[str, Any]] = self._request("GET", "/api/backends").json()[
+            "backends"
+        ]
+        return data
+
     def get_events(
         self,
         session_id: str,
@@ -199,6 +205,14 @@ class WaypointClient:
         data: dict[str, Any] = self._request(
             "POST", f"/api/sessions/{session_id}/terminate"
         ).json()["session"]
+        return data
+
+    def delete(self, session_id: str, *, force: bool = False) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "DELETE",
+            f"/api/sessions/{session_id}",
+            params={"force": force} if force else None,
+        ).json()
         return data
 
     def approve(

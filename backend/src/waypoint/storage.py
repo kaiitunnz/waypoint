@@ -10,6 +10,8 @@ from typing import Any
 from pydantic import BaseModel
 
 from waypoint.schemas import (
+    BoardChannel,
+    BoardEntry,
     EventKind,
     EventRecord,
     ScheduledSessionRecord,
@@ -160,6 +162,20 @@ class Storage:
                 session_id TEXT,
                 failure_reason TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS board_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel TEXT NOT NULL,
+                author_session_id TEXT,
+                key TEXT,
+                text TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                UNIQUE(channel, key)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_board_channel
+                ON board_entries(channel, id);
             """)
         self._ensure_column("scheduled_sessions", "permission_mode", "TEXT")
         self._ensure_column("scheduled_sessions", "model", "TEXT")
@@ -285,6 +301,118 @@ class Storage:
         sessions_deleted = cursor.rowcount or 0
         self.connection.commit()
         return sessions_deleted > 0 or events_deleted > 0
+
+    @_synchronized
+    def add_board_entry(
+        self,
+        channel: str,
+        text: str,
+        *,
+        key: str | None = None,
+        author_session_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> BoardEntry:
+        now = datetime.now(UTC)
+        meta = metadata or {}
+        meta_json = json.dumps(meta)
+        if key is None:
+            cursor = self.connection.execute(
+                """
+                INSERT INTO board_entries
+                    (channel, author_session_id, key, text, metadata, created_at)
+                VALUES (?, ?, NULL, ?, ?, ?)
+                """,
+                (channel, author_session_id, text, meta_json, now.isoformat()),
+            )
+            entry_id = int(cursor.lastrowid or 0)
+        else:
+            # Latest post for a ``(channel, key)`` cell overwrites in place,
+            # keeping the original row id so key reads stay stable.
+            self.connection.execute(
+                """
+                INSERT INTO board_entries
+                    (channel, author_session_id, key, text, metadata, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(channel, key) DO UPDATE SET
+                    author_session_id = excluded.author_session_id,
+                    text = excluded.text,
+                    metadata = excluded.metadata,
+                    created_at = excluded.created_at
+                """,
+                (channel, author_session_id, key, text, meta_json, now.isoformat()),
+            )
+            row = self.connection.execute(
+                "SELECT id FROM board_entries WHERE channel = ? AND key = ?",
+                (channel, key),
+            ).fetchone()
+            entry_id = int(row["id"])
+        self.connection.commit()
+        return BoardEntry(
+            id=entry_id,
+            channel=channel,
+            author_session_id=author_session_id,
+            key=key,
+            text=text,
+            metadata=meta,
+            created_at=now,
+        )
+
+    @_synchronized
+    def list_board_entries(
+        self,
+        channel: str,
+        *,
+        since: int | None = None,
+        key: str | None = None,
+    ) -> list[BoardEntry]:
+        query = "SELECT * FROM board_entries WHERE channel = ?"
+        params: list[Any] = [channel]
+        if key is not None:
+            query += " AND key = ?"
+            params.append(key)
+        if since is not None:
+            query += " AND id > ?"
+            params.append(since)
+        query += " ORDER BY id ASC"
+        rows = self.connection.execute(query, params).fetchall()
+        return [self._board_entry_from_row(row) for row in rows]
+
+    @_synchronized
+    def list_board_channels(self) -> list[BoardChannel]:
+        rows = self.connection.execute("""
+            SELECT channel,
+                   COUNT(*) AS entry_count,
+                   MAX(created_at) AS last_created_at
+            FROM board_entries
+            GROUP BY channel
+            ORDER BY last_created_at DESC
+            """).fetchall()
+        return [
+            BoardChannel(
+                channel=row["channel"],
+                entry_count=int(row["entry_count"]),
+                last_created_at=datetime.fromisoformat(row["last_created_at"]),
+            )
+            for row in rows
+        ]
+
+    @_synchronized
+    def clear_board_channel(self, channel: str) -> int:
+        cursor = self.connection.execute(
+            "DELETE FROM board_entries WHERE channel = ?",
+            (channel,),
+        )
+        self.connection.commit()
+        return cursor.rowcount or 0
+
+    @_synchronized
+    def prune_board_for_session(self, session_id: str) -> int:
+        cursor = self.connection.execute(
+            "DELETE FROM board_entries WHERE author_session_id = ?",
+            (session_id,),
+        )
+        self.connection.commit()
+        return cursor.rowcount or 0
 
     @_synchronized
     def append_event(self, event: EventRecord) -> EventRecord:
@@ -684,6 +812,17 @@ class Storage:
         payload["ts"] = datetime.fromisoformat(payload["ts"])
         payload["metadata"] = json.loads(payload["metadata"])
         return EventRecord.model_validate(payload)
+
+    def _board_entry_from_row(self, row: sqlite3.Row) -> BoardEntry:
+        payload = dict(row)
+        payload["created_at"] = datetime.fromisoformat(payload["created_at"])
+        raw_metadata = payload.get("metadata") or "{}"
+        try:
+            decoded = json.loads(raw_metadata)
+        except json.JSONDecodeError:
+            decoded = {}
+        payload["metadata"] = decoded if isinstance(decoded, dict) else {}
+        return BoardEntry.model_validate(payload)
 
     def _serialize_field(self, value: Any) -> Any:
         if isinstance(value, datetime):

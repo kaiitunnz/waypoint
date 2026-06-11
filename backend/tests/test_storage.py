@@ -728,6 +728,85 @@ def test_append_event_stamps_envelope_version(tmp_path) -> None:
     assert explicit.metadata["version"] == 2
 
 
+def test_board_append_log_is_ordered_and_keyless(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    first = storage.add_board_entry("topic:plan", "hello", author_session_id="s1")
+    second = storage.add_board_entry("topic:plan", "world", author_session_id="s2")
+    assert first.key is None
+    assert second.id > first.id
+    entries = storage.list_board_entries("topic:plan")
+    assert [e.text for e in entries] == ["hello", "world"]
+    assert [e.author_session_id for e in entries] == ["s1", "s2"]
+
+
+def test_board_keyed_entry_upserts_in_place(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    created = storage.add_board_entry(
+        "team:p1", "draft", key="status", metadata={"v": 1}
+    )
+    updated = storage.add_board_entry(
+        "team:p1", "final", key="status", metadata={"v": 2}
+    )
+    # Same cell, stable id, latest value wins.
+    assert updated.id == created.id
+    rows = storage.list_board_entries("team:p1", key="status")
+    assert len(rows) == 1
+    assert rows[0].text == "final"
+    assert rows[0].metadata == {"v": 2}
+
+
+def test_board_keyed_and_keyless_coexist_per_channel(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    storage.add_board_entry("topic:x", "log-a")
+    storage.add_board_entry("topic:x", "log-b")
+    storage.add_board_entry("topic:x", "val", key="k1")
+    storage.add_board_entry("topic:x", "val2", key="k2")
+    assert len(storage.list_board_entries("topic:x")) == 4
+    keyed = storage.list_board_entries("topic:x", key="k1")
+    assert [e.text for e in keyed] == ["val"]
+
+
+def test_board_list_entries_since_cursor(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    a = storage.add_board_entry("topic:c", "a")
+    storage.add_board_entry("topic:c", "b")
+    storage.add_board_entry("topic:c", "c")
+    fresh = storage.list_board_entries("topic:c", since=a.id)
+    assert [e.text for e in fresh] == ["b", "c"]
+
+
+def test_board_list_channels_summarizes(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    storage.add_board_entry("topic:a", "1")
+    storage.add_board_entry("topic:a", "2")
+    storage.add_board_entry("topic:b", "1")
+    channels = {c.channel: c for c in storage.list_board_channels()}
+    assert channels["topic:a"].entry_count == 2
+    assert channels["topic:b"].entry_count == 1
+
+
+def test_board_clear_channel_removes_only_that_channel(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    storage.add_board_entry("topic:a", "1")
+    storage.add_board_entry("topic:a", "2")
+    storage.add_board_entry("topic:b", "1")
+    removed = storage.clear_board_channel("topic:a")
+    assert removed == 2
+    assert storage.list_board_entries("topic:a") == []
+    assert len(storage.list_board_entries("topic:b")) == 1
+
+
+def test_board_prune_for_session_drops_authored_rows(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    storage.add_board_entry("topic:a", "mine", author_session_id="s1")
+    storage.add_board_entry("topic:a", "theirs", author_session_id="s2")
+    storage.add_board_entry("topic:a", "anon")
+    removed = storage.prune_board_for_session("s1")
+    assert removed == 1
+    remaining = storage.list_board_entries("topic:a")
+    assert [e.text for e in remaining] == ["theirs", "anon"]
+
+
 def test_storage_legacy_db_gets_launch_mode_column(tmp_path) -> None:
     """A pre-launch_mode SQLite file gains the column with default 'auto'."""
     import sqlite3

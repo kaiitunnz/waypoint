@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 import secrets
 import shutil
@@ -18,7 +19,7 @@ from waypoint.assistant_assets import AssistantAssetError, ensure_assistant_asse
 from waypoint.backends import BackendRegistry, get_registry
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
-from waypoint.backends.tmux.normalize import TerminalNormalizer
+from waypoint.backends.tmux.normalize import NormalizedChunk, TerminalNormalizer
 from waypoint.builtin_completions import waypoint_builtin_completions
 from waypoint.git_meta import resolve_git_meta
 from waypoint.launch_targets import SshLaunchTargetConfig
@@ -53,6 +54,33 @@ log = logging.getLogger("waypoint.runtime")
 
 SAFE_NAME = re.compile(r"[^a-zA-Z0-9_-]+")
 CompletionCacheKey = tuple[str, str]
+
+
+def _raw_log_end_offset(path: Path) -> int:
+    # Returns a text-mode tell() cookie at EOF, matching the offsets
+    # _ingest_raw_output records so a later seek() round-trips cleanly.
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as handle:
+            handle.seek(0, os.SEEK_END)
+            return handle.tell()
+    except OSError:
+        return 0
+
+
+def _read_and_normalize(
+    normalizer: TerminalNormalizer,
+    session_id: str,
+    path: Path,
+    offset: int,
+    start_sequence: int,
+) -> tuple[int, NormalizedChunk | None]:
+    with path.open("r", encoding="utf-8", errors="ignore") as handle:
+        handle.seek(offset)
+        chunk = handle.read()
+        new_offset = handle.tell()
+    if not chunk.strip():
+        return new_offset, None
+    return new_offset, normalizer.normalize(session_id, chunk, start_sequence)
 
 
 class BroadcastHub:
@@ -1566,6 +1594,15 @@ class SessionRuntime:
         session = self.get_session(session_id)
         if session.transport != TMUX_TRANSPORT_ID:
             return
+        if session_id not in self.file_offsets:
+            # A missing offset means this process has never ingested this raw
+            # log — typically a boot-time restore. The prior run already
+            # persisted its events, so resume from the current end instead of
+            # replaying (and synchronously re-normalizing) the whole backlog,
+            # which blocks the event loop and stalls startup.
+            self.file_offsets[session_id] = _raw_log_end_offset(
+                Path(session.raw_log_path)
+            )
         self.monitor_tasks[session_id] = asyncio.create_task(
             self._monitor_session(session_id)
         )
@@ -1635,15 +1672,20 @@ class SessionRuntime:
         if not raw_log_path.exists():
             return
         offset = self.file_offsets.get(session_id, 0)
-        with raw_log_path.open("r", encoding="utf-8", errors="ignore") as handle:
-            handle.seek(offset)
-            chunk = handle.read()
-            self.file_offsets[session_id] = handle.tell()
-        if not chunk.strip():
-            return
-        normalized = self.normalizer.normalize(
-            session_id, chunk, self.storage.next_sequence(session_id)
+        # Read + normalize off the event loop: a large chunk (or slow
+        # storage) would otherwise block every other task, including
+        # uvicorn's bind during boot restore.
+        new_offset, normalized = await asyncio.to_thread(
+            _read_and_normalize,
+            self.normalizer,
+            session_id,
+            raw_log_path,
+            offset,
+            self.storage.next_sequence(session_id),
         )
+        self.file_offsets[session_id] = new_offset
+        if normalized is None:
+            return
         for event in normalized.events:
             persisted = self.storage.append_event(event)
             self._append_structured_log(session_id, persisted)

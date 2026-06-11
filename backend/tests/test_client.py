@@ -135,6 +135,19 @@ def test_create_session_posts_payload(
     assert session["model"] == "gpt-5"
 
 
+def test_create_session_passes_spawner_session_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        session = client.create_session(
+            backend="claude_code", cwd="/tmp", spawner_session_id="parent-1"
+        )
+    # The mock echoes the POST body back into the session payload.
+    assert session["spawner_session_id"] == "parent-1"
+
+
 def test_error_response_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
     state: dict = {}

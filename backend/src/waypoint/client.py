@@ -168,6 +168,7 @@ class WaypointClient:
         model: str | None = None,
         effort: str | None = None,
         permission_mode: str | None = None,
+        spawner_session_id: str | None = None,
         args: list[str] | None = None,
     ) -> dict[str, Any]:
         body = {
@@ -178,6 +179,7 @@ class WaypointClient:
             "model": model,
             "effort": effort,
             "permission_mode": permission_mode,
+            "spawner_session_id": spawner_session_id,
             "args": args or [],
         }
         data: dict[str, Any] = self._request("POST", "/api/sessions", json=body).json()[

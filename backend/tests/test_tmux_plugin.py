@@ -541,9 +541,15 @@ class _FakeRuntime:
         _cwd: str,
         *,
         allocate_tty: bool = False,
+        session_id: str | None = None,
     ) -> list[str]:
         self.command_calls.append(
-            {"backend": backend, "args": args, "allocate_tty": allocate_tty}
+            {
+                "backend": backend,
+                "args": args,
+                "allocate_tty": allocate_tty,
+                "session_id": session_id,
+            }
         )
         return [backend, *args]
 

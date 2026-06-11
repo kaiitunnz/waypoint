@@ -179,6 +179,11 @@ class SessionRecord(BaseModel):
     raw_log_path: str
     structured_log_path: str
     pinned_at: datetime | None = None
+    # The session that spawned this one, if any. Set when a session is created
+    # by an agent running inside another session (the CLI stamps it from
+    # ``WAYPOINT_SESSION_ID``). Used to inherit the spawner's permission mode
+    # and to identify subagent sessions. ``None`` for user/top-level sessions.
+    spawner_session_id: str | None = None
     permission_mode: str | None = None
     model: str | None = None
     effort: str | None = None
@@ -278,6 +283,10 @@ class SessionCreateRequest(BaseModel):
     args: list[str] = Field(default_factory=list)
     config_overrides: list[str] = Field(default_factory=list)
     source_mode: SessionSource = SessionSource.MANAGED
+    # Set by the CLI from ``WAYPOINT_SESSION_ID`` when an agent inside a session
+    # spawns this one. When ``permission_mode`` is unset and the spawner shares
+    # this backend, the child inherits the spawner's mode.
+    spawner_session_id: str | None = None
     permission_mode: str | None = None
     model: str | None = None
     effort: str | None = None

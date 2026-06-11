@@ -1234,6 +1234,9 @@ class ClaudeCliAdapter:
             # Enable the dynamic-workflow feature so the Workflow tool is
             # available and routes its approval through `can_use_tool`.
             "CLAUDE_CODE_WORKFLOWS": "1",
+            # Let an agent (and the waypoint CLI it runs) know its own session,
+            # so child sessions it spawns can inherit this session's posture.
+            "WAYPOINT_SESSION_ID": session_id,
         }
         return ClaudeLaunchSpec(
             args=args,

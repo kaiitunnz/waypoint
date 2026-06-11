@@ -1124,6 +1124,9 @@ def test_build_local_launch_spec_uses_session_cli_mode(monkeypatch) -> None:
     assert args[args.index("--permission-prompt-tool") + 1] == "stdio"
     assert "--settings" not in args
     assert spec.env is not None and spec.env.get("CLAUDE_CODE_WORKFLOWS") == "1"
+    # The session id is exported so an agent (and its waypoint CLI) can inherit
+    # this session's posture into children it spawns.
+    assert spec.env.get("WAYPOINT_SESSION_ID") == "sess"
 
 
 def test_build_local_launch_spec_emits_model_flag(monkeypatch) -> None:

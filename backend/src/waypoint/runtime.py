@@ -261,7 +261,7 @@ class SessionRuntime:
         git_meta = await resolve_git_meta(request.cwd)
         permission_mode = (
             self.registry.get(request.backend).validate_permission_mode(
-                request.permission_mode
+                self._effective_permission_mode(request)
             )
             or "default"
         )
@@ -330,6 +330,22 @@ class SessionRuntime:
         )
         self._warm_command_completions(session)
         return session
+
+    def _effective_permission_mode(self, request: SessionCreateRequest) -> str | None:
+        """Resolve the permission mode to validate for a new session.
+
+        An explicitly requested mode always wins (and may widen). Otherwise a
+        child inherits its spawner's mode when they share a backend — modes are
+        not portable across backends, so a cross-backend spawn falls back to the
+        default rather than copying an invalid value.
+        """
+        if request.permission_mode is not None:
+            return request.permission_mode
+        if request.spawner_session_id:
+            spawner = self.storage.get_session(request.spawner_session_id)
+            if spawner is not None and spawner.backend == request.backend:
+                return spawner.permission_mode
+        return None
 
     async def _ensure_assistant_session(self) -> None:
         """Create / reuse / replace the personal-assistant singleton.
@@ -1542,9 +1558,14 @@ class SessionRuntime:
         cwd: str | None = None,
         *,
         allocate_tty: bool = False,
+        session_id: str | None = None,
     ) -> list[str]:
         plugin = self.registry.get(backend)
-        extra_env = plugin.extra_env
+        extra_env = dict(plugin.extra_env)
+        if session_id:
+            # So the wrapped agent (and any waypoint CLI it runs) knows its own
+            # session and can inherit this session's posture into children.
+            extra_env["WAYPOINT_SESSION_ID"] = session_id
         if launch_target is None:
             executable = (
                 self.settings.plugin_config(backend).local_bin

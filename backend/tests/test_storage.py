@@ -141,6 +141,33 @@ def test_session_round_trip_persists_launch_mode(tmp_path) -> None:
     assert loaded.launch_mode == LaunchMode.TMUX_WRAPPER
 
 
+def test_session_round_trip_persists_spawner_session_id(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="child-1",
+        backend="claude_code",
+        source=SessionSource.MANAGED,
+        title="Child",
+        cwd="/tmp",
+        status=SessionStatus.IDLE,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="/tmp/raw.log",
+        structured_log_path="/tmp/events.jsonl",
+        spawner_session_id="parent-1",
+    )
+    storage.create_session(session)
+
+    loaded = storage.get_session("child-1")
+    assert loaded is not None
+    assert loaded.spawner_session_id == "parent-1"
+
+    updated = storage.update_session("child-1", spawner_session_id="parent-2")
+    assert updated.spawner_session_id == "parent-2"
+
+
 def test_schedule_round_trip_persists_launch_mode(tmp_path) -> None:
     storage = Storage(tmp_path / "waypoint.db")
     now = datetime.now(UTC)

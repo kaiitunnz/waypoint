@@ -286,6 +286,14 @@ def sessions_start(
     model: Annotated[str | None, typer.Option()] = None,
     effort: Annotated[str | None, typer.Option()] = None,
     permission_mode: Annotated[str | None, typer.Option()] = None,
+    spawner_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Spawner session; the child inherits its permission mode. "
+            "Defaults to this session's id when run inside one.",
+        ),
+    ] = None,
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
     """Launch a new session on the running server."""
@@ -300,6 +308,7 @@ def sessions_start(
                 model=model,
                 effort=effort,
                 permission_mode=permission_mode,
+                spawner_session_id=spawner_session_id,
                 args=list(args or []),
             )
         },

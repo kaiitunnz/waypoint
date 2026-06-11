@@ -1,6 +1,6 @@
 ---
 name: waypoint-comms
-description: Use when an agent inside a Waypoint session needs to coordinate with other live Waypoint sessions — hand a task to a peer, ask a question, relay a result, broadcast a finding, or share state. Two channels: direct point-to-point messaging and a shared blackboard, over the `waypoint` CLI.
+description: Use when an agent inside a Waypoint session needs to coordinate with other live Waypoint sessions — hand a task to a peer, ask a question, relay a result, broadcast a finding, or share state. Two channels — direct point-to-point messaging and a shared blackboard — over the `waypoint` CLI.
 ---
 
 # Waypoint Comms

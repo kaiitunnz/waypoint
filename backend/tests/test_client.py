@@ -34,6 +34,35 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
             return httpx.Response(
                 200, json={"backends": [{"id": "claude_code"}, {"id": "codex"}]}
             )
+        if request.url.path == "/api/board" and request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "channels": [
+                        {
+                            "channel": "topic:x",
+                            "entry_count": 2,
+                            "last_created_at": "x",
+                        }
+                    ]
+                },
+            )
+        if request.url.path.startswith("/api/board/"):
+            channel = request.url.path.rsplit("/", 1)[-1]
+            if request.method == "POST":
+                payload = json.loads(request.content)
+                state["board_post"] = {"channel": channel, **payload}
+                return httpx.Response(
+                    200, json={"entry": {"id": 1, "channel": channel, **payload}}
+                )
+            if request.method == "GET":
+                state["board_read_params"] = dict(request.url.params)
+                return httpx.Response(
+                    200,
+                    json={"channel": channel, "entries": [{"id": 1, "text": "hello"}]},
+                )
+            if request.method == "DELETE":
+                return httpx.Response(200, json={"channel": channel, "cleared": 3})
         if request.url.path == "/api/sessions" and request.method == "POST":
             payload = json.loads(request.content)
             return httpx.Response(200, json={"session": {"id": "new", **payload}})
@@ -146,6 +175,51 @@ def test_create_session_passes_spawner_session_id(
         )
     # The mock echoes the POST body back into the session payload.
     assert session["spawner_session_id"] == "parent-1"
+
+
+def test_list_board_channels(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        channels = client.list_board_channels()
+    assert channels[0]["channel"] == "topic:x"
+    assert channels[0]["entry_count"] == 2
+
+
+def test_post_board_sends_body(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        entry = client.post_board(
+            "topic:x",
+            "hello",
+            key="k1",
+            author_session_id="s1",
+            metadata={"a": "b"},
+        )
+    assert entry["text"] == "hello"
+    assert state["board_post"]["key"] == "k1"
+    assert state["board_post"]["author_session_id"] == "s1"
+    assert state["board_post"]["metadata"] == {"a": "b"}
+
+
+def test_read_board_passes_filters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        entries = client.read_board("topic:x", since=5, key="k1")
+    assert entries == [{"id": 1, "text": "hello"}]
+    assert state["board_read_params"]["since"] == "5"
+    assert state["board_read_params"]["key"] == "k1"
+
+
+def test_clear_board(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        assert client.clear_board("topic:x") == {"channel": "topic:x", "cleared": 3}
 
 
 def test_error_response_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

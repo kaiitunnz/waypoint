@@ -69,8 +69,13 @@ sessions_app = typer.Typer(
     help="Manage sessions on a running Waypoint server over HTTP.",
     no_args_is_help=True,
 )
+board_app = typer.Typer(
+    help="Blackboard messaging shared across sessions.",
+    no_args_is_help=True,
+)
 app.add_typer(session_app, name="session")
 app.add_typer(sessions_app, name="sessions")
+app.add_typer(board_app, name="board")
 
 
 @app.callback()
@@ -246,6 +251,16 @@ def _emit(settings: Settings, run: Callable[[WaypointClient], Any]) -> None:
     typer.echo(json.dumps(result, indent=2))
 
 
+def _parse_meta(items: list[str] | None) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    for item in items or []:
+        key, sep, value = item.partition("=")
+        if not sep:
+            raise typer.BadParameter(f"--meta expects key=value, got: {item}")
+        metadata[key] = value
+    return metadata
+
+
 @sessions_app.command("list")
 def sessions_list(ctx: typer.Context) -> None:
     """List all sessions."""
@@ -376,6 +391,80 @@ def sessions_approve(
             )
         },
     )
+
+
+@board_app.command("post")
+def board_post(
+    ctx: typer.Context,
+    channel: Annotated[str, typer.Argument()],
+    text: Annotated[str, typer.Argument()],
+    key: Annotated[
+        str | None,
+        typer.Option(
+            "--key", help="Upsert this (channel, key) cell instead of appending."
+        ),
+    ] = None,
+    meta: Annotated[
+        list[str] | None,
+        typer.Option("--meta", help="Attach metadata as key=value. Repeatable."),
+    ] = None,
+    author_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Authoring session; defaults to this session's id. "
+            "Posts are pruned when that session is deleted.",
+        ),
+    ] = None,
+) -> None:
+    """Post to a board channel (append, or upsert a cell with --key)."""
+    metadata = _parse_meta(meta)
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "entry": c.post_board(
+                channel,
+                text,
+                key=key,
+                author_session_id=author_session_id,
+                metadata=metadata,
+            )
+        },
+    )
+
+
+@board_app.command("read")
+def board_read(
+    ctx: typer.Context,
+    channel: Annotated[str, typer.Argument()],
+    since: Annotated[
+        int | None,
+        typer.Option("--since", help="Only entries with an id greater than this."),
+    ] = None,
+    key: Annotated[
+        str | None, typer.Option("--key", help="Only the cell with this key.")
+    ] = None,
+) -> None:
+    """Read entries from a board channel."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"entries": c.read_board(channel, since=since, key=key)},
+    )
+
+
+@board_app.command("channels")
+def board_channels(ctx: typer.Context) -> None:
+    """List board channels and their entry counts."""
+    _emit(_settings_from_ctx(ctx), lambda c: {"channels": c.list_board_channels()})
+
+
+@board_app.command("clear")
+def board_clear(
+    ctx: typer.Context,
+    channel: Annotated[str, typer.Argument()],
+) -> None:
+    """Delete all entries in a board channel."""
+    _emit(_settings_from_ctx(ctx), lambda c: c.clear_board(channel))
 
 
 def run_reset(settings: Settings | None = None, *, confirmed: bool) -> None:

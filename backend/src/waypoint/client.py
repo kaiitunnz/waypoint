@@ -231,3 +231,48 @@ class WaypointClient:
             json={"decision": decision, "text": text, "approval_id": approval_id},
         ).json()["session"]
         return data
+
+    # ── board ───────────────────────────────────────────────────────────
+
+    def list_board_channels(self) -> list[dict[str, Any]]:
+        data: list[dict[str, Any]] = self._request("GET", "/api/board").json()[
+            "channels"
+        ]
+        return data
+
+    def read_board(
+        self, channel: str, *, since: int | None = None, key: str | None = None
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {}
+        if since is not None:
+            params["since"] = since
+        if key is not None:
+            params["key"] = key
+        data: list[dict[str, Any]] = self._request(
+            "GET", f"/api/board/{channel}", params=params or None
+        ).json()["entries"]
+        return data
+
+    def post_board(
+        self,
+        channel: str,
+        text: str,
+        *,
+        key: str | None = None,
+        author_session_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        body = {
+            "text": text,
+            "key": key,
+            "author_session_id": author_session_id,
+            "metadata": metadata or {},
+        }
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/board/{channel}", json=body
+        ).json()["entry"]
+        return data
+
+    def clear_board(self, channel: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request("DELETE", f"/api/board/{channel}").json()
+        return data

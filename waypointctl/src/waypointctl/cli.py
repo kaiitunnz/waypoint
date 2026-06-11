@@ -2,6 +2,7 @@ import os
 import signal
 import subprocess
 from pathlib import Path
+from typing import Annotated
 
 import typer
 
@@ -22,6 +23,7 @@ from waypointctl.paths import (
 )
 from waypointctl.process import is_pid_running, read_pid_file, running_pid
 from waypointctl.protocol import DaemonResult
+from waypointctl.skills import run_skills_helper
 from waypointctl.stack import WaypointStack
 from waypointctl.tailscale import preflight_tailscale_command, run_tailscale_helper
 
@@ -40,6 +42,13 @@ tailscale_app = typer.Typer(
     help="Manage Docker-backed tailnet sidecars",
 )
 app.add_typer(tailscale_app, name="tailscale")
+
+skills_app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    help="Install coding-agent skills into global skill directories",
+)
+app.add_typer(skills_app, name="skills")
 
 
 def _ctx_home(ctx: typer.Context) -> Path:
@@ -288,6 +297,83 @@ def _run_tailscale_command(ctx: typer.Context, command: str, profile: str) -> No
     home = _ctx_home(ctx)
     preflight_tailscale_command(command)
     run_tailscale_helper(home, command, profile)
+
+
+def _skills_extra_args(
+    skill_dir: list[str] | None,
+    skill: list[str] | None,
+    *,
+    all_skills: bool = False,
+    copy: bool = False,
+) -> list[str]:
+    extra: list[str] = []
+    for path in skill_dir or []:
+        extra += ["--skill-dir", path]
+    for name in skill or []:
+        extra += ["--skill", name]
+    if all_skills:
+        extra.append("--all")
+    if copy:
+        extra.append("--copy")
+    return extra
+
+
+SkillDirOption = Annotated[
+    list[str] | None,
+    typer.Option("--skill-dir", help="Destination skill root. Repeatable."),
+]
+SkillOption = Annotated[
+    list[str] | None,
+    typer.Option("--skill", help="Skill to act on. Repeatable."),
+]
+AllSkillsOption = Annotated[
+    bool, typer.Option("--all", help="Act on every skill under .agents/skills.")
+]
+
+
+@skills_app.command("install")
+def skills_install(
+    ctx: typer.Context,
+    skill_dir: SkillDirOption = None,
+    skill: SkillOption = None,
+    all_skills: AllSkillsOption = False,
+    copy: Annotated[
+        bool, typer.Option("--copy", help="Copy skills instead of symlinking.")
+    ] = False,
+) -> None:
+    run_skills_helper(
+        _ctx_home(ctx),
+        "install",
+        _skills_extra_args(skill_dir, skill, all_skills=all_skills, copy=copy),
+    )
+
+
+@skills_app.command("uninstall")
+def skills_uninstall(
+    ctx: typer.Context,
+    skill_dir: SkillDirOption = None,
+    skill: SkillOption = None,
+    all_skills: AllSkillsOption = False,
+) -> None:
+    run_skills_helper(
+        _ctx_home(ctx),
+        "uninstall",
+        _skills_extra_args(skill_dir, skill, all_skills=all_skills),
+    )
+
+
+@skills_app.command("status")
+def skills_status(
+    ctx: typer.Context,
+    skill_dir: SkillDirOption = None,
+    skill: SkillOption = None,
+    all_skills: AllSkillsOption = False,
+) -> None:
+    run_skills_helper(
+        _ctx_home(ctx),
+        "status",
+        _skills_extra_args(skill_dir, skill, all_skills=all_skills),
+    )
 
 
 def _should_use_daemon(home: Path) -> bool:

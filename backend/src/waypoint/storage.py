@@ -174,6 +174,7 @@ class Storage:
         self._ensure_column("sessions", "launch_mode", "TEXT NOT NULL DEFAULT 'auto'")
         self._ensure_column("sessions", "context_usage", "TEXT")
         self._ensure_column("sessions", "rate_limit_usage", "TEXT")
+        self._ensure_column("sessions", "spawner_session_id", "TEXT")
         self._ensure_column(
             "scheduled_sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
         )
@@ -191,9 +192,9 @@ class Storage:
                 id, backend, source, transport, title, cwd, launch_target_id,
                 launch_mode, repo_name, branch, status, created_at, updated_at,
                 last_event_at, raw_log_path, structured_log_path, transport_state,
-                pinned_at, permission_mode, model, effort, args, config_overrides,
-                context_usage, rate_limit_usage
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                pinned_at, spawner_session_id, permission_mode, model, effort, args,
+                config_overrides, context_usage, rate_limit_usage
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -214,6 +215,7 @@ class Storage:
                 session.structured_log_path,
                 json.dumps(session.transport_state),
                 session.pinned_at.isoformat() if session.pinned_at else None,
+                session.spawner_session_id,
                 session.permission_mode,
                 session.model,
                 session.effort,

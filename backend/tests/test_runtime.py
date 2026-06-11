@@ -322,6 +322,65 @@ def test_command_for_backend_remote_forwards_plugin_extra_env(tmp_path) -> None:
     assert "CLAUDE_CODE_NO_FLICKER=1" in remote_command
 
 
+def test_command_for_backend_injects_session_id(tmp_path) -> None:
+    runtime, _, _ = make_runtime(tmp_path)
+    command = runtime._command_for_backend(
+        "codex", ["resume", "abc"], session_id="codex-1234"
+    )
+    assert command[0] == "env"
+    assert "WAYPOINT_SESSION_ID=codex-1234" in command
+    cli_idx = command.index("codex")
+    assert command[cli_idx:] == ["codex", "resume", "abc"]
+
+
+def test_effective_permission_mode_inherits_same_backend(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    storage.create_session(
+        make_session(
+            settings, id="parent", backend="claude_code", permission_mode="auto"
+        )
+    )
+    request = SessionCreateRequest(
+        backend="claude_code", cwd="/tmp", spawner_session_id="parent"
+    )
+    assert runtime._effective_permission_mode(request) == "auto"
+
+
+def test_effective_permission_mode_explicit_wins_and_can_widen(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    storage.create_session(
+        make_session(
+            settings, id="parent", backend="claude_code", permission_mode="default"
+        )
+    )
+    request = SessionCreateRequest(
+        backend="claude_code",
+        cwd="/tmp",
+        spawner_session_id="parent",
+        permission_mode="bypassPermissions",
+    )
+    assert runtime._effective_permission_mode(request) == "bypassPermissions"
+
+
+def test_effective_permission_mode_cross_backend_does_not_inherit(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    storage.create_session(
+        make_session(
+            settings, id="parent", backend="codex", permission_mode="full_access"
+        )
+    )
+    request = SessionCreateRequest(
+        backend="claude_code", cwd="/tmp", spawner_session_id="parent"
+    )
+    assert runtime._effective_permission_mode(request) is None
+
+
+def test_effective_permission_mode_no_spawner_is_none(tmp_path) -> None:
+    runtime, _, _ = make_runtime(tmp_path)
+    request = SessionCreateRequest(backend="claude_code", cwd="/tmp")
+    assert runtime._effective_permission_mode(request) is None
+
+
 def make_session(settings: Settings, **overrides) -> SessionRecord:
     session_dir = settings.sessions_dir / overrides.get("id", "sess")
     session_dir.mkdir(parents=True, exist_ok=True)

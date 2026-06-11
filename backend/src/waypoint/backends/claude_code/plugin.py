@@ -994,6 +994,7 @@ class ClaudeCodePlugin:
             raw_log_path=str(raw_log),
             structured_log_path=str(structured_log),
             transport_state={"thread_id": claude_session_id},
+            spawner_session_id=request.spawner_session_id,
             permission_mode=permission_mode,
             model=resolved_model,
             effort=resolved_effort,

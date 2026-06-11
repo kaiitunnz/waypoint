@@ -375,6 +375,7 @@ class TmuxPlugin:
                 launch_target,
                 session.cwd,
                 allocate_tty=True,
+                session_id=session.id,
             )
         except HTTPException as exc:
             await runtime._record_system_event(
@@ -1011,6 +1012,7 @@ class TmuxPlugin:
             launch_target,
             request.cwd,
             allocate_tty=True,
+            session_id=session_id,
         )
         try:
             target = await runtime.tmux.start_managed_session(
@@ -1052,6 +1054,7 @@ class TmuxPlugin:
             raw_log_path=str(raw_log),
             structured_log_path=str(structured_log),
             transport_state=transport_state,
+            spawner_session_id=request.spawner_session_id,
             permission_mode=persisted_permission_mode,
             model=resolved_model,
             effort=persisted_effort,
@@ -1099,13 +1102,18 @@ class TmuxPlugin:
                 ),
             )
         launch_args = self._resume_args(backend, thread_id, [])
+        session_id = runtime._generate_session_id(backend)
         try:
             command = runtime._command_for_backend(
-                backend, launch_args, launch_target, cwd, allocate_tty=True
+                backend,
+                launch_args,
+                launch_target,
+                cwd,
+                allocate_tty=True,
+                session_id=session_id,
             )
         except HTTPException:
             raise
-        session_id = runtime._generate_session_id(backend)
         session_dir = runtime._session_dir(session_id)
         raw_log = session_dir / "raw.log"
         structured_log = session_dir / "events.jsonl"

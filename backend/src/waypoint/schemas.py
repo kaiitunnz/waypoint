@@ -206,6 +206,36 @@ class EventRecord(BaseModel):
     sequence: int
 
 
+class BoardEntry(BaseModel):
+    # A single blackboard row. With ``key`` unset the entry is an append-log
+    # post (ordered, never overwritten); with ``key`` set it is a key/value
+    # cell that the latest post for that ``(channel, key)`` overwrites in place.
+    id: int
+    channel: str
+    # The session that posted this, stamped by the CLI from
+    # ``WAYPOINT_SESSION_ID``. ``None`` when posted outside a session (a user
+    # via the frontend, an ad-hoc CLI call). Pruned with its authoring session.
+    author_session_id: str | None = None
+    key: str | None = None
+    text: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class BoardChannel(BaseModel):
+    channel: str
+    entry_count: int
+    last_created_at: datetime
+
+
+class BoardPostRequest(BaseModel):
+    text: str
+    # When set, upsert the ``(channel, key)`` cell instead of appending.
+    key: str | None = None
+    author_session_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class LoginRequest(BaseModel):
     password: str
 

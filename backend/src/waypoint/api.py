@@ -31,6 +31,7 @@ from waypoint.schemas import (
     AssistantAttachRequest,
     AssistantResetRequest,
     AssistantSummary,
+    BoardPostRequest,
     LoginRequest,
     MeResponse,
     ScheduleCreateRequest,
@@ -428,6 +429,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # graceful path won't complete.
         await context.runtime.delete(session_id, force=force)
         return {"deleted": session_id}
+
+    @app.get("/api/board")
+    async def board_channels(_: Annotated[str, Depends(token_dependency())]) -> Any:
+        channels = [
+            channel.model_dump(mode="json")
+            for channel in context.runtime.list_board_channels()
+        ]
+        return {"channels": channels}
+
+    @app.get("/api/board/{channel}")
+    async def board_read(
+        channel: str,
+        _: Annotated[str, Depends(token_dependency())],
+        since: Annotated[int | None, Query()] = None,
+        key: Annotated[str | None, Query()] = None,
+    ) -> Any:
+        entries = [
+            entry.model_dump(mode="json")
+            for entry in context.runtime.list_board_entries(
+                channel, since=since, key=key
+            )
+        ]
+        return {"channel": channel, "entries": entries}
+
+    @app.post("/api/board/{channel}")
+    async def board_post(
+        channel: str,
+        body: BoardPostRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        entry = await context.runtime.post_board_entry(channel, body)
+        return {"entry": entry.model_dump(mode="json")}
+
+    @app.delete("/api/board/{channel}")
+    async def board_clear(
+        channel: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        removed = await context.runtime.clear_board_channel(channel)
+        return {"channel": channel, "cleared": removed}
 
     @app.patch("/api/sessions/{session_id}/title")
     async def session_set_title(

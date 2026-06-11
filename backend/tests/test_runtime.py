@@ -19,6 +19,7 @@ from waypoint.backends.codex.schemas import CodexThreadImportRequest
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
+    BoardPostRequest,
     CommandCompletion,
     CompletionDispatch,
     EventKind,
@@ -379,6 +380,31 @@ def test_effective_permission_mode_no_spawner_is_none(tmp_path) -> None:
     runtime, _, _ = make_runtime(tmp_path)
     request = SessionCreateRequest(backend="claude_code", cwd="/tmp")
     assert runtime._effective_permission_mode(request) is None
+
+
+@pytest.mark.asyncio
+async def test_post_board_entry_persists_and_broadcasts(tmp_path) -> None:
+    runtime, storage, _ = make_runtime(tmp_path)
+    queue = runtime.broadcast.subscribe_global()
+    entry = await runtime.post_board_entry(
+        "topic:plan", BoardPostRequest(text="hello", author_session_id="s1")
+    )
+    assert entry.text == "hello"
+    assert storage.list_board_entries("topic:plan")[0].text == "hello"
+    message = queue.get_nowait()
+    assert message["type"] == "board_update"
+    assert message["payload"]["channel"] == "topic:plan"
+
+
+@pytest.mark.asyncio
+async def test_clear_board_channel_broadcasts(tmp_path) -> None:
+    runtime, storage, _ = make_runtime(tmp_path)
+    await runtime.post_board_entry("topic:x", BoardPostRequest(text="a"))
+    queue = runtime.broadcast.subscribe_global()
+    removed = await runtime.clear_board_channel("topic:x")
+    assert removed == 1
+    assert storage.list_board_entries("topic:x") == []
+    assert queue.get_nowait()["payload"]["channel"] == "topic:x"
 
 
 def make_session(settings: Settings, **overrides) -> SessionRecord:

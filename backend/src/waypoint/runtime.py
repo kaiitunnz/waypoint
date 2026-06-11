@@ -26,6 +26,9 @@ from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.scheduler import Scheduler
 from waypoint.schemas import (
     AssistantSummary,
+    BoardChannel,
+    BoardEntry,
+    BoardPostRequest,
     CommandCompletion,
     EventKind,
     EventRecord,
@@ -1128,6 +1131,8 @@ class SessionRuntime:
             else:
                 await self.terminate(session_id)
         self.storage.delete_session(session_id)
+        # Drop this session's blackboard posts along with its record.
+        pruned = self.storage.prune_board_for_session(session_id)
         self.registry.plugin_for(session).on_session_deleted(self, session)
         await self.broadcast.publish(
             SessionEnvelope(
@@ -1138,6 +1143,41 @@ class SessionRuntime:
                     ]
                 },
             )
+        )
+        if pruned:
+            await self._publish_board_update(None)
+
+    async def post_board_entry(
+        self, channel: str, request: BoardPostRequest
+    ) -> BoardEntry:
+        entry = self.storage.add_board_entry(
+            channel,
+            request.text,
+            key=request.key,
+            author_session_id=request.author_session_id,
+            metadata=request.metadata,
+        )
+        await self._publish_board_update(channel)
+        return entry
+
+    def list_board_entries(
+        self, channel: str, *, since: int | None = None, key: str | None = None
+    ) -> list[BoardEntry]:
+        return self.storage.list_board_entries(channel, since=since, key=key)
+
+    def list_board_channels(self) -> list[BoardChannel]:
+        return self.storage.list_board_channels()
+
+    async def clear_board_channel(self, channel: str) -> int:
+        removed = self.storage.clear_board_channel(channel)
+        await self._publish_board_update(channel)
+        return removed
+
+    async def _publish_board_update(self, channel: str | None) -> None:
+        # ``channel=None`` means "the board changed broadly" (e.g. a session
+        # delete pruned posts across channels); clients refetch what they show.
+        await self.broadcast.publish(
+            SessionEnvelope(type="board_update", payload={"channel": channel})
         )
 
     async def set_permission_mode(self, session_id: str, mode: str) -> SessionRecord:

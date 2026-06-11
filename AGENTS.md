@@ -27,6 +27,9 @@ Override ports or paths inline with `WAYPOINT_STACK_BACKEND_PORT`, `WAYPOINT_STA
 
 `scripts/waypoint.sh` is the legacy supervisor and is slated for deprecation; prefer `waypointctl` for new work and only fall back to the script if the user explicitly asks for it.
 
+## Distributing Coding-Agent Skills
+The repo's `.agents/skills/` are auto-installed only into the personal assistant's workspace. To let *any* coding session spawn and manage child Waypoint sessions, install the `waypoint-subagents` skill into the cross-agent global skills directory (`~/.agents/skills` by default) with `scripts/install_skills.sh install` (or `waypointctl skills install`). The installer symlinks by default so the skill tracks the repo; pass `--skill-dir` / `WAYPOINT_SKILLS_DIR` to target an agent-specific directory (e.g. `~/.claude/skills`, `~/.codex/skills`), `--skill`/`--all` to widen the selection, and `--copy` for a detached snapshot. `status` and `uninstall` round-trip it; `uninstall` only removes symlinks the installer created, never a real or copied directory.
+
 ## Coding Style & Naming Conventions
 Follow the existing style in each half of the repo. Python uses 4-space indentation, type hints, top-level imports, and `snake_case` for functions/modules; keep FastAPI handlers and Pydantic models explicit. TypeScript uses 2-space indentation, strict typing, `PascalCase` for components, and `camelCase` for helpers and state. Keep comments sparse and only explain non-obvious reasoning.
 

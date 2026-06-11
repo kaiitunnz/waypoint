@@ -28,6 +28,7 @@ _WINDOWS: tuple[tuple[str, str, int], ...] = (
     ("seven_day", "Weekly", 7 * 24 * 60),
     ("seven_day_opus", "Opus", 7 * 24 * 60),
     ("seven_day_sonnet", "Sonnet", 7 * 24 * 60),
+    ("seven_day_fable", "Fable", 7 * 24 * 60),
 )
 _CLAUDE_USER_AGENT: str | None = None
 _CLAUDE_USER_AGENT_RESOLVED = False

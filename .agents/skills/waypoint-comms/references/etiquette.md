@@ -33,9 +33,11 @@ or be picked up only after the current turn). So:
 
 ## When direct messaging is the wrong tool
 
+Reach for the **blackboard** (`references/blackboard.md`) instead when:
+
 - **Broadcasting** to many sessions, or posting a finding others may or may not
-  consume → a shared store, not N direct sends.
-- **The target is busy** and the message is informational, not urgent → leave it
-  somewhere it can read when ready, rather than interrupting.
+  consume → post to a channel, not N direct sends.
+- **The target is busy** and the message is informational, not urgent → post it
+  where the target reads when ready, rather than interrupting its turn.
 - **No specific recipient** ("whoever picks this up") → direct addressing does
-  not apply.
+  not apply; a `topic:` channel does.

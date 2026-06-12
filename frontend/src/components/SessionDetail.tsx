@@ -8,6 +8,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -76,6 +77,8 @@ import {
   type AskAnswerEntry,
   type ToolPair,
 } from "@/components/TranscriptCard";
+import { TaskProgressDock } from "@/components/TaskProgressDock";
+import { readTodoEntries, summarizeTodos } from "@/lib/todos";
 import { useSwitcher } from "@/components/SwitcherProvider";
 import {
   Backend,
@@ -269,6 +272,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const catalog = useBackendCatalog(host || null, token || null, null);
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [events, setEvents] = useState<EventRecord[]>([]);
+  // The task group (by item_id) the user has dismissed from the progress
+  // dock; a newer group re-shows the dock since its id differs.
+  const [dismissedTaskItemId, setDismissedTaskItemId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState("");
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [view, setView] = useState<ViewMode>("chat");
@@ -1174,6 +1180,21 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     : transcriptEvents;
   const transcriptItems = buildTranscriptItems(transcriptEventsForDisplay);
   const hasToolRuns = transcriptItems.some((item) => item.kind === "tool_run");
+  // Latest task group, read off the raw event stream so the dock reflects the
+  // true current state regardless of the transcript's event filter.
+  const currentTaskEvent = useMemo(() => {
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      if (isTodoListEvent(events[i])) {
+        return events[i];
+      }
+    }
+    return null;
+  }, [events]);
+  const taskProgress = useMemo(
+    () => summarizeTodos(readTodoEntries(currentTaskEvent)),
+    [currentTaskEvent],
+  );
+  const currentTaskItemId = currentTaskEvent ? itemIdForEvent(currentTaskEvent) : null;
   // Session has stopped its backend process (clean shutdown or crash).
   const sessionExited = Boolean(
     session && (session.status === "exited" || session.status === "error"),
@@ -1198,6 +1219,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     session && supportsResume(session.transport) && !sessionExited,
   );
   const activeView: ViewMode = terminalOnly ? "terminal" : view;
+  const showTaskDock =
+    activeView === "chat" &&
+    taskProgress !== null &&
+    currentTaskItemId !== dismissedTaskItemId;
   const liveTmux = session?.transport === "tmux";
   const { theme } = useTheme();
   const terminalRef = useRef<XTerminalHandle | null>(null);
@@ -1851,6 +1876,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
             ×
           </button>
         </div>
+      ) : null}
+      {showTaskDock && taskProgress ? (
+        <TaskProgressDock
+          progress={taskProgress}
+          onDismiss={() => setDismissedTaskItemId(currentTaskItemId)}
+        />
       ) : null}
       {session && !terminalOnly ? (
         <ReplyComposer

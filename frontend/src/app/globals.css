@@ -3373,6 +3373,233 @@ html[data-theme="light"] .inline-code {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
 }
 
+/* ─── Task progress dock ─── */
+/* A persistent readout of the current task group, docked just above the
+ * composer in the same sticky band as the scroll affordances. Collapsed it
+ * shows the active task plus a progress meter; expanded it reveals the full
+ * list — a full-width bottom sheet on mobile, a bottom-right popover on
+ * desktop. The whole thing rides the same `--composer-height` offset the
+ * composer reserves. */
+.task-dock {
+  position: sticky;
+  bottom: calc(var(--composer-height, 220px) + 12px);
+  z-index: 7;
+  margin-top: -8px;
+  pointer-events: none;
+}
+
+.task-dock-strip {
+  pointer-events: auto;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(20, 24, 33, 0.92), rgba(12, 15, 22, 0.96));
+  box-shadow:
+    0 12px 30px rgba(0, 0, 0, 0.36),
+    0 0 0 1px rgba(200, 169, 106, 0.05) inset;
+  backdrop-filter: blur(22px) saturate(1.2);
+}
+
+html[data-theme="light"] .task-dock-strip {
+  background: linear-gradient(180deg, rgba(248, 245, 238, 0.96), rgba(240, 236, 226, 0.98));
+  box-shadow:
+    0 12px 30px rgba(60, 50, 30, 0.14),
+    0 0 0 1px rgba(200, 169, 106, 0.12) inset;
+}
+
+.task-dock-meter {
+  height: 3px;
+  width: 100%;
+  background: rgba(180, 150, 220, 0.16);
+}
+
+.task-dock-meter-fill {
+  height: 100%;
+  background: var(--accent-strong);
+  transition: width 0.4s ease;
+}
+
+.task-dock.complete .task-dock-meter-fill {
+  background: var(--success);
+}
+
+.task-dock-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+}
+
+.task-dock-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 2px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.task-dock-glyph {
+  flex: none;
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.task-dock.complete .task-dock-glyph {
+  color: var(--success);
+}
+
+.task-dock.active .task-dock-glyph {
+  animation: task-dock-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes task-dock-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.task-dock-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-dock-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+.task-dock-chevron {
+  flex: none;
+  color: var(--muted-soft);
+}
+
+.task-dock-dismiss {
+  flex: none;
+  padding: 4px 6px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--muted-soft);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.task-dock-dismiss:hover {
+  color: var(--text);
+}
+
+.task-dock-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  border: none;
+  background: rgba(0, 0, 0, 0.4);
+  cursor: default;
+  pointer-events: auto;
+}
+
+html[data-theme="light"] .task-dock-scrim {
+  background: rgba(20, 16, 8, 0.22);
+}
+
+.task-dock-panel {
+  position: relative;
+  z-index: 7;
+  margin-bottom: 8px;
+  max-height: 50vh;
+  overflow-y: auto;
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(20, 24, 33, 0.96), rgba(12, 15, 22, 0.98));
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(22px) saturate(1.2);
+  pointer-events: auto;
+}
+
+html[data-theme="light"] .task-dock-panel {
+  background: linear-gradient(180deg, rgba(248, 245, 238, 0.98), rgba(240, 236, 226, 0.99));
+  box-shadow: 0 -10px 30px rgba(60, 50, 30, 0.16);
+}
+
+.task-dock-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-dock-panel-title {
+  flex: 1;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.task-dock-collapse {
+  padding: 4px 6px;
+  background: none;
+  border: none;
+  color: var(--muted-soft);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+@media (min-width: 768px) {
+  .task-dock-scrim,
+  html[data-theme="light"] .task-dock-scrim {
+    background: transparent;
+  }
+
+  .task-dock-panel {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 8px);
+    width: min(420px, 92vw);
+    margin-bottom: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-dock.active .task-dock-glyph {
+    animation: none;
+  }
+
+  .task-dock-meter-fill {
+    transition: none;
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ────────────────────────────────────────────────────────────────────────
  * Composer — sticky reply deck pinned to the viewport bottom so the user
  * never has to scroll to find the input. The transcript section reserves

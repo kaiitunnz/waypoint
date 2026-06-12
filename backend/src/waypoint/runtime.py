@@ -11,7 +11,7 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
-from typing import Any
+from typing import Any, TextIO
 
 from fastapi import HTTPException, status
 
@@ -52,6 +52,12 @@ from waypoint.transports import TransportAdapter
 
 TMUX_TRANSPORT_ID = "tmux"
 COMPLETION_REFRESH_INTERVAL_SECONDS = 30.0
+# Debounce window for streaming-driven session_state / session_list
+# broadcasts. A burst of streamed events collapses into one broadcast per
+# window instead of one per token; lifecycle changes still broadcast
+# immediately, so this only adds at most this much latency to the live
+# list/status updates a fast stream produces.
+SESSION_BROADCAST_DEBOUNCE_SECONDS = 0.25
 
 
 log = logging.getLogger("waypoint.runtime")
@@ -159,6 +165,19 @@ class SessionRuntime:
             CompletionCacheKey, asyncio.Task[list[CommandCompletion]]
         ] = {}
         self.file_offsets: dict[str, int] = {}
+        # Open append handles for per-session structured logs, kept around
+        # so the streaming path doesn't reopen (and re-stat via get_session)
+        # the file on every event. Closed on terminate/delete and at stop().
+        self._structured_log_handles: dict[str, TextIO] = {}
+        # Coalesced session_state / session_list broadcasting. The
+        # streaming event path marks sessions dirty and wakes the flusher
+        # instead of re-serializing every session per event; the flusher
+        # debounces and emits one broadcast per window. See
+        # ``_session_broadcast_loop``.
+        self._dirty_session_states: set[str] = set()
+        self._session_list_dirty = False
+        self._broadcast_wake = asyncio.Event()
+        self._broadcast_flusher: asyncio.Task[None] | None = None
         # Id of the personal-assistant singleton, populated by
         # ``_ensure_assistant_session`` during ``start``. ``None`` when the
         # assistant is disabled or its bootstrap failed.
@@ -176,6 +195,9 @@ class SessionRuntime:
         return self._transports[session.transport]
 
     async def start(self) -> None:
+        self._broadcast_flusher = asyncio.create_task(
+            self._session_broadcast_loop(), name="session-broadcast-flusher"
+        )
         for session in self.storage.list_sessions():
             # ERROR sessions get one passive restore attempt at boot — the
             # plugin's restore_session is responsible for tagging them
@@ -222,6 +244,15 @@ class SessionRuntime:
         for completion_task in completion_tasks:
             with suppress(asyncio.CancelledError):
                 await completion_task
+        if self._broadcast_flusher is not None:
+            self._broadcast_flusher.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._broadcast_flusher
+            self._broadcast_flusher = None
+        for handle in self._structured_log_handles.values():
+            with suppress(Exception):
+                handle.close()
+        self._structured_log_handles.clear()
         for plugin in self.registry.all():
             await plugin.shutdown(self)
         self.storage.close()
@@ -689,16 +720,7 @@ class SessionRuntime:
             structured_log,
         )
         self._warm_command_completions(new_session)
-        await self.broadcast.publish(
-            SessionEnvelope(
-                type="session_list_update",
-                payload={
-                    "sessions": [
-                        item.model_dump(mode="json") for item in self.list_sessions()
-                    ]
-                },
-            )
-        )
+        await self._broadcast_session_list()
         return new_session
 
     async def attach_tmux(self, request: SessionAttachRequest) -> SessionRecord:
@@ -1061,6 +1083,7 @@ class SessionRuntime:
         await self._record_system_event(
             session.id, "Session terminated", status=SessionStatus.EXITED
         )
+        self._close_structured_log(session.id)
         return self.storage.update_session(session.id, status=SessionStatus.EXITED)
 
     async def reattach(self, session_id: str) -> SessionRecord:
@@ -1131,20 +1154,12 @@ class SessionRuntime:
                     await self.terminate(session_id)
             else:
                 await self.terminate(session_id)
+        self._close_structured_log(session_id)
         self.storage.delete_session(session_id)
         # Drop this session's blackboard posts along with its record.
         pruned = self.storage.prune_board_for_session(session_id)
         self.registry.plugin_for(session).on_session_deleted(self, session)
-        await self.broadcast.publish(
-            SessionEnvelope(
-                type="session_list_update",
-                payload={
-                    "sessions": [
-                        item.model_dump(mode="json") for item in self.list_sessions()
-                    ]
-                },
-            )
-        )
+        await self._broadcast_session_list()
         if pruned:
             await self._publish_board_update(None)
 
@@ -1225,16 +1240,7 @@ class SessionRuntime:
             )
         await plugin.apply_permission_mode(self, session, validated)
         updated = self.storage.update_session(session_id, permission_mode=validated)
-        await self.broadcast.publish(
-            SessionEnvelope(
-                type="session_list_update",
-                payload={
-                    "sessions": [
-                        item.model_dump(mode="json") for item in self.list_sessions()
-                    ]
-                },
-            )
-        )
+        await self._broadcast_session_list()
         return updated
 
     async def set_model(self, session_id: str, model: str | None) -> SessionRecord:
@@ -1248,16 +1254,7 @@ class SessionRuntime:
             )
         await plugin.apply_model(self, session, cleaned)
         updated = self.storage.update_session(session_id, model=cleaned)
-        await self.broadcast.publish(
-            SessionEnvelope(
-                type="session_list_update",
-                payload={
-                    "sessions": [
-                        item.model_dump(mode="json") for item in self.list_sessions()
-                    ]
-                },
-            )
-        )
+        await self._broadcast_session_list()
         return updated
 
     async def set_effort(self, session_id: str, effort: str | None) -> SessionRecord:
@@ -1290,16 +1287,7 @@ class SessionRuntime:
                 status=SessionStatus.IDLE,
             )
         updated = self.storage.update_session(session_id, effort=cleaned)
-        await self.broadcast.publish(
-            SessionEnvelope(
-                type="session_list_update",
-                payload={
-                    "sessions": [
-                        item.model_dump(mode="json") for item in self.list_sessions()
-                    ]
-                },
-            )
-        )
+        await self._broadcast_session_list()
         return updated
 
     async def list_backend_models(
@@ -1325,16 +1313,7 @@ class SessionRuntime:
         if session.title == title:
             return session
         updated = self.storage.update_session(session_id, title=title)
-        await self.broadcast.publish(
-            SessionEnvelope(
-                type="session_list_update",
-                payload={
-                    "sessions": [
-                        item.model_dump(mode="json") for item in self.list_sessions()
-                    ]
-                },
-            )
-        )
+        await self._broadcast_session_list()
         return updated
 
     async def set_pinned(self, session_id: str, pinned: bool) -> SessionRecord:
@@ -1343,16 +1322,7 @@ class SessionRuntime:
         if (session.pinned_at is None) == (pinned_at is None):
             return session
         updated = self.storage.update_session(session_id, pinned_at=pinned_at)
-        await self.broadcast.publish(
-            SessionEnvelope(
-                type="session_list_update",
-                payload={
-                    "sessions": [
-                        item.model_dump(mode="json") for item in self.list_sessions()
-                    ]
-                },
-            )
-        )
+        await self._broadcast_session_list()
         return updated
 
     async def answer_question(
@@ -1558,7 +1528,7 @@ class SessionRuntime:
     ) -> SessionRecord:
         session = self.storage.update_session(session_id, **updates)
         if publish:
-            await self._publish_session_state(session_id)
+            self._publish_session_state(session_id)
         return session
 
     def session_update_callback(
@@ -1581,17 +1551,19 @@ class SessionRuntime:
             ),
             session_id=event.session_id,
         )
-        await self._publish_session_state(event.session_id)
+        self._publish_session_state(event.session_id)
 
-    async def _publish_session_state(self, session_id: str) -> None:
-        session = self.get_session(session_id)
-        await self.broadcast.publish(
-            SessionEnvelope(
-                type="session_state",
-                payload={"session": session.model_dump(mode="json")},
-            ),
-            session_id=session_id,
-        )
+    def _publish_session_state(self, session_id: str) -> None:
+        # Streaming hot path: mark the session dirty and let the debounced
+        # flusher emit the session_state / session_list broadcasts. A fast
+        # token stream would otherwise re-serialize every session on every
+        # event. Lifecycle changes call ``_broadcast_session_list``
+        # directly when they need an immediate update.
+        self._dirty_session_states.add(session_id)
+        self._session_list_dirty = True
+        self._broadcast_wake.set()
+
+    async def _broadcast_session_list(self) -> None:
         await self.broadcast.publish(
             SessionEnvelope(
                 type="session_list_update",
@@ -1603,11 +1575,51 @@ class SessionRuntime:
             )
         )
 
+    async def _broadcast_session_state(self, session_id: str) -> None:
+        session = self.storage.get_session(session_id)
+        if session is None:
+            # Deleted between being marked dirty and this flush; the
+            # delete already broadcast a fresh list, so there's nothing to
+            # publish for it.
+            return
+        await self.broadcast.publish(
+            SessionEnvelope(
+                type="session_state",
+                payload={"session": session.model_dump(mode="json")},
+            ),
+            session_id=session_id,
+        )
+
+    async def _session_broadcast_loop(self) -> None:
+        while True:
+            await self._broadcast_wake.wait()
+            await asyncio.sleep(SESSION_BROADCAST_DEBOUNCE_SECONDS)
+            # Clear before draining so any event arriving during the
+            # broadcast below re-arms the flusher rather than being lost.
+            self._broadcast_wake.clear()
+            dirty_ids = self._dirty_session_states
+            self._dirty_session_states = set()
+            list_dirty = self._session_list_dirty
+            self._session_list_dirty = False
+            for session_id in dirty_ids:
+                await self._broadcast_session_state(session_id)
+            if list_dirty:
+                await self._broadcast_session_list()
+
     def _append_structured_log(self, session_id: str, event: EventRecord) -> None:
-        session = self.get_session(session_id)
-        path = Path(session.structured_log_path)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event.model_dump(mode="json")) + "\n")
+        handle = self._structured_log_handles.get(session_id)
+        if handle is None:
+            session = self.get_session(session_id)
+            handle = Path(session.structured_log_path).open("a", encoding="utf-8")
+            self._structured_log_handles[session_id] = handle
+        handle.write(json.dumps(event.model_dump(mode="json")) + "\n")
+        handle.flush()
+
+    def _close_structured_log(self, session_id: str) -> None:
+        handle = self._structured_log_handles.pop(session_id, None)
+        if handle is not None:
+            with suppress(Exception):
+                handle.close()
 
     def _generate_session_id(self, backend: str) -> str:
         token = secrets.token_hex(4)
@@ -1698,11 +1710,22 @@ class SessionRuntime:
         )
 
     async def _monitor_session(self, session_id: str) -> None:
+        ingest_interval = self.settings.stream_poll_interval
+        ticks_per_refresh = max(
+            1, round(self.settings.state_poll_interval / ingest_interval)
+        )
         try:
+            tick = 0
             while True:
                 await self._ingest_raw_output(session_id)
-                await self._refresh_state(session_id)
-                await asyncio.sleep(self.settings.stream_poll_interval)
+                # Ingest the cheap (threaded) output read every tick, but
+                # only run the subprocess-spawning liveness refresh every
+                # Nth tick. tick 0 refreshes immediately so a pane that's
+                # already dead is caught on the first pass.
+                if tick % ticks_per_refresh == 0:
+                    await self._refresh_state(session_id)
+                tick += 1
+                await asyncio.sleep(ingest_interval)
         except asyncio.CancelledError:
             raise
         except Exception:

@@ -298,6 +298,9 @@ class ClaudeCodePlugin:
         # invalidate so a re-import after delete sees the freed slot.
         if session.launch_target_id and self.thread_enumerator is not None:
             self.thread_enumerator.invalidate(session.launch_target_id)
+        # Drop any todo tracker stashed for a respawn that will never come.
+        if self.adapter is not None:
+            self.adapter.discard_session(session.id)
 
     def register_routes(self, app: FastAPI, context: Any) -> None:
         # Tool approval now rides the `can_use_tool` control protocol over the

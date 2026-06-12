@@ -1328,6 +1328,43 @@ html[data-theme="light"] .session-header {
   margin-left: auto;
 }
 
+/* Quiet click-to-copy session id — reads as meta text, not a button. */
+.session-id-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted-soft);
+  font: inherit;
+  letter-spacing: inherit;
+  vertical-align: baseline;
+  cursor: pointer;
+  transition: color 0.14s ease;
+}
+
+.session-id-copy:hover {
+  color: var(--text);
+}
+
+.session-id-copy.copied {
+  color: var(--success);
+}
+
+.session-id-copy-key {
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.session-id-copy-value {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Live status pulse — encodes both socket connection and session status in
  * one chip so we can drop the old "Connecting…" banner. */
 .session-pulse {

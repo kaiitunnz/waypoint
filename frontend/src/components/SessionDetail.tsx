@@ -1602,7 +1602,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                   const toolNames = item.items
                     .map((child) => {
                       const event = child.kind === "pair" ? child.pair.call ?? child.pair.result : child.event;
-                      return event ? readToolName(event) : null;
+                      if (!event) return null;
+                      // Codex's todo event carries no tool_name; tag every todo
+                      // as "TodoWrite" so the run summary can show a todos chip.
+                      return isTodoListEvent(event) ? "TodoWrite" : readToolName(event);
                     })
                     .filter((name): name is string => name !== null);
                   return (

@@ -3130,6 +3130,17 @@ html[data-theme="light"] .tool-run-chip.read {
   border-color: rgba(47, 111, 158, 0.3);
 }
 
+.tool-run-chip.todo {
+  background: rgba(180, 150, 220, 0.1);
+  border-color: rgba(180, 150, 220, 0.22);
+  color: var(--todo-glyph);
+}
+
+html[data-theme="light"] .tool-run-chip.todo {
+  background: rgba(120, 90, 160, 0.1);
+  border-color: rgba(120, 90, 160, 0.3);
+}
+
 .tool-run-chip.other {
   background: rgba(151, 162, 179, 0.06);
   border-color: rgba(151, 162, 179, 0.14);

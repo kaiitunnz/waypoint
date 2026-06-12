@@ -476,6 +476,38 @@ def board_delete(
     _emit(_settings_from_ctx(ctx), lambda c: c.delete_board(channel))
 
 
+@board_app.command("delete-entry")
+def board_delete_entry(
+    ctx: typer.Context,
+    channel: Annotated[str, typer.Argument()],
+    entry_id: Annotated[int, typer.Argument()],
+) -> None:
+    """Delete a single post (log entry or cell) by its id."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: c.delete_board_entry(channel, entry_id),
+    )
+
+
+@board_app.command("edit-entry")
+def board_edit_entry(
+    ctx: typer.Context,
+    channel: Annotated[str, typer.Argument()],
+    entry_id: Annotated[int, typer.Argument()],
+    text: Annotated[str, typer.Argument()],
+    meta: Annotated[
+        list[str] | None,
+        typer.Option("--meta", help="Replace metadata with key=value. Repeatable."),
+    ] = None,
+) -> None:
+    """Edit a post's text and metadata in place (the cell key is immutable)."""
+    metadata = _parse_meta(meta)
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"entry": c.update_board_entry(channel, entry_id, text, metadata)},
+    )
+
+
 def run_reset(settings: Settings | None = None, *, confirmed: bool) -> None:
     settings = settings or load_settings()
     db_path = settings.database_path

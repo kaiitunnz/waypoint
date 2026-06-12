@@ -96,14 +96,14 @@ class Storage:
         self._lock = threading.RLock()
         self.connection = sqlite3.connect(self.database_path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
-        # WAL lets reads run concurrently with the writer and drops the
-        # full fsync that the default rollback journal does on every
-        # commit — the streaming event path commits per event, so that
-        # fsync otherwise serializes the whole asyncio loop. synchronous
-        # NORMAL is safe under WAL (a crash can lose only the last
-        # un-checkpointed commits, never corrupt the db), and busy_timeout
-        # lets the threadpooled readers wait out a checkpoint instead of
-        # raising "database is locked".
+        # WAL drops the full fsync that the default rollback journal does
+        # on every commit — the streaming event path commits per event, so
+        # that fsync otherwise serializes the whole asyncio loop.
+        # synchronous NORMAL is safe under WAL (a crash can lose only the
+        # last un-checkpointed commits, never corrupt the db). This single
+        # connection is serialized by ``_synchronized``, so WAL's
+        # concurrent-reader benefit doesn't apply today; busy_timeout is
+        # defensive in case that ever changes.
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.execute("PRAGMA synchronous=NORMAL")
         self.connection.execute("PRAGMA busy_timeout=5000")

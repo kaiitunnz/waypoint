@@ -301,6 +301,11 @@ class ClaudeCliAdapter:
         self._on_session_update = on_session_update
         self._default_model_id = normalize_claude_model_id(default_model_id)
         self._sessions: dict[str, ClaudeSessionState] = {}
+        # Folded todo state stashed by terminate_session and consumed by the
+        # next resume-spawn, so a respawn (set_effort, reattach) restores the
+        # tracker instead of stubbing the CLI's TaskUpdate deltas for tasks
+        # created before the respawn. Keyed by session id.
+        self._carried_task_state: dict[str, tuple[TaskListTracker, str | None]] = {}
         self._approval_lock = asyncio.Lock()
 
     async def start_session(
@@ -1071,6 +1076,13 @@ class ClaudeCliAdapter:
         state = self._sessions.pop(session_id, None)
         if state is None:
             return False
+        if not state.task_tracker.is_empty:
+            # A respawn (set_effort, reattach) terminates before the
+            # resume-spawn; preserve the folded todo state for it to restore.
+            self._carried_task_state[session_id] = (
+                state.task_tracker,
+                state.task_card_item_id,
+            )
         state.closing = True
         if state.rate_limit_refresh_task is not None:
             state.rate_limit_refresh_task.cancel()
@@ -1189,22 +1201,26 @@ class ClaudeCliAdapter:
         state.stderr_task = asyncio.create_task(self._read_stderr(state))
         state.wait_task = asyncio.create_task(self._watch_process(state))
         if resume:
-            self._carry_task_state(self._sessions.get(session_id), state)
+            self._restore_carried_task_state(session_id, state)
+        else:
+            # A fresh (non-resume) start of this id isn't a respawn; drop any
+            # stale carry so it can't leak into an unrelated session.
+            self._carried_task_state.pop(session_id, None)
         self._sessions[session_id] = state
         return state
 
-    @staticmethod
-    def _carry_task_state(
-        prior: ClaudeSessionState | None, state: ClaudeSessionState
+    def _restore_carried_task_state(
+        self, session_id: str, state: ClaudeSessionState
     ) -> None:
         # A resume/respawn builds a fresh state, but the CLI keeps the same task
         # ids and will send TaskUpdate deltas for tasks created before the
         # respawn. Without the prior tracker those deltas hit unknown ids and
-        # materialise blank stubs under a new card, so carry the fold forward.
-        if prior is None:
+        # materialise blank stubs under a new card, so restore the fold that
+        # terminate_session stashed just before this respawn.
+        carried = self._carried_task_state.pop(session_id, None)
+        if carried is None:
             return
-        state.task_tracker = prior.task_tracker
-        state.task_card_item_id = prior.task_card_item_id
+        state.task_tracker, state.task_card_item_id = carried
 
     def _build_local_launch_spec(
         self,

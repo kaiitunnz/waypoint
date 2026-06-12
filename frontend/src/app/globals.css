@@ -3449,6 +3449,10 @@ html[data-theme="light"] .task-dock-strip {
   background: rgba(180, 150, 220, 0.16);
 }
 
+html[data-theme="light"] .task-dock-meter {
+  background: rgba(120, 90, 160, 0.16);
+}
+
 .task-dock-meter-fill {
   height: 100%;
   background: var(--accent-strong);

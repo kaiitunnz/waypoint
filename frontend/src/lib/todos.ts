@@ -32,14 +32,6 @@ export function isTodoToolEvent(event: EventRecord | null | undefined): boolean 
   return readTodoEntries(event)?.length ? true : toolNameOf(event) === "TodoWrite";
 }
 
-export function todoStatusForEvent(event: EventRecord): "complete" | "pending" {
-  const method = typeof event.metadata?.method === "string" ? event.metadata.method : "";
-  if (method === "item/completed" || method === "user.tool_result") {
-    return "complete";
-  }
-  return "pending";
-}
-
 export function readTodoEntries(event: EventRecord | null | undefined): TodoEntry[] | null {
   if (!event) {
     return null;
@@ -90,7 +82,6 @@ export interface TodoProgress {
   todos: TodoEntry[];
   total: number;
   completed: number;
-  inProgress: number;
   // The task to surface as "current": the in-progress one, else the first
   // pending one, else null (everything done).
   current: TodoEntry | null;
@@ -104,7 +95,6 @@ export function summarizeTodos(
     return null;
   }
   const completed = todos.filter((todo) => todo.status === "completed").length;
-  const inProgress = todos.filter((todo) => todo.status === "in-progress").length;
   const current =
     todos.find((todo) => todo.status === "in-progress") ??
     todos.find((todo) => todo.status === "pending") ??
@@ -113,7 +103,6 @@ export function summarizeTodos(
     todos,
     total: todos.length,
     completed,
-    inProgress,
     current,
     allComplete: completed === todos.length,
   };

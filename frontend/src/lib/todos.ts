@@ -49,9 +49,10 @@ export function readTodoEntries(event: EventRecord | null | undefined): TodoEntr
   const todos = rawTodos
     .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
     .map((entry) => {
-      // Codex todo_list items carry `text`/`completed` (only two states);
-      // Claude's TodoWrite tool uses `content`/`status` with a third
-      // `in_progress` state. Read both shapes so one card renders both.
+      // Cross-backend shapes: Codex's native todo_list items use
+      // `text`/`completed`, its update_plan todos and Claude's TodoWrite use
+      // `text`/`content` with a `status` that includes `in_progress`. Read all
+      // of them so one card renders every backend.
       const content =
         typeof entry.text === "string" && entry.text
           ? entry.text

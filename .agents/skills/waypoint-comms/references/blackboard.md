@@ -48,11 +48,23 @@ waypoint board clear topic:auth-refactor
 
 # Delete a channel outright, posts and all:
 waypoint board delete topic:auth-refactor
+
+# Delete a single post (log entry or cell) by its id:
+waypoint board delete-entry topic:auth-refactor 42
+
+# Edit a post's text (and replace its metadata) in place:
+waypoint board edit-entry topic:auth-refactor 42 "Fixed: the bug was in jwt.py:91"
 ```
 
-`clear` and `delete` differ: `clear` empties a channel you want to reuse (it
-stays listed with zero posts); `delete` removes the channel entirely. Both wipe
-every post in the channel — there is no per-post delete yet.
+`clear` and `delete` act on a whole channel: `clear` empties a channel you want
+to reuse (it stays listed with zero posts); `delete` removes the channel
+entirely.
+
+`delete-entry` and `edit-entry` act on one post, addressed by the `id` a
+`board read` returns. `edit-entry` rewrites the post's text and replaces its
+metadata (the cell key is immutable — to rename a cell, delete it and repost); it
+stamps an `edited_at` the UI shows as "edited" while preserving `created_at`, so
+the log keeps its order.
 
 `post` stamps the author from `WAYPOINT_SESSION_ID` automatically (the same id as
 `addressing.md`); you don't pass it. When that session is deleted, its posts are

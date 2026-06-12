@@ -643,6 +643,48 @@ export async function deleteBoardChannel(
   return payload.deleted ?? 0;
 }
 
+export async function deleteBoardEntry(
+  host: string,
+  token: string,
+  channel: string,
+  entryId: number,
+): Promise<void> {
+  const response = await fetch(
+    `${host}/api/board/${encodeURIComponent(channel)}/entries/${entryId}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  await ensureOk(response, "failed to delete board entry");
+}
+
+export async function updateBoardEntry(
+  host: string,
+  token: string,
+  channel: string,
+  entryId: number,
+  body: { text: string; metadata?: Record<string, unknown> },
+): Promise<BoardEntry> {
+  const response = await fetch(
+    `${host}/api/board/${encodeURIComponent(channel)}/entries/${entryId}`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text: body.text,
+        metadata: body.metadata ?? {},
+      }),
+    },
+  );
+  await ensureOk(response, "failed to update board entry");
+  const payload = await response.json();
+  return payload.entry as BoardEntry;
+}
+
 export async function deleteSession(host: string, token: string, sessionId: string): Promise<void> {
   const response = await fetch(`${host}/api/sessions/${sessionId}`, {
     method: "DELETE",

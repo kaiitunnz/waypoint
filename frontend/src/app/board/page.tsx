@@ -16,10 +16,12 @@ import {
   clearBoardChannel,
   connectSessionsSocket,
   deleteBoardChannel,
+  deleteBoardEntry,
   fetchBoardChannel,
   fetchBoardChannels,
   isAuthError,
   postBoardEntry,
+  updateBoardEntry,
 } from "@/lib/api";
 import { clearToken, readHost, readToken } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
@@ -50,34 +52,115 @@ function MetaChips({ metadata }: { metadata: Record<string, unknown> }) {
   );
 }
 
-function EntryDetail({ entry }: { entry: BoardEntry }) {
+interface EntryDetailProps {
+  entry: BoardEntry;
+  isEditing: boolean;
+  editDraft: string;
+  savingEdit: boolean;
+  onEditChange: (value: string) => void;
+  onStartEdit: (entry: BoardEntry) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: (entry: BoardEntry) => void;
+  onDelete: (entry: BoardEntry) => void;
+}
+
+function EntryDetail({
+  entry,
+  isEditing,
+  editDraft,
+  savingEdit,
+  onEditChange,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onDelete,
+}: EntryDetailProps) {
+  const stop = (event: { stopPropagation: () => void }) =>
+    event.stopPropagation();
   return (
-    <dl className="board-detail">
-      <div className="board-detail-row">
-        <dt>entry</dt>
-        <dd>#{entry.id}</dd>
-      </div>
-      <div className="board-detail-row">
-        <dt>posted</dt>
-        <dd>{new Date(entry.created_at).toLocaleString()}</dd>
-      </div>
-      <div className="board-detail-row">
-        <dt>author</dt>
-        <dd>
-          {entry.author_session_id ? (
-            <Link
-              className="board-detail-link"
-              href={`/session/${entry.author_session_id}`}
-              onClick={(event) => event.stopPropagation()}
+    <div className="board-detail" onClick={stop} onKeyDown={stop}>
+      <dl className="board-detail-rows">
+        <div className="board-detail-row">
+          <dt>entry</dt>
+          <dd>#{entry.id}</dd>
+        </div>
+        <div className="board-detail-row">
+          <dt>posted</dt>
+          <dd>{new Date(entry.created_at).toLocaleString()}</dd>
+        </div>
+        {entry.edited_at ? (
+          <div className="board-detail-row">
+            <dt>edited</dt>
+            <dd>{new Date(entry.edited_at).toLocaleString()}</dd>
+          </div>
+        ) : null}
+        <div className="board-detail-row">
+          <dt>author</dt>
+          <dd>
+            {entry.author_session_id ? (
+              <Link
+                className="board-detail-link"
+                href={`/session/${entry.author_session_id}`}
+              >
+                {entry.author_session_id} →
+              </Link>
+            ) : (
+              "no session"
+            )}
+          </dd>
+        </div>
+      </dl>
+
+      {isEditing ? (
+        <div className="board-edit">
+          <textarea
+            className="board-edit-text"
+            value={editDraft}
+            onChange={(event) => onEditChange(event.target.value)}
+            rows={3}
+            autoFocus
+            aria-label="Edit message"
+          />
+          <div className="board-edit-actions">
+            <button
+              type="button"
+              className="primary"
+              onClick={() => onSaveEdit(entry)}
+              disabled={
+                savingEdit || !editDraft.trim() || editDraft === entry.text
+              }
             >
-              {entry.author_session_id} →
-            </Link>
-          ) : (
-            "no session"
-          )}
-        </dd>
-      </div>
-    </dl>
+              {savingEdit ? "Saving…" : "Save"}
+            </button>
+            <button
+              type="button"
+              className="board-action"
+              onClick={onCancelEdit}
+              disabled={savingEdit}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="board-detail-actions">
+          <button
+            type="button"
+            className="board-action"
+            onClick={() => onStartEdit(entry)}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            className="board-action board-action-danger"
+            onClick={() => onDelete(entry)}
+          >
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -98,6 +181,9 @@ export default function BoardPage() {
   const [draftKey, setDraftKey] = useState("");
   const [posting, setPosting] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const toggleExpanded = (id: number) =>
     setExpandedId((current) => (current === id ? null : id));
@@ -216,6 +302,8 @@ export default function BoardPage() {
   }, [refreshChannels]);
 
   useEffect(() => {
+    setExpandedId(null);
+    setEditingId(null);
     if (activeChannel) {
       setDraftChannel(activeChannel);
       void refreshEntries(activeChannel);
@@ -367,6 +455,74 @@ export default function BoardPage() {
       }
     },
     [host, token, refreshChannels, handleAuthFailure],
+  );
+
+  const startEdit = useCallback((entry: BoardEntry) => {
+    setEditingId(entry.id);
+    setEditDraft(entry.text);
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditingId(null);
+    setEditDraft("");
+  }, []);
+
+  const handleEditSave = useCallback(
+    async (entry: BoardEntry) => {
+      if (!host || !token || !activeChannel) return;
+      const text = editDraft.trim();
+      if (!text || text === entry.text) return;
+      setSavingEdit(true);
+      setError("");
+      try {
+        await updateBoardEntry(host, token, activeChannel, entry.id, { text });
+        setEditingId(null);
+        setEditDraft("");
+        await refreshEntries(activeChannel);
+      } catch (err) {
+        if (isAuthError(err)) {
+          handleAuthFailure();
+          return;
+        }
+        setError(err instanceof Error ? err.message : "failed to edit post");
+      } finally {
+        setSavingEdit(false);
+      }
+    },
+    [host, token, activeChannel, editDraft, refreshEntries, handleAuthFailure],
+  );
+
+  const handleDeleteEntry = useCallback(
+    async (entry: BoardEntry) => {
+      if (!host || !token || !activeChannel) return;
+      if (!window.confirm(`Delete post #${entry.id}? This cannot be undone.`)) {
+        return;
+      }
+      setError("");
+      try {
+        await deleteBoardEntry(host, token, activeChannel, entry.id);
+        if (expandedId === entry.id) setExpandedId(null);
+        if (editingId === entry.id) setEditingId(null);
+        await refreshChannels();
+        await refreshEntries(activeChannel);
+      } catch (err) {
+        if (isAuthError(err)) {
+          handleAuthFailure();
+          return;
+        }
+        setError(err instanceof Error ? err.message : "failed to delete post");
+      }
+    },
+    [
+      host,
+      token,
+      activeChannel,
+      expandedId,
+      editingId,
+      refreshChannels,
+      refreshEntries,
+      handleAuthFailure,
+    ],
   );
 
   // The two shapes the board is built on: keyed cells (latest-wins
@@ -547,6 +703,9 @@ export default function BoardPage() {
                         <span className="board-cell-key">{entry.key}</span>
                         <span className="board-cell-time">
                           {formatRelativeTime(entry.created_at)}
+                          {entry.edited_at ? (
+                            <span className="board-edited"> · edited</span>
+                          ) : null}
                         </span>
                       </header>
                       <p className="board-cell-value">{entry.text}</p>
@@ -559,7 +718,17 @@ export default function BoardPage() {
                       </footer>
                       <MetaChips metadata={entry.metadata} />
                       {expandedId === entry.id ? (
-                        <EntryDetail entry={entry} />
+                        <EntryDetail
+                          entry={entry}
+                          isEditing={editingId === entry.id}
+                          editDraft={editDraft}
+                          savingEdit={savingEdit}
+                          onEditChange={setEditDraft}
+                          onStartEdit={startEdit}
+                          onCancelEdit={cancelEdit}
+                          onSaveEdit={handleEditSave}
+                          onDelete={handleDeleteEntry}
+                        />
                       ) : null}
                     </article>
                   ))}
@@ -600,12 +769,25 @@ export default function BoardPage() {
                           </span>
                           <span className="board-log-time">
                             {formatRelativeTime(entry.created_at)}
+                            {entry.edited_at ? (
+                              <span className="board-edited"> · edited</span>
+                            ) : null}
                           </span>
                         </div>
                         <p className="board-log-text">{entry.text}</p>
                         <MetaChips metadata={entry.metadata} />
                         {expandedId === entry.id ? (
-                          <EntryDetail entry={entry} />
+                          <EntryDetail
+                            entry={entry}
+                            isEditing={editingId === entry.id}
+                            editDraft={editDraft}
+                            savingEdit={savingEdit}
+                            onEditChange={setEditDraft}
+                            onStartEdit={startEdit}
+                            onCancelEdit={cancelEdit}
+                            onSaveEdit={handleEditSave}
+                            onDelete={handleDeleteEntry}
+                          />
                         ) : null}
                       </div>
                     </li>

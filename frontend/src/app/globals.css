@@ -9726,9 +9726,16 @@ html[data-theme="light"]
   border-top: 1px dashed var(--line);
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 12px;
   font-family: var(--font-mono);
   font-size: 0.72rem;
+  cursor: default;
+}
+
+.board-detail-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 
 .board-detail-row {
@@ -9758,6 +9765,41 @@ html[data-theme="light"]
 
 .board-detail-link:hover {
   text-decoration: underline;
+}
+
+.board-detail-actions,
+.board-edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.board-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.board-edit-text {
+  width: 100%;
+  resize: vertical;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-card-soft);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.board-edit-text:focus-visible {
+  outline: 2px solid var(--accent-cool);
+  outline-offset: 2px;
+}
+
+.board-edited {
+  color: var(--accent-cool);
+  letter-spacing: 0.04em;
 }
 
 /* Empty / status panels */

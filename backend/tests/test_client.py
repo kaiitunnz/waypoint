@@ -52,6 +52,34 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
             if rest.endswith("/clear") and request.method == "POST":
                 channel = rest[: -len("/clear")]
                 return httpx.Response(200, json={"channel": channel, "cleared": 3})
+            if "/entries/" in rest:
+                channel, entry_id = rest.split("/entries/", 1)
+                if request.method == "DELETE":
+                    return httpx.Response(
+                        200,
+                        json={
+                            "channel": channel,
+                            "entry_id": int(entry_id),
+                            "deleted": True,
+                        },
+                    )
+                if request.method == "PATCH":
+                    payload = json.loads(request.content)
+                    state["board_update"] = {
+                        "channel": channel,
+                        "entry_id": int(entry_id),
+                        **payload,
+                    }
+                    return httpx.Response(
+                        200,
+                        json={
+                            "entry": {
+                                "id": int(entry_id),
+                                "channel": channel,
+                                **payload,
+                            }
+                        },
+                    )
             channel = rest
             if request.method == "POST":
                 payload = json.loads(request.content)
@@ -231,6 +259,29 @@ def test_delete_board(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state: dict = {}
     with _client(_settings(tmp_path), state) as client:
         assert client.delete_board("topic:x") == {"channel": "topic:x", "deleted": 5}
+
+
+def test_delete_board_entry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        assert client.delete_board_entry("topic:x", 7) == {
+            "channel": "topic:x",
+            "entry_id": 7,
+            "deleted": True,
+        }
+
+
+def test_update_board_entry_sends_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        entry = client.update_board_entry("topic:x", 7, "new", metadata={"a": "b"})
+    assert entry["text"] == "new"
+    assert state["board_update"]["entry_id"] == 7
+    assert state["board_update"]["metadata"] == {"a": "b"}
 
 
 def test_error_response_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

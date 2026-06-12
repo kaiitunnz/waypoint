@@ -864,6 +864,45 @@ def test_board_prune_for_session_drops_authored_rows(tmp_path) -> None:
     assert [e.text for e in remaining] == ["theirs", "anon"]
 
 
+def test_board_delete_entry_removes_one_post(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    a = storage.add_board_entry("topic:a", "keep")
+    b = storage.add_board_entry("topic:a", "drop")
+    cell = storage.add_board_entry("topic:a", "v", key="k")
+    assert storage.delete_board_entry("topic:a", b.id) is True
+    assert storage.delete_board_entry("topic:a", cell.id) is True
+    remaining = storage.list_board_entries("topic:a")
+    assert [e.id for e in remaining] == [a.id]
+
+
+def test_board_delete_entry_wrong_channel_is_noop(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    entry = storage.add_board_entry("topic:a", "hi")
+    assert storage.delete_board_entry("topic:b", entry.id) is False
+    assert len(storage.list_board_entries("topic:a")) == 1
+
+
+def test_board_update_entry_edits_text_and_metadata(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    entry = storage.add_board_entry("topic:a", "old", metadata={"v": 1})
+    updated = storage.update_board_entry("topic:a", entry.id, "new", metadata={"v": 2})
+    assert updated is not None
+    assert updated.text == "new"
+    assert updated.metadata == {"v": 2}
+    # The original post time is preserved; an edit stamp is added.
+    assert updated.created_at == entry.created_at
+    assert updated.edited_at is not None
+
+
+def test_board_update_entry_missing_returns_none(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    entry = storage.add_board_entry("topic:a", "hi")
+    assert storage.update_board_entry("topic:a", 99999, "x") is None
+    # Wrong channel is also a no-op.
+    assert storage.update_board_entry("topic:b", entry.id, "x") is None
+    assert storage.list_board_entries("topic:a")[0].text == "hi"
+
+
 def test_storage_legacy_db_gets_launch_mode_column(tmp_path) -> None:
     """A pre-launch_mode SQLite file gains the column with default 'auto'."""
     import sqlite3

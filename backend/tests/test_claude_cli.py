@@ -1367,6 +1367,39 @@ async def test_task_description_flows_into_snapshot_and_is_patchable() -> None:
 
 
 @pytest.mark.asyncio
+async def test_carry_task_state_preserves_tracker_across_respawn() -> None:
+    """A resume builds a fresh state; the folded todo tracker must carry over
+    so the CLI's post-respawn TaskUpdate deltas keep patching real items."""
+    adapter = _make_adapter([])
+    prior, _ = _attach_state(adapter, "sess")
+    prior.task_tracker.create("1", content="First", status="completed")
+    prior.task_card_item_id = "card-abc"
+    fresh, _ = _attach_state(adapter, "sess2")
+    adapter._carry_task_state(prior, fresh)
+    assert fresh.task_tracker is prior.task_tracker
+    assert fresh.task_card_item_id == "card-abc"
+    # A status-only update for the carried id patches in place rather than
+    # creating a blank stub.
+    fresh.task_tracker.update("1", status="in_progress")
+    assert fresh.task_tracker.snapshot() == [
+        {
+            "content": "First",
+            "status": "in_progress",
+            "activeForm": None,
+            "description": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_carry_task_state_tolerates_no_prior() -> None:
+    adapter = _make_adapter([])
+    fresh, _ = _attach_state(adapter)
+    adapter._carry_task_state(None, fresh)
+    assert fresh.task_tracker.is_empty
+
+
+@pytest.mark.asyncio
 async def test_task_get_and_list_results_are_suppressed() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)

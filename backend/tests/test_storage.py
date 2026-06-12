@@ -775,6 +775,41 @@ def test_board_list_entries_since_cursor(tmp_path) -> None:
     assert [e.text for e in fresh] == ["b", "c"]
 
 
+def test_board_read_channel_caps_log_and_keeps_all_cells(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    for i in range(5):
+        storage.add_board_entry("topic:x", f"log-{i}")
+    storage.add_board_entry("topic:x", "v1", key="k1")
+    storage.add_board_entry("topic:x", "v2", key="k2")
+
+    entries, log_total = storage.read_board_channel("topic:x", log_limit=3)
+    cells = [e for e in entries if e.key]
+    log = [e for e in entries if not e.key]
+    assert log_total == 5
+    # Every cell is kept; only the newest 3 log rows, oldest-first.
+    assert {e.key for e in cells} == {"k1", "k2"}
+    assert [e.text for e in log] == ["log-2", "log-3", "log-4"]
+
+
+def test_board_read_channel_pages_older_with_before(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    ids = [storage.add_board_entry("topic:x", f"log-{i}").id for i in range(5)]
+    storage.add_board_entry("topic:x", "v1", key="k1")
+
+    first, log_total = storage.read_board_channel("topic:x", log_limit=2)
+    assert log_total == 5
+    first_log = [e for e in first if not e.key]
+    assert [e.text for e in first_log] == ["log-3", "log-4"]
+
+    # Page older than the oldest log row returned; cells omitted on older pages.
+    older, _ = storage.read_board_channel(
+        "topic:x", log_limit=2, before=first_log[0].id
+    )
+    assert [e for e in older if e.key] == []
+    assert [e.text for e in older] == ["log-1", "log-2"]
+    assert first_log[0].id == ids[3]
+
+
 def test_board_list_channels_summarizes(tmp_path) -> None:
     storage = Storage(tmp_path / "waypoint.db")
     storage.add_board_entry("topic:a", "1")
@@ -794,6 +829,28 @@ def test_board_clear_channel_removes_only_that_channel(tmp_path) -> None:
     assert removed == 2
     assert storage.list_board_entries("topic:a") == []
     assert len(storage.list_board_entries("topic:b")) == 1
+
+
+def test_board_clear_keeps_the_channel_registered(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    storage.add_board_entry("topic:a", "1", key="k1")
+    storage.add_board_entry("topic:a", "2")
+    storage.clear_board_channel("topic:a")
+    channels = {c.channel: c for c in storage.list_board_channels()}
+    # The emptied channel survives with zero entries.
+    assert "topic:a" in channels
+    assert channels["topic:a"].entry_count == 0
+
+
+def test_board_delete_channel_removes_it_from_the_list(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    storage.add_board_entry("topic:a", "1")
+    storage.add_board_entry("topic:b", "1")
+    removed = storage.delete_board_channel("topic:a")
+    assert removed == 1
+    channels = {c.channel for c in storage.list_board_channels()}
+    assert channels == {"topic:b"}
+    assert storage.list_board_entries("topic:a") == []
 
 
 def test_board_prune_for_session_drops_authored_rows(tmp_path) -> None:

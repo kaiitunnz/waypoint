@@ -1165,12 +1165,24 @@ class SessionRuntime:
     ) -> list[BoardEntry]:
         return self.storage.list_board_entries(channel, since=since, key=key)
 
+    def read_board_channel(
+        self, channel: str, *, log_limit: int | None = None, before: int | None = None
+    ) -> tuple[list[BoardEntry], int]:
+        return self.storage.read_board_channel(
+            channel, log_limit=log_limit, before=before
+        )
+
     def list_board_channels(self) -> list[BoardChannel]:
         return self.storage.list_board_channels()
 
     async def clear_board_channel(self, channel: str) -> int:
         removed = self.storage.clear_board_channel(channel)
         await self._publish_board_update(channel)
+        return removed
+
+    async def delete_board_channel(self, channel: str) -> int:
+        removed = self.storage.delete_board_channel(channel)
+        await self._publish_board_update(None)
         return removed
 
     async def _publish_board_update(self, channel: str | None) -> None:

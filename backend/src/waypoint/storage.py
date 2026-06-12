@@ -176,7 +176,20 @@ class Storage:
 
             CREATE INDEX IF NOT EXISTS idx_board_channel
                 ON board_entries(channel, id);
+
+            -- Channels exist independently of their entries so a cleared
+            -- channel survives with zero posts; a channel is gone only when
+            -- explicitly deleted.
+            CREATE TABLE IF NOT EXISTS board_channels (
+                channel TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL
+            );
             """)
+        # Register any channels that predate the board_channels table.
+        self.connection.execute(
+            "INSERT OR IGNORE INTO board_channels (channel, created_at) "
+            "SELECT channel, MIN(created_at) FROM board_entries GROUP BY channel"
+        )
         self._ensure_column("scheduled_sessions", "permission_mode", "TEXT")
         self._ensure_column("scheduled_sessions", "model", "TEXT")
         self._ensure_column("scheduled_sessions", "effort", "TEXT")
@@ -315,6 +328,10 @@ class Storage:
         now = datetime.now(UTC)
         meta = metadata or {}
         meta_json = json.dumps(meta)
+        self.connection.execute(
+            "INSERT OR IGNORE INTO board_channels (channel, created_at) VALUES (?, ?)",
+            (channel, now.isoformat()),
+        )
         if key is None:
             cursor = self.connection.execute(
                 """
@@ -378,13 +395,61 @@ class Storage:
         return [self._board_entry_from_row(row) for row in rows]
 
     @_synchronized
+    def read_board_channel(
+        self,
+        channel: str,
+        *,
+        log_limit: int | None = None,
+        before: int | None = None,
+    ) -> tuple[list[BoardEntry], int]:
+        """Read a page of a channel: keyed cells plus a window of the append-log.
+
+        Returns ``(entries, log_total)`` where ``entries`` is cells followed by
+        log rows in ascending id order, and ``log_total`` is the full append-log
+        count. The newest ``log_limit`` log rows are returned; pass ``before`` (a
+        log id) to page further back. Cells are always returned in full on the
+        first page (``before`` unset) so every cell's latest value stays visible;
+        older pages carry log rows only.
+        """
+        cells: list[BoardEntry] = []
+        if before is None:
+            cell_rows = self.connection.execute(
+                "SELECT * FROM board_entries WHERE channel = ? AND key IS NOT NULL "
+                "ORDER BY id ASC",
+                (channel,),
+            ).fetchall()
+            cells = [self._board_entry_from_row(row) for row in cell_rows]
+        log_total = int(
+            self.connection.execute(
+                "SELECT COUNT(*) AS n FROM board_entries "
+                "WHERE channel = ? AND key IS NULL",
+                (channel,),
+            ).fetchone()["n"]
+        )
+        log_query = "SELECT * FROM board_entries WHERE channel = ? AND key IS NULL"
+        params: list[Any] = [channel]
+        if before is not None:
+            log_query += " AND id < ?"
+            params.append(before)
+        log_query += " ORDER BY id DESC"
+        if log_limit is not None:
+            log_query += " LIMIT ?"
+            params.append(log_limit)
+        log_rows = self.connection.execute(log_query, params).fetchall()
+        log = [self._board_entry_from_row(row) for row in reversed(log_rows)]
+        return cells + log, log_total
+
+    @_synchronized
     def list_board_channels(self) -> list[BoardChannel]:
+        # Driven by the registry so cleared (empty) channels still appear; an
+        # empty channel sorts by its own creation time.
         rows = self.connection.execute("""
-            SELECT channel,
-                   COUNT(*) AS entry_count,
-                   MAX(created_at) AS last_created_at
-            FROM board_entries
-            GROUP BY channel
+            SELECT c.channel AS channel,
+                   COUNT(e.id) AS entry_count,
+                   COALESCE(MAX(e.created_at), c.created_at) AS last_created_at
+            FROM board_channels c
+            LEFT JOIN board_entries e ON e.channel = c.channel
+            GROUP BY c.channel
             ORDER BY last_created_at DESC
             """).fetchall()
         return [
@@ -398,12 +463,27 @@ class Storage:
 
     @_synchronized
     def clear_board_channel(self, channel: str) -> int:
+        # Remove the posts but keep the channel registered so it survives empty.
         cursor = self.connection.execute(
             "DELETE FROM board_entries WHERE channel = ?",
             (channel,),
         )
         self.connection.commit()
         return cursor.rowcount or 0
+
+    @_synchronized
+    def delete_board_channel(self, channel: str) -> int:
+        cursor = self.connection.execute(
+            "DELETE FROM board_entries WHERE channel = ?",
+            (channel,),
+        )
+        removed = cursor.rowcount or 0
+        self.connection.execute(
+            "DELETE FROM board_channels WHERE channel = ?",
+            (channel,),
+        )
+        self.connection.commit()
+        return removed
 
     @_synchronized
     def prune_board_for_session(self, session_id: str) -> int:

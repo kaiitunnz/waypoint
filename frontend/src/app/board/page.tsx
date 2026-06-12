@@ -52,33 +52,96 @@ function MetaChips({ metadata }: { metadata: Record<string, unknown> }) {
   );
 }
 
+const stopEvent = (event: { stopPropagation: () => void }) =>
+  event.stopPropagation();
+
+interface EntryEditorProps {
+  entry: BoardEntry;
+  draft: string;
+  saving: boolean;
+  onChange: (value: string) => void;
+  onSave: (entry: BoardEntry) => void;
+  onCancel: () => void;
+}
+
+// Edits happen in place of the post text so you rewrite the content where it
+// lives, not in a detached field. Text-only by design; the post keeps its key
+// and metadata.
+function EntryEditor({
+  entry,
+  draft,
+  saving,
+  onChange,
+  onSave,
+  onCancel,
+}: EntryEditorProps) {
+  const unchanged = !draft.trim() || draft === entry.text;
+  return (
+    <div className="board-edit" onClick={stopEvent}>
+      <textarea
+        className="board-edit-text"
+        value={draft}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onCancel();
+          } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            if (!saving && !unchanged) onSave(entry);
+          }
+        }}
+        rows={3}
+        autoFocus
+        aria-label="Edit post text"
+      />
+      <div className="board-edit-foot">
+        <span className="board-edit-hint" aria-hidden="true">
+          ⌘↵ save · esc cancel
+        </span>
+        <div className="board-edit-actions">
+          <button
+            type="button"
+            className="board-action"
+            onClick={onCancel}
+            disabled={saving}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="board-action board-edit-save"
+            onClick={() => onSave(entry)}
+            disabled={saving || unchanged}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface EntryDetailProps {
   entry: BoardEntry;
-  isEditing: boolean;
-  editDraft: string;
-  savingEdit: boolean;
-  onEditChange: (value: string) => void;
+  confirmingDelete: boolean;
   onStartEdit: (entry: BoardEntry) => void;
-  onCancelEdit: () => void;
-  onSaveEdit: (entry: BoardEntry) => void;
-  onDelete: (entry: BoardEntry) => void;
+  onRequestDelete: (entry: BoardEntry) => void;
+  onConfirmDelete: (entry: BoardEntry) => void;
+  onCancelDelete: () => void;
 }
 
 function EntryDetail({
   entry,
-  isEditing,
-  editDraft,
-  savingEdit,
-  onEditChange,
+  confirmingDelete,
   onStartEdit,
-  onCancelEdit,
-  onSaveEdit,
-  onDelete,
+  onRequestDelete,
+  onConfirmDelete,
+  onCancelDelete,
 }: EntryDetailProps) {
-  const stop = (event: { stopPropagation: () => void }) =>
-    event.stopPropagation();
   return (
-    <div className="board-detail" onClick={stop} onKeyDown={stop}>
+    <div className="board-detail" onClick={stopEvent} onKeyDown={stopEvent}>
       <dl className="board-detail-rows">
         <div className="board-detail-row">
           <dt>entry</dt>
@@ -111,36 +174,19 @@ function EntryDetail({
         </div>
       </dl>
 
-      {isEditing ? (
-        <div className="board-edit">
-          <textarea
-            className="board-edit-text"
-            value={editDraft}
-            onChange={(event) => onEditChange(event.target.value)}
-            rows={3}
-            autoFocus
-            aria-label="Edit message"
-          />
-          <div className="board-edit-actions">
-            <button
-              type="button"
-              className="primary"
-              onClick={() => onSaveEdit(entry)}
-              disabled={
-                savingEdit || !editDraft.trim() || editDraft === entry.text
-              }
-            >
-              {savingEdit ? "Saving…" : "Save"}
-            </button>
-            <button
-              type="button"
-              className="board-action"
-              onClick={onCancelEdit}
-              disabled={savingEdit}
-            >
-              Cancel
-            </button>
-          </div>
+      {confirmingDelete ? (
+        <div className="board-detail-actions board-confirm">
+          <span className="board-confirm-text">Delete this post?</span>
+          <button type="button" className="board-action" onClick={onCancelDelete}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="board-action board-action-danger"
+            onClick={() => onConfirmDelete(entry)}
+          >
+            Delete
+          </button>
         </div>
       ) : (
         <div className="board-detail-actions">
@@ -154,7 +200,7 @@ function EntryDetail({
           <button
             type="button"
             className="board-action board-action-danger"
-            onClick={() => onDelete(entry)}
+            onClick={() => onRequestDelete(entry)}
           >
             Delete
           </button>
@@ -184,14 +230,26 @@ export default function BoardPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
-  const toggleExpanded = (id: number) =>
+  // Expand/collapse a card. Never collapse the card you're editing (that would
+  // drop the draft); activating a different card cancels any open edit/confirm
+  // so only one entry is ever interactive at a time.
+  const activateEntry = (id: number) => {
+    if (editingId === id) return;
+    if (editingId !== null) {
+      setEditingId(null);
+      setEditDraft("");
+    }
+    setConfirmDeleteId(null);
     setExpandedId((current) => (current === id ? null : id));
+  };
 
   const onEntryKeyDown = (event: KeyboardEvent, id: number) => {
+    if (editingId === id) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      toggleExpanded(id);
+      activateEntry(id);
     }
   };
 
@@ -304,6 +362,8 @@ export default function BoardPage() {
   useEffect(() => {
     setExpandedId(null);
     setEditingId(null);
+    setEditDraft("");
+    setConfirmDeleteId(null);
     if (activeChannel) {
       setDraftChannel(activeChannel);
       void refreshEntries(activeChannel);
@@ -475,7 +535,12 @@ export default function BoardPage() {
       setSavingEdit(true);
       setError("");
       try {
-        await updateBoardEntry(host, token, activeChannel, entry.id, { text });
+        // Edits are text-only here; resend the existing metadata so a text
+        // change doesn't wipe the post's chips.
+        await updateBoardEntry(host, token, activeChannel, entry.id, {
+          text,
+          metadata: entry.metadata,
+        });
         setEditingId(null);
         setEditDraft("");
         await refreshEntries(activeChannel);
@@ -492,15 +557,23 @@ export default function BoardPage() {
     [host, token, activeChannel, editDraft, refreshEntries, handleAuthFailure],
   );
 
+  const requestDelete = useCallback((entry: BoardEntry) => {
+    setConfirmDeleteId(entry.id);
+  }, []);
+
+  const cancelDelete = useCallback(() => {
+    setConfirmDeleteId(null);
+  }, []);
+
   const handleDeleteEntry = useCallback(
     async (entry: BoardEntry) => {
       if (!host || !token || !activeChannel) return;
-      if (!window.confirm(`Delete post #${entry.id}? This cannot be undone.`)) {
-        return;
-      }
       setError("");
       try {
         await deleteBoardEntry(host, token, activeChannel, entry.id);
+        setConfirmDeleteId((current) =>
+          current === entry.id ? null : current,
+        );
         if (expandedId === entry.id) setExpandedId(null);
         if (editingId === entry.id) setEditingId(null);
         await refreshChannels();
@@ -696,7 +769,7 @@ export default function BoardPage() {
                       role="button"
                       tabIndex={0}
                       aria-expanded={expandedId === entry.id}
-                      onClick={() => toggleExpanded(entry.id)}
+                      onClick={() => activateEntry(entry.id)}
                       onKeyDown={(event) => onEntryKeyDown(event, entry.id)}
                     >
                       <header className="board-cell-head">
@@ -708,7 +781,18 @@ export default function BoardPage() {
                           ) : null}
                         </span>
                       </header>
-                      <p className="board-cell-value">{entry.text}</p>
+                      {editingId === entry.id ? (
+                        <EntryEditor
+                          entry={entry}
+                          draft={editDraft}
+                          saving={savingEdit}
+                          onChange={setEditDraft}
+                          onSave={handleEditSave}
+                          onCancel={cancelEdit}
+                        />
+                      ) : (
+                        <p className="board-cell-value">{entry.text}</p>
+                      )}
                       <footer className="board-cell-foot">
                         <span className="board-cell-author">
                           {entry.author_session_id
@@ -717,17 +801,14 @@ export default function BoardPage() {
                         </span>
                       </footer>
                       <MetaChips metadata={entry.metadata} />
-                      {expandedId === entry.id ? (
+                      {expandedId === entry.id && editingId !== entry.id ? (
                         <EntryDetail
                           entry={entry}
-                          isEditing={editingId === entry.id}
-                          editDraft={editDraft}
-                          savingEdit={savingEdit}
-                          onEditChange={setEditDraft}
+                          confirmingDelete={confirmDeleteId === entry.id}
                           onStartEdit={startEdit}
-                          onCancelEdit={cancelEdit}
-                          onSaveEdit={handleEditSave}
-                          onDelete={handleDeleteEntry}
+                          onRequestDelete={requestDelete}
+                          onConfirmDelete={handleDeleteEntry}
+                          onCancelDelete={cancelDelete}
                         />
                       ) : null}
                     </article>
@@ -758,7 +839,7 @@ export default function BoardPage() {
                         role="button"
                         tabIndex={0}
                         aria-expanded={expandedId === entry.id}
-                        onClick={() => toggleExpanded(entry.id)}
+                        onClick={() => activateEntry(entry.id)}
                         onKeyDown={(event) => onEntryKeyDown(event, entry.id)}
                       >
                         <div className="board-log-head">
@@ -774,19 +855,27 @@ export default function BoardPage() {
                             ) : null}
                           </span>
                         </div>
-                        <p className="board-log-text">{entry.text}</p>
+                        {editingId === entry.id ? (
+                          <EntryEditor
+                            entry={entry}
+                            draft={editDraft}
+                            saving={savingEdit}
+                            onChange={setEditDraft}
+                            onSave={handleEditSave}
+                            onCancel={cancelEdit}
+                          />
+                        ) : (
+                          <p className="board-log-text">{entry.text}</p>
+                        )}
                         <MetaChips metadata={entry.metadata} />
-                        {expandedId === entry.id ? (
+                        {expandedId === entry.id && editingId !== entry.id ? (
                           <EntryDetail
                             entry={entry}
-                            isEditing={editingId === entry.id}
-                            editDraft={editDraft}
-                            savingEdit={savingEdit}
-                            onEditChange={setEditDraft}
+                            confirmingDelete={confirmDeleteId === entry.id}
                             onStartEdit={startEdit}
-                            onCancelEdit={cancelEdit}
-                            onSaveEdit={handleEditSave}
-                            onDelete={handleDeleteEntry}
+                            onRequestDelete={requestDelete}
+                            onConfirmDelete={handleDeleteEntry}
+                            onCancelDelete={cancelDelete}
                           />
                         ) : null}
                       </div>

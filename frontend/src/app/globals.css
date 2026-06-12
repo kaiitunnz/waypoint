@@ -9771,12 +9771,25 @@ html[data-theme="light"]
 .board-edit-actions {
   display: flex;
   gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
+.board-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Inline edit, in place of the post text */
 .board-edit {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  margin: 0;
+}
+
+.board-log-body .board-edit {
+  margin-top: 4px;
 }
 
 .board-edit-text {
@@ -9788,13 +9801,48 @@ html[data-theme="light"]
   background: var(--bg-card-soft);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   line-height: 1.5;
 }
 
 .board-edit-text:focus-visible {
   outline: 2px solid var(--accent-cool);
   outline-offset: 2px;
+}
+
+.board-edit-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.board-edit-hint {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.06em;
+  color: var(--muted-soft);
+}
+
+.board-edit-save:not(:disabled) {
+  border-color: var(--accent-cool);
+  color: var(--accent-cool);
+}
+
+.board-edit-save:not(:disabled):hover {
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+  border-color: var(--accent-cool);
+  color: var(--accent-cool);
+}
+
+/* Inline delete confirmation, replacing the action row in place */
+.board-confirm .board-confirm-text {
+  margin-right: auto;
+  align-self: center;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--danger);
 }
 
 .board-edited {

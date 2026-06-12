@@ -109,11 +109,14 @@ def map_notification(
         item = extract_item(payload)
         return _format_item_completed(item)
     if method == "turn/plan/updated":
-        plan = payload.get("plan", [])
-        text = "\n".join(
-            f"- {entry.get('step', '')} [{entry.get('status', '')}]" for entry in plan
+        # Codex's update_plan tool. Surfaced as a todo_list (TOOL_RESULT) so it
+        # renders in the shared todo dock/card like other backends rather than
+        # as a plain system note; the adapter synthesizes the todo_list item.
+        return (
+            EventKind.TOOL_RESULT,
+            format_plan(payload.get("plan", [])),
+            (SessionStatus.RUNNING),
         )
-        return EventKind.SYSTEM_NOTE, text, SessionStatus.RUNNING
     if method == "error":
         error = payload.get("error", {})
         return (
@@ -347,6 +350,45 @@ def diff_preview_for_approval(
             "proposed", files_from_codex_legacy_file_changes(params.get("fileChanges"))
         )
     return None
+
+
+# Codex update_plan step statuses → the canonical todo statuses the frontend
+# reads (`in_progress`, not Codex's `inProgress`).
+_PLAN_TODO_STATUS = {
+    "completed": "completed",
+    "inProgress": "in_progress",
+    "pending": "pending",
+}
+
+
+def plan_todo_items(plan: Any) -> list[dict[str, Any]]:
+    """Map a Codex ``turn/plan/updated`` plan into todo_list item entries."""
+    if not isinstance(plan, list):
+        return []
+    items: list[dict[str, Any]] = []
+    for entry in plan:
+        if not isinstance(entry, dict):
+            continue
+        items.append(
+            {
+                "text": str(entry.get("step", "")),
+                "status": _PLAN_TODO_STATUS.get(
+                    str(entry.get("status", "")), "pending"
+                ),
+            }
+        )
+    return items
+
+
+def format_plan(plan: Any) -> str:
+    if not isinstance(plan, list):
+        return ""
+    lines = [
+        f"- {entry.get('step', '')} [{entry.get('status', '')}]"
+        for entry in plan
+        if isinstance(entry, dict)
+    ]
+    return "\n".join(lines)
 
 
 def format_todo_list(item: dict[str, Any]) -> str:

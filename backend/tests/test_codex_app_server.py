@@ -671,6 +671,87 @@ async def test_streamed_file_change_completed_preserves_diff_preview() -> None:
     assert tool_results[1][3]["diff_preview"]["files"][0]["path"] == "app.py"
 
 
+@pytest.mark.asyncio
+async def test_turn_plan_updated_emits_todo_list_event() -> None:
+    """Codex's update_plan plan is normalised into a canonical todo_list event
+    (TOOL_RESULT + item_type), keyed by turnId, so the shared todo dock/card
+    renders it like any other backend."""
+    emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]] = []
+    adapter, fake = make_adapter(emitted)
+    await adapter.start_session("sess", "/tmp/work")
+
+    fake.notifications.put_nowait(
+        FakeNotification(
+            "turn/plan/updated",
+            {
+                "turnId": "turn-1",
+                "explanation": "Dummy plan.",
+                "plan": [
+                    {"step": "First task", "status": "completed"},
+                    {"step": "Second task", "status": "inProgress"},
+                    {"step": "Third task", "status": "pending"},
+                ],
+            },
+        )
+    )
+    fake.notifications.put_nowait(
+        FakeNotification(
+            "turn/completed",
+            {"turn": {"id": "turn-1", "status": "completed"}},
+        )
+    )
+
+    await adapter.send_input("sess", "make a plan")
+    state = adapter._sessions["sess"]
+    if state.stream_task is not None:
+        await state.stream_task
+
+    todo_events = [
+        entry for entry in emitted if entry[3].get("item_type") == "todo_list"
+    ]
+    assert len(todo_events) == 1
+    kind, _text, metadata = todo_events[0][1], todo_events[0][2], todo_events[0][3]
+    assert kind == EventKind.TOOL_RESULT
+    assert metadata["item_id"] == "turn-1"
+    assert metadata["payload"]["item"]["items"] == [
+        {"text": "First task", "status": "completed"},
+        {"text": "Second task", "status": "in_progress"},
+        {"text": "Third task", "status": "pending"},
+    ]
+
+
+def test_plan_todo_items_maps_codex_statuses() -> None:
+    from waypoint.backends.codex.normalize import plan_todo_items
+
+    items = plan_todo_items(
+        [
+            {"step": "a", "status": "completed"},
+            {"step": "b", "status": "inProgress"},
+            {"step": "c", "status": "pending"},
+            {"step": "d", "status": "weird"},
+            "not-a-dict",
+        ]
+    )
+    assert items == [
+        {"text": "a", "status": "completed"},
+        {"text": "b", "status": "in_progress"},
+        {"text": "c", "status": "pending"},
+        {"text": "d", "status": "pending"},
+    ]
+
+
+def test_map_notification_turn_plan_updated_is_todo_result() -> None:
+    from waypoint.backends.codex.normalize import map_notification
+
+    kind, text, status = map_notification(
+        "turn/plan/updated",
+        {"plan": [{"step": "a", "status": "completed"}], "turnId": "t1"},
+    )
+    assert kind == EventKind.TOOL_RESULT
+    assert text == "- a [completed]"
+    assert status == SessionStatus.RUNNING
+
+
 def test_map_notification_agent_message_delta() -> None:
     from waypoint.backends.codex.normalize import map_notification
 

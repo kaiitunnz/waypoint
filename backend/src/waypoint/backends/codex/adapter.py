@@ -22,6 +22,7 @@ from waypoint.backends.codex.normalize import (
     map_notification,
     payload_to_dict,
     plan_metadata_for_item,
+    plan_todo_items,
 )
 from waypoint.backends.diff_preview import DiffPreviewPayload, preview_to_metadata
 from waypoint.schemas import (
@@ -611,6 +612,16 @@ class CodexAppServerAdapter:
                     if snapshot is not None:
                         await self._publish_context_usage(state, snapshot)
                     continue
+                if notification.method == "turn/plan/updated":
+                    # Synthesize a todo_list item so the generic metadata path
+                    # below emits a canonical todo event (rendered in the shared
+                    # dock/card). Keying the item by turnId collapses successive
+                    # plan updates within a turn into one evolving card.
+                    payload["item"] = {
+                        "type": "todo_list",
+                        "id": payload.get("turnId"),
+                        "items": plan_todo_items(payload.get("plan")),
+                    }
                 kind, text, status = map_notification(notification.method, payload)
                 if kind is not None and text:
                     if notification.method == "item/commandExecution/outputDelta":

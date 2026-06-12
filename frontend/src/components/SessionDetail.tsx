@@ -272,13 +272,14 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const catalog = useBackendCatalog(host || null, token || null, null);
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [events, setEvents] = useState<EventRecord[]>([]);
-  // The todo-event sequence the user last dismissed from the progress dock.
-  // Keyed on sequence (not item_id) because a session reuses one todo item_id
-  // across task groups — every create/update bumps the sequence, so any new
-  // task activity after a dismissal re-shows the dock.
-  const [dismissedTaskSequence, setDismissedTaskSequence] = useState<number | null>(
-    null,
-  );
+  // The task set the user last dismissed from the progress dock, keyed by the
+  // group's item_id and task count. Dismissal sticks through status-only
+  // updates (count unchanged); a genuinely new task (count grows) or a new
+  // group (item_id changes) re-shows the dock.
+  const [dismissedTask, setDismissedTask] = useState<{
+    itemId: string | null;
+    count: number;
+  } | null>(null);
   const [snapshot, setSnapshot] = useState("");
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [view, setView] = useState<ViewMode>("chat");
@@ -1198,6 +1199,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     () => summarizeTodos(readTodoEntries(currentTaskEvent)),
     [currentTaskEvent],
   );
+  const currentTaskItemId = currentTaskEvent ? itemIdForEvent(currentTaskEvent) : null;
   // Session has stopped its backend process (clean shutdown or crash).
   const sessionExited = Boolean(
     session && (session.status === "exited" || session.status === "error"),
@@ -1225,8 +1227,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const showTaskDock =
     activeView === "chat" &&
     taskProgress !== null &&
-    currentTaskEvent !== null &&
-    currentTaskEvent.sequence !== dismissedTaskSequence;
+    (dismissedTask === null ||
+      currentTaskItemId !== dismissedTask.itemId ||
+      taskProgress.total > dismissedTask.count);
   const liveTmux = session?.transport === "tmux";
   const { theme } = useTheme();
   const terminalRef = useRef<XTerminalHandle | null>(null);
@@ -1884,7 +1887,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       {showTaskDock && taskProgress ? (
         <TaskProgressDock
           progress={taskProgress}
-          onDismiss={() => setDismissedTaskSequence(currentTaskEvent?.sequence ?? null)}
+          onDismiss={() =>
+            setDismissedTask({
+              itemId: currentTaskItemId,
+              count: taskProgress.total,
+            })
+          }
         />
       ) : null}
       {session && !terminalOnly ? (

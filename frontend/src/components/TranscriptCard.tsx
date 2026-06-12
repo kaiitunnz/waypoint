@@ -493,11 +493,13 @@ export function ToolCallRunGroup({
   let bashCount = 0;
   let editCount = 0;
   let readCount = 0;
+  let todoCount = 0;
   let otherCount = 0;
   for (const name of toolNames) {
     if (name === "Bash") bashCount++;
     else if (isFileEditToolName(name)) editCount++;
     else if (name === "Read" || name === "Grep" || name === "Glob") readCount++;
+    else if (name === "TodoWrite") todoCount++;
     else otherCount++;
   }
 
@@ -524,6 +526,13 @@ export function ToolCallRunGroup({
               <span className="tool-run-glyph">▤</span>
               <span className="tool-run-label">read</span>
               <span className="tool-run-count">×{readCount}</span>
+            </span>
+          )}
+          {todoCount > 0 && (
+            <span className="tool-run-chip todo">
+              <span className="tool-run-glyph">☑</span>
+              <span className="tool-run-label">todos</span>
+              <span className="tool-run-count">×{todoCount}</span>
             </span>
           )}
           {otherCount > 0 && (

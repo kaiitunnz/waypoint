@@ -2625,9 +2625,34 @@ html[data-theme="light"] .transcript.codex.tool_pair {
   min-width: 0;
 }
 
-.todo-card {
-  display: grid;
-  gap: 12px;
+/* Chronological todo marker: a slim, collapsed-by-default record of the task
+ * list at a point in the transcript. The live view is the docked
+ * TaskProgressDock, so this stays out of the way until expanded. */
+.todo-marker {
+  padding: 8px 12px;
+}
+
+.todo-marker-summary {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 26px;
+}
+
+.todo-marker-meta {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-marker-body {
+  margin-top: 10px;
 }
 
 .todo-list {

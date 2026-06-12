@@ -17,7 +17,8 @@ import {
 import {
   isTodoToolEvent,
   readTodoEntries,
-  todoStatusForEvent,
+  summarizeTodos,
+  type TodoEntry,
 } from "@/lib/todos";
 import { PlanApprovalCard } from "@/components/ApprovalCard";
 import { CopyMessageButton } from "@/components/CopyMessageButton";
@@ -663,40 +664,39 @@ function ToolPairCard({
 // "TodoWrite" tool name to look it up — render the same badge for both.
 const TODO_BADGE = { glyph: "☑", variant: "todo", label: "Todos" } as const;
 
-function TodoToolCard({ event }: { event: EventRecord }) {
-  const todos = readTodoEntries(event);
-  const status = todoStatusForEvent(event);
+// The live list lives in the docked TaskProgressDock; in the transcript the
+// todo event is just a chronological marker ("when did this list exist") that
+// expands on demand, so it doesn't duplicate the dock or shove the
+// conversation down.
+function TodoMarkerCard({ todos, ts }: { todos: TodoEntry[] | null; ts: string }) {
+  const progress = summarizeTodos(todos);
+  const summary = progress
+    ? `${progress.total} item${progress.total === 1 ? "" : "s"} · ${progress.completed}/${progress.total} done`
+    : "no items";
   return (
-    <article className="panel transcript codex todo-card">
-      <div className="transcript-role">
+    <details className="panel transcript codex todo-marker">
+      <summary className="transcript-summary todo-marker-summary">
         <span className={`tool-glyph ${TODO_BADGE.variant}`} aria-hidden>
           {TODO_BADGE.glyph}
         </span>
         <span className="tool-name">{TODO_BADGE.label}</span>
-        <span className={`badge tool-status ${status}`}>{status}</span>
-        <span className="role-time">{formatTime(event.ts)}</span>
+        <span className="todo-marker-meta">{summary}</span>
+        <span className="role-time">{formatTime(ts)}</span>
+      </summary>
+      <div className="todo-marker-body">
+        <TodoListBody todos={todos} />
       </div>
-      <TodoListBody todos={todos} />
-    </article>
+    </details>
   );
+}
+
+function TodoToolCard({ event }: { event: EventRecord }) {
+  return <TodoMarkerCard todos={readTodoEntries(event)} ts={event.ts} />;
 }
 
 function TodoToolPairCard({ pair }: { pair: ToolPair }) {
   const todos = readTodoEntries(pair.result) ?? readTodoEntries(pair.call);
-  const status = pair.result ? todoStatusForEvent(pair.result) : "pending";
-  return (
-    <article className="panel transcript codex tool_pair todo-card">
-      <div className="transcript-role">
-        <span className={`tool-glyph ${TODO_BADGE.variant}`} aria-hidden>
-          {TODO_BADGE.glyph}
-        </span>
-        <span className="tool-name">{TODO_BADGE.label}</span>
-        <span className={`badge tool-status ${status}`}>{status}</span>
-        <span className="role-time">{formatTime(pair.ts)}</span>
-      </div>
-      <TodoListBody todos={todos} />
-    </article>
-  );
+  return <TodoMarkerCard todos={todos} ts={pair.ts} />;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

@@ -1146,3 +1146,223 @@ def test_build_local_launch_spec_emits_model_flag(monkeypatch) -> None:
     args = spec.args
     assert "--model" in args
     assert args[args.index("--model") + 1] == "opus"
+
+
+# ─── Task tools (Claude Code >= v2.1.142) ───────────────────────────────────
+
+
+def _task_create_event(tool_use_id: str, subject: str) -> dict[str, Any]:
+    return {
+        "type": "assistant",
+        "message": {
+            "id": "m_create",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": tool_use_id,
+                    "name": "TaskCreate",
+                    "input": {"subject": subject},
+                }
+            ],
+        },
+    }
+
+
+def _task_create_result_event(
+    tool_use_id: str, task_id: str, *, shape: str = "string"
+) -> dict[str, Any]:
+    # "string" mirrors what real Claude Code emits (verified against persisted
+    # production events): a plain "Task #N created successfully: ..." line. The
+    # JSON shapes cover the Agent SDK doc's structured payload for forward-compat.
+    content: Any
+    if shape == "json":
+        content = [{"task": {"id": task_id, "subject": "ignored"}}]
+    elif shape == "json_text":
+        content = json.dumps({"task": {"id": task_id, "subject": "ignored"}})
+    else:
+        content = f"Task #{task_id} created successfully: ignored"
+    return {
+        "type": "user",
+        "message": {
+            "content": [
+                {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}
+            ]
+        },
+    }
+
+
+def _task_update_event(task_id: str, **patch: Any) -> dict[str, Any]:
+    return {
+        "type": "assistant",
+        "message": {
+            "id": "m_update",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": f"toolu_update_{task_id}",
+                    "name": "TaskUpdate",
+                    "input": {"taskId": task_id, **patch},
+                }
+            ],
+        },
+    }
+
+
+def _todo_snapshots(emitted: list) -> list[list[dict[str, Any]]]:
+    return [
+        item[3]["payload"]["input"]["todos"]
+        for item in emitted
+        if item[3].get("item_type") == "todo_list"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_task_create_folds_into_todo_snapshot() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    # The raw TaskCreate tool_call must not render; only the result emits a card.
+    await adapter._dispatch(state, _task_create_event("toolu_a", "Write the parser"))
+    assert emitted == []
+    await adapter._dispatch(state, _task_create_result_event("toolu_a", "1"))
+    snapshots = _todo_snapshots(emitted)
+    assert snapshots == [
+        [{"content": "Write the parser", "status": "pending", "activeForm": None}]
+    ]
+    assert emitted[0][1] == EventKind.TOOL_RESULT
+    assert state.task_card_item_id is not None
+
+
+@pytest.mark.asyncio
+async def test_task_create_reads_id_from_json_text_result() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    await adapter._dispatch(state, _task_create_event("toolu_a", "Task A"))
+    await adapter._dispatch(
+        state, _task_create_result_event("toolu_a", "t1", shape="json_text")
+    )
+    # Updating by the id parsed out of the JSON-text result must patch in place,
+    # not create a duplicate stub.
+    await adapter._dispatch(state, _task_update_event("t1", status="completed"))
+    snapshots = _todo_snapshots(emitted)
+    assert snapshots[-1] == [
+        {"content": "Task A", "status": "completed", "activeForm": None}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_task_updates_patch_one_item_keyed_by_id() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    await adapter._dispatch(state, _task_create_event("toolu_a", "First"))
+    await adapter._dispatch(state, _task_create_result_event("toolu_a", "1"))
+    await adapter._dispatch(state, _task_create_event("toolu_b", "Second"))
+    await adapter._dispatch(state, _task_create_result_event("toolu_b", "2"))
+    await adapter._dispatch(
+        state,
+        _task_update_event("1", status="in_progress", activeForm="Doing first"),
+    )
+    snapshots = _todo_snapshots(emitted)
+    assert snapshots[-1] == [
+        {"content": "First", "status": "in_progress", "activeForm": "Doing first"},
+        {"content": "Second", "status": "pending", "activeForm": None},
+    ]
+    # Every snapshot merges under one stable card so the transcript shows a
+    # single evolving todo list rather than one card per Task call.
+    item_ids = {
+        item[3]["item_id"]
+        for item in emitted
+        if item[3].get("item_type") == "todo_list"
+    }
+    assert len(item_ids) == 1
+
+
+@pytest.mark.asyncio
+async def test_task_update_deleted_removes_item() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    await adapter._dispatch(state, _task_create_event("toolu_a", "Throwaway"))
+    await adapter._dispatch(state, _task_create_result_event("toolu_a", "1"))
+    await adapter._dispatch(state, _task_update_event("1", status="deleted"))
+    assert _todo_snapshots(emitted)[-1] == []
+    assert state.task_tracker.is_empty
+
+
+@pytest.mark.asyncio
+async def test_task_update_for_unknown_id_materialises_stub() -> None:
+    """A resumed session may patch a task whose create predates this process."""
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    await adapter._dispatch(
+        state, _task_update_event("task-ghost", status="completed", subject="Recovered")
+    )
+    assert _todo_snapshots(emitted)[-1] == [
+        {"content": "Recovered", "status": "completed", "activeForm": None}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_task_get_and_list_results_are_suppressed() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    for tool in ("TaskGet", "TaskList"):
+        tool_use_id = f"toolu_{tool}"
+        await adapter._dispatch(
+            state,
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "m",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": tool_use_id,
+                            "name": tool,
+                            "input": {},
+                        }
+                    ],
+                },
+            },
+        )
+        await adapter._dispatch(
+            state,
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": "[]",
+                        }
+                    ]
+                },
+            },
+        )
+    assert emitted == []
+
+
+@pytest.mark.asyncio
+async def test_replays_real_task_stream_from_production_fixture() -> None:
+    """Replay a real Claude Code session's Task stream (captured from persisted
+    production events) and assert the fold reconstructs the full list. The
+    fixture has 31 creates whose ids come only from the "Task #N created"
+    result strings; if the string-id path failed and fell back to tool_use_id,
+    the TaskUpdates would stub empty duplicates and inflate the count past 31."""
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    fixture = Path(__file__).parent / "fixtures" / "claude_task_stream.json"
+    for event in json.loads(fixture.read_text()):
+        await adapter._dispatch(state, event)
+    final = _todo_snapshots(emitted)[-1]
+    assert len(final) == 31
+    assert all(todo["content"] for todo in final)
+    assert all(todo["status"] == "completed" for todo in final)
+    assert final[0]["content"] == "Write waypoint-subagents skill"
+    assert final[-1]["content"] == "Commit 7: hydration fix"

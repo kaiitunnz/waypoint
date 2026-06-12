@@ -20,10 +20,14 @@ from waypoint.backends.claude_code.models import (
     normalize_claude_model_id,
 )
 from waypoint.backends.claude_code.normalize import (
+    TASK_TOOL_NAMES,
+    TaskListTracker,
+    extract_created_task_id,
     format_approval_text,
     format_compact_boundary,
     format_rate_limit,
     format_status_event,
+    format_task_snapshot,
     iter_content_blocks,
     stringify_tool_result,
 )
@@ -226,6 +230,15 @@ class ClaudeSessionState:
     # 0-call tool run. Suppress that result's display too.
     suppressed_result_tool_use_ids: set[str] = field(default_factory=set)
     file_edit_preview_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Folds Claude Code's incremental Task tool stream (CC >= v2.1.142) back
+    # into a single evolving todo card. `pending_task_creates` holds each
+    # TaskCreate's input until its tool_result reveals the assigned task id;
+    # `task_card_item_id` is the stable item_id the snapshots merge under, and
+    # is rotated when a new task group starts so completed groups keep their
+    # own card.
+    task_tracker: TaskListTracker = field(default_factory=TaskListTracker)
+    pending_task_creates: dict[str, dict[str, Any]] = field(default_factory=dict)
+    task_card_item_id: str | None = None
     last_message_text: dict[str, str] = field(default_factory=dict)
     terminal_fragments: list[str] = field(default_factory=list)
     stderr_tail: deque[str] = field(
@@ -1550,6 +1563,11 @@ class ClaudeCliAdapter:
                     if tool_use_id:
                         state.suppressed_result_tool_use_ids.add(tool_use_id)
                     continue
+                if tool_name in TASK_TOOL_NAMES:
+                    await self._handle_task_tool_use(
+                        state, tool_name, tool_use_id, block.get("input") or {}
+                    )
+                    continue
                 input_text = json.dumps(block.get("input") or {}, indent=2)
                 await self._emit_event(
                     state.session_id,
@@ -1584,9 +1602,16 @@ class ClaudeCliAdapter:
             if block.get("type") != "tool_result":
                 continue
             tool_use_id = str(block.get("tool_use_id") or "")
+            if tool_use_id and tool_use_id in state.pending_task_creates:
+                # The TaskCreate result carries the assigned task id; fold it
+                # into the todo snapshot instead of rendering the raw result.
+                await self._handle_task_create_result(state, tool_use_id, block)
+                continue
             if tool_use_id and tool_use_id in state.suppressed_result_tool_use_ids:
-                # Echoed verdict for an ExitPlanMode approval; the plan card and
-                # the agent's next message already convey the outcome.
+                # Echoed verdict for an ExitPlanMode approval, or a suppressed
+                # Task tool result (TaskUpdate/TaskGet/TaskList) whose effect is
+                # already reflected in the todo card. The plan card and the
+                # agent's next message convey ExitPlanMode outcomes.
                 state.suppressed_result_tool_use_ids.discard(tool_use_id)
                 continue
             content = block.get("content")
@@ -1610,6 +1635,87 @@ class ClaudeCliAdapter:
                 if preview_metadata is not None:
                     metadata.update(preview_metadata)
             await self._emit_event(state.session_id, kind, text, metadata, status)
+
+    async def _handle_task_tool_use(
+        self,
+        state: ClaudeSessionState,
+        tool_name: str,
+        tool_use_id: str,
+        tool_input: dict[str, Any],
+    ) -> None:
+        if tool_name == "TaskCreate":
+            # The assigned id only comes back in the matching tool_result, so
+            # stash the input until then; the result handler folds it in.
+            if tool_use_id:
+                state.pending_task_creates[tool_use_id] = tool_input
+            return
+        # Drop the echoed result for the remaining Task tools — their effect is
+        # already reflected in the todo card (TaskUpdate) or read-only
+        # (TaskGet/TaskList). We deliberately do not reseed the tracker from
+        # TaskList results: persisted production data shows TaskGet/TaskList go
+        # effectively unused, so their result schema is unverified and
+        # reconciling against the doc's shape would risk clobbering good state.
+        # Resume is instead covered by stub-materialisation in
+        # TaskListTracker.update for updates that reference an unseen id.
+        if tool_use_id:
+            state.suppressed_result_tool_use_ids.add(tool_use_id)
+        if tool_name == "TaskUpdate":
+            task_id = str(tool_input.get("taskId") or "")
+            if not task_id:
+                return
+            state.task_tracker.update(
+                task_id,
+                status=tool_input.get("status"),
+                content=tool_input.get("subject"),
+                active_form=tool_input.get("activeForm"),
+            )
+            await self._emit_task_snapshot(state)
+
+    async def _handle_task_create_result(
+        self, state: ClaudeSessionState, tool_use_id: str, block: dict[str, Any]
+    ) -> None:
+        create_input = state.pending_task_creates.pop(tool_use_id, None)
+        if create_input is None:
+            return
+        task_id = extract_created_task_id(block)
+        if task_id is None:
+            # Fall back to the tool_use_id so the item still renders; a later
+            # TaskUpdate keyed by the real id will then create a stub instead of
+            # patching this one.
+            log.debug("TaskCreate result missing task id; falling back to tool_use_id")
+            task_id = tool_use_id
+        if state.task_tracker.is_empty:
+            # A fresh task group — rotate to a new card so it doesn't overwrite
+            # a prior, completed group's card. CC numbers task ids monotonically
+            # within a session (and never deletes in the observed data), so the
+            # tracker is genuinely empty here and reused ids can't collide.
+            state.task_card_item_id = None
+        state.task_tracker.create(
+            task_id,
+            content=str(create_input.get("subject") or ""),
+            active_form=create_input.get("activeForm"),
+            status=create_input.get("status") or "pending",
+        )
+        await self._emit_task_snapshot(state)
+
+    async def _emit_task_snapshot(self, state: ClaudeSessionState) -> None:
+        if state.task_card_item_id is None:
+            state.task_card_item_id = uuid.uuid4().hex
+        todos = state.task_tracker.snapshot()
+        await self._emit_event(
+            state.session_id,
+            EventKind.TOOL_RESULT,
+            format_task_snapshot(todos),
+            {
+                "method": "assistant.task_update",
+                "item_id": state.task_card_item_id,
+                "item_type": "todo_list",
+                "tool_name": "TodoWrite",
+                "payload": {"input": {"todos": todos}},
+                "status": SessionStatus.RUNNING,
+            },
+            SessionStatus.RUNNING,
+        )
 
     async def _handle_result(
         self, state: ClaudeSessionState, event: dict[str, Any]

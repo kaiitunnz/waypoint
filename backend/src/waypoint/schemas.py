@@ -220,6 +220,9 @@ class BoardEntry(BaseModel):
     text: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
+    # Set when the post's text or metadata was edited in place; ``None`` while
+    # the post is untouched since it was first written.
+    edited_at: datetime | None = None
 
 
 class BoardChannel(BaseModel):
@@ -233,6 +236,11 @@ class BoardPostRequest(BaseModel):
     # When set, upsert the ``(channel, key)`` cell instead of appending.
     key: str | None = None
     author_session_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class BoardEntryUpdateRequest(BaseModel):
+    text: str
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

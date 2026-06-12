@@ -171,6 +171,7 @@ class Storage:
                 text TEXT NOT NULL,
                 metadata TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL,
+                edited_at TEXT,
                 UNIQUE(channel, key)
             );
 
@@ -190,6 +191,7 @@ class Storage:
             "INSERT OR IGNORE INTO board_channels (channel, created_at) "
             "SELECT channel, MIN(created_at) FROM board_entries GROUP BY channel"
         )
+        self._ensure_column("board_entries", "edited_at", "TEXT")
         self._ensure_column("scheduled_sessions", "permission_mode", "TEXT")
         self._ensure_column("scheduled_sessions", "model", "TEXT")
         self._ensure_column("scheduled_sessions", "effort", "TEXT")
@@ -484,6 +486,42 @@ class Storage:
         )
         self.connection.commit()
         return removed
+
+    @_synchronized
+    def delete_board_entry(self, channel: str, entry_id: int) -> bool:
+        # Scoped to the channel so a wrong channel is a clean no-op; works for
+        # both keyless log posts and keyed cells.
+        cursor = self.connection.execute(
+            "DELETE FROM board_entries WHERE id = ? AND channel = ?",
+            (entry_id, channel),
+        )
+        self.connection.commit()
+        return (cursor.rowcount or 0) > 0
+
+    @_synchronized
+    def update_board_entry(
+        self,
+        channel: str,
+        entry_id: int,
+        text: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> BoardEntry | None:
+        # Edit a post's text/metadata in place, preserving ``created_at`` and
+        # stamping ``edited_at``. The cell key is immutable here.
+        now = datetime.now(UTC)
+        cursor = self.connection.execute(
+            "UPDATE board_entries SET text = ?, metadata = ?, edited_at = ? "
+            "WHERE id = ? AND channel = ?",
+            (text, json.dumps(metadata or {}), now.isoformat(), entry_id, channel),
+        )
+        self.connection.commit()
+        if not (cursor.rowcount or 0):
+            return None
+        row = self.connection.execute(
+            "SELECT * FROM board_entries WHERE id = ?",
+            (entry_id,),
+        ).fetchone()
+        return self._board_entry_from_row(row) if row else None
 
     @_synchronized
     def prune_board_for_session(self, session_id: str) -> int:
@@ -896,6 +934,8 @@ class Storage:
     def _board_entry_from_row(self, row: sqlite3.Row) -> BoardEntry:
         payload = dict(row)
         payload["created_at"] = datetime.fromisoformat(payload["created_at"])
+        if payload.get("edited_at"):
+            payload["edited_at"] = datetime.fromisoformat(payload["edited_at"])
         raw_metadata = payload.get("metadata") or "{}"
         try:
             decoded = json.loads(raw_metadata)

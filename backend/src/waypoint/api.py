@@ -31,6 +31,7 @@ from waypoint.schemas import (
     AssistantAttachRequest,
     AssistantResetRequest,
     AssistantSummary,
+    BoardEntryUpdateRequest,
     BoardPostRequest,
     LoginRequest,
     MeResponse,
@@ -493,6 +494,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Remove the channel entirely, posts and all.
         removed = await context.runtime.delete_board_channel(channel)
         return {"channel": channel, "deleted": removed}
+
+    @app.delete("/api/board/{channel}/entries/{entry_id}")
+    async def board_delete_entry(
+        channel: str,
+        entry_id: int,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        deleted = await context.runtime.delete_board_entry(channel, entry_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="board entry not found")
+        return {"channel": channel, "entry_id": entry_id, "deleted": True}
+
+    @app.patch("/api/board/{channel}/entries/{entry_id}")
+    async def board_edit_entry(
+        channel: str,
+        entry_id: int,
+        body: BoardEntryUpdateRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        entry = await context.runtime.update_board_entry(channel, entry_id, body)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="board entry not found")
+        return {"entry": entry.model_dump(mode="json")}
 
     @app.patch("/api/sessions/{session_id}/title")
     async def session_set_title(

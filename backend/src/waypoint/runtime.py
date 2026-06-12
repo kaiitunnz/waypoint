@@ -28,6 +28,7 @@ from waypoint.schemas import (
     AssistantSummary,
     BoardChannel,
     BoardEntry,
+    BoardEntryUpdateRequest,
     BoardPostRequest,
     CommandCompletion,
     EventKind,
@@ -1184,6 +1185,22 @@ class SessionRuntime:
         removed = self.storage.delete_board_channel(channel)
         await self._publish_board_update(None)
         return removed
+
+    async def delete_board_entry(self, channel: str, entry_id: int) -> bool:
+        deleted = self.storage.delete_board_entry(channel, entry_id)
+        if deleted:
+            await self._publish_board_update(channel)
+        return deleted
+
+    async def update_board_entry(
+        self, channel: str, entry_id: int, request: BoardEntryUpdateRequest
+    ) -> BoardEntry | None:
+        entry = self.storage.update_board_entry(
+            channel, entry_id, request.text, request.metadata
+        )
+        if entry is not None:
+            await self._publish_board_update(channel)
+        return entry
 
     async def _publish_board_update(self, channel: str | None) -> None:
         # ``channel=None`` means "the board changed broadly" (e.g. a session

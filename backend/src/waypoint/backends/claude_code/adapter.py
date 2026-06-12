@@ -1188,8 +1188,23 @@ class ClaudeCliAdapter:
         state.stdout_task = asyncio.create_task(self._read_stdout(state))
         state.stderr_task = asyncio.create_task(self._read_stderr(state))
         state.wait_task = asyncio.create_task(self._watch_process(state))
+        if resume:
+            self._carry_task_state(self._sessions.get(session_id), state)
         self._sessions[session_id] = state
         return state
+
+    @staticmethod
+    def _carry_task_state(
+        prior: ClaudeSessionState | None, state: ClaudeSessionState
+    ) -> None:
+        # A resume/respawn builds a fresh state, but the CLI keeps the same task
+        # ids and will send TaskUpdate deltas for tasks created before the
+        # respawn. Without the prior tracker those deltas hit unknown ids and
+        # materialise blank stubs under a new card, so carry the fold forward.
+        if prior is None:
+            return
+        state.task_tracker = prior.task_tracker
+        state.task_card_item_id = prior.task_card_item_id
 
     def _build_local_launch_spec(
         self,

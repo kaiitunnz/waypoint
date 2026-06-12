@@ -1151,7 +1151,12 @@ def test_build_local_launch_spec_emits_model_flag(monkeypatch) -> None:
 # ─── Task tools (Claude Code >= v2.1.142) ───────────────────────────────────
 
 
-def _task_create_event(tool_use_id: str, subject: str) -> dict[str, Any]:
+def _task_create_event(
+    tool_use_id: str, subject: str, description: str | None = None
+) -> dict[str, Any]:
+    tool_input: dict[str, Any] = {"subject": subject}
+    if description is not None:
+        tool_input["description"] = description
     return {
         "type": "assistant",
         "message": {
@@ -1161,7 +1166,7 @@ def _task_create_event(tool_use_id: str, subject: str) -> dict[str, Any]:
                     "type": "tool_use",
                     "id": tool_use_id,
                     "name": "TaskCreate",
-                    "input": {"subject": subject},
+                    "input": tool_input,
                 }
             ],
         },
@@ -1227,7 +1232,14 @@ async def test_task_create_folds_into_todo_snapshot() -> None:
     await adapter._dispatch(state, _task_create_result_event("toolu_a", "1"))
     snapshots = _todo_snapshots(emitted)
     assert snapshots == [
-        [{"content": "Write the parser", "status": "pending", "activeForm": None}]
+        [
+            {
+                "content": "Write the parser",
+                "status": "pending",
+                "activeForm": None,
+                "description": None,
+            }
+        ]
     ]
     assert emitted[0][1] == EventKind.TOOL_RESULT
     assert state.task_card_item_id is not None
@@ -1247,7 +1259,12 @@ async def test_task_create_reads_id_from_json_text_result() -> None:
     await adapter._dispatch(state, _task_update_event("t1", status="completed"))
     snapshots = _todo_snapshots(emitted)
     assert snapshots[-1] == [
-        {"content": "Task A", "status": "completed", "activeForm": None}
+        {
+            "content": "Task A",
+            "status": "completed",
+            "activeForm": None,
+            "description": None,
+        }
     ]
 
 
@@ -1266,8 +1283,18 @@ async def test_task_updates_patch_one_item_keyed_by_id() -> None:
     )
     snapshots = _todo_snapshots(emitted)
     assert snapshots[-1] == [
-        {"content": "First", "status": "in_progress", "activeForm": "Doing first"},
-        {"content": "Second", "status": "pending", "activeForm": None},
+        {
+            "content": "First",
+            "status": "in_progress",
+            "activeForm": "Doing first",
+            "description": None,
+        },
+        {
+            "content": "Second",
+            "status": "pending",
+            "activeForm": None,
+            "description": None,
+        },
     ]
     # Every snapshot merges under one stable card so the transcript shows a
     # single evolving todo list rather than one card per Task call.
@@ -1301,8 +1328,42 @@ async def test_task_update_for_unknown_id_materialises_stub() -> None:
         state, _task_update_event("task-ghost", status="completed", subject="Recovered")
     )
     assert _todo_snapshots(emitted)[-1] == [
-        {"content": "Recovered", "status": "completed", "activeForm": None}
+        {
+            "content": "Recovered",
+            "status": "completed",
+            "activeForm": None,
+            "description": None,
+        }
     ]
+
+
+@pytest.mark.asyncio
+async def test_task_description_flows_into_snapshot_and_is_patchable() -> None:
+    emitted: list = []
+    adapter = _make_adapter(emitted)
+    state, _ = _attach_state(adapter)
+    await adapter._dispatch(
+        state, _task_create_event("toolu_a", "Write parser", "Create parser.py")
+    )
+    await adapter._dispatch(state, _task_create_result_event("toolu_a", "1"))
+    assert _todo_snapshots(emitted)[-1] == [
+        {
+            "content": "Write parser",
+            "status": "pending",
+            "activeForm": None,
+            "description": "Create parser.py",
+        }
+    ]
+    # TaskUpdate can revise the description in place.
+    await adapter._dispatch(
+        state,
+        _task_update_event(
+            "1", status="in_progress", description="Create parser.py + wire it"
+        ),
+    )
+    final = _todo_snapshots(emitted)[-1][0]
+    assert final["status"] == "in_progress"
+    assert final["description"] == "Create parser.py + wire it"
 
 
 @pytest.mark.asyncio

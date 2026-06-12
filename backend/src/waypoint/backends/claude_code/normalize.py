@@ -159,6 +159,7 @@ class TaskItem:
     content: str
     status: str = "pending"
     active_form: str | None = None
+    description: str | None = None
 
 
 @dataclass
@@ -184,12 +185,14 @@ class TaskListTracker:
         *,
         content: str,
         active_form: str | None = None,
+        description: str | None = None,
         status: str = "pending",
     ) -> None:
         self.tasks[task_id] = TaskItem(
             content=content,
             status=normalize_task_status(status),
             active_form=active_form,
+            description=description,
         )
 
     def update(
@@ -199,6 +202,7 @@ class TaskListTracker:
         status: str | None = None,
         content: str | None = None,
         active_form: str | None = None,
+        description: str | None = None,
     ) -> None:
         if status == "deleted":
             self.tasks.pop(task_id, None)
@@ -219,6 +223,8 @@ class TaskListTracker:
             task.content = content
         if active_form is not None:
             task.active_form = active_form
+        if description is not None:
+            task.description = description
 
     def snapshot(self) -> list[dict[str, Any]]:
         return [
@@ -226,6 +232,7 @@ class TaskListTracker:
                 "content": task.content,
                 "status": task.status,
                 "activeForm": task.active_form,
+                "description": task.description,
             }
             for task in self.tasks.values()
         ]

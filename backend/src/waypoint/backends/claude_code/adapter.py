@@ -1668,6 +1668,7 @@ class ClaudeCliAdapter:
                 status=tool_input.get("status"),
                 content=tool_input.get("subject"),
                 active_form=tool_input.get("activeForm"),
+                description=tool_input.get("description"),
             )
             await self._emit_task_snapshot(state)
 
@@ -1694,6 +1695,7 @@ class ClaudeCliAdapter:
             task_id,
             content=str(create_input.get("subject") or ""),
             active_form=create_input.get("activeForm"),
+            description=create_input.get("description"),
             status=create_input.get("status") or "pending",
         )
         await self._emit_task_snapshot(state)

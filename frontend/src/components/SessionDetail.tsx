@@ -265,11 +265,11 @@ const COMPOSER_HEIGHT_FALLBACK = 220;
 const COMPOSER_HEIGHT_STORAGE_KEY = "waypoint-composer-height";
 
 // Per-session dismissal of the task progress dock, persisted so a refresh
-// keeps it dismissed. sessionStorage (not localStorage) scopes it to the tab
-// session and self-cleans, matching "dismiss this for now".
+// keeps it dismissed. We store the dismissed todo-event sequence: any later
+// task update emits a higher-sequence event and re-shows the dock, while a
+// bare refresh (no new event) keeps the same sequence and stays dismissed.
+// sessionStorage (not localStorage) scopes it to the tab and self-cleans.
 const TASK_DOCK_DISMISSED_STORAGE_PREFIX = "waypoint-task-dock-dismissed:";
-
-type DismissedTask = { itemId: string | null; count: number };
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
@@ -279,15 +279,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const catalog = useBackendCatalog(host || null, token || null, null);
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [events, setEvents] = useState<EventRecord[]>([]);
-  // The task set the user last dismissed from the progress dock, keyed by the
-  // group's item_id and task count. Dismissal sticks through status-only
-  // updates (count unchanged); a genuinely new task (count grows) or a new
-  // group (item_id changes) re-shows the dock. `undefined` means we haven't
-  // read the persisted value yet — the dock stays hidden until then so a
-  // dismissed dock doesn't flash on load (and to avoid an SSR hydration
-  // mismatch from reading sessionStorage during render).
-  const [dismissedTask, setDismissedTask] = useState<
-    DismissedTask | null | undefined
+  // The todo-event sequence the user last dismissed from the progress dock.
+  // `undefined` means we haven't read the persisted value yet — the dock stays
+  // hidden until then so a dismissed dock doesn't flash on load (and to avoid
+  // an SSR hydration mismatch from reading sessionStorage during render).
+  const [dismissedTaskSequence, setDismissedTaskSequence] = useState<
+    number | null | undefined
   >(undefined);
   // Read the persisted dismissal after mount (never during render) so SSR and
   // the first client render agree. Re-reads when the session changes, since
@@ -300,17 +297,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       const raw = window.sessionStorage.getItem(
         `${TASK_DOCK_DISMISSED_STORAGE_PREFIX}${sessionId}`,
       );
-      const parsed = raw ? JSON.parse(raw) : null;
-      if (parsed && typeof parsed === "object" && typeof parsed.count === "number") {
-        setDismissedTask({
-          itemId: typeof parsed.itemId === "string" ? parsed.itemId : null,
-          count: parsed.count,
-        });
-      } else {
-        setDismissedTask(null);
-      }
+      const parsed = raw !== null ? Number(raw) : NaN;
+      setDismissedTaskSequence(Number.isFinite(parsed) ? parsed : null);
     } catch {
-      setDismissedTask(null);
+      setDismissedTaskSequence(null);
     }
   }, [sessionId]);
   const [snapshot, setSnapshot] = useState("");
@@ -1232,7 +1222,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     () => summarizeTodos(readTodoEntries(currentTaskEvent)),
     [currentTaskEvent],
   );
-  const currentTaskItemId = currentTaskEvent ? itemIdForEvent(currentTaskEvent) : null;
   // Session has stopped its backend process (clean shutdown or crash).
   const sessionExited = Boolean(
     session && (session.status === "exited" || session.status === "error"),
@@ -1260,10 +1249,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const showTaskDock =
     activeView === "chat" &&
     taskProgress !== null &&
-    dismissedTask !== undefined &&
-    (dismissedTask === null ||
-      currentTaskItemId !== dismissedTask.itemId ||
-      taskProgress.total > dismissedTask.count);
+    currentTaskEvent !== null &&
+    dismissedTaskSequence !== undefined &&
+    currentTaskEvent.sequence !== dismissedTaskSequence;
   const liveTmux = session?.transport === "tmux";
   const { theme } = useTheme();
   const terminalRef = useRef<XTerminalHandle | null>(null);
@@ -1922,16 +1910,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         <TaskProgressDock
           progress={taskProgress}
           onDismiss={() => {
-            const next: DismissedTask = {
-              itemId: currentTaskItemId,
-              count: taskProgress.total,
-            };
-            setDismissedTask(next);
-            if (typeof window !== "undefined") {
+            const sequence = currentTaskEvent?.sequence ?? null;
+            setDismissedTaskSequence(sequence);
+            if (sequence !== null && typeof window !== "undefined") {
               try {
                 window.sessionStorage.setItem(
                   `${TASK_DOCK_DISMISSED_STORAGE_PREFIX}${sessionId}`,
-                  JSON.stringify(next),
+                  String(sequence),
                 );
               } catch {
                 // sessionStorage unavailable (private mode, quota) — the

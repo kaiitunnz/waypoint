@@ -142,6 +142,34 @@ function copyTextSync(text: string): boolean {
   return ok;
 }
 
+// The session id is otherwise only readable from the URL — invisible in the
+// installed PWA where the address bar is hidden. This puts a quiet,
+// click-to-copy copy of it in the header meta row for the human operator (who
+// occasionally needs the raw id for a `waypoint sessions …` call or to hand to
+// an agent). Copies the full id even though the display truncates it.
+function SessionIdCopy({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className={`session-id-copy${copied ? " copied" : ""}`}
+      title={copied ? "Copied" : `Copy session id: ${id}`}
+      aria-label={copied ? "Session id copied" : `Copy session id ${id}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (copyTextSync(id)) {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        }
+      }}
+    >
+      <span className="session-id-copy-key">id</span>
+      <span className="session-id-copy-value">{id}</span>
+      <span aria-hidden>{copied ? "✓" : "⎘"}</span>
+    </button>
+  );
+}
+
 // WebKit (desktop Safari + every iOS browser, since the App Store
 // requires WebKit) gates ``navigator.clipboard.readText()`` behind a
 // system "Paste" banner that the user must click to authorize. Other
@@ -3421,6 +3449,8 @@ function SessionHeader({
             {typeof session.transport_state?.thread_id === "string"
               ? ` · ${session.transport_state.thread_id}`
               : null}
+            {" · "}
+            <SessionIdCopy id={session.id} />
           </span>
         ) : null}
       </div>

@@ -102,6 +102,12 @@ class Settings(BaseModel):
     database_name: str = "waypoint.db"
     token_ttl_seconds: int = 60 * 60 * 24 * 30
     stream_poll_interval: float = 1.0
+    # tmux pane liveness/pid refresh runs on this slower cadence than the
+    # raw-output ingest above: describe_target spawns a tmux subprocess per
+    # poll per session, so refreshing every ingest tick is wasteful. The
+    # cost is up to this much latency detecting a pane that died on its own
+    # (explicit terminate/delete are unaffected).
+    state_poll_interval: float = 3.0
     tail_snapshot_lines: int = 200
     cors_origins: list[str] = Field(default_factory=lambda: list(DEFAULT_CORS_ORIGINS))
     cors_allow_origin_regex: str | None = DEFAULT_CORS_ORIGIN_REGEX

@@ -264,6 +264,13 @@ type ConnectionState = "connecting" | "open" | "reconnecting";
 const COMPOSER_HEIGHT_FALLBACK = 220;
 const COMPOSER_HEIGHT_STORAGE_KEY = "waypoint-composer-height";
 
+// Per-session dismissal of the task progress dock, persisted so a refresh
+// keeps it dismissed. sessionStorage (not localStorage) scopes it to the tab
+// session and self-cleans, matching "dismiss this for now".
+const TASK_DOCK_DISMISSED_STORAGE_PREFIX = "waypoint-task-dock-dismissed:";
+
+type DismissedTask = { itemId: string | null; count: number };
+
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 
@@ -275,11 +282,37 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // The task set the user last dismissed from the progress dock, keyed by the
   // group's item_id and task count. Dismissal sticks through status-only
   // updates (count unchanged); a genuinely new task (count grows) or a new
-  // group (item_id changes) re-shows the dock.
-  const [dismissedTask, setDismissedTask] = useState<{
-    itemId: string | null;
-    count: number;
-  } | null>(null);
+  // group (item_id changes) re-shows the dock. `undefined` means we haven't
+  // read the persisted value yet — the dock stays hidden until then so a
+  // dismissed dock doesn't flash on load (and to avoid an SSR hydration
+  // mismatch from reading sessionStorage during render).
+  const [dismissedTask, setDismissedTask] = useState<
+    DismissedTask | null | undefined
+  >(undefined);
+  // Read the persisted dismissal after mount (never during render) so SSR and
+  // the first client render agree. Re-reads when the session changes, since
+  // the route can reuse this component across `/session/[id]` navigations.
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const raw = window.sessionStorage.getItem(
+        `${TASK_DOCK_DISMISSED_STORAGE_PREFIX}${sessionId}`,
+      );
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && typeof parsed === "object" && typeof parsed.count === "number") {
+        setDismissedTask({
+          itemId: typeof parsed.itemId === "string" ? parsed.itemId : null,
+          count: parsed.count,
+        });
+      } else {
+        setDismissedTask(null);
+      }
+    } catch {
+      setDismissedTask(null);
+    }
+  }, [sessionId]);
   const [snapshot, setSnapshot] = useState("");
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [view, setView] = useState<ViewMode>("chat");
@@ -1227,6 +1260,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const showTaskDock =
     activeView === "chat" &&
     taskProgress !== null &&
+    dismissedTask !== undefined &&
     (dismissedTask === null ||
       currentTaskItemId !== dismissedTask.itemId ||
       taskProgress.total > dismissedTask.count);
@@ -1887,12 +1921,24 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       {showTaskDock && taskProgress ? (
         <TaskProgressDock
           progress={taskProgress}
-          onDismiss={() =>
-            setDismissedTask({
+          onDismiss={() => {
+            const next: DismissedTask = {
               itemId: currentTaskItemId,
               count: taskProgress.total,
-            })
-          }
+            };
+            setDismissedTask(next);
+            if (typeof window !== "undefined") {
+              try {
+                window.sessionStorage.setItem(
+                  `${TASK_DOCK_DISMISSED_STORAGE_PREFIX}${sessionId}`,
+                  JSON.stringify(next),
+                );
+              } catch {
+                // sessionStorage unavailable (private mode, quota) — the
+                // in-memory dismissal above still applies for this view.
+              }
+            }
+          }}
         />
       ) : null}
       {session && !terminalOnly ? (

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { BackendSwitcher } from "@/components/BackendSwitcher";
+import { BoardPanel } from "@/components/BoardPanel";
 import { LaunchPanel } from "@/components/LaunchPanel";
 import { LoginForm } from "@/components/LoginForm";
 import { SchedulePanel } from "@/components/SchedulePanel";
@@ -22,6 +23,7 @@ import {
   createSession,
   deleteSession as deleteSessionRequest,
   fetchBackendThreads,
+  fetchBoardChannels,
   fetchMe,
   fetchSchedules,
   fetchSessions,
@@ -49,6 +51,7 @@ import {
   AssistantSummary,
   Backend,
   BackendDescriptor,
+  BoardChannel,
   LaunchTargetSummary,
   LaunchMode,
   ScheduleCreateRequest,
@@ -118,6 +121,7 @@ export default function HomePage() {
   const [launchTargets, setLaunchTargets] = useState<LaunchTargetSummary[]>([]);
   const [activeLaunchTargetId, setActiveLaunchTargetId] = useState("");
   const [schedules, setSchedules] = useState<ScheduledSession[]>([]);
+  const [boardChannels, setBoardChannels] = useState<BoardChannel[]>([]);
   const [recentCwds, setRecentCwds] = useState<string[]>([]);
   const [threadsByBackend, setThreadsByBackend] = useState<
     Record<Backend, ThreadSummary[]>
@@ -183,12 +187,14 @@ export default function HomePage() {
       fetchSessions(host, token),
       fetchMe(host, token),
       fetchSchedules(host, token).catch(() => [] as ScheduledSession[]),
+      fetchBoardChannels(host, token).catch(() => []),
     ])
-      .then(([items, me, scheduleItems]) => {
+      .then(([items, me, scheduleItems, boardChannels]) => {
         if (!active) {
           return;
         }
         setSessions(items);
+        setBoardChannels(boardChannels);
         setDefaultBackend(me.default_backend);
         setDefaultCwd(me.default_cwd || "~/");
         setLaunchTargets(me.launch_targets);
@@ -232,6 +238,11 @@ export default function HomePage() {
           }
           if (message.type === "schedule_list_update") {
             setSchedules(message.payload.schedules as ScheduledSession[]);
+          }
+          if (message.type === "board_update") {
+            fetchBoardChannels(host, token)
+              .then((list) => setBoardChannels(list))
+              .catch(() => {});
           }
           if (message.type === "auth_revoked") {
             resetAuthState("Session expired. Log in again.");
@@ -770,6 +781,7 @@ export default function HomePage() {
           onAuthFailure={handleAuthFailure}
         />
       ) : null}
+      {token ? <BoardPanel channels={boardChannels} /> : null}
       {token ? (
         <SessionList
           sessions={sessions.filter((session) => session.source !== "assistant")}
@@ -780,31 +792,17 @@ export default function HomePage() {
           onSetTitle={handleSetTitle}
         />
       ) : null}
-      {token ? (
-        <div className="fab-stack">
-          <Link
-            className="board-fab"
-            href="/board"
-            aria-label="Open shared blackboard"
-          >
-            <span className="board-fab-glyph" aria-hidden="true">
-              ▤
-            </span>
-            <span className="board-fab-label">Board</span>
-          </Link>
-          {assistant ? (
-            <Link
-              className="assistant-fab"
-              href="/assistant"
-              aria-label="Open personal assistant"
-            >
-              <span className="assistant-fab-glyph" aria-hidden="true">
-                ✦
-              </span>
-              <span className="assistant-fab-label">Assistant</span>
-            </Link>
-          ) : null}
-        </div>
+      {token && assistant ? (
+        <Link
+          className="assistant-fab"
+          href="/assistant"
+          aria-label="Open personal assistant"
+        >
+          <span className="assistant-fab-glyph" aria-hidden="true">
+            ✦
+          </span>
+          <span className="assistant-fab-label">Assistant</span>
+        </Link>
       ) : null}
     </main>
   );

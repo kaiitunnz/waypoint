@@ -3,33 +3,82 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   clearBoardChannel,
   connectSessionsSocket,
+  deleteBoardChannel,
+  fetchBoardChannel,
   fetchBoardChannels,
-  fetchBoardEntries,
   isAuthError,
   postBoardEntry,
 } from "@/lib/api";
 import { clearToken, readHost, readToken } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
 import { BoardChannel, BoardEntry, SessionEnvelope } from "@/lib/types";
+import { formatRelativeTime } from "@/lib/usage";
 
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 15000;
+const LOG_LIMIT = 100;
 
 type LoadState = "loading" | "ready" | "error";
 
-function formatTime(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+function shortId(value: string): string {
+  return value.length > 16 ? `${value.slice(0, 16)}…` : value;
 }
 
-function shortId(value: string): string {
-  return value.length > 14 ? `${value.slice(0, 14)}…` : value;
+function MetaChips({ metadata }: { metadata: Record<string, unknown> }) {
+  const keys = Object.keys(metadata);
+  if (keys.length === 0) return null;
+  return (
+    <div className="board-meta">
+      {keys.map((key) => (
+        <span key={key} className="board-meta-chip">
+          {key}={String(metadata[key])}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function EntryDetail({ entry }: { entry: BoardEntry }) {
+  return (
+    <dl className="board-detail">
+      <div className="board-detail-row">
+        <dt>entry</dt>
+        <dd>#{entry.id}</dd>
+      </div>
+      <div className="board-detail-row">
+        <dt>posted</dt>
+        <dd>{new Date(entry.created_at).toLocaleString()}</dd>
+      </div>
+      <div className="board-detail-row">
+        <dt>author</dt>
+        <dd>
+          {entry.author_session_id ? (
+            <Link
+              className="board-detail-link"
+              href={`/session/${entry.author_session_id}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {entry.author_session_id} →
+            </Link>
+          ) : (
+            "no session"
+          )}
+        </dd>
+      </div>
+    </dl>
+  );
 }
 
 export default function BoardPage() {
@@ -40,12 +89,25 @@ export default function BoardPage() {
   const [channels, setChannels] = useState<BoardChannel[]>([]);
   const [activeChannel, setActiveChannel] = useState<string | null>(null);
   const [entries, setEntries] = useState<BoardEntry[]>([]);
+  const [logTotal, setLogTotal] = useState(0);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [state, setState] = useState<LoadState>("loading");
   const [error, setError] = useState("");
   const [draftChannel, setDraftChannel] = useState("");
   const [draftText, setDraftText] = useState("");
   const [draftKey, setDraftKey] = useState("");
   const [posting, setPosting] = useState(false);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  const toggleExpanded = (id: number) =>
+    setExpandedId((current) => (current === id ? null : id));
+
+  const onEntryKeyDown = (event: KeyboardEvent, id: number) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      toggleExpanded(id);
+    }
+  };
 
   // Read inside the live socket handler without making the socket effect
   // depend on (and reconnect on) every channel switch.
@@ -53,6 +115,9 @@ export default function BoardPage() {
   useEffect(() => {
     activeChannelRef.current = activeChannel;
   }, [activeChannel]);
+
+  // A `?channel=` deep link selects that channel once it loads.
+  const pendingChannelRef = useRef<string | null>(null);
 
   const handleAuthFailure = useCallback(() => {
     clearToken();
@@ -65,6 +130,8 @@ export default function BoardPage() {
     const currentToken = readToken();
     setHost(currentHost);
     setToken(currentToken);
+    const requested = new URLSearchParams(window.location.search).get("channel");
+    if (requested) pendingChannelRef.current = requested;
     if (!currentHost || !currentToken) {
       router.replace("/");
     }
@@ -76,11 +143,15 @@ export default function BoardPage() {
       const list = await fetchBoardChannels(host, token);
       setChannels(list);
       setState("ready");
-      setActiveChannel((current) =>
-        current && list.some((c) => c.channel === current)
-          ? current
-          : (list[0]?.channel ?? null),
-      );
+      setActiveChannel((current) => {
+        const pending = pendingChannelRef.current;
+        if (pending && list.some((c) => c.channel === pending)) {
+          pendingChannelRef.current = null;
+          return pending;
+        }
+        if (current && list.some((c) => c.channel === current)) return current;
+        return list[0]?.channel ?? null;
+      });
     } catch (err) {
       if (isAuthError(err)) {
         handleAuthFailure();
@@ -94,7 +165,11 @@ export default function BoardPage() {
     async (channel: string) => {
       if (!host || !token) return;
       try {
-        setEntries(await fetchBoardEntries(host, token, channel));
+        const page = await fetchBoardChannel(host, token, channel, {
+          limit: LOG_LIMIT,
+        });
+        setEntries(page.entries);
+        setLogTotal(page.logTotal);
       } catch (err) {
         if (isAuthError(err)) {
           handleAuthFailure();
@@ -106,6 +181,36 @@ export default function BoardPage() {
     [host, token, handleAuthFailure],
   );
 
+  const loadOlder = useCallback(async () => {
+    if (!host || !token || !activeChannel) return;
+    const oldestLogId = entries
+      .filter((entry) => !entry.key)
+      .reduce<number | null>(
+        (min, entry) => (min === null || entry.id < min ? entry.id : min),
+        null,
+      );
+    if (oldestLogId === null) return;
+    setLoadingOlder(true);
+    try {
+      const page = await fetchBoardChannel(host, token, activeChannel, {
+        limit: LOG_LIMIT,
+        before: oldestLogId,
+      });
+      // Older rows have ids below everything loaded, so prepend keeps the
+      // append-log in ascending id order; cells already loaded are untouched.
+      setEntries((prev) => [...page.entries, ...prev]);
+      setLogTotal(page.logTotal);
+    } catch (err) {
+      if (isAuthError(err)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(err instanceof Error ? err.message : "failed to load older posts");
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [host, token, activeChannel, entries, handleAuthFailure]);
+
   useEffect(() => {
     void refreshChannels();
   }, [refreshChannels]);
@@ -114,6 +219,12 @@ export default function BoardPage() {
     if (activeChannel) {
       setDraftChannel(activeChannel);
       void refreshEntries(activeChannel);
+      // Keep the URL shareable without triggering a navigation.
+      window.history.replaceState(
+        null,
+        "",
+        `/board?channel=${encodeURIComponent(activeChannel)}`,
+      );
     } else {
       setEntries([]);
     }
@@ -212,7 +323,7 @@ export default function BoardPage() {
       if (!host || !token) return;
       if (
         !window.confirm(
-          `Clear all entries in "${channel}"? This cannot be undone.`,
+          `Remove all posts from "${channel}"? The channel stays. This cannot be undone.`,
         )
       ) {
         return;
@@ -221,6 +332,7 @@ export default function BoardPage() {
       try {
         await clearBoardChannel(host, token, channel);
         await refreshChannels();
+        await refreshEntries(channel);
       } catch (err) {
         if (isAuthError(err)) {
           handleAuthFailure();
@@ -229,8 +341,41 @@ export default function BoardPage() {
         setError(err instanceof Error ? err.message : "failed to clear channel");
       }
     },
+    [host, token, refreshChannels, refreshEntries, handleAuthFailure],
+  );
+
+  const handleDeleteChannel = useCallback(
+    async (channel: string) => {
+      if (!host || !token) return;
+      if (
+        !window.confirm(
+          `Delete channel "${channel}" and all its posts? This cannot be undone.`,
+        )
+      ) {
+        return;
+      }
+      setError("");
+      try {
+        await deleteBoardChannel(host, token, channel);
+        await refreshChannels();
+      } catch (err) {
+        if (isAuthError(err)) {
+          handleAuthFailure();
+          return;
+        }
+        setError(err instanceof Error ? err.message : "failed to delete channel");
+      }
+    },
     [host, token, refreshChannels, handleAuthFailure],
   );
+
+  // The two shapes the board is built on: keyed cells (latest-wins
+  // variables, pinned) and the append-only log (newest first).
+  const cells = entries
+    .filter((entry) => entry.key)
+    .sort((a, b) => (a.key ?? "").localeCompare(b.key ?? ""));
+  const log = entries.filter((entry) => !entry.key).reverse();
+  const hasOlder = log.length < logTotal;
 
   return (
     <main className="page-shell">
@@ -271,24 +416,27 @@ export default function BoardPage() {
         </div>
       ) : null}
 
-      <section className="panel board-compose" aria-label="Post to a channel">
-        <div className="board-compose-row">
+      <section className="panel board-composer" aria-label="Post to a channel">
+        <div className="board-composer-fields">
           <input
             className="board-input board-input-channel"
-            placeholder="channel (e.g. topic:plan)"
+            placeholder="channel — e.g. topic:plan"
             value={draftChannel}
             onChange={(event) => setDraftChannel(event.target.value)}
             aria-label="Channel"
           />
+          <span className="board-composer-sep" aria-hidden="true">
+            /
+          </span>
           <input
             className="board-input board-input-key"
-            placeholder="key (optional — upserts a cell)"
+            placeholder="key — blank appends to the log"
             value={draftKey}
             onChange={(event) => setDraftKey(event.target.value)}
             aria-label="Key"
           />
         </div>
-        <div className="board-compose-row">
+        <div className="board-composer-row">
           <input
             className="board-input board-input-text"
             placeholder="message"
@@ -305,7 +453,7 @@ export default function BoardPage() {
             onClick={() => void handlePost()}
             disabled={posting || !draftChannel.trim() || !draftText.trim()}
           >
-            Post
+            {draftKey.trim() ? "Set cell" : "Post"}
           </button>
         </div>
       </section>
@@ -322,22 +470,30 @@ export default function BoardPage() {
       ) : null}
 
       {state === "ready" && channels.length > 0 ? (
-        <section className="board-layout">
-          <aside className="panel board-channels" aria-label="Channels">
-            <h2 className="board-section-title">Channels</h2>
-            <ul className="board-channel-list">
+        <section className="board-grid">
+          <aside className="panel board-rail" aria-label="Channels">
+            <div className="board-rail-head">
+              <h2 className="board-rail-title">Channels</h2>
+              <span className="board-rail-count">{channels.length}</span>
+            </div>
+            <ul className="board-rail-list">
               {channels.map((channel) => (
                 <li key={channel.channel}>
                   <button
                     type="button"
-                    className={`board-channel${
+                    className={`board-rail-item${
                       channel.channel === activeChannel ? " is-active" : ""
                     }`}
                     onClick={() => setActiveChannel(channel.channel)}
                   >
-                    <span className="board-channel-name">{channel.channel}</span>
-                    <span className="board-channel-count">
-                      {channel.entry_count}
+                    <span className="board-rail-name">{channel.channel}</span>
+                    <span className="board-rail-meta">
+                      <span className="board-rail-badge">
+                        {channel.entry_count}
+                      </span>
+                      <span className="board-rail-time">
+                        {formatRelativeTime(channel.last_created_at)}
+                      </span>
                     </span>
                   </button>
                 </li>
@@ -345,52 +501,133 @@ export default function BoardPage() {
             </ul>
           </aside>
 
-          <div className="panel board-entries">
-            <div className="board-entries-head">
-              <h2 className="board-section-title">{activeChannel}</h2>
-              {activeChannel ? (
-                <button
-                  type="button"
-                  className="board-clear"
-                  onClick={() => void handleClear(activeChannel)}
-                >
-                  Clear channel
-                </button>
-              ) : null}
-            </div>
-            {entries.length === 0 ? (
-              <p className="muted board-entries-empty">No entries.</p>
-            ) : (
-              <ul className="board-entry-list">
-                {entries.map((entry) => (
-                  <li key={entry.id} className="board-entry">
-                    <div className="board-entry-head">
-                      {entry.key ? (
-                        <span className="board-entry-key">{entry.key}</span>
+          <div className="board-main">
+            {activeChannel ? (
+              <div className="board-main-head">
+                <div>
+                  <p className="board-main-eyebrow">channel</p>
+                  <h2 className="board-main-title">{activeChannel}</h2>
+                </div>
+                <div className="board-actions">
+                  <button
+                    type="button"
+                    className="board-action"
+                    onClick={() => void handleClear(activeChannel)}
+                  >
+                    Clear posts
+                  </button>
+                  <button
+                    type="button"
+                    className="board-action board-action-danger"
+                    onClick={() => void handleDeleteChannel(activeChannel)}
+                  >
+                    Delete channel
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {cells.length > 0 ? (
+              <section aria-label="Cells">
+                <h3 className="board-group-label">Cells · latest value</h3>
+                <div className="board-cell-grid">
+                  {cells.map((entry) => (
+                    <article
+                      key={entry.id}
+                      className={`board-cell${
+                        expandedId === entry.id ? " is-expanded" : ""
+                      }`}
+                      role="button"
+                      tabIndex={0}
+                      aria-expanded={expandedId === entry.id}
+                      onClick={() => toggleExpanded(entry.id)}
+                      onKeyDown={(event) => onEntryKeyDown(event, entry.id)}
+                    >
+                      <header className="board-cell-head">
+                        <span className="board-cell-key">{entry.key}</span>
+                        <span className="board-cell-time">
+                          {formatRelativeTime(entry.created_at)}
+                        </span>
+                      </header>
+                      <p className="board-cell-value">{entry.text}</p>
+                      <footer className="board-cell-foot">
+                        <span className="board-cell-author">
+                          {entry.author_session_id
+                            ? shortId(entry.author_session_id)
+                            : "—"}
+                        </span>
+                      </footer>
+                      <MetaChips metadata={entry.metadata} />
+                      {expandedId === entry.id ? (
+                        <EntryDetail entry={entry} />
                       ) : null}
-                      <span className="board-entry-author">
-                        {entry.author_session_id
-                          ? shortId(entry.author_session_id)
-                          : "—"}
-                      </span>
-                      <span className="board-entry-time">
-                        {formatTime(entry.created_at)}
-                      </span>
-                    </div>
-                    <p className="board-entry-text">{entry.text}</p>
-                    {Object.keys(entry.metadata).length > 0 ? (
-                      <div className="board-entry-meta">
-                        {Object.entries(entry.metadata).map(([key, value]) => (
-                          <span key={key} className="board-meta-chip">
-                            {key}={String(value)}
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            <section aria-label="Log">
+              {cells.length > 0 ? (
+                <h3 className="board-group-label">Log · newest first</h3>
+              ) : null}
+              {log.length === 0 ? (
+                <p className="board-log-empty">
+                  {cells.length > 0
+                    ? "No log posts in this channel."
+                    : "No entries yet."}
+                </p>
+              ) : (
+                <ol className="board-log-list">
+                  {log.map((entry) => (
+                    <li key={entry.id} className="board-log-item">
+                      <div className="board-log-rail" aria-hidden="true" />
+                      <div
+                        className={`board-log-body${
+                          expandedId === entry.id ? " is-expanded" : ""
+                        }`}
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={expandedId === entry.id}
+                        onClick={() => toggleExpanded(entry.id)}
+                        onKeyDown={(event) => onEntryKeyDown(event, entry.id)}
+                      >
+                        <div className="board-log-head">
+                          <span className="board-log-author">
+                            {entry.author_session_id
+                              ? shortId(entry.author_session_id)
+                              : "—"}
                           </span>
-                        ))}
+                          <span className="board-log-time">
+                            {formatRelativeTime(entry.created_at)}
+                          </span>
+                        </div>
+                        <p className="board-log-text">{entry.text}</p>
+                        <MetaChips metadata={entry.metadata} />
+                        {expandedId === entry.id ? (
+                          <EntryDetail entry={entry} />
+                        ) : null}
                       </div>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            )}
+                    </li>
+                  ))}
+                </ol>
+              )}
+              {hasOlder ? (
+                <div className="board-log-more">
+                  <button
+                    type="button"
+                    className="board-load-older"
+                    onClick={() => void loadOlder()}
+                    disabled={loadingOlder}
+                  >
+                    {loadingOlder ? "Loading…" : "Load older"}
+                  </button>
+                  <span className="board-log-count">
+                    {log.length} of {logTotal}
+                  </span>
+                </div>
+              ) : null}
+            </section>
           </div>
         </section>
       ) : null}

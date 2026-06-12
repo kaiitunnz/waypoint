@@ -115,7 +115,7 @@ def map_notification(
         return (
             EventKind.TOOL_RESULT,
             format_plan(payload.get("plan", [])),
-            (SessionStatus.RUNNING),
+            SessionStatus.RUNNING,
         )
     if method == "error":
         error = payload.get("error", {})

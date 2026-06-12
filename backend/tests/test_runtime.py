@@ -407,6 +407,26 @@ async def test_clear_board_channel_broadcasts(tmp_path) -> None:
     assert queue.get_nowait()["payload"]["channel"] == "topic:x"
 
 
+@pytest.mark.asyncio
+async def test_delete_session_prunes_board_entries_and_broadcasts(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    storage.create_session(
+        make_session(settings, id="poster", status=SessionStatus.EXITED)
+    )
+    await runtime.post_board_entry(
+        "topic:x", BoardPostRequest(text="mine", author_session_id="poster")
+    )
+    await runtime.post_board_entry("topic:x", BoardPostRequest(text="anon"))
+    queue = runtime.broadcast.subscribe_global()
+
+    await runtime.delete("poster")
+
+    # The poster's row is gone; the unauthored one survives.
+    assert [e.text for e in storage.list_board_entries("topic:x")] == ["anon"]
+    drained = [queue.get_nowait()["type"] for _ in range(queue.qsize())]
+    assert "board_update" in drained
+
+
 def make_session(settings: Settings, **overrides) -> SessionRecord:
     session_dir = settings.sessions_dir / overrides.get("id", "sess")
     session_dir.mkdir(parents=True, exist_ok=True)

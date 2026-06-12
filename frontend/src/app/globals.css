@@ -3511,7 +3511,13 @@ html[data-theme="light"] .task-dock-strip {
 
 .task-dock-chevron {
   flex: none;
+  display: inline-flex;
   color: var(--muted-soft);
+  transition: transform 160ms ease;
+}
+
+.task-dock-toggle[aria-expanded="true"] .task-dock-chevron {
+  transform: rotate(180deg);
 }
 
 .task-dock-dismiss {
@@ -3579,13 +3585,18 @@ html[data-theme="light"] .task-dock-panel {
 }
 
 .task-dock-collapse {
+  display: inline-flex;
+  align-items: center;
   padding: 4px 6px;
   background: none;
   border: none;
   color: var(--muted-soft);
-  font-size: 16px;
-  line-height: 1;
   cursor: pointer;
+}
+
+/* The collapse control always points down ("close"). */
+.task-dock-collapse svg {
+  transform: rotate(180deg);
 }
 
 @media (min-width: 768px) {

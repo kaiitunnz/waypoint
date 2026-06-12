@@ -5,6 +5,26 @@ import { useEffect, useState } from "react";
 import { TodoProgress } from "@/lib/todos";
 import { TodoListBody } from "@/components/TodoList";
 
+// A single chevron glyph (pointing up) so the expand and collapse affordances
+// are always identical in size; orientation is handled with a CSS rotation.
+function ChevronIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M4 10l4-4 4 4" />
+    </svg>
+  );
+}
+
 // A persistent, glanceable readout of the session's current task group,
 // docked above the composer so live progress stays visible as the transcript
 // scrolls. Collapsed it shows the current task + a progress meter; tapping it
@@ -62,7 +82,7 @@ export function TaskProgressDock({
                 aria-label="Collapse task list"
                 onClick={() => setExpanded(false)}
               >
-                ⌄
+                <ChevronIcon />
               </button>
             </div>
             <TodoListBody todos={todos} />
@@ -95,7 +115,7 @@ export function TaskProgressDock({
               {completed}/{total}
             </span>
             <span className="task-dock-chevron" aria-hidden>
-              {expanded ? "⌄" : "⌃"}
+              <ChevronIcon />
             </span>
           </button>
           <button

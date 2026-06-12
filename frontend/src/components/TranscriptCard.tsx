@@ -657,6 +657,7 @@ type TodoStatus = "completed" | "in-progress" | "pending";
 interface TodoEntry {
   text: string;
   status: TodoStatus;
+  detail?: string;
 }
 
 const TODO_MARKER: Record<TodoStatus, string> = {
@@ -717,7 +718,10 @@ function TodoListBody({ todos }: { todos: TodoEntry[] | null }) {
           <span className="todo-marker" aria-hidden>
             {TODO_MARKER[todo.status]}
           </span>
-          <span className="todo-text">{todo.text}</span>
+          <span className="todo-body">
+            <span className="todo-text">{todo.text}</span>
+            {todo.detail ? <span className="todo-detail">{todo.detail}</span> : null}
+          </span>
         </li>
       ))}
     </ul>
@@ -759,7 +763,7 @@ function readTodoEntries(event: EventRecord | null | undefined): TodoEntry[] | n
       // Codex todo_list items carry `text`/`completed` (only two states);
       // Claude's TodoWrite tool uses `content`/`status` with a third
       // `in_progress` state. Read both shapes so one card renders both.
-      const text =
+      const content =
         typeof entry.text === "string" && entry.text
           ? entry.text
           : typeof entry.content === "string"
@@ -773,7 +777,13 @@ function readTodoEntries(event: EventRecord | null | undefined): TodoEntry[] | n
       } else {
         status = "pending";
       }
-      return { text, status };
+      // While in progress, prefer the present-tense `activeForm` ("Writing
+      // the parser") over the imperative subject, matching how Claude renders
+      // its own spinner. Carried by both TodoWrite and the Task tools.
+      const activeForm = typeof entry.activeForm === "string" ? entry.activeForm : "";
+      const text = status === "in-progress" && activeForm ? activeForm : content;
+      const detail = typeof entry.description === "string" ? entry.description : undefined;
+      return { text, status, detail };
     })
     .filter((entry) => entry.text);
   return todos.length > 0 ? todos : null;

@@ -2676,9 +2676,26 @@ html[data-theme="light"] .transcript.codex.tool_pair {
   color: var(--success);
 }
 
+.todo-body {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
 .todo-text {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.todo-detail {
+  min-width: 0;
+  font-size: 0.85em;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .todo-empty {

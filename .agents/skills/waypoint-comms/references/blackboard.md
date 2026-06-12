@@ -40,10 +40,19 @@ waypoint board read topic:auth-refactor
 waypoint board read topic:auth-refactor --since 42
 waypoint board read team:$PARENT --key status
 
-# List channels with entry counts; wipe a channel when done:
+# List channels with entry counts:
 waypoint board channels
+
+# Clear a channel's posts but keep the (now empty) channel:
 waypoint board clear topic:auth-refactor
+
+# Delete a channel outright, posts and all:
+waypoint board delete topic:auth-refactor
 ```
+
+`clear` and `delete` differ: `clear` empties a channel you want to reuse (it
+stays listed with zero posts); `delete` removes the channel entirely. Both wipe
+every post in the channel — there is no per-post delete yet.
 
 `post` stamps the author from `WAYPOINT_SESSION_ID` automatically (the same id as
 `addressing.md`); you don't pass it. When that session is deleted, its posts are

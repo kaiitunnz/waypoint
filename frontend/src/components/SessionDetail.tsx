@@ -3221,9 +3221,12 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
   }
 
   // Classify each item so the grouping loop is easy to reason about.
-  // "content"  → user messages, agent text, approvals, todos, ask-questions:
+  // "content"  → user messages, agent text, approvals, ask-questions:
   //              always breaks (and terminates) the current tool run.
-  // "tool"     → ordinary tool call/result pairs/singles: join the run.
+  // "tool"     → ordinary tool call/result pairs/singles, including todos:
+  //              join the run. The live task list lives in the dock now, so
+  //              the transcript todo marker is just a historical tool record
+  //              and folds into the run instead of standing alone.
   // "absorbed" → system_note / status_update lifecycle noise: silently join
   //              the active run (rendered as quiet separators when expanded),
   //              or fall through as standalone if no run is active yet.
@@ -3231,7 +3234,7 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
     if (item.kind === "pair") {
       const { call, result } = item.pair;
       const isSpecial = (e: EventRecord | null) =>
-        e !== null && (isTodoListEvent(e) || readToolName(e) === "AskUserQuestion");
+        e !== null && readToolName(e) === "AskUserQuestion";
       return isSpecial(call) || isSpecial(result) ? "content" : "tool";
     }
     const { event } = item;
@@ -3242,9 +3245,7 @@ function buildTranscriptItems(events: EventRecord[]): TranscriptItem[] {
         return "content";
       case "tool_call":
       case "tool_result":
-        return isTodoListEvent(event) || readToolName(event) === "AskUserQuestion"
-          ? "content"
-          : "tool";
+        return readToolName(event) === "AskUserQuestion" ? "content" : "tool";
       default:
         return isPlanEvent(event) ? "content" : "absorbed";
     }

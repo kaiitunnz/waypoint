@@ -96,6 +96,17 @@ class Storage:
         self._lock = threading.RLock()
         self.connection = sqlite3.connect(self.database_path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
+        # WAL lets reads run concurrently with the writer and drops the
+        # full fsync that the default rollback journal does on every
+        # commit — the streaming event path commits per event, so that
+        # fsync otherwise serializes the whole asyncio loop. synchronous
+        # NORMAL is safe under WAL (a crash can lose only the last
+        # un-checkpointed commits, never corrupt the db), and busy_timeout
+        # lets the threadpooled readers wait out a checkpoint instead of
+        # raising "database is locked".
+        self.connection.execute("PRAGMA journal_mode=WAL")
+        self.connection.execute("PRAGMA synchronous=NORMAL")
+        self.connection.execute("PRAGMA busy_timeout=5000")
         self._init_db()
 
     def _init_db(self) -> None:
@@ -138,6 +149,12 @@ class Storage:
                 sequence INTEGER NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
+
+            -- Serves both the per-event next_sequence MAX(sequence) lookup
+            -- and the per-session paginated event reads, which would
+            -- otherwise scan the whole events table.
+            CREATE INDEX IF NOT EXISTS idx_events_session_seq
+                ON events(session_id, sequence);
 
             CREATE TABLE IF NOT EXISTS auth_tokens (
                 token TEXT PRIMARY KEY,

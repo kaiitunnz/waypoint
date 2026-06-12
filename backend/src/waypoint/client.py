@@ -282,3 +282,22 @@ class WaypointClient:
     def delete_board(self, channel: str) -> dict[str, Any]:
         data: dict[str, Any] = self._request("DELETE", f"/api/board/{channel}").json()
         return data
+
+    def delete_board_entry(self, channel: str, entry_id: int) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "DELETE", f"/api/board/{channel}/entries/{entry_id}"
+        ).json()
+        return data
+
+    def update_board_entry(
+        self,
+        channel: str,
+        entry_id: int,
+        text: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        body = {"text": text, "metadata": metadata or {}}
+        data: dict[str, Any] = self._request(
+            "PATCH", f"/api/board/{channel}/entries/{entry_id}", json=body
+        ).json()["entry"]
+        return data

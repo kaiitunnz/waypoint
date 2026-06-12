@@ -2677,7 +2677,8 @@ html[data-theme="light"] .transcript.codex.tool_pair {
 /* Flat rows — status is carried by the marker glyph and text colour, not a
  * per-item box, so the list stays clean inside the dock panel and the
  * transcript marker (both already bordered surfaces). The in-progress row
- * gets a faint accent wash so the current task still stands out. */
+ * carries a stronger text colour and an accent-tinted marker glyph so the
+ * current task still stands out. */
 .todo-item {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);

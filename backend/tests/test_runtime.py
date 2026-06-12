@@ -19,6 +19,7 @@ from waypoint.backends.codex.schemas import CodexThreadImportRequest
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
+    BoardEntryUpdateRequest,
     BoardPostRequest,
     CommandCompletion,
     CompletionDispatch,
@@ -425,6 +426,50 @@ async def test_delete_session_prunes_board_entries_and_broadcasts(tmp_path) -> N
     assert [e.text for e in storage.list_board_entries("topic:x")] == ["anon"]
     drained = [queue.get_nowait()["type"] for _ in range(queue.qsize())]
     assert "board_update" in drained
+
+
+@pytest.mark.asyncio
+async def test_delete_board_entry_broadcasts(tmp_path) -> None:
+    runtime, storage, _ = make_runtime(tmp_path)
+    entry = await runtime.post_board_entry("topic:x", BoardPostRequest(text="a"))
+    queue = runtime.broadcast.subscribe_global()
+    assert await runtime.delete_board_entry("topic:x", entry.id) is True
+    assert storage.list_board_entries("topic:x") == []
+    assert queue.get_nowait()["payload"]["channel"] == "topic:x"
+
+
+@pytest.mark.asyncio
+async def test_delete_board_entry_missing_does_not_broadcast(tmp_path) -> None:
+    runtime, _, _ = make_runtime(tmp_path)
+    queue = runtime.broadcast.subscribe_global()
+    assert await runtime.delete_board_entry("topic:x", 123) is False
+    assert queue.qsize() == 0
+
+
+@pytest.mark.asyncio
+async def test_update_board_entry_broadcasts(tmp_path) -> None:
+    runtime, storage, _ = make_runtime(tmp_path)
+    entry = await runtime.post_board_entry("topic:x", BoardPostRequest(text="a"))
+    queue = runtime.broadcast.subscribe_global()
+    updated = await runtime.update_board_entry(
+        "topic:x", entry.id, BoardEntryUpdateRequest(text="b")
+    )
+    assert updated is not None and updated.text == "b"
+    assert storage.list_board_entries("topic:x")[0].text == "b"
+    assert queue.get_nowait()["payload"]["channel"] == "topic:x"
+
+
+@pytest.mark.asyncio
+async def test_update_board_entry_missing_does_not_broadcast(tmp_path) -> None:
+    runtime, _, _ = make_runtime(tmp_path)
+    queue = runtime.broadcast.subscribe_global()
+    assert (
+        await runtime.update_board_entry(
+            "topic:x", 123, BoardEntryUpdateRequest(text="b")
+        )
+        is None
+    )
+    assert queue.qsize() == 0
 
 
 def make_session(settings: Settings, **overrides) -> SessionRecord:

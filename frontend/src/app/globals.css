@@ -2651,6 +2651,17 @@ html[data-theme="light"] .transcript.codex.tool_pair {
   font-variant-numeric: tabular-nums;
 }
 
+/* The timestamp lives in the summary, not a `.transcript-role`, so it misses
+ * the shared `.role-time` rule — restate it here. */
+.todo-marker-summary .role-time {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--muted-soft);
+  font-variant-numeric: tabular-nums;
+}
+
 .todo-marker-body {
   margin-top: 10px;
 }
@@ -3481,7 +3492,7 @@ html[data-theme="light"] .task-dock-strip {
 }
 
 .task-dock.active .task-dock-glyph {
-  animation: task-dock-pulse 1.6s ease-in-out infinite;
+  animation: task-dock-pulse 2.8s ease-in-out infinite;
 }
 
 @keyframes task-dock-pulse {
@@ -3490,7 +3501,7 @@ html[data-theme="light"] .task-dock-strip {
     opacity: 1;
   }
   50% {
-    opacity: 0.4;
+    opacity: 0.5;
   }
 }
 

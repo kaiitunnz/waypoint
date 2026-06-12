@@ -274,5 +274,11 @@ class WaypointClient:
         return data
 
     def clear_board(self, channel: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/board/{channel}/clear"
+        ).json()
+        return data
+
+    def delete_board(self, channel: str) -> dict[str, Any]:
         data: dict[str, Any] = self._request("DELETE", f"/api/board/{channel}").json()
         return data

@@ -463,8 +463,17 @@ def board_clear(
     ctx: typer.Context,
     channel: Annotated[str, typer.Argument()],
 ) -> None:
-    """Delete all entries in a board channel."""
+    """Remove all posts from a channel, keeping the (now empty) channel."""
     _emit(_settings_from_ctx(ctx), lambda c: c.clear_board(channel))
+
+
+@board_app.command("delete")
+def board_delete(
+    ctx: typer.Context,
+    channel: Annotated[str, typer.Argument()],
+) -> None:
+    """Delete a channel entirely, posts and all."""
+    _emit(_settings_from_ctx(ctx), lambda c: c.delete_board(channel))
 
 
 def run_reset(settings: Settings | None = None, *, confirmed: bool) -> None:

@@ -48,7 +48,11 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
                 },
             )
         if request.url.path.startswith("/api/board/"):
-            channel = request.url.path.rsplit("/", 1)[-1]
+            rest = request.url.path[len("/api/board/") :]
+            if rest.endswith("/clear") and request.method == "POST":
+                channel = rest[: -len("/clear")]
+                return httpx.Response(200, json={"channel": channel, "cleared": 3})
+            channel = rest
             if request.method == "POST":
                 payload = json.loads(request.content)
                 state["board_post"] = {"channel": channel, **payload}
@@ -62,7 +66,7 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
                     json={"channel": channel, "entries": [{"id": 1, "text": "hello"}]},
                 )
             if request.method == "DELETE":
-                return httpx.Response(200, json={"channel": channel, "cleared": 3})
+                return httpx.Response(200, json={"channel": channel, "deleted": 5})
         if request.url.path == "/api/sessions" and request.method == "POST":
             payload = json.loads(request.content)
             return httpx.Response(200, json={"session": {"id": "new", **payload}})
@@ -220,6 +224,13 @@ def test_clear_board(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state: dict = {}
     with _client(_settings(tmp_path), state) as client:
         assert client.clear_board("topic:x") == {"channel": "topic:x", "cleared": 3}
+
+
+def test_delete_board(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        assert client.delete_board("topic:x") == {"channel": "topic:x", "deleted": 5}
 
 
 def test_error_response_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

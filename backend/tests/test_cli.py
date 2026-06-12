@@ -50,7 +50,7 @@ def test_help_lists_command_groups() -> None:
 def test_board_help_lists_commands() -> None:
     result = runner.invoke(app, ["board", "--help"])
     assert result.exit_code == 0
-    for name in ("post", "read", "channels", "clear"):
+    for name in ("post", "read", "channels", "clear", "delete"):
         assert name in result.stdout
 
 

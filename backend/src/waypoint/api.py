@@ -444,7 +444,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
         since: Annotated[int | None, Query()] = None,
         key: Annotated[str | None, Query()] = None,
+        limit: Annotated[int | None, Query(ge=1)] = None,
+        before: Annotated[int | None, Query(ge=1)] = None,
     ) -> Any:
+        # Paged read for the UI: all cells + a bounded, back-pageable window of
+        # the append-log, with the full log count. `since`/`key` stay the
+        # unbounded cursor/lookup path the CLI uses.
+        if limit is not None or before is not None:
+            page, log_total = context.runtime.read_board_channel(
+                channel, log_limit=limit, before=before
+            )
+            return {
+                "channel": channel,
+                "entries": [entry.model_dump(mode="json") for entry in page],
+                "log_total": log_total,
+            }
         entries = [
             entry.model_dump(mode="json")
             for entry in context.runtime.list_board_entries(
@@ -462,13 +476,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         entry = await context.runtime.post_board_entry(channel, body)
         return {"entry": entry.model_dump(mode="json")}
 
-    @app.delete("/api/board/{channel}")
+    @app.post("/api/board/{channel}/clear")
     async def board_clear(
         channel: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
+        # Remove the channel's posts but keep the (now empty) channel.
         removed = await context.runtime.clear_board_channel(channel)
         return {"channel": channel, "cleared": removed}
+
+    @app.delete("/api/board/{channel}")
+    async def board_delete(
+        channel: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        # Remove the channel entirely, posts and all.
+        removed = await context.runtime.delete_board_channel(channel)
+        return {"channel": channel, "deleted": removed}
 
     @app.patch("/api/sessions/{session_id}/title")
     async def session_set_title(

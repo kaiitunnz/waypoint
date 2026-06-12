@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { BackendSwitcher } from "@/components/BackendSwitcher";
 import { BoardPanel } from "@/components/BoardPanel";
@@ -163,6 +163,24 @@ export default function HomePage() {
     : launchableBackends[0] ?? supportedBackends[0];
   const effectiveDefaultCwd = activeLaunchTarget?.default_cwd ?? defaultCwd;
 
+  const resetAuthState = useCallback((message: string) => {
+    clearToken();
+    setToken("");
+    setSessions([]);
+    setDefaultBackend("codex");
+    setDefaultCwd("~/");
+    setLaunchTargets([]);
+    setActiveLaunchTargetId("");
+    setSchedules([]);
+    setThreadsByBackend({});
+    setLoadingByBackend({});
+    setError(message);
+  }, []);
+
+  const handleAuthFailure = useCallback(() => {
+    resetAuthState("Session expired. Log in again.");
+  }, [resetAuthState]);
+
   useEffect(() => {
     const currentHost = readHost();
     const currentToken = readToken();
@@ -280,7 +298,7 @@ export default function HomePage() {
       }
       socket?.close();
     };
-  }, [host, token]);
+  }, [host, resetAuthState, token]);
 
   // The set of backends we should fetch threads for: those that
   // advertise `supports_thread_discovery=True` AND are listed by the
@@ -368,6 +386,7 @@ export default function HomePage() {
     host,
     launchTargets,
     discoveryBackendsKey,
+    resetAuthState,
     token,
   ]);
 
@@ -488,24 +507,6 @@ export default function HomePage() {
           : `failed to import ${backend} thread`,
       );
     }
-  }
-
-  function resetAuthState(message: string) {
-    clearToken();
-    setToken("");
-    setSessions([]);
-    setDefaultBackend("codex");
-    setDefaultCwd("~/");
-    setLaunchTargets([]);
-    setActiveLaunchTargetId("");
-    setSchedules([]);
-    setThreadsByBackend({});
-    setLoadingByBackend({});
-    setError(message);
-  }
-
-  function handleAuthFailure() {
-    resetAuthState("Session expired. Log in again.");
   }
 
   async function handleCreateSchedule(payload: ScheduleCreateRequest) {

@@ -296,6 +296,7 @@ export interface BoardEntry {
   text: string;
   metadata: Record<string, unknown>;
   created_at: string;
+  edited_at?: string | null;
 }
 
 export interface BoardChannel {

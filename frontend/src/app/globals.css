@@ -2628,7 +2628,7 @@ html[data-theme="light"] .transcript.codex.tool_pair {
 /* Chronological todo marker: a slim, collapsed-by-default record of the task
  * list at a point in the transcript. The live view is the docked
  * TaskProgressDock, so this stays out of the way until expanded. */
-.todo-marker {
+.todo-marker-card {
   padding: 8px 12px;
 }
 
@@ -2674,34 +2674,36 @@ html[data-theme="light"] .transcript.codex.tool_pair {
   padding: 0;
 }
 
+/* Flat rows — status is carried by the marker glyph and text colour, not a
+ * per-item box, so the list stays clean inside the dock panel and the
+ * transcript marker (both already bordered surfaces). The in-progress row
+ * gets a faint accent wash so the current task still stands out. */
 .todo-item {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr);
   align-items: start;
   gap: 10px;
-  padding: 8px 10px;
-  border: 1px solid rgba(180, 150, 220, 0.18);
-  border-radius: var(--radius-sm);
-  background: rgba(180, 150, 220, 0.08);
+  padding: 3px 0;
   color: var(--text);
 }
 
 .todo-item.in-progress {
-  border-color: rgba(200, 169, 106, 0.32);
-  background: rgba(200, 169, 106, 0.1);
   color: var(--text-strong);
 }
 
 .todo-item.completed {
-  border-color: rgba(94, 210, 156, 0.2);
-  background: rgba(94, 210, 156, 0.08);
   color: var(--muted);
 }
 
+.todo-item.completed .todo-text {
+  text-decoration: line-through;
+  text-decoration-color: var(--muted-soft);
+}
+
 .todo-marker {
-  color: var(--todo-glyph);
+  color: var(--muted-soft);
   font-weight: 700;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 
 .todo-item.in-progress .todo-marker {
@@ -3587,6 +3589,23 @@ html[data-theme="light"] .task-dock-panel {
   box-shadow: 0 -10px 30px rgba(60, 50, 30, 0.16);
 }
 
+/* Mobile bottom sheet: join the panel to the strip into one surface — the
+ * panel's bottom edge meets the strip's top border (a single seam divider),
+ * with the strip carrying the shadow. (Desktop overrides this below to float
+ * the panel as a detached popover.) */
+.task-dock.expanded .task-dock-panel {
+  margin-bottom: 0;
+  border-bottom: none;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  box-shadow: none;
+}
+
+.task-dock.expanded .task-dock-strip {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
 .task-dock-panel-head {
   display: flex;
   align-items: center;
@@ -3626,6 +3645,24 @@ html[data-theme="light"] .task-dock-panel {
     bottom: calc(100% + 8px);
     width: min(420px, 92vw);
     margin-bottom: 0;
+  }
+
+  /* The panel floats as a detached popover, so undo the mobile sheet join:
+   * restore its own border, rounding, and a downward shadow, and give the
+   * strip its full rounding back. */
+  .task-dock.expanded .task-dock-panel {
+    border-bottom: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  }
+
+  html[data-theme="light"] .task-dock.expanded .task-dock-panel {
+    box-shadow: 0 12px 30px rgba(60, 50, 30, 0.16);
+  }
+
+  .task-dock.expanded .task-dock-strip {
+    border-top-left-radius: var(--radius);
+    border-top-right-radius: var(--radius);
   }
 }
 

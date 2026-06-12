@@ -61,7 +61,9 @@ export function TaskProgressDock({
       : "Tasks";
 
   return (
-    <div className={`task-dock ${allComplete ? "complete" : "active"}`}>
+    <div
+      className={`task-dock ${allComplete ? "complete" : "active"}${expanded ? " expanded" : ""}`}
+    >
       {expanded ? (
         <>
           <button

@@ -674,7 +674,7 @@ function TodoMarkerCard({ todos, ts }: { todos: TodoEntry[] | null; ts: string }
     ? `${progress.total} item${progress.total === 1 ? "" : "s"} · ${progress.completed}/${progress.total} done`
     : "no items";
   return (
-    <details className="panel transcript codex todo-marker">
+    <details className="panel transcript codex todo-marker-card">
       <summary className="transcript-summary todo-marker-summary">
         <span className={`tool-glyph ${TODO_BADGE.variant}`} aria-hidden>
           {TODO_BADGE.glyph}

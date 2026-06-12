@@ -1222,6 +1222,13 @@ class ClaudeCliAdapter:
             return
         state.task_tracker, state.task_card_item_id = carried
 
+    def discard_session(self, session_id: str) -> None:
+        # Permanent removal: drop the carried todo tracker so a stash for a
+        # session that's deleted (rather than respawned) doesn't linger. An
+        # exited session keeps its stash — it may still be reattached, which is
+        # exactly when the carry-over is needed.
+        self._carried_task_state.pop(session_id, None)
+
     def _build_local_launch_spec(
         self,
         session_id: str,

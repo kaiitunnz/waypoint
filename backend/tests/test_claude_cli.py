@@ -1412,6 +1412,19 @@ async def test_restore_carried_task_state_tolerates_missing() -> None:
 
 
 @pytest.mark.asyncio
+async def test_discard_session_clears_carried_task_state() -> None:
+    """A permanent delete drops the stash so it doesn't linger for a respawn
+    that will never come."""
+    adapter = _make_adapter([])
+    state, _ = _attach_state(adapter, "sess")
+    state.task_tracker.create("1", content="First")
+    await adapter.terminate_session("sess")
+    assert "sess" in adapter._carried_task_state
+    adapter.discard_session("sess")
+    assert "sess" not in adapter._carried_task_state
+
+
+@pytest.mark.asyncio
 async def test_task_get_and_list_results_are_suppressed() -> None:
     emitted: list = []
     adapter = _make_adapter(emitted)

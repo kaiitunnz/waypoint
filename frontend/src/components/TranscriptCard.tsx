@@ -14,10 +14,16 @@ import {
   planTextForEvent,
   type EventDiffPreview,
 } from "@/lib/events";
+import {
+  isTodoToolEvent,
+  readTodoEntries,
+  todoStatusForEvent,
+} from "@/lib/todos";
 import { PlanApprovalCard } from "@/components/ApprovalCard";
 import { CopyMessageButton } from "@/components/CopyMessageButton";
 import { DiffPreview } from "@/components/DiffPreview";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
+import { TodoListBody } from "@/components/TodoList";
 
 export interface ToolPair {
   call: EventRecord | null;
@@ -652,20 +658,6 @@ function ToolPairCard({
   );
 }
 
-type TodoStatus = "completed" | "in-progress" | "pending";
-
-interface TodoEntry {
-  text: string;
-  status: TodoStatus;
-  detail?: string;
-}
-
-const TODO_MARKER: Record<TodoStatus, string> = {
-  completed: "✓",
-  "in-progress": "◐",
-  pending: "○",
-};
-
 // Fixed badge for the cross-backend Todo card. Codex's todo_list is a
 // built-in item (not a tool the agent invokes), so don't borrow Claude's
 // "TodoWrite" tool name to look it up — render the same badge for both.
@@ -705,88 +697,6 @@ function TodoToolPairCard({ pair }: { pair: ToolPair }) {
       <TodoListBody todos={todos} />
     </article>
   );
-}
-
-function TodoListBody({ todos }: { todos: TodoEntry[] | null }) {
-  if (!todos || todos.length === 0) {
-    return <p className="todo-empty">No todo items.</p>;
-  }
-  return (
-    <ul className="todo-list">
-      {todos.map((todo, index) => (
-        <li key={`${todo.text}-${index}`} className={`todo-item ${todo.status}`}>
-          <span className="todo-marker" aria-hidden>
-            {TODO_MARKER[todo.status]}
-          </span>
-          <span className="todo-body">
-            <span className="todo-text">{todo.text}</span>
-            {todo.detail ? <span className="todo-detail">{todo.detail}</span> : null}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function isTodoToolEvent(event: EventRecord | null | undefined): boolean {
-  if (!event) {
-    return false;
-  }
-  return readTodoEntries(event)?.length ? true : readToolName(event) === "TodoWrite";
-}
-
-function todoStatusForEvent(event: EventRecord): "complete" | "pending" {
-  const method = typeof event.metadata?.method === "string" ? event.metadata.method : "";
-  if (method === "item/completed" || method === "user.tool_result") {
-    return "complete";
-  }
-  return "pending";
-}
-
-function readTodoEntries(event: EventRecord | null | undefined): TodoEntry[] | null {
-  if (!event) {
-    return null;
-  }
-  const meta = asRecord(event.metadata);
-  const payload = asRecord(meta?.payload);
-  const input = asRecord(payload?.input) ?? asRecord(meta?.tool_input);
-  const item = asRecord(payload?.item);
-  const rawTodos =
-    (Array.isArray(item?.items) ? item.items : null) ??
-    (Array.isArray(input?.todos) ? input.todos : null);
-  if (!rawTodos || rawTodos.length === 0) {
-    return null;
-  }
-  const todos = rawTodos
-    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
-    .map((entry) => {
-      // Codex todo_list items carry `text`/`completed` (only two states);
-      // Claude's TodoWrite tool uses `content`/`status` with a third
-      // `in_progress` state. Read both shapes so one card renders both.
-      const content =
-        typeof entry.text === "string" && entry.text
-          ? entry.text
-          : typeof entry.content === "string"
-            ? entry.content
-            : "";
-      let status: TodoStatus;
-      if (entry.completed === true || entry.status === "completed") {
-        status = "completed";
-      } else if (entry.status === "in_progress") {
-        status = "in-progress";
-      } else {
-        status = "pending";
-      }
-      // While in progress, prefer the present-tense `activeForm` ("Writing
-      // the parser") over the imperative subject, matching how Claude renders
-      // its own spinner. Carried by both TodoWrite and the Task tools.
-      const activeForm = typeof entry.activeForm === "string" ? entry.activeForm : "";
-      const text = status === "in-progress" && activeForm ? activeForm : content;
-      const detail = typeof entry.description === "string" ? entry.description : undefined;
-      return { text, status, detail };
-    })
-    .filter((entry) => entry.text);
-  return todos.length > 0 ? todos : null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

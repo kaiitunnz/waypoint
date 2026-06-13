@@ -1,9 +1,13 @@
+import json
 from pathlib import Path
 
+import httpx
 import pytest
 from typer.testing import CliRunner
 
 from waypoint.cli import app
+from waypoint.client import WaypointClient
+from waypoint.settings import Settings
 
 runner = CliRunner()
 
@@ -104,6 +108,59 @@ def test_models_rejects_unknown_backend(tmp_path: Path) -> None:
     result = runner.invoke(app, ["--config", str(_config(tmp_path)), "models", "bogus"])
     assert result.exit_code != 0
     assert "unknown backend" in result.output
+
+
+def test_models_sweep_skips_fallback_and_isolates_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/backends":
+            return httpx.Response(
+                200,
+                json={
+                    "backends": [
+                        {
+                            "id": "claude_code",
+                            "capabilities": {"is_fallback_for_managed_launch": False},
+                        },
+                        {
+                            "id": "codex",
+                            "capabilities": {"is_fallback_for_managed_launch": False},
+                        },
+                        {
+                            "id": "tmux",
+                            "capabilities": {"is_fallback_for_managed_launch": True},
+                        },
+                    ]
+                },
+            )
+        if path.endswith("/models"):
+            backend = path[len("/api/backends/") : -len("/models")]
+            requested.append(backend)
+            if backend == "codex":
+                return httpx.Response(502, json={"detail": "codex discovery failed"})
+            return httpx.Response(
+                200, json={"backend": backend, "models": [{"id": "x"}]}
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(app, ["--config", str(_config(tmp_path)), "models"])
+    assert result.exit_code == 0
+    by_id = {entry["backend"]: entry for entry in json.loads(result.stdout)["backends"]}
+    # The fallback backend is filtered out before any model request.
+    assert set(by_id) == {"claude_code", "codex"}
+    assert "tmux" not in requested
+    # A live-discovery failure becomes an error entry, not a failed sweep.
+    assert by_id["claude_code"]["models"] == [{"id": "x"}]
+    assert "error" in by_id["codex"]
 
 
 def test_answer_question_rejects_malformed_answers_json(tmp_path: Path) -> None:

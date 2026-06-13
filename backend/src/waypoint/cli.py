@@ -78,10 +78,15 @@ board_app = typer.Typer(
     help="Blackboard messaging shared across sessions.",
     no_args_is_help=True,
 )
+schedule_app = typer.Typer(
+    help="Manage scheduled session launches on a running Waypoint server.",
+    no_args_is_help=True,
+)
 app.add_typer(backends_app, name="backends")
 app.add_typer(session_app, name="session")
 app.add_typer(sessions_app, name="sessions")
 app.add_typer(board_app, name="board")
+app.add_typer(schedule_app, name="schedule")
 
 
 @app.callback()
@@ -735,6 +740,76 @@ def board_edit_entry(
         _settings_from_ctx(ctx),
         lambda c: {"entry": c.update_board_entry(channel, entry_id, text, metadata)},
     )
+
+
+@schedule_app.command("list")
+def schedule_list(ctx: typer.Context) -> None:
+    """List all scheduled sessions."""
+    _emit(_settings_from_ctx(ctx), lambda c: {"schedules": c.list_schedules()})
+
+
+@schedule_app.command("create")
+def schedule_create(
+    ctx: typer.Context,
+    backend: BackendOption,
+    cwd: Annotated[str, typer.Option(help="Working directory for the session.")],
+    launch_target_id: Annotated[str | None, typer.Option()] = None,
+    launch_mode: Annotated[str | None, typer.Option()] = None,
+    title: Annotated[str | None, typer.Option()] = None,
+    model: Annotated[str | None, typer.Option()] = None,
+    effort: Annotated[str | None, typer.Option()] = None,
+    permission_mode: Annotated[str | None, typer.Option()] = None,
+    prompt: Annotated[
+        str | None,
+        typer.Option("--prompt", help="Initial prompt sent to the session on launch."),
+    ] = None,
+    delay_seconds: Annotated[
+        int | None,
+        typer.Option(help="Launch this many seconds from now."),
+    ] = None,
+    scheduled_at: Annotated[
+        str | None,
+        typer.Option(help="ISO 8601 datetime at which to launch the session."),
+    ] = None,
+    args: Annotated[list[str] | None, typer.Argument()] = None,
+) -> None:
+    """Schedule a session launch on the running server."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "schedule": c.create_schedule(
+                backend=backend,
+                cwd=cwd,
+                launch_target_id=launch_target_id,
+                launch_mode=launch_mode,
+                title=title,
+                model=model,
+                effort=effort,
+                permission_mode=permission_mode,
+                initial_prompt=prompt,
+                args=list(args or []),
+                delay_seconds=delay_seconds,
+                scheduled_at=scheduled_at,
+            )
+        },
+    )
+
+
+@schedule_app.command("delete")
+def schedule_delete(
+    ctx: typer.Context, schedule_id: Annotated[str, typer.Argument()]
+) -> None:
+    """Cancel and remove a scheduled session."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"schedule": c.delete_schedule(schedule_id)},
+    )
+
+
+@schedule_app.command("clear-history")
+def schedule_clear_history(ctx: typer.Context) -> None:
+    """Remove completed/cancelled schedule records."""
+    _emit(_settings_from_ctx(ctx), lambda c: c.clear_schedule_history())
 
 
 def run_reset(settings: Settings | None = None, *, confirmed: bool) -> None:

@@ -48,6 +48,7 @@ def test_help_lists_command_groups() -> None:
         "session",
         "sessions",
         "board",
+        "schedule",
     ):
         assert name in result.stdout
 
@@ -510,3 +511,66 @@ def test_doctor_reports_config_path(tmp_path: Path) -> None:
     result = runner.invoke(app, ["--config", str(_config(tmp_path)), "doctor"])
     assert result.exit_code == 0
     assert "config_path" in result.stdout
+
+
+def test_schedule_help_lists_commands() -> None:
+    result = runner.invoke(app, ["schedule", "--help"])
+    assert result.exit_code == 0
+    for name in ("list", "create", "delete", "clear-history"):
+        assert name in result.stdout
+
+
+def test_schedule_create_rejects_unknown_backend(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "schedule",
+            "create",
+            "--backend",
+            "bogus",
+            "--cwd",
+            "/tmp",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "unknown backend" in result.output
+
+
+def test_schedule_create_emits_schedule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/schedules" and request.method == "POST":
+            payload = json.loads(request.content)
+            return httpx.Response(200, json={"schedule": {"id": "sc1", **payload}})
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "schedule",
+            "create",
+            "--backend",
+            "claude_code",
+            "--cwd",
+            "/tmp",
+            "--prompt",
+            "hello",
+            "--delay-seconds",
+            "60",
+        ],
+    )
+    assert result.exit_code == 0
+    out = json.loads(result.stdout)
+    assert out["schedule"]["id"] == "sc1"
+    assert out["schedule"]["initial_prompt"] == "hello"
+    assert out["schedule"]["delay_seconds"] == 60

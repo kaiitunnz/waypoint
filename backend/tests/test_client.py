@@ -98,7 +98,23 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
         if request.url.path == "/api/sessions" and request.method == "POST":
             payload = json.loads(request.content)
             return httpx.Response(200, json={"session": {"id": "new", **payload}})
+        if (
+            request.url.path == "/api/sessions/s1/attachments"
+            and request.method == "POST"
+        ):
+            state["uploads"] = state.get("uploads", 0) + 1
+            return httpx.Response(
+                200,
+                json={
+                    "id": f"att{state['uploads']:032x}",
+                    "filename": "f",
+                    "mime": "text/plain",
+                    "size": 1,
+                    "kind": "file",
+                },
+            )
         if request.url.path == "/api/sessions/s1/input":
+            state["input_body"] = json.loads(request.content)
             return httpx.Response(200, json={"session": {"id": "s1"}})
         if request.url.path.startswith("/api/sessions/") and request.method == "DELETE":
             state["delete_force"] = request.url.params.get("force")
@@ -194,6 +210,32 @@ def test_create_session_posts_payload(
         session = client.create_session(backend="codex", cwd="/tmp", model="gpt-5")
     assert session["backend"] == "codex"
     assert session["model"] == "gpt-5"
+
+
+def test_send_input_uploads_attachments_and_sends_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    one = tmp_path / "a.txt"
+    two = tmp_path / "b.png"
+    one.write_text("x")
+    two.write_bytes(b"y")
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        ids = [client.upload_attachment("s1", p)["id"] for p in (one, two)]
+        client.send_input("s1", "hi", attachments=ids)
+    assert state["uploads"] == 2
+    assert state["input_body"]["attachments"] == ids
+
+
+def test_send_input_omits_attachments_when_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.send_input("s1", "hi")
+    assert "attachments" not in state["input_body"]
 
 
 def test_create_session_passes_spawner_session_id(

@@ -335,11 +335,27 @@ def sessions_send(
     ctx: typer.Context,
     session_id: Annotated[str, typer.Argument()],
     text: Annotated[str, typer.Argument()],
+    attach: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--attach",
+            "-a",
+            exists=True,
+            dir_okay=False,
+            readable=True,
+            help="Attach a file to the message (repeatable). Images ride "
+            "natively where the backend supports it; other files are delivered "
+            "by host path or inline depending on the backend.",
+        ),
+    ] = None,
 ) -> None:
     """Send a message to a session."""
-    _emit(
-        _settings_from_ctx(ctx), lambda c: {"session": c.send_input(session_id, text)}
-    )
+
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        ids = [c.upload_attachment(session_id, path)["id"] for path in attach or []]
+        return {"session": c.send_input(session_id, text, attachments=ids or None)}
+
+    _emit(_settings_from_ctx(ctx), _run)
 
 
 @sessions_app.command("interrupt")

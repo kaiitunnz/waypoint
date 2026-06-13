@@ -187,13 +187,30 @@ class WaypointClient:
         ]
         return data
 
+    def upload_attachment(self, session_id: str, path: Path) -> dict[str, Any]:
+        with path.open("rb") as handle:
+            spec: dict[str, Any] = self._request(
+                "POST",
+                f"/api/sessions/{session_id}/attachments",
+                files={"file": (path.name, handle)},
+            ).json()
+        return spec
+
     def send_input(
-        self, session_id: str, text: str, *, submit: bool = True
+        self,
+        session_id: str,
+        text: str,
+        *,
+        submit: bool = True,
+        attachments: list[str] | None = None,
     ) -> dict[str, Any]:
+        body: dict[str, Any] = {"text": text, "submit": submit}
+        if attachments:
+            body["attachments"] = attachments
         data: dict[str, Any] = self._request(
             "POST",
             f"/api/sessions/{session_id}/input",
-            json={"text": text, "submit": submit},
+            json=body,
         ).json()["session"]
         return data
 

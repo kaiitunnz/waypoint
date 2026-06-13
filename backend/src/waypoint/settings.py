@@ -103,6 +103,11 @@ class Settings(BaseModel):
     # Hard ceiling on a single uploaded attachment. Defaults to 25 MiB;
     # override with ``WAYPOINT_MAX_UPLOAD_BYTES``.
     max_upload_bytes: int = 25 * 1024 * 1024
+    # Eager uploads that are never sent (e.g. attached then the page closed
+    # before send) are reaped once their blob is older than this, unless a sent
+    # message references them. Defaults to 24h; override with
+    # ``WAYPOINT_ATTACHMENT_ORPHAN_TTL_SECONDS``.
+    attachment_orphan_ttl_seconds: int = 60 * 60 * 24
     database_name: str = "waypoint.db"
     token_ttl_seconds: int = 60 * 60 * 24 * 30
     stream_poll_interval: float = 1.0
@@ -241,6 +246,10 @@ def _env_overrides() -> dict[str, Any]:
         ).expanduser()
     if "WAYPOINT_MAX_UPLOAD_BYTES" in os.environ:
         overrides["max_upload_bytes"] = int(os.environ["WAYPOINT_MAX_UPLOAD_BYTES"])
+    if "WAYPOINT_ATTACHMENT_ORPHAN_TTL_SECONDS" in os.environ:
+        overrides["attachment_orphan_ttl_seconds"] = int(
+            os.environ["WAYPOINT_ATTACHMENT_ORPHAN_TTL_SECONDS"]
+        )
     if "WAYPOINT_CORS_ORIGINS" in os.environ:
         overrides["cors_origins"] = parse_cors_origins(
             os.environ["WAYPOINT_CORS_ORIGINS"]

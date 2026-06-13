@@ -806,6 +806,14 @@ class SessionRuntime:
             submit=request.submit,
             attachments=[item.spec for item in attachments],
         )
+        # The recorded user event now references these blobs, so exempt them
+        # from the orphan sweep; then reap any earlier eager uploads this
+        # session never sent.
+        if attachments:
+            self.attachments.mark_sent(
+                session.id, [item.spec.id for item in attachments]
+            )
+        self.attachments.sweep(session.id, self.settings.attachment_orphan_ttl_seconds)
         try:
             await transport.send_input(session, request.text, attachments or None)
         except Exception:

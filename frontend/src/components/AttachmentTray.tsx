@@ -88,6 +88,11 @@ export function useAttachments({
   const urlsRef = useRef<Set<string>>(new Set());
   // Source File kept per localId so a failed upload can be retried.
   const filesRef = useRef<Map<string, File>>(new Map());
+  // Unsent, non-referenced uploaded blob ids — the orphans to free if the user
+  // leaves before sending. Kept in a ref so the unmount/pagehide handler sees
+  // the latest set without re-subscribing.
+  const orphanRef = useRef<string[]>([]);
+  const credsRef = useRef({ host, token, sessionId });
 
   const revoke = useCallback((url?: string) => {
     if (url && urlsRef.current.has(url)) {
@@ -101,6 +106,37 @@ export function useAttachments({
     return () => {
       for (const url of urls) URL.revokeObjectURL(url);
       urls.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    credsRef.current = { host, token, sessionId };
+    orphanRef.current = items
+      .filter((item) => item.spec && !item.referenced)
+      .map((item) => (item.spec as AttachmentSpec).id);
+  }, [items, host, token, sessionId]);
+
+  // Eager uploads leak a server blob if the page closes before send. Free the
+  // unsent ones on unmount (SPA navigation / view switch) and on page hide
+  // (hard close) with keepalive so the request survives teardown; a sent turn
+  // clears the tray first, so its blobs are never in `orphanRef`. The server's
+  // TTL sweep is the backstop for crashes / offline.
+  useEffect(() => {
+    const flush = () => {
+      const { host: h, token: t, sessionId: s } = credsRef.current;
+      for (const id of orphanRef.current) {
+        void fetch(`${h}/api/sessions/${s}/attachments/${id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${t}` },
+          keepalive: true,
+        }).catch(() => {});
+      }
+      orphanRef.current = [];
+    };
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
     };
   }, []);
 

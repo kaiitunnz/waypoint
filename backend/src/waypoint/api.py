@@ -341,9 +341,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> list[dict[str, Any]]:
         context.runtime.get_session(session_id)
+        context.runtime.attachments.sweep(
+            session_id, context.settings.attachment_orphan_ttl_seconds
+        )
         return [
             {**spec.model_dump(mode="json"), "uploaded_at": uploaded_at}
-            for spec, uploaded_at in context.runtime.attachments.list(session_id)
+            for spec, uploaded_at in context.runtime.attachments.entries(session_id)
         ]
 
     @app.delete("/api/sessions/{session_id}/attachments")

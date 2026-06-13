@@ -145,8 +145,17 @@ def models(
         str | None,
         typer.Argument(callback=_validate_backend, autocompletion=_complete_backend),
     ] = None,
-    launch_target_id: Annotated[str | None, typer.Option()] = None,
-    include_hidden: Annotated[bool, typer.Option("--include-hidden")] = False,
+    launch_target_id: Annotated[
+        str | None,
+        typer.Option(
+            help="Resolve models for a specific launch target (e.g. a remote "
+            "host or worktree) rather than the backend's default context."
+        ),
+    ] = None,
+    include_hidden: Annotated[
+        bool,
+        typer.Option("--include-hidden", help="Include models the backend hides."),
+    ] = False,
 ) -> None:
     """List the models a backend offers (its ids, labels, and reasoning efforts).
 

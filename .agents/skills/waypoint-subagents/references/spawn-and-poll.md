@@ -33,10 +33,18 @@ Then send the task as the first input:
 waypoint sessions send <session-id> "<task instructions>"
 ```
 
-## Poll to completion
+## Wait to completion
 
-There is no blocking `wait` command, so poll `sessions show` until the child
-reaches a terminal state. Terminal/idle statuses to stop on:
+`waypoint sessions wait` blocks until the child reaches a terminal/idle status,
+prints nothing until then, and emits the final `{"session": {...}}` once. Use it
+instead of a hand-rolled poll loop:
+
+```bash
+sid=<session-id>
+waypoint sessions wait "$sid" --timeout 600   # cap the wait; tune per task
+```
+
+By default it stops on these statuses:
 
 - `idle` / `waiting_input` — the child has finished its turn (possibly awaiting
   more input, an approval, or an answer to a question — see
@@ -46,24 +54,24 @@ reaches a terminal state. Terminal/idle statuses to stop on:
 
 Statuses that mean keep waiting: `starting`, `running`, `interrupted`.
 
-The CLI always prints JSON; `sessions show <id>` emits `{"session": {...}}`, so
-the status lives at `.session.status`. A reasonable poll loop with an interval
-and a hard timeout:
+It maps the outcome to a process exit code so it composes in `&&` chains:
+`error` → 1, timeout → 124, everything else → 0. Narrow the set with `--until`
+(comma-separated), e.g. wait only for the process to end, then dump events:
 
 ```bash
-sid=<session-id>
-deadline=$((SECONDS + 600))   # cap the wait; tune per task
-while :; do
-  status=$(waypoint sessions show "$sid" | jq -r .session.status)
-  case "$status" in
-    idle|waiting_input|exited|error) break ;;
-  esac
-  [ "$SECONDS" -ge "$deadline" ] && { echo "timed out waiting on $sid"; break; }
-  sleep 5
-done
+waypoint sessions wait "$sid" --until exited,error --timeout 600 \
+  && waypoint sessions events "$sid"
 ```
 
-Parse the JSON `status` field rather than scraping human output. The status
+To watch a child's transcript live instead of blocking silently, stream events
+as NDJSON (one compact JSON object per line) until a terminal status or Ctrl+C:
+
+```bash
+waypoint sessions events "$sid" --follow
+```
+
+The CLI always prints JSON; `sessions show <id>` emits `{"session": {...}}`, so
+when you do need a one-off status read it lives at `.session.status`. The status
 values are lowercase: `starting`, `idle`, `waiting_input`, `running`,
 `interrupted`, `exited`, `error`.
 

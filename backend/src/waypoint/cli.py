@@ -8,12 +8,39 @@ from typing import Annotated, Any
 
 import typer
 import uvicorn
+from websockets.exceptions import WebSocketException
 
 from waypoint.api import AppContext, create_app
 from waypoint.backends.registry import get_registry
-from waypoint.client import WaypointClient, WaypointError, write_cli_token
-from waypoint.schemas import SessionAttachRequest, SessionCreateRequest
+from waypoint.client import (
+    WaypointClient,
+    WaypointError,
+    is_event_envelope,
+    session_status_from_envelope,
+    write_cli_token,
+)
+from waypoint.schemas import SessionAttachRequest, SessionCreateRequest, SessionStatus
 from waypoint.settings import Settings, load_settings
+
+# Statuses that, by default, end a `sessions wait`: the session is idle,
+# blocked on the user, or finished. `starting`/`running`/`interrupted` are
+# transient and keep the wait blocked.
+WAIT_DEFAULT_STATUSES: frozenset[str] = frozenset(
+    {
+        SessionStatus.IDLE,
+        SessionStatus.WAITING_INPUT,
+        SessionStatus.EXITED,
+        SessionStatus.ERROR,
+    }
+)
+# Lifecycle-terminal statuses that stop `sessions events --follow` — the
+# process is gone, so no further events will arrive.
+FOLLOW_TERMINAL_STATUSES: frozenset[str] = frozenset(
+    {SessionStatus.EXITED, SessionStatus.ERROR}
+)
+# Conventional "timeout" exit code (matches GNU coreutils `timeout`).
+WAIT_TIMEOUT_EXIT_CODE = 124
+WAIT_POLL_INTERVAL_SECONDS = 2.0
 
 
 def _backend_choices() -> list[str]:
@@ -376,6 +403,114 @@ def _parse_meta(items: list[str] | None) -> dict[str, str]:
     return metadata
 
 
+def parse_wait_until(raw: str | None) -> frozenset[str]:
+    """Parse a comma-separated ``--until`` list into a set of valid statuses.
+
+    ``None`` yields the default terminal/idle set; unknown statuses are an
+    error so a typo never blocks forever.
+    """
+    if raw is None:
+        return WAIT_DEFAULT_STATUSES
+    requested = {item.strip() for item in raw.split(",") if item.strip()}
+    if not requested:
+        raise typer.BadParameter("--until needs at least one status")
+    unknown = sorted(requested - {str(status) for status in SessionStatus})
+    if unknown:
+        raise typer.BadParameter(
+            f"--until has unknown status(es): {', '.join(unknown)}"
+        )
+    return frozenset(requested)
+
+
+def exit_code_for_wait(status: str | None) -> int:
+    """Map a ``sessions wait`` outcome to a process exit code.
+
+    ``None`` means the timeout elapsed (124); ``error`` is a failure (1);
+    every other reached status is success (0), so shell ``&&`` chains compose.
+    """
+    if status is None:
+        return WAIT_TIMEOUT_EXIT_CODE
+    if status == SessionStatus.ERROR:
+        return 1
+    return 0
+
+
+def _emit_ndjson(payload: Any) -> None:
+    """Write one compact JSON object per line and flush.
+
+    The streaming counterpart to ``_emit``'s single pretty-printed blob; used
+    by ``sessions events --follow`` so each event is consumable as it arrives.
+    """
+    print(json.dumps(payload, separators=(",", ":")), flush=True)
+
+
+async def _await_status_via_ws(
+    client: WaypointClient, session_id: str, until: frozenset[str]
+) -> tuple[dict[str, Any], str] | None:
+    """Block on the WS stream until a status in ``until`` is seen.
+
+    Returns the final session and its status, or ``None`` if the stream cannot
+    connect or closes first, so the caller can fall back to polling.
+    """
+    try:
+        async for envelope in client.stream_session_envelopes(session_id):
+            status = session_status_from_envelope(envelope)
+            if status is None:
+                continue
+            if status in until:
+                return envelope["payload"]["session"], status
+    except (OSError, WebSocketException):
+        return None
+    return None
+
+
+async def _await_status_via_poll(
+    client: WaypointClient, session_id: str, until: frozenset[str]
+) -> tuple[dict[str, Any], str]:
+    while True:
+        session = client.get_session(session_id)
+        status = session.get("status")
+        if isinstance(status, str) and status in until:
+            return session, status
+        await asyncio.sleep(WAIT_POLL_INTERVAL_SECONDS)
+
+
+async def _wait_for_session(
+    client: WaypointClient,
+    session_id: str,
+    until: frozenset[str],
+    timeout: float | None,
+) -> tuple[dict[str, Any], str | None]:
+    """Block until the session reaches ``until`` or ``timeout`` elapses.
+
+    Prefers the WS stream and falls back to polling if it cannot connect.
+    Returns the final session plus the reached status, or a ``None`` status on
+    timeout (the caller maps that to exit code 124).
+    """
+    try:
+        async with asyncio.timeout(timeout):
+            streamed = await _await_status_via_ws(client, session_id, until)
+            if streamed is not None:
+                return streamed
+            return await _await_status_via_poll(client, session_id, until)
+    except TimeoutError:
+        return client.get_session(session_id), None
+
+
+async def _follow_events(settings: Settings, session_id: str) -> None:
+    """Stream event envelopes as NDJSON until a terminal status or SIGINT."""
+    try:
+        with WaypointClient(settings) as client:
+            async for envelope in client.stream_session_envelopes(session_id):
+                if is_event_envelope(envelope):
+                    _emit_ndjson(envelope)
+                if session_status_from_envelope(envelope) in FOLLOW_TERMINAL_STATUSES:
+                    break
+    except (WaypointError, OSError, WebSocketException) as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
 @sessions_app.command("list")
 def sessions_list(ctx: typer.Context) -> None:
     """List all sessions."""
@@ -396,8 +531,23 @@ def sessions_events(
     session_id: Annotated[str, typer.Argument()],
     messages: Annotated[int | None, typer.Option()] = None,
     before_sequence: Annotated[int | None, typer.Option()] = None,
+    follow: Annotated[
+        bool,
+        typer.Option(
+            "--follow",
+            "-f",
+            help="Stream new event envelopes as NDJSON (one per line) until a "
+            "terminal status or Ctrl+C, instead of printing the transcript.",
+        ),
+    ] = False,
 ) -> None:
-    """Show a session's transcript."""
+    """Show a session's transcript, or stream live events with --follow."""
+    if follow:
+        try:
+            asyncio.run(_follow_events(_settings_from_ctx(ctx), session_id))
+        except KeyboardInterrupt:
+            pass
+        return
     _emit(
         _settings_from_ctx(ctx),
         lambda c: c.get_events(
@@ -409,6 +559,45 @@ def sessions_events(
 def _conversation_events(events_page: dict[str, Any]) -> list[dict[str, Any]]:
     visible = {"user_input", "agent_output"}
     return [event for event in events_page["events"] if event.get("kind") in visible]
+
+
+@sessions_app.command("wait")
+def sessions_wait(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    until: Annotated[
+        str | None,
+        typer.Option(
+            "--until",
+            help="Comma-separated statuses to wait for. Defaults to "
+            "idle,waiting_input,exited,error.",
+        ),
+    ] = None,
+    timeout: Annotated[
+        float | None,
+        typer.Option("--timeout", help="Give up after this many seconds (exit 124)."),
+    ] = None,
+) -> None:
+    """Block (printing nothing) until a session reaches a terminal/idle status.
+
+    Emits the final ``{"session": {...}}`` once, then exits with a status-mapped
+    code (error=1, timeout=124, otherwise 0) so it composes in shell ``&&``
+    chains. Prefers the WS stream, falling back to polling if it cannot connect.
+    """
+    until_set = parse_wait_until(until)
+    outcome: dict[str, str | None] = {}
+
+    def run(c: WaypointClient) -> dict[str, Any]:
+        session, status = asyncio.run(
+            _wait_for_session(c, session_id, until_set, timeout)
+        )
+        outcome["status"] = status
+        return {"session": session}
+
+    _emit(_settings_from_ctx(ctx), run)
+    code = exit_code_for_wait(outcome.get("status"))
+    if code:
+        raise typer.Exit(code=code)
 
 
 @sessions_app.command("start")

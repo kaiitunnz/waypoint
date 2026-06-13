@@ -1,11 +1,14 @@
 import json
+from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
+import typer
 from typer.testing import CliRunner
 
-from waypoint.cli import app
+from waypoint.cli import app, exit_code_for_wait, parse_wait_until
 from waypoint.client import WaypointClient
 from waypoint.settings import Settings
 
@@ -574,3 +577,147 @@ def test_schedule_create_emits_schedule(
     assert out["schedule"]["id"] == "sc1"
     assert out["schedule"]["initial_prompt"] == "hello"
     assert out["schedule"]["delay_seconds"] == 60
+
+
+def test_parse_wait_until_defaults_and_validates() -> None:
+    assert parse_wait_until(None) == frozenset(
+        {"idle", "waiting_input", "exited", "error"}
+    )
+    assert parse_wait_until("exited, error") == frozenset({"exited", "error"})
+    with pytest.raises(typer.BadParameter):
+        parse_wait_until("bogus,idle")
+    with pytest.raises(typer.BadParameter):
+        parse_wait_until(",")
+
+
+def test_exit_code_for_wait_maps_terminal_status() -> None:
+    assert exit_code_for_wait(None) == 124  # timeout
+    assert exit_code_for_wait("error") == 1
+    assert exit_code_for_wait("idle") == 0
+    assert exit_code_for_wait("waiting_input") == 0
+    assert exit_code_for_wait("exited") == 0
+
+
+def _session_state(status: str) -> dict[str, Any]:
+    return {
+        "type": "session_state",
+        "payload": {"session": {"id": "s1", "status": status}},
+    }
+
+
+def _patch_stream(
+    monkeypatch: pytest.MonkeyPatch, envelopes: list[dict[str, Any]]
+) -> None:
+    async def stream(self: WaypointClient, session_id: str) -> AsyncIterator[dict]:
+        for envelope in envelopes:
+            yield envelope
+
+    monkeypatch.setattr(WaypointClient, "stream_session_envelopes", stream)
+
+
+def test_wait_emits_final_session_and_exits_zero_on_idle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+    _patch_stream(monkeypatch, [_session_state("running"), _session_state("idle")])
+    result = runner.invoke(
+        app, ["--config", str(_config(tmp_path)), "sessions", "wait", "s1"]
+    )
+    assert result.exit_code == 0
+    # Nothing intermediate: a single final session blob.
+    assert json.loads(result.stdout)["session"]["status"] == "idle"
+
+
+def test_wait_exits_one_on_error_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+    _patch_stream(monkeypatch, [_session_state("error")])
+    result = runner.invoke(
+        app, ["--config", str(_config(tmp_path)), "sessions", "wait", "s1"]
+    )
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["session"]["status"] == "error"
+
+
+def test_wait_falls_back_to_polling_when_ws_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+
+    async def failing_stream(
+        self: WaypointClient, session_id: str
+    ) -> AsyncIterator[dict]:
+        raise OSError("connection refused")
+        yield {}  # pragma: no cover - makes this an async generator
+
+    monkeypatch.setattr(WaypointClient, "stream_session_envelopes", failing_stream)
+    monkeypatch.setattr(
+        WaypointClient,
+        "get_session",
+        lambda self, session_id: {"id": session_id, "status": "exited"},
+    )
+    result = runner.invoke(
+        app, ["--config", str(_config(tmp_path)), "sessions", "wait", "s1"]
+    )
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["session"]["status"] == "exited"
+
+
+def test_wait_times_out_with_code_124(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+    # A stream that never reaches the until-set; the timeout must win.
+    _patch_stream(monkeypatch, [_session_state("running")])
+    monkeypatch.setattr(
+        WaypointClient,
+        "get_session",
+        lambda self, session_id: {"id": session_id, "status": "running"},
+    )
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "wait",
+            "s1",
+            "--timeout",
+            "0.05",
+        ],
+    )
+    assert result.exit_code == 124
+    assert json.loads(result.stdout)["session"]["status"] == "running"
+
+
+def test_events_follow_streams_ndjson_until_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+    _patch_stream(
+        monkeypatch,
+        [
+            {"type": "event", "payload": {"event": {"sequence": 1}}},
+            _session_state("running"),
+            {"type": "event", "payload": {"event": {"sequence": 2}}},
+            _session_state("exited"),
+            {"type": "event", "payload": {"event": {"sequence": 3}}},
+        ],
+    )
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "events", "s1", "--follow"],
+    )
+    assert result.exit_code == 0
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    # Only event envelopes are emitted, one compact JSON object per line, and
+    # the stream stops at the terminal `exited` state (event 3 never prints).
+    assert len(lines) == 2
+    assert all(
+        line == json.dumps(json.loads(line), separators=(",", ":")) for line in lines
+    )
+    assert [json.loads(line)["payload"]["event"]["sequence"] for line in lines] == [
+        1,
+        2,
+    ]

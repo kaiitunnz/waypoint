@@ -176,6 +176,12 @@ def test_read_cli_credentials_prefers_file_before_keychain(
 def test_read_cli_credentials_falls_back_to_keychain_json_blob(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Isolate the file-based source: on a host with a real ~/.claude
+    # credentials file it would otherwise win over the keychain fallback.
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._credential_paths",
+        lambda env: (),
+    )
     monkeypatch.setattr(
         "waypoint.backends.claude_code.rate_limits._read_keychain_access_token",
         lambda env: (
@@ -194,6 +200,10 @@ def test_read_cli_credentials_falls_back_to_keychain_json_blob(
 def test_read_cli_credentials_keychain_legacy_bare_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._credential_paths",
+        lambda env: (),
+    )
     monkeypatch.setattr(
         "waypoint.backends.claude_code.rate_limits._read_keychain_access_token",
         lambda env: "bare-token-no-json",
@@ -313,11 +323,11 @@ def test_probe_claude_usage_parses_messages_api_headers(
             headers={
                 "anthropic-ratelimit-unified-5h-utilization": "0.25",
                 "anthropic-ratelimit-unified-5h-reset": str(
-                    datetime(2026, 5, 12, 13, 0, tzinfo=UTC).timestamp()
+                    (datetime.now(UTC) + timedelta(hours=4)).timestamp()
                 ),
                 "anthropic-ratelimit-unified-7d-utilization": "0.812",
                 "anthropic-ratelimit-unified-7d-reset": str(
-                    datetime(2026, 5, 19, 1, 0, tzinfo=UTC).timestamp()
+                    (datetime.now(UTC) + timedelta(days=6)).timestamp()
                 ),
             },
             body=b'{"content":[{"type":"text","text":"hi"}]}',
@@ -442,11 +452,11 @@ def test_probe_claude_usage_remote_parses_messages_headers(
         "headers": {
             "anthropic-ratelimit-unified-5h-utilization": "0.4",
             "anthropic-ratelimit-unified-5h-reset": str(
-                datetime(2026, 5, 12, 13, 0, tzinfo=UTC).timestamp()
+                (datetime.now(UTC) + timedelta(hours=4)).timestamp()
             ),
             "anthropic-ratelimit-unified-7d-utilization": "0.92",
             "anthropic-ratelimit-unified-7d-reset": str(
-                datetime(2026, 5, 19, 1, 0, tzinfo=UTC).timestamp()
+                (datetime.now(UTC) + timedelta(days=6)).timestamp()
             ),
         },
         "body_preview": "{}",

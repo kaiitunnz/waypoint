@@ -11,7 +11,7 @@ two mechanisms, and picking the right one matters:
 - **Direct send** (`waypoint sessions send`) — a message lands in the **target's
   input** and starts a turn for that agent, exactly as if a user had typed it;
   its reply comes back on the target's event stream. **Point-to-point and
-  interrupt-driven.** The right tool for a direct hand-off or question to a
+  input-injecting.** The right tool for a direct hand-off or question to a
   specific session — a parent delegating to a child it spawned, or one peer
   asking another for something.
 
@@ -50,9 +50,10 @@ without a prompt each time.
 
 ## Guardrails
 
-- A **send interrupts** the target's turn. Check `waypoint sessions show <id>`
-  first and prefer `idle` / `waiting_input` targets. A **board post interrupts
-  no one** — prefer it when the message can wait.
+- A **send injects input** into the target and may disrupt or interleave with an
+  active turn. Check `waypoint sessions show <id>` first and prefer `idle` /
+  `waiting_input` targets. A **board post interrupts no one** — prefer it when
+  the message can wait.
 - Message freely the sessions you spawned; message a session you did not create
   only with explicit user confirmation, and never the personal assistant. Any
   session may read and post to any board channel.

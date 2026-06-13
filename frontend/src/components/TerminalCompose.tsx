@@ -16,6 +16,8 @@ import {
 import {
   AttachmentTray,
   filesFromDataTransfer,
+  FilesIcon,
+  PaperclipIcon,
   useAttachments,
 } from "@/components/AttachmentTray";
 import { CommandSuggestions } from "@/components/CommandSuggestions";
@@ -48,6 +50,7 @@ interface TerminalComposeProps {
     attachmentIds: string[],
   ) => Promise<TerminalSubmitResult>;
   attachmentsEnabled: boolean;
+  onOpenFiles: () => void;
   onError: (message: string) => void;
   expanded: boolean;
   onExpandedChange: (next: boolean) => void;
@@ -71,6 +74,7 @@ export function TerminalCompose({
   onSubmit,
   onSubmitWithAttachments,
   attachmentsEnabled,
+  onOpenFiles,
   onError,
   expanded,
   onExpandedChange,
@@ -324,6 +328,8 @@ export function TerminalCompose({
               <AttachmentTray
                 items={attachments.items}
                 onRemove={attachments.remove}
+                onRetry={attachments.retry}
+                onClear={attachments.discardAll}
               />
             ) : null}
             <textarea
@@ -344,7 +350,8 @@ export function TerminalCompose({
             />
             {dragActive ? (
               <div className="composer-drop-hint" aria-hidden="true">
-                Drop files to attach
+                <span className="composer-drop-glyph">⤓</span>
+                <span>Drop to attach</span>
               </div>
             ) : null}
           </div>
@@ -379,6 +386,18 @@ export function TerminalCompose({
                 />
                 <button
                   type="button"
+                  className="ghost composer-attach term-compose-files"
+                  onClick={onOpenFiles}
+                  title="Session files"
+                  aria-label="Session files"
+                  tabIndex={expanded ? 0 : -1}
+                >
+                  <span className="glyph" aria-hidden>
+                    <FilesIcon />
+                  </span>
+                </button>
+                <button
+                  type="button"
                   className="ghost composer-attach term-compose-attach"
                   onClick={() => fileInputRef.current?.click()}
                   title="Attach files"
@@ -386,7 +405,7 @@ export function TerminalCompose({
                   tabIndex={expanded ? 0 : -1}
                 >
                   <span className="glyph" aria-hidden>
-                    ⎙
+                    <PaperclipIcon />
                   </span>
                 </button>
               </>

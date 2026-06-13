@@ -72,8 +72,10 @@ import {
   AttachmentContextProvider,
   AttachmentTray,
   filesFromDataTransfer,
+  PaperclipIcon,
   useAttachments,
 } from "@/components/AttachmentTray";
+import { SessionFilesPanel } from "@/components/SessionFilesPanel";
 import { SessionTerminalView } from "@/components/SessionTerminalView";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { CommandSuggestions } from "@/components/CommandSuggestions";
@@ -291,6 +293,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     () => ({ host, token, sessionId }),
     [host, token, sessionId],
   );
+  const [filesOpen, setFilesOpen] = useState(false);
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [events, setEvents] = useState<EventRecord[]>([]);
   // The todo-event sequence the user last dismissed from the progress dock.
@@ -1748,6 +1751,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onTerminate={terminate}
           onRemoveFromList={removeFromList}
           onSwitchSession={openSwitcher}
+          onOpenFiles={() => setFilesOpen(true)}
           onError={setError}
         />
       ) : null}
@@ -2032,12 +2036,20 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           attachmentsEnabled={
             session ? supportsAttachments(session.backend, catalog) : false
           }
+          onOpenFiles={() => setFilesOpen(true)}
           onTerminate={terminate}
           onError={setError}
           assistant={assistant}
           assistantControls={assistantControls}
         />
       ) : null}
+      <SessionFilesPanel
+        host={host}
+        token={token}
+        sessionId={sessionId}
+        open={filesOpen}
+        onClose={() => setFilesOpen(false)}
+      />
     </section>
   );
 }
@@ -2093,6 +2105,7 @@ interface ReplyComposerProps {
     attachments?: string[],
   ) => Promise<boolean>;
   attachmentsEnabled: boolean;
+  onOpenFiles: () => void;
   onTerminate: () => void | Promise<void>;
   onError: (message: string) => void;
   assistant: boolean;
@@ -2142,6 +2155,7 @@ const ReplyComposer = memo(function ReplyComposer({
   onSwitchSession,
   onSend,
   attachmentsEnabled,
+  onOpenFiles,
   onTerminate,
   onError,
   assistant,
@@ -2854,7 +2868,12 @@ const ReplyComposer = memo(function ReplyComposer({
         onDrop={handleDrop}
       >
         {attachmentsEnabled ? (
-          <AttachmentTray items={attachments.items} onRemove={attachments.remove} />
+          <AttachmentTray
+            items={attachments.items}
+            onRemove={attachments.remove}
+            onRetry={attachments.retry}
+            onClear={attachments.discardAll}
+          />
         ) : null}
         <textarea
           ref={textareaRef}
@@ -2871,7 +2890,8 @@ const ReplyComposer = memo(function ReplyComposer({
         />
         {dragActive ? (
           <div className="composer-drop-hint" aria-hidden="true">
-            Drop files to attach
+            <span className="composer-drop-glyph">⤓</span>
+            <span>Drop to attach</span>
           </div>
         ) : null}
         {suggestionsOpen ? (
@@ -2886,31 +2906,6 @@ const ReplyComposer = memo(function ReplyComposer({
         ) : null}
       </div>
       <div className="composer-actions">
-        {attachmentsEnabled ? (
-          <>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="composer-file-input"
-              onChange={addFilesFromInput}
-              aria-hidden="true"
-              tabIndex={-1}
-            />
-            <button
-              className="ghost composer-attach"
-              onClick={() => fileInputRef.current?.click()}
-              type="button"
-              disabled={disabled}
-              title="Attach files"
-              aria-label="Attach files"
-            >
-              <span className="glyph" aria-hidden>
-                ⎙
-              </span>
-            </button>
-          </>
-        ) : null}
         <button
           className="primary send"
           onClick={() => void handleSend()}
@@ -2933,6 +2928,31 @@ const ReplyComposer = memo(function ReplyComposer({
         >
           Interrupt
         </button>
+        {attachmentsEnabled ? (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="composer-file-input"
+              onChange={addFilesFromInput}
+              aria-hidden="true"
+              tabIndex={-1}
+            />
+            <button
+              className="ghost composer-attach"
+              onClick={() => fileInputRef.current?.click()}
+              type="button"
+              disabled={disabled}
+              title="Attach files"
+              aria-label="Attach files"
+            >
+              <span className="glyph" aria-hidden>
+                <PaperclipIcon />
+              </span>
+            </button>
+          </>
+        ) : null}
         {canResume ? (
           <button
             className="ghost"
@@ -3009,6 +3029,20 @@ const ReplyComposer = memo(function ReplyComposer({
                     <span className="glyph">⇄</span>
                     Switch session…
                   </button>
+                  {attachmentsEnabled ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="composer-overflow-item"
+                      onClick={() => {
+                        setOverflowOpen(false);
+                        onOpenFiles();
+                      }}
+                    >
+                      <span className="glyph">▤</span>
+                      Files…
+                    </button>
+                  ) : null}
                   {hasToolRuns ? (
                     <button
                       type="button"

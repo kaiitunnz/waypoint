@@ -2346,7 +2346,9 @@ html[data-theme="light"] .transcript.codex.agent_output {
  * space via padding so the meta clears the block. */
 .transcript.codex.user_input:has(.markdown-message > *:last-child:not(p)),
 .transcript.codex.agent_output:has(.markdown-message > *:last-child:not(p)),
-.transcript.codex.user_input.ask-answer-summary {
+.transcript.codex.user_input.ask-answer-summary,
+.transcript.codex.user_input:has(.message-attachments),
+.transcript.codex.agent_output:has(.message-attachments) {
   padding-bottom: 30px;
 }
 
@@ -3433,9 +3435,18 @@ html[data-theme="light"] .inline-code {
 .task-dock {
   position: sticky;
   bottom: calc(var(--composer-height, 220px) + 12px);
-  z-index: 7;
+  /* Below the composer (z-index 6) so the composer's upward-opening popovers
+     (model/effort/permission picker, ⋯ menu) — trapped in the composer's
+     stacking context — render above this floating progress strip. */
+  z-index: 5;
   margin-top: -8px;
   pointer-events: none;
+}
+
+/* Expanded, the dock is a modal (full-screen scrim + task list) and must sit
+   above the composer and its popovers. */
+.task-dock.expanded {
+  z-index: 50;
 }
 
 .task-dock-strip {
@@ -6927,15 +6938,29 @@ html[data-theme="light"] .ask-question-note-input {
   display: none;
 }
 
-.composer-attach .glyph {
-  font-size: 0.95rem;
-  line-height: 1;
+.composer-attach {
+  width: 36px;
+  padding: 0;
 }
 
+.composer-attach .glyph {
+  display: inline-flex;
+  line-height: 0;
+}
+
+.composer-attach svg {
+  transition: transform 200ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.composer-attach:hover:not(:disabled) svg {
+  transform: rotate(-14deg) scale(1.06);
+}
+
+/* Drag target: a brass dashed frame that reads as "this surface accepts a drop". */
 .reply-textarea-wrap.is-drag-active,
 .term-compose-field.is-drag-active {
-  outline: 2px dashed var(--accent);
-  outline-offset: 2px;
+  outline: 1.5px dashed color-mix(in srgb, var(--accent) 68%, transparent);
+  outline-offset: 3px;
   border-radius: var(--radius-sm);
 }
 
@@ -6943,64 +6968,189 @@ html[data-theme="light"] .ask-question-note-input {
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 7px;
   pointer-events: none;
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--text-strong);
-  font-size: 0.82rem;
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-input));
+  backdrop-filter: blur(3px);
+  color: var(--accent-strong);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  animation: drop-hint-in 180ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.composer-drop-glyph {
+  font-size: 1.55rem;
+  line-height: 1;
+  animation: drop-glyph-bob 1.2s ease-in-out infinite;
+}
+
+@keyframes drop-hint-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes drop-glyph-bob {
+  0%,
+  100% {
+    transform: translateY(-2px);
+  }
+  50% {
+    transform: translateY(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-drop-glyph,
+  .attachment-chip {
+    animation: none;
+  }
+}
+
+.attachment-tray-wrap {
+  margin-bottom: 8px;
+}
+
+.attachment-tray-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 0 2px;
+}
+
+.attachment-tray-count {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
   letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.attachment-clear {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  transition: color 120ms ease;
+}
+
+.attachment-clear:hover {
+  color: var(--accent-strong);
 }
 
 .attachment-tray {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 8px;
 }
 
 .attachment-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  max-width: 220px;
-  padding: 4px 6px 4px 4px;
+  gap: 8px;
+  max-width: 240px;
+  padding: 5px 8px 5px 5px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--bg-card-soft);
-  font-size: 0.76rem;
   color: var(--text);
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+  animation: attachment-chip-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.attachment-chip:hover {
+  border-color: var(--line-strong);
 }
 
 .attachment-chip.is-error {
   border-color: color-mix(in srgb, var(--danger) 55%, transparent);
-  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-card-soft));
 }
 
-.attachment-thumb {
-  width: 28px;
-  height: 28px;
-  object-fit: cover;
-  border-radius: 4px;
+@keyframes attachment-chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* A 26px leading square gives image thumbs and file glyphs visual parity. */
+.attachment-thumb,
+.attachment-tile {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
   flex: 0 0 auto;
 }
 
-.attachment-glyph {
-  font-size: 0.95rem;
-  opacity: 0.8;
+.attachment-thumb {
+  object-fit: cover;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.attachment-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent-strong);
+}
+
+.attachment-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
 }
 
 .attachment-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 0.76rem;
+  line-height: 1.25;
+}
+
+.attachment-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.attachment-chip.is-error .attachment-meta {
+  color: var(--danger);
 }
 
 .attachment-spinner {
-  width: 11px;
-  height: 11px;
-  border: 2px solid var(--line-strong);
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--accent) 24%, transparent);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: attachment-spin 0.7s linear infinite;
@@ -7013,63 +7163,385 @@ html[data-theme="light"] .ask-question-note-input {
   }
 }
 
-.attachment-error {
-  color: var(--danger);
-  font-weight: 700;
-}
-
+.attachment-retry,
 .attachment-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
   border: none;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  font-size: 1rem;
   line-height: 1;
-  padding: 0 2px;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.attachment-remove {
+  font-size: 0.95rem;
+}
+
+.attachment-retry {
+  font-size: 0.85rem;
 }
 
 .attachment-remove:hover {
-  color: var(--text-strong);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+}
+
+.attachment-retry:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent-strong);
+}
+
+/* Phone: a single horizontally-scrollable strip so the tray never balloons
+   vertically on a small screen; the right edge fades to hint overflow. */
+@media (max-width: 720px) {
+  .attachment-tray {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    padding-bottom: 2px;
+    -webkit-overflow-scrolling: touch;
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 20px), transparent);
+    mask-image: linear-gradient(90deg, #000 calc(100% - 20px), transparent);
+  }
+
+  .attachment-chip {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+    max-width: 76vw;
+  }
+
+  /* Touch has no hover, so keep remove/retry comfortably tappable. */
+  .attachment-retry,
+  .attachment-remove {
+    width: 28px;
+    height: 28px;
+  }
 }
 
 .message-attachments {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.message-attachment-image {
-  display: inline-flex;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.message-attachment-image img {
-  max-width: 240px;
-  max-height: 240px;
-  object-fit: contain;
-  display: block;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .message-attachment-file {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  max-width: 240px;
-  padding: 6px 10px;
+  gap: 10px;
+  max-width: 260px;
+  padding: 8px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--bg-card-soft);
   color: var(--text);
   text-decoration: none;
   font-size: 0.8rem;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    transform 140ms ease;
 }
 
 .message-attachment-file:hover {
-  border-color: var(--line-strong);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line-strong));
+  background: var(--bg-card);
   color: var(--text-strong);
+  transform: translateY(-1px);
+}
+
+.message-attachment-file .attachment-tile,
+.message-attachment-thumb {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+}
+
+.message-attachment-thumb {
+  border-radius: 7px;
+  object-fit: cover;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.message-attachment-file .attachment-name {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+}
+
+/* ─── Session files manager ─── */
+.term-compose-files .glyph {
+  display: inline-flex;
+  line-height: 0;
+}
+
+.session-files-backdrop {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  padding: 16px;
+}
+
+.session-files-modal {
+  width: 100%;
+  max-width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 64px);
+  min-height: 0;
+  background: rgba(14, 17, 24, 0.96);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: session-files-in 200ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+html[data-theme="light"] .session-files-modal {
+  background: rgba(252, 249, 242, 0.98);
+  box-shadow: 0 16px 48px rgba(60, 45, 20, 0.2);
+}
+
+@keyframes session-files-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.session-files-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.session-files-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.session-files-title > span:first-child {
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  color: var(--text-strong);
+}
+
+.session-files-count {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.session-files-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.session-files-clear,
+.session-files-cancel,
+.session-files-confirm {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border-radius: var(--radius-pill);
+  transition:
+    border-color 120ms ease,
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.session-files-clear:hover,
+.session-files-cancel:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.session-files-confirm {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  color: var(--danger);
+}
+
+.session-files-confirm:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.session-files-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1.2rem;
+  line-height: 1;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.session-files-close:hover {
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+  color: var(--text-strong);
+}
+
+.session-files-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.session-files-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.session-files-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.session-files-row:hover {
+  background: var(--bg-card-soft);
+  border-color: var(--line);
+}
+
+.session-files-thumb,
+.session-files-tile {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  flex: 0 0 auto;
+}
+
+.session-files-thumb {
+  object-fit: cover;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.session-files-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent-strong);
+}
+
+.session-files-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.session-files-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.84rem;
+  color: var(--text);
+}
+
+.session-files-meta {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.session-files-open,
+.session-files-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  text-decoration: none;
+  font-size: 1rem;
+  line-height: 1;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.session-files-open:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-strong);
+}
+
+.session-files-delete:hover {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+}
+
+@media (max-width: 720px) {
+  /* Stay centered like the session switcher — a bottom sheet felt awkward.
+     Only enlarge the touch targets. */
+  .session-files-open,
+  .session-files-delete,
+  .session-files-close {
+    width: 38px;
+    height: 38px;
+  }
 }
 
 .slash-suggestions {

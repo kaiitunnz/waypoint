@@ -107,6 +107,12 @@ export interface AttachmentSpec {
   kind: AttachmentKind;
 }
 
+// A session-stored attachment as returned by the list endpoint: the spec plus
+// the upload time (epoch seconds), so the files manager can sort newest-first.
+export interface SessionAttachment extends AttachmentSpec {
+  uploaded_at: number;
+}
+
 export interface EventRecord {
   id?: number;
   session_id: string;

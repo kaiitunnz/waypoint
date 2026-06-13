@@ -1,6 +1,9 @@
 "use client";
 
 import {
+  ChangeEvent,
+  ClipboardEvent,
+  DragEvent,
   KeyboardEvent,
   PointerEvent as ReactPointerEvent,
   useCallback,
@@ -10,6 +13,11 @@ import {
   useState,
 } from "react";
 
+import {
+  AttachmentTray,
+  filesFromDataTransfer,
+  useAttachments,
+} from "@/components/AttachmentTray";
 import { CommandSuggestions } from "@/components/CommandSuggestions";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import {
@@ -33,6 +41,13 @@ interface TerminalComposeProps {
   // control commands (``/new``) are handled by the host rather than the
   // socket, so a submit can succeed even while the WS is reconnecting.
   onSubmit: (text: string) => Promise<TerminalSubmitResult>;
+  // Used instead of ``onSubmit`` when the draft carries attachments — routes
+  // through the HTTP input endpoint so the server appends the file paths.
+  onSubmitWithAttachments: (
+    text: string,
+    attachmentIds: string[],
+  ) => Promise<TerminalSubmitResult>;
+  attachmentsEnabled: boolean;
   expanded: boolean;
   onExpandedChange: (next: boolean) => void;
   connection: ConnectionState;
@@ -53,6 +68,8 @@ export function TerminalCompose({
   sessionId,
   session,
   onSubmit,
+  onSubmitWithAttachments,
+  attachmentsEnabled,
   expanded,
   onExpandedChange,
   connection,
@@ -65,6 +82,9 @@ export function TerminalCompose({
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [textareaHeight, setTextareaHeight] = useState<number | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const attachments = useAttachments({ host, token, sessionId });
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const handleRef = useRef<HTMLButtonElement | null>(null);
@@ -125,23 +145,31 @@ export function TerminalCompose({
 
   const dirty = draft.trim().length > 0;
   const connected = connection === "open";
+  const hasAttachments = attachments.readyIds.length > 0;
   // Not gated on ``connected``: control commands like ``/new`` work without
   // the socket, and ``send`` surfaces a retry hint for plain text when the WS
   // is closed — so the button mirrors the ⌘↵ path rather than greying out.
-  const canSend = expanded && dirty && !sending;
+  const canSend =
+    expanded && (dirty || hasAttachments) && !sending && !attachments.uploading;
 
   const send = useCallback(async () => {
     const text = draft;
-    if (!text.trim()) return;
+    const attachmentIds = attachments.readyIds;
+    if ((!text.trim() && attachmentIds.length === 0) || attachments.uploading) {
+      return;
+    }
     // No connection gate here: control commands like ``/new`` are handled by
     // the host and don't need the socket, so ``onSubmit`` decides whether the
     // WS was actually required.
     setSending(true);
     try {
-      const result = await onSubmit(text);
+      const result = attachmentIds.length
+        ? await onSubmitWithAttachments(text, attachmentIds)
+        : await onSubmit(text);
       if (result === "ok") {
         setDraft("");
         setHint(null);
+        attachments.clear();
         resetCompletions();
       } else if (result === "socket-closed") {
         setHint(
@@ -155,7 +183,41 @@ export function TerminalCompose({
       // Briefly hold the disabled state so the user gets feedback.
       window.setTimeout(() => setSending(false), 120);
     }
-  }, [draft, connected, onSubmit, resetCompletions]);
+  }, [draft, connected, onSubmit, onSubmitWithAttachments, attachments, resetCompletions]);
+
+  const addFilesFromInput = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files ? Array.from(event.target.files) : [];
+    if (files.length) attachments.addFiles(files);
+    event.target.value = "";
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!attachmentsEnabled) return;
+    const files = filesFromDataTransfer(event.clipboardData);
+    if (files.length === 0) return;
+    event.preventDefault();
+    attachments.addFiles(files);
+  };
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (!attachmentsEnabled) return;
+    event.preventDefault();
+    setDragActive(false);
+    const files = filesFromDataTransfer(event.dataTransfer);
+    if (files.length) attachments.addFiles(files);
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!attachmentsEnabled) return;
+    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+    event.preventDefault();
+    setDragActive(true);
+  };
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    setDragActive(false);
+  };
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -245,12 +307,23 @@ export function TerminalCompose({
       </button>
       <div className="term-compose-shell" id={regionId} aria-hidden={!expanded}>
         <div className="term-compose-inner">
-          <div className="term-compose-field">
+          <div
+            className={`term-compose-field${dragActive ? " is-drag-active" : ""}`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
             <div
               className="composer-resize-handle term-compose-resize"
               onPointerDown={handlePointerDown}
               aria-hidden="true"
             />
+            {attachmentsEnabled ? (
+              <AttachmentTray
+                items={attachments.items}
+                onRemove={attachments.remove}
+              />
+            ) : null}
             <textarea
               ref={textareaRef}
               className="composer-textarea term-compose-textarea"
@@ -262,10 +335,16 @@ export function TerminalCompose({
                 if (hint) setHint(null);
               }}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               placeholder="Type a message"
               aria-label="Message to send to terminal"
               tabIndex={expanded ? 0 : -1}
             />
+            {dragActive ? (
+              <div className="composer-drop-hint" aria-hidden="true">
+                Drop files to attach
+              </div>
+            ) : null}
           </div>
           <div className="term-compose-meta">
             <SessionUsagePill
@@ -285,6 +364,31 @@ export function TerminalCompose({
               <kbd>{shortcutLabel}</kbd>
               <span>send</span>
             </span>
+            {attachmentsEnabled ? (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="composer-file-input"
+                  onChange={addFilesFromInput}
+                  aria-hidden="true"
+                  tabIndex={-1}
+                />
+                <button
+                  type="button"
+                  className="ghost composer-attach term-compose-attach"
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Attach files"
+                  aria-label="Attach files"
+                  tabIndex={expanded ? 0 : -1}
+                >
+                  <span className="glyph" aria-hidden>
+                    ⎙
+                  </span>
+                </button>
+              </>
+            ) : null}
             <button
               type="button"
               className="primary send term-compose-send"

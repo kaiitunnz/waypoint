@@ -41,6 +41,13 @@ interface SessionTerminalViewProps {
   // control command reported its own error, or clear it on success. Async
   // because Waypoint control commands (e.g. ``/new``) are handled here.
   onTerminalSubmit: (text: string) => Promise<TerminalSubmitResult>;
+  // Attachment-bearing submits route through the HTTP input endpoint (which
+  // appends the host file path for tmux) rather than the terminal WS.
+  onTerminalSubmitWithAttachments: (
+    text: string,
+    attachmentIds: string[],
+  ) => Promise<TerminalSubmitResult>;
+  attachmentsEnabled: boolean;
   onRequestPaste: () => void;
   onTerminalResize: (size: { cols: number; rows: number }) => void;
   onTerminalScrollChip: (direction: "up" | "down") => void;
@@ -78,6 +85,8 @@ export function SessionTerminalView({
   locked,
   onTerminalInput,
   onTerminalSubmit,
+  onTerminalSubmitWithAttachments,
+  attachmentsEnabled,
   onRequestPaste,
   onTerminalResize,
   onTerminalScrollChip,
@@ -287,6 +296,8 @@ export function SessionTerminalView({
           sessionId={sessionId}
           session={session}
           onSubmit={onTerminalSubmit}
+          onSubmitWithAttachments={onTerminalSubmitWithAttachments}
+          attachmentsEnabled={attachmentsEnabled}
           expanded={composeOpen}
           onExpandedChange={setComposeOpen}
           connection={connection}

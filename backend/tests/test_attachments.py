@@ -1,4 +1,5 @@
 import base64
+import os
 from pathlib import Path
 
 from waypoint.attachments import (
@@ -40,6 +41,73 @@ def test_mime_inferred_from_extension_when_missing(tmp_path: Path) -> None:
     spec = store.save("s", data=b"%PDF-1.4", filename="doc.pdf", content_type=None)
     assert spec.mime == "application/pdf"
     assert spec.kind == AttachmentKind.FILE
+
+
+def test_save_dedupes_colliding_filenames(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    first = store.save(
+        "s", data=b"one", filename="report.pdf", content_type="application/pdf"
+    )
+    second = store.save(
+        "s", data=b"two", filename="report.pdf", content_type="application/pdf"
+    )
+
+    resolved_first = store.resolve("s", first.id)
+    resolved_second = store.resolve("s", second.id)
+    assert resolved_first is not None and resolved_second is not None
+    path_first = resolved_first[1]
+    path_second = resolved_second[1]
+
+    # Blobs are stored under the legible name; the collision gets a `(1)` suffix.
+    assert path_first.name == "report.pdf"
+    assert path_second.name == "report (1).pdf"
+    assert path_first.read_bytes() == b"one"
+    assert path_second.read_bytes() == b"two"
+    # The display filename is unchanged for both.
+    assert first.filename == second.filename == "report.pdf"
+
+
+def test_list_orders_newest_first_and_skips_non_sidecars(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    old = store.save("s", data=b"old", filename="old.txt", content_type="text/plain")
+    new = store.save("s", data=b"new", filename="new.txt", content_type="text/plain")
+    resolved = store.resolve("s", old.id)
+    assert resolved is not None
+    session_dir = resolved[1].parent
+    os.utime(session_dir / f"{old.id}.json", (1000, 1000))
+    os.utime(session_dir / f"{new.id}.json", (2000, 2000))
+    # A stray user-uploaded JSON blob must not be mistaken for a sidecar.
+    (session_dir / "notes.json").write_text('{"hello": 1}', encoding="utf-8")
+
+    listed = store.list("s")
+    assert [spec.id for spec, _ in listed] == [new.id, old.id]
+    assert all(mtime > 0 for _, mtime in listed)
+
+
+def test_list_empty_for_unknown_session(tmp_path: Path) -> None:
+    assert _store(tmp_path).list("never-existed") == []
+
+
+def test_list_empty_after_discard(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")
+    store.discard("s")
+    assert store.list("s") == []
+
+
+def test_delete_removes_blob_and_sidecar(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    spec = store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")
+    resolved = store.resolve("s", spec.id)
+    assert resolved is not None
+    path = resolved[1]
+
+    assert store.delete("s", spec.id) is True
+    assert not path.exists()
+    assert store.resolve("s", spec.id) is None
+    # Deleting again, an unknown id, or a traversal-style id is a no-op.
+    assert store.delete("s", spec.id) is False
+    assert store.delete("s", "../../etc/passwd") is False
 
 
 def test_resolve_rejects_non_uuid_id(tmp_path: Path) -> None:

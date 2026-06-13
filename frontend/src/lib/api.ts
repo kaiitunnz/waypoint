@@ -4,6 +4,7 @@ import {
   AssistantAttachRequest,
   AssistantResetRequest,
   AssistantSummary,
+  AttachmentSpec,
   Backend,
   BackendDescriptor,
   BackendModelListResponse,
@@ -771,6 +772,7 @@ export async function sendInput(
   sessionId: string,
   text: string,
   command?: SessionCommandInvocation,
+  attachments?: string[],
 ): Promise<void> {
   const response = await fetch(`${host}/api/sessions/${sessionId}/input`, {
     method: "POST",
@@ -778,9 +780,46 @@ export async function sendInput(
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ text, submit: true, command }),
+    body: JSON.stringify({
+      text,
+      submit: true,
+      command,
+      attachments: attachments?.length ? attachments : undefined,
+    }),
   });
   await ensureOk(response, "failed to send input");
+}
+
+export async function uploadAttachment(
+  host: string,
+  token: string,
+  sessionId: string,
+  file: File,
+): Promise<AttachmentSpec> {
+  const body = new FormData();
+  body.append("file", file, file.name);
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/attachments`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body,
+    },
+  );
+  await ensureOk(response, "failed to upload attachment");
+  return (await response.json()) as AttachmentSpec;
+}
+
+// Authenticated URL for an uploaded attachment. The token rides as a query
+// param because <img>/<a> can't send an Authorization header (mirrors the
+// WebSocket endpoints).
+export function attachmentUrl(
+  host: string,
+  token: string,
+  sessionId: string,
+  attachmentId: string,
+): string {
+  return `${host}/api/sessions/${sessionId}/attachments/${attachmentId}?token=${encodeURIComponent(token)}`;
 }
 
 interface SocketHandlers {

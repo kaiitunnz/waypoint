@@ -159,6 +159,13 @@ export function supportsApprovalNote(
   return caps ? caps.supports_approval_note : FALLBACK_APPROVAL_NOTE.has(backend);
 }
 
+export function supportsAttachments(
+  backend: Backend,
+  catalog?: BackendCatalog,
+): boolean {
+  return Boolean(catalog?.byId(backend)?.capabilities.supports_attachments);
+}
+
 // Which approval decisions a backend honours (e.g. codex/opencode add
 // `acceptForSession`). Drives which escalation buttons the approval card
 // renders so it can't offer a decision the backend would map to a plain

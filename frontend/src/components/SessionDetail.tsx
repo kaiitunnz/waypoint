@@ -2,6 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import {
+  ChangeEvent,
+  ClipboardEvent,
+  DragEvent,
   KeyboardEvent,
   memo,
   startTransition,
@@ -41,6 +44,7 @@ import {
   humaniseBackend,
   permissionModesFor,
   supportsApprovalNote,
+  supportsAttachments,
   supportsPlanApproval,
   supportsReattachAfterExit,
   supportsResume,
@@ -64,6 +68,12 @@ import {
 } from "@/lib/events";
 import { useTheme } from "@/lib/theme";
 import { formatRelativeTime } from "@/lib/usage";
+import {
+  AttachmentContextProvider,
+  AttachmentTray,
+  filesFromDataTransfer,
+  useAttachments,
+} from "@/components/AttachmentTray";
 import { SessionTerminalView } from "@/components/SessionTerminalView";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { CommandSuggestions } from "@/components/CommandSuggestions";
@@ -277,6 +287,10 @@ const RECONNECT_MAX_MS = 15000;
 export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant = false, assistantControls = null }: SessionDetailProps) {
   const router = useRouter();
   const catalog = useBackendCatalog(host || null, token || null, null);
+  const attachmentContext = useMemo(
+    () => ({ host, token, sessionId }),
+    [host, token, sessionId],
+  );
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [events, setEvents] = useState<EventRecord[]>([]);
   // The todo-event sequence the user last dismissed from the progress dock.
@@ -938,23 +952,27 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const submitInput = useCallback(async (
     text: string,
     command?: SessionCommandInvocation,
+    attachments?: string[],
   ) => {
-    if (!text.trim()) {
+    if (!text.trim() && !attachments?.length) {
       return false;
     }
 
     // The persistent assistant isn't a launchpad — `/new` and `/fork` would
     // spawn stray managed sessions, so let them flow to the agent as text.
-    const handled = await runFrontendControlCommand(text, {
-      allowFork: !assistant,
-      allowNew: !assistant,
-    });
-    if (handled !== null) {
-      return handled === "handled";
+    // Attachment-bearing turns are never control commands, so skip the check.
+    if (!attachments?.length) {
+      const handled = await runFrontendControlCommand(text, {
+        allowFork: !assistant,
+        allowNew: !assistant,
+      });
+      if (handled !== null) {
+        return handled === "handled";
+      }
     }
 
     try {
-      await sendInput(host, token, sessionId, text, command);
+      await sendInput(host, token, sessionId, text, command, attachments);
       return true;
     } catch (sendError) {
       if (isAuthError(sendError)) {
@@ -967,7 +985,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   }, [runFrontendControlCommand, handleAuthFailure, host, token, sessionId, assistant]);
 
   const onSendWithOptimistic = useCallback(
-    async (text: string, command?: SessionCommandInvocation) => {
+    async (
+      text: string,
+      command?: SessionCommandInvocation,
+      attachments?: string[],
+    ) => {
       const tempId = Math.random().toString(36).slice(2);
       const ts = new Date().toISOString();
       setOptimisticMessages((prev) => [...prev, { tempId, text, ts, confirmed: false }]);
@@ -996,7 +1018,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
             return false;
           }
         }
-        return await submitInput(text, command);
+        return await submitInput(text, command, attachments);
       } finally {
         setOptimisticMessages((prev) => prev.filter((m) => m.tempId !== tempId));
       }
@@ -1374,6 +1396,17 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     return "ok";
   }, [runFrontendControlCommand]);
 
+  // Attachment-bearing terminal submits go over HTTP, not the terminal WS:
+  // handle_input routes them through the tmux transport, which appends the
+  // host file paths to the message so the wrapped CLI can read them.
+  const handleTerminalSubmitWithAttachments = useCallback(
+    async (text: string, attachmentIds: string[]): Promise<TerminalSubmitResult> => {
+      const sent = await submitInput(text, undefined, attachmentIds);
+      return sent ? "ok" : "command-error";
+    },
+    [submitInput],
+  );
+
   const requestPaste = useCallback(async () => {
     setError("");
     if (typeof navigator === "undefined" || !navigator.clipboard?.readText) {
@@ -1571,6 +1604,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         </div>
       ) : null}
       {session && !terminalOnly && activeView === "chat" ? (
+        <AttachmentContextProvider value={attachmentContext}>
         <section className="stack transcript-stack">
           {hasOlderEvents ? (
             <div className="transcript-load-older">
@@ -1675,6 +1709,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
               ))
             : null}
         </section>
+        </AttachmentContextProvider>
       ) : null}
       {session && activeView === "terminal" ? (
         <SessionTerminalView
@@ -1699,6 +1734,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onRateLimitRefresh={handleRateLimitRefresh}
           onTerminalInput={handleTerminalInput}
           onTerminalSubmit={handleTerminalSubmit}
+          onTerminalSubmitWithAttachments={handleTerminalSubmitWithAttachments}
+          attachmentsEnabled={
+            session ? supportsAttachments(session.backend, catalog) : false
+          }
           onRequestPaste={requestPaste}
           onTerminalResize={handleTerminalResize}
           onTerminalScrollChip={handleTerminalScrollChip}
@@ -1989,6 +2028,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onResume={resumeSession}
           onSwitchSession={openSwitcher}
           onSend={onSendWithOptimistic}
+          attachmentsEnabled={
+            session ? supportsAttachments(session.backend, catalog) : false
+          }
           onTerminate={terminate}
           onError={setError}
           assistant={assistant}
@@ -2044,7 +2086,12 @@ interface ReplyComposerProps {
   onReattach: () => void | Promise<void>;
   onResume: () => void | Promise<void>;
   onSwitchSession: () => void;
-  onSend: (text: string, command?: SessionCommandInvocation) => Promise<boolean>;
+  onSend: (
+    text: string,
+    command?: SessionCommandInvocation,
+    attachments?: string[],
+  ) => Promise<boolean>;
+  attachmentsEnabled: boolean;
   onTerminate: () => void | Promise<void>;
   onError: (message: string) => void;
   assistant: boolean;
@@ -2093,12 +2140,16 @@ const ReplyComposer = memo(function ReplyComposer({
   onResume,
   onSwitchSession,
   onSend,
+  attachmentsEnabled,
   onTerminate,
   onError,
   assistant,
   assistantControls,
 }: ReplyComposerProps) {
   const [draft, setDraft] = useState("");
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const attachments = useAttachments({ host, token, sessionId, onError });
   const [sending, setSending] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
@@ -2279,7 +2330,10 @@ const ReplyComposer = memo(function ReplyComposer({
 
   async function handleSend() {
     const text = draft.trim();
-    if (!text) {
+    const attachmentIds = attachments.readyIds;
+    // Allow an attachment-only turn, but never send while an upload is
+    // still in flight (its id wouldn't be in readyIds yet).
+    if ((!text && attachmentIds.length === 0) || attachments.uploading) {
       return;
     }
     setSending(true);
@@ -2287,14 +2341,56 @@ const ReplyComposer = memo(function ReplyComposer({
     const invocation = selectedCommandInvocation(text);
     resetCompletions();
     try {
-      const sent = await onSend(text, invocation);
-      if (!sent) {
+      const sent = await onSend(
+        text,
+        invocation,
+        attachmentIds.length ? attachmentIds : undefined,
+      );
+      if (sent) {
+        attachments.clear();
+      } else {
         setDraft(text);
       }
     } finally {
       setSending(false);
     }
   }
+
+  const addFilesFromInput = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files ? Array.from(event.target.files) : [];
+    if (files.length) attachments.addFiles(files);
+    event.target.value = "";
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!attachmentsEnabled) return;
+    const files = filesFromDataTransfer(event.clipboardData);
+    if (files.length === 0) return;
+    // Pasted files (e.g. a screenshot) become attachments; let plain-text
+    // pastes fall through to the textarea.
+    event.preventDefault();
+    attachments.addFiles(files);
+  };
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (!attachmentsEnabled) return;
+    event.preventDefault();
+    setDragActive(false);
+    const files = filesFromDataTransfer(event.dataTransfer);
+    if (files.length) attachments.addFiles(files);
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!attachmentsEnabled) return;
+    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+    event.preventDefault();
+    setDragActive(true);
+  };
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    setDragActive(false);
+  };
 
   function handleDraftKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) {
@@ -2750,7 +2846,15 @@ const ReplyComposer = memo(function ReplyComposer({
           />
         </div>
       </div>
-      <div className="reply-textarea-wrap">
+      <div
+        className={`reply-textarea-wrap${dragActive ? " is-drag-active" : ""}`}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {attachmentsEnabled ? (
+          <AttachmentTray items={attachments.items} onRemove={attachments.remove} />
+        ) : null}
         <textarea
           ref={textareaRef}
           className="composer-textarea"
@@ -2759,10 +2863,16 @@ const ReplyComposer = memo(function ReplyComposer({
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleDraftKeyDown}
+          onPaste={handlePaste}
           disabled={disabled}
           placeholder={placeholder}
           aria-label="Reply"
         />
+        {dragActive ? (
+          <div className="composer-drop-hint" aria-hidden="true">
+            Drop files to attach
+          </div>
+        ) : null}
         {suggestionsOpen ? (
           <CommandSuggestions
             ref={suggestionsRef}
@@ -2775,11 +2885,41 @@ const ReplyComposer = memo(function ReplyComposer({
         ) : null}
       </div>
       <div className="composer-actions">
+        {attachmentsEnabled ? (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="composer-file-input"
+              onChange={addFilesFromInput}
+              aria-hidden="true"
+              tabIndex={-1}
+            />
+            <button
+              className="ghost composer-attach"
+              onClick={() => fileInputRef.current?.click()}
+              type="button"
+              disabled={disabled}
+              title="Attach files"
+              aria-label="Attach files"
+            >
+              <span className="glyph" aria-hidden>
+                ⎙
+              </span>
+            </button>
+          </>
+        ) : null}
         <button
           className="primary send"
           onClick={() => void handleSend()}
           type="button"
-          disabled={disabled || sending || !draft.trim()}
+          disabled={
+            disabled ||
+            sending ||
+            attachments.uploading ||
+            (!draft.trim() && attachments.readyIds.length === 0)
+          }
         >
           {sending ? "Sending…" : "Send"}
         </button>

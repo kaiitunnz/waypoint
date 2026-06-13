@@ -20,6 +20,7 @@ import {
   summarizeTodos,
   type TodoEntry,
 } from "@/lib/todos";
+import { MessageAttachments } from "@/components/AttachmentTray";
 import { PlanApprovalCard } from "@/components/ApprovalCard";
 import { CopyMessageButton } from "@/components/CopyMessageButton";
 import { DiffPreview } from "@/components/DiffPreview";
@@ -255,6 +256,7 @@ function UserMessageBubble({ event }: { event: EventRecord }) {
       style={style}
     >
       <MarkdownMessage text={event.text} />
+      <MessageAttachments event={event} />
       <div ref={metaRef} className="transcript-meta">
         <span className="badge user">you</span>
         <span className="role-time">{formatTime(event.ts)}</span>
@@ -1208,6 +1210,7 @@ function HeuristicCard({ event }: { event: EventRecord }) {
         <CopyMessageButton text={event.text} />
       </div>
       <pre>{event.text}</pre>
+      <MessageAttachments event={event} />
     </article>
   );
 }

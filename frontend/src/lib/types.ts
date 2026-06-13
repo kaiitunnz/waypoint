@@ -97,6 +97,16 @@ export interface SessionRecord {
   config_overrides: string[];
 }
 
+export type AttachmentKind = "image" | "file";
+
+export interface AttachmentSpec {
+  id: string;
+  filename: string;
+  mime: string;
+  size: number;
+  kind: AttachmentKind;
+}
+
 export interface EventRecord {
   id?: number;
   session_id: string;
@@ -164,6 +174,7 @@ export interface BackendCapabilities {
   supports_plan_approval: boolean;
   supports_slash_compact: boolean;
   supports_approval_note: boolean;
+  supports_attachments: boolean;
   supports_custom_cli_args: boolean;
   supports_config_overrides: boolean;
   supports_reattach_after_exit: boolean;

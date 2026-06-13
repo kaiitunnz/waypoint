@@ -139,6 +139,50 @@ def backends(ctx: typer.Context) -> None:
 
 
 @app.command()
+def models(
+    ctx: typer.Context,
+    backend: Annotated[
+        str | None,
+        typer.Argument(callback=_validate_backend, autocompletion=_complete_backend),
+    ] = None,
+    launch_target_id: Annotated[str | None, typer.Option()] = None,
+    include_hidden: Annotated[bool, typer.Option("--include-hidden")] = False,
+) -> None:
+    """List the models a backend offers (its ids, labels, and reasoning efforts).
+
+    With no BACKEND, queries every selectable backend; a backend whose live
+    model discovery is unavailable is reported with an ``error`` entry rather
+    than failing the whole listing.
+    """
+
+    def run(c: WaypointClient) -> Any:
+        if backend is not None:
+            return c.list_models(
+                backend,
+                launch_target_id=launch_target_id,
+                include_hidden=include_hidden,
+            )
+        catalogues: list[dict[str, Any]] = []
+        for descriptor in c.list_backends():
+            if descriptor["capabilities"].get("is_fallback_for_managed_launch"):
+                continue
+            backend_id = descriptor["id"]
+            try:
+                catalogues.append(
+                    c.list_models(
+                        backend_id,
+                        launch_target_id=launch_target_id,
+                        include_hidden=include_hidden,
+                    )
+                )
+            except WaypointError as exc:
+                catalogues.append({"backend": backend_id, "error": str(exc)})
+        return {"backends": catalogues}
+
+    _emit(_settings_from_ctx(ctx), run)
+
+
+@app.command()
 def reset(
     ctx: typer.Context,
     yes: Annotated[
@@ -249,6 +293,20 @@ def _emit(settings: Settings, run: Callable[[WaypointClient], Any]) -> None:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     typer.echo(json.dumps(result, indent=2))
+
+
+def _parse_answers(raw: str | None) -> list[dict[str, Any]] | None:
+    if raw is None:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(f"--answers-json is not valid JSON: {exc}") from exc
+    if not isinstance(parsed, list) or not all(
+        isinstance(item, dict) for item in parsed
+    ):
+        raise typer.BadParameter("--answers-json must be a JSON array of objects")
+    return parsed
 
 
 def _parse_meta(items: list[str] | None) -> dict[str, str]:
@@ -404,6 +462,44 @@ def sessions_approve(
         lambda c: {
             "session": c.approve(
                 session_id, decision, text=text, approval_id=approval_id
+            )
+        },
+    )
+
+
+@sessions_app.command("answer-question")
+def sessions_answer_question(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    answer: Annotated[
+        str,
+        typer.Option(
+            "--answer", help="Free-text answer to the session's pending question."
+        ),
+    ],
+    tool_use_id: Annotated[
+        str | None,
+        typer.Option(
+            help="Target a specific question by tool-use id. Omit to answer the "
+            "sole pending question.",
+        ),
+    ] = None,
+    answers_json: Annotated[
+        str | None,
+        typer.Option(
+            "--answers-json",
+            help='Structured per-question answers as JSON, e.g. \'[{"question": '
+            '"...", "answer": "...", "notes": "..."}]\'.',
+        ),
+    ] = None,
+) -> None:
+    """Answer a session's blocking question (not the same as send or approve)."""
+    answers = _parse_answers(answers_json)
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "session": c.answer_question(
+                session_id, answer, tool_use_id=tool_use_id, answers=answers
             )
         },
     )

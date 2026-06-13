@@ -141,6 +141,23 @@ class WaypointClient:
         ]
         return data
 
+    def list_models(
+        self,
+        backend: str,
+        *,
+        launch_target_id: str | None = None,
+        include_hidden: bool = False,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if launch_target_id is not None:
+            params["launch_target_id"] = launch_target_id
+        if include_hidden:
+            params["include_hidden"] = include_hidden
+        data: dict[str, Any] = self._request(
+            "GET", f"/api/backends/{backend}/models", params=params or None
+        ).json()
+        return data
+
     def get_events(
         self,
         session_id: str,
@@ -211,6 +228,24 @@ class WaypointClient:
             "POST",
             f"/api/sessions/{session_id}/input",
             json=body,
+        ).json()["session"]
+        return data
+
+    def answer_question(
+        self,
+        session_id: str,
+        answer: str,
+        *,
+        tool_use_id: str | None = None,
+        answers: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        body = {
+            "answer": answer,
+            "tool_use_id": tool_use_id,
+            "answers": answers,
+        }
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/sessions/{session_id}/answer-question", json=body
         ).json()["session"]
         return data
 

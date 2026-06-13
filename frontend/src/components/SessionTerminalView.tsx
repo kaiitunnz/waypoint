@@ -61,6 +61,7 @@ interface SessionTerminalViewProps {
   onTerminate: () => void | Promise<void>;
   onRemoveFromList: () => void | Promise<void>;
   onSwitchSession: () => void;
+  onError: (message: string) => void;
 }
 
 export function SessionTerminalView({
@@ -97,6 +98,7 @@ export function SessionTerminalView({
   onTerminate,
   onRemoveFromList,
   onSwitchSession,
+  onError,
 }: SessionTerminalViewProps) {
   // Primary action shown as a pill button next to the overflow trigger.
   // Only states the user can't trivially reach inside the pane — Reconnect
@@ -298,6 +300,7 @@ export function SessionTerminalView({
           onSubmit={onTerminalSubmit}
           onSubmitWithAttachments={onTerminalSubmitWithAttachments}
           attachmentsEnabled={attachmentsEnabled}
+          onError={onError}
           expanded={composeOpen}
           onExpandedChange={setComposeOpen}
           connection={connection}

@@ -1748,6 +1748,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onTerminate={terminate}
           onRemoveFromList={removeFromList}
           onSwitchSession={openSwitcher}
+          onError={setError}
         />
       ) : null}
       {!terminalOnly && pendingApproval ? (

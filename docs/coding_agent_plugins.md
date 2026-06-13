@@ -132,7 +132,10 @@ Non-image files on image-only protocols degrade to the same path append.
 Uploads are persisted server-side by `AttachmentStore` under
 `settings.attachments_dir`; the runtime resolves the client-supplied ids to
 paths before calling the transport, so a backend never trusts a path from the
-client.
+client. Blobs are stored under their sanitized original filename,
+de-duplicated with ` (1)`, ` (2)` … on collision, so the paths appended for
+path-based agents stay legible; the server-issued uuid remains the resolution
+key and the only token the client ever sends back.
 
 ### Lifecycle
 

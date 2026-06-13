@@ -99,6 +99,10 @@ class Settings(BaseModel):
     default_cwd: str = "~/"
     data_dir: Path = Field(default_factory=default_data_dir)
     sessions_dir_name: str = "sessions"
+    attachments_dir_name: str = "attachments"
+    # Hard ceiling on a single uploaded attachment. Defaults to 25 MiB;
+    # override with ``WAYPOINT_MAX_UPLOAD_BYTES``.
+    max_upload_bytes: int = 25 * 1024 * 1024
     database_name: str = "waypoint.db"
     token_ttl_seconds: int = 60 * 60 * 24 * 30
     stream_poll_interval: float = 1.0
@@ -155,6 +159,10 @@ class Settings(BaseModel):
     def sessions_dir(self) -> Path:
         return self.data_dir / self.sessions_dir_name
 
+    @property
+    def attachments_dir(self) -> Path:
+        return self.data_dir / self.attachments_dir_name
+
     def plugin_config(self, plugin_id: str) -> PluginConfig:
         """Return the validated config for ``plugin_id``.
 
@@ -180,6 +188,7 @@ class Settings(BaseModel):
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
+        self.attachments_dir.mkdir(parents=True, exist_ok=True)
 
 
 def load_settings(config_path_override: Path | None = None) -> Settings:
@@ -230,6 +239,8 @@ def _env_overrides() -> dict[str, Any]:
         overrides["data_dir"] = Path(
             os.path.expandvars(os.environ["WAYPOINT_DATA_DIR"])
         ).expanduser()
+    if "WAYPOINT_MAX_UPLOAD_BYTES" in os.environ:
+        overrides["max_upload_bytes"] = int(os.environ["WAYPOINT_MAX_UPLOAD_BYTES"])
     if "WAYPOINT_CORS_ORIGINS" in os.environ:
         overrides["cors_origins"] = parse_cors_origins(
             os.environ["WAYPOINT_CORS_ORIGINS"]

@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from waypoint.attachments import ResolvedAttachment, append_attachment_paths
 from waypoint.backends.claude_code.models import (
     claude_context_window_for_model,
     claude_model_family,
@@ -53,6 +54,40 @@ from waypoint.schemas import (
 )
 
 log = logging.getLogger("waypoint.claude_cli")
+
+
+def _user_content(
+    text: str, attachments: list[ResolvedAttachment] | None
+) -> str | list[dict[str, Any]]:
+    """Build the ``message.content`` for a user turn.
+
+    Returns the plain string when there are no attachments (preserving the
+    historical envelope shape). Otherwise returns Anthropic content blocks:
+    images embed inline as base64 ``image`` blocks; non-image files degrade
+    to their host paths appended to the text block, which Claude reads via
+    its file tools.
+    """
+    if not attachments:
+        return text
+    images = [item for item in attachments if item.is_image]
+    files = [item for item in attachments if not item.is_image]
+    body = append_attachment_paths(text, files)
+    blocks: list[dict[str, Any]] = []
+    if body:
+        blocks.append({"type": "text", "text": body})
+    for image in images:
+        blocks.append(
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": image.spec.mime,
+                    "data": image.read_base64(),
+                },
+            }
+        )
+    return blocks or text
+
 
 CONTROL_REQUEST_TIMEOUT_SECONDS = 10.0
 # Claude's stream-json output can emit a single line larger than asyncio's
@@ -527,7 +562,12 @@ class ClaudeCliAdapter:
             return
         future.set_result(response)
 
-    async def send_input(self, session_id: str, text: str) -> None:
+    async def send_input(
+        self,
+        session_id: str,
+        text: str,
+        attachments: list[ResolvedAttachment] | None = None,
+    ) -> None:
         state = self._require_session(session_id)
         if state.process.returncode is not None:
             raise ClaudeCliError(
@@ -539,7 +579,7 @@ class ClaudeCliAdapter:
             )
         envelope = {
             "type": "user",
-            "message": {"role": "user", "content": text},
+            "message": {"role": "user", "content": _user_content(text, attachments)},
         }
         line = (json.dumps(envelope) + "\n").encode("utf-8")
         state.process.stdin.write(line)

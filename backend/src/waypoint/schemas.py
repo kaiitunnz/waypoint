@@ -109,6 +109,23 @@ class SessionInputItem(BaseModel):
     path: str | None = None
 
 
+class AttachmentKind(StrEnum):
+    IMAGE = "image"
+    FILE = "file"
+
+
+class AttachmentSpec(BaseModel):
+    # Server-issued handle for an uploaded blob. The frontend receives this
+    # from the upload endpoint and later references the attachment by ``id``
+    # when sending input; the runtime resolves the id back to a host path
+    # server-side, so the absolute path is never trusted from the client.
+    id: str
+    filename: str
+    mime: str
+    size: int
+    kind: AttachmentKind
+
+
 class SessionCompletionsResponse(BaseModel):
     completions: list[CommandCompletion] = Field(default_factory=list)
     refreshing: bool = False
@@ -341,6 +358,9 @@ class SessionInputRequest(BaseModel):
     submit: bool = True
     command: SessionCommandInvocation | None = None
     items: list[SessionInputItem] | None = None
+    # Ids of previously uploaded attachments to deliver alongside the text.
+    # Resolved to host paths server-side; see ``AttachmentSpec``.
+    attachments: list[str] | None = None
 
 
 class SessionApprovalRequest(BaseModel):

@@ -9,14 +9,17 @@ from typing import Annotated, Any
 from fastapi import (
     Depends,
     FastAPI,
+    File,
     Header,
     HTTPException,
     Query,
+    UploadFile,
     WebSocket,
     WebSocketDisconnect,
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from waypoint.auth import TokenStore, require_token
 from waypoint.backends import BackendRegistry
@@ -307,6 +310,54 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         session = await context.runtime.handle_input(session_id, request)
         return {"session": session.model_dump(mode="json")}
+
+    @app.post("/api/sessions/{session_id}/attachments")
+    async def upload_attachment(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+        file: Annotated[UploadFile, File()],
+    ) -> Any:
+        # 404 on an unknown session before persisting anything.
+        context.runtime.get_session(session_id)
+        max_bytes = context.settings.max_upload_bytes
+        data = await file.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"attachment exceeds {max_bytes} byte limit",
+            )
+        spec = context.runtime.attachments.save(
+            session_id,
+            data=data,
+            filename=file.filename or "file",
+            content_type=file.content_type,
+        )
+        return spec.model_dump(mode="json")
+
+    @app.get("/api/sessions/{session_id}/attachments/{attachment_id}")
+    async def serve_attachment(
+        session_id: str,
+        attachment_id: str,
+        token: Annotated[str, Query()] = "",
+    ) -> FileResponse:
+        # ``<img>`` tags can't send an Authorization header, so this mirrors
+        # the WebSocket endpoints and takes the token as a query parameter.
+        if not context.tokens.validate(token):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token"
+            )
+        resolved = context.runtime.attachments.resolve(session_id, attachment_id)
+        if resolved is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="attachment not found"
+            )
+        spec, path = resolved
+        return FileResponse(
+            path,
+            media_type=spec.mime,
+            filename=spec.filename,
+            content_disposition_type="inline",
+        )
 
     @app.post("/api/sessions/{session_id}/interrupt")
     async def session_interrupt(

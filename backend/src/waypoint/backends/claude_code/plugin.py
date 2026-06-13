@@ -131,6 +131,7 @@ class ClaudeCodePlugin:
         supports_fork=True,
         supports_slash_compact=False,
         supports_approval_note=True,
+        supports_attachments=True,
         supports_custom_cli_args=True,
         # One-shot approve/decline only. The binary ignores the can_use_tool
         # response's permission_updates in -p mode (verified against v2.1.157:

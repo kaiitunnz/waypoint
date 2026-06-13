@@ -145,6 +145,7 @@ class OpenCodePlugin:
         supports_fork=True,
         supports_slash_compact=True,
         supports_approval_note=True,
+        supports_attachments=True,
         supports_custom_cli_args=True,
         # OpenCode's "always" reply is surfaced as "approve for session"; it
         # has no decision distinct from that, so no acceptAlways.

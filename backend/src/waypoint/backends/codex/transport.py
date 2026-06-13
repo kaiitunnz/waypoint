@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, status
 
+from waypoint.attachments import ResolvedAttachment, append_attachment_paths
 from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
 
@@ -34,13 +35,22 @@ class CodexTransport(TransportAdapter):
             )
         return adapter
 
-    async def send_input(self, session: SessionRecord, text: str) -> None:
+    async def send_input(
+        self,
+        session: SessionRecord,
+        text: str,
+        attachments: list[ResolvedAttachment] | None = None,
+    ) -> None:
+        turn_params = self._plugin.turn_params_for(session)
         try:
-            await self.adapter.send_input(
-                session.id,
-                text,
-                turn_params=self._plugin.turn_params_for(session),
-            )
+            if attachments:
+                await self.adapter.send_input_items(
+                    session.id,
+                    _input_items(text, attachments),
+                    turn_params=turn_params,
+                )
+            else:
+                await self.adapter.send_input(session.id, text, turn_params=turn_params)
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
@@ -67,3 +77,17 @@ class CodexTransport(TransportAdapter):
 
     def terminal_snapshot(self, session: SessionRecord) -> str:
         return self.adapter.terminal_snapshot(session.id)
+
+
+def _input_items(
+    text: str, attachments: list[ResolvedAttachment]
+) -> list[dict[str, Any]]:
+    # Codex natively accepts local images via ``localImage`` items; other
+    # files have no item type, so their host paths are appended to the text.
+    images = [item for item in attachments if item.is_image]
+    files = [item for item in attachments if not item.is_image]
+    items: list[dict[str, Any]] = [
+        {"type": "text", "text": append_attachment_paths(text, files)}
+    ]
+    items.extend({"type": "localImage", "path": str(image.path)} for image in images)
+    return items

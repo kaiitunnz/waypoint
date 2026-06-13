@@ -462,7 +462,9 @@ class _FakeAdapter:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, tuple[object, ...]]] = []
 
-    async def send_input(self, session_id: str, text: str) -> None:
+    async def send_input(
+        self, session_id: str, text: str, attachments: object = None
+    ) -> None:
         self.calls.append(("send_input", session_id, (text,)))
 
     async def interrupt(self, session_id: str) -> None:

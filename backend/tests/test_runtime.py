@@ -109,10 +109,14 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         self.efforts: dict[str, str | None] = {}
         self.slash_commands: dict[str, tuple[str, ...]] = {}
         self.pending_ids: list[str] = []
+        self.discard_calls: list[str] = []
 
     async def terminate_session(self, session_id: str) -> bool:
         self.terminate_calls.append(session_id)
         return True
+
+    def discard_session(self, session_id: str) -> None:
+        self.discard_calls.append(session_id)
 
     async def register_rate_limit_probe(
         self,

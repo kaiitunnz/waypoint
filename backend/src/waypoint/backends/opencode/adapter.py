@@ -989,7 +989,9 @@ class OpenCodeAdapter:
             raise OpenCodeError(f"session not found: {session_id}")
         model = self._split_model_ref(state.model)
         client = self._require_client()
-        parts: list[dict[str, Any]] = [{"type": "text", "text": text}]
+        # Omit the text part on an attachment-only turn so the server doesn't
+        # receive a blank prompt part.
+        parts: list[dict[str, Any]] = [{"type": "text", "text": text}] if text else []
         # Embed every attachment as a data-url file part rather than a host
         # path: the OpenCode server may run on a remote host (SSH launch
         # target) that can't see the local attachments directory.

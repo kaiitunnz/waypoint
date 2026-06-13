@@ -86,8 +86,11 @@ def _input_items(
     # files have no item type, so their host paths are appended to the text.
     images = [item for item in attachments if item.is_image]
     files = [item for item in attachments if not item.is_image]
-    items: list[dict[str, Any]] = [
-        {"type": "text", "text": append_attachment_paths(text, files)}
-    ]
+    body = append_attachment_paths(text, files)
+    items: list[dict[str, Any]] = []
+    # Omit the text item entirely on an image-only turn so the app server
+    # doesn't see a blank turn (an empty string is not a valid input item).
+    if body:
+        items.append({"type": "text", "text": body})
     items.extend({"type": "localImage", "path": str(image.path)} for image in images)
     return items

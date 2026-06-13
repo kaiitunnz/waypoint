@@ -2,6 +2,7 @@ import base64
 import json
 import mimetypes
 import re
+import shutil
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -123,3 +124,7 @@ class AttachmentStore:
         if not blob.is_file():
             return None
         return AttachmentSpec.model_validate(raw), blob
+
+    def discard(self, session_id: str) -> None:
+        """Remove a session's attachment dir. Best-effort; never raises."""
+        shutil.rmtree(self._session_dir(session_id), ignore_errors=True)

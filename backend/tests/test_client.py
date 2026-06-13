@@ -165,6 +165,23 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
         if request.url.path.endswith("/answer-question") and request.method == "POST":
             state["answer_body"] = json.loads(request.content)
             return httpx.Response(200, json={"session": {"id": "s1"}})
+        if (
+            request.url.path == "/api/schedules/clear-history"
+            and request.method == "POST"
+        ):
+            return httpx.Response(200, json={"removed": 3})
+        if request.url.path == "/api/schedules" and request.method == "GET":
+            return httpx.Response(200, json={"schedules": [{"id": "sc1"}]})
+        if request.url.path == "/api/schedules" and request.method == "POST":
+            payload = json.loads(request.content)
+            state["schedule_create"] = payload
+            return httpx.Response(200, json={"schedule": {"id": "sc1", **payload}})
+        if (
+            request.url.path.startswith("/api/schedules/")
+            and request.method == "DELETE"
+        ):
+            schedule_id = request.url.path.rsplit("/", 1)[-1]
+            return httpx.Response(200, json={"schedule": {"id": schedule_id}})
         if request.url.path == "/api/sessions/missing":
             return httpx.Response(404, json={"detail": "session not found"})
         return httpx.Response(200, json={"session": {"id": "ok"}})
@@ -456,3 +473,47 @@ def test_error_response_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     with _client(_settings(tmp_path), state) as client:
         with pytest.raises(WaypointError):
             client.get_session("missing")
+
+
+def test_list_schedules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        schedules = client.list_schedules()
+    assert schedules == [{"id": "sc1"}]
+
+
+def test_create_schedule_posts_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        schedule = client.create_schedule(
+            backend="claude_code",
+            cwd="/tmp",
+            initial_prompt="do the thing",
+            delay_seconds=30,
+        )
+    assert schedule["id"] == "sc1"
+    assert state["schedule_create"]["backend"] == "claude_code"
+    assert state["schedule_create"]["initial_prompt"] == "do the thing"
+    assert state["schedule_create"]["delay_seconds"] == 30
+
+
+def test_delete_schedule(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        schedule = client.delete_schedule("sc1")
+    assert schedule == {"id": "sc1"}
+
+
+def test_clear_schedule_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        result = client.clear_schedule_history()
+    assert result == {"removed": 3}

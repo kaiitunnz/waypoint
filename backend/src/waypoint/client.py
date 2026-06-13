@@ -372,3 +372,58 @@ class WaypointClient:
             "PATCH", f"/api/board/{channel}/entries/{entry_id}", json=body
         ).json()["entry"]
         return data
+
+    # ── schedules ───────────────────────────────────────────────────────
+
+    def list_schedules(self) -> list[dict[str, Any]]:
+        data: list[dict[str, Any]] = self._request("GET", "/api/schedules").json()[
+            "schedules"
+        ]
+        return data
+
+    def create_schedule(
+        self,
+        *,
+        backend: str,
+        cwd: str,
+        launch_target_id: str | None = None,
+        launch_mode: str | None = None,
+        title: str | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+        permission_mode: str | None = None,
+        initial_prompt: str | None = None,
+        args: list[str] | None = None,
+        delay_seconds: int | None = None,
+        scheduled_at: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "backend": backend,
+            "cwd": cwd,
+            "launch_target_id": launch_target_id,
+            "launch_mode": launch_mode,
+            "title": title,
+            "model": model,
+            "effort": effort,
+            "permission_mode": permission_mode,
+            "initial_prompt": initial_prompt,
+            "args": args or [],
+            "delay_seconds": delay_seconds,
+            "scheduled_at": scheduled_at,
+        }
+        data: dict[str, Any] = self._request(
+            "POST", "/api/schedules", json=body
+        ).json()["schedule"]
+        return data
+
+    def delete_schedule(self, schedule_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "DELETE", f"/api/schedules/{schedule_id}"
+        ).json()["schedule"]
+        return data
+
+    def clear_schedule_history(self) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", "/api/schedules/clear-history"
+        ).json()
+        return data

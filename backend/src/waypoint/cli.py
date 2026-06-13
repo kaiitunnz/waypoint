@@ -468,7 +468,9 @@ async def _await_status_via_poll(
     client: WaypointClient, session_id: str, until: frozenset[str]
 ) -> tuple[dict[str, Any], str]:
     while True:
-        session = client.get_session(session_id)
+        # Off the event loop: get_session is sync httpx, so running it inline
+        # would block asyncio.timeout from firing until the request returned.
+        session = await asyncio.to_thread(client.get_session, session_id)
         status = session.get("status")
         if isinstance(status, str) and status in until:
             return session, status
@@ -494,7 +496,8 @@ async def _wait_for_session(
                 return streamed
             return await _await_status_via_poll(client, session_id, until)
     except TimeoutError:
-        return client.get_session(session_id), None
+        session = await asyncio.to_thread(client.get_session, session_id)
+        return session, None
 
 
 async def _follow_events(settings: Settings, session_id: str) -> None:

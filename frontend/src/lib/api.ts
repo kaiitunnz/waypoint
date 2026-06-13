@@ -17,6 +17,7 @@ import {
   ScheduledSession,
   SessionCompletionsResponse,
   SessionCommandInvocation,
+  SessionAttachment,
   SessionEnvelope,
   SessionRecord,
   UsageDashboardResponse,
@@ -808,6 +809,60 @@ export async function uploadAttachment(
   );
   await ensureOk(response, "failed to upload attachment");
   return (await response.json()) as AttachmentSpec;
+}
+
+// Every attachment stored for a session, newest first — backs the files
+// manager.
+export async function fetchSessionAttachments(
+  host: string,
+  token: string,
+  sessionId: string,
+): Promise<SessionAttachment[]> {
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/attachments`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  await ensureOk(response, "failed to list attachments");
+  return (await response.json()) as SessionAttachment[];
+}
+
+// Delete every attachment stored for a session ("Delete all").
+export async function deleteAllAttachments(
+  host: string,
+  token: string,
+  sessionId: string,
+): Promise<void> {
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/attachments`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  await ensureOk(response, "failed to delete attachments");
+}
+
+// Free a server-side attachment blob. Used when a pending attachment is
+// removed from the composer before it is sent, so eager uploads don't orphan.
+export async function deleteAttachment(
+  host: string,
+  token: string,
+  sessionId: string,
+  attachmentId: string,
+): Promise<void> {
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/attachments/${attachmentId}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  // A 404 means it's already gone — fine for a best-effort cleanup.
+  if (!response.ok && response.status !== 404) {
+    await ensureOk(response, "failed to delete attachment");
+  }
 }
 
 // Authenticated URL for an uploaded attachment. The token rides as a query

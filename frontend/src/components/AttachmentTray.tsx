@@ -9,17 +9,40 @@ import {
   useState,
 } from "react";
 
-import { attachmentUrl, uploadAttachment } from "@/lib/api";
+import { attachmentUrl, deleteAttachment, uploadAttachment } from "@/lib/api";
 import type { AttachmentSpec, EventRecord } from "@/lib/types";
 
 export interface PendingAttachment {
   localId: string;
   name: string;
+  size: number;
   isImage: boolean;
   status: "uploading" | "done" | "error";
   previewUrl?: string;
   spec?: AttachmentSpec;
   error?: string;
+}
+
+// Human-readable byte size, e.g. "812 B", "2.4 MB".
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
+// A short type tag for a chip — the uppercased extension, else IMAGE/FILE.
+export function typeTag(filename: string, isImage: boolean): string {
+  const dot = filename.lastIndexOf(".");
+  const ext =
+    dot > 0 && dot < filename.length - 1 ? filename.slice(dot + 1) : "";
+  if (ext && ext.length <= 5) return ext.toUpperCase();
+  return isImage ? "IMAGE" : "FILE";
 }
 
 interface UseAttachmentsArgs {
@@ -59,6 +82,8 @@ export function useAttachments({
   const [items, setItems] = useState<PendingAttachment[]>([]);
   // Object URLs created for image previews, revoked on removal/unmount.
   const urlsRef = useRef<Set<string>>(new Set());
+  // Source File kept per localId so a failed upload can be retried.
+  const filesRef = useRef<Map<string, File>>(new Map());
 
   const revoke = useCallback((url?: string) => {
     if (url && urlsRef.current.has(url)) {
@@ -75,6 +100,36 @@ export function useAttachments({
     };
   }, []);
 
+  const startUpload = useCallback(
+    (localId: string) => {
+      const file = filesRef.current.get(localId);
+      if (!file) return;
+      uploadAttachment(host, token, sessionId, file)
+        .then((spec) => {
+          setItems((prev) =>
+            prev.map((item) =>
+              item.localId === localId
+                ? { ...item, status: "done", spec, error: undefined }
+                : item,
+            ),
+          );
+        })
+        .catch((error) => {
+          const message =
+            error instanceof Error ? error.message : "upload failed";
+          setItems((prev) =>
+            prev.map((item) =>
+              item.localId === localId
+                ? { ...item, status: "error", error: message }
+                : item,
+            ),
+          );
+          onError?.(message);
+        });
+    },
+    [host, token, sessionId, onError],
+  );
+
   const addFiles = useCallback(
     (files: File[]) => {
       const accepted = files.filter((file) => file.size > 0);
@@ -86,60 +141,86 @@ export function useAttachments({
           previewUrl = URL.createObjectURL(file);
           urlsRef.current.add(previewUrl);
         }
+        const localId = `att-${attachmentSeq++}`;
+        filesRef.current.set(localId, file);
         return {
-          localId: `att-${attachmentSeq++}`,
+          localId,
           name: file.name || "file",
+          size: file.size,
           isImage,
           status: "uploading",
           previewUrl,
         };
       });
       setItems((prev) => [...prev, ...pending]);
-      accepted.forEach((file, index) => {
-        const { localId } = pending[index];
-        uploadAttachment(host, token, sessionId, file)
-          .then((spec) => {
-            setItems((prev) =>
-              prev.map((item) =>
-                item.localId === localId
-                  ? { ...item, status: "done", spec }
-                  : item,
-              ),
-            );
-          })
-          .catch((error) => {
-            const message =
-              error instanceof Error ? error.message : "upload failed";
-            setItems((prev) =>
-              prev.map((item) =>
-                item.localId === localId
-                  ? { ...item, status: "error", error: message }
-                  : item,
-              ),
-            );
-            onError?.(message);
-          });
-      });
+      for (const item of pending) startUpload(item.localId);
     },
-    [host, token, sessionId, onError],
+    [startUpload],
+  );
+
+  const retry = useCallback(
+    (localId: string) => {
+      setItems((prev) =>
+        prev.map((item) =>
+          item.localId === localId
+            ? { ...item, status: "uploading", error: undefined }
+            : item,
+        ),
+      );
+      startUpload(localId);
+    },
+    [startUpload],
+  );
+
+  // Free the server blob for any uploaded item so removed eager uploads don't
+  // orphan; best-effort, so a failed cleanup never blocks removal.
+  const discardServerSide = useCallback(
+    (item: PendingAttachment) => {
+      if (item.spec) {
+        void deleteAttachment(host, token, sessionId, item.spec.id).catch(
+          () => {},
+        );
+      }
+      filesRef.current.delete(item.localId);
+    },
+    [host, token, sessionId],
   );
 
   const remove = useCallback(
     (localId: string) => {
       setItems((prev) => {
-        revoke(prev.find((item) => item.localId === localId)?.previewUrl);
+        const target = prev.find((item) => item.localId === localId);
+        if (target) {
+          revoke(target.previewUrl);
+          discardServerSide(target);
+        }
         return prev.filter((item) => item.localId !== localId);
       });
     },
-    [revoke],
+    [revoke, discardServerSide],
   );
 
+  // Reset the tray WITHOUT touching the server — used after a successful send,
+  // where the blobs now belong to the sent message and must survive.
   const clear = useCallback(() => {
     setItems((prev) => {
       for (const item of prev) revoke(item.previewUrl);
+      filesRef.current.clear();
       return [];
     });
   }, [revoke]);
+
+  // Discard every pending attachment AND free its server blob — the explicit
+  // "Clear all" control, only ever used before the message is sent.
+  const discardAll = useCallback(() => {
+    setItems((prev) => {
+      for (const item of prev) {
+        revoke(item.previewUrl);
+        discardServerSide(item);
+      }
+      return [];
+    });
+  }, [revoke, discardServerSide]);
 
   const uploading = items.some((item) => item.status === "uploading");
   const readyIds = items
@@ -150,11 +231,71 @@ export function useAttachments({
     items,
     addFiles,
     remove,
+    retry,
     clear,
+    discardAll,
     uploading,
     readyIds,
     hasItems: items.length > 0,
   };
+}
+
+// Crisp monochrome glyphs that inherit `currentColor`, so they sit alongside
+// the composer's brass action buttons instead of an off-palette emoji.
+export function PaperclipIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 11.5 12 20.5a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" />
+    </svg>
+  );
+}
+
+export function FileIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="15"
+      height="15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z" />
+      <path d="M13 3v6h6" />
+    </svg>
+  );
+}
+
+// Folder glyph for the "session files" manager entry point.
+export function FilesIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </svg>
+  );
 }
 
 interface AttachmentContextValue {
@@ -173,49 +314,63 @@ function attachmentSpecsFor(event: EventRecord): AttachmentSpec[] {
   return Array.isArray(raw) ? (raw as AttachmentSpec[]) : [];
 }
 
-// Renders the attachments carried by a user message: images as thumbnails
-// that open full size, other files as labelled links. Both hit the
-// token-scoped serve endpoint.
+// One compact card for a sent message's attachment — a small thumbnail
+// (images) or file glyph plus name and size. A thumbnail whose blob was since
+// deleted via the files manager 404s, so it falls back to the file glyph
+// instead of a broken image. Tapping opens the full file in a new tab.
+function MessageAttachmentCard({
+  spec,
+  url,
+}: {
+  spec: AttachmentSpec;
+  url: string;
+}) {
+  const [imageBroken, setImageBroken] = useState(false);
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="message-attachment-file"
+      title={spec.filename}
+    >
+      {spec.kind === "image" && !imageBroken ? (
+        // Token-query serve URL — next/image can't optimize it.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          className="message-attachment-thumb"
+          src={url}
+          alt={spec.filename}
+          loading="lazy"
+          onError={() => setImageBroken(true)}
+        />
+      ) : (
+        <span className="attachment-tile" aria-hidden="true">
+          <FileIcon />
+        </span>
+      )}
+      <span className="attachment-body">
+        <span className="attachment-name">{spec.filename}</span>
+        <span className="attachment-meta">{formatBytes(spec.size)}</span>
+      </span>
+    </a>
+  );
+}
+
+// Renders the attachments carried by a user message as compact cards.
 export function MessageAttachments({ event }: { event: EventRecord }) {
   const ctx = useContext(AttachmentContext);
   const specs = attachmentSpecsFor(event);
   if (!ctx || specs.length === 0) return null;
   return (
     <div className="message-attachments">
-      {specs.map((spec) => {
-        const url = attachmentUrl(ctx.host, ctx.token, ctx.sessionId, spec.id);
-        if (spec.kind === "image") {
-          return (
-            <a
-              key={spec.id}
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              className="message-attachment-image"
-              title={spec.filename}
-            >
-              {/* Token-query serve URL — next/image can't optimize it. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={url} alt={spec.filename} loading="lazy" />
-            </a>
-          );
-        }
-        return (
-          <a
-            key={spec.id}
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className="message-attachment-file"
-            title={spec.filename}
-          >
-            <span className="attachment-glyph" aria-hidden="true">
-              ▤
-            </span>
-            <span className="attachment-name">{spec.filename}</span>
-          </a>
-        );
-      })}
+      {specs.map((spec) => (
+        <MessageAttachmentCard
+          key={spec.id}
+          spec={spec}
+          url={attachmentUrl(ctx.host, ctx.token, ctx.sessionId, spec.id)}
+        />
+      ))}
     </div>
   );
 }
@@ -223,52 +378,79 @@ export function MessageAttachments({ event }: { event: EventRecord }) {
 export function AttachmentTray({
   items,
   onRemove,
+  onRetry,
+  onClear,
 }: {
   items: PendingAttachment[];
   onRemove: (localId: string) => void;
+  onRetry: (localId: string) => void;
+  onClear: () => void;
 }) {
   if (items.length === 0) return null;
+  const total = items.reduce((sum, item) => sum + item.size, 0);
+  const summary = `${items.length} file${items.length === 1 ? "" : "s"} · ${formatBytes(total)}`;
   return (
-    <div className="attachment-tray" role="list">
-      {items.map((item) => (
-        <div
-          key={item.localId}
-          className={`attachment-chip is-${item.status}`}
-          role="listitem"
-          title={item.error ?? item.name}
-        >
-          {item.isImage && item.previewUrl ? (
-            // Local object URL preview — next/image can't optimize blob URLs.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              className="attachment-thumb"
-              src={item.previewUrl}
-              alt={item.name}
-            />
-          ) : (
-            <span className="attachment-glyph" aria-hidden="true">
-              ▤
-            </span>
-          )}
-          <span className="attachment-name">{item.name}</span>
-          {item.status === "uploading" ? (
-            <span className="attachment-spinner" aria-label="Uploading" />
-          ) : null}
-          {item.status === "error" ? (
-            <span className="attachment-error" aria-hidden="true">
-              !
-            </span>
-          ) : null}
-          <button
-            type="button"
-            className="attachment-remove"
-            aria-label={`Remove ${item.name}`}
-            onClick={() => onRemove(item.localId)}
+    <div className="attachment-tray-wrap">
+      <div className="attachment-tray-header">
+        <span className="attachment-tray-count">{summary}</span>
+        <button type="button" className="attachment-clear" onClick={onClear}>
+          Clear all
+        </button>
+      </div>
+      <div className="attachment-tray" role="list">
+        {items.map((item) => (
+          <div
+            key={item.localId}
+            className={`attachment-chip is-${item.status}`}
+            role="listitem"
+            title={item.error ?? item.name}
           >
-            ×
-          </button>
-        </div>
-      ))}
+            {item.isImage && item.previewUrl ? (
+              // Local object URL preview — next/image can't optimize blob URLs.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                className="attachment-thumb"
+                src={item.previewUrl}
+                alt={item.name}
+              />
+            ) : (
+              <span className="attachment-tile" aria-hidden="true">
+                <FileIcon />
+              </span>
+            )}
+            <span className="attachment-body">
+              <span className="attachment-name">{item.name}</span>
+              <span className="attachment-meta">
+                {item.status === "error"
+                  ? "Upload failed"
+                  : `${typeTag(item.name, item.isImage)} · ${formatBytes(item.size)}`}
+              </span>
+            </span>
+            {item.status === "uploading" ? (
+              <span className="attachment-spinner" aria-label="Uploading" />
+            ) : null}
+            {item.status === "error" ? (
+              <button
+                type="button"
+                className="attachment-retry"
+                aria-label={`Retry ${item.name}`}
+                title="Retry upload"
+                onClick={() => onRetry(item.localId)}
+              >
+                ↻
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="attachment-remove"
+              aria-label={`Remove ${item.name}`}
+              onClick={() => onRemove(item.localId)}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

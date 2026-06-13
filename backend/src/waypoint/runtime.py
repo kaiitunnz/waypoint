@@ -1182,6 +1182,8 @@ class SessionRuntime:
                 await self.terminate(session_id)
         self._close_structured_log(session_id)
         self.storage.delete_session(session_id)
+        # Reclaim the session's uploaded blobs, which can be large.
+        self.attachments.discard(session_id)
         # Drop this session's blackboard posts along with its record.
         pruned = self.storage.prune_board_for_session(session_id)
         self.registry.plugin_for(session).on_session_deleted(self, session)

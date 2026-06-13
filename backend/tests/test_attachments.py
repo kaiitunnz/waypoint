@@ -117,3 +117,20 @@ def test_codex_input_items_image_and_file(tmp_path: Path) -> None:
     # ...while the image rides as a native localImage item.
     local_images = [i for i in items if i["type"] == "localImage"]
     assert local_images[0]["path"] == str(image.path)
+
+
+def test_codex_input_items_omits_empty_text(tmp_path: Path) -> None:
+    image = _resolved(tmp_path, "p.png", "image/png", PNG_BYTES)
+    items = _input_items("", [image])
+    # An image-only turn must not emit a blank text item.
+    assert all(item["type"] != "text" for item in items)
+    assert items == [{"type": "localImage", "path": str(image.path)}]
+
+
+def test_discard_removes_session_dir(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    spec = store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")
+    store.discard("s")
+    assert store.resolve("s", spec.id) is None
+    # Discarding a session with no attachments is a no-op, never raises.
+    store.discard("never-existed")

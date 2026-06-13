@@ -1,6 +1,7 @@
 import asyncio
 import json
 import shutil
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any
@@ -61,6 +62,10 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=True,
 )
+backends_app = typer.Typer(
+    help="Inspect backend capabilities and importable threads on a running server.",
+    invoke_without_command=True,
+)
 session_app = typer.Typer(
     help="Launch sessions via an in-process runtime (one-shot, no running server).",
     no_args_is_help=True,
@@ -73,6 +78,7 @@ board_app = typer.Typer(
     help="Blackboard messaging shared across sessions.",
     no_args_is_help=True,
 )
+app.add_typer(backends_app, name="backends")
 app.add_typer(session_app, name="session")
 app.add_typer(sessions_app, name="sessions")
 app.add_typer(board_app, name="board")
@@ -132,10 +138,33 @@ def doctor(ctx: typer.Context) -> None:
     run_doctor(_settings_from_ctx(ctx))
 
 
-@app.command()
+@backends_app.callback()
 def backends(ctx: typer.Context) -> None:
     """List backends and their capabilities (permission modes, approval decisions)."""
+    if ctx.invoked_subcommand is not None:
+        return
     _emit(_settings_from_ctx(ctx), lambda c: {"backends": c.list_backends()})
+
+
+@backends_app.command("threads")
+def backends_threads(
+    ctx: typer.Context,
+    backend: Annotated[str, typer.Argument()],
+    launch_target_id: Annotated[
+        str | None,
+        typer.Option(
+            help="Resolve importable threads for a specific launch target "
+            "(e.g. a remote host or worktree)."
+        ),
+    ] = None,
+) -> None:
+    """List a backend's importable threads."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "threads": c.list_threads(backend, launch_target_id=launch_target_id)
+        },
+    )
 
 
 @app.command()
@@ -318,6 +347,20 @@ def _parse_answers(raw: str | None) -> list[dict[str, Any]] | None:
     return parsed
 
 
+def _parse_json_object(source: str) -> dict[str, Any]:
+    try:
+        raw = sys.stdin.read() if source == "-" else Path(source).read_text("utf-8")
+    except OSError as exc:
+        raise typer.BadParameter(f"--json could not read {source}: {exc}") from exc
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(f"--json is not valid JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise typer.BadParameter("--json must be a JSON object")
+    return parsed
+
+
 def _parse_meta(items: list[str] | None) -> dict[str, str]:
     metadata: dict[str, str] = {}
     for item in items or []:
@@ -356,6 +399,11 @@ def sessions_events(
             session_id, messages=messages, before_sequence=before_sequence
         ),
     )
+
+
+def _conversation_events(events_page: dict[str, Any]) -> list[dict[str, Any]]:
+    visible = {"user_input", "agent_output"}
+    return [event for event in events_page["events"] if event.get("kind") in visible]
 
 
 @sessions_app.command("start")
@@ -510,6 +558,66 @@ def sessions_answer_question(
             "session": c.answer_question(
                 session_id, answer, tool_use_id=tool_use_id, answers=answers
             )
+        },
+    )
+
+
+@sessions_app.command("import")
+def sessions_import(
+    ctx: typer.Context,
+    backend: Annotated[str, typer.Argument()],
+    json_source: Annotated[
+        str,
+        typer.Option(
+            "--json",
+            help="Path to a JSON object body, or - to read it from stdin.",
+            metavar="FILE|-",
+        ),
+    ],
+) -> None:
+    """Import a backend-native thread into Waypoint."""
+    body = _parse_json_object(json_source)
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"session": c.import_thread(backend, body)},
+    )
+
+
+@sessions_app.command("output")
+def sessions_output(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    messages: Annotated[int | None, typer.Option()] = None,
+    text: Annotated[
+        bool,
+        typer.Option(
+            "--text",
+            help="Print only the concatenated agent output text for shell piping.",
+        ),
+    ] = False,
+) -> None:
+    """Show just the conversational transcript from a session."""
+    if text:
+        settings = _settings_from_ctx(ctx)
+        try:
+            with WaypointClient(settings) as client:
+                events = _conversation_events(
+                    client.get_events(session_id, messages=messages)
+                )
+        except WaypointError as exc:
+            typer.echo(f"error: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        typer.echo(
+            "".join(
+                event["text"] for event in events if event.get("kind") == "agent_output"
+            ),
+            nl=False,
+        )
+        return
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "events": _conversation_events(c.get_events(session_id, messages=messages))
         },
     )
 

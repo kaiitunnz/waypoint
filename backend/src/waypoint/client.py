@@ -158,6 +158,19 @@ class WaypointClient:
         ).json()
         return data
 
+    def list_threads(
+        self, backend: str, *, launch_target_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        params = (
+            {"launch_target_id": launch_target_id}
+            if launch_target_id is not None
+            else None
+        )
+        data: list[dict[str, Any]] = self._request(
+            "GET", f"/api/backends/{backend}/threads", params=params
+        ).json()["threads"]
+        return data
+
     def get_events(
         self,
         session_id: str,
@@ -202,6 +215,12 @@ class WaypointClient:
         data: dict[str, Any] = self._request("POST", "/api/sessions", json=body).json()[
             "session"
         ]
+        return data
+
+    def import_thread(self, backend: str, body: dict[str, Any]) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/backends/{backend}/sessions/import", json=body
+        ).json()["session"]
         return data
 
     def upload_attachment(self, session_id: str, path: Path) -> dict[str, Any]:

@@ -49,6 +49,15 @@ waypoint board post job:drop-py38 \
 updates the `task:<n>` cell. Workers never write cells — a worker's own posts
 vanish when it is reaped, so durable state stays with the long-lived lead.
 
+> **Pitfall — `--key` is an upsert that REPLACES the cell's text.** There is no
+> text-preserving metadata patch (`board edit-entry` also requires the text). So
+> to flip a task's status, **re-post the cell with its full contract text** plus
+> the new `--meta`; keep that text in a shell variable so you can repost it
+> verbatim. Never post a keyed cell with throwaway text (`"task 3 -> <sid>"`) just
+> to change `state` — that silently destroys the contract the worker reads, and
+> the worker will (correctly) report blocked for want of scope. Track the
+> assignee in `--meta`, not in the text.
+
 ## Handing a task to a worker
 
 Spawn the worker in the task's worktree (see `references/playbook.md`), then send
@@ -73,5 +82,5 @@ waypoint sessions send <worker-sid> \
 ## Variant: add a reviewer
 
 For risky changes, before the step-4 merge the lead asks the reviewer session (a
-different model) "does branch `wq/<job>/task-<n>` do exactly `task:<n>`?" and
+different model) "does branch `wq/<job>-t<n>` do exactly `task:<n>`?" and
 merges only on a yes. One extra session; nothing else changes.

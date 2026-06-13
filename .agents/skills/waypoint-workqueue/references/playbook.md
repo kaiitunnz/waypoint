@@ -19,16 +19,22 @@ its code lives:
 
 ```bash
 n=3
-git -C "$repo" worktree add ".wq/$job/task-$n" -b "wq/$job/task-$n" "wq/$job"
+# Task branch is `wq/$job-t$n`, NOT `wq/$job/task-$n`: a slash makes it a child
+# of the integration ref `wq/$job`, and git cannot hold both a branch and a
+# directory at that path ("cannot lock ref ... exists").
+git -C "$repo" worktree add "$repo/../.wq/$job/task-$n" -b "wq/$job-t$n" "wq/$job"
 sid=$(waypoint sessions start \
   --backend codex --model gpt-5-codex \
-  --cwd "$repo/.wq/$job/task-$n" \
+  --cwd "$repo/../.wq/$job/task-$n" \
   --title "subagent:wq-$job-$n" | jq -r .session.id)
-waypoint board post job:$job "task $n -> $sid" --key task:$n --meta state=doing --meta assignee=$sid
+# Re-post the cell's FULL contract text (kept in $task_text) — NOT a stub like
+# "task $n -> $sid". `--key` replaces the cell text, so a stub wipes the scope
+# the worker reads. The assignee goes in --meta. See org-template.md.
+waypoint board post job:$job "$task_text" --key task:$n --meta state=doing --meta assignee=$sid
 # then send the worker the fixed message from org-template.md
 ```
 
-Put the worktree root **outside** the repo (e.g. `"$repo/../.wq/$job/task-$n"`)
+Put the worktree root **outside** the repo (as above, `"$repo/../.wq/..."`)
 or add `.wq/` to `.gitignore`. Git does not auto-ignore a nested worktree path,
 so an in-tree `.wq/` shows up as untracked in the integration branch.
 
@@ -46,11 +52,11 @@ between a single branch and the integration branch):
 
 ```bash
 git -C "$repo" switch "wq/$job"
-git -C "$repo" merge --no-ff "wq/$job/task-$n"
+git -C "$repo" merge --no-ff "wq/$job-t$n"
 # run the task's check, e.g. uv run pytest pkg/auth
 ```
 
-- Clean merge and green check → `git -C "$repo" worktree remove ".wq/$job/task-$n"`
+- Clean merge and green check → `git -C "$repo" worktree remove "$repo/../.wq/$job/task-$n"`
   and set the task done: `waypoint board post job:$job "task $n merged" --key task:$n --meta state=done`.
 - Conflict or red → `git -C "$repo" merge --abort`, hand the task back
   (`--meta state=todo`), and reassign it (often a fresh worktree).
@@ -64,7 +70,7 @@ and report integrated vs. blocked counts.
 1. Read the task: `waypoint board read job:<job-id> --key task:<n>`.
 2. Do exactly that task in your cwd (an isolated worktree). Commit once the
    task's check passes: `git add -A && git commit -m "task <n>"`.
-3. Report: `waypoint board post job:<job-id> "task <n> done — branch wq/<job-id>/task-<n>"`.
+3. Report: `waypoint board post job:<job-id> "task <n> done — branch wq/<job-id>-t<n>"`.
    If stuck, post `"task <n> blocked — <reason>"` and stop. Never fake success.
 4. Go idle. The lead merges, or hands the task back to you.
 

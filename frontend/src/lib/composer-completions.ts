@@ -329,7 +329,7 @@ export function useCommandCompletions({
 
 // The [start, end) bounds of the non-whitespace word that ``pos`` sits in (or
 // at the edge of). Empty run when ``pos`` is on whitespace.
-function wordRangeAt(text: string, pos: number): [number, number] {
+export function wordRangeAt(text: string, pos: number): [number, number] {
   let start = pos;
   while (start > 0 && !/\s/.test(text[start - 1])) start--;
   let end = pos;

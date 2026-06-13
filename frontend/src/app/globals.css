@@ -7085,6 +7085,16 @@ html[data-theme="light"] .ask-question-note-input {
   background: color-mix(in srgb, var(--danger) 10%, var(--bg-card-soft));
 }
 
+/* A referenced (linked) file reads with a brass edge so it's distinct from a
+   fresh upload. */
+.attachment-chip.is-referenced {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+}
+
+.attachment-chip.is-referenced .attachment-meta {
+  color: var(--accent-strong);
+}
+
 @keyframes attachment-chip-in {
   from {
     opacity: 0;
@@ -7502,6 +7512,7 @@ html[data-theme="light"] .session-files-modal {
   color: var(--muted);
 }
 
+.session-files-add,
 .session-files-open,
 .session-files-delete {
   display: inline-flex;
@@ -7523,9 +7534,19 @@ html[data-theme="light"] .session-files-modal {
     color 120ms ease;
 }
 
+.session-files-add {
+  font-size: 1.15rem;
+}
+
+.session-files-add:hover:not(:disabled),
 .session-files-open:hover {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   color: var(--accent-strong);
+}
+
+.session-files-add:disabled {
+  color: var(--success);
+  cursor: default;
 }
 
 .session-files-delete:hover {
@@ -7615,6 +7636,40 @@ html[data-theme="light"] .slash-suggestion.active {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The @-mention popover reuses the slash list, but each row is a file —
+   thumbnail/glyph on the left, name over size on the right. */
+.slash-suggestion.file-mention {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.file-mention-thumb,
+.file-mention .attachment-tile {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  flex: 0 0 auto;
+}
+
+.file-mention-thumb {
+  object-fit: cover;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.file-mention-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.file-mention .slash-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
 }
 
 .list-actions {

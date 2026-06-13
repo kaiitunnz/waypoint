@@ -21,6 +21,8 @@ import {
   useAttachments,
 } from "@/components/AttachmentTray";
 import { CommandSuggestions } from "@/components/CommandSuggestions";
+import { FileMentions } from "@/components/FileMentions";
+import { SessionFilesPanel } from "@/components/SessionFilesPanel";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import {
   COMPOSER_MIN_HEIGHT,
@@ -28,6 +30,7 @@ import {
   type TerminalSubmitResult,
 } from "@/lib/composer";
 import { useCommandCompletions } from "@/lib/composer-completions";
+import { useFileMentions } from "@/lib/use-file-mentions";
 import type { SessionRecord } from "@/lib/types";
 
 type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
@@ -50,7 +53,6 @@ interface TerminalComposeProps {
     attachmentIds: string[],
   ) => Promise<TerminalSubmitResult>;
   attachmentsEnabled: boolean;
-  onOpenFiles: () => void;
   onError: (message: string) => void;
   expanded: boolean;
   onExpandedChange: (next: boolean) => void;
@@ -74,7 +76,6 @@ export function TerminalCompose({
   onSubmit,
   onSubmitWithAttachments,
   attachmentsEnabled,
-  onOpenFiles,
   onError,
   expanded,
   onExpandedChange,
@@ -90,6 +91,7 @@ export function TerminalCompose({
   const [textareaHeight, setTextareaHeight] = useState<number | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [filesOpen, setFilesOpen] = useState(false);
   const attachments = useAttachments({ host, token, sessionId, onError });
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -130,6 +132,17 @@ export function TerminalCompose({
     draft,
     setDraft,
     enabled: expanded,
+    textareaRef,
+  });
+
+  const mentions = useFileMentions({
+    host,
+    token,
+    sessionId,
+    draft,
+    setDraft,
+    enabled: expanded && attachmentsEnabled,
+    onReference: attachments.referenceExisting,
     textareaRef,
   });
 
@@ -227,8 +240,11 @@ export function TerminalCompose({
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
-      // The suggestions menu owns Tab/Enter/Arrows/Esc when open, so
+      // The suggestion/mention menus own Tab/Enter/Arrows/Esc when open, so
       // Esc-to-dismiss takes precedence over Esc-to-collapse-drawer.
+      if (mentions.handleKey(event)) {
+        return;
+      }
       if (handleSuggestionKey(event)) {
         return;
       }
@@ -244,7 +260,7 @@ export function TerminalCompose({
       event.preventDefault();
       send();
     },
-    [handleSuggestionKey, send, onExpandedChange, refocusTerminal],
+    [mentions, handleSuggestionKey, send, onExpandedChange, refocusTerminal],
   );
 
   const toggle = useCallback(() => {
@@ -387,7 +403,7 @@ export function TerminalCompose({
                 <button
                   type="button"
                   className="ghost composer-attach term-compose-files"
-                  onClick={onOpenFiles}
+                  onClick={() => setFilesOpen(true)}
                   title="Session files"
                   aria-label="Session files"
                   tabIndex={expanded ? 0 : -1}
@@ -430,6 +446,29 @@ export function TerminalCompose({
           itemRefs={suggestionItemRefs}
           onApply={applySuggestion}
           onHover={setActiveIndex}
+        />
+      ) : null}
+      {mentions.open ? (
+        <FileMentions
+          host={host}
+          token={token}
+          sessionId={sessionId}
+          mentions={mentions.mentions}
+          activeIndex={mentions.activeIndex}
+          itemRefs={mentions.itemRefs}
+          onApply={mentions.apply}
+          onHover={mentions.setActiveIndex}
+        />
+      ) : null}
+      {attachmentsEnabled ? (
+        <SessionFilesPanel
+          host={host}
+          token={token}
+          sessionId={sessionId}
+          open={filesOpen}
+          onClose={() => setFilesOpen(false)}
+          onReference={attachments.referenceExisting}
+          referencedIds={attachments.attachedIds}
         />
       ) : null}
     </section>

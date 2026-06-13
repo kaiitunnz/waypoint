@@ -3,7 +3,7 @@
 Direct messaging injects input into the target session, which **starts a turn**
 for that agent. Treat it accordingly.
 
-## A send interrupts
+## A send injects input
 
 `waypoint sessions send` flips the target to `running` and hands the text to its
 backend. There is no "deliver when free" queue you can rely on — sending to a
@@ -38,6 +38,6 @@ Reach for the **blackboard** (`references/blackboard.md`) instead when:
 - **Broadcasting** to many sessions, or posting a finding others may or may not
   consume → post to a channel, not N direct sends.
 - **The target is busy** and the message is informational, not urgent → post it
-  where the target reads when ready, rather than interrupting its turn.
+  where the target reads when ready, rather than injecting input into its turn.
 - **No specific recipient** ("whoever picks this up") → direct addressing does
   not apply; a `topic:` channel does.

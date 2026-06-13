@@ -11,15 +11,17 @@ waypoint sessions start \
 ```
 
 - Pick `--backend` deliberately — this is the main reason to use a Waypoint
-  sub-session over a harness subagent. Use `waypoint doctor` to see which
-  backend ids are available locally.
+  sub-session over a harness subagent. Use `waypoint backends` to see which
+  backend ids are registered, and `waypoint doctor` to check local CLI
+  availability when launch fails.
 - Pick `--cwd` deliberately. For repo work, pass the repo root; for scratch or
   host inspection, pass an explicit safe directory. Do not assume the child
   should inherit your own working directory.
 - Always set the `subagent:` title prefix so the session is recognizable as one
   you own.
-- The child **inherits your permission mode** automatically; pass
-  `--permission-mode` only to override it. See `references/permissions.md`.
+- A child on the **same backend** inherits your permission mode automatically;
+  cross-backend children fall back to that backend's default. Pass
+  `--permission-mode` only to override this. See `references/permissions.md`.
 - Capture the returned session id. Keep it for the rest of the turn.
 
 Then send the task as the first input:

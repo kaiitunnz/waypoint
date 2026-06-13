@@ -10,8 +10,9 @@ waypoint sessions start --backend <id> --cwd <path> --effort <effort>
 waypoint sessions start --backend <id> --cwd <path> --permission-mode <mode>
 ```
 
-Use `waypoint doctor` or `waypoint sessions start --help` to discover available
-backend ids and local CLI availability when launch fails.
+Use `waypoint backends` to discover registered backend ids and capabilities.
+Use `waypoint doctor` for local CLI availability when launch fails, and
+`waypoint sessions start --help` for the installed flag surface.
 
 Choose `cwd` deliberately. For repository work, use the repo root. For host
 inspection or scratch work, use an explicit safe directory rather than assuming

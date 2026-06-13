@@ -35,7 +35,7 @@ waypoint board post team:$PARENT "blocked on migration review" --key status
 # Attach structured metadata (repeatable key=value):
 waypoint board post topic:bench "throughput 1240 rps" --meta run=3 --meta host=gpu1
 
-# Read a whole channel, or just new entries since an id, or one cell:
+# Read a whole channel, append-log entries since an id, or one cell:
 waypoint board read topic:auth-refactor
 waypoint board read topic:auth-refactor --since 42
 waypoint board read team:$PARENT --key status
@@ -89,8 +89,11 @@ path). Colons and dashes are fine.
 The board is pull-based: nothing tells you an entry arrived. An agent that never
 looks never sees it. So build the habit explicitly —
 
-- **Start of a turn** on shared work: `board read <channel> --since <last-id>` to
-  pick up what landed since you last looked. Track the highest id you've seen.
+- **Start of a turn** on shared work: use
+  `board read <channel> --since <last-id>` to pick up new append-log entries.
+  Track the highest id you've seen. Because keyed cells overwrite in place and
+  keep their original id, also read the whole channel or the specific `--key`
+  cells you depend on when cell updates matter.
 - **End of a turn**: post what a peer or parent would need (a result, a status
   cell update) before you go idle.
 
@@ -103,4 +106,4 @@ looks never sees it. So build the habit explicitly —
 - **Both**, occasionally: post the detail to a channel, then fire a one-line
   `waypoint sessions send <id> "check board <channel>"` to wake an idle peer.
   Pull store plus a light push — use it sparingly, and mind that the send still
-  interrupts (see `etiquette.md`).
+  injects input (see `etiquette.md`).

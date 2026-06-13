@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
 
+from waypoint.attachments import ResolvedAttachment, append_attachment_paths
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.schemas import (
     SessionInputRequest,
@@ -35,9 +36,17 @@ class TmuxTransport(TransportAdapter):
         state = session.transport_state
         return state.get("tmux_pane") or state.get("tmux_session") or session.id
 
-    async def send_input(self, session: SessionRecord, text: str) -> None:
+    async def send_input(
+        self,
+        session: SessionRecord,
+        text: str,
+        attachments: list[ResolvedAttachment] | None = None,
+    ) -> None:
+        # A raw terminal can't carry binary, so attachments degrade to their
+        # host paths appended to the message; the inner CLI reads them itself.
+        payload = append_attachment_paths(text, attachments or [])
         try:
-            await self.adapter.send_input(self._target(session), text, True)
+            await self.adapter.send_input(self._target(session), payload, True)
         except TmuxError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)

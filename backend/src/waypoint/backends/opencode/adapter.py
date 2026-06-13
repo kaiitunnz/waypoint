@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from waypoint.attachments import ResolvedAttachment
 from waypoint.backends.opencode.client import (
     LocalOpenCodeClient,
     OpenCodeHttpClient,
@@ -977,20 +978,31 @@ class OpenCodeAdapter:
         # The plugin records the user-facing restore/import note; the adapter
         # stays silent here so the transcript only shows one entry.
 
-    async def send_input(self, session_id: str, text: str) -> None:
+    async def send_input(
+        self,
+        session_id: str,
+        text: str,
+        attachments: list[ResolvedAttachment] | None = None,
+    ) -> None:
         state = self._sessions.get(session_id)
         if state is None:
             raise OpenCodeError(f"session not found: {session_id}")
         model = self._split_model_ref(state.model)
         client = self._require_client()
-        payload: dict[str, Any] = {
-            "parts": [
+        parts: list[dict[str, Any]] = [{"type": "text", "text": text}]
+        # Embed every attachment as a data-url file part rather than a host
+        # path: the OpenCode server may run on a remote host (SSH launch
+        # target) that can't see the local attachments directory.
+        for attachment in attachments or []:
+            parts.append(
                 {
-                    "type": "text",
-                    "text": text,
+                    "type": "file",
+                    "mime": attachment.spec.mime,
+                    "filename": attachment.spec.filename,
+                    "url": attachment.to_data_url(),
                 }
-            ]
-        }
+            )
+        payload: dict[str, Any] = {"parts": parts}
         if model is not None:
             payload["model"] = model
         if state.effort:

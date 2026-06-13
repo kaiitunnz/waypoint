@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING
 
+from waypoint.attachments import ResolvedAttachment
 from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
 
@@ -23,14 +24,19 @@ class OpenCodeTransport(TransportAdapter):
             )
         )
 
-    async def send_input(self, session: SessionRecord, text: str) -> None:
+    async def send_input(
+        self,
+        session: SessionRecord,
+        text: str,
+        attachments: list[ResolvedAttachment] | None = None,
+    ) -> None:
         adapter = await self._plugin._get_or_create_adapter(
             self._runtime,
             session.launch_target_id,
             session.cwd,
             self._effective_args(session),
         )
-        await adapter.send_input(session.id, text)
+        await adapter.send_input(session.id, text, attachments)
 
     async def interrupt(self, session: SessionRecord) -> None:
         adapter = await self._plugin._get_or_create_adapter(

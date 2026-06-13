@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 
 from fastapi import HTTPException, status
 
+from waypoint.attachments import ResolvedAttachment
 from waypoint.schemas import SessionRecord
 
 
@@ -19,7 +20,12 @@ class TransportAdapter(ABC):
     supports_resume: bool = False
 
     @abstractmethod
-    async def send_input(self, session: SessionRecord, text: str) -> None: ...
+    async def send_input(
+        self,
+        session: SessionRecord,
+        text: str,
+        attachments: list[ResolvedAttachment] | None = None,
+    ) -> None: ...
 
     @abstractmethod
     async def interrupt(self, session: SessionRecord) -> None: ...

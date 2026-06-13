@@ -80,6 +80,7 @@ class TmuxPlugin:
         supports_thread_discovery=False,
         supports_thread_import=False,
         supports_slash_compact=False,
+        supports_attachments=True,
         model_source=ModelSource.NONE,
         badges={"glyph": "T", "color": "#94a3b8"},
         is_fallback_for_managed_launch=True,

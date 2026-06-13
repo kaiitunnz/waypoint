@@ -115,6 +115,7 @@ class CodexPlugin:
         supports_plan_approval=True,
         supports_slash_compact=True,
         supports_approval_note=False,
+        supports_attachments=True,
         supports_custom_cli_args=True,
         supports_config_overrides=True,
         # Codex honours "approve for session" on tool approvals

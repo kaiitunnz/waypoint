@@ -16,6 +16,7 @@ from typing import Any, TextIO
 from fastapi import HTTPException, status
 
 from waypoint.assistant_assets import AssistantAssetError, ensure_assistant_assets
+from waypoint.attachments import AttachmentStore, ResolvedAttachment
 from waypoint.backends import BackendRegistry, get_registry
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
@@ -26,6 +27,7 @@ from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.scheduler import Scheduler
 from waypoint.schemas import (
     AssistantSummary,
+    AttachmentSpec,
     BoardChannel,
     BoardEntry,
     BoardEntryUpdateRequest,
@@ -140,6 +142,7 @@ class SessionRuntime:
     ) -> None:
         self.settings = settings
         self.storage = storage
+        self.attachments = AttachmentStore(settings.attachments_dir)
         self.tmux = TmuxAdapter()
         self.normalizer = TerminalNormalizer()
         self.broadcast = BroadcastHub()
@@ -794,15 +797,38 @@ class SessionRuntime:
         # SSE events; recording the user event afterward would land it last
         # in the transcript. Revert on send failure so the UI doesn't show
         # a stuck "running" state for an unsent message.
+        attachments = self._resolve_attachments(session.id, request.attachments)
         previous_status = session.status
         updated = self.storage.update_session(session.id, status=SessionStatus.RUNNING)
-        await self._record_user_event(session.id, request.text, submit=request.submit)
+        await self._record_user_event(
+            session.id,
+            request.text,
+            submit=request.submit,
+            attachments=[item.spec for item in attachments],
+        )
         try:
-            await transport.send_input(session, request.text)
+            await transport.send_input(session, request.text, attachments or None)
         except Exception:
             self.storage.update_session(session.id, status=previous_status)
             raise
         return updated
+
+    def _resolve_attachments(
+        self, session_id: str, attachment_ids: list[str] | None
+    ) -> list[ResolvedAttachment]:
+        if not attachment_ids:
+            return []
+        resolved: list[ResolvedAttachment] = []
+        for attachment_id in attachment_ids:
+            match = self.attachments.resolve(session_id, attachment_id)
+            if match is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"attachment not found: {attachment_id}",
+                )
+            spec, path = match
+            resolved.append(ResolvedAttachment(spec=spec, path=path))
+        return resolved
 
     async def list_command_completions(
         self,
@@ -1485,8 +1511,13 @@ class SessionRuntime:
         submit: bool,
         status: SessionStatus = SessionStatus.RUNNING,
         extra_metadata: dict[str, Any] | None = None,
+        attachments: list[AttachmentSpec] | None = None,
     ) -> None:
         metadata: dict[str, Any] = {"submit": submit, "status": status}
+        if attachments:
+            metadata["attachments"] = [
+                spec.model_dump(mode="json") for spec in attachments
+            ]
         if extra_metadata:
             metadata.update(extra_metadata)
         event = EventRecord(

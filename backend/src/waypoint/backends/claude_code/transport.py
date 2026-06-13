@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
 
+from waypoint.attachments import ResolvedAttachment
 from waypoint.backends.claude_code.adapter import ClaudeCliError
 from waypoint.schemas import SessionRecord
 from waypoint.transports.base import TransportAdapter
@@ -35,10 +36,15 @@ class ClaudeTransport(TransportAdapter):
             )
         return adapter
 
-    async def send_input(self, session: SessionRecord, text: str) -> None:
+    async def send_input(
+        self,
+        session: SessionRecord,
+        text: str,
+        attachments: list[ResolvedAttachment] | None = None,
+    ) -> None:
         adapter = self._require_adapter()
         try:
-            await adapter.send_input(session.id, text)
+            await adapter.send_input(session.id, text, attachments)
         except ClaudeCliError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)

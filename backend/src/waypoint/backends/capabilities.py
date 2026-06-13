@@ -51,6 +51,13 @@ class BackendCapabilities(_FrozenModel):
     supports_plan_approval: bool = False
     supports_slash_compact: bool = False
     supports_approval_note: bool = False
+    # The plugin's transport accepts uploaded attachments alongside text
+    # input. Every backend that sets this delivers images natively where it
+    # can (inline content blocks / local image items / file parts) and falls
+    # back to appending the host file path for other files; the universal
+    # fallback is plain path-insertion (tmux). Drives whether the frontend
+    # composer shows the upload affordance.
+    supports_attachments: bool = False
     permission_modes: tuple[PermissionModeSpec, ...] = ()
     effort_levels: tuple[str, ...] = ()
     model_source: ModelSource = ModelSource.NONE

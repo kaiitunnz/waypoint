@@ -67,7 +67,7 @@ def test_save_dedupes_colliding_filenames(tmp_path: Path) -> None:
     assert first.filename == second.filename == "report.pdf"
 
 
-def test_list_orders_newest_first_and_skips_non_sidecars(tmp_path: Path) -> None:
+def test_entries_orders_newest_first_and_skips_non_sidecars(tmp_path: Path) -> None:
     store = _store(tmp_path)
     old = store.save("s", data=b"old", filename="old.txt", content_type="text/plain")
     new = store.save("s", data=b"new", filename="new.txt", content_type="text/plain")
@@ -79,20 +79,51 @@ def test_list_orders_newest_first_and_skips_non_sidecars(tmp_path: Path) -> None
     # A stray user-uploaded JSON blob must not be mistaken for a sidecar.
     (session_dir / "notes.json").write_text('{"hello": 1}', encoding="utf-8")
 
-    listed = store.list("s")
+    listed = store.entries("s")
     assert [spec.id for spec, _ in listed] == [new.id, old.id]
     assert all(mtime > 0 for _, mtime in listed)
 
 
-def test_list_empty_for_unknown_session(tmp_path: Path) -> None:
-    assert _store(tmp_path).list("never-existed") == []
+def test_entries_empty_for_unknown_session(tmp_path: Path) -> None:
+    assert _store(tmp_path).entries("never-existed") == []
 
 
-def test_list_empty_after_discard(tmp_path: Path) -> None:
+def test_entries_empty_after_discard(tmp_path: Path) -> None:
     store = _store(tmp_path)
     store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")
     store.discard("s")
-    assert store.list("s") == []
+    assert store.entries("s") == []
+
+
+def test_sweep_reaps_unsent_orphan(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    spec = store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")
+    resolved = store.resolve("s", spec.id)
+    assert resolved is not None
+    # Age the blob past the TTL (epoch 1000 is well before now - 60s).
+    os.utime(resolved[1].parent / f"{spec.id}.json", (1000, 1000))
+
+    assert store.sweep("s", ttl_seconds=60) == 1
+    assert store.resolve("s", spec.id) is None
+
+
+def test_sweep_keeps_recent_and_sent(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    recent = store.save("s", data=PNG_BYTES, filename="r.png", content_type="image/png")
+    sent = store.save("s", data=PNG_BYTES, filename="s.png", content_type="image/png")
+    resolved = store.resolve("s", sent.id)
+    assert resolved is not None
+    # The sent blob is old but referenced; the recent blob is young.
+    os.utime(resolved[1].parent / f"{sent.id}.json", (1000, 1000))
+    store.mark_sent("s", [sent.id])
+
+    assert store.sweep("s", ttl_seconds=60) == 0
+    assert store.resolve("s", recent.id) is not None
+    assert store.resolve("s", sent.id) is not None
+
+
+def test_sweep_missing_session_is_noop(tmp_path: Path) -> None:
+    assert _store(tmp_path).sweep("never-existed", ttl_seconds=60) == 0
 
 
 def test_delete_removes_blob_and_sidecar(tmp_path: Path) -> None:

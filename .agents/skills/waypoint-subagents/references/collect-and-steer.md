@@ -41,6 +41,20 @@ See `references/permissions.md` for reading the pending request, the
 backend-specific `<decision>` values, tool-use vs. plan approvals, and choosing a
 child's permission mode at spawn time so it stalls less often.
 
+## Answer a question
+
+A child can instead be blocked on a question (an `AskUserQuestion`, surfacing as
+a `tool_call` with `tool_name: AskUserQuestion`, not an `approval_request`).
+Answer it with `answer-question`, not `send` or `approve`:
+
+```bash
+waypoint sessions answer-question <session-id> --answer "<your answer>"
+```
+
+`send` injects a message and leaves the question blocking; only `answer-question`
+releases it. See `references/permissions.md` for the structured `--answers-json`
+shape and `--tool-use-id`.
+
 ## Interrupt a stuck child
 
 ```bash

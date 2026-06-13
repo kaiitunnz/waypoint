@@ -13,6 +13,7 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
+    Response,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
@@ -334,6 +335,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return spec.model_dump(mode="json")
 
+    @app.get("/api/sessions/{session_id}/attachments")
+    async def list_attachments(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> list[dict[str, Any]]:
+        context.runtime.get_session(session_id)
+        return [
+            {**spec.model_dump(mode="json"), "uploaded_at": uploaded_at}
+            for spec, uploaded_at in context.runtime.attachments.list(session_id)
+        ]
+
+    @app.delete("/api/sessions/{session_id}/attachments")
+    async def delete_all_attachments(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Response:
+        context.runtime.get_session(session_id)
+        context.runtime.attachments.discard(session_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     @app.get("/api/sessions/{session_id}/attachments/{attachment_id}")
     async def serve_attachment(
         session_id: str,
@@ -358,6 +379,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             filename=spec.filename,
             content_disposition_type="inline",
         )
+
+    @app.delete("/api/sessions/{session_id}/attachments/{attachment_id}")
+    async def delete_attachment(
+        session_id: str,
+        attachment_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Response:
+        # Frees a single blob. Called both by the composer (removing a pending
+        # upload) and by the session files manager, which can delete a file a
+        # sent message still references — that message's transcript card then
+        # 404s on its thumbnail, which the client renders as a file fallback.
+        context.runtime.get_session(session_id)
+        if not context.runtime.attachments.delete(session_id, attachment_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="attachment not found"
+            )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.post("/api/sessions/{session_id}/interrupt")
     async def session_interrupt(

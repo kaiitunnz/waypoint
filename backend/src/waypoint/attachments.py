@@ -7,6 +7,8 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from waypoint.schemas import AttachmentKind, AttachmentSpec
 
 _UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
@@ -63,15 +65,34 @@ def append_attachment_paths(text: str, attachments: list[ResolvedAttachment]) ->
     return f"{text}\n\n{block}" if text else block
 
 
+def _write_unique(session_dir: Path, name: str, data: bytes) -> str:
+    """Write ``data`` under ``name`` in ``session_dir``, suffixing `` (1)``,
+    `` (2)`` … on collision, and return the stored filename. Uses exclusive
+    create so two concurrent uploads of the same name never clobber each other.
+    """
+    stem, suffix = Path(name).stem, Path(name).suffix
+    candidate = name
+    counter = 1
+    while True:
+        try:
+            with (session_dir / candidate).open("xb") as handle:
+                handle.write(data)
+            return candidate
+        except FileExistsError:
+            candidate = f"{stem} ({counter}){suffix}"
+            counter += 1
+
+
 class AttachmentStore:
     """Persists uploaded blobs under a per-session directory and resolves
     server-issued ids back to their host path.
 
-    Layout: ``<root>/<session_id>/<id><ext>`` for the blob plus a
-    ``<id>.json`` sidecar holding the :class:`AttachmentSpec` and the blob's
-    stored name. The id is a server-generated uuid and the only key the
-    client ever sends back, so a hostile client cannot point resolution at an
-    arbitrary path.
+    Layout: ``<root>/<session_id>/<name>`` for the blob — the sanitized
+    original filename, de-duplicated with `` (1)``, `` (2)`` … so the path
+    handed to path-based agents stays legible — plus a ``<id>.json`` sidecar
+    holding the :class:`AttachmentSpec` and that stored name. The id is a
+    server-generated uuid and the only key the client ever sends back, so a
+    hostile client cannot point resolution at an arbitrary path.
     """
 
     def __init__(self, root: Path) -> None:
@@ -91,10 +112,9 @@ class AttachmentStore:
         attachment_id = uuid.uuid4().hex
         clean_name = _sanitize_component(filename, fallback="file")
         mime = content_type or mimetypes.guess_type(clean_name)[0] or _DEFAULT_MIME
-        stored_name = f"{attachment_id}{Path(clean_name).suffix}"
         session_dir = self._session_dir(session_id)
         session_dir.mkdir(parents=True, exist_ok=True)
-        (session_dir / stored_name).write_bytes(data)
+        stored_name = _write_unique(session_dir, clean_name, data)
         spec = AttachmentSpec(
             id=attachment_id,
             filename=clean_name,
@@ -124,6 +144,48 @@ class AttachmentStore:
         if not blob.is_file():
             return None
         return AttachmentSpec.model_validate(raw), blob
+
+    def list(self, session_id: str) -> list[tuple[AttachmentSpec, float]]:
+        """Every attachment in the session, each paired with its upload time
+        (sidecar mtime), newest first. Skips anything that isn't a valid
+        sidecar so a user-uploaded ``*.json`` blob is never mistaken for one."""
+        session_dir = self._session_dir(session_id)
+        if not session_dir.is_dir():
+            return []
+        out: list[tuple[AttachmentSpec, float]] = []
+        for sidecar in session_dir.glob("*.json"):
+            if not _ATTACHMENT_ID.fullmatch(sidecar.stem):
+                continue
+            try:
+                raw = json.loads(sidecar.read_text(encoding="utf-8"))
+                raw.pop("stored_name", None)
+                spec = AttachmentSpec.model_validate(raw)
+                mtime = sidecar.stat().st_mtime
+            except (OSError, json.JSONDecodeError, ValidationError):
+                continue
+            out.append((spec, mtime))
+        out.sort(key=lambda item: item[1], reverse=True)
+        return out
+
+    def delete(self, session_id: str, attachment_id: str) -> bool:
+        """Remove a single attachment's blob and sidecar. Returns whether it
+        existed; best-effort on the file removals, so it never raises."""
+        if not _ATTACHMENT_ID.fullmatch(attachment_id):
+            return False
+        session_dir = self._session_dir(session_id)
+        sidecar = session_dir / f"{attachment_id}.json"
+        if not sidecar.is_file():
+            return False
+        try:
+            stored_name = json.loads(sidecar.read_text(encoding="utf-8")).get(
+                "stored_name"
+            )
+        except (OSError, json.JSONDecodeError):
+            stored_name = None
+        if isinstance(stored_name, str):
+            (session_dir / stored_name).unlink(missing_ok=True)
+        sidecar.unlink(missing_ok=True)
+        return True
 
     def discard(self, session_id: str) -> None:
         """Remove a session's attachment dir. Best-effort; never raises."""

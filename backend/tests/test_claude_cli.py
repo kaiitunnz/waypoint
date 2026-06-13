@@ -8,6 +8,7 @@ import pytest
 from waypoint.backends.claude_code.adapter import (
     ClaudeCliAdapter,
     ClaudeSessionState,
+    _read_stream_line,
     claude_cli_mode_for,
 )
 from waypoint.backends.claude_code.models import (
@@ -1485,3 +1486,19 @@ async def test_replays_real_task_stream_from_production_fixture() -> None:
     assert all(todo["status"] == "completed" for todo in final)
     assert final[0]["content"] == "Write waypoint-subagents skill"
     assert final[-1]["content"] == "Commit 7: hydration fix"
+
+
+@pytest.mark.asyncio
+async def test_read_stream_line_skips_oversized_line() -> None:
+    """A stream-json line longer than the buffer limit (e.g. a base64 tool
+    result echoing a large attachment) must be dropped, not tear down the
+    reader: readline() masks the overrun as a ValueError, so the reader reads
+    via readuntil() and drains the giant line so the next one still parses."""
+    reader = asyncio.StreamReader(limit=64)
+    reader.feed_data(b"x" * 500 + b"\n")
+    reader.feed_data(b'{"type":"result"}\n')
+    reader.feed_eof()
+
+    assert await _read_stream_line(reader, "s", "stdout") is None
+    assert await _read_stream_line(reader, "s", "stdout") == b'{"type":"result"}\n'
+    assert await _read_stream_line(reader, "s", "stdout") == b""

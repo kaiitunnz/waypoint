@@ -21,6 +21,10 @@ export interface PendingAttachment {
   previewUrl?: string;
   spec?: AttachmentSpec;
   error?: string;
+  // True when this is a reference to a file the session already stores (added
+  // via the picker or @-mention) rather than a fresh upload — removing it must
+  // not delete the shared blob.
+  referenced?: boolean;
 }
 
 // Human-readable byte size, e.g. "812 B", "2.4 MB".
@@ -172,11 +176,40 @@ export function useAttachments({
     [startUpload],
   );
 
-  // Free the server blob for any uploaded item so removed eager uploads don't
-  // orphan; best-effort, so a failed cleanup never blocks removal.
+  // Add a file the session already stores as a referenced attachment — no
+  // upload. Its id rides on send like any other; the image preview points at
+  // the server's serve endpoint (a plain URL, never an object URL to revoke).
+  const referenceExisting = useCallback(
+    (spec: AttachmentSpec) => {
+      setItems((prev) => {
+        if (prev.some((item) => item.spec?.id === spec.id)) return prev;
+        const isImage = spec.kind === "image";
+        return [
+          ...prev,
+          {
+            localId: `att-${attachmentSeq++}`,
+            name: spec.filename,
+            size: spec.size,
+            isImage,
+            status: "done",
+            spec,
+            referenced: true,
+            previewUrl: isImage
+              ? attachmentUrl(host, token, sessionId, spec.id)
+              : undefined,
+          },
+        ];
+      });
+    },
+    [host, token, sessionId],
+  );
+
+  // Free the server blob for a removed eager upload so it doesn't orphan;
+  // best-effort. A *referenced* item is just a pointer to a file the session
+  // already owns, so removing it must never delete that shared blob.
   const discardServerSide = useCallback(
     (item: PendingAttachment) => {
-      if (item.spec) {
+      if (item.spec && !item.referenced) {
         void deleteAttachment(host, token, sessionId, item.spec.id).catch(
           () => {},
         );
@@ -226,12 +259,19 @@ export function useAttachments({
   const readyIds = items
     .filter((item) => item.status === "done" && item.spec)
     .map((item) => (item.spec as AttachmentSpec).id);
+  // Every session-file id currently in the tray, so a picker can mark files
+  // that are already added.
+  const attachedIds = new Set(
+    items.flatMap((item) => (item.spec ? [item.spec.id] : [])),
+  );
 
   return {
     items,
     addFiles,
     remove,
     retry,
+    referenceExisting,
+    attachedIds,
     clear,
     discardAll,
     uploading,
@@ -401,9 +441,12 @@ export function AttachmentTray({
         {items.map((item) => (
           <div
             key={item.localId}
-            className={`attachment-chip is-${item.status}`}
+            className={`attachment-chip is-${item.status}${item.referenced ? " is-referenced" : ""}`}
             role="listitem"
-            title={item.error ?? item.name}
+            title={
+              item.error ??
+              (item.referenced ? `${item.name} (linked)` : item.name)
+            }
           >
             {item.isImage && item.previewUrl ? (
               // Local object URL preview — next/image can't optimize blob URLs.
@@ -423,7 +466,7 @@ export function AttachmentTray({
               <span className="attachment-meta">
                 {item.status === "error"
                   ? "Upload failed"
-                  : `${typeTag(item.name, item.isImage)} · ${formatBytes(item.size)}`}
+                  : `${item.referenced ? "↪ " : ""}${typeTag(item.name, item.isImage)} · ${formatBytes(item.size)}`}
               </span>
             </span>
             {item.status === "uploading" ? (

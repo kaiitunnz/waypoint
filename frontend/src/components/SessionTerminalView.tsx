@@ -48,7 +48,6 @@ interface SessionTerminalViewProps {
     attachmentIds: string[],
   ) => Promise<TerminalSubmitResult>;
   attachmentsEnabled: boolean;
-  onOpenFiles: () => void;
   onRequestPaste: () => void;
   onTerminalResize: (size: { cols: number; rows: number }) => void;
   onTerminalScrollChip: (direction: "up" | "down") => void;
@@ -89,7 +88,6 @@ export function SessionTerminalView({
   onTerminalSubmit,
   onTerminalSubmitWithAttachments,
   attachmentsEnabled,
-  onOpenFiles,
   onRequestPaste,
   onTerminalResize,
   onTerminalScrollChip,
@@ -302,7 +300,6 @@ export function SessionTerminalView({
           onSubmit={onTerminalSubmit}
           onSubmitWithAttachments={onTerminalSubmitWithAttachments}
           attachmentsEnabled={attachmentsEnabled}
-          onOpenFiles={onOpenFiles}
           onError={onError}
           expanded={composeOpen}
           onExpandedChange={setComposeOpen}

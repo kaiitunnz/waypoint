@@ -19,6 +19,11 @@ interface SessionFilesPanelProps {
   sessionId: string;
   open: boolean;
   onClose: () => void;
+  // When set, each row offers an "add to message" action that references the
+  // file in the composer (no re-upload). `referencedIds` are files already in
+  // the tray, shown as added.
+  onReference?: (spec: SessionAttachment) => void;
+  referencedIds?: ReadonlySet<string>;
 }
 
 // Session-wide files manager: lists every attachment a session has stored and
@@ -30,6 +35,8 @@ export function SessionFilesPanel({
   sessionId,
   open,
   onClose,
+  onReference,
+  referencedIds,
 }: SessionFilesPanelProps) {
   const [items, setItems] = useState<SessionAttachment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -194,6 +201,22 @@ export function SessionFilesPanel({
                     )}
                   </span>
                 </div>
+                {onReference ? (
+                  <button
+                    type="button"
+                    className="session-files-add"
+                    disabled={referencedIds?.has(it.id)}
+                    aria-label={`Add ${it.filename} to message`}
+                    title={
+                      referencedIds?.has(it.id)
+                        ? "Added to message"
+                        : "Add to message"
+                    }
+                    onClick={() => onReference(it)}
+                  >
+                    {referencedIds?.has(it.id) ? "✓" : "+"}
+                  </button>
+                ) : null}
                 <a
                   className="session-files-open"
                   href={url}

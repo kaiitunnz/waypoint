@@ -59,6 +59,7 @@ import {
   type TerminalSubmitResult,
 } from "@/lib/composer";
 import { useCommandCompletions } from "@/lib/composer-completions";
+import { useFileMentions } from "@/lib/use-file-mentions";
 import {
   isPlanEvent,
   itemIdForEvent,
@@ -79,6 +80,7 @@ import { SessionFilesPanel } from "@/components/SessionFilesPanel";
 import { SessionTerminalView } from "@/components/SessionTerminalView";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { CommandSuggestions } from "@/components/CommandSuggestions";
+import { FileMentions } from "@/components/FileMentions";
 import { type XTerminalHandle } from "@/components/XTerminal";
 import { ApprovalRequestCard, PlanApprovalCard } from "@/components/ApprovalCard";
 import {
@@ -293,7 +295,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     () => ({ host, token, sessionId }),
     [host, token, sessionId],
   );
-  const [filesOpen, setFilesOpen] = useState(false);
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [events, setEvents] = useState<EventRecord[]>([]);
   // The todo-event sequence the user last dismissed from the progress dock.
@@ -1751,7 +1752,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onTerminate={terminate}
           onRemoveFromList={removeFromList}
           onSwitchSession={openSwitcher}
-          onOpenFiles={() => setFilesOpen(true)}
           onError={setError}
         />
       ) : null}
@@ -2036,20 +2036,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           attachmentsEnabled={
             session ? supportsAttachments(session.backend, catalog) : false
           }
-          onOpenFiles={() => setFilesOpen(true)}
           onTerminate={terminate}
           onError={setError}
           assistant={assistant}
           assistantControls={assistantControls}
         />
       ) : null}
-      <SessionFilesPanel
-        host={host}
-        token={token}
-        sessionId={sessionId}
-        open={filesOpen}
-        onClose={() => setFilesOpen(false)}
-      />
     </section>
   );
 }
@@ -2105,7 +2097,6 @@ interface ReplyComposerProps {
     attachments?: string[],
   ) => Promise<boolean>;
   attachmentsEnabled: boolean;
-  onOpenFiles: () => void;
   onTerminate: () => void | Promise<void>;
   onError: (message: string) => void;
   assistant: boolean;
@@ -2155,7 +2146,6 @@ const ReplyComposer = memo(function ReplyComposer({
   onSwitchSession,
   onSend,
   attachmentsEnabled,
-  onOpenFiles,
   onTerminate,
   onError,
   assistant,
@@ -2165,6 +2155,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const attachments = useAttachments({ host, token, sessionId, onError });
+  const [filesOpen, setFilesOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
@@ -2229,6 +2220,17 @@ const ReplyComposer = memo(function ReplyComposer({
     draft,
     setDraft,
     enabled: supportsSlash,
+    textareaRef,
+  });
+
+  const mentions = useFileMentions({
+    host,
+    token,
+    sessionId,
+    draft,
+    setDraft,
+    enabled: attachmentsEnabled,
+    onReference: attachments.referenceExisting,
     textareaRef,
   });
 
@@ -2420,6 +2422,9 @@ const ReplyComposer = memo(function ReplyComposer({
         const nextIndex = (currentIndex + 1) % permissionModeOptions.length;
         void onModeChange(permissionModeOptions[nextIndex].id);
       }
+      return;
+    }
+    if (mentions.handleKey(event)) {
       return;
     }
     if (handleSuggestionKey(event)) {
@@ -2904,6 +2909,18 @@ const ReplyComposer = memo(function ReplyComposer({
             onHover={setActiveIndex}
           />
         ) : null}
+        {mentions.open ? (
+          <FileMentions
+            host={host}
+            token={token}
+            sessionId={sessionId}
+            mentions={mentions.mentions}
+            activeIndex={mentions.activeIndex}
+            itemRefs={mentions.itemRefs}
+            onApply={mentions.apply}
+            onHover={mentions.setActiveIndex}
+          />
+        ) : null}
       </div>
       <div className="composer-actions">
         <button
@@ -3036,7 +3053,7 @@ const ReplyComposer = memo(function ReplyComposer({
                       className="composer-overflow-item"
                       onClick={() => {
                         setOverflowOpen(false);
-                        onOpenFiles();
+                        setFilesOpen(true);
                       }}
                     >
                       <span className="glyph">▤</span>
@@ -3157,6 +3174,17 @@ const ReplyComposer = memo(function ReplyComposer({
           ) : null}
         </div>
       </div>
+      {attachmentsEnabled ? (
+        <SessionFilesPanel
+          host={host}
+          token={token}
+          sessionId={sessionId}
+          open={filesOpen}
+          onClose={() => setFilesOpen(false)}
+          onReference={attachments.referenceExisting}
+          referencedIds={attachments.attachedIds}
+        />
+      ) : null}
     </section>
   );
 });

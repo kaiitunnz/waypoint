@@ -397,9 +397,11 @@ class WaypointClient:
         delay_seconds: int | None = None,
         scheduled_at: str | None = None,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {
-            "backend": backend,
-            "cwd": cwd,
+        body: dict[str, Any] = {"backend": backend, "cwd": cwd, "args": args or []}
+        # Omit unset optionals so the server's model defaults apply. Sending an
+        # explicit null for a non-optional-with-default field like launch_mode
+        # is a 422 (it is validated against the enum, default or not).
+        optional = {
             "launch_target_id": launch_target_id,
             "launch_mode": launch_mode,
             "title": title,
@@ -407,10 +409,12 @@ class WaypointClient:
             "effort": effort,
             "permission_mode": permission_mode,
             "initial_prompt": initial_prompt,
-            "args": args or [],
             "delay_seconds": delay_seconds,
             "scheduled_at": scheduled_at,
         }
+        body.update(
+            {key: value for key, value in optional.items() if value is not None}
+        )
         data: dict[str, Any] = self._request(
             "POST", "/api/schedules", json=body
         ).json()["schedule"]

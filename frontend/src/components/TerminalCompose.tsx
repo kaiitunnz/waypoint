@@ -48,6 +48,7 @@ interface TerminalComposeProps {
     attachmentIds: string[],
   ) => Promise<TerminalSubmitResult>;
   attachmentsEnabled: boolean;
+  onError: (message: string) => void;
   expanded: boolean;
   onExpandedChange: (next: boolean) => void;
   connection: ConnectionState;
@@ -70,6 +71,7 @@ export function TerminalCompose({
   onSubmit,
   onSubmitWithAttachments,
   attachmentsEnabled,
+  onError,
   expanded,
   onExpandedChange,
   connection,
@@ -84,7 +86,7 @@ export function TerminalCompose({
   const [textareaHeight, setTextareaHeight] = useState<number | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const attachments = useAttachments({ host, token, sessionId });
+  const attachments = useAttachments({ host, token, sessionId, onError });
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const handleRef = useRef<HTMLButtonElement | null>(null);

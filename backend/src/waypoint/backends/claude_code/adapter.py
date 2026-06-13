@@ -112,6 +112,34 @@ async def _drain_until_newline(reader: asyncio.StreamReader) -> None:
             return
 
 
+async def _read_stream_line(
+    reader: asyncio.StreamReader, session_id: str, stream: str
+) -> bytes | None:
+    """Read one newline-terminated line, surviving an over-limit line.
+
+    Returns the line (with trailing newline), ``b""`` at EOF, or ``None`` when an
+    oversized line was drained and skipped so the caller can continue. We read
+    via ``readuntil`` rather than ``readline`` because ``readline`` masks
+    ``LimitOverrunError`` as a plain ``ValueError`` that loses ``consumed`` and
+    can't be drained — so a single giant stream-json line (e.g. a base64 tool
+    result echoing a large attachment) would otherwise tear down the reader."""
+    try:
+        return await reader.readuntil(b"\n")
+    except asyncio.LimitOverrunError as exc:
+        await reader.readexactly(exc.consumed)
+        await _drain_until_newline(reader)
+        log.warning(
+            "claude %s line exceeded buffer limit; dropped",
+            stream,
+            extra={"session_id": session_id, "consumed_bytes": exc.consumed},
+        )
+        return None
+    except asyncio.IncompleteReadError as exc:
+        # EOF before a newline: hand back the trailing partial (empty once the
+        # stream is fully drained, which the caller treats as EOF).
+        return exc.partial
+
+
 def _auto_approve_for_mode(
     mode: str,
     tool_name: object,
@@ -1339,21 +1367,12 @@ class ClaudeCliAdapter:
         assert state.process.stdout is not None
         try:
             while True:
-                try:
-                    line = await state.process.stdout.readline()
-                except asyncio.LimitOverrunError as exc:
-                    # Line exceeded the StreamReader buffer. Drain and skip it
-                    # so the reader survives; the lost line is almost always a
-                    # giant tool-result blob we couldn't have parsed anyway.
-                    await state.process.stdout.readexactly(exc.consumed)
-                    await _drain_until_newline(state.process.stdout)
-                    log.warning(
-                        "claude stdout line exceeded buffer limit; dropped",
-                        extra={
-                            "session_id": state.session_id,
-                            "consumed_bytes": exc.consumed,
-                        },
-                    )
+                # A dropped line is almost always a giant tool-result blob we
+                # couldn't have parsed anyway; the session survives it.
+                line = await _read_stream_line(
+                    state.process.stdout, state.session_id, "stdout"
+                )
+                if line is None:
                     continue
                 if not line:
                     break
@@ -1391,18 +1410,10 @@ class ClaudeCliAdapter:
         assert state.process.stderr is not None
         try:
             while True:
-                try:
-                    line = await state.process.stderr.readline()
-                except asyncio.LimitOverrunError as exc:
-                    await state.process.stderr.readexactly(exc.consumed)
-                    await _drain_until_newline(state.process.stderr)
-                    log.warning(
-                        "claude stderr line exceeded buffer limit; dropped",
-                        extra={
-                            "session_id": state.session_id,
-                            "consumed_bytes": exc.consumed,
-                        },
-                    )
+                line = await _read_stream_line(
+                    state.process.stderr, state.session_id, "stderr"
+                )
+                if line is None:
                     continue
                 if not line:
                     break

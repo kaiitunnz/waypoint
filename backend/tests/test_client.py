@@ -499,6 +499,9 @@ def test_create_schedule_posts_payload(
     assert state["schedule_create"]["backend"] == "claude_code"
     assert state["schedule_create"]["initial_prompt"] == "do the thing"
     assert state["schedule_create"]["delay_seconds"] == 30
+    # Unset optionals must be omitted, not sent as null: the server validates
+    # launch_mode against its enum even though it has a default.
+    assert "launch_mode" not in state["schedule_create"]
 
 
 def test_delete_schedule(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -15,7 +15,7 @@ version.
 
 ## Common Routing
 
-- Read session state or transcript: see `references/sessions-read.md`.
+- Read session state or transcript: see `references/sessions-read.md`; list importable threads with `waypoint backends threads <backend>`, import one with `waypoint sessions import <backend> --json ...`, or pipe just the assistant text with `waypoint sessions output <session-id> --text`.
 - Launch a new coding agent: see `references/sessions-launch.md`.
 - Discover the backend ids and the models/efforts each offers: `waypoint
   backends` and `waypoint models [backend]` (see `references/sessions-launch.md`).

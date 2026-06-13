@@ -67,6 +67,12 @@ def test_board_help_lists_commands() -> None:
         assert name in result.stdout
 
 
+def test_backends_help_lists_threads() -> None:
+    result = runner.invoke(app, ["backends", "--help"])
+    assert result.exit_code == 0
+    assert "threads" in result.stdout
+
+
 def test_board_post_rejects_malformed_meta(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
@@ -161,6 +167,270 @@ def test_models_sweep_skips_fallback_and_isolates_errors(
     # A live-discovery failure becomes an error entry, not a failed sweep.
     assert by_id["claude_code"]["models"] == [{"id": "x"}]
     assert "error" in by_id["codex"]
+
+
+def test_backends_threads_emits_threads_and_params(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/backends/claude_code/threads":
+            state["threads_params"] = dict(request.url.params)
+            return httpx.Response(
+                200,
+                json={
+                    "threads": [
+                        {"id": "thread-1", "title": "Alpha", "cwd": "/tmp/repo"}
+                    ]
+                },
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "backends",
+            "threads",
+            "claude_code",
+            "--launch-target-id",
+            "ssh-box",
+        ],
+    )
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {
+        "threads": [{"id": "thread-1", "title": "Alpha", "cwd": "/tmp/repo"}]
+    }
+    assert state["threads_params"] == {"launch_target_id": "ssh-box"}
+
+
+def test_backends_threads_surfaces_server_capability_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/backends/tmux/threads":
+            return httpx.Response(
+                400,
+                json={"detail": "thread discovery is not supported for tmux"},
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "backends", "threads", "tmux"],
+    )
+    assert result.exit_code != 0
+    assert "thread discovery is not supported for tmux" in result.output
+
+
+def test_sessions_import_reads_json_file_and_emits_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload_path = tmp_path / "thread.json"
+    payload_path.write_text(
+        '{"thread_id": "thread-1", "cwd": "/tmp/repo"}', encoding="utf-8"
+    )
+    state: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/backends/claude_code/sessions/import":
+            state["import_body"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "imported-1"}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "import",
+            "claude_code",
+            "--json",
+            str(payload_path),
+        ],
+    )
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"session": {"id": "imported-1"}}
+    assert state["import_body"] == {"thread_id": "thread-1", "cwd": "/tmp/repo"}
+
+
+def test_sessions_import_reads_stdin_when_dash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/backends/claude_code/sessions/import":
+            state["import_body"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "imported-stdin"}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "import",
+            "claude_code",
+            "--json",
+            "-",
+        ],
+        input='{"thread_id": "stdin-1"}',
+    )
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"session": {"id": "imported-stdin"}}
+    assert state["import_body"] == {"thread_id": "stdin-1"}
+
+
+def test_sessions_import_rejects_malformed_json(tmp_path: Path) -> None:
+    payload_path = tmp_path / "thread.json"
+    payload_path.write_text("not json", encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "import",
+            "claude_code",
+            "--json",
+            str(payload_path),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "not valid JSON" in result.output
+
+
+def test_sessions_import_rejects_non_object_json(tmp_path: Path) -> None:
+    payload_path = tmp_path / "thread.json"
+    payload_path.write_text('["thread-1"]', encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "import",
+            "claude_code",
+            "--json",
+            str(payload_path),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "JSON object" in result.output
+
+
+def test_sessions_output_filters_events_and_passes_messages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions/s1/events":
+            state["events_params"] = dict(request.url.params)
+            return httpx.Response(
+                200,
+                json={
+                    "events": [
+                        {"kind": "status_update", "text": "busy", "sequence": 1},
+                        {"kind": "user_input", "text": "question", "sequence": 2},
+                        {"kind": "tool_call", "text": "ignored", "sequence": 3},
+                        {"kind": "agent_output", "text": "answer", "sequence": 4},
+                        {"kind": "system_note", "text": "ignored", "sequence": 5},
+                    ],
+                    "has_more": True,
+                },
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "output",
+            "s1",
+            "--messages",
+            "7",
+        ],
+    )
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {
+        "events": [
+            {"kind": "user_input", "text": "question", "sequence": 2},
+            {"kind": "agent_output", "text": "answer", "sequence": 4},
+        ]
+    }
+    assert state["events_params"] == {"messages": "7"}
+
+
+def test_sessions_output_text_prints_only_agent_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions/s1/events":
+            return httpx.Response(
+                200,
+                json={
+                    "events": [
+                        {"kind": "user_input", "text": "question", "sequence": 1},
+                        {"kind": "agent_output", "text": "hello", "sequence": 2},
+                        {"kind": "tool_result", "text": "ignored", "sequence": 3},
+                        {"kind": "agent_output", "text": " world", "sequence": 4},
+                    ],
+                    "has_more": False,
+                },
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "output",
+            "s1",
+            "--text",
+        ],
+    )
+    assert result.exit_code == 0
+    assert result.stdout == "hello world"
 
 
 def test_answer_question_rejects_malformed_answers_json(tmp_path: Path) -> None:

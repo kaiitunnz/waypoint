@@ -34,6 +34,22 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
             return httpx.Response(
                 200, json={"backends": [{"id": "claude_code"}, {"id": "codex"}]}
             )
+        if request.url.path == "/api/backends/claude_code/threads":
+            state["threads_params"] = dict(request.url.params)
+            return httpx.Response(
+                200,
+                json={
+                    "threads": [
+                        {"id": "thread-1", "title": "Alpha", "cwd": "/tmp/repo"}
+                    ]
+                },
+            )
+        if request.url.path == "/api/backends/claude_code/sessions/import":
+            state["import_body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={"session": {"id": "imported", **state["import_body"]}},
+            )
         if request.url.path == "/api/board" and request.method == "GET":
             return httpx.Response(
                 200,
@@ -121,6 +137,18 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
             return httpx.Response(
                 200, json={"deleted": request.url.path.rsplit("/", 1)[-1]}
             )
+        if request.url.path == "/api/sessions/s1/events" and request.method == "GET":
+            state["events_params"] = dict(request.url.params)
+            return httpx.Response(
+                200,
+                json={
+                    "events": [
+                        {"kind": "user_input", "text": "hi", "sequence": 1},
+                        {"kind": "agent_output", "text": "hello", "sequence": 2},
+                    ],
+                    "has_more": False,
+                },
+            )
         if request.url.path.startswith("/api/backends/") and request.url.path.endswith(
             "/models"
         ):
@@ -191,6 +219,41 @@ def test_list_models_omits_default_params(
     with _client(_settings(tmp_path), state) as client:
         client.list_models("claude_code")
     assert state["models_params"] == {}
+
+
+def test_list_threads_passes_params(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        threads = client.list_threads("claude_code", launch_target_id="lt1")
+    assert threads == [{"id": "thread-1", "title": "Alpha", "cwd": "/tmp/repo"}]
+    assert state["threads_params"] == {"launch_target_id": "lt1"}
+
+
+def test_import_thread_sends_raw_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        session = client.import_thread(
+            "claude_code", {"thread_id": "thread-1", "cwd": "/tmp/repo"}
+        )
+    assert session["id"] == "imported"
+    assert state["import_body"] == {"thread_id": "thread-1", "cwd": "/tmp/repo"}
+
+
+def test_get_events_passes_messages_param(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        page = client.get_events("s1", messages=5)
+    assert page["events"][1]["text"] == "hello"
+    assert state["events_params"] == {"messages": "5"}
 
 
 def test_answer_question_sends_body(

@@ -39,6 +39,7 @@ def test_help_lists_command_groups() -> None:
         "serve",
         "doctor",
         "backends",
+        "models",
         "reset",
         "session",
         "sessions",
@@ -97,6 +98,50 @@ def test_board_edit_entry_rejects_malformed_meta(tmp_path: Path) -> None:
     )
     assert result.exit_code != 0
     assert "key=value" in result.output
+
+
+def test_models_rejects_unknown_backend(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["--config", str(_config(tmp_path)), "models", "bogus"])
+    assert result.exit_code != 0
+    assert "unknown backend" in result.output
+
+
+def test_answer_question_rejects_malformed_answers_json(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "answer-question",
+            "s1",
+            "--answer",
+            "ok",
+            "--answers-json",
+            "not json",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "not valid JSON" in result.output
+
+
+def test_answer_question_rejects_non_array_answers_json(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "answer-question",
+            "s1",
+            "--answer",
+            "ok",
+            "--answers-json",
+            '{"question": "q"}',
+        ],
+    )
+    assert result.exit_code != 0
+    assert "array of objects" in result.output
 
 
 def test_config_is_a_top_level_option(tmp_path: Path) -> None:

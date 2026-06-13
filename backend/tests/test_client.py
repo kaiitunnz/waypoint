@@ -121,6 +121,22 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
             return httpx.Response(
                 200, json={"deleted": request.url.path.rsplit("/", 1)[-1]}
             )
+        if request.url.path.startswith("/api/backends/") and request.url.path.endswith(
+            "/models"
+        ):
+            backend = request.url.path[len("/api/backends/") : -len("/models")]
+            state["models_params"] = dict(request.url.params)
+            return httpx.Response(
+                200,
+                json={
+                    "backend": backend,
+                    "models": [{"id": "opus", "label": "Opus"}],
+                    "default_model_id": "opus",
+                },
+            )
+        if request.url.path.endswith("/answer-question") and request.method == "POST":
+            state["answer_body"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "s1"}})
         if request.url.path == "/api/sessions/missing":
             return httpx.Response(404, json={"detail": "session not found"})
         return httpx.Response(200, json={"session": {"id": "ok"}})
@@ -150,6 +166,51 @@ def test_list_backends(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state: dict = {}
     with _client(_settings(tmp_path), state) as client:
         assert client.list_backends() == [{"id": "claude_code"}, {"id": "codex"}]
+
+
+def test_list_models_passes_params(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        payload = client.list_models(
+            "claude_code", launch_target_id="lt1", include_hidden=True
+        )
+    assert payload["backend"] == "claude_code"
+    assert payload["default_model_id"] == "opus"
+    assert state["models_params"]["launch_target_id"] == "lt1"
+    assert state["models_params"]["include_hidden"] == "true"
+
+
+def test_list_models_omits_default_params(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.list_models("claude_code")
+    assert state["models_params"] == {}
+
+
+def test_answer_question_sends_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        session = client.answer_question(
+            "s1",
+            "use opus",
+            tool_use_id="tu1",
+            answers=[{"question": "which model?", "answer": "opus"}],
+        )
+    assert session == {"id": "s1"}
+    assert state["answer_body"]["answer"] == "use opus"
+    assert state["answer_body"]["tool_use_id"] == "tu1"
+    assert state["answer_body"]["answers"] == [
+        {"question": "which model?", "answer": "opus"}
+    ]
 
 
 def test_delete_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

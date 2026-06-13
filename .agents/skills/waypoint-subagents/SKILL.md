@@ -48,8 +48,9 @@ convention:
 
 - Verify the CLI is reachable and authenticated: `references/preflight.md`.
 - Spawn children and wait for them to finish: `references/spawn-and-poll.md`.
-- Decide how a child handles approvals, and service them: `references/permissions.md`.
-- Read their output, continue them, or answer their approvals:
+- Decide how a child handles approvals, and service its approvals and questions:
+  `references/permissions.md`.
+- Read their output, continue them, or service their approvals and questions:
   `references/collect-and-steer.md`.
 - Tear down the children you spawned: `references/cleanup.md`.
 

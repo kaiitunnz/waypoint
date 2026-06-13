@@ -85,3 +85,28 @@ pending.
 
 Do not approve destructive, privileged, or unclear requests on a child's behalf
 — surface them to the user, exactly as for your own session.
+
+## Service a child's questions
+
+A child can also block on a **question** (an `AskUserQuestion` prompt), which is
+distinct from an approval and is serviced through a different command. It
+surfaces in the child's events as a `tool_call` whose metadata has
+`tool_name: AskUserQuestion` (carrying the question text and options under
+`payload.input.questions`); on some backends the child also reports
+`waiting_input`. There is no `approval_request` for it, so `sessions approve`
+will not release it.
+
+```bash
+waypoint sessions events <child-id> --messages 10   # find the AskUserQuestion tool_call
+waypoint sessions answer-question <child-id> --answer "<your answer>"
+```
+
+- Answer in plain text with `--answer`. For the structured multi-question shape,
+  pass `--answers-json '[{"question": "...", "answer": "...", "notes": "..."}]'`.
+- Pass `--tool-use-id <id>` to target a specific question when several are
+  pending; omit it to answer the sole pending one.
+- **Do not** use `sessions send` to answer a question — injecting a message does
+  not satisfy the blocking prompt, so the child stays parked. `answer-question`
+  is the only command that releases it.
+- As with approvals, do not answer on the child's behalf when the choice is the
+  user's to make — surface it instead.

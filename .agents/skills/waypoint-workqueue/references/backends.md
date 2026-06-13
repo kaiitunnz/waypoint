@@ -12,12 +12,17 @@ Do not assume a backend or model exists — the install varies per deployment.
 ```bash
 waypoint doctor      # which backend CLIs are installed on this host
 waypoint backends    # registered plugins + their capability descriptors
+waypoint models      # the model ids and reasoning efforts each backend offers
 ```
 
 `codex` and `opencode` discover their model lists live; `claude_code` serves a
-static curated list; `tmux` has none. Confirm the menu before assigning, and
-apply your own current knowledge of the models it reports — the names below are
-illustrative (mid-2026) and will age.
+static curated list; `tmux` has none. `waypoint models` reports the exact ids
+and efforts each backend offers right now — run it and pass those ids verbatim
+to `--model` / `--effort`, rather than guessing from memory. With no argument it
+sweeps every selectable backend (a backend whose live discovery is down is
+reported with an `error` entry instead of failing the sweep); pass one
+(`waypoint models codex`) to query a single backend. The names below are
+illustrative (mid-2026) and will age — trust `waypoint models` over them.
 
 If you are unsure whether the harness or model you want is available, or whether
 it is the right fit for the job, **ask the user** (use the ask-question tool if

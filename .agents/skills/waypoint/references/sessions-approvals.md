@@ -14,3 +14,20 @@ transcript exposes one.
 
 Do not approve destructive, privileged, or unclear requests without user
 confirmation.
+
+## Questions
+
+A session can also block on a question (an `AskUserQuestion` prompt), which is
+not an approval. It surfaces as a `tool_call` event with
+`tool_name: AskUserQuestion` rather than an `approval_request`, so `approve`
+does not release it — answer it instead:
+
+```bash
+waypoint sessions answer-question <session-id> --answer "<your answer>"
+waypoint sessions answer-question <session-id> --answer "<text>" --tool-use-id <id>
+waypoint sessions answer-question <session-id> --answers-json '[{"question": "...", "answer": "..."}]'
+```
+
+`sessions send` injects a normal message and will **not** satisfy the blocking
+question; only `answer-question` does. Pass `--tool-use-id` when several
+questions are pending.

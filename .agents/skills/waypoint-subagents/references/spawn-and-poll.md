@@ -14,6 +14,9 @@ waypoint sessions start \
   sub-session over a harness subagent. Use `waypoint backends` to see which
   backend ids are registered, and `waypoint doctor` to check local CLI
   availability when launch fails.
+- Pick `--model` / `--effort` from `waypoint models <backend>`, which reports the
+  ids and efforts that backend actually offers. Pass them verbatim; do not guess
+  model names from memory.
 - Pick `--cwd` deliberately. For repo work, pass the repo root; for scratch or
   host inspection, pass an explicit safe directory. Do not assume the child
   should inherit your own working directory.
@@ -36,7 +39,8 @@ There is no blocking `wait` command, so poll `sessions show` until the child
 reaches a terminal state. Terminal/idle statuses to stop on:
 
 - `idle` / `waiting_input` — the child has finished its turn (possibly awaiting
-  more input or an approval).
+  more input, an approval, or an answer to a question — see
+  `references/permissions.md`).
 - `exited` — the child process ended.
 - `error` — the child failed; read its events to find out why.
 

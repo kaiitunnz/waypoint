@@ -4,7 +4,14 @@ from pathlib import Path
 import httpx
 import pytest
 
-from waypoint.client import WaypointClient, WaypointError, cli_token_path
+from waypoint.client import (
+    WaypointClient,
+    WaypointError,
+    cli_token_path,
+    is_event_envelope,
+    session_status_from_envelope,
+    websocket_url,
+)
 from waypoint.settings import Settings
 
 VALID_TOKEN = "valid-token"
@@ -520,3 +527,36 @@ def test_clear_schedule_history(
     with _client(_settings(tmp_path), state) as client:
         result = client.clear_schedule_history()
     assert result == {"removed": 3}
+
+
+def test_websocket_url_derives_scheme_and_encodes_token() -> None:
+    assert (
+        websocket_url("http://127.0.0.1:8787", "/ws/sessions/s1", token="a b")
+        == "ws://127.0.0.1:8787/ws/sessions/s1?token=a%20b"
+    )
+    assert (
+        websocket_url("https://host:443/", "/ws/sessions/s1", token="t")
+        == "wss://host:443/ws/sessions/s1?token=t"
+    )
+
+
+def test_session_status_from_envelope() -> None:
+    assert (
+        session_status_from_envelope(
+            {"type": "session_state", "payload": {"session": {"status": "idle"}}}
+        )
+        == "idle"
+    )
+    # Non-state envelopes and malformed payloads carry no status.
+    assert (
+        session_status_from_envelope({"type": "event", "payload": {"event": {}}})
+        is None
+    )
+    assert (
+        session_status_from_envelope({"type": "session_state", "payload": {}}) is None
+    )
+
+
+def test_is_event_envelope() -> None:
+    assert is_event_envelope({"type": "event", "payload": {"event": {}}})
+    assert not is_event_envelope({"type": "session_state", "payload": {"session": {}}})

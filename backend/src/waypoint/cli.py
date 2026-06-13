@@ -354,15 +354,19 @@ async def _session_attach(
         await context.runtime.stop()
 
 
-def _emit(settings: Settings, run: Callable[[WaypointClient], Any]) -> None:
-    """Run a client call against the live server and print the JSON result."""
+def _run_client(settings: Settings, run: Callable[[WaypointClient], Any]) -> Any:
+    """Run a call against the live server, mapping transport errors to exit 1."""
     try:
         with WaypointClient(settings) as client:
-            result = run(client)
+            return run(client)
     except WaypointError as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
-    typer.echo(json.dumps(result, indent=2))
+
+
+def _emit(settings: Settings, run: Callable[[WaypointClient], Any]) -> None:
+    """Run a client call against the live server and print the JSON result."""
+    typer.echo(json.dumps(_run_client(settings, run), indent=2))
 
 
 def _parse_answers(raw: str | None) -> list[dict[str, Any]] | None:
@@ -795,21 +799,16 @@ def sessions_output(
 ) -> None:
     """Show just the conversational transcript from a session."""
     if text:
-        settings = _settings_from_ctx(ctx)
-        try:
-            with WaypointClient(settings) as client:
-                events = _conversation_events(
-                    client.get_events(session_id, messages=messages)
-                )
-        except WaypointError as exc:
-            typer.echo(f"error: {exc}", err=True)
-            raise typer.Exit(code=1) from exc
-        typer.echo(
-            "".join(
-                event["text"] for event in events if event.get("kind") == "agent_output"
-            ),
-            nl=False,
+        page = _run_client(
+            _settings_from_ctx(ctx),
+            lambda c: c.get_events(session_id, messages=messages),
         )
+        agent_text = "".join(
+            event["text"]
+            for event in _conversation_events(page)
+            if event.get("kind") == "agent_output"
+        )
+        typer.echo(agent_text, nl=False)
         return
     _emit(
         _settings_from_ctx(ctx),

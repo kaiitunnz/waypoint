@@ -120,6 +120,20 @@ Returns the `TransportAdapter` (from
 transport class lazily inside the method body — the obvious top-level
 import path triggers a circular import via the package's `__init__`.
 
+`send_input(session, text, attachments=None)` takes an optional
+`list[ResolvedAttachment]` (a `waypoint.attachments.AttachmentSpec` paired
+with its on-disk host path). A backend that sets
+`capabilities.supports_attachments` maps these to its native input form:
+Claude embeds images as base64 content blocks, Codex sends `localImage`
+items, OpenCode adds data-url file parts, and tmux (the universal fallback)
+appends the host paths to the text via
+`waypoint.attachments.append_attachment_paths` so the wrapped CLI reads them.
+Non-image files on image-only protocols degrade to the same path append.
+Uploads are persisted server-side by `AttachmentStore` under
+`settings.attachments_dir`; the runtime resolves the client-supplied ids to
+paths before calling the transport, so a backend never trusts a path from the
+client.
+
 ### Lifecycle
 
 ```python

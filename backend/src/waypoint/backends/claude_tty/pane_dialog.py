@@ -28,14 +28,31 @@ class PaneScreen(StrEnum):
 # Footer signatures uniquely identify each popup. The approval and trust dialogs
 # both end in "Esc to cancel", so the distinguishing token is "Tab to amend"
 # (approval) vs "Enter to confirm" anchored to the trust question.
+#
+# Anchors are matched in both their literal form and a whitespace-stripped
+# ("compact") form, so a dialog that wraps or pads differently at the rendered
+# width still classifies — box-drawn popups reflow and a raw substring match is
+# brittle to that.
 _APPROVAL_FOOTER = "Esc to cancel · Tab to amend"
+_APPROVAL_QUESTION_MARKER = "Do you want to"
 _MODEL_FOOTER = "Enter to set as default"
+_MODEL_MARKER = "Select model"
 _EFFORT_FOOTER = "←/→ to adjust · Enter to confirm"
+_EFFORT_MARKER = "Effort"
 _TRUST_MARKER = "Is this a project you created or one you trust?"
 
 _OPTION_RE = re.compile(r"^\s*(❯)?\s*(\d+)\.\s+(.*\S)\s*$")
 _TOOL_HEADER_RE = re.compile(r"^\s*●\s*([A-Za-z][\w-]*)\((.*)\)\s*$")
 _QUESTION_RE = re.compile(r"^\s*(Do you want to .*\?)\s*$", re.MULTILINE)
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _compact(text: str) -> str:
+    return _WHITESPACE_RE.sub("", text)
+
+
+def _contains(screen: str, screen_compact: str, marker: str) -> bool:
+    return marker in screen or _compact(marker) in screen_compact
 
 
 @dataclass
@@ -70,13 +87,20 @@ class ApprovalDialog:
 
 
 def classify(screen: str) -> PaneScreen:
-    if _APPROVAL_FOOTER in screen and _QUESTION_RE.search(screen) is not None:
+    compact = _compact(screen)
+    if _contains(screen, compact, _APPROVAL_FOOTER) and _contains(
+        screen, compact, _APPROVAL_QUESTION_MARKER
+    ):
         return PaneScreen.APPROVAL
-    if _TRUST_MARKER in screen:
+    if _contains(screen, compact, _TRUST_MARKER):
         return PaneScreen.TRUST
-    if _MODEL_FOOTER in screen and "Select model" in screen:
+    if _contains(screen, compact, _MODEL_FOOTER) and _contains(
+        screen, compact, _MODEL_MARKER
+    ):
         return PaneScreen.MODEL_SELECTOR
-    if _EFFORT_FOOTER in screen and "Effort" in screen:
+    if _contains(screen, compact, _EFFORT_FOOTER) and _contains(
+        screen, compact, _EFFORT_MARKER
+    ):
         return PaneScreen.EFFORT_POPUP
     return PaneScreen.OTHER
 

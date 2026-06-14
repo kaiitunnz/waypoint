@@ -33,6 +33,7 @@ def _make_session(
     session_id: str = "sess-1",
     permission_mode: str | None = None,
     pane: str = "%0",
+    status: SessionStatus = SessionStatus.RUNNING,
 ) -> SessionRecord:
     now = datetime.now(UTC)
     return SessionRecord(
@@ -42,7 +43,7 @@ def _make_session(
         transport="claude_tty",
         title="test",
         cwd="/tmp",
-        status=SessionStatus.RUNNING,
+        status=status,
         created_at=now,
         updated_at=now,
         last_event_at=now,
@@ -277,6 +278,58 @@ async def test_non_approval_screen_does_not_emit() -> None:
         await tailer._poll_dialog()
 
         runtime._emit_adapter_event.assert_not_called()
+
+
+# ── plugin: reconnect resume must not replay the transcript ──────────────────
+
+
+async def _run_exited_reconnect(resumes: bool) -> bool:
+    """Run restore_session on an EXITED session and report the tailer's
+    start_at_end. resumes=True → an existing thread is reattached."""
+    plugin = ClaudeTtyPlugin()
+    session = _make_session(status=SessionStatus.EXITED)
+
+    target = MagicMock(session="s", window="0", pane="%9", pane_pid=123)
+    runtime = MagicMock()
+    runtime.tmux.kill_session = AsyncMock()
+    runtime.tmux.start_managed_session = AsyncMock(return_value=target)
+    runtime.tmux.pipe_output = AsyncMock()
+    runtime.tmux.resize_window = AsyncMock()
+    runtime._find_launch_target.return_value = None
+    runtime._command_for_backend.return_value = ["claude", "--resume", "thread-1"]
+    runtime._record_system_event = AsyncMock()
+    runtime.storage.update_session = MagicMock()
+
+    plugin._conversation_exists = AsyncMock(return_value=resumes)  # type: ignore[method-assign]
+    plugin._spawn_rate_limit_watcher = MagicMock()  # type: ignore[method-assign]
+
+    captured: dict[str, bool] = {}
+
+    def _fake_start_tailer(
+        runtime: object,
+        session_id: str,
+        thread_id: str,
+        cwd: str,
+        *,
+        start_at_end: bool = False,
+    ) -> None:
+        captured["start_at_end"] = start_at_end
+
+    plugin._start_tailer = _fake_start_tailer  # type: ignore[method-assign]
+
+    await plugin.restore_session(runtime, session)
+    return captured["start_at_end"]
+
+
+async def test_reconnect_resume_tails_from_end_not_replay() -> None:
+    # Resuming an existing thread reopens its populated transcript (already in
+    # the event DB); the tailer must start at the end so it is not replayed.
+    assert await _run_exited_reconnect(resumes=True) is True
+
+
+async def test_reconnect_new_thread_tails_from_start() -> None:
+    # A fresh thread starts an empty transcript, so reading from 0 is correct.
+    assert await _run_exited_reconnect(resumes=False) is False
 
 
 # ── transport: respond_to_approval ───────────────────────────────────────────

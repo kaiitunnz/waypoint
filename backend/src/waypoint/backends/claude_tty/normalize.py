@@ -161,6 +161,10 @@ class TranscriptNormalizer:
         if _is_injected_turn(content):
             return []
 
+        # Only tool_result blocks are surfaced from user records. A user/peer
+        # turn's own text is already recorded at the input boundary
+        # (runtime.handle_input → _record_user_event); re-emitting the
+        # transcript's copy would duplicate the message in the event stream.
         events: list[NormalizedEvent] = []
         for block in iter_content_blocks(content):
             if block.get("type") != "tool_result":

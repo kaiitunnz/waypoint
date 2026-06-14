@@ -904,10 +904,12 @@ def _create_worktree(branch: str, base: str | None, cwd: str) -> str:
         subprocess.run(
             ["git", "worktree", "add", worktree_path, "-b", branch, base],
             cwd=repo_root,
+            capture_output=True,
+            text=True,
             check=True,
         )
     except subprocess.CalledProcessError as exc:
-        typer.echo(f"error: git worktree add failed: {exc}", err=True)
+        typer.echo(f"error: git worktree add failed: {exc.stderr.strip()}", err=True)
         raise typer.Exit(code=1) from exc
 
     return worktree_path

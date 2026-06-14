@@ -1,6 +1,7 @@
 "use client";
 
 import { Dispatch, MutableRefObject, SetStateAction, useCallback, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { TerminalCompose } from "@/components/TerminalCompose";
@@ -9,6 +10,7 @@ import { XTerminal, type XTerminalHandle } from "@/components/XTerminal";
 import { useBackendCatalog } from "@/lib/backends";
 import type { TerminalSubmitResult } from "@/lib/composer";
 import { SessionRecord } from "@/lib/types";
+import { usePopoverAnchor } from "@/lib/use-popover-anchor";
 
 type Connection = "idle" | "connecting" | "open" | "reconnecting";
 
@@ -144,6 +146,11 @@ export function SessionTerminalView({
   const refocusTerminal = useCallback(() => {
     terminalRef.current?.focus();
   }, [terminalRef]);
+  // The menu is portaled to ``document.body`` for the same reason as the
+  // usage panel — it drops out of the term-bar, and ``.session-terminal``'s
+  // ``overflow: hidden`` would clip an in-pane absolute menu. Right-anchored
+  // to match the trigger's top-right home.
+  const overflowMenuStyle = usePopoverAnchor(termMenuWrapRef, termMenuOpen, "right");
 
   return (
     <section
@@ -159,6 +166,7 @@ export function SessionTerminalView({
           catalog={catalog}
           onRateLimitRefresh={onRateLimitRefresh}
           rateLimitRefreshBusy={rateLimitRefreshBusy}
+          anchored
         />
         <span className="term-bar-spacer" />
         {liveTmux && terminalDims ? (
@@ -188,7 +196,13 @@ export function SessionTerminalView({
             ⋯
           </button>
           {termMenuOpen ? (
-            <div className="composer-overflow-menu term-bar-overflow-menu" role="menu">
+            createPortal(
+            <div
+              className="composer-overflow-menu term-bar-overflow-menu"
+              role="menu"
+              data-term-overflow-menu
+              style={overflowMenuStyle ?? undefined}
+            >
               {session && primary?.kind !== "refresh" ? (
                 <button
                   type="button"
@@ -255,7 +269,9 @@ export function SessionTerminalView({
                   </button>
                 </>
               ) : null}
-            </div>
+            </div>,
+            document.body,
+            )
           ) : null}
         </div>
       </div>

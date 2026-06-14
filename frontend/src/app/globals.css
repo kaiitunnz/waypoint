@@ -7963,11 +7963,10 @@ html[data-theme="light"] .terminal {
 }
 
 .term-bar {
-  /* position+z-index creates a stacking context for the bar so the
-     ``.composer-overflow-menu`` (z-index: 30, position: absolute)
-     inside ``.term-bar-overflow`` paints above .term-stage's content
-     — xterm's canvases sit there at z-index: auto and would otherwise
-     win on document order when the bar isn't a stacking context. */
+  /* Keep the bar above .term-stage's xterm canvases (which sit at
+     z-index: auto) so the triggers and their hover states are never
+     painted under the pane content. The popovers themselves are portaled
+     to the body, so they escape this stacking context entirely. */
   position: relative;
   z-index: 2;
   display: flex;
@@ -8048,47 +8047,15 @@ html[data-theme="light"] .term-bar-action.primary {
   color: var(--danger);
 }
 
-/* The .term-bar-overflow wraps the trigger and popover, mirroring
-   .composer-overflow on the chat composer so the two surfaces share
-   visual + structural vocabulary. We reuse .composer-overflow-trigger
-   and .composer-overflow-menu/-item styles directly; the only override
-   here flips the menu from "floats above" (composer is at the bottom of
-   the page) to "drops below" (term-bar is at the top of the pane). */
+/* The .term-bar-overflow wraps the trigger, mirroring .composer-overflow
+   on the chat composer so the two surfaces share visual + structural
+   vocabulary. The term-bar's usage panel and overflow menu both drop out
+   of the bar, and .session-terminal's overflow: hidden would clip an
+   in-pane absolute popover to the pane — so both are portaled to the body
+   and positioned fixed against their trigger (see usePopoverAnchor). */
 .term-bar-overflow {
   position: relative;
   flex: 0 0 auto;
-}
-
-.term-bar-overflow-menu {
-  top: calc(100% + 8px);
-  bottom: auto;
-}
-
-/* The usage pill in the term-bar lives at the top-left of the terminal
-   pane, so the popover must drop downward (the composer variant floats
-   up because it sits at the bottom of the chat surface). .session-terminal
-   has overflow: hidden, which would clip an upward-floating popover
-   entirely; dropping below renders the panel inside the pane's clipped
-   region instead. Anchor to the pill's left edge so a 440px panel
-   doesn't shoot off-screen leftward on a left-aligned trigger. */
-.term-bar .usage-panel {
-  top: calc(100% + 10px);
-  bottom: auto;
-  left: 0;
-  right: auto;
-  /* Above .term-stage's xterm canvases regardless of how their own
-     internal stacking contexts shake out. */
-  z-index: 50;
-}
-
-/* On narrow screens the 440px panel + left-anchor would clip the right
-   edge. Pin the right side too so the panel flexes within the term-bar's
-   width and the popover stays fully visible. */
-@media (max-width: 720px) {
-  .term-bar .usage-panel {
-    right: 8px;
-    width: auto;
-  }
 }
 
 .term-stage {

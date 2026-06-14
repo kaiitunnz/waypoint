@@ -12,6 +12,7 @@ import {
   formatTokens,
   rateLimitUsageTone,
 } from "@/lib/usage";
+import { usePopoverAnchor } from "@/lib/use-popover-anchor";
 
 type Connection = "idle" | "connecting" | "open" | "reconnecting";
 
@@ -21,12 +22,12 @@ interface SessionUsagePillProps {
   catalog?: BackendCatalog;
   onRateLimitRefresh: () => void | Promise<void>;
   rateLimitRefreshBusy: boolean;
-  // When provided, the popover panel is portaled into this element
-  // instead of rendering as a sibling of the trigger button. Used by
-  // the tmux quick-compose drawer where the trigger lives inside an
-  // ``overflow: hidden`` ancestor — portaling escapes the clip so the
-  // panel can float above the drawer.
-  popoverContainer?: HTMLElement | null;
+  // When set, the panel is portaled to ``document.body`` and positioned
+  // ``fixed`` below the trigger instead of rendering as a sibling. The
+  // term-bar trigger lives inside ``.session-terminal``'s ``overflow:
+  // hidden`` box, which would otherwise clip the dropped-down panel to the
+  // pane; portaling escapes the clip.
+  anchored?: boolean;
 }
 
 export function SessionUsagePill({
@@ -35,11 +36,12 @@ export function SessionUsagePill({
   catalog,
   onRateLimitRefresh,
   rateLimitRefreshBusy,
-  popoverContainer,
+  anchored = false,
 }: SessionUsagePillProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const anchorStyle = usePopoverAnchor(wrapRef, anchored && open, "left");
 
   useEffect(() => {
     if (!open) return;
@@ -137,7 +139,7 @@ export function SessionUsagePill({
   }
 
   const renderPanel = (node: React.ReactNode): React.ReactNode =>
-    popoverContainer ? createPortal(node, popoverContainer) : node;
+    anchored ? createPortal(node, document.body) : node;
 
   return (
     <div className="composer-context" ref={wrapRef}>
@@ -165,6 +167,7 @@ export function SessionUsagePill({
         <div
           ref={panelRef}
           className={`usage-panel tone-${usageToneValue}`}
+          style={anchored ? anchorStyle ?? undefined : undefined}
           role="dialog"
           aria-label="Usage details"
         >

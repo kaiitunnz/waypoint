@@ -1483,7 +1483,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     if (!termMenuOpen) return;
     function onPointerDown(event: PointerEvent) {
       const wrap = termMenuWrapRef.current;
-      if (wrap && !wrap.contains(event.target as Node)) {
+      const target = event.target as Element | null;
+      // The menu is portaled to document.body, so a click on an item is not
+      // inside the trigger wrapper — match the portaled menu separately so it
+      // isn't dismissed before the item's handler runs.
+      if (target?.closest("[data-term-overflow-menu]")) return;
+      if (wrap && !wrap.contains(target)) {
         setTermMenuOpen(false);
       }
     }

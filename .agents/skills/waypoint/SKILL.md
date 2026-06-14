@@ -9,9 +9,12 @@ Use this skill for the `waypoint` backend CLI. Prefer `waypoint sessions ...`
 for a running Waypoint server; avoid the singular `waypoint session ...` flow
 unless the user explicitly wants an in-process one-shot runtime.
 
-Start by running `waypoint sessions --help` or the specific subcommand's
-`--help` when uncertain; the CLI is the source of truth for the installed
-version.
+Run `waypoint help` to dump the entire CLI surface — every nested command, its
+arguments, and its options — in one call (`waypoint help --json` for structured
+output). This is generated directly from the command definitions, so it is
+ground truth for the installed version and never drifts. Prefer it over running
+`--help` at each nested level, and defer to it for exact flags rather than
+trusting any flag list reproduced in this skill.
 
 ## Common Routing
 

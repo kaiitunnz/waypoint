@@ -20,9 +20,14 @@ Key invariants (all verified against real transcripts in Phase 0):
 """
 
 import json
+import uuid
 from typing import Any
 
 from waypoint.backends.claude_code.normalize import (
+    TASK_TOOL_NAMES,
+    TaskListTracker,
+    extract_created_task_id,
+    format_task_snapshot,
     iter_content_blocks,
     stringify_tool_result,
 )
@@ -60,6 +65,10 @@ class TranscriptNormalizer:
 
     def __init__(self) -> None:
         self._seen_message_ids: set[str] = set()
+        self._task_tracker: TaskListTracker = TaskListTracker()
+        self._pending_task_creates: dict[str, dict[str, Any]] = {}
+        self._suppressed_result_tool_use_ids: set[str] = set()
+        self._task_card_item_id: str | None = None
 
     def process_record(self, record: dict[str, Any]) -> list[NormalizedEvent]:
         rec_type = record.get("type")
@@ -105,6 +114,29 @@ class TranscriptNormalizer:
                 has_tool_use = True
                 tool_use_id = str(block.get("id") or "")
                 tool_name = str(block.get("name") or "tool")
+                if tool_name in TASK_TOOL_NAMES:
+                    tool_input: dict[str, Any] = block.get("input") or {}
+                    if tool_name == "TaskCreate":
+                        if tool_use_id:
+                            self._pending_task_creates[tool_use_id] = tool_input
+                    elif tool_name == "TaskUpdate":
+                        task_id = str(tool_input.get("taskId") or "")
+                        if tool_use_id:
+                            self._suppressed_result_tool_use_ids.add(tool_use_id)
+                        if task_id:
+                            self._task_tracker.update(
+                                task_id,
+                                status=tool_input.get("status"),
+                                content=tool_input.get("subject"),
+                                active_form=tool_input.get("activeForm"),
+                                description=tool_input.get("description"),
+                            )
+                            events.extend(self._emit_task_snapshot())
+                    else:
+                        # TaskGet / TaskList: suppress result, emit nothing
+                        if tool_use_id:
+                            self._suppressed_result_tool_use_ids.add(tool_use_id)
+                    continue
                 input_text = json.dumps(block.get("input") or {}, indent=2)
                 events.append(
                     NormalizedEvent(
@@ -170,6 +202,23 @@ class TranscriptNormalizer:
             if block.get("type") != "tool_result":
                 continue
             tool_use_id = str(block.get("tool_use_id") or "")
+            if tool_use_id and tool_use_id in self._pending_task_creates:
+                create_input = self._pending_task_creates.pop(tool_use_id)
+                task_id = extract_created_task_id(block) or tool_use_id
+                if self._task_tracker.is_empty:
+                    self._task_card_item_id = None
+                self._task_tracker.create(
+                    task_id,
+                    content=str(create_input.get("subject") or ""),
+                    active_form=create_input.get("activeForm"),
+                    description=create_input.get("description"),
+                    status=create_input.get("status") or "pending",
+                )
+                events.extend(self._emit_task_snapshot())
+                continue
+            if tool_use_id and tool_use_id in self._suppressed_result_tool_use_ids:
+                self._suppressed_result_tool_use_ids.discard(tool_use_id)
+                continue
             text = stringify_tool_result(block.get("content"))
             is_error = bool(block.get("is_error"))
             events.append(
@@ -189,6 +238,26 @@ class TranscriptNormalizer:
             )
 
         return events
+
+    def _emit_task_snapshot(self) -> list[NormalizedEvent]:
+        if self._task_card_item_id is None:
+            self._task_card_item_id = uuid.uuid4().hex
+        todos = self._task_tracker.snapshot()
+        return [
+            NormalizedEvent(
+                kind=EventKind.TOOL_RESULT,
+                text=format_task_snapshot(todos),
+                metadata={
+                    "method": "assistant.task_update",
+                    "item_id": self._task_card_item_id,
+                    "item_type": "todo_list",
+                    "tool_name": "TodoWrite",
+                    "payload": {"input": {"todos": todos}},
+                    "status": SessionStatus.RUNNING,
+                },
+                status=SessionStatus.RUNNING,
+            )
+        ]
 
 
 def _is_injected_turn(content: Any) -> bool:

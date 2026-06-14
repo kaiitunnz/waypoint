@@ -1,0 +1,40 @@
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+❯ Run this exact shell command, nothing else: echo waypoint-probe-hello
+
+● Bash(echo waypoint-probe-hello)
+  ⎿  waypoint-probe-hello
+
+● waypoint-probe-hello
+
+✻ Cogitated for 5s
+
+❯ Create a new file named probe_out.txt containing exactly the text: waypoint-probe
+
+● Write(probe_out.txt)
+  ⎿  Wrote 1 lines to probe_out.txt
+      1 waypoint-probe
+
+● Created /tmp/cc-tty-probe/probe_out.txt containing waypoint-probe.
+
+✻ Churned for 5s
+
+❯ Run exactly this shell command, nothing else: mkdir /tmp/cc-tty-probe/probe_subdir
+
+● Bash(mkdir /tmp/cc-tty-probe/probe_subdir)
+  ⎿  Waiting…
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+
+   mkdir /tmp/cc-tty-probe/probe_subdir
+   Create probe_subdir directory
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and always allow access to cc-tty-probe/ from this project
+   3. No
+
+ Esc to cancel · Tab to amend · ctrl+e to explain
+

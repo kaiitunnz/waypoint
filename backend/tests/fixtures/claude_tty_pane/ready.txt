@@ -1,0 +1,40 @@
+cd /tmp/cc-tty-probe && claude --permission-mode default --session-id 49f99157-4d72-469f-ac29-796d750db24c
+01:16:05 noppanat@luyao-h0 cc-tty-probe → cd /tmp/cc-tty-probe && claude --permission-mode default --session-id 49f99157
+-4d72-469f-ac29-796d750db24c
+╭─── Claude Code v2.1.177 ─────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                 │ Tips for getting started                                           │
+│              Welcome back Noppanat!             │ Run /init to create a CLAUDE.md file with instructions for Claude  │
+│                                                 │ ────────────────────────────────────────────────────────────────── │
+│                     ▐▛███▜▌                     │ What's new                                                         │
+│                    ▝▜█████▛▘                    │ Session titles are now generated in the language of your conversa… │
+│                      ▘▘ ▝▝                      │ Added `footerLinksRegexes` setting for regex-matched link badges … │
+│                                                 │ Improved Bedrock credential caching: credentials from `awsCredent… │
+│   Opus 4.8 (1M context) · Claude Team · lumid   │ /release-notes for more                                            │
+│                /tmp/cc-tty-probe                │                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Try "fix typecheck errors"
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ? for shortcuts · ← for agents
+                  tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach for focus tracking
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

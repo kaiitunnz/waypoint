@@ -1,0 +1,40 @@
+● Write(probe_out.txt)
+  ⎿  Wrote 1 lines to probe_out.txt
+      1 waypoint-probe
+
+● Created /tmp/cc-tty-probe/probe_out.txt containing waypoint-probe.
+
+✻ Churned for 5s
+
+❯ Run exactly this shell command, nothing else: mkdir /tmp/cc-tty-probe/probe_subdir
+
+● Bash(mkdir /tmp/cc-tty-probe/probe_subdir)
+  ⎿  Interrupted · What should Claude do instead?
+
+❯ /model
+  ⎿  Set model to Opus 4.8 (1M context) (default) and saved as your default for new sessions
+
+❯ /effort
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Effort
+
+                             Faster                                                 Smarter
+                             ────────────────────▲──────────────────────┆──────────────────
+                             low     medium     high     xhigh      max       ultracode
+                                                                          xhigh + workflows
+
+  ←/→ to adjust · Enter to confirm · Esc to cancel
+
+
+
+
+
+
+
+
+
+
+
+
+

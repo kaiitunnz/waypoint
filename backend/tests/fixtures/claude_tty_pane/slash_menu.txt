@@ -1,0 +1,40 @@
+
+❯ Create a new file named probe_out.txt containing exactly the text: waypoint-probe
+
+● Write(probe_out.txt)
+  ⎿  Wrote 1 lines to probe_out.txt
+      1 waypoint-probe
+
+● Created /tmp/cc-tty-probe/probe_out.txt containing waypoint-probe.
+
+✻ Churned for 5s
+
+❯ Run exactly this shell command, nothing else: mkdir /tmp/cc-tty-probe/probe_subdir
+
+● Bash(mkdir /tmp/cc-tty-probe/probe_subdir)
+  ⎿  Interrupted · What should Claude do instead?
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ /model
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/model                        Set the AI model for Claude Code (currently Opus 4.8 (1M context))
+/waypoint-workqueue           Use when a coding agent needs to run a batch of independent software tasks across a
+                              crew of durable Waypoint sessions — possibly different models or backends, in separat…
+/loop                         Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo). Omit the
+                              interval to let the model self-pace.
+/claude-api                   Reference for the Claude API / Anthropic SDK — model ids, pricing, params, streaming,
+                              tool use, MCP, agents, caching, token counting, model migration. TRIGGER — read BEFOR…
+/advisor                      Let Claude consult a stronger model at key moments
+/effort                       Set effort level for model usage
+/status                       Show Claude Code status including version, model, account, API connectivity, and tool
+                              statuses
+/waypoint-subagents           Use when a coding agent inside a Waypoint session needs to spawn and manage child
+                              Waypoint sessions as subagents — fanning work out to other backends/models, running u…
+/update-config                Use this skill to configure the Claude Code harness via settings.json. Automated
+                              behaviors ("from now on when X", "each time X", "whenever X", "before/after X") requi…
+/fast                         Toggle fast mode (Opus 4.8)
+/voice                        Toggle voice mode
+/plan                         Enable plan mode or view the current session plan
+
+
+

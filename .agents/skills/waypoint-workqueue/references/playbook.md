@@ -19,22 +19,28 @@ its code lives:
 
 ```bash
 n=3
-# Task branch is `wq/$job-t$n`, NOT `wq/$job/task-$n`: a slash makes it a child
-# of the integration ref `wq/$job`, and git cannot hold both a branch and a
-# directory at that path ("cannot lock ref ... exists").
-git -C "$repo" worktree add "$repo/../.wq/$job/task-$n" -b "wq/$job-t$n" "wq/$job"
+lead=$WAYPOINT_SESSION_ID   # the lead's own session id; set --spawner-session-id explicitly if unset
+# `--worktree` creates branch `wq/$job-t$n` off the integration branch in a
+# sibling worktree, records the path on the session for cleanup, and launches
+# the worker there — no manual `git worktree add`. `--cwd` is the repo root the
+# worktree is cut from.
 sid=$(waypoint sessions start \
   --backend codex --model gpt-5-codex \
-  --cwd "$repo/../.wq/$job/task-$n" \
-  --title "subagent:wq-$job-$n" | jq -r .session.id)
+  --cwd "$repo" --worktree "wq/$job-t$n" --worktree-base "wq/$job" \
+  --title "subagent:wq-$job-$n" --spawner-session-id "$lead" \
+  | jq -r .session.id)
 # task:<n> is the immutable contract — never rewritten. Update status:<n> only.
 waypoint board set-meta job:$job --key status:$n --meta state=doing --meta assignee=$sid
 # then send the worker the fixed message from org-template.md
 ```
 
-Put the worktree root **outside** the repo (as above, `"$repo/../.wq/..."`)
-or add `.wq/` to `.gitignore`. Git does not auto-ignore a nested worktree path,
-so an in-tree `.wq/` shows up as untracked in the integration branch.
+`--worktree` removes the whole class of plumbing this step used to need: it picks
+a sibling path outside the working tree (so nothing shows up as untracked) and
+names the branch for you, so the old `wq/$job/task-$n` slash-collision and the
+in-tree `.wq/` gitignore caveats no longer apply. `--spawner-session-id "$lead"`
+is what makes owner-scoped reap work at the end (`sessions reap --spawned-by
+"$lead"`); it defaults from `WAYPOINT_SESSION_ID` when the lead is a session, but
+set it explicitly so cleanup is reliable.
 
 The per-task `--backend` / `--model` choice is a core reason to use a crew: spend
 a cheap, fast model on mechanical tasks and a stronger one where it matters. See
@@ -42,8 +48,17 @@ a cheap, fast model on mechanical tasks and a stronger one where it matters. See
 it a judgement call, not a routing engine.
 
 **Cross-repo jobs:** `repo` need not be fixed. For a task in another repository,
-create its worktree in that repo and point `--cwd` there — one job can span
-several repos at once. Track which repo a task belongs to in its `task:<n>` cell.
+point `--cwd` at that repo's root (with `--worktree`, the sibling worktree is cut
+there) — one job can span several repos at once. Track which repo a task belongs
+to in its `task:<n>` cell.
+
+**Monitor without polling.** Once workers are assigned, block on them rather than
+looping: `waypoint sessions wait <sid> <sid> …` returns when every worker reaches
+idle/terminal — that is the default; pass `--any` to return on the first. To react
+to a blocked child instantly, follow the fleet:
+`waypoint sessions events --follow --spawned-by "$lead" --filter approval_request`
+surfaces matching events across all your workers as they happen (`--filter` takes a
+single event kind; drop it to see everything).
 
 Check and merge **one task at a time** (sequential merges keep every conflict
 between a single branch and the integration branch):
@@ -54,14 +69,28 @@ git -C "$repo" merge --no-ff "wq/$job-t$n"
 # run the task's check, e.g. uv run pytest pkg/auth
 ```
 
-- Clean merge and green check → `git -C "$repo" worktree remove "$repo/../.wq/$job/task-$n"`
-  and set the task done: `waypoint board set-meta job:$job --key status:$n --meta state=done`.
-- Conflict or red → `git -C "$repo" merge --abort`, hand the task back:
-  `waypoint board set-meta job:$job --key status:$n --meta state=todo`, and reassign it.
+- Clean merge and green check → set the task done: `waypoint board set-meta
+  job:$job --key status:$n --meta state=done`. The worktree is removed for you
+  when the worker is reaped (its path is recorded on the session), so there is no
+  manual `git worktree remove`.
+- Red check → `git -C "$repo" merge --abort`, hand the task back
+  (`--meta state=todo`), and reassign it (often a fresh worktree).
+- Conflict → tell the two kinds apart. An **additive** conflict — two workers
+  appending to the same append-only file (a test suite, a registry, an export
+  list) — is not a real disagreement: keep both. Take the integration side and
+  re-append the worker's block: `git checkout --ours <file>`, then add the
+  worker's additions to the end (or hand-merge both hunks) and commit. A
+  **semantic** conflict — both branches changed the same logic — is the one you
+  `merge --abort` and hand back. If a shared file conflicts on *every* merge, the
+  tasks were not independent enough and should have been one worker.
 
 Finish when no task is `todo` or `doing`: run the **full** suite on `wq/$job`,
-post a summary to the board, reap the workers (`waypoint-subagents` → cleanup),
-and report integrated vs. blocked counts.
+then — for a server/CLI/integration artifact — **exercise the real thing**, not
+just unit tests. Green mocked tests routinely miss wiring bugs (a 422 from an
+unset field, git chatter polluting stdout); start the app and run the new paths
+once. Post a summary to the board, reap the workers with `waypoint sessions reap
+--spawned-by "$lead"` (this also removes their recorded worktrees), and report
+integrated vs. blocked counts.
 
 ## Worker
 

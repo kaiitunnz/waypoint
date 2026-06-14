@@ -25,6 +25,20 @@ Reach for Waypoint sub-sessions only when you need something they cannot give:
 
 If none of those apply, do not spawn a Waypoint session.
 
+## Two shapes: parallel crew vs. delegate-and-review
+
+Spawning children comes in two shapes, good for opposite kinds of work:
+
+- **Parallel crew** — many children, each an independent task, merged by a lead.
+  For batch work too big for one context: migrations, codemods, per-file sweeps.
+  See `waypoint-workqueue`.
+- **Delegate-and-review** — *one* child takes a whole coherent chunk and you
+  review its diff before integrating. For work too large to do inline but too
+  tightly coupled to parallelize (a multi-file change to one module, where
+  splitting it would only create merge conflicts). You stay the reviewer: read
+  the diff, run the checks yourself, own the merge. This is the right move for
+  exactly the coupled work the crew is wrong for.
+
 ## Before anything: preflight
 
 The `waypoint` CLI is not guaranteed to be reachable from inside every session.

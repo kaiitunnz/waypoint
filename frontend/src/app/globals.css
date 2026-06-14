@@ -6643,18 +6643,6 @@ html[data-theme="light"] .reply-textarea-wrap {
   }
 }
 
-/* Keyboard hint — desktop only, tucked in the capsule before Send. */
-.composer-bar .composer-shortcut {
-  align-self: center;
-  flex: 0 0 auto;
-  padding-right: 2px;
-}
-@media (pointer: coarse), (max-width: 640px) {
-  .composer-bar .composer-shortcut {
-    display: none;
-  }
-}
-
 /* On phones the ⊕ menu and the control popover become full-width sheets that
  * rise from just above the composer. They must anchor to `.composer` (not the
  * trigger), so the trigger wrappers go `position: static` and the sheet is
@@ -7190,24 +7178,6 @@ html[data-theme="light"] .ask-question-note-input {
 /* ─── Attachments ─── */
 .composer-file-input {
   display: none;
-}
-
-.composer-attach {
-  width: 36px;
-  padding: 0;
-}
-
-.composer-attach .glyph {
-  display: inline-flex;
-  line-height: 0;
-}
-
-.composer-attach svg {
-  transition: transform 200ms cubic-bezier(0.2, 0.7, 0.2, 1);
-}
-
-.composer-attach:hover:not(:disabled) svg {
-  transform: rotate(-14deg) scale(1.06);
 }
 
 /* Drag target: a brass dashed frame that reads as "this surface accepts a drop". */
@@ -9328,21 +9298,6 @@ html[data-theme="light"] .term-compose-input {
   .composer-textarea {
     min-height: 0;
     padding: 0;
-  }
-
-  .composer-actions {
-    gap: 6px;
-  }
-
-  .composer-actions .send {
-    min-width: 0;
-    flex: 1 1 auto;
-  }
-
-  .composer-actions .ghost {
-    min-height: 32px;
-    padding: 0 10px;
-    font-size: 0.7rem;
   }
 
   .composer-overflow-trigger {

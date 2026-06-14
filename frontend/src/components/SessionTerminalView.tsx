@@ -299,7 +299,6 @@ export function SessionTerminalView({
           host={host}
           token={token}
           sessionId={sessionId}
-          session={session}
           onSubmit={onTerminalSubmit}
           onSubmitWithAttachments={onTerminalSubmitWithAttachments}
           attachmentsEnabled={attachmentsEnabled}
@@ -307,8 +306,6 @@ export function SessionTerminalView({
           expanded={composeOpen}
           onExpandedChange={setComposeOpen}
           connection={connection}
-          rateLimitRefreshBusy={rateLimitRefreshBusy}
-          onRateLimitRefresh={onRateLimitRefresh}
           refocusTerminal={refocusTerminal}
         />
       ) : null}

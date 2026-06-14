@@ -8651,33 +8651,6 @@ html[data-theme="light"] .term-compose-input {
   }
 }
 
-.term-compose-meta-spacer {
-  flex: 1 1 auto;
-}
-
-/* SessionUsagePill portals its panel into ``.term-compose`` to escape
-   the ``overflow: hidden`` on ``.term-compose-inner`` (without the
-   portal the panel is clipped at the textarea boundary regardless of
-   z-index). Once portaled, the panel positions against the drawer's
-   outer box: float upward above the drawer, anchor to the left to
-   match the pill's left-aligned home in the meta row, and float over
-   the term-stage above the drawer. */
-.term-compose > .usage-panel {
-  left: 8px;
-  right: auto;
-  bottom: calc(100% + 8px);
-  z-index: 50;
-}
-
-/* On narrow screens the 440px panel would overflow the right edge of
-   the pane; pin the right side so it flexes within the drawer width. */
-@media (max-width: 720px) {
-  .term-compose > .usage-panel {
-    right: 8px;
-    width: auto;
-  }
-}
-
 /* The slash-suggestions list also escapes the clipped subtree by
    rendering as a child of ``.term-compose``. Its default anchoring
    (``left: 0; right: 0; bottom: calc(100% + 6px)``) places it above
@@ -8702,12 +8675,6 @@ html[data-theme="light"] .term-compose-input {
   font-family: var(--font-mono);
   font-size: 0.72rem;
   color: var(--warn, var(--accent));
-}
-
-@media (max-width: 480px) {
-  .term-compose-shortcut {
-    display: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

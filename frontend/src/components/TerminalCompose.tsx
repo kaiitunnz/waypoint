@@ -22,15 +22,9 @@ import {
 import { CommandSuggestions } from "@/components/CommandSuggestions";
 import { FileMentions } from "@/components/FileMentions";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
-import { SessionUsagePill } from "@/components/SessionUsagePill";
-import { useBackendCatalog } from "@/lib/backends";
-import {
-  SHORTCUT_IS_MAC,
-  type TerminalSubmitResult,
-} from "@/lib/composer";
+import { type TerminalSubmitResult } from "@/lib/composer";
 import { useCommandCompletions } from "@/lib/composer-completions";
 import { useFileMentions } from "@/lib/use-file-mentions";
-import type { SessionRecord } from "@/lib/types";
 
 type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
 
@@ -38,7 +32,6 @@ interface TerminalComposeProps {
   host: string;
   token: string;
   sessionId: string;
-  session: SessionRecord | null;
   // Resolves a ``TerminalSubmitResult``: ``socket-closed`` keeps the draft
   // and surfaces a retry hint, ``command-error`` keeps it silently (the host
   // already reported the error), ``ok`` clears it. Async because Waypoint
@@ -56,8 +49,6 @@ interface TerminalComposeProps {
   expanded: boolean;
   onExpandedChange: (next: boolean) => void;
   connection: ConnectionState;
-  rateLimitRefreshBusy: boolean;
-  onRateLimitRefresh: () => void | Promise<void>;
   // Focus target when the user dismisses the drawer via Escape — the
   // xterm canvas, so typing resumes inside the pane.
   refocusTerminal: () => void;
@@ -68,7 +59,6 @@ export function TerminalCompose({
   host,
   token,
   sessionId,
-  session,
   onSubmit,
   onSubmitWithAttachments,
   attachmentsEnabled,
@@ -76,12 +66,9 @@ export function TerminalCompose({
   expanded,
   onExpandedChange,
   connection,
-  rateLimitRefreshBusy,
-  onRateLimitRefresh,
   refocusTerminal,
 }: TerminalComposeProps) {
   const regionId = useId();
-  const catalog = useBackendCatalog(host || null, token || null, null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -95,19 +82,6 @@ export function TerminalCompose({
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const handleRef = useRef<HTMLButtonElement | null>(null);
-  // Host for popovers that need to escape ``.term-compose-inner``'s
-  // ``overflow: hidden`` clip (the grid-row open animation requires it).
-  // The slash-suggestions list and the SessionUsagePill panel both
-  // anchor against this element, which is the outer drawer container
-  // and lives outside the clipped subtree.
-  const composeRef = useRef<HTMLElement | null>(null);
-  // ``popoverContainer`` only takes effect once the section ref is
-  // attached, which happens on first commit. Mirror it into state so
-  // SessionUsagePill re-renders with a valid host after mount.
-  const [popoverHost, setPopoverHost] = useState<HTMLElement | null>(null);
-  useEffect(() => {
-    setPopoverHost(composeRef.current);
-  }, []);
 
   // ``/new`` is a Waypoint control command the host intercepts (see
   // ``handleTerminalSubmit``) rather than forwarding to the wrapped CLI, so
@@ -262,11 +236,8 @@ export function TerminalCompose({
     }
   }, [expanded, onExpandedChange, refocusTerminal]);
 
-  const shortcutLabel = SHORTCUT_IS_MAC ? "⌘↵" : "Ctrl+↵";
-
   return (
     <section
-      ref={composeRef}
       className={`term-compose ${expanded ? "is-open" : "is-closed"}`}
       aria-label="Quick compose"
     >
@@ -284,26 +255,13 @@ export function TerminalCompose({
       </button>
       <div className="term-compose-shell" id={regionId} aria-hidden={!expanded}>
         <div className="term-compose-inner">
-          <div className="term-compose-rail">
-            <SessionUsagePill
-              session={session}
-              connection={connection}
-              catalog={catalog}
-              onRateLimitRefresh={onRateLimitRefresh}
-              rateLimitRefreshBusy={rateLimitRefreshBusy}
-              popoverContainer={popoverHost}
-            />
-            {hint ? (
+          {hint ? (
+            <div className="term-compose-rail">
               <span className="term-compose-hint" role="status">
                 {hint}
               </span>
-            ) : null}
-            <span className="term-compose-meta-spacer" />
-            <span className="composer-shortcut term-compose-shortcut" aria-hidden="true">
-              <kbd>{shortcutLabel}</kbd>
-              <span>send</span>
-            </span>
-          </div>
+            </div>
+          ) : null}
           <div
             className={`term-compose-field${dragActive ? " is-drag-active" : ""}${leadForced ? " lead-forced" : ""}`}
             onDragOver={handleDragOver}

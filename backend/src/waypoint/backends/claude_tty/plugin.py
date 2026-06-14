@@ -27,10 +27,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, status
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
 from waypoint.backends.claude_code.models import (
+    CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
     claude_default_model_id,
 )
@@ -38,9 +39,19 @@ from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_PERMISSION_MODE_SPECS,
     CLAUDE_PERMISSION_MODES,
 )
+from waypoint.backends.claude_code.plugin import _claude_effort_swap_message
 from waypoint.backends.claude_code.rate_limits import (
     probe_claude_usage,
     probe_claude_usage_remote,
+)
+from waypoint.backends.claude_code.schemas import (
+    ClaudeThreadImportRequest,
+    ClaudeThreadSummary,
+)
+from waypoint.backends.claude_code.threads import (
+    ClaudeThreadInfo,
+    find_local_claude_thread,
+    list_local_claude_threads,
 )
 from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
@@ -64,6 +75,23 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("waypoint.backends.claude_tty")
 
+# Sentinel distinguishing "argument not passed" from "explicitly set to None"
+# in the control-swap helper, so a caller can clear a flag (effort=None) while
+# the unspecified flags keep the session's current value.
+_UNSET: Any = object()
+
+# CLI flags Waypoint owns; users may not smuggle them in through custom args.
+_RESERVED_CLI_FLAGS = frozenset(
+    {
+        "--session-id",
+        "--resume",
+        "--fork-session",
+        "--model",
+        "--effort",
+        "--permission-mode",
+    }
+)
+
 
 class ClaudeTtyPluginConfig(PluginConfig):
     """Configuration for the claude_tty plugin.
@@ -83,6 +111,7 @@ class ClaudeTtyPlugin(TmuxPlugin):
     id = "claude_tty"
     transport_id = "claude_tty"
     label = "Claude TUI"
+    import_request_schema: type[BaseModel] | None = ClaudeThreadImportRequest
     config_schema: type[PluginConfig] = ClaudeTtyPluginConfig
     extra_env = {"CLAUDE_CODE_NO_FLICKER": "1"}
     capabilities = BackendCapabilities(
@@ -91,9 +120,16 @@ class ClaudeTtyPlugin(TmuxPlugin):
         supports_reattach_after_exit=True,
         supports_fork=True,
         supports_attachments=True,
-        supports_set_model_inline=False,
+        # All control swaps restart the pane with `--resume <thread>` and a
+        # rebuilt flag set; none of them mutate a live process inline.
+        supports_set_model_inline=True,
         supports_set_effort_inline=False,
-        supports_set_permission_mode_inline=False,
+        supports_set_effort_with_restart=True,
+        supports_set_permission_mode_inline=True,
+        supports_custom_cli_args=True,
+        supports_thread_discovery=True,
+        supports_thread_import=True,
+        effort_levels=CLAUDE_EFFORT_LEVELS,
         model_source=ModelSource.STATIC,
         permission_modes=CLAUDE_PERMISSION_MODE_SPECS,
         badges={"glyph": "C", "color": "#a78bfa"},
@@ -222,6 +258,7 @@ class ClaudeTtyPlugin(TmuxPlugin):
         resolved_model: str | None,
         resolved_effort: str | None,
     ) -> SessionRecord:
+        _validate_custom_args(request.args)
         thread_id = str(uuid.uuid4())
         launch_args = _build_launch_args(
             thread_id=thread_id,
@@ -513,6 +550,288 @@ class ClaudeTtyPlugin(TmuxPlugin):
         self._spawn_rate_limit_watcher(runtime, new_session)
         return runtime.get_session(new_session_id)
 
+    # ── Control swaps (restart-with-resume) ──────────────────────────────────
+
+    async def apply_model(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        model: str | None,
+    ) -> None:
+        await self._restart_with_args(runtime, session, model=model)
+
+    async def apply_permission_mode(
+        self, runtime: "SessionRuntime", session: SessionRecord, mode: str
+    ) -> None:
+        await self._restart_with_args(runtime, session, permission_mode=mode)
+
+    async def apply_effort(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        effort: str | None,
+    ) -> bool:
+        return await self._restart_with_args(runtime, session, effort=effort)
+
+    def effort_swap_message(self, effort: str | None) -> str:
+        return _claude_effort_swap_message(effort)
+
+    async def _restart_with_args(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        *,
+        model: Any = _UNSET,
+        effort: Any = _UNSET,
+        permission_mode: Any = _UNSET,
+    ) -> bool:
+        """Relaunch the pane with ``--resume <thread>`` and a rebuilt flag set.
+
+        Claude's TUI has no in-process knob for model/effort/permission mode,
+        so every swap kills the pane and respawns ``claude --resume <thread>``
+        with the merged flags. Only the kwargs the caller passes change; the
+        others keep the session's current value. Returns ``True`` when a
+        restart happened, ``False`` when the requested value was already
+        active (so ``set_effort`` knows not to announce a no-op swap).
+        """
+        field = (
+            "model"
+            if model is not _UNSET
+            else "effort" if effort is not _UNSET else "permission mode"
+        )
+        if session.status is not SessionStatus.IDLE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"cannot change {field} while the session is running",
+            )
+
+        new_model = session.model if model is _UNSET else model
+        new_effort = session.effort if effort is _UNSET else effort
+        new_permission_mode = (
+            session.permission_mode if permission_mode is _UNSET else permission_mode
+        )
+        current = (
+            session.model or None,
+            session.effort or None,
+            session.permission_mode or None,
+        )
+        merged = (new_model or None, new_effort or None, new_permission_mode or None)
+        if merged == current:
+            return False
+
+        state = session.transport_state
+        thread_id = state.get("thread_id")
+        if not isinstance(thread_id, str) or not thread_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="claude_tty session has no thread id to resume",
+            )
+
+        old_tmux_session = state.get("tmux_session")
+        if old_tmux_session:
+            with suppress(TmuxError):
+                await runtime.tmux.kill_session(old_tmux_session)
+        self._pending_approvals.pop(session.id, None)
+        tailer_task = self._tailer_tasks.pop(session.id, None)
+        if tailer_task is not None:
+            tailer_task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await tailer_task
+
+        stored_args = state.get("launch_args")
+        base_args = _scrub_session_args(
+            stored_args if isinstance(stored_args, list) else []
+        )
+        flag_pairs: list[str] = []
+        if merged[0]:
+            flag_pairs += ["--model", merged[0]]
+        if merged[1]:
+            flag_pairs += ["--effort", merged[1]]
+        if merged[2]:
+            flag_pairs += ["--permission-mode", merged[2]]
+        launch_args = ["--resume", thread_id, *flag_pairs, *base_args]
+
+        launch_target = runtime._find_launch_target(session.launch_target_id)
+        command = runtime._command_for_backend(
+            self.id,
+            launch_args,
+            launch_target,
+            session.cwd,
+            allocate_tty=True,
+            session_id=session.id,
+        )
+        raw_log = Path(session.raw_log_path)
+        with suppress(OSError):
+            raw_log.parent.mkdir(parents=True, exist_ok=True)
+            raw_log.write_bytes(b"")
+        try:
+            target = await runtime.tmux.start_managed_session(
+                session.id, session.cwd, command
+            )
+            await runtime.tmux.pipe_output(target.pane, raw_log)
+        except TmuxError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        with suppress(TmuxError):
+            await runtime.tmux.resize_window(target.session, 120, 50)
+
+        new_state: dict[str, Any] = {
+            "tmux_session": target.session,
+            "tmux_window": target.window,
+            "tmux_pane": target.pane,
+            "pid": target.pane_pid,
+            "thread_id": thread_id,
+            "launch_args": launch_args,
+        }
+        runtime.storage.update_session(
+            session.id, transport_state=new_state, status=SessionStatus.STARTING
+        )
+        await runtime._record_system_event(
+            session.id,
+            f"Restarted Claude TUI session to apply {field} change (thread {thread_id})",
+            status=SessionStatus.IDLE,
+        )
+        # The resumed thread reopens its already-populated transcript, whose
+        # records are in the event DB; tail from the end so they aren't replayed.
+        self._start_tailer(
+            runtime, session.id, thread_id, session.cwd, start_at_end=True
+        )
+        return True
+
+    # ── Thread discovery + import ────────────────────────────────────────────
+
+    def _thread_summary(self, info: ClaudeThreadInfo) -> ClaudeThreadSummary:
+        return ClaudeThreadSummary(
+            id=info.id,
+            title=info.title,
+            cwd=info.cwd,
+            repo_name=info.repo_name,
+            branch=info.branch,
+            preview=info.preview,
+            created_at=info.created_at,
+            updated_at=info.updated_at,
+        )
+
+    def _imported_thread_ids(self, runtime: "SessionRuntime") -> set[str]:
+        imported: set[str] = set()
+        for session in runtime.storage.list_sessions():
+            if session.backend != self.id:
+                continue
+            thread_id = session.transport_state.get("thread_id")
+            if isinstance(thread_id, str) and thread_id:
+                imported.add(thread_id)
+        return imported
+
+    async def list_threads(
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None = None,
+    ) -> list[ClaudeThreadSummary]:
+        # Remote enumeration is a follow-up; only the local store is read here.
+        if launch_target_id is not None:
+            return []
+        infos = await asyncio.to_thread(list_local_claude_threads)
+        imported = self._imported_thread_ids(runtime)
+        return [self._thread_summary(info) for info in infos if info.id not in imported]
+
+    async def import_thread(
+        self,
+        runtime: "SessionRuntime",
+        request: ClaudeThreadImportRequest,
+    ) -> SessionRecord:
+        if request.launch_target_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="remote import not yet supported for claude_tty",
+            )
+        info = await asyncio.to_thread(find_local_claude_thread, request.thread_id)
+        if info is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="claude thread not found",
+            )
+        cwd_path = Path(info.cwd).expanduser()
+        if not cwd_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"claude thread cwd {info.cwd} no longer exists; cannot resume",
+            )
+        if request.thread_id in self._imported_thread_ids(runtime):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="claude thread already imported",
+            )
+        cwd = str(cwd_path)
+        launch_args = ["--resume", request.thread_id]
+        session_id = runtime._generate_session_id(self.id)
+        session_dir = runtime._session_dir(session_id)
+        raw_log = session_dir / "raw.log"
+        structured_log = session_dir / "events.jsonl"
+        raw_log.parent.mkdir(parents=True, exist_ok=True)
+        raw_log.touch(exist_ok=True)
+        try:
+            command = runtime._command_for_backend(
+                self.id,
+                launch_args,
+                None,
+                cwd,
+                allocate_tty=True,
+                session_id=session_id,
+            )
+        except HTTPException:
+            raise
+        try:
+            target = await runtime.tmux.start_managed_session(session_id, cwd, command)
+            await runtime.tmux.pipe_output(target.pane, raw_log)
+        except TmuxError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        with suppress(TmuxError):
+            await runtime.tmux.resize_window(target.session, 120, 50)
+
+        now = datetime.now(UTC)
+        session = SessionRecord(
+            id=session_id,
+            backend=self.id,
+            source=SessionSource.MANAGED,
+            transport=self.transport_id,
+            title=info.title,
+            cwd=cwd,
+            launch_target_id=None,
+            repo_name=info.repo_name,
+            branch=info.branch,
+            status=SessionStatus.STARTING,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            raw_log_path=str(raw_log),
+            structured_log_path=str(structured_log),
+            transport_state={
+                "tmux_session": target.session,
+                "tmux_window": target.window,
+                "tmux_pane": target.pane,
+                "pid": target.pane_pid,
+                "thread_id": request.thread_id,
+                "launch_args": launch_args,
+            },
+        )
+        runtime.storage.create_session(session)
+        await runtime._record_system_event(
+            session.id,
+            f"Imported stored Claude thread ({cwd})",
+            status=SessionStatus.IDLE,
+            metadata={"imported_thread_id": request.thread_id},
+        )
+        # The resumed thread reopens an already-populated transcript; tail from
+        # the end so records already on disk are not replayed into the DB.
+        self._start_tailer(
+            runtime, session.id, request.thread_id, cwd, start_at_end=True
+        )
+        self._spawn_rate_limit_watcher(runtime, session)
+        return runtime.get_session(session.id)
+
 
 def _build_launch_args(
     *,
@@ -534,17 +853,50 @@ def _build_launch_args(
 
 
 def _scrub_session_args(args: list[str]) -> list[str]:
-    """Strip ``--session-id`` and ``--resume`` (plus their value) from args."""
+    """Strip Waypoint-managed flags (and their values) from stored args.
+
+    Removes the thread-identity flags (``--session-id``/``--resume``/
+    ``--fork-session``) and the control flags (``--model``/``--effort``/
+    ``--permission-mode``) so a restart can rebuild them from the merged
+    session state. Custom user args pass through untouched.
+    """
+    valued = {
+        "--session-id",
+        "--resume",
+        "--model",
+        "--effort",
+        "--permission-mode",
+    }
     result: list[str] = []
     skip = 0
     for arg in args:
         if skip:
             skip -= 1
             continue
-        if arg in ("--session-id", "--resume", "--fork-session"):
-            # --fork-session has no value argument; --session-id and --resume do
-            if arg != "--fork-session":
-                skip = 1
+        if arg == "--fork-session":
+            # Valueless toggle; drop it on its own.
+            continue
+        if arg in valued:
+            skip = 1
             continue
         result.append(arg)
     return result
+
+
+def _validate_custom_args(args: list[str]) -> None:
+    """Reject Waypoint-managed flags supplied as custom CLI args.
+
+    Thread identity and the model/effort/permission knobs are rebuilt by the
+    plugin on every launch and restart; letting a user pin them through
+    ``args`` would desync the stored session state from the live pane.
+    """
+    for arg in args:
+        flag = arg.split("=", 1)[0]
+        if flag in _RESERVED_CLI_FLAGS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"{flag} is managed by Waypoint and cannot be passed "
+                    "as a custom CLI arg"
+                ),
+            )

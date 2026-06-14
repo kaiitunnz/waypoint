@@ -13,6 +13,7 @@ Thin subclass of ``TmuxTransport`` that overrides:
 
 from typing import TYPE_CHECKING
 
+from waypoint.backends.approvals import is_approve_decision
 from waypoint.backends.tmux.transport import TmuxTransport
 from waypoint.schemas import SessionRecord
 
@@ -30,6 +31,12 @@ class ClaudeTtyTransport(TmuxTransport):
         self._plugin = plugin
 
     async def interrupt(self, session: SessionRecord) -> None:
+        # Esc cancels whatever the pane is showing — including an open
+        # permission dialog, which it declines. Drop any pending approval now
+        # so ``has_pending_approval`` goes false immediately instead of lingering
+        # until the next dialog poll, where a racing ``respond_to_approval``
+        # would fire a stray digit at the ready prompt.
+        self._plugin._pending_approvals.pop(session.id, None)
         await self.adapter.send_bytes(self._target(session), b"\x1b")
 
     def has_pending_approval(self, session: SessionRecord) -> bool:
@@ -54,9 +61,8 @@ class ClaudeTtyTransport(TmuxTransport):
         self._plugin._pending_approvals.pop(session.id, None)
 
         target = self._target(session)
-        normalized = decision.strip().lower()
 
-        if normalized in {"approve", "yes", "y"}:
+        if is_approve_decision(decision):
             await self.adapter.send_input(
                 target, str(pending.approve_number), submit=True
             )

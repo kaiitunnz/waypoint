@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from waypoint.attachments import ResolvedAttachment, append_attachment_paths
+from waypoint.backends.approvals import is_approve_decision
 from waypoint.backends.claude_code.models import (
     claude_context_window_for_model,
     claude_model_family,
@@ -1919,18 +1920,7 @@ class ClaudeCliAdapter:
         await self._publish_context_usage(state, refreshed)
 
     def _map_decision(self, decision: str) -> str:
-        lowered = decision.strip().lower()
-        if lowered in {
-            "approve",
-            "accept",
-            "yes",
-            "y",
-            "allow",
-            "acceptforsession",
-            "acceptalways",
-        }:
-            return "allow"
-        return "deny"
+        return "allow" if is_approve_decision(decision) else "deny"
 
     def _require_session(self, session_id: str) -> ClaudeSessionState:
         try:

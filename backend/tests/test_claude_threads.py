@@ -7,6 +7,7 @@ import pytest
 
 from waypoint.backends.claude_code.threads import (
     claude_projects_root,
+    encode_project_dir,
     find_local_claude_thread,
     list_local_claude_threads,
 )
@@ -48,6 +49,20 @@ def claude_root(tmp_path, monkeypatch) -> Path:
 def test_claude_projects_root_honors_env(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "alt"))
     assert claude_projects_root() == tmp_path / "alt" / "projects"
+
+
+@pytest.mark.parametrize(
+    "cwd, expected",
+    [
+        ("/home/user/waypoint", "-home-user-waypoint"),
+        # Leading-dot (hidden) component collapses `/.` to `--`; a naive
+        # str.replace("/", "-") would leave the dot and miss the real dir.
+        ("/home/user/.wq/task-1", "-home-user--wq-task-1"),
+        ("/tmp/a.b_c:d", "-tmp-a-b-c-d"),
+    ],
+)
+def test_encode_project_dir_matches_cli_encoding(cwd, expected) -> None:
+    assert encode_project_dir(cwd) == expected
 
 
 def test_list_local_claude_threads_extracts_metadata(claude_root) -> None:

@@ -66,6 +66,16 @@ def claude_projects_root() -> Path:
     return root / "projects"
 
 
+def encode_project_dir(cwd: str) -> str:
+    """Encode a cwd to the project-dir name Claude stores transcripts under.
+
+    Matches the CLI's lossy ``[^a-zA-Z0-9] -> '-'`` mapping (e.g. a leading-dot
+    component collapses ``/.`` to ``--``); the result is not reversible, which is
+    why discovery reads ``cwd`` from the records rather than decoding the name.
+    """
+    return re.sub(r"[^a-zA-Z0-9]", "-", cwd)
+
+
 def list_local_claude_threads() -> list[ClaudeThreadInfo]:
     """Enumerate resumable Claude sessions on the local filesystem.
 

@@ -17,6 +17,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from waypoint.backends.claude_code.normalize import format_approval_text
+from waypoint.backends.claude_code.threads import (
+    claude_projects_root,
+    encode_project_dir,
+)
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.claude_tty.normalize import TranscriptNormalizer
@@ -36,9 +40,14 @@ _DIALOG_STABLE_TICKS = 2  # consecutive identical captures before surfacing
 
 
 def transcript_path(cwd: str, session_uuid: str) -> Path:
-    """Return the Claude TUI's JSONL transcript path for the given session."""
-    dashed = cwd.replace("/", "-")
-    return Path.home() / ".claude" / "projects" / dashed / f"{session_uuid}.jsonl"
+    """Return the Claude TUI's JSONL transcript path for the given session.
+
+    Resolves the store root and the encoded project-dir name through the same
+    helpers thread discovery uses, so the tailed path matches where the CLI
+    actually writes — including for cwds with non-slash special characters
+    (hidden dirs, worktrees) and a non-default ``$CLAUDE_CONFIG_DIR``.
+    """
+    return claude_projects_root() / encode_project_dir(cwd) / f"{session_uuid}.jsonl"
 
 
 class TranscriptTailer:

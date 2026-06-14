@@ -2,10 +2,10 @@
 
 claude_tty has no in-process knobs: model/effort/permission-mode swaps all
 relaunch the pane with ``--resume <thread>`` and a rebuilt flag set. These
-tests cover the arg scrubber, the restart helper (idle guard, no-op
-short-circuit, flag rebuild), the effort return contract, custom-arg
-validation, thread-discovery dedup, and the resume-import path — all against
-fakes so no live TUI/tmux is needed.
+tests cover the arg scrubber, the restart helper (running-restart with an
+interruption note, starting guard, no-op short-circuit, flag rebuild), the
+effort return contract, custom-arg validation, thread-discovery dedup, and the
+resume-import path — all against fakes so no live TUI/tmux is needed.
 """
 
 from datetime import UTC, datetime
@@ -23,6 +23,7 @@ from waypoint.backends.claude_tty.plugin import (
     _scrub_session_args,
     _validate_custom_args,
 )
+from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.schemas import (
     SessionCreateRequest,
     SessionRecord,
@@ -133,18 +134,50 @@ def test_scrub_strips_resume() -> None:
 # ── _restart_with_args ────────────────────────────────────────────────────────
 
 
-async def test_restart_idle_guard_raises_when_running() -> None:
+async def test_restart_while_running_relaunches_and_notes_interruption() -> None:
     plugin = ClaudeTtyPlugin()
     _stub_lifecycle(plugin)
     session = _make_session(status=SessionStatus.RUNNING, model="opus")
+    runtime, _ = _restart_runtime()
+
+    result = await plugin._restart_with_args(runtime, session, model="sonnet")
+
+    assert result is True
+    runtime.tmux.start_managed_session.assert_awaited_once()
+    note = runtime._record_system_event.call_args.args[1]
+    assert "Interrupted the running turn" in note
+
+
+async def test_restart_guard_raises_when_starting() -> None:
+    plugin = ClaudeTtyPlugin()
+    _stub_lifecycle(plugin)
+    session = _make_session(status=SessionStatus.STARTING, model="opus")
     runtime, _ = _restart_runtime()
 
     with pytest.raises(HTTPException) as exc:
         await plugin._restart_with_args(runtime, session, model="sonnet")
 
     assert exc.value.status_code == 400
-    assert "model" in exc.value.detail
+    assert "starting" in exc.value.detail
     runtime.tmux.start_managed_session.assert_not_called()
+
+
+async def test_restart_when_exited_tolerates_dead_pane_and_relaunches() -> None:
+    plugin = ClaudeTtyPlugin()
+    _stub_lifecycle(plugin)
+    session = _make_session(status=SessionStatus.EXITED, model="opus")
+    runtime, _ = _restart_runtime()
+    # The old pane is already gone, so killing it raises — which must be
+    # swallowed so the resume relaunch still happens.
+    runtime.tmux.kill_session = AsyncMock(side_effect=TmuxError("no such session"))
+
+    result = await plugin._restart_with_args(runtime, session, model="sonnet")
+
+    assert result is True
+    runtime.tmux.start_managed_session.assert_awaited_once()
+    # EXITED is not a running turn, so the note must not claim an interruption.
+    note = runtime._record_system_event.call_args.args[1]
+    assert "Interrupted the running turn" not in note
 
 
 async def test_restart_unchanged_value_returns_false_without_relaunch() -> None:

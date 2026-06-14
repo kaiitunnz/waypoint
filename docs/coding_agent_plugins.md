@@ -101,6 +101,7 @@ plugin without calling into it:
 | `supports_set_effort_inline` | `bool` | Gates the effort picker. Set `False` if effort changes require a session restart (Claude); the runtime still routes through your `apply_effort`, which decides whether to short-circuit. |
 | `supports_set_effort_with_restart` | `bool` | Gates effort changes that restart and resume the backend between turns instead of applying the value mid-stream. |
 | `supports_set_permission_mode_inline` | `bool` | Gates the permission-mode picker + the `/api/sessions/{id}/mode` endpoint. |
+| `settings_change_interrupts_turn` | `bool` | Frontend hint that applying a model/permission-mode/effort change relaunches the session and interrupts any running turn (claude_tty), so the composer confirms before changing settings on a running session. |
 | `supports_thread_discovery` | `bool` | Enables `GET /api/backends/{id}/threads`. |
 | `supports_thread_import` | `bool` | Enables `POST /api/backends/{id}/sessions/import`. |
 | `supports_fork` | `bool` | Enables creating a new session from an existing backend thread. |
@@ -125,17 +126,19 @@ mechanisms behind it:
 | Backend | Transport | Models | Effort | Permission mode | Threads | Custom CLI args | Approval notes |
 |---------|-----------|--------|--------|-----------------|---------|-----------------|----------------|
 | `claude_code` | Claude stream-json subprocess | Static Claude model catalogue; swaps through the CLI control protocol | `low` / `medium` / `high` / `xhigh`; restart-with-resume while idle | Claude permission-mode catalogue; swaps through the CLI control protocol | Discovers and imports Claude transcripts | Yes | Yes, on decline |
-| `claude_tty` | Claude fullscreen TUI in tmux, tailed from transcript JSONL | Static Claude model catalogue; restart-with-resume while idle | `low` / `medium` / `high` / `xhigh`; restart-with-resume while idle | Claude permission-mode catalogue; restart-with-resume while idle | Discovers and imports Claude transcripts | Yes | No |
+| `claude_tty` | Claude fullscreen TUI in tmux, tailed from transcript JSONL | Static Claude model catalogue; restart-with-resume, interrupting any running turn | `low` / `medium` / `high` / `xhigh`; restart-with-resume, interrupting any running turn | Claude permission-mode catalogue; restart-with-resume, interrupting any running turn | Discovers and imports Claude transcripts | Yes | No |
 | `codex` | App Server SDK | Live `model/list` RPC | Per-turn flag from live model metadata | Codex permission-mode catalogue; applied inline | Discovers and imports Codex threads | Yes | No |
 | `opencode` | OpenCode REST + SSE | Live OpenCode metadata | Backend-native setting | OpenCode permission-mode catalogue; applied inline | Discovers and imports OpenCode sessions | Yes | Yes, on decline |
 | `tmux` | Generic tmux pane | None | None | None | None | No | No |
 
 `claude_tty` applies model, effort, and permission-mode swaps by
 relaunching the pane with `claude --resume <thread>` plus the selected
-`--model`, `--effort`, and `--permission-mode` flags while the session
-is idle. That is deliberately different from `claude_code`, which can
-send model and permission changes over Claude's stdio control protocol
-and uses restart-with-resume only for effort changes.
+`--model`, `--effort`, and `--permission-mode` flags. The TUI has no
+in-process knob, so a swap on a running session interrupts the live turn
+before resuming; the plugin sets `settings_change_interrupts_turn` so the
+composer warns first. That is deliberately different from `claude_code`,
+which sends model and permission changes over Claude's stdio control
+protocol mid-turn and uses restart-with-resume only for effort changes.
 
 Thread discovery/import for `claude_tty` reads the same
 `~/.claude/projects` transcript store as `claude_code`, so the same

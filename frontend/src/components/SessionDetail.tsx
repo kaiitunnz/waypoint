@@ -442,9 +442,29 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     window.scrollTo({ top: 0, behavior });
   }, []);
 
+  // Backends that apply settings by relaunching the process (claude_tty)
+  // interrupt the live turn, so confirm before changing one mid-turn.
+  const confirmTurnInterrupt = useCallback(
+    (field: string): boolean => {
+      if (!session) return false;
+      const interrupts = catalog.byId(session.backend)?.capabilities
+        .settings_change_interrupts_turn;
+      const running =
+        session.status === "running" || session.status === "waiting_input";
+      if (!interrupts || !running) return true;
+      return window.confirm(
+        `Changing the ${field} restarts this session and interrupts the current turn. Continue?`,
+      );
+    },
+    [session, catalog],
+  );
+
   const handlePermissionModeChange = useCallback(
     async (nextMode: string) => {
       if (!session || nextMode === (session.permission_mode ?? "default")) {
+        return;
+      }
+      if (!confirmTurnInterrupt("permission mode")) {
         return;
       }
       setModeBusy(true);
@@ -464,7 +484,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         setModeBusy(false);
       }
     },
-    [host, token, session, handleAuthFailure],
+    [host, token, session, handleAuthFailure, confirmTurnInterrupt],
   );
 
   // Refresh the model picker whenever the active backend or launch target
@@ -518,6 +538,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       if (cleaned === current) {
         return;
       }
+      if (!confirmTurnInterrupt("model")) {
+        return;
+      }
       setModelBusy(true);
       setError("");
       try {
@@ -535,7 +558,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         setModelBusy(false);
       }
     },
-    [host, token, session, handleAuthFailure],
+    [host, token, session, handleAuthFailure, confirmTurnInterrupt],
   );
 
   const handleEffortChange = useCallback(
@@ -546,6 +569,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       const cleaned = nextEffort.trim() || null;
       const current = session.effort ?? null;
       if (cleaned === current) {
+        return;
+      }
+      if (!confirmTurnInterrupt("effort")) {
         return;
       }
       setEffortBusy(true);
@@ -565,7 +591,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         setEffortBusy(false);
       }
     },
-    [host, token, session, handleAuthFailure],
+    [host, token, session, handleAuthFailure, confirmTurnInterrupt],
   );
 
   const flushPendingEvents = useCallback(() => {

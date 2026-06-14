@@ -45,6 +45,12 @@ class BackendCapabilities(_FrozenModel):
     # path don't have to also claim ``supports_set_effort_inline``.
     supports_set_effort_with_restart: bool = False
     supports_set_permission_mode_inline: bool = False
+    # Applying a model/permission-mode/effort change relaunches the session
+    # process, so doing it mid-turn interrupts the running turn. claude_tty
+    # is the only backend like this today — its TUI has no in-process knob,
+    # so every swap kills the pane and respawns ``--resume``. The frontend
+    # reads this to warn before changing settings on a running session.
+    settings_change_interrupts_turn: bool = False
     supports_thread_discovery: bool = False
     supports_thread_import: bool = False
     supports_fork: bool = False

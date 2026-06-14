@@ -29,12 +29,11 @@ from typing import TYPE_CHECKING, Any
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 
-from waypoint.backends.capabilities import (
-    BackendCapabilities,
-    ModelSource,
-    SlashCommandSpec,
+from waypoint.backends.capabilities import BackendCapabilities, ModelSource
+from waypoint.backends.claude_code.commands import (
+    CLAUDE_BUILTIN_SLASH_COMMANDS,
+    list_claude_command_completions,
 )
-from waypoint.backends.claude_code.commands import list_claude_command_completions
 from waypoint.backends.claude_code.models import (
     CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
@@ -86,24 +85,6 @@ log = logging.getLogger("waypoint.backends.claude_tty")
 # in the control-swap helper, so a caller can clear a flag (effort=None) while
 # the unspecified flags keep the session's current value.
 _UNSET: Any = object()
-
-# Built-in Claude TUI slash commands worth surfacing in the composer. claude_code
-# learns these from the SDK's ``system.init`` stream, which the TUI path never
-# emits, so claude_tty carries a curated static list instead. They dispatch as
-# plain text — typed straight into the pane, where the TUI interprets them.
-_CLAUDE_TTY_SLASH_COMMANDS = (
-    SlashCommandSpec(
-        name="compact", description="Compact the conversation to free up context"
-    ),
-    SlashCommandSpec(name="clear", description="Clear the conversation history"),
-    SlashCommandSpec(name="context", description="Show context window usage"),
-    SlashCommandSpec(name="cost", description="Show token usage and cost"),
-    SlashCommandSpec(name="export", description="Export the conversation"),
-    SlashCommandSpec(name="memory", description="Edit Claude memory files"),
-    SlashCommandSpec(name="init", description="Generate a CLAUDE.md for the project"),
-    SlashCommandSpec(name="config", description="Open the settings panel"),
-    SlashCommandSpec(name="help", description="List available commands"),
-)
 
 # CLI flags Waypoint owns; users may not smuggle them in through custom args.
 _RESERVED_CLI_FLAGS = frozenset(
@@ -161,7 +142,7 @@ class ClaudeTtyPlugin(TmuxPlugin):
         effort_levels=CLAUDE_EFFORT_LEVELS,
         model_source=ModelSource.STATIC,
         permission_modes=CLAUDE_PERMISSION_MODE_SPECS,
-        slash_commands=_CLAUDE_TTY_SLASH_COMMANDS,
+        slash_commands=CLAUDE_BUILTIN_SLASH_COMMANDS,
         badges={"glyph": "C", "color": "#a78bfa"},
         cli_binary="claude",
         target_aliases=("claude_tty",),

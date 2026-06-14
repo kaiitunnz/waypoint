@@ -714,6 +714,10 @@ class ClaudeTtyPlugin(TmuxPlugin):
         )
 
     def _imported_thread_ids(self, runtime: "SessionRuntime") -> set[str]:
+        # Keyed on thread_id alone, which is sufficient only because claude_tty
+        # imports the local store exclusively. If remote enumeration lands, switch
+        # to a (launch_target_id, thread_id) key so a local import cannot mask the
+        # same thread on a remote target (cf. claude_code's dedup).
         imported: set[str] = set()
         for session in runtime.storage.list_sessions():
             if session.backend != self.id:

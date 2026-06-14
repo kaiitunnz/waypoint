@@ -128,7 +128,7 @@ mechanisms behind it:
 | `claude_tty` | Claude fullscreen TUI in tmux, tailed from transcript JSONL | Static Claude model catalogue; restart-with-resume while idle | `low` / `medium` / `high` / `xhigh`; restart-with-resume while idle | Claude permission-mode catalogue; restart-with-resume while idle | Discovers and imports Claude transcripts | Yes | No |
 | `codex` | App Server SDK | Live `model/list` RPC | Per-turn flag from live model metadata | Codex permission-mode catalogue; applied inline | Discovers and imports Codex threads | Yes | No |
 | `opencode` | OpenCode REST + SSE | Live OpenCode metadata | Backend-native setting | OpenCode permission-mode catalogue; applied inline | Discovers and imports OpenCode sessions | Yes | Yes, on decline |
-| `tmux` | Generic tmux pane | None | None | None | None | Yes | No |
+| `tmux` | Generic tmux pane | None | None | None | None | No | No |
 
 `claude_tty` applies model, effort, and permission-mode swaps by
 relaunching the pane with `claude --resume <thread>` plus the selected

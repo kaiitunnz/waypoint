@@ -58,8 +58,10 @@ harness and model with `references/backends.md`.
 - Size the crew to the work and scale it deliberately — fan-out has no
   server-side limit, so an unbounded pool exhausts the host. Reap what you finish
   with.
-- The lead owns the board cells; workers only report. A worker-authored cell is
-  pruned when the worker is reaped, so durable state must stay with the lead.
+- The lead owns the board cells; workers only append to the log. A worker-authored
+  keyed cell is pruned when the worker is reaped; keyless log posts are durable
+  history — they survive reap and are readable with `board log job:<id>`. Durable
+  state (cells) must stay with the lead.
 - Give each worker a task it can do with no other context, and its own worktree —
   never let two workers share a tree.
 - Check the **final merged** result, not just per-task success.

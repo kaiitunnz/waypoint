@@ -55,8 +55,11 @@ waypoint board set-meta job:drop-py38 --key status:3 --meta state=doing --meta a
 
 `state` is `todo | doing | done | blocked`. Workers report progress to the **log**
 (a plain `waypoint board post job:<id> "..."`) or by a direct send; the lead
-updates `status:<n>` cells. Workers never write cells — a worker's own posts
-vanish when it is reaped, so durable state stays with the long-lived lead.
+updates `status:<n>` cells. Workers never write cells — a worker-authored keyed
+cell is pruned when the worker is reaped. Keyless log posts are durable history:
+they survive reap and persist as long as the channel does. Read the job's history
+with `board log job:<id>`; confirm what landed from git (ground truth for code),
+the log is the narrative. Durable state (cells) stays with the long-lived lead.
 
 > **Why two cells? — `--key` is an upsert that REPLACES the cell's text.** There
 > is no text-preserving metadata patch (`board edit-entry` also requires the text).

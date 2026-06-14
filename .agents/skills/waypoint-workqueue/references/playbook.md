@@ -79,6 +79,9 @@ The board is the checkpoint — no separate state file. A lead (re)starting read
 `todo` tasks get assigned; a `doing` task whose worker is gone
 (`waypoint sessions show <sid>` → `exited`/`error`) is handed back to `todo`.
 
+Read the job's history with `board log job:<job-id>`; confirm what landed from
+git (ground truth for code), the log is the narrative.
+
 ### Resume after the lead dies
 
 1. Read the board: `waypoint board read job:<job-id>`.

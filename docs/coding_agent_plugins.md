@@ -45,6 +45,11 @@ backend/src/waypoint/
     │   ├── support.py        ← host-side support bundle (thread enumerator)
     │   ├── threads.py        ← local thread enumeration
     │   └── threads_remote.py ← SSH thread enumeration
+    ├── claude_tty/
+    │   ├── plugin.py
+    │   ├── transport.py      ← tmux-pane input + approval driver
+    │   ├── tailer.py         ← Claude transcript tailer
+    │   └── normalize.py      ← transcript JSONL → EventEnvelope helpers
     ├── codex/
     │   ├── plugin.py
     │   ├── adapter.py        ← App Server SDK driver
@@ -94,9 +99,14 @@ plugin without calling into it:
 | `supports_terminate` | `bool` | Reserved; today every plugin returns `True`. |
 | `supports_set_model_inline` | `bool` | Gates the model picker in the composer + the `/api/sessions/{id}/model` endpoint. |
 | `supports_set_effort_inline` | `bool` | Gates the effort picker. Set `False` if effort changes require a session restart (Claude); the runtime still routes through your `apply_effort`, which decides whether to short-circuit. |
+| `supports_set_effort_with_restart` | `bool` | Gates effort changes that restart and resume the backend between turns instead of applying the value mid-stream. |
 | `supports_set_permission_mode_inline` | `bool` | Gates the permission-mode picker + the `/api/sessions/{id}/mode` endpoint. |
 | `supports_thread_discovery` | `bool` | Enables `GET /api/backends/{id}/threads`. |
 | `supports_thread_import` | `bool` | Enables `POST /api/backends/{id}/sessions/import`. |
+| `supports_fork` | `bool` | Enables creating a new session from an existing backend thread. |
+| `supports_approval_note` | `bool` | Allows the approval response form to send a reviewer note back to the backend on decline. |
+| `supports_attachments` | `bool` | Enables uploaded attachments in the composer for transports that can deliver paths or native image/file payloads. |
+| `supports_custom_cli_args` | `bool` | Allows launch requests and configured targets to pass extra raw CLI arguments to the backend binary. |
 | `supports_slash_compact` | `bool` | Frontend hint that `/compact` is meaningful for this backend. |
 | `permission_modes` | `tuple[PermissionModeSpec, ...]` | Drives the picker, scheduler validation, and the catalog payload. |
 | `effort_levels` | `tuple[str, ...]` | Empty tuple means "discovered per-model from the live model list" (Codex). |
@@ -106,6 +116,30 @@ plugin without calling into it:
 | `badges` | `dict[str, str]` | UI palette: `{"glyph": "X", "color": "#34d399"}`. |
 | `cli_binary` | `str \| None` | Default CLI invoked for local launches and for tmux fallback launches; `None` opts out. Override per-deployment via `plugin_configs.<id>.local_bin` (local) or `ssh_targets[*].plugin_configs.<id>.remote_bin` (per SSH target). |
 | `target_aliases` | `tuple[str, ...]` | Substrings used to infer this backend from a tmux pane name. |
+
+### Built-in backend capability profiles
+
+The built-in plugins expose the same contract but use different
+mechanisms behind it:
+
+| Backend | Transport | Models | Effort | Permission mode | Threads | Custom CLI args | Approval notes |
+|---------|-----------|--------|--------|-----------------|---------|-----------------|----------------|
+| `claude_code` | Claude stream-json subprocess | Static Claude model catalogue; swaps through the CLI control protocol | `low` / `medium` / `high` / `xhigh`; restart-with-resume while idle | Claude permission-mode catalogue; swaps through the CLI control protocol | Discovers and imports Claude transcripts | Yes | Yes, on decline |
+| `claude_tty` | Claude fullscreen TUI in tmux, tailed from transcript JSONL | Static Claude model catalogue; restart-with-resume while idle | `low` / `medium` / `high` / `xhigh`; restart-with-resume while idle | Claude permission-mode catalogue; restart-with-resume while idle | Discovers and imports Claude transcripts | Yes | No |
+| `codex` | App Server SDK | Live `model/list` RPC | Per-turn flag from live model metadata | Codex permission-mode catalogue; applied inline | Discovers and imports Codex threads | Yes | No |
+| `opencode` | OpenCode REST + SSE | Live OpenCode metadata | Backend-native setting | OpenCode permission-mode catalogue; applied inline | Discovers and imports OpenCode sessions | Yes | Yes, on decline |
+| `tmux` | Generic tmux pane | None | None | None | None | Yes | No |
+
+`claude_tty` applies model, effort, and permission-mode swaps by
+relaunching the pane with `claude --resume <thread>` plus the selected
+`--model`, `--effort`, and `--permission-mode` flags while the session
+is idle. That is deliberately different from `claude_code`, which can
+send model and permission changes over Claude's stdio control protocol
+and uses restart-with-resume only for effort changes.
+
+Thread discovery/import for `claude_tty` reads the same
+`~/.claude/projects` transcript store as `claude_code`, so the same
+Claude threads appear under both backend ids.
 
 ### Transport view
 

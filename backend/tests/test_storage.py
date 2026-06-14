@@ -17,6 +17,25 @@ from waypoint.schemas import (
 from waypoint.storage import Storage
 
 
+def _make_session(storage: Storage, session_id: str, title: str) -> None:
+    now = datetime.now(UTC)
+    storage.create_session(
+        SessionRecord(
+            id=session_id,
+            backend="codex",
+            source=SessionSource.MANAGED,
+            title=title,
+            cwd="/tmp",
+            status=SessionStatus.EXITED,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            raw_log_path="/tmp/raw.log",
+            structured_log_path="/tmp/events.jsonl",
+        )
+    )
+
+
 def test_storage_round_trip(tmp_path) -> None:
     storage = Storage(tmp_path / "waypoint.db")
     now = datetime.now(UTC)
@@ -853,15 +872,21 @@ def test_board_delete_channel_removes_it_from_the_list(tmp_path) -> None:
     assert storage.list_board_entries("topic:a") == []
 
 
-def test_board_prune_for_session_drops_authored_rows(tmp_path) -> None:
+def test_board_prune_for_session_drops_keyed_cells_keeps_log(tmp_path) -> None:
+    # Keyed cells authored by s1 are pruned; keyless log posts survive.
     storage = Storage(tmp_path / "waypoint.db")
-    storage.add_board_entry("topic:a", "mine", author_session_id="s1")
+    log_post = storage.add_board_entry("topic:a", "log-mine", author_session_id="s1")
+    cell = storage.add_board_entry(
+        "topic:a", "cell-mine", key="k", author_session_id="s1"
+    )
     storage.add_board_entry("topic:a", "theirs", author_session_id="s2")
     storage.add_board_entry("topic:a", "anon")
     removed = storage.prune_board_for_session("s1")
-    assert removed == 1
+    assert removed == 1  # only the keyed cell
     remaining = storage.list_board_entries("topic:a")
-    assert [e.text for e in remaining] == ["theirs", "anon"]
+    ids = [e.id for e in remaining]
+    assert log_post.id in ids
+    assert cell.id not in ids
 
 
 def test_board_delete_entry_removes_one_post(tmp_path) -> None:
@@ -982,3 +1007,82 @@ def test_storage_legacy_db_gets_launch_mode_column(tmp_path) -> None:
         assert row[0] == LaunchMode.AUTO.value
     finally:
         conn.close()
+
+
+# ── board history / author_label / keep_last ────────────────────────────────
+
+
+def test_board_author_label_round_trips(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    entry = storage.add_board_entry(
+        "topic:a", "hello", author_session_id="s1", author_label="My Session"
+    )
+    assert entry.author_label == "My Session"
+    loaded = storage.list_board_entries("topic:a")
+    assert loaded[0].author_label == "My Session"
+
+
+def test_board_author_label_survives_session_delete(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    _make_session(storage, "s1", "Worker One")
+    entry = storage.add_board_entry(
+        "topic:a", "done", author_session_id="s1", author_label="Worker One"
+    )
+    storage.delete_session("s1")
+    # Log post survives; author_label still readable.
+    remaining = storage.list_board_entries("topic:a")
+    assert len(remaining) == 1
+    assert remaining[0].id == entry.id
+    assert remaining[0].author_label == "Worker One"
+
+
+def test_board_clear_keep_last_retains_n_newest_log_posts(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    ids = [storage.add_board_entry("topic:a", f"log-{i}").id for i in range(5)]
+    # Also add a keyed cell (always dropped by clear).
+    storage.add_board_entry("topic:a", "val", key="k1")
+    removed = storage.clear_board_channel("topic:a", keep_last=3)
+    remaining = storage.list_board_entries("topic:a")
+    # Cell is gone; 2 oldest log posts dropped; 3 newest kept.
+    assert all(e.key is None for e in remaining)
+    remaining_ids = [e.id for e in remaining]
+    assert ids[0] not in remaining_ids
+    assert ids[1] not in remaining_ids
+    assert ids[2] in remaining_ids
+    assert ids[3] in remaining_ids
+    assert ids[4] in remaining_ids
+    assert removed == 3  # 2 old log + 1 cell
+
+
+def test_board_clear_keep_last_fewer_posts_than_n_only_drops_cells(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    log_id = storage.add_board_entry("topic:a", "only-post").id
+    storage.add_board_entry("topic:a", "cell", key="k")
+    removed = storage.clear_board_channel("topic:a", keep_last=10)
+    remaining = storage.list_board_entries("topic:a")
+    assert len(remaining) == 1
+    assert remaining[0].id == log_id
+    assert removed == 1  # only the cell
+
+
+def test_board_regression_log_post_survives_session_delete_and_list(tmp_path) -> None:
+    # Regression for the original bug: a keyless "done" log post must survive
+    # session delete, and list_board_entries must surface it.
+    storage = Storage(tmp_path / "waypoint.db")
+    _make_session(storage, "worker", "worker-session")
+    log_post = storage.add_board_entry(
+        "job:test",
+        "task 1 done",
+        author_session_id="worker",
+        author_label="worker-session",
+    )
+    storage.add_board_entry(
+        "job:test", "running", key="status", author_session_id="worker"
+    )
+    storage.prune_board_for_session("worker")
+    storage.delete_session("worker")
+    entries = storage.list_board_entries("job:test")
+    assert any(e.id == log_post.id for e in entries)
+    log_entries = [e for e in entries if e.key is None]
+    assert len(log_entries) == 1
+    assert log_entries[0].text == "task 1 done"

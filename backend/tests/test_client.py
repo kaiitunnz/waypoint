@@ -74,6 +74,7 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
             rest = request.url.path[len("/api/board/") :]
             if rest.endswith("/clear") and request.method == "POST":
                 channel = rest[: -len("/clear")]
+                state["clear_params"] = dict(request.url.params)
                 return httpx.Response(200, json={"channel": channel, "cleared": 3})
             if "/entries/" in rest:
                 channel, entry_id = rest.split("/entries/", 1)
@@ -749,3 +750,24 @@ def test_send_input_non_timeout_error_raises(
     with WaypointClient(_settings(tmp_path), token=VALID_TOKEN, client=http) as c:
         with pytest.raises(WaypointError):
             c.send_input("s1", "hello")
+
+
+def test_clear_board_keep_last_passes_param(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        result = client.clear_board("topic:x", keep_last=5)
+    assert result == {"channel": "topic:x", "cleared": 3}
+    assert state["clear_params"].get("keep_last") == "5"
+
+
+def test_clear_board_no_keep_last_omits_param(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.clear_board("topic:x")
+    assert state.get("clear_params", {}).get("keep_last") is None

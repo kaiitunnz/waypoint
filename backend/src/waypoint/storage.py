@@ -184,6 +184,7 @@ class Storage:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 channel TEXT NOT NULL,
                 author_session_id TEXT,
+                author_label TEXT,
                 key TEXT,
                 text TEXT NOT NULL,
                 metadata TEXT NOT NULL DEFAULT '{}',
@@ -209,6 +210,7 @@ class Storage:
             "SELECT channel, MIN(created_at) FROM board_entries GROUP BY channel"
         )
         self._ensure_column("board_entries", "edited_at", "TEXT")
+        self._ensure_column("board_entries", "author_label", "TEXT")
         self._ensure_column("scheduled_sessions", "permission_mode", "TEXT")
         self._ensure_column("scheduled_sessions", "model", "TEXT")
         self._ensure_column("scheduled_sessions", "effort", "TEXT")
@@ -344,6 +346,7 @@ class Storage:
         *,
         key: str | None = None,
         author_session_id: str | None = None,
+        author_label: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> BoardEntry:
         now = datetime.now(UTC)
@@ -357,10 +360,17 @@ class Storage:
             cursor = self.connection.execute(
                 """
                 INSERT INTO board_entries
-                    (channel, author_session_id, key, text, metadata, created_at)
-                VALUES (?, ?, NULL, ?, ?, ?)
+                    (channel, author_session_id, author_label, key, text, metadata, created_at)
+                VALUES (?, ?, ?, NULL, ?, ?, ?)
                 """,
-                (channel, author_session_id, text, meta_json, now.isoformat()),
+                (
+                    channel,
+                    author_session_id,
+                    author_label,
+                    text,
+                    meta_json,
+                    now.isoformat(),
+                ),
             )
             entry_id = int(cursor.lastrowid or 0)
         else:
@@ -369,15 +379,24 @@ class Storage:
             self.connection.execute(
                 """
                 INSERT INTO board_entries
-                    (channel, author_session_id, key, text, metadata, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (channel, author_session_id, author_label, key, text, metadata, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(channel, key) DO UPDATE SET
                     author_session_id = excluded.author_session_id,
+                    author_label = excluded.author_label,
                     text = excluded.text,
                     metadata = excluded.metadata,
                     created_at = excluded.created_at
                 """,
-                (channel, author_session_id, key, text, meta_json, now.isoformat()),
+                (
+                    channel,
+                    author_session_id,
+                    author_label,
+                    key,
+                    text,
+                    meta_json,
+                    now.isoformat(),
+                ),
             )
             row = self.connection.execute(
                 "SELECT id FROM board_entries WHERE channel = ? AND key = ?",
@@ -389,6 +408,7 @@ class Storage:
             id=entry_id,
             channel=channel,
             author_session_id=author_session_id,
+            author_label=author_label,
             key=key,
             text=text,
             metadata=meta,
@@ -483,12 +503,37 @@ class Storage:
         ]
 
     @_synchronized
-    def clear_board_channel(self, channel: str) -> int:
+    def clear_board_channel(self, channel: str, keep_last: int | None = None) -> int:
         # Remove the posts but keep the channel registered so it survives empty.
-        cursor = self.connection.execute(
-            "DELETE FROM board_entries WHERE channel = ?",
-            (channel,),
-        )
+        # With keep_last, retain the N most-recent keyless log posts; cells are
+        # always deleted regardless.
+        if keep_last is not None and keep_last > 0:
+            cutoff_row = self.connection.execute(
+                """
+                SELECT id FROM board_entries
+                WHERE channel = ? AND key IS NULL
+                ORDER BY id DESC
+                LIMIT 1 OFFSET ?
+                """,
+                (channel, keep_last - 1),
+            ).fetchone()
+            if cutoff_row is not None:
+                cursor = self.connection.execute(
+                    "DELETE FROM board_entries WHERE channel = ? AND "
+                    "(key IS NOT NULL OR id < ?)",
+                    (channel, cutoff_row["id"]),
+                )
+            else:
+                # Fewer than keep_last log posts exist; only drop cells.
+                cursor = self.connection.execute(
+                    "DELETE FROM board_entries WHERE channel = ? AND key IS NOT NULL",
+                    (channel,),
+                )
+        else:
+            cursor = self.connection.execute(
+                "DELETE FROM board_entries WHERE channel = ?",
+                (channel,),
+            )
         self.connection.commit()
         return cursor.rowcount or 0
 
@@ -549,8 +594,10 @@ class Storage:
 
     @_synchronized
     def prune_board_for_session(self, session_id: str) -> int:
+        # Only keyed cells are pruned; keyless log posts are durable history
+        # and survive a session delete (GC by channel via clear/delete).
         cursor = self.connection.execute(
-            "DELETE FROM board_entries WHERE author_session_id = ?",
+            "DELETE FROM board_entries WHERE author_session_id = ? AND key IS NOT NULL",
             (session_id,),
         )
         self.connection.commit()

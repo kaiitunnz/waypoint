@@ -411,9 +411,12 @@ class WaypointClient:
         ).json()["entry"]
         return data
 
-    def clear_board(self, channel: str) -> dict[str, Any]:
+    def clear_board(self, channel: str, keep_last: int | None = None) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if keep_last is not None:
+            params["keep_last"] = keep_last
         data: dict[str, Any] = self._request(
-            "POST", f"/api/board/{channel}/clear"
+            "POST", f"/api/board/{channel}/clear", params=params or None
         ).json()
         return data
 

@@ -402,6 +402,33 @@ async def test_post_board_entry_persists_and_broadcasts(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_post_board_entry_stamps_author_label_from_session_title(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    session = make_session(settings, id="worker-1", status=SessionStatus.IDLE)
+    # Override the title to something recognizable.
+    session = session.model_copy(update={"title": "My Worker"})
+    storage.create_session(session)
+    entry = await runtime.post_board_entry(
+        "job:test", BoardPostRequest(text="task done", author_session_id="worker-1")
+    )
+    assert entry.author_label == "My Worker"
+    loaded = storage.list_board_entries("job:test")
+    assert loaded[0].author_label == "My Worker"
+
+
+@pytest.mark.asyncio
+async def test_post_board_entry_author_label_none_for_unknown_session(tmp_path) -> None:
+    runtime, storage, _ = make_runtime(tmp_path)
+    entry = await runtime.post_board_entry(
+        "job:test",
+        BoardPostRequest(text="anon post", author_session_id="nonexistent"),
+    )
+    assert entry.author_label is None
+
+
+@pytest.mark.asyncio
 async def test_clear_board_channel_broadcasts(tmp_path) -> None:
     runtime, storage, _ = make_runtime(tmp_path)
     await runtime.post_board_entry("topic:x", BoardPostRequest(text="a"))
@@ -418,16 +445,24 @@ async def test_delete_session_prunes_board_entries_and_broadcasts(tmp_path) -> N
     storage.create_session(
         make_session(settings, id="poster", status=SessionStatus.EXITED)
     )
+    # Keyless log post: survives session delete.
+    log_entry = await runtime.post_board_entry(
+        "topic:x", BoardPostRequest(text="mine-log", author_session_id="poster")
+    )
+    # Keyed cell: pruned on session delete.
     await runtime.post_board_entry(
-        "topic:x", BoardPostRequest(text="mine", author_session_id="poster")
+        "topic:x",
+        BoardPostRequest(text="mine-cell", key="k", author_session_id="poster"),
     )
     await runtime.post_board_entry("topic:x", BoardPostRequest(text="anon"))
     queue = runtime.broadcast.subscribe_global()
 
     await runtime.delete("poster")
 
-    # The poster's row is gone; the unauthored one survives.
-    assert [e.text for e in storage.list_board_entries("topic:x")] == ["anon"]
+    # Only the keyed cell is pruned; the log post and anon post survive.
+    remaining = storage.list_board_entries("topic:x")
+    assert {e.text for e in remaining} == {"mine-log", "anon"}
+    assert any(e.id == log_entry.id for e in remaining)
     drained = [queue.get_nowait()["type"] for _ in range(queue.qsize())]
     assert "board_update" in drained
 

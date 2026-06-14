@@ -1476,3 +1476,255 @@ def test_help_includes_usage_command() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     assert "usage" in result.stdout
+
+
+# ── board read / board log CLI tests ─────────────────────────────────────────
+
+
+def _board_read_handler(entries: list[dict]) -> "httpx.MockTransport":
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/api/board/") and request.method == "GET":
+            return httpx.Response(
+                200,
+                json={"channel": "job:test", "entries": entries},
+            )
+        if request.url.path == "/api/auth/login":
+            return httpx.Response(200, json={"token": "t", "expires_at": "x"})
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    return httpx.MockTransport(handler)
+
+
+_MIXED_ENTRIES: list[dict[str, Any]] = [
+    {
+        "id": 1,
+        "channel": "job:test",
+        "key": "plan",
+        "text": "plan text",
+        "metadata": {"state": "done"},
+        "created_at": "2024-01-01T00:00:00+00:00",
+        "author_session_id": "lead",
+        "author_label": "Lead Session",
+    },
+    {
+        "id": 2,
+        "channel": "job:test",
+        "key": None,
+        "text": "task 1 done",
+        "metadata": {},
+        "created_at": "2024-01-02T00:00:00+00:00",
+        "author_session_id": "worker-1",
+        "author_label": "Worker One",
+    },
+    {
+        "id": 3,
+        "channel": "job:test",
+        "key": None,
+        "text": "task 2 done",
+        "metadata": {},
+        "created_at": "2024-01-03T00:00:00+00:00",
+        "author_session_id": "worker-2",
+        "author_label": "Worker Two",
+    },
+]
+
+
+def test_board_read_json_splits_cells_and_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(
+            transport=_board_read_handler(_MIXED_ENTRIES),
+            base_url="http://t",
+        )
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "board", "read", "job:test", "--json"],
+    )
+    assert result.exit_code == 0
+    out = json.loads(result.stdout)
+    assert out["channel"] == "job:test"
+    assert len(out["cells"]) == 1
+    assert out["cells"][0]["key"] == "plan"
+    assert len(out["log"]) == 2
+    assert all(e["key"] is None for e in out["log"])
+
+
+def test_board_read_default_render_shows_sections(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(
+            transport=_board_read_handler(_MIXED_ENTRIES),
+            base_url="http://t",
+        )
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "board", "read", "job:test"],
+    )
+    assert result.exit_code == 0
+    assert "=== Cells" in result.output
+    assert "=== Log" in result.output
+    assert "plan" in result.output
+    assert "task 1 done" in result.output
+    assert "task 2 done" in result.output
+
+
+def test_board_read_key_no_match_writes_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(
+            transport=_board_read_handler([]),
+            base_url="http://t",
+        )
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "board",
+            "read",
+            "job:test",
+            "--key",
+            "missing",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "no cell 'missing' matched" in result.output
+
+
+def test_board_log_filters_by_author(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(
+            transport=_board_read_handler(_MIXED_ENTRIES),
+            base_url="http://t",
+        )
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "board",
+            "log",
+            "job:test",
+            "--author",
+            "worker-1",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0
+    posts = json.loads(result.stdout)
+    assert len(posts) == 1
+    assert posts[0]["author_session_id"] == "worker-1"
+
+
+def test_board_log_filters_by_grep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(
+            transport=_board_read_handler(_MIXED_ENTRIES),
+            base_url="http://t",
+        )
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "board",
+            "log",
+            "job:test",
+            "--grep",
+            "task 2",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0
+    posts = json.loads(result.stdout)
+    assert len(posts) == 1
+    assert posts[0]["text"] == "task 2 done"
+
+
+def test_board_log_empty_author_filter_writes_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(
+            transport=_board_read_handler(_MIXED_ENTRIES),
+            base_url="http://t",
+        )
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "board",
+            "log",
+            "job:test",
+            "--author",
+            "nobody",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "no posts by 'nobody' matched" in result.output
+
+
+def test_board_clear_keep_last_passes_param(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/auth/login":
+            return httpx.Response(200, json={"token": "t", "expires_at": "x"})
+        if request.url.path == "/api/board/job:test/clear" and request.method == "POST":
+            state["params"] = dict(request.url.params)
+            return httpx.Response(200, json={"channel": "job:test", "cleared": 2})
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "board",
+            "clear",
+            "job:test",
+            "--keep-last",
+            "5",
+        ],
+    )
+    assert result.exit_code == 0
+    assert state["params"].get("keep_last") == "5"
+
+
+def test_board_help_lists_log_command() -> None:
+    result = runner.invoke(app, ["board", "--help"])
+    assert result.exit_code == 0
+    assert "log" in result.stdout

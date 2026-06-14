@@ -1229,7 +1229,8 @@ def board_post(
         typer.Option(
             envvar="WAYPOINT_SESSION_ID",
             help="Authoring session; defaults to this session's id. "
-            "Posts are pruned when that session is deleted.",
+            "Keyed cells are pruned when that session is deleted; "
+            "keyless log posts survive as durable history.",
         ),
     ] = None,
 ) -> None:
@@ -1260,12 +1261,117 @@ def board_read(
     key: Annotated[
         str | None, typer.Option("--key", help="Only the cell with this key.")
     ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json", help="Emit structured JSON instead of the rendered view."
+        ),
+    ] = False,
 ) -> None:
-    """Read entries from a board channel."""
-    _emit(
-        _settings_from_ctx(ctx),
-        lambda c: {"entries": c.read_board(channel, since=since, key=key)},
+    """Read entries from a board channel.
+
+    Default view: a Cells section followed by a Log section (newest-first).
+    With --json: ``{"channel": ..., "cells": [...], "log": [...]}``.
+    """
+    entries = _run_client(
+        _settings_from_ctx(ctx), lambda c: c.read_board(channel, since=since, key=key)
     )
+    cells = [e for e in entries if e.get("key") is not None]
+    log = [e for e in entries if e.get("key") is None]
+
+    if key is not None and not cells:
+        typer.echo(f"no cell '{key}' matched in {channel}", err=True)
+
+    if json_output:
+        typer.echo(
+            json.dumps({"channel": channel, "cells": cells, "log": log}, indent=2)
+        )
+        return
+
+    typer.echo(f"=== Cells ({channel}) ===")
+    if cells:
+        for cell in cells:
+            meta_str = "  ".join(
+                f"{k}={v}" for k, v in (cell.get("metadata") or {}).items()
+            )
+            line = cell.get("key", "")
+            if meta_str:
+                line += f"  [{meta_str}]"
+            line += f"  {cell.get('text', '')}"
+            typer.echo(line)
+    else:
+        typer.echo("(no cells)")
+
+    typer.echo(f"\n=== Log ({channel}) ===")
+    if log:
+        for post in reversed(log):
+            ts = post.get("created_at", "")
+            author = post.get("author_label") or post.get("author_session_id") or "—"
+            typer.echo(f"{ts}  {author}: {post.get('text', '')}")
+    else:
+        typer.echo("(no posts)")
+
+
+@board_app.command("log")
+def board_log(
+    ctx: typer.Context,
+    channel: Annotated[str, typer.Argument()],
+    since: Annotated[
+        int | None,
+        typer.Option("--since", help="Only posts with an id greater than this."),
+    ] = None,
+    author: Annotated[
+        str | None,
+        typer.Option("--author", help="Filter by author session id."),
+    ] = None,
+    grep: Annotated[
+        str | None,
+        typer.Option("--grep", help="Substring match on post text (case-insensitive)."),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", help="Maximum number of posts to show."),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json", help="Emit structured JSON instead of the rendered view."
+        ),
+    ] = False,
+) -> None:
+    """Show the append-log (keyless posts) for a channel, newest-first."""
+    entries = _run_client(
+        _settings_from_ctx(ctx), lambda c: c.read_board(channel, since=since)
+    )
+    posts = [e for e in entries if e.get("key") is None]
+
+    if author is not None:
+        posts = [p for p in posts if p.get("author_session_id") == author]
+        if not posts:
+            typer.echo(f"no posts by '{author}' matched in {channel}", err=True)
+
+    if grep is not None:
+        posts = [p for p in posts if grep.lower() in (p.get("text") or "").lower()]
+        if not posts:
+            typer.echo(f"no posts matching '{grep}' matched in {channel}", err=True)
+
+    posts = list(reversed(posts))
+    if limit is not None:
+        posts = posts[:limit]
+
+    if json_output:
+        typer.echo(json.dumps(posts, indent=2))
+        return
+
+    if posts:
+        for post in posts:
+            ts = post.get("created_at", "")
+            author_label = (
+                post.get("author_label") or post.get("author_session_id") or "—"
+            )
+            typer.echo(f"{ts}  {author_label}: {post.get('text', '')}")
+    else:
+        typer.echo("(no posts)")
 
 
 @board_app.command("channels")
@@ -1278,9 +1384,23 @@ def board_channels(ctx: typer.Context) -> None:
 def board_clear(
     ctx: typer.Context,
     channel: Annotated[str, typer.Argument()],
+    keep_last: Annotated[
+        int | None,
+        typer.Option(
+            "--keep-last",
+            help="Retain the N most-recent log posts; cells are always dropped.",
+            min=1,
+        ),
+    ] = None,
 ) -> None:
-    """Remove all posts from a channel, keeping the (now empty) channel."""
-    _emit(_settings_from_ctx(ctx), lambda c: c.clear_board(channel))
+    """Remove all posts from a channel, keeping the (now empty) channel.
+
+    With --keep-last N, the N most-recent keyless log posts are kept; cells
+    are always deleted.
+    """
+    _emit(
+        _settings_from_ctx(ctx), lambda c: c.clear_board(channel, keep_last=keep_last)
+    )
 
 
 @board_app.command("delete")

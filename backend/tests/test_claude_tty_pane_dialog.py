@@ -104,6 +104,23 @@ def test_classify_robust_to_spacing_variation() -> None:
     assert classify(padded) is PaneScreen.APPROVAL
 
 
+def test_parse_real_ansi_capture() -> None:
+    # A pane captured with `tmux capture-pane -e` (as the live tailer does)
+    # carries ANSI colour/cursor codes interleaved with the text. The detector
+    # must strip them. This fixture is a real capture from a running session
+    # whose Bash dialog rendered no "Bash(...)" header — tool/target must come
+    # from the dialog body.
+    screen = _load("approval_bash_ansi.txt")
+    assert "\x1b" in screen  # guard: fixture really contains escapes
+    assert classify(screen) is PaneScreen.APPROVAL
+    dialog = parse_approval(screen)
+    assert dialog is not None
+    assert dialog.tool_name == "Bash"
+    assert dialog.target == "mkdir /tmp/cctty-e2e-made"
+    assert dialog.approve_option is not None and dialog.approve_option.number == 1
+    assert dialog.decline_option is not None and dialog.decline_option.number == 3
+
+
 def test_classify_robust_to_wrapped_footer() -> None:
     # The footer wrapping across two lines breaks a raw substring match but not
     # the compact one.

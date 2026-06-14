@@ -1,0 +1,50 @@
+
+[38;5;174m╭───[39m [38;5;174mClaude Code[39m [38;5;246mv2.1.177[39m [38;5;174m─────────────────────────────────────────────────────────────────────────────────────────────╮
+│[39m                                                    [2m[38;5;174m│[0m [1m[38;5;174mTips for getting started[0m                                        [38;5;174m│
+│[39m               [1mWelcome back Noppanat![0m               [2m[38;5;174m│[0m Ask Claude to create a new app or clone a repository            [38;5;174m│
+│[39m                                                    [2m[38;5;174m│[0m [38;5;174m───────────────────────────────────────────────────────────────[39m [38;5;174m│
+│[39m                      [38;5;174m ▐[48;5;16m▛███▜[49m▌[39m                      [2m[38;5;174m│[0m [1m[38;5;174mWhat's new[0m                                                      [38;5;174m│
+│[39m                      [38;5;174m▝▜[48;5;16m█████[49m▛▘[39m                     [2m[38;5;174m│[0m Session titles are now generated in the language of your conve… [38;5;174m│
+│[39m                      [38;5;174m  ▘▘ ▝▝  [39m                     [2m[38;5;174m│[0m Added `footerLinksRegexes` setting for regex-matched link badg… [38;5;174m│
+│[39m   [38;5;246mOpus 4.8 (1M context) with hi… · Claude Team · [39m  [2m[38;5;174m│[0m Improved Bedrock credential caching: credentials from `awsCred… [38;5;174m│
+│[39m   [38;5;246mlumid[39m                                            [2m[38;5;174m│[0m [3m[38;5;246m/release-notes for more[0m                                         [38;5;174m│
+│[39m                   [38;5;246m/tmp/cctty-e2e[39m                   [2m[38;5;174m│[0m                                                                 [38;5;174m│
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+[38;5;239m[48;5;237m❯ [38;5;231mRun exactly this shell command and nothing else: mkdir /tmp/cctty-e2e-made[39m                                            
+
+[38;5;246m[49m●[39m Running [1m1[0m shell command…
+[38;5;246m  ⎿  $ mkdir /tmp/cctty-e2e-made
+
+[38;5;153m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m [1m[38;5;153mBash command
+
+[0m   mkdir /tmp/cctty-e2e-made
+   [38;5;246mCreate directory /tmp/cctty-e2e-made
+
+[39m Do you want to proceed?
+ [38;5;153m❯[39m [38;5;246m1. [38;5;153mYes
+[39m   [38;5;246m2. [39mYes, and always allow access to [1mtmp[0m/ from this project
+   [38;5;246m3. [39mNo
+
+ [38;5;246mEsc to cancel · Tab to amend · ctrl+e to explain
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[39m                                                                                                                       
+
+
+
+                                

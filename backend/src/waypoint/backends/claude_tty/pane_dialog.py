@@ -45,6 +45,16 @@ _OPTION_RE = re.compile(r"^\s*(❯)?\s*(\d+)\.\s+(.*\S)\s*$")
 _TOOL_HEADER_RE = re.compile(r"^\s*●\s*([A-Za-z][\w-]*)\((.*)\)\s*$")
 _QUESTION_RE = re.compile(r"^\s*(Do you want to .*\?)\s*$", re.MULTILINE)
 _WHITESPACE_RE = re.compile(r"\s+")
+# CSI / OSC / two-byte escape sequences. A pane captured with `tmux capture-pane
+# -e` carries colour and cursor codes interleaved with the text, which would
+# shred the substring/regex anchors; strip them before any matching.
+_ANSI_RE = re.compile(
+    r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))"
+)
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
 
 
 def _compact(text: str) -> str:
@@ -87,6 +97,7 @@ class ApprovalDialog:
 
 
 def classify(screen: str) -> PaneScreen:
+    screen = _strip_ansi(screen)
     compact = _compact(screen)
     if _contains(screen, compact, _APPROVAL_FOOTER) and _contains(
         screen, compact, _APPROVAL_QUESTION_MARKER
@@ -127,6 +138,7 @@ def parse_approval(screen: str) -> ApprovalDialog | None:
     The question, options, and footer form the dialog; the ``● Tool(arg)`` line
     nearest above it carries the tool name and target.
     """
+    screen = _strip_ansi(screen)
     if classify(screen) is not PaneScreen.APPROVAL:
         return None
     lines = screen.splitlines()
@@ -152,13 +164,7 @@ def parse_approval(screen: str) -> ApprovalDialog | None:
         len(lines),
     )
     options = _parse_options(lines[question_idx + 1 : footer_idx])
-
-    tool_name: str | None = None
-    target: str | None = None
-    for line in lines[:question_idx]:
-        header = _TOOL_HEADER_RE.match(line)
-        if header is not None:
-            tool_name, target = header.group(1), header.group(2)
+    tool_name, target = _extract_tool_target(lines[:question_idx], question)
 
     return ApprovalDialog(
         tool_name=tool_name,
@@ -168,8 +174,53 @@ def parse_approval(screen: str) -> ApprovalDialog | None:
     )
 
 
+# Dialog-body labels Claude renders above the question. These are the reliable
+# source of the tool + target: the `● Tool(arg)` header line is often absent
+# (e.g. a Bash dialog shows a "Running…" spinner there instead), so it is only
+# a fallback.
+_BODY_TOOL_LABELS: dict[str, str] = {
+    "Bash command": "Bash",
+    "Create file": "Write",
+    "Write file": "Write",
+    "Edit file": "Edit",
+    "Update file": "Edit",
+}
+
+
+def _extract_tool_target(
+    head_lines: list[str], question: str
+) -> tuple[str | None, str | None]:
+    stripped = [line.strip() for line in head_lines]
+
+    # 1. Body label → tool; the next non-empty line is the command/path.
+    for i, line in enumerate(stripped):
+        tool = _BODY_TOOL_LABELS.get(line)
+        if tool is not None:
+            target = next((s for s in stripped[i + 1 :] if s), None)
+            return tool, target
+
+    # 2. File operations name the path in the question itself.
+    qmatch = re.match(
+        r"Do you want to (create|write to|edit|update) (.+?)\?$", question
+    )
+    if qmatch is not None:
+        verb = qmatch.group(1)
+        tool = "Write" if verb in {"create", "write to"} else "Edit"
+        return tool, qmatch.group(2)
+
+    # 3. Fallback: the `● Tool(arg)` header line, if present.
+    header_tool: str | None = None
+    header_target: str | None = None
+    for line in head_lines:
+        header = _TOOL_HEADER_RE.match(line)
+        if header is not None:
+            header_tool, header_target = header.group(1), header.group(2)
+    return header_tool, header_target
+
+
 def parse_model_selector(screen: str) -> list[DialogOption] | None:
     """Parse the ``/model`` selector's choices, or None if not on that screen."""
+    screen = _strip_ansi(screen)
     if classify(screen) is not PaneScreen.MODEL_SELECTOR:
         return None
     lines = screen.splitlines()

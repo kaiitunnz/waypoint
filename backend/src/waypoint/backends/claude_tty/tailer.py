@@ -150,6 +150,20 @@ class TranscriptTailer:
 
         screen_type = pane_dialog.classify(snapshot)
 
+        if screen_type is pane_dialog.PaneScreen.TRUST:
+            # A fresh cwd opens with the workspace-trust prompt, which blocks the
+            # session (including autonomously-spawned ones in fresh worktrees)
+            # until answered. Option 1 ("trust") is preselected, so a bare Enter
+            # accepts. Re-sent each tick it persists — idempotent, and self-heals
+            # if a keystroke is dropped; a stray Enter at the ready prompt after
+            # it clears is a harmless empty submit.
+            log.info(
+                "accepting workspace-trust prompt",
+                extra={"session_id": self._session_id},
+            )
+            await self._runtime.tmux.send_input(pane, "", submit=True)
+            return
+
         if screen_type is not pane_dialog.PaneScreen.APPROVAL:
             # Dialog gone — clear any pending approval for this session.
             self._plugin._pending_approvals.pop(self._session_id, None)

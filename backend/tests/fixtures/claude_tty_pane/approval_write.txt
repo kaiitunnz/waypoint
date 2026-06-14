@@ -1,0 +1,40 @@
+-4d72-469f-ac29-796d750db24c
+╭─── Claude Code v2.1.177 ─────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                 │ Tips for getting started                                           │
+│              Welcome back Noppanat!             │ Run /init to create a CLAUDE.md file with instructions for Claude  │
+│                                                 │ ────────────────────────────────────────────────────────────────── │
+│                     ▐▛███▜▌                     │ What's new                                                         │
+│                    ▝▜█████▛▘                    │ Session titles are now generated in the language of your conversa… │
+│                      ▘▘ ▝▝                      │ Added `footerLinksRegexes` setting for regex-matched link badges … │
+│                                                 │ Improved Bedrock credential caching: credentials from `awsCredent… │
+│   Opus 4.8 (1M context) · Claude Team · lumid   │ /release-notes for more                                            │
+│                /tmp/cc-tty-probe                │                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+❯ Run this exact shell command, nothing else: echo waypoint-probe-hello
+
+● Bash(echo waypoint-probe-hello)
+  ⎿  waypoint-probe-hello
+
+● waypoint-probe-hello
+
+✻ Cogitated for 5s
+
+❯ Create a new file named probe_out.txt containing exactly the text: waypoint-probe
+
+● Write(probe_out.txt)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Create file
+ probe_out.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  1 waypoint-probe
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to create probe_out.txt?
+ ❯ 1. Yes
+   2. Yes, allow all edits during this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend
+

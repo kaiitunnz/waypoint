@@ -1,0 +1,40 @@
+cd /tmp/cc-tty-probe && claude --session-id 766eaabc-21d5-40c9-9767-3f11f0412887
+01:23:45 noppanat@luyao-h0 cc-tty-probe → cd /tmp/cc-tty-probe && claude --session-id 766eaabc-21d5-40c9-9767-3f11f04128
+87
+╭─── Claude Code v2.1.177 ─────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting started                                        │
+│               Welcome back Noppanat!               │ Run /init to create a CLAUDE.md file with instructions for Cla… │
+│                                                    │ ─────────────────────────────────────────────────────────────── │
+│                       ▐▛███▜▌                      │ What's new                                                      │
+│                      ▝▜█████▛▘                     │ Session titles are now generated in the language of your conve… │
+│                        ▘▘ ▝▝                       │ Added `footerLinksRegexes` setting for regex-matched link badg… │
+│   Opus 4.8 (1M context) with hi… · Claude Team ·   │ Improved Bedrock credential caching: credentials from `awsCred… │
+│   lumid                                            │ /release-notes for more                                         │
+│                  /tmp/cc-tty-probe                 │                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+❯ /model
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Select model
+  Switch between Claude models. Your pick becomes the default for new sessions. For other/previous model names,
+  specify with --model.
+
+  ❯ 1. Default (recommended) ✔  Opus 4.8 with 1M context · Best for everyday, complex tasks
+    2. Opus                     Opus 4.8 with 1M context · Best for everyday, complex tasks
+    3. Sonnet                   Sonnet 4.6 · Efficient for routine tasks
+    4. Haiku                    Haiku 4.5 · Fastest for quick answers
+    5. Fable (disabled)         Claude Fable 5 is currently unavailable. Learn more:
+                                https://www.anthropic.com/news/fable-mythos-access
+
+  ● High effort (default) ←/→ to adjust
+
+  Enter to set as default · s to use this session only · Esc to cancel
+
+
+
+
+
+
+

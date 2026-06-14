@@ -193,6 +193,8 @@ class TranscriptNormalizer:
         if _is_injected_turn(content):
             return []
 
+        turn_aborted = _is_user_rejection(record)
+
         # Only tool_result blocks are surfaced from user records. A user/peer
         # turn's own text is already recorded at the input boundary
         # (runtime.handle_input → _record_user_event); re-emitting the
@@ -237,6 +239,22 @@ class TranscriptNormalizer:
                 )
             )
 
+        # A declined tool ends the turn with no terminal-stop_reason record to
+        # follow, so resolve the session to idle here or it stays stuck running.
+        if turn_aborted:
+            events.append(
+                NormalizedEvent(
+                    kind=EventKind.SYSTEM_NOTE,
+                    text="Turn ended — tool use declined",
+                    metadata={
+                        "method": "result",
+                        "stop_reason": "tool_rejected",
+                        "status": SessionStatus.IDLE,
+                    },
+                    status=SessionStatus.IDLE,
+                )
+            )
+
         return events
 
     def _emit_task_snapshot(self) -> list[NormalizedEvent]:
@@ -268,3 +286,17 @@ def _is_injected_turn(content: Any) -> bool:
             "This session is being continued"
         )
     return False
+
+
+def _is_user_rejection(record: dict[str, Any]) -> bool:
+    """Return True when the user declined the tool this record reports on.
+
+    A declined tool aborts the TUI turn back to the ready prompt with no
+    following assistant record, so the terminal-``stop_reason`` path never
+    fires. The CLI tags the record with ``toolUseResult: "User rejected tool
+    use"``, which we use to resolve the session to idle off the rejection.
+    """
+    result = record.get("toolUseResult")
+    return isinstance(result, str) and result.strip().lower().startswith(
+        "user rejected"
+    )

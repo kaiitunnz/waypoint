@@ -3,6 +3,7 @@ fixtures (Claude Code 2.1.177). Proves detection/parsing before any live
 keystroke wiring.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -91,3 +92,22 @@ def test_parse_model_selector() -> None:
 
 def test_parse_model_selector_returns_none_off_screen() -> None:
     assert parse_model_selector(_load("ready.txt")) is None
+
+
+def test_classify_robust_to_spacing_variation() -> None:
+    # A reflowed dialog with collapsed/expanded inter-word spacing must still
+    # classify via the whitespace-compact anchor match.
+    screen = _load("approval_write.txt")
+    squeezed = re.sub(r" {2,}", " ", screen)
+    padded = screen.replace("Tab to amend", "Tab   to   amend")
+    assert classify(squeezed) is PaneScreen.APPROVAL
+    assert classify(padded) is PaneScreen.APPROVAL
+
+
+def test_classify_robust_to_wrapped_footer() -> None:
+    # The footer wrapping across two lines breaks a raw substring match but not
+    # the compact one.
+    screen = _load("approval_bash.txt").replace(
+        "Esc to cancel · Tab to amend", "Esc to cancel · Tab to\namend"
+    )
+    assert classify(screen) is PaneScreen.APPROVAL

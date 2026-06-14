@@ -313,6 +313,12 @@ class ClaudeTtyPlugin(TmuxPlugin):
                     session.cwd,
                     start_at_end=True,
                 )
+            else:
+                log.warning(
+                    "restored session has no thread_id; "
+                    "transcript tailer not started",
+                    extra={"session_id": session.id},
+                )
             self._spawn_rate_limit_watcher(runtime, session)
             return
 
@@ -397,7 +403,16 @@ class ClaudeTtyPlugin(TmuxPlugin):
         await runtime._record_system_event(
             session.id, message, status=SessionStatus.IDLE
         )
-        self._start_tailer(runtime, session.id, new_thread_id, session.cwd)
+        # Resuming an existing thread reopens its already-populated transcript,
+        # whose records are already in the event DB; tail from the end so they
+        # are not replayed. A new thread starts an empty file, so read from 0.
+        self._start_tailer(
+            runtime,
+            session.id,
+            new_thread_id,
+            session.cwd,
+            start_at_end=effective_thread_id is not None,
+        )
         self._spawn_rate_limit_watcher(runtime, session)
 
     async def fork_session(

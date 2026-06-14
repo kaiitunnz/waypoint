@@ -41,7 +41,11 @@ export function SessionUsagePill({
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const anchorStyle = usePopoverAnchor(wrapRef, anchored && open, "left");
+  // Below 540px the generic ``.usage-panel`` mobile bottom-sheet rule takes
+  // over (deferBelow), so the inline fixed anchor only drives wider viewports.
+  const anchorStyle = usePopoverAnchor(wrapRef, anchored && open, "left", {
+    deferBelow: 540,
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -139,7 +143,9 @@ export function SessionUsagePill({
   }
 
   const renderPanel = (node: React.ReactNode): React.ReactNode =>
-    anchored ? createPortal(node, document.body) : node;
+    anchored && typeof document !== "undefined"
+      ? createPortal(node, document.body)
+      : node;
 
   return (
     <div className="composer-context" ref={wrapRef}>

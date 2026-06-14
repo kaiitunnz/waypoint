@@ -195,10 +195,10 @@ export function SessionTerminalView({
           >
             ⋯
           </button>
-          {termMenuOpen ? (
+          {termMenuOpen && typeof document !== "undefined" ? (
             createPortal(
             <div
-              className="composer-overflow-menu term-bar-overflow-menu"
+              className="composer-overflow-menu"
               role="menu"
               data-term-overflow-menu
               style={overflowMenuStyle ?? undefined}

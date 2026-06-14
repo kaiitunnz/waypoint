@@ -60,29 +60,41 @@ to a blocked child instantly, follow the fleet:
 surfaces matching events across all your workers as they happen (`--filter` takes a
 single event kind; drop it to see everything).
 
-Check and merge **one task at a time** (sequential merges keep every conflict
-between a single branch and the integration branch):
+Integrate **one task at a time**, and keep the integration branch's history
+**linear** — no merge commits. Rebase each task's branch onto the current
+integration tip, check it there, then fast-forward:
 
 ```bash
+git -C "$repo" switch "wq/$job-t$n"
+git -C "$repo" rebase "wq/$job"        # replay the task's commits onto the integration tip
+# run the task's check on the rebased branch, e.g. uv run pytest pkg/auth
 git -C "$repo" switch "wq/$job"
-git -C "$repo" merge --no-ff "wq/$job-t$n"
-# run the task's check, e.g. uv run pytest pkg/auth
+git -C "$repo" merge --ff-only "wq/$job-t$n"   # green check → fast-forward, never a merge commit
 ```
 
-- Clean merge and green check → set the task done: `waypoint board set-meta
-  job:$job --key status:$n --meta state=done`. The worktree is removed for you
-  when the worker is reaped (its path is recorded on the session), so there is no
-  manual `git worktree remove`.
-- Red check → `git -C "$repo" merge --abort`, hand the task back
-  (`--meta state=todo`), and reassign it (often a fresh worktree).
-- Conflict → tell the two kinds apart. An **additive** conflict — two workers
-  appending to the same append-only file (a test suite, a registry, an export
-  list) — is not a real disagreement: keep both. Take the integration side and
-  re-append the worker's block: `git checkout --ours <file>`, then add the
-  worker's additions to the end (or hand-merge both hunks) and commit. A
-  **semantic** conflict — both branches changed the same logic — is the one you
-  `merge --abort` and hand back. If a shared file conflicts on *every* merge, the
-  tasks were not independent enough and should have been one worker.
+A linear integration branch is the preferred shape. Rebasing one branch at a
+time keeps every conflict between a single task and the integration tip, and the
+branch lands cleanly however the final PR is merged. Merge commits are the thing
+to avoid: a squash- or rebase-style landing flattens them and re-replays the
+underlying commits, so any conflict you resolved *inside* a merge commit
+silently resurfaces at landing time.
+
+- Green check → fast-forward (above) and set the task done: `waypoint board
+  set-meta job:$job --key status:$n --meta state=done`. The worktree is removed
+  for you when the worker is reaped (its path is recorded on the session), so
+  there is no manual `git worktree remove`.
+- Red check → hand the task back (`--meta state=todo`) and reassign it (often a
+  fresh worktree). You checked *before* the fast-forward, so the integration
+  branch is untouched — nothing to undo.
+- Conflict during the rebase → tell the two kinds apart. An **additive**
+  conflict — two workers appending to the same append-only file (a test suite, a
+  registry, an export list) — is not a real disagreement: keep both. Take the
+  integration side and re-append the worker's block (`git checkout --ours
+  <file>`, then add the worker's additions to the end, or hand-merge both
+  hunks), `git add` it, and `git rebase --continue`. A **semantic** conflict —
+  both branches changed the same logic — is the one you `git rebase --abort` and
+  hand back. If a shared file conflicts on *every* task, the tasks were not
+  independent enough and should have been one worker.
 
 Finish when no task is `todo` or `doing`: run the **full** suite on `wq/$job`,
 then — for a server/CLI/integration artifact — **exercise the real thing**, not

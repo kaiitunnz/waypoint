@@ -42,6 +42,7 @@ from waypoint.backends.claude_code.rate_limits import (
     probe_claude_usage,
     probe_claude_usage_remote,
 )
+from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.plugin_config import PluginConfig
 from waypoint.backends.tmux.adapter import TmuxError
@@ -102,11 +103,12 @@ class ClaudeTtyPlugin(TmuxPlugin):
 
     def __init__(self) -> None:
         self._tailer_tasks: dict[str, asyncio.Task[None]] = {}
+        self._pending_approvals: dict[str, PendingTtyApproval] = {}
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
         from waypoint.backends.claude_tty.transport import ClaudeTtyTransport
 
-        return ClaudeTtyTransport(runtime)
+        return ClaudeTtyTransport(runtime, self)
 
     def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
         return shutil.which("claude") is not None
@@ -189,6 +191,7 @@ class ClaudeTtyPlugin(TmuxPlugin):
             session_uuid=thread_id,
             cwd=cwd,
             runtime=runtime,
+            plugin=self,
             start_at_end=start_at_end,
         )
         self._tailer_tasks[session_id] = asyncio.create_task(tailer.run())
@@ -202,6 +205,7 @@ class ClaudeTtyPlugin(TmuxPlugin):
             tailer_task.cancel()
             with suppress(asyncio.CancelledError, Exception):
                 await tailer_task
+        self._pending_approvals.pop(session.id, None)
 
     async def create_session(
         self,
@@ -246,6 +250,8 @@ class ClaudeTtyPlugin(TmuxPlugin):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
+        with suppress(TmuxError):
+            await runtime.tmux.resize_window(target.session, 120, 50)
 
         now = datetime.now(UTC)
         session = SessionRecord(
@@ -369,6 +375,8 @@ class ClaudeTtyPlugin(TmuxPlugin):
                 status=SessionStatus.EXITED,
             )
             return
+        with suppress(TmuxError):
+            await runtime.tmux.resize_window(target.session, 120, 50)
 
         new_state: dict[str, Any] = {
             "tmux_session": target.session,
@@ -447,6 +455,8 @@ class ClaudeTtyPlugin(TmuxPlugin):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
+        with suppress(TmuxError):
+            await runtime.tmux.resize_window(target.session, 120, 50)
 
         now = datetime.now(UTC)
         new_session = SessionRecord(

@@ -1,6 +1,8 @@
 import asyncio
 import json
+import os
 import shutil
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -267,6 +269,28 @@ def reset(
     run_reset(_settings_from_ctx(ctx), confirmed=yes)
 
 
+@app.command()
+def usage(
+    ctx: typer.Context,
+    refresh: Annotated[
+        bool,
+        typer.Option(
+            "--refresh",
+            help="POST /api/usage/refresh to pull fresh rate-limit data before "
+            "returning the dashboard.",
+        ),
+    ] = False,
+) -> None:
+    """Show the usage dashboard (token usage, rate limits, cost per session)."""
+
+    def run(c: WaypointClient) -> Any:
+        if refresh:
+            return c.refresh_usage()
+        return c.get_usage()
+
+    _emit(_settings_from_ctx(ctx), run)
+
+
 @session_app.command("start")
 def session_start(
     ctx: typer.Context,
@@ -504,24 +528,194 @@ async def _wait_for_session(
         return session, None
 
 
-async def _follow_events(settings: Settings, session_id: str) -> None:
-    """Stream event envelopes as NDJSON until a terminal status or SIGINT."""
+async def _follow_events_fleet(
+    settings: Settings,
+    session_ids: list[str],
+    *,
+    spawned_by: str | None,
+    mine: bool,
+    filter_type: str | None,
+) -> None:
+    """Stream event envelopes as NDJSON across one or more sessions.
+
+    Each output line is a compact JSON envelope; multi-session output adds a
+    ``session_id`` key to disambiguate. Stops when all tracked sessions reach
+    a terminal status or SIGINT fires.
+    """
     try:
         with WaypointClient(settings) as client:
-            async for envelope in client.stream_session_envelopes(session_id):
-                if is_event_envelope(envelope):
-                    _emit_ndjson(envelope)
-                if session_status_from_envelope(envelope) in FOLLOW_TERMINAL_STATUSES:
-                    break
+            extra_ids: list[str] = []
+            if spawned_by or mine:
+                sessions = await asyncio.to_thread(client.list_sessions)
+                if spawned_by:
+                    extra_ids += [
+                        s["id"]
+                        for s in sessions
+                        if s.get("spawner_session_id") == spawned_by
+                    ]
+                if mine:
+                    my_id = os.environ.get("WAYPOINT_SESSION_ID")
+                    if my_id:
+                        extra_ids += [
+                            s["id"]
+                            for s in sessions
+                            if s.get("spawner_session_id") == my_id
+                        ]
+
+            # Deduplicate while preserving order.
+            seen: set[str] = set()
+            all_ids: list[str] = []
+            for sid in session_ids + extra_ids:
+                if sid not in seen:
+                    seen.add(sid)
+                    all_ids.append(sid)
+
+            if not all_ids:
+                typer.echo("error: no sessions to follow", err=True)
+                raise typer.Exit(code=1)
+
+            if len(all_ids) == 1:
+                sid = all_ids[0]
+                async for envelope in client.stream_session_envelopes(sid):
+                    if is_event_envelope(envelope):
+                        kind = envelope.get("payload", {}).get("event", {}).get("kind")
+                        if filter_type is None or kind == filter_type:
+                            _emit_ndjson(envelope)
+                    if (
+                        session_status_from_envelope(envelope)
+                        in FOLLOW_TERMINAL_STATUSES
+                    ):
+                        break
+                return
+
+            # Multiple sessions: merge streams, prefix each line with session_id.
+            queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+            async def _stream_one(sid: str) -> None:
+                try:
+                    async for envelope in client.stream_session_envelopes(sid):
+                        if is_event_envelope(envelope):
+                            await queue.put({"session_id": sid, **envelope})
+                        if (
+                            session_status_from_envelope(envelope)
+                            in FOLLOW_TERMINAL_STATUSES
+                        ):
+                            break
+                except (WaypointError, OSError, WebSocketException):
+                    pass
+                finally:
+                    await queue.put(None)
+
+            tasks = [asyncio.create_task(_stream_one(sid)) for sid in all_ids]
+            remaining = len(all_ids)
+            try:
+                while remaining > 0:
+                    item = await queue.get()
+                    if item is None:
+                        remaining -= 1
+                    else:
+                        kind = item.get("payload", {}).get("event", {}).get("kind")
+                        if filter_type is None or kind == filter_type:
+                            _emit_ndjson(item)
+            finally:
+                for task in tasks:
+                    task.cancel()
+
     except (WaypointError, OSError, WebSocketException) as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
 
+async def _wait_sessions_concurrent(
+    client: WaypointClient,
+    session_ids: list[str],
+    until: frozenset[str],
+    timeout: float | None,
+    *,
+    first_wins: bool,
+) -> list[tuple[dict[str, Any], str | None]]:
+    """Wait for all sessions (or the first one) to reach ``until`` or timeout.
+
+    Returns a list of ``(session, status)`` pairs.  ``status`` is ``None`` when
+    the session's slot timed out before reaching the target set.
+    """
+    tasks = [
+        asyncio.create_task(_wait_for_session(client, sid, until, None))
+        for sid in session_ids
+    ]
+    try:
+        async with asyncio.timeout(timeout):
+            if first_wins:
+                done, pending = await asyncio.wait(
+                    tasks, return_when=asyncio.FIRST_COMPLETED
+                )
+                for t in pending:
+                    t.cancel()
+                first = next(iter(done))
+                try:
+                    return [first.result()]
+                except Exception:
+                    session = await asyncio.to_thread(
+                        client.get_session, session_ids[0]
+                    )
+                    return [(session, None)]
+            else:
+                pairs = await asyncio.gather(*tasks, return_exceptions=True)
+                results: list[tuple[dict[str, Any], str | None]] = []
+                for i, pair in enumerate(pairs):
+                    if isinstance(pair, BaseException):
+                        try:
+                            session = await asyncio.to_thread(
+                                client.get_session, session_ids[i]
+                            )
+                        except Exception:
+                            session = {"id": session_ids[i]}
+                        results.append((session, None))
+                    else:
+                        results.append(pair)
+                return results
+    except TimeoutError:
+        for t in tasks:
+            t.cancel()
+        results = []
+        for sid in session_ids:
+            try:
+                session = await asyncio.to_thread(client.get_session, sid)
+            except Exception:
+                session = {"id": sid}
+            results.append((session, None))
+        return results
+
+
 @sessions_app.command("list")
-def sessions_list(ctx: typer.Context) -> None:
+def sessions_list(
+    ctx: typer.Context,
+    spawned_by: Annotated[
+        str | None,
+        typer.Option(
+            "--spawned-by", help="Return only sessions spawned by this session id."
+        ),
+    ] = None,
+    mine: Annotated[
+        bool,
+        typer.Option(
+            "--mine",
+            help="Return only sessions spawned by $WAYPOINT_SESSION_ID.",
+        ),
+    ] = False,
+) -> None:
     """List all sessions."""
-    _emit(_settings_from_ctx(ctx), lambda c: {"sessions": c.list_sessions()})
+    if mine:
+        spawned_by = os.environ.get("WAYPOINT_SESSION_ID")
+        if not spawned_by:
+            raise typer.BadParameter(
+                "$WAYPOINT_SESSION_ID is not set; cannot use --mine",
+                param_hint="--mine",
+            )
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"sessions": c.list_sessions(spawned_by=spawned_by)},
+    )
 
 
 @sessions_app.command("show")
@@ -535,7 +729,7 @@ def sessions_show(
 @sessions_app.command("events")
 def sessions_events(
     ctx: typer.Context,
-    session_id: Annotated[str, typer.Argument()],
+    session_ids: Annotated[list[str] | None, typer.Argument()] = None,
     messages: Annotated[int | None, typer.Option()] = None,
     before_sequence: Annotated[int | None, typer.Option()] = None,
     follow: Annotated[
@@ -547,14 +741,58 @@ def sessions_events(
             "terminal status or Ctrl+C, instead of printing the transcript.",
         ),
     ] = False,
+    spawned_by: Annotated[
+        str | None,
+        typer.Option(
+            "--spawned-by",
+            help="(--follow only) Also follow sessions whose spawner_session_id "
+            "matches this id.",
+        ),
+    ] = None,
+    mine: Annotated[
+        bool,
+        typer.Option(
+            "--mine",
+            help="(--follow only) Also follow sessions spawned by this session "
+            "(WAYPOINT_SESSION_ID env).",
+        ),
+    ] = False,
+    filter_type: Annotated[
+        str | None,
+        typer.Option(
+            "--filter",
+            help="(--follow only) Print only events whose kind matches this value "
+            "(e.g. approval_request, agent_output).",
+        ),
+    ] = None,
 ) -> None:
-    """Show a session's transcript, or stream live events with --follow."""
+    """Show a session's transcript, or stream live events with --follow.
+
+    Pass one or more SESSION_IDs, or use --spawned-by / --mine with --follow
+    to resolve the set dynamically from the running server.
+    """
     if follow:
         try:
-            asyncio.run(_follow_events(_settings_from_ctx(ctx), session_id))
+            asyncio.run(
+                _follow_events_fleet(
+                    _settings_from_ctx(ctx),
+                    list(session_ids or []),
+                    spawned_by=spawned_by,
+                    mine=mine,
+                    filter_type=filter_type,
+                )
+            )
         except KeyboardInterrupt:
             pass
         return
+
+    # Non-follow: exactly one session id required.
+    if not session_ids or len(session_ids) != 1:
+        typer.echo(
+            "error: exactly one SESSION_ID is required without --follow", err=True
+        )
+        raise typer.Exit(code=1)
+    session_id = session_ids[0]
     _emit(
         _settings_from_ctx(ctx),
         lambda c: c.get_events(
@@ -571,7 +809,7 @@ def _conversation_events(events_page: dict[str, Any]) -> list[dict[str, Any]]:
 @sessions_app.command("wait")
 def sessions_wait(
     ctx: typer.Context,
-    session_id: Annotated[str, typer.Argument()],
+    session_ids: Annotated[list[str], typer.Argument()],
     until: Annotated[
         str | None,
         typer.Option(
@@ -584,27 +822,95 @@ def sessions_wait(
         float | None,
         typer.Option("--timeout", help="Give up after this many seconds (exit 124)."),
     ] = None,
+    any_: Annotated[
+        bool,
+        typer.Option(
+            "--any",
+            help="Return as soon as the first session reaches the until-set "
+            "(default: wait for ALL).",
+        ),
+    ] = False,
 ) -> None:
-    """Block (printing nothing) until a session reaches a terminal/idle status.
+    """Block until one or more sessions reach a terminal/idle status.
 
-    Emits the final ``{"session": {...}}`` once, then exits with a status-mapped
-    code (error=1, timeout=124, otherwise 0) so it composes in shell ``&&``
-    chains. Prefers the WS stream, falling back to polling if it cannot connect.
+    With a single id emits ``{"session": {...}}``; with multiple ids emits
+    ``{"sessions": [...]}``.  Exits with a status-mapped code (error=1,
+    timeout=124, otherwise 0) so it composes in shell ``&&`` chains.  Prefers
+    the WS stream, falling back to polling if it cannot connect.
     """
+    if not session_ids:
+        typer.echo("error: provide at least one SESSION_ID", err=True)
+        raise typer.Exit(code=1)
+
     until_set = parse_wait_until(until)
-    outcome: dict[str, str | None] = {}
+    outcome_statuses: list[str | None] = []
 
     def run(c: WaypointClient) -> dict[str, Any]:
-        session, status = asyncio.run(
-            _wait_for_session(c, session_id, until_set, timeout)
+        pairs = asyncio.run(
+            _wait_sessions_concurrent(
+                c, session_ids, until_set, timeout, first_wins=any_
+            )
         )
-        outcome["status"] = status
-        return {"session": session}
+        outcome_statuses.extend(status for _, status in pairs)
+        if len(session_ids) == 1:
+            session, _ = pairs[0]
+            return {"session": session}
+        return {"sessions": [session for session, _ in pairs]}
 
     _emit(_settings_from_ctx(ctx), run)
-    code = exit_code_for_wait(outcome.get("status"))
-    if code:
-        raise typer.Exit(code=code)
+
+    if any(s is None for s in outcome_statuses):
+        raise typer.Exit(code=WAIT_TIMEOUT_EXIT_CODE)
+    if any(s == SessionStatus.ERROR for s in outcome_statuses):
+        raise typer.Exit(code=1)
+
+
+def _create_worktree(branch: str, base: str | None, cwd: str) -> str:
+    """Create a git worktree for ``branch`` and return its path.
+
+    The worktree is placed in a sibling directory of the repo root so it
+    never appears as an untracked file inside the working tree.
+    """
+    try:
+        repo_root = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except subprocess.CalledProcessError as exc:
+        typer.echo(f"error: not a git repository: {exc.stderr.strip()}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if base is None:
+        try:
+            base = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+        except subprocess.CalledProcessError:
+            base = "main"
+
+    # Sanitize branch name for use as a directory component.
+    safe = branch.replace("/", "-").replace("\\", "-")
+    repo_dir = Path(repo_root)
+    worktree_path = str(repo_dir.parent / f"{repo_dir.name}-{safe}")
+
+    try:
+        subprocess.run(
+            ["git", "worktree", "add", worktree_path, "-b", branch, base],
+            cwd=repo_root,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        typer.echo(f"error: git worktree add failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    return worktree_path
 
 
 @sessions_app.command("start")
@@ -625,21 +931,42 @@ def sessions_start(
             "Defaults to this session's id when run inside one.",
         ),
     ] = None,
+    worktree: Annotated[
+        str | None,
+        typer.Option(
+            "--worktree",
+            help="Create a git worktree on this new branch and use it as the session cwd.",
+        ),
+    ] = None,
+    worktree_base: Annotated[
+        str | None,
+        typer.Option(
+            "--worktree-base",
+            help="Base ref for the new worktree branch (default: current HEAD, else main).",
+        ),
+    ] = None,
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
     """Launch a new session on the running server."""
+    effective_cwd = cwd
+    worktree_path: str | None = None
+    if worktree is not None:
+        worktree_path = _create_worktree(worktree, worktree_base, cwd)
+        effective_cwd = worktree_path
+
     _emit(
         _settings_from_ctx(ctx),
         lambda c: {
             "session": c.create_session(
                 backend=backend,
-                cwd=cwd,
+                cwd=effective_cwd,
                 launch_target_id=launch_target_id,
                 title=title,
                 model=model,
                 effort=effort,
                 permission_mode=permission_mode,
                 spawner_session_id=spawner_session_id,
+                worktree_path=worktree_path,
                 args=list(args or []),
             )
         },
@@ -665,13 +992,22 @@ def sessions_send(
         ),
     ] = None,
 ) -> None:
-    """Send a message to a session."""
+    """Send a message to a session.
+
+    Exits 0 on confirmed delivery or when the server accepted the input.
+    On transport timeout, reports ``{"session": {..., "send": "delivered"}}``
+    when the session advanced to running, or ``{"send": "unknown"}`` when
+    delivery cannot be confirmed, and exits 1 in the unknown case.
+    """
 
     def _run(c: WaypointClient) -> dict[str, Any]:
         ids = [c.upload_attachment(session_id, path)["id"] for path in attach or []]
         return {"session": c.send_input(session_id, text, attachments=ids or None)}
 
-    _emit(_settings_from_ctx(ctx), _run)
+    result = _run_client(_settings_from_ctx(ctx), _run)
+    typer.echo(json.dumps(result, indent=2))
+    if result.get("session", {}).get("send") == "unknown":
+        raise typer.Exit(code=1)
 
 
 @sessions_app.command("interrupt")
@@ -704,6 +1040,61 @@ def sessions_delete(
 ) -> None:
     """Terminate (if needed) and remove a session record."""
     _emit(_settings_from_ctx(ctx), lambda c: c.delete(session_id, force=force))
+
+
+@sessions_app.command("reap")
+def sessions_reap(
+    ctx: typer.Context,
+    spawned_by: Annotated[
+        str | None,
+        typer.Option(
+            "--spawned-by", help="Reap only sessions spawned by this session id."
+        ),
+    ] = None,
+    mine: Annotated[
+        bool,
+        typer.Option(
+            "--mine",
+            help="Reap only sessions spawned by $WAYPOINT_SESSION_ID.",
+        ),
+    ] = False,
+    all_sessions: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help="Reap all sessions regardless of spawner. Required when no scope is given.",
+        ),
+    ] = False,
+) -> None:
+    """Terminate and delete sessions in bulk."""
+    if mine:
+        spawned_by = os.environ.get("WAYPOINT_SESSION_ID")
+        if not spawned_by:
+            raise typer.BadParameter(
+                "$WAYPOINT_SESSION_ID is not set; cannot use --mine",
+                param_hint="--mine",
+            )
+
+    if spawned_by is None and not all_sessions:
+        raise typer.BadParameter(
+            "pass --spawned-by <id>, --mine, or --all to select a scope",
+            param_hint="--spawned-by/--mine/--all",
+        )
+
+    def _run(client: WaypointClient) -> dict[str, Any]:
+        sessions = client.list_sessions(spawned_by=spawned_by)
+        reaped: list[str] = []
+        failed: list[str] = []
+        for session in sessions:
+            sid = session["id"]
+            try:
+                client.delete(sid)
+                reaped.append(sid)
+            except Exception:
+                failed.append(sid)
+        return {"reaped": reaped, "failed": failed}
+
+    _emit(_settings_from_ctx(ctx), _run)
 
 
 @sessions_app.command("approve")
@@ -931,6 +1322,45 @@ def board_edit_entry(
         _settings_from_ctx(ctx),
         lambda c: {"entry": c.update_board_entry(channel, entry_id, text, metadata)},
     )
+
+
+@board_app.command("set-meta")
+def board_set_meta(
+    ctx: typer.Context,
+    channel: Annotated[str, typer.Argument()],
+    meta: Annotated[
+        list[str] | None,
+        typer.Option("--meta", help="Replace metadata with key=value. Repeatable."),
+    ] = None,
+    key: Annotated[
+        str | None, typer.Option("--key", help="Cell key to target.")
+    ] = None,
+    entry_id: Annotated[
+        int | None, typer.Option("--entry-id", help="Entry id to target.")
+    ] = None,
+) -> None:
+    """Update a keyed cell's metadata without changing its text."""
+    if key is None and entry_id is None:
+        raise typer.BadParameter("Provide --key or --entry-id.")
+    if key is not None and entry_id is not None:
+        raise typer.BadParameter("--key and --entry-id are mutually exclusive.")
+    metadata = _parse_meta(meta)
+
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        if key is not None:
+            entries = c.read_board(channel, key=key)
+            if not entries:
+                typer.echo(f"error: no entry with key '{key}' in {channel}", err=True)
+                raise typer.Exit(code=1)
+            eid: int = entries[0]["id"]
+        else:
+            assert entry_id is not None
+            eid = entry_id
+        return {
+            "entry": c.update_board_entry(channel, eid, text=None, metadata=metadata)
+        }
+
+    _emit(_settings_from_ctx(ctx), _run)
 
 
 @schedule_app.command("list")

@@ -5,6 +5,7 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -366,6 +367,10 @@ class SessionRuntime:
             resolved_model=resolved_model,
             resolved_effort=resolved_effort,
         )
+        if request.worktree_path is not None:
+            session = self.storage.update_session(
+                session.id, worktree_path=request.worktree_path
+            )
         self._warm_command_completions(session)
         return session
 
@@ -1190,6 +1195,12 @@ class SessionRuntime:
                 await self.terminate(session_id)
         self._close_structured_log(session_id)
         self.storage.delete_session(session_id)
+        if session.worktree_path is not None:
+            with suppress(Exception):
+                subprocess.run(
+                    ["git", "worktree", "remove", "--force", session.worktree_path],
+                    check=False,
+                )
         # Reclaim the session's uploaded blobs, which can be large.
         self.attachments.discard(session_id)
         # Drop this session's blackboard posts along with its record.

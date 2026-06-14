@@ -201,6 +201,7 @@ class SessionRecord(BaseModel):
     # ``WAYPOINT_SESSION_ID``). Used to inherit the spawner's permission mode
     # and to identify subagent sessions. ``None`` for user/top-level sessions.
     spawner_session_id: str | None = None
+    worktree_path: str | None = None
     permission_mode: str | None = None
     model: str | None = None
     effort: str | None = None
@@ -257,7 +258,7 @@ class BoardPostRequest(BaseModel):
 
 
 class BoardEntryUpdateRequest(BaseModel):
-    text: str
+    text: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -342,6 +343,7 @@ class SessionCreateRequest(BaseModel):
     # spawns this one. When ``permission_mode`` is unset and the spawner shares
     # this backend, the child inherits the spawner's mode.
     spawner_session_id: str | None = None
+    worktree_path: str | None = None
     permission_mode: str | None = None
     model: str | None = None
     effort: str | None = None

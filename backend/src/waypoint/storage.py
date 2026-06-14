@@ -223,6 +223,7 @@ class Storage:
         self._ensure_column("sessions", "context_usage", "TEXT")
         self._ensure_column("sessions", "rate_limit_usage", "TEXT")
         self._ensure_column("sessions", "spawner_session_id", "TEXT")
+        self._ensure_column("sessions", "worktree_path", "TEXT")
         self._ensure_column(
             "scheduled_sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
         )
@@ -240,9 +241,9 @@ class Storage:
                 id, backend, source, transport, title, cwd, launch_target_id,
                 launch_mode, repo_name, branch, status, created_at, updated_at,
                 last_event_at, raw_log_path, structured_log_path, transport_state,
-                pinned_at, spawner_session_id, permission_mode, model, effort, args,
-                config_overrides, context_usage, rate_limit_usage
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                pinned_at, spawner_session_id, worktree_path, permission_mode, model,
+                effort, args, config_overrides, context_usage, rate_limit_usage
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -264,6 +265,7 @@ class Storage:
                 json.dumps(session.transport_state),
                 session.pinned_at.isoformat() if session.pinned_at else None,
                 session.spawner_session_id,
+                session.worktree_path,
                 session.permission_mode,
                 session.model,
                 session.effort,
@@ -520,17 +522,22 @@ class Storage:
         self,
         channel: str,
         entry_id: int,
-        text: str,
+        text: str | None,
         metadata: dict[str, Any] | None = None,
     ) -> BoardEntry | None:
-        # Edit a post's text/metadata in place, preserving ``created_at`` and
-        # stamping ``edited_at``. The cell key is immutable here.
         now = datetime.now(UTC)
-        cursor = self.connection.execute(
-            "UPDATE board_entries SET text = ?, metadata = ?, edited_at = ? "
-            "WHERE id = ? AND channel = ?",
-            (text, json.dumps(metadata or {}), now.isoformat(), entry_id, channel),
-        )
+        if text is None:
+            cursor = self.connection.execute(
+                "UPDATE board_entries SET metadata = ?, edited_at = ? "
+                "WHERE id = ? AND channel = ?",
+                (json.dumps(metadata or {}), now.isoformat(), entry_id, channel),
+            )
+        else:
+            cursor = self.connection.execute(
+                "UPDATE board_entries SET text = ?, metadata = ?, edited_at = ? "
+                "WHERE id = ? AND channel = ?",
+                (text, json.dumps(metadata or {}), now.isoformat(), entry_id, channel),
+            )
         self.connection.commit()
         if not (cursor.rowcount or 0):
             return None

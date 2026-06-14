@@ -67,6 +67,7 @@ def test_board_help_lists_commands() -> None:
         "delete",
         "delete-entry",
         "edit-entry",
+        "set-meta",
     ):
         assert name in result.stdout
 
@@ -237,6 +238,146 @@ def test_backends_threads_surfaces_server_capability_error(
     )
     assert result.exit_code != 0
     assert "thread discovery is not supported for tmux" in result.output
+
+
+def test_sessions_list_spawned_by_passes_param(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions" and request.method == "GET":
+            state["params"] = dict(request.url.params)
+            return httpx.Response(
+                200, json={"sessions": [{"id": "child-1", "spawner_session_id": "p1"}]}
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "list", "--spawned-by", "p1"],
+    )
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["sessions"] == [
+        {"id": "child-1", "spawner_session_id": "p1"}
+    ]
+    assert state["params"] == {"spawned_by": "p1"}
+
+
+def test_sessions_list_mine_reads_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_SESSION_ID", "my-session")
+    state: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions" and request.method == "GET":
+            state["params"] = dict(request.url.params)
+            return httpx.Response(200, json={"sessions": []})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "list", "--mine"],
+    )
+    assert result.exit_code == 0
+    assert state["params"] == {"spawned_by": "my-session"}
+
+
+def test_sessions_list_mine_errors_when_env_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("WAYPOINT_SESSION_ID", raising=False)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "list", "--mine"],
+    )
+    assert result.exit_code != 0
+    assert "WAYPOINT_SESSION_ID" in result.output
+
+
+def test_sessions_reap_deletes_matched_sessions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deleted: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions" and request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "sessions": [
+                        {"id": "c1", "spawner_session_id": "p1"},
+                        {"id": "c2", "spawner_session_id": "p1"},
+                    ]
+                },
+            )
+        if request.url.path.startswith("/api/sessions/") and request.method == "DELETE":
+            sid = request.url.path.rsplit("/", 1)[-1]
+            deleted.append(sid)
+            return httpx.Response(200, json={"deleted": sid})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "reap", "--spawned-by", "p1"],
+    )
+    assert result.exit_code == 0
+    summary = json.loads(result.stdout)
+    assert set(summary["reaped"]) == {"c1", "c2"}
+    assert summary["failed"] == []
+    assert set(deleted) == {"c1", "c2"}
+
+
+def test_sessions_reap_reports_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions" and request.method == "GET":
+            return httpx.Response(200, json={"sessions": [{"id": "c1"}, {"id": "c2"}]})
+        if request.url.path == "/api/sessions/c1" and request.method == "DELETE":
+            return httpx.Response(200, json={"deleted": "c1"})
+        if request.url.path == "/api/sessions/c2" and request.method == "DELETE":
+            return httpx.Response(500, json={"detail": "internal error"})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "reap", "--all"],
+    )
+    assert result.exit_code == 0
+    summary = json.loads(result.stdout)
+    assert summary["reaped"] == ["c1"]
+    assert summary["failed"] == ["c2"]
+
+
+def test_sessions_reap_requires_scope(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "reap"],
+    )
+    assert result.exit_code != 0
+    assert "--all" in result.output or "scope" in result.output
 
 
 def test_sessions_import_reads_json_file_and_emits_session(
@@ -721,3 +862,617 @@ def test_events_follow_streams_ndjson_until_terminal(
         1,
         2,
     ]
+
+
+def _board_set_meta_handler(
+    request: httpx.Request, state: dict[str, Any]
+) -> httpx.Response:
+    path = request.url.path
+    if path == "/api/board/job:x" and request.method == "GET":
+        key_filter = request.url.params.get("key")
+        entries = [
+            {"id": 42, "channel": "job:x", "key": "task:1", "text": "original text"}
+        ]
+        if key_filter:
+            entries = [e for e in entries if e.get("key") == key_filter]
+        return httpx.Response(200, json={"channel": "job:x", "entries": entries})
+    if path == "/api/board/job:x/entries/42" and request.method == "PATCH":
+        payload = json.loads(request.content)
+        state["patch_body"] = payload
+        return httpx.Response(
+            200,
+            json={
+                "entry": {
+                    "id": 42,
+                    "channel": "job:x",
+                    "text": "original text",
+                    **payload,
+                }
+            },
+        )
+    return httpx.Response(404, json={"detail": f"unexpected {path}"})
+
+
+def test_board_set_meta_by_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state: dict[str, Any] = {}
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(
+            transport=httpx.MockTransport(lambda r: _board_set_meta_handler(r, state)),
+            base_url="http://t",
+        )
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "board",
+            "set-meta",
+            "job:x",
+            "--key",
+            "task:1",
+            "--meta",
+            "status=done",
+        ],
+    )
+    assert result.exit_code == 0
+    out = json.loads(result.stdout)
+    # Text is preserved; only metadata changed.
+    assert out["entry"]["text"] == "original text"
+    assert out["entry"]["metadata"] == {"status": "done"}
+    assert "text" not in state["patch_body"]
+
+
+def test_board_set_meta_by_entry_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(
+            transport=httpx.MockTransport(lambda r: _board_set_meta_handler(r, state)),
+            base_url="http://t",
+        )
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "board",
+            "set-meta",
+            "job:x",
+            "--entry-id",
+            "42",
+            "--meta",
+            "status=blocked",
+        ],
+    )
+    assert result.exit_code == 0
+    out = json.loads(result.stdout)
+    assert out["entry"]["text"] == "original text"
+    assert out["entry"]["metadata"] == {"status": "blocked"}
+    assert "text" not in state["patch_body"]
+
+
+def test_sessions_start_worktree_creates_worktree_and_sets_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[list[str]] = []
+    root = str(tmp_path / "myrepo")
+    worktree_dir = str(tmp_path / "myrepo-feat-foo")
+
+    import subprocess
+
+    def fake_run(
+        cmd: list[str], *, check: bool = False, **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        if cmd[:3] == ["git", "rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=root + "\n", stderr="")
+        if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="main\n", stderr="")
+        if cmd[:3] == ["git", "worktree", "add"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        raise AssertionError(f"unexpected subprocess call: {cmd}")
+
+    monkeypatch.setattr("waypoint.cli.subprocess.run", fake_run)
+
+    state: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions" and request.method == "POST":
+            body = json.loads(request.content)
+            state["create_body"] = body
+            return httpx.Response(200, json={"session": {"id": "new", **body}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "start",
+            "--backend",
+            "codex",
+            "--cwd",
+            root,
+            "--worktree",
+            "feat/foo",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    wt_call = next(c for c in calls if c[:3] == ["git", "worktree", "add"])
+    assert wt_call[3] == worktree_dir
+    assert wt_call[4:6] == ["-b", "feat/foo"]
+    body = state["create_body"]
+    assert isinstance(body, dict)
+    assert body["worktree_path"] == worktree_dir
+    assert body["cwd"] == worktree_dir
+
+
+def test_sessions_start_worktree_git_failure_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    def fake_run(
+        cmd: list[str], *, check: bool = False, **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if cmd[:3] == ["git", "rev-parse", "--show-toplevel"]:
+            raise subprocess.CalledProcessError(128, cmd, stderr="not a git repo")
+        raise AssertionError(f"unexpected: {cmd}")
+
+    monkeypatch.setattr("waypoint.cli.subprocess.run", fake_run)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "start",
+            "--backend",
+            "codex",
+            "--cwd",
+            "/tmp",
+            "--worktree",
+            "feat/bar",
+        ],
+    )
+    assert result.exit_code == 1
+
+
+# ── multi-id sessions wait ────────────────────────────────────────────────────
+
+
+def _session_state_for(session_id: str, status: str) -> dict[str, Any]:
+    """Session-state envelope with the given id (unlike _session_state which hardcodes s1)."""
+    return {
+        "type": "session_state",
+        "payload": {"session": {"id": session_id, "status": status}},
+    }
+
+
+def test_wait_multi_all_emits_sessions_and_exits_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+
+    streams: dict[str, list[dict[str, Any]]] = {
+        "s1": [_session_state_for("s1", "running"), _session_state_for("s1", "idle")],
+        "s2": [_session_state_for("s2", "idle")],
+    }
+
+    async def stream(self: WaypointClient, session_id: str) -> AsyncIterator[dict]:
+        for envelope in streams[session_id]:
+            yield envelope
+
+    monkeypatch.setattr(WaypointClient, "stream_session_envelopes", stream)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "wait", "s1", "s2"],
+    )
+    assert result.exit_code == 0
+    out = json.loads(result.stdout)
+    assert "sessions" in out
+    statuses = {s["id"]: s["status"] for s in out["sessions"]}
+    assert statuses["s1"] == "idle"
+    assert statuses["s2"] == "idle"
+
+
+def test_wait_multi_any_returns_first_and_exits_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+
+    # s2 reaches idle immediately; s1 would block indefinitely without cancel.
+    import asyncio
+
+    async def stream(self: WaypointClient, session_id: str) -> AsyncIterator[dict]:
+        if session_id == "s2":
+            yield _session_state("idle")
+        else:
+            # Never yields a terminal status — would block without --any.
+            await asyncio.sleep(60)
+            yield _session_state("idle")
+
+    monkeypatch.setattr(WaypointClient, "stream_session_envelopes", stream)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "wait",
+            "s1",
+            "s2",
+            "--any",
+        ],
+    )
+    assert result.exit_code == 0
+    out = json.loads(result.stdout)
+    # --any returns a single-element sessions list (the first to finish).
+    assert "sessions" in out
+    assert len(out["sessions"]) == 1
+    assert out["sessions"][0]["status"] == "idle"
+
+
+def test_wait_multi_exits_one_when_any_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+
+    streams: dict[str, list[dict[str, Any]]] = {
+        "s1": [_session_state_for("s1", "idle")],
+        "s2": [_session_state_for("s2", "error")],
+    }
+
+    async def stream(self: WaypointClient, session_id: str) -> AsyncIterator[dict]:
+        for envelope in streams[session_id]:
+            yield envelope
+
+    monkeypatch.setattr(WaypointClient, "stream_session_envelopes", stream)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "wait", "s1", "s2"],
+    )
+    assert result.exit_code == 1
+
+
+def test_wait_multi_exits_124_on_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+
+    _patch_stream(monkeypatch, [_session_state("running")])
+    monkeypatch.setattr(
+        WaypointClient,
+        "get_session",
+        lambda self, session_id: {"id": session_id, "status": "running"},
+    )
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "wait",
+            "s1",
+            "s2",
+            "--timeout",
+            "0.05",
+        ],
+    )
+    assert result.exit_code == 124
+
+
+# ── fleet events --follow ─────────────────────────────────────────────────────
+
+
+def test_events_follow_single_session_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Single-id follow still works without a session_id prefix in output."""
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+    _patch_stream(
+        monkeypatch,
+        [
+            {
+                "type": "event",
+                "payload": {"event": {"sequence": 1, "kind": "agent_output"}},
+            },
+            _session_state("exited"),
+        ],
+    )
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "events", "s1", "--follow"],
+    )
+    assert result.exit_code == 0
+    lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    assert len(lines) == 1
+    # No session_id prefix for single-session follow.
+    envelope = json.loads(lines[0])
+    assert "session_id" not in envelope
+    assert envelope["type"] == "event"
+
+
+def test_events_follow_multi_prefixes_session_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+
+    streams: dict[str, list[dict[str, Any]]] = {
+        "s1": [
+            {
+                "type": "event",
+                "payload": {"event": {"sequence": 1, "kind": "agent_output"}},
+            },
+            _session_state_for("s1", "exited"),
+        ],
+        "s2": [
+            {
+                "type": "event",
+                "payload": {"event": {"sequence": 2, "kind": "user_input"}},
+            },
+            _session_state_for("s2", "exited"),
+        ],
+    }
+
+    async def stream(self: WaypointClient, session_id: str) -> AsyncIterator[dict]:
+        for envelope in streams[session_id]:
+            yield envelope
+
+    monkeypatch.setattr(WaypointClient, "stream_session_envelopes", stream)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "events",
+            "s1",
+            "s2",
+            "--follow",
+        ],
+    )
+    assert result.exit_code == 0
+    lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    assert len(lines) == 2
+    session_ids_seen = {json.loads(ln)["session_id"] for ln in lines}
+    assert session_ids_seen == {"s1", "s2"}
+
+
+def test_events_follow_filter_type_excludes_non_matching(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+    _patch_stream(
+        monkeypatch,
+        [
+            {
+                "type": "event",
+                "payload": {"event": {"sequence": 1, "kind": "agent_output"}},
+            },
+            {
+                "type": "event",
+                "payload": {"event": {"sequence": 2, "kind": "approval_request"}},
+            },
+            _session_state("exited"),
+        ],
+    )
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "events",
+            "s1",
+            "--follow",
+            "--filter",
+            "approval_request",
+        ],
+    )
+    assert result.exit_code == 0
+    lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    assert len(lines) == 1
+    assert json.loads(lines[0])["payload"]["event"]["kind"] == "approval_request"
+
+
+def test_events_follow_spawned_by_resolves_sessions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+
+    all_sessions = [
+        {"id": "child1", "spawner_session_id": "parent"},
+        {"id": "child2", "spawner_session_id": "parent"},
+        {"id": "other", "spawner_session_id": "other-parent"},
+    ]
+    seen_ids: list[str] = []
+
+    async def stream(self: WaypointClient, session_id: str) -> AsyncIterator[dict]:
+        seen_ids.append(session_id)
+        yield _session_state("exited")
+
+    def fake_list_sessions(self: WaypointClient) -> list[dict]:
+        return all_sessions
+
+    monkeypatch.setattr(WaypointClient, "stream_session_envelopes", stream)
+    monkeypatch.setattr(WaypointClient, "list_sessions", fake_list_sessions)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "events",
+            "--follow",
+            "--spawned-by",
+            "parent",
+        ],
+    )
+    assert result.exit_code == 0
+    assert set(seen_ids) == {"child1", "child2"}
+
+
+def test_events_follow_mine_resolves_spawned_sessions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+    monkeypatch.setenv("WAYPOINT_SESSION_ID", "me")
+
+    all_sessions = [
+        {"id": "my-child", "spawner_session_id": "me"},
+        {"id": "other", "spawner_session_id": "someone-else"},
+    ]
+    seen_ids: list[str] = []
+
+    async def stream(self: WaypointClient, session_id: str) -> AsyncIterator[dict]:
+        seen_ids.append(session_id)
+        yield _session_state("exited")
+
+    def fake_list_sessions(self: WaypointClient) -> list[dict]:
+        return all_sessions
+
+    monkeypatch.setattr(WaypointClient, "stream_session_envelopes", stream)
+    monkeypatch.setattr(WaypointClient, "list_sessions", fake_list_sessions)
+
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "events",
+            "--follow",
+            "--mine",
+        ],
+    )
+    assert result.exit_code == 0
+    assert seen_ids == ["my-child"]
+
+
+# ── sessions send timeout semantics ──────────────────────────────────────────
+
+
+def test_sessions_send_reports_delivered_on_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions/s1/input":
+            raise httpx.ReadTimeout("timeout", request=request)
+        if request.url.path == "/api/sessions/s1":
+            return httpx.Response(
+                200, json={"session": {"id": "s1", "status": "running"}}
+            )
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "send", "s1", "hi"],
+    )
+    assert result.exit_code == 0
+    out = json.loads(result.stdout)
+    assert out["session"]["send"] == "delivered"
+
+
+def test_sessions_send_reports_unknown_on_timeout_idle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions/s1/input":
+            raise httpx.ReadTimeout("timeout", request=request)
+        if request.url.path == "/api/sessions/s1":
+            return httpx.Response(200, json={"session": {"id": "s1", "status": "idle"}})
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "send", "s1", "hi"],
+    )
+    # unknown send → exits 1 to signal uncertainty
+    assert result.exit_code == 1
+    out = json.loads(result.stdout)
+    assert out["session"]["send"] == "unknown"
+
+
+# ── usage command ─────────────────────────────────────────────────────────────
+
+
+def test_usage_emits_dashboard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/usage" and request.method == "GET":
+            return httpx.Response(200, json={"buckets": [], "total_cost_usd": 0.5})
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(app, ["--config", str(_config(tmp_path)), "usage"])
+    assert result.exit_code == 0
+    out = json.loads(result.stdout)
+    assert out["buckets"] == []
+    assert out["total_cost_usd"] == 0.5
+
+
+def test_usage_refresh_posts_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/usage/refresh" and request.method == "POST":
+            called.append("refresh")
+            return httpx.Response(
+                200, json={"buckets": [{"id": "b1"}], "total_cost_usd": 2.0}
+            )
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app, ["--config", str(_config(tmp_path)), "usage", "--refresh"]
+    )
+    assert result.exit_code == 0
+    assert called == ["refresh"]
+    out = json.loads(result.stdout)
+    assert out["total_cost_usd"] == 2.0
+
+
+def test_help_includes_usage_command() -> None:
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "usage" in result.stdout

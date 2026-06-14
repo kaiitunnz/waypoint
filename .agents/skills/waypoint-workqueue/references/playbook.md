@@ -27,10 +27,8 @@ sid=$(waypoint sessions start \
   --backend codex --model gpt-5-codex \
   --cwd "$repo/../.wq/$job/task-$n" \
   --title "subagent:wq-$job-$n" | jq -r .session.id)
-# Re-post the cell's FULL contract text (kept in $task_text) — NOT a stub like
-# "task $n -> $sid". `--key` replaces the cell text, so a stub wipes the scope
-# the worker reads. The assignee goes in --meta. See org-template.md.
-waypoint board post job:$job "$task_text" --key task:$n --meta state=doing --meta assignee=$sid
+# task:<n> is the immutable contract — never rewritten. Update status:<n> only.
+waypoint board set-meta job:$job --key status:$n --meta state=doing --meta assignee=$sid
 # then send the worker the fixed message from org-template.md
 ```
 
@@ -57,9 +55,9 @@ git -C "$repo" merge --no-ff "wq/$job-t$n"
 ```
 
 - Clean merge and green check → `git -C "$repo" worktree remove "$repo/../.wq/$job/task-$n"`
-  and set the task done: `waypoint board post job:$job "task $n merged" --key task:$n --meta state=done`.
-- Conflict or red → `git -C "$repo" merge --abort`, hand the task back
-  (`--meta state=todo`), and reassign it (often a fresh worktree).
+  and set the task done: `waypoint board set-meta job:$job --key status:$n --meta state=done`.
+- Conflict or red → `git -C "$repo" merge --abort`, hand the task back:
+  `waypoint board set-meta job:$job --key status:$n --meta state=todo`, and reassign it.
 
 Finish when no task is `todo` or `doing`: run the **full** suite on `wq/$job`,
 post a summary to the board, reap the workers (`waypoint-subagents` → cleanup),
@@ -80,3 +78,17 @@ The board is the checkpoint — no separate state file. A lead (re)starting read
 `waypoint board read job:<job-id>` and continues: `done` tasks are merged (skip);
 `todo` tasks get assigned; a `doing` task whose worker is gone
 (`waypoint sessions show <sid>` → `exited`/`error`) is handed back to `todo`.
+
+### Resume after the lead dies
+
+1. Read the board: `waypoint board read job:<job-id>`.
+2. Find the old lead's workers: `waypoint sessions list --spawned-by <old-lead-sid>`.
+3. For each `doing` task, check its assigned worker (`waypoint sessions show <sid>`).
+   If `exited`/`error`, the worker is orphaned — hand the task back to `todo`:
+   `waypoint board set-meta job:<job-id> --key status:<n> --meta state=todo`.
+4. Workers still running can be adopted: read their events to verify progress, then
+   resume steering them.
+
+> **`waypoint sessions send` may report a transport timeout even when the input
+> landed.** Confirm via `waypoint sessions events <sid>` before resending — a
+> duplicate message can cause a worker to execute a task twice.

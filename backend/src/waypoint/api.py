@@ -202,11 +202,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return snapshot.model_dump(mode="json")
 
     @app.get("/api/sessions")
-    async def list_sessions(_: Annotated[str, Depends(token_dependency())]) -> Any:
-        sessions = [
-            session.model_dump(mode="json")
-            for session in context.runtime.list_sessions()
-        ]
+    async def list_sessions(
+        _: Annotated[str, Depends(token_dependency())],
+        spawned_by: Annotated[str | None, Query()] = None,
+    ) -> Any:
+        all_sessions = context.runtime.list_sessions()
+        if spawned_by is not None:
+            all_sessions = [
+                s for s in all_sessions if s.spawner_session_id == spawned_by
+            ]
+        sessions = [session.model_dump(mode="json") for session in all_sessions]
         return {"sessions": sessions}
 
     @app.get("/api/backends/{backend}/threads")

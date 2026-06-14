@@ -26,11 +26,14 @@ One channel for the whole job: `job:<job-id>` (a short slug, no slashes — e.g.
 `job:drop-py38`). Everything lives here, so `/board` shows the job's progress at
 a glance.
 
-Two kinds of cell, **both written only by the lead**:
+Three kinds of cell, **all written only by the lead**:
 
 - `plan` — the job in one cell: goal, integration branch, and the task list.
-- `task:<n>` — one per task. The text is the instruction plus how to check it;
-  `--meta` carries the live status.
+- `task:<n>` — one per task. **Immutable contract**: the text is the instruction
+  plus how to check it. Set once; never rewritten.
+- `status:<n>` — paired with each `task:<n>`. **Mutable status**: `--meta`
+  carries `state=todo|doing|done|blocked` and `assignee=<sid>`. Text is a brief
+  label. Update with `waypoint board set-meta` to flip state without touching text.
 
 ```bash
 # plan — once
@@ -38,25 +41,31 @@ waypoint board post job:drop-py38 \
   "Drop Python 3.8 support. Integration branch wq/drop-py38. 12 tasks, one per package." \
   --key plan
 
-# a task — text is the contract, meta is the status
+# task cell — immutable contract, written once
 waypoint board post job:drop-py38 \
   "pkg/auth: remove the 3.8 shims and set requires-python >=3.9. Check: uv run pytest pkg/auth." \
-  --key task:3 --meta state=todo
+  --key task:3
+
+# status cell — created alongside the task, updated as work progresses
+waypoint board post job:drop-py38 "task 3 status" --key status:3 --meta state=todo
+
+# flip state without resupplying text
+waypoint board set-meta job:drop-py38 --key status:3 --meta state=doing --meta assignee=<sid>
 ```
 
 `state` is `todo | doing | done | blocked`. Workers report progress to the **log**
 (a plain `waypoint board post job:<id> "..."`) or by a direct send; the lead
-updates the `task:<n>` cell. Workers never write cells — a worker's own posts
+updates `status:<n>` cells. Workers never write cells — a worker's own posts
 vanish when it is reaped, so durable state stays with the long-lived lead.
 
-> **Pitfall — `--key` is an upsert that REPLACES the cell's text.** There is no
-> text-preserving metadata patch (`board edit-entry` also requires the text). So
-> to flip a task's status, **re-post the cell with its full contract text** plus
-> the new `--meta`; keep that text in a shell variable so you can repost it
-> verbatim. Never post a keyed cell with throwaway text (`"task 3 -> <sid>"`) just
-> to change `state` — that silently destroys the contract the worker reads, and
-> the worker will (correctly) report blocked for want of scope. Track the
-> assignee in `--meta`, not in the text.
+> **Why two cells? — `--key` is an upsert that REPLACES the cell's text.** There
+> is no text-preserving metadata patch (`board edit-entry` also requires the text).
+> With a single cell, flipping state forces you to re-post the full contract text or
+> silently clobber it — posting a stub like `"task 3 -> <sid>"` destroys the scope
+> the worker reads, and the worker will (correctly) report blocked. The two-cell
+> shape avoids this by design: `task:<n>` is the immutable contract (never touched
+> after creation), and `status:<n>` is the mutable status cell updated with
+> `set-meta`. Track the assignee in `status:<n>`'s `--meta`, not in text.
 
 ## Handing a task to a worker
 
@@ -70,12 +79,13 @@ waypoint sessions send <worker-sid> \
 
 ## Lifecycle (five steps)
 
-1. Lead writes `plan` and one `task:<n>` per task.
+1. Lead writes `plan`, one `task:<n>` per task, and one `status:<n>` per task
+   (state=todo).
 2. Lead gives each free worker a task — a worktree plus the message above — and
-   sets that task `doing`.
+   sets `status:<n>` to state=doing with assignee=\<sid\>.
 3. Worker does it, self-checks, reports `done` (or `blocked`).
-4. Lead checks the result against the task, merges the worker's branch, sets the
-   task `done` (or hands it back as `todo`).
+4. Lead checks the result against the task, merges the worker's branch, sets
+   `status:<n>` to done (or todo to hand it back).
 5. Repeat until every task is `done` or `blocked`; then run the full check on the
    integration branch and report.
 

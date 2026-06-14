@@ -399,6 +399,20 @@ def test_create_session_passes_spawner_session_id(
     assert session["spawner_session_id"] == "parent-1"
 
 
+def test_create_session_passes_worktree_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        session = client.create_session(
+            backend="claude_code",
+            cwd="/repos/myrepo-feat",
+            worktree_path="/repos/myrepo-feat",
+        )
+    assert session["worktree_path"] == "/repos/myrepo-feat"
+
+
 def test_list_board_channels(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
     state: dict = {}
@@ -472,6 +486,20 @@ def test_update_board_entry_sends_body(
     assert entry["text"] == "new"
     assert state["board_update"]["entry_id"] == 7
     assert state["board_update"]["metadata"] == {"a": "b"}
+
+
+def test_update_board_entry_meta_only_omits_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        entry = client.update_board_entry("topic:x", 7, metadata={"x": "y"})
+    assert state["board_update"]["entry_id"] == 7
+    assert state["board_update"]["metadata"] == {"x": "y"}
+    assert "text" not in state["board_update"]
+    # Server echoes back existing text unchanged.
+    assert entry["id"] == 7
 
 
 def test_error_response_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -560,3 +588,164 @@ def test_session_status_from_envelope() -> None:
 def test_is_event_envelope() -> None:
     assert is_event_envelope({"type": "event", "payload": {"event": {}}})
     assert not is_event_envelope({"type": "session_state", "payload": {"session": {}}})
+
+
+def test_list_sessions_passes_spawned_by(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/auth/login":
+            return httpx.Response(200, json={"token": VALID_TOKEN, "expires_at": "x"})
+        if request.url.path == "/api/sessions" and request.method == "GET":
+            state["params"] = dict(request.url.params)
+            spawned_by = request.url.params.get("spawned_by")
+            if spawned_by == "parent-1":
+                return httpx.Response(200, json={"sessions": [{"id": "child-1"}]})
+            return httpx.Response(200, json={"sessions": [{"id": "s1"}, {"id": "s2"}]})
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    settings = _settings(tmp_path)
+    with WaypointClient(settings, token=VALID_TOKEN, client=http) as client:
+        all_sessions = client.list_sessions()
+        filtered = client.list_sessions(spawned_by="parent-1")
+    assert all_sessions == [{"id": "s1"}, {"id": "s2"}]
+    assert (
+        "spawned_by" not in state.get("params", {})
+        or state["params"].get("spawned_by") == "parent-1"
+    )
+    assert filtered == [{"id": "child-1"}]
+    assert state["params"]["spawned_by"] == "parent-1"
+
+
+def test_list_sessions_omits_spawned_by_when_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions" and request.method == "GET":
+            state["params"] = dict(request.url.params)
+            return httpx.Response(200, json={"sessions": []})
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    settings = _settings(tmp_path)
+    with WaypointClient(settings, token=VALID_TOKEN, client=http) as client:
+        client.list_sessions()
+    assert "spawned_by" not in state["params"]
+
+
+def test_get_usage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/usage" and request.method == "GET":
+            return httpx.Response(
+                200,
+                json={"buckets": [], "total_cost_usd": 0.0},
+            )
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+    with WaypointClient(_settings(tmp_path), token=VALID_TOKEN, client=http) as c:
+        result = c.get_usage()
+    assert result["buckets"] == []
+    assert result["total_cost_usd"] == 0.0
+
+
+def test_refresh_usage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    called: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/usage/refresh" and request.method == "POST":
+            called.append("refresh")
+            return httpx.Response(
+                200,
+                json={"buckets": [{"id": "b1"}], "total_cost_usd": 1.5},
+            )
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+    with WaypointClient(_settings(tmp_path), token=VALID_TOKEN, client=http) as c:
+        result = c.refresh_usage()
+    assert called == ["refresh"]
+    assert result["total_cost_usd"] == 1.5
+
+
+def test_send_input_timeout_session_running_reports_delivered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions/s1/input":
+            raise httpx.ReadTimeout("timed out", request=request)
+        if request.url.path == "/api/sessions/s1" and request.method == "GET":
+            return httpx.Response(
+                200, json={"session": {"id": "s1", "status": "running"}}
+            )
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+    with WaypointClient(_settings(tmp_path), token=VALID_TOKEN, client=http) as c:
+        result = c.send_input("s1", "hello")
+    assert result["send"] == "delivered"
+    assert result["status"] == "running"
+
+
+def test_send_input_timeout_session_idle_reports_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions/s1/input":
+            raise httpx.ReadTimeout("timed out", request=request)
+        if request.url.path == "/api/sessions/s1" and request.method == "GET":
+            return httpx.Response(200, json={"session": {"id": "s1", "status": "idle"}})
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+    with WaypointClient(_settings(tmp_path), token=VALID_TOKEN, client=http) as c:
+        result = c.send_input("s1", "hello")
+    assert result["send"] == "unknown"
+
+
+def test_send_input_timeout_get_fails_reports_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions/s1/input":
+            raise httpx.ReadTimeout("timed out", request=request)
+        # GET also fails
+        return httpx.Response(503, json={"detail": "unavailable"})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+    with WaypointClient(_settings(tmp_path), token=VALID_TOKEN, client=http) as c:
+        result = c.send_input("s1", "hello")
+    assert result["send"] == "unknown"
+    assert result["id"] == "s1"
+
+
+def test_send_input_non_timeout_error_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions/s1/input":
+            return httpx.Response(400, json={"detail": "bad input"})
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+    with WaypointClient(_settings(tmp_path), token=VALID_TOKEN, client=http) as c:
+        with pytest.raises(WaypointError):
+            c.send_input("s1", "hello")

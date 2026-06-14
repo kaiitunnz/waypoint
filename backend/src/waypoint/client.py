@@ -155,10 +155,13 @@ class WaypointClient:
 
     # ── sessions ────────────────────────────────────────────────────────
 
-    def list_sessions(self) -> list[dict[str, Any]]:
-        data: list[dict[str, Any]] = self._request("GET", "/api/sessions").json()[
-            "sessions"
-        ]
+    def list_sessions(self, spawned_by: str | None = None) -> list[dict[str, Any]]:
+        params: dict[str, str] = {}
+        if spawned_by is not None:
+            params["spawned_by"] = spawned_by
+        data: list[dict[str, Any]] = self._request(
+            "GET", "/api/sessions", params=params if params else None
+        ).json()["sessions"]
         return data
 
     def get_session(self, session_id: str) -> dict[str, Any]:
@@ -251,6 +254,7 @@ class WaypointClient:
         effort: str | None = None,
         permission_mode: str | None = None,
         spawner_session_id: str | None = None,
+        worktree_path: str | None = None,
         args: list[str] | None = None,
     ) -> dict[str, Any]:
         body = {
@@ -262,6 +266,7 @@ class WaypointClient:
             "effort": effort,
             "permission_mode": permission_mode,
             "spawner_session_id": spawner_session_id,
+            "worktree_path": worktree_path,
             "args": args or [],
         }
         data: dict[str, Any] = self._request("POST", "/api/sessions", json=body).json()[
@@ -295,12 +300,22 @@ class WaypointClient:
         body: dict[str, Any] = {"text": text, "submit": submit}
         if attachments:
             body["attachments"] = attachments
-        data: dict[str, Any] = self._request(
-            "POST",
-            f"/api/sessions/{session_id}/input",
-            json=body,
-        ).json()["session"]
-        return data
+        try:
+            return self._request(
+                "POST",
+                f"/api/sessions/{session_id}/input",
+                json=body,
+            ).json()["session"]
+        except WaypointError as exc:
+            if not isinstance(exc.__cause__, httpx.TimeoutException):
+                raise
+        # Timeout: the server may have already accepted the input. Check session status.
+        try:
+            session = self.get_session(session_id)
+        except WaypointError:
+            return {"id": session_id, "send": "unknown"}
+        send_flag = "delivered" if session.get("status") == "running" else "unknown"
+        return {**session, "send": send_flag}
 
     def answer_question(
         self,
@@ -416,10 +431,12 @@ class WaypointClient:
         self,
         channel: str,
         entry_id: int,
-        text: str,
+        text: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        body = {"text": text, "metadata": metadata or {}}
+        body: dict[str, Any] = {"metadata": metadata or {}}
+        if text is not None:
+            body["text"] = text
         data: dict[str, Any] = self._request(
             "PATCH", f"/api/board/{channel}/entries/{entry_id}", json=body
         ).json()["entry"]
@@ -482,4 +499,14 @@ class WaypointClient:
         data: dict[str, Any] = self._request(
             "POST", "/api/schedules/clear-history"
         ).json()
+        return data
+
+    # ── usage ────────────────────────────────────────────────────────────
+
+    def get_usage(self) -> dict[str, Any]:
+        data: dict[str, Any] = self._request("GET", "/api/usage").json()
+        return data
+
+    def refresh_usage(self) -> dict[str, Any]:
+        data: dict[str, Any] = self._request("POST", "/api/usage/refresh").json()
         return data

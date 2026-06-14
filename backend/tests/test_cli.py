@@ -1,8 +1,9 @@
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+import click
 import httpx
 import pytest
 import typer
@@ -76,6 +77,50 @@ def test_backends_help_lists_threads() -> None:
     result = runner.invoke(app, ["backends", "--help"])
     assert result.exit_code == 0
     assert "threads" in result.stdout
+
+
+def test_help_command_dumps_full_surface() -> None:
+    # No server or token configured — recursive help is pure introspection.
+    result = runner.invoke(app, ["help"])
+    assert result.exit_code == 0
+    for command in ("sessions start", "board set-meta", "usage"):
+        assert command in result.stdout
+    assert "--backend" in result.stdout
+
+
+def test_help_json_is_structured() -> None:
+    result = runner.invoke(app, ["help", "--json"])
+    assert result.exit_code == 0
+    commands = json.loads(result.stdout)
+    by_path = {entry["command"]: entry for entry in commands}
+    start = by_path["sessions start"]
+    backend = next(o for o in start["options"] if "--backend" in o["flags"])
+    assert backend["required"] is True
+    assert backend["type"] == "text"
+
+
+def _walk_leaf_paths(group: click.Group, prefix: str) -> list[str]:
+    paths: list[str] = []
+    for name, cmd in group.commands.items():
+        if cmd.hidden:
+            continue
+        path = f"{prefix} {name}".strip()
+        if isinstance(getattr(cmd, "commands", None), dict):
+            paths.extend(_walk_leaf_paths(cast(click.Group, cmd), path))
+        else:
+            paths.append(path)
+    return paths
+
+
+def test_help_covers_every_leaf_command() -> None:
+    # Regression guard: every leaf in the tree must appear in the dump so the
+    # surface can't silently drift away from the generated help.
+    result = runner.invoke(app, ["help", "--json"])
+    assert result.exit_code == 0
+    dumped = {entry["command"] for entry in json.loads(result.stdout)}
+    root = cast(click.Group, typer.main.get_command(app))
+    expected = set(_walk_leaf_paths(root, ""))
+    assert expected <= dumped
 
 
 def test_board_post_rejects_malformed_meta(tmp_path: Path) -> None:

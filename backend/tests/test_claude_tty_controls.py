@@ -25,6 +25,7 @@ from waypoint.backends.claude_tty.plugin import (
 )
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.schemas import (
+    CommandCompletion,
     SessionCreateRequest,
     SessionRecord,
     SessionSource,
@@ -335,6 +336,58 @@ async def test_list_threads_dedups_imported(monkeypatch: pytest.MonkeyPatch) -> 
     summaries = await plugin.list_threads(runtime)
 
     assert [s.id for s in summaries] == ["t-b"]
+
+
+# ── command completions ───────────────────────────────────────────────────────
+
+
+async def test_list_command_completions_surfaces_compact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Isolate the static built-ins from on-disk skill/command discovery.
+    monkeypatch.setattr(
+        plugin_mod, "list_claude_command_completions", AsyncMock(return_value=[])
+    )
+    plugin = ClaudeTtyPlugin()
+    runtime = MagicMock()
+    runtime._find_launch_target.return_value = None
+    session = _make_session()
+
+    completions = await plugin.list_command_completions(
+        runtime, session, prefix="/comp"
+    )
+
+    compact = next(c for c in completions if c.name == "compact")
+    assert compact.replacement == "/compact "
+    assert compact.dispatch == "plain_text"
+
+
+async def test_list_command_completions_merges_dynamic_skills(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skill = CommandCompletion(
+        id="claude:skill:deep-research",
+        trigger="/",
+        replacement="/deep-research ",
+        name="deep-research",
+        description="Run deep research",
+        kind="skill",
+        source="user_skill",
+        dispatch="plain_text",
+    )
+    monkeypatch.setattr(
+        plugin_mod,
+        "list_claude_command_completions",
+        AsyncMock(return_value=[skill]),
+    )
+    plugin = ClaudeTtyPlugin()
+    runtime = MagicMock()
+    runtime._find_launch_target.return_value = None
+    session = _make_session()
+
+    names = {c.name for c in await plugin.list_command_completions(runtime, session)}
+
+    assert {"compact", "deep-research"} <= names
 
 
 async def test_list_threads_remote_returns_empty() -> None:

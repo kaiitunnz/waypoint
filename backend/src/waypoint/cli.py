@@ -6,8 +6,9 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
+import click
 import typer
 import uvicorn
 from websockets.exceptions import WebSocketException
@@ -289,6 +290,22 @@ def usage(
         return c.get_usage()
 
     _emit(_settings_from_ctx(ctx), run)
+
+
+@app.command("help")
+def help_(
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit the command tree as structured JSON."),
+    ] = False,
+) -> None:
+    """Dump the entire CLI surface (all nested commands) in one call."""
+    root = cast(click.Group, typer.main.get_command(app))
+    commands = _walk_commands(root, "waypoint")
+    if json_output:
+        typer.echo(json.dumps(commands, indent=2))
+    else:
+        typer.echo(_render_help_text(commands))
 
 
 @session_app.command("start")
@@ -1588,6 +1605,87 @@ def run_reset(settings: Settings | None = None, *, confirmed: bool) -> None:
         print(f"removed {target}")
     settings.ensure_dirs()
     print(f"recreated {settings.data_dir}")
+
+
+def _walk_commands(group: click.Group, prefix: str) -> list[dict[str, Any]]:
+    """Recursively flatten a Click command tree into serializable descriptors.
+
+    Sub-groups are descended into; non-group commands are leaves. Hidden
+    commands/params and the auto-added ``--help`` option are skipped. Output is
+    sorted by command path for stable text/JSON dumps.
+    """
+    out: list[dict[str, Any]] = []
+    for name, cmd in group.commands.items():
+        if cmd.hidden:
+            continue
+        path = f"{prefix} {name}"
+        # Typer vendors its own Click, so a sub-app is not an ``isinstance`` of
+        # the top-level ``click.Group``; detect groups by the ``commands`` map.
+        if isinstance(getattr(cmd, "commands", None), dict):
+            out.extend(_walk_commands(cast(click.Group, cmd), path))
+            continue
+        out.append(_describe_command(cmd, path))
+    out.sort(key=lambda entry: entry["command"])
+    return out
+
+
+def _describe_command(cmd: click.Command, path: str) -> dict[str, Any]:
+    arguments: list[dict[str, Any]] = []
+    options: list[dict[str, Any]] = []
+    with click.Context(cmd, info_name=path) as ctx:
+        for param in cmd.get_params(ctx):
+            if getattr(param, "hidden", False) or param.name == "help":
+                continue
+            if param.param_type_name == "option":
+                options.append(
+                    {
+                        "flags": list(param.opts),
+                        "type": param.type.name,
+                        "required": param.required,
+                        "default": param.default,
+                        "help": getattr(param, "help", None),
+                    }
+                )
+            else:
+                arguments.append(
+                    {"name": param.name, "required": param.required, "help": None}
+                )
+    # Strip the leading "waypoint " (or other root) from the reported command.
+    command = path.split(" ", 1)[1] if " " in path else path
+    return {
+        "command": command,
+        "help": cmd.get_short_help_str() or None,
+        "arguments": arguments,
+        "options": options,
+    }
+
+
+def _render_help_text(commands: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for entry in commands:
+        lines.append(entry["command"])
+        if entry["help"]:
+            lines.append(f"  {entry['help']}")
+        if entry["arguments"]:
+            lines.append("  ARGUMENTS:")
+            for arg in entry["arguments"]:
+                req = "required" if arg["required"] else "optional"
+                lines.append(f"    {arg['name']} ({req})")
+        if entry["options"]:
+            lines.append("  OPTIONS:")
+            for opt in entry["options"]:
+                flags = ", ".join(opt["flags"])
+                bits = [opt["type"]]
+                bits.append("required" if opt["required"] else "optional")
+                if opt["default"] is not None:
+                    bits.append(f"default={opt['default']}")
+                detail = ", ".join(bits)
+                line = f"    {flags} [{detail}]"
+                if opt["help"]:
+                    line += f" — {opt['help']}"
+                lines.append(line)
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 def run_doctor(settings: Settings | None = None) -> None:

@@ -118,6 +118,17 @@ def _walk_commands(group: click.Group, prefix: str) -> list[dict[str, Any]]:
     return out
 
 
+def _json_safe(value: Any) -> Any:
+    """Coerce an option default to a JSON-serializable form.
+
+    Defaults are usually primitives, but some (enums, paths, frozensets) are
+    not; fall back to ``str`` so the dump never fails to serialize.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return str(value)
+
+
 def _describe_command(cmd: click.Command, path: str) -> dict[str, Any]:
     arguments: list[dict[str, Any]] = []
     options: list[dict[str, Any]] = []
@@ -131,7 +142,7 @@ def _describe_command(cmd: click.Command, path: str) -> dict[str, Any]:
                         "flags": list(param.opts),
                         "type": param.type.name,
                         "required": param.required,
-                        "default": param.default,
+                        "default": _json_safe(param.default),
                         "help": getattr(param, "help", None),
                     }
                 )

@@ -9,7 +9,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from waypoint.cli import app, exit_code_for_wait, parse_wait_until
+from waypoint.cli import _json_safe, app, exit_code_for_wait, parse_wait_until
 from waypoint.client import WaypointClient
 from waypoint.settings import Settings
 
@@ -133,6 +133,16 @@ def test_help_surfaces_runnable_groups() -> None:
     by_path = {entry["command"]: entry for entry in json.loads(result.stdout)}
     assert "backends" in by_path
     assert by_path["backends"]["help"]
+
+
+def test_json_safe_stringifies_non_primitive_defaults() -> None:
+    # Primitives pass through untouched so the JSON dump stays faithful.
+    for value in (None, True, 3, 1.5, "x"):
+        assert _json_safe(value) == value
+    # Non-serializable defaults (enums, paths, frozensets) coerce to str so a
+    # future option can never break `help --json`.
+    assert _json_safe(frozenset({"a"})) == str(frozenset({"a"}))
+    assert _json_safe(Path("/tmp/x")) == "/tmp/x"
 
 
 def test_board_post_rejects_malformed_meta(tmp_path: Path) -> None:

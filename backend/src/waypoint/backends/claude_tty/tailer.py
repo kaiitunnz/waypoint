@@ -72,6 +72,10 @@ class TranscriptTailer:
         # Dialog debounce state
         self._prev_dialog_sig: str | None = None
         self._dialog_stable_count: int = 0
+        # Signature of the dialog already surfaced as an APPROVAL_REQUEST; held
+        # until the dialog leaves the screen so a response that clears pending
+        # before the pane redraws cannot trigger a duplicate emit.
+        self._surfaced_sig: str | None = None
 
     def _read_new_bytes(self) -> bytes:
         if not self._path.exists():
@@ -143,6 +147,7 @@ class TranscriptTailer:
             self._plugin._pending_approvals.pop(self._session_id, None)
             self._prev_dialog_sig = None
             self._dialog_stable_count = 0
+            self._surfaced_sig = None
             return
 
         dialog = pane_dialog.parse_approval(snapshot)
@@ -162,8 +167,10 @@ class TranscriptTailer:
         if self._dialog_stable_count < _DIALOG_STABLE_TICKS:
             return
 
-        # Already surfaced — avoid re-emitting the same pending dialog.
-        if self._session_id in self._plugin._pending_approvals:
+        # Already surfaced this exact dialog — do not re-emit, even once the
+        # response has cleared the pending entry but the pane has not yet
+        # redrawn the box away.
+        if sig == self._surfaced_sig:
             return
 
         approve_num = dialog.approve_option.number if dialog.approve_option else 1
@@ -192,6 +199,7 @@ class TranscriptTailer:
             decline_number=decline_num,
             signature=sig,
         )
+        self._surfaced_sig = sig
 
         await self._runtime._emit_adapter_event(
             self._session_id,

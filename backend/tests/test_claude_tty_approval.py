@@ -181,6 +181,56 @@ async def test_vanished_dialog_clears_pending() -> None:
     assert "sess-1" not in plugin._pending_approvals
 
 
+async def test_no_reemit_after_response_while_dialog_lingers() -> None:
+    # After respond_to_approval clears pending, the dialog can still be on the
+    # pane for up to one poll before it redraws. The tailer must NOT re-emit a
+    # duplicate approval for that same dialog.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    runtime = _make_runtime(session, _load("approval_write.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()  # tick 1: debounce
+    await tailer._poll_dialog()  # tick 2: emit + pending
+    assert runtime._emit_adapter_event.call_count == 1
+
+    # Simulate the transport answering the approval.
+    del plugin._pending_approvals["sess-1"]
+
+    await tailer._poll_dialog()  # tick 3: same dialog still rendered
+    assert runtime._emit_adapter_event.call_count == 1  # no duplicate
+    assert "sess-1" not in plugin._pending_approvals
+
+
+async def test_reemits_distinct_dialog_after_screen_clears() -> None:
+    # Once the pane redraws away (dialog gone) the surfaced-signature guard
+    # resets, so a genuinely new dialog later is surfaced again.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    write_screen = _load("approval_write.txt")
+    ready_screen = _load("ready.txt")
+    screens = [write_screen, write_screen, ready_screen, write_screen, write_screen]
+    idx = [0]
+
+    async def _side_effect(pane: str) -> str:
+        screen = screens[min(idx[0], len(screens) - 1)]
+        idx[0] += 1
+        return screen
+
+    runtime = _make_runtime(session, write_screen)
+    runtime.tmux.capture_snapshot = AsyncMock(side_effect=_side_effect)
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()  # emit (debounce tick 1)
+    await tailer._poll_dialog()  # emit (tick 2) → 1
+    del plugin._pending_approvals["sess-1"]  # responded
+    await tailer._poll_dialog()  # ready: screen cleared, guard resets
+    await tailer._poll_dialog()  # write again, debounce
+    await tailer._poll_dialog()  # write stable → re-emit → 2
+
+    assert runtime._emit_adapter_event.call_count == 2
+
+
 async def test_auto_mode_never_captures_pane() -> None:
     for mode in ("auto", "bypassPermissions", "dontAsk"):
         plugin = ClaudeTtyPlugin()

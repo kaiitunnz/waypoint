@@ -250,6 +250,22 @@ async def test_auto_mode_dialog_still_surfaced() -> None:
         assert session.id in plugin._pending_approvals
 
 
+async def test_trust_prompt_is_accepted() -> None:
+    # A fresh-cwd session opens at the workspace-trust prompt; the tailer must
+    # accept it (bare Enter) so the session — including autonomous ones — does
+    # not hang, without emitting any approval.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    runtime = _make_runtime(session, _load("trust_dialog.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()
+
+    runtime.tmux.send_input.assert_called_once_with("%0", "", submit=True)
+    runtime._emit_adapter_event.assert_not_called()
+    assert "sess-1" not in plugin._pending_approvals
+
+
 async def test_non_approval_screen_does_not_emit() -> None:
     for fixture in ("ready.txt", "trust_dialog.txt", "model_selector.txt"):
         plugin = ClaudeTtyPlugin()

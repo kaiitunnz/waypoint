@@ -2875,7 +2875,9 @@ const ReplyComposer = memo(function ReplyComposer({
         ›
       </button>
       <div
-        className={`reply-textarea-wrap${dragActive ? " is-drag-active" : ""}`}
+        className={`reply-textarea-wrap${dragActive ? " is-drag-active" : ""}${
+          agentBusy ? " is-busy" : ""
+        }`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -2910,25 +2912,35 @@ const ReplyComposer = memo(function ReplyComposer({
             <span>Drop to attach</span>
           </div>
         ) : null}
+        {agentBusy ? (
+          <button
+            type="button"
+            className="composer-interrupt"
+            onClick={() => void onInterrupt()}
+            disabled={disabled || dormant}
+            aria-label="Interrupt the agent"
+            title="Interrupt the agent's current turn"
+          >
+            <span className="composer-send-glyph" aria-hidden>
+              ■
+            </span>
+          </button>
+        ) : null}
         <button
           type="button"
-          className={`composer-send-morph ${agentBusy ? "is-stop" : "is-send"}`}
-          onClick={() => (agentBusy ? void onInterrupt() : void handleSend())}
+          className="composer-send"
+          onClick={() => void handleSend()}
           disabled={
-            agentBusy
-              ? disabled || dormant
-              : disabled ||
-                sending ||
-                attachments.uploading ||
-                (!draft.trim() && attachments.readyIds.length === 0)
+            disabled ||
+            sending ||
+            attachments.uploading ||
+            (!draft.trim() && attachments.readyIds.length === 0)
           }
-          aria-label={agentBusy ? "Stop the agent" : "Send"}
-          title={
-            agentBusy ? "Interrupt the agent's current turn" : "Send (⌘/Ctrl + ↵)"
-          }
+          aria-label="Send"
+          title="Send (⌘/Ctrl + ↵)"
         >
           <span className="composer-send-glyph" aria-hidden>
-            {sending ? "…" : agentBusy ? "■" : "↑"}
+            {sending ? "…" : "↑"}
           </span>
         </button>
         {suggestionsOpen ? (

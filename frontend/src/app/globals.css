@@ -6466,6 +6466,11 @@ html[data-theme="light"] .reply-textarea-wrap {
     inset 0 1px 0 rgba(200, 169, 106, 0.16),
     0 0 0 3px rgba(200, 169, 106, 0.16);
 }
+/* While busy the Interrupt button joins Send in the corner; widen the reserve
+ * so neither button overlaps the text. */
+.reply-textarea-wrap.is-busy {
+  padding-right: 84px;
+}
 
 /* The ›-chevron stand-in for the leading cluster. It is always in the DOM but
  * only shown (and the ⊕/📎 collapsed) while the field is focused — driven by
@@ -6571,11 +6576,12 @@ html[data-theme="light"] .reply-textarea-wrap {
   transform: rotate(45deg);
 }
 
-/* The morph primary — circular, accent for Send, danger for Stop. Pinned to
- * the bottom-right inside the input pill. */
-.composer-send-morph {
+/* Composer actions — a gold circular Send pinned bottom-right, with a danger
+ * Interrupt that appears to its left while the agent is busy so a follow-up
+ * can still be sent. Send keeps its slot so it never jumps between states. */
+.composer-send,
+.composer-interrupt {
   position: absolute;
-  right: 3px;
   bottom: 3px;
   width: 32px;
   height: 32px;
@@ -6584,40 +6590,49 @@ html[data-theme="light"] .reply-textarea-wrap {
   justify-content: center;
   border: 0;
   border-radius: 50%;
-  color: #0c0f15;
-  background: linear-gradient(180deg, var(--accent-strong), var(--accent));
-  box-shadow: 0 4px 14px rgba(200, 169, 106, 0.3);
-  font-size: 0.98rem;
   transition:
     transform 140ms ease,
     background 200ms ease,
     box-shadow 200ms ease,
     opacity 140ms ease;
 }
+.composer-send {
+  right: 3px;
+  color: #0c0f15;
+  background: linear-gradient(180deg, var(--accent-strong), var(--accent));
+  box-shadow: 0 4px 14px rgba(200, 169, 106, 0.3);
+  font-size: 0.98rem;
+}
 .composer-send-glyph {
   display: inline-flex;
   line-height: 1;
   transform: translateY(-1px);
 }
-.composer-send-morph:hover:not(:disabled) {
+.composer-send:hover:not(:disabled) {
   transform: translateY(-1px);
   box-shadow: 0 6px 18px rgba(200, 169, 106, 0.42);
 }
-.composer-send-morph:disabled {
+.composer-send:disabled,
+.composer-interrupt:disabled {
   opacity: 0.4;
   cursor: default;
   box-shadow: none;
 }
-.composer-send-morph.is-stop {
+.composer-interrupt {
+  right: 39px;
   color: #fff;
   background: linear-gradient(180deg, #e8807f, var(--danger));
   box-shadow: 0 4px 14px rgba(226, 108, 112, 0.34);
 }
-.composer-send-morph.is-stop .composer-send-glyph {
+.composer-interrupt:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(226, 108, 112, 0.46);
+}
+.composer-interrupt .composer-send-glyph {
   font-size: 0.78rem;
   transform: none;
 }
-.composer-send-morph.is-stop::after {
+.composer-interrupt::after {
   content: "";
   position: absolute;
   inset: -4px;
@@ -6638,7 +6653,7 @@ html[data-theme="light"] .reply-textarea-wrap {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer-send-morph.is-stop::after {
+  .composer-interrupt::after {
     animation: none;
   }
 }

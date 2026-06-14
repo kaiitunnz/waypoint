@@ -8,7 +8,7 @@ import { connectSessionsSocket, fetchSessions } from "@/lib/api";
 import { matchesQuery, parseQuery } from "@/lib/search";
 import { SessionEnvelope, SessionRecord } from "@/lib/types";
 import { SearchInput } from "@/components/SearchInput";
-import { humaniseBackend } from "@/lib/backends";
+import { humaniseBackend, useBackendCatalog } from "@/lib/backends";
 
 interface SessionSwitcherProps {
   host: string;
@@ -51,6 +51,7 @@ function formatCwdSegments(cwd: string): string[] {
 
 export function SessionSwitcher({ host, token, currentSession, onAuthFailure, onClose }: SessionSwitcherProps) {
   const router = useRouter();
+  const catalog = useBackendCatalog(host || null, token || null, null);
   const toggleHint = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform) ? "⌘K" : "Ctrl+K";
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [query, setQuery] = useState("");
@@ -311,7 +312,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
     const cwdSegments = formatCwdSegments(s.cwd);
     const workspace = s.repo_name || cwdSegments[cwdSegments.length - 1];
     const target = s.launch_target_id || "Local";
-    const breadcrumb = [humaniseBackend(s.backend), target, workspace].filter(Boolean).join(" ▸ ");
+    const breadcrumb = [humaniseBackend(s.backend, catalog), target, workspace].filter(Boolean).join(" ▸ ");
     
     return (
       <button 

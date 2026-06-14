@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { UsageBar, UsageReadout } from "@/components/UsageReadout";
-import { humaniseBackend } from "@/lib/backends";
+import { humaniseBackend, type BackendCatalog } from "@/lib/backends";
 import type { SessionContextUsage, SessionRecord } from "@/lib/types";
 import {
   clampPercent,
@@ -18,6 +18,7 @@ type Connection = "idle" | "connecting" | "open" | "reconnecting";
 interface SessionUsagePillProps {
   session: SessionRecord | null;
   connection: Connection;
+  catalog?: BackendCatalog;
   onRateLimitRefresh: () => void | Promise<void>;
   rateLimitRefreshBusy: boolean;
   // When provided, the popover panel is portaled into this element
@@ -31,6 +32,7 @@ interface SessionUsagePillProps {
 export function SessionUsagePill({
   session,
   connection,
+  catalog,
   onRateLimitRefresh,
   rateLimitRefreshBusy,
   popoverContainer,
@@ -93,7 +95,7 @@ export function SessionUsagePill({
   const rateLimitSourceLabel = rateLimitUsage
     ? rateLimitUsage.notes?.length
       ? rateLimitUsage.notes.join(" · ")
-      : humaniseBackend(rateLimitUsage.source)
+      : humaniseBackend(rateLimitUsage.source, catalog)
     : "Unavailable";
   const usageToneValue = (() => {
     if (contextUsage === null) return rateLimitUsageToneValue;
@@ -178,7 +180,7 @@ export function SessionUsagePill({
                   Context
                 </h3>
                 <span className="usage-block-tag">
-                  {humaniseBackend(contextUsage.source)}
+                  {humaniseBackend(contextUsage.source, catalog)}
                 </span>
               </header>
               <div className="usage-block-body">

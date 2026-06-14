@@ -1,7 +1,7 @@
 "use client";
 
 import { UsageDial } from "@/components/UsageDial";
-import { humaniseBackend } from "@/lib/backends";
+import { humaniseBackend, type BackendCatalog } from "@/lib/backends";
 import { UsageDashboardBucket } from "@/lib/types";
 import {
   formatRateLimitWindowReset,
@@ -13,6 +13,7 @@ import {
 
 interface UsageInstrumentPanelProps {
   bucket: UsageDashboardBucket;
+  catalog?: BackendCatalog;
   emphasis?: "primary" | "secondary";
   onRefresh?: () => void | Promise<void>;
   refreshing?: boolean;
@@ -28,6 +29,7 @@ function bucketDetailNotes(bucket: UsageDashboardBucket): string[] {
 
 export function UsageInstrumentPanel({
   bucket,
+  catalog,
   emphasis = "secondary",
   onRefresh,
   refreshing = false,
@@ -58,7 +60,7 @@ export function UsageInstrumentPanel({
       <header className="usage-instrument-head">
         <div className="usage-instrument-plaque">
           <span className="usage-instrument-eyebrow">
-            {humaniseBackend(bucket.backend)}
+            {humaniseBackend(bucket.backend, catalog)}
           </span>
           <h3 className="usage-instrument-title">{bucket.account_label}</h3>
         </div>

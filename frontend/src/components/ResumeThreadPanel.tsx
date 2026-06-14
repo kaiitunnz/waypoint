@@ -225,7 +225,7 @@ export function ResumeThreadPanel({
         <p className="muted resume-panel-empty">
           {query.trim().length > 0
             ? "No threads match your search."
-            : emptyHintFor(filter, dualBackend, targetLabel)}
+            : emptyHintFor(filter, dualBackend, targetLabel, catalog)}
         </p>
       ) : null}
 
@@ -344,12 +344,13 @@ function emptyHintFor(
   filter: Filter,
   dualBackend: boolean,
   targetLabel: string | null,
+  catalog?: BackendCatalog,
 ): string {
   const where = targetLabel ? ` on ${targetLabel}` : "";
   if (filter === "all" || !dualBackend) {
     return `No importable threads found${where}.`;
   }
-  return `No ${humaniseBackend(filter)} sessions${where}.`;
+  return `No ${humaniseBackend(filter, catalog)} sessions${where}.`;
 }
 
 function formatRelativeTime(value: string): string {

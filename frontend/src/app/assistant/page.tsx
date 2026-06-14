@@ -16,7 +16,7 @@ import {
   resetAssistant,
   terminateAssistant,
 } from "@/lib/api";
-import { humaniseBackend } from "@/lib/backends";
+import { buildCatalog, humaniseBackend } from "@/lib/backends";
 import { copyText } from "@/lib/clipboard";
 import { clearToken, readHost, readToken } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
@@ -84,6 +84,7 @@ export default function AssistantPage() {
   const [assistant, setAssistant] = useState<AssistantSummary | null>(null);
   const [backends, setBackends] = useState<BackendDescriptor[]>([]);
   const [state, setState] = useState<LoadState>("loading");
+  const catalog = useMemo(() => buildCatalog(backends), [backends]);
 
   const handleAuthFailure = useCallback(() => {
     clearToken();
@@ -228,7 +229,7 @@ export default function AssistantPage() {
               </span>
               <div className="assistant-banner-text">
                 <p className="assistant-banner-eyebrow">
-                  {humaniseBackend(assistant.backend)}
+                  {humaniseBackend(assistant.backend, catalog)}
                 </p>
                 <p className="assistant-banner-note">
                   Your persistent assistant — ask about this host or your running

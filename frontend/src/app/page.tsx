@@ -786,6 +786,7 @@ export default function HomePage() {
       {token ? (
         <SessionList
           sessions={sessions.filter((session) => session.source !== "assistant")}
+          catalog={catalog}
           onDelete={handleDelete}
           onDeleteExited={handleDeleteExited}
           onTerminate={handleTerminate}

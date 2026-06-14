@@ -24,6 +24,7 @@ import { CommandSuggestions } from "@/components/CommandSuggestions";
 import { FileMentions } from "@/components/FileMentions";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
+import { useBackendCatalog } from "@/lib/backends";
 import {
   COMPOSER_MIN_HEIGHT,
   SHORTCUT_IS_MAC,
@@ -85,6 +86,7 @@ export function TerminalCompose({
   refocusTerminal,
 }: TerminalComposeProps) {
   const regionId = useId();
+  const catalog = useBackendCatalog(host || null, token || null, null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -375,6 +377,7 @@ export function TerminalCompose({
             <SessionUsagePill
               session={session}
               connection={connection}
+              catalog={catalog}
               onRateLimitRefresh={onRateLimitRefresh}
               rateLimitRefreshBusy={rateLimitRefreshBusy}
               popoverContainer={popoverHost}

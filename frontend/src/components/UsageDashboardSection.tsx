@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { UsageInstrumentPanel } from "@/components/UsageInstrumentPanel";
-import { humaniseBackend } from "@/lib/backends";
+import { humaniseBackend, useBackendCatalog, type BackendCatalog } from "@/lib/backends";
 import {
   fetchUsageDashboard,
   isAuthError,
@@ -31,6 +31,7 @@ interface UsageDashboardSectionProps {
 
 function deriveBucketsFromSessions(
   sessions: SessionRecord[],
+  catalog?: BackendCatalog,
 ): UsageDashboardBucket[] {
   const buckets = new Map<string, UsageDashboardBucket>();
   for (const session of sessions) {
@@ -40,6 +41,7 @@ function deriveBucketsFromSessions(
       session.id,
       snapshot.source,
       snapshot.notes ?? [],
+      catalog,
     );
     const existing = buckets.get(key);
     if (!existing) {
@@ -65,6 +67,7 @@ function accountBucketKey(
   sessionId: string,
   source: Backend,
   notes: string[],
+  catalog?: BackendCatalog,
 ): { key: string; label: string } {
   if (source === "claude_code") {
     const org = findPrefixed(notes, "org: ");
@@ -84,7 +87,7 @@ function accountBucketKey(
   }
   return {
     key: `${source}:session:${sessionId}`,
-    label: humaniseBackend(source),
+    label: humaniseBackend(source, catalog),
   };
 }
 
@@ -187,14 +190,15 @@ export function UsageDashboardSection({
   const [refreshing, setRefreshing] = useState(false);
   const [refreshingBucketId, setRefreshingBucketId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const catalog = useBackendCatalog(host || null, token || null, null);
 
   useEffect(() => {
     setOpen(readUsageDashboardOpen());
   }, []);
 
   useEffect(() => {
-    setBuckets(deriveBucketsFromSessions(sessions));
-  }, [sessions]);
+    setBuckets(deriveBucketsFromSessions(sessions, catalog));
+  }, [sessions, catalog]);
 
   useEffect(() => {
     if (!host || !token) return;
@@ -383,6 +387,7 @@ export function UsageDashboardSection({
                 <UsageInstrumentPanel
                   key={bucket.account_key}
                   bucket={bucket}
+                  catalog={catalog}
                   emphasis={i === 0 && buckets.length > 1 ? "primary" : "secondary"}
                   index={i}
                   onRefresh={() => handleRefreshBucket(bucket)}

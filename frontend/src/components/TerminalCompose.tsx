@@ -5,7 +5,6 @@ import {
   ClipboardEvent,
   DragEvent,
   KeyboardEvent,
-  PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
   useId,
@@ -26,7 +25,6 @@ import { SessionFilesPanel } from "@/components/SessionFilesPanel";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { useBackendCatalog } from "@/lib/backends";
 import {
-  COMPOSER_MIN_HEIGHT,
   SHORTCUT_IS_MAC,
   type TerminalSubmitResult,
 } from "@/lib/composer";
@@ -65,9 +63,6 @@ interface TerminalComposeProps {
   refocusTerminal: () => void;
 }
 
-const HEIGHT_STORAGE_KEY = "waypoint-term-compose-height";
-const HEIGHT_FALLBACK = 132;
-const HEIGHT_MAX = 320;
 
 export function TerminalCompose({
   host,
@@ -90,8 +85,10 @@ export function TerminalCompose({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
-  const [textareaHeight, setTextareaHeight] = useState<number | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  // Mirrors the chat composer: 📁/📎 collapse to a ›-chevron on focus (CSS),
+  // and the chevron forces them back open via `lead-forced`.
+  const [leadForced, setLeadForced] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const attachments = useAttachments({ host, token, sessionId, onError });
@@ -148,21 +145,14 @@ export function TerminalCompose({
     textareaRef,
   });
 
-  // Restore the desktop height preference on mount; mobile media query
-  // hides the resize handle so the persisted value is harmless there.
+  // Auto-grow the field: a single line by default (matching the flanking
+  // buttons), growing as the draft wraps up to the CSS max-height.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const stored = window.localStorage.getItem(HEIGHT_STORAGE_KEY);
-      if (!stored) return;
-      const parsed = Number.parseInt(stored, 10);
-      if (Number.isFinite(parsed) && parsed >= COMPOSER_MIN_HEIGHT) {
-        setTextareaHeight(Math.min(parsed, HEIGHT_MAX));
-      }
-    } catch {
-      // localStorage can throw in private windows — fall back to default.
-    }
-  }, []);
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [draft]);
 
   const dirty = draft.trim().length > 0;
   const connected = connection === "open";
@@ -272,43 +262,6 @@ export function TerminalCompose({
     }
   }, [expanded, onExpandedChange, refocusTerminal]);
 
-  // Desktop resize handle on the top edge of the textarea. Drag-up
-  // grows; drag-down shrinks. Mirrors the chat composer's behaviour so
-  // the gesture feels identical between the two surfaces.
-  const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.pointerType === "touch") return;
-    const startY = event.clientY;
-    const startHeight =
-      textareaRef.current?.getBoundingClientRect().height ?? HEIGHT_FALLBACK;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const onMove = (e: PointerEvent) => {
-      const delta = startY - e.clientY;
-      const next = Math.min(
-        HEIGHT_MAX,
-        Math.max(COMPOSER_MIN_HEIGHT, Math.round(startHeight + delta)),
-      );
-      setTextareaHeight(next);
-    };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-      try {
-        if (textareaRef.current) {
-          window.localStorage.setItem(
-            HEIGHT_STORAGE_KEY,
-            String(textareaRef.current.getBoundingClientRect().height),
-          );
-        }
-      } catch {
-        // Ignore storage failures — height resets to default next load.
-      }
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-  }, []);
-
   const shortcutLabel = SHORTCUT_IS_MAC ? "⌘↵" : "Ctrl+↵";
 
   return (
@@ -331,49 +284,7 @@ export function TerminalCompose({
       </button>
       <div className="term-compose-shell" id={regionId} aria-hidden={!expanded}>
         <div className="term-compose-inner">
-          <div
-            className={`term-compose-field${dragActive ? " is-drag-active" : ""}`}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-          >
-            <div
-              className="composer-resize-handle term-compose-resize"
-              onPointerDown={handlePointerDown}
-              aria-hidden="true"
-            />
-            {attachmentsEnabled ? (
-              <AttachmentTray
-                items={attachments.items}
-                onRemove={attachments.remove}
-                onRetry={attachments.retry}
-                onClear={attachments.discardAll}
-              />
-            ) : null}
-            <textarea
-              ref={textareaRef}
-              className="composer-textarea term-compose-textarea"
-              style={textareaHeight ? { height: textareaHeight } : undefined}
-              rows={3}
-              value={draft}
-              onChange={(event) => {
-                setDraft(event.target.value);
-                if (hint) setHint(null);
-              }}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-              placeholder="Type a message"
-              aria-label="Message to send to terminal"
-              tabIndex={expanded ? 0 : -1}
-            />
-            {dragActive ? (
-              <div className="composer-drop-hint" aria-hidden="true">
-                <span className="composer-drop-glyph">⤓</span>
-                <span>Drop to attach</span>
-              </div>
-            ) : null}
-          </div>
-          <div className="term-compose-meta">
+          <div className="term-compose-rail">
             <SessionUsagePill
               session={session}
               connection={connection}
@@ -392,6 +303,26 @@ export function TerminalCompose({
               <kbd>{shortcutLabel}</kbd>
               <span>send</span>
             </span>
+          </div>
+          <div
+            className={`term-compose-field${dragActive ? " is-drag-active" : ""}${leadForced ? " lead-forced" : ""}`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            <button
+              type="button"
+              className="term-compose-lead-expand"
+              onClick={() => {
+                setLeadForced(true);
+                textareaRef.current?.focus();
+              }}
+              aria-label="Show actions"
+              title="Show actions"
+              tabIndex={expanded ? 0 : -1}
+            >
+              ›
+            </button>
             {attachmentsEnabled ? (
               <>
                 <input
@@ -405,7 +336,7 @@ export function TerminalCompose({
                 />
                 <button
                   type="button"
-                  className="ghost composer-attach term-compose-files"
+                  className="term-compose-act term-compose-files"
                   onClick={() => setFilesOpen(true)}
                   title="Session files"
                   aria-label="Session files"
@@ -417,7 +348,7 @@ export function TerminalCompose({
                 </button>
                 <button
                   type="button"
-                  className="ghost composer-attach term-compose-attach"
+                  className="term-compose-act term-compose-attach"
                   onClick={() => fileInputRef.current?.click()}
                   title="Attach files"
                   aria-label="Attach files"
@@ -429,15 +360,52 @@ export function TerminalCompose({
                 </button>
               </>
             ) : null}
-            <button
-              type="button"
-              className="primary send term-compose-send"
-              onClick={send}
-              disabled={!canSend}
-              tabIndex={expanded ? 0 : -1}
-            >
-              {sending ? "Sending…" : "Send"}
-            </button>
+            <div className="term-compose-input">
+              {attachmentsEnabled ? (
+                <AttachmentTray
+                  items={attachments.items}
+                  onRemove={attachments.remove}
+                  onRetry={attachments.retry}
+                  onClear={attachments.discardAll}
+                />
+              ) : null}
+              <textarea
+                ref={textareaRef}
+                className="composer-textarea term-compose-textarea"
+                rows={1}
+                value={draft}
+                onChange={(event) => {
+                  setDraft(event.target.value);
+                  setLeadForced(false);
+                  if (hint) setHint(null);
+                }}
+                onBlur={() => setLeadForced(false)}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                placeholder="Type a message"
+                aria-label="Message to send to terminal"
+                tabIndex={expanded ? 0 : -1}
+              />
+              {dragActive ? (
+                <div className="composer-drop-hint" aria-hidden="true">
+                  <span className="composer-drop-glyph">⤓</span>
+                  <span>Drop to attach</span>
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className="term-compose-send"
+                onClick={send}
+                disabled={!canSend}
+                aria-label="Send"
+                title="Send"
+                tabIndex={expanded ? 0 : -1}
+              >
+                <span className="composer-send-glyph" aria-hidden>
+                  {sending ? "…" : "↑"}
+                </span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

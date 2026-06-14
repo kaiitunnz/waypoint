@@ -3722,8 +3722,8 @@ html[data-theme="light"] .task-dock-panel {
   bottom: 0;
   z-index: 6;
   display: grid;
-  gap: 10px;
-  padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+  gap: 7px;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background: linear-gradient(
@@ -3748,21 +3748,6 @@ html[data-theme="light"] .composer {
     0 0 0 1px rgba(166, 122, 34, 0.06) inset;
 }
 
-.composer-resize-handle {
-  position: absolute;
-  top: -4px;
-  left: 0;
-  right: 0;
-  height: 8px;
-  cursor: ns-resize;
-  z-index: 10;
-}
-
-@media (pointer: coarse) {
-  .composer-resize-handle {
-    display: none;
-  }
-}
 
 .composer::before {
   content: "";
@@ -3787,13 +3772,17 @@ html[data-theme="light"] .composer::before {
   );
 }
 
+/* The toprow is now a thin "context rail": a single muted line carrying the
+ * model/effort/permission summary (tappable → control sheet) on the left and
+ * the usage/connection chip on the right. No wrapping — it stays one line. */
 .composer-toprow {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 8px;
+  flex-wrap: nowrap;
   min-width: 0;
+  padding: 0 4px;
 }
 
 /* Right-anchored trailing group: the keyboard-shortcut hint then the
@@ -6206,29 +6195,26 @@ html[data-theme="light"] .composer-shortcut kbd {
   background: rgba(235, 230, 218, 0.85);
 }
 
+/* The textarea is now the bare input inside the .composer-bar capsule — the
+ * capsule owns the border / background / focus ring, so the field itself is
+ * transparent and chromeless. Default ~2 lines; grows to a cap then scrolls. */
 .composer-textarea {
   width: 100%;
-  min-height: 88px;
+  min-height: 0;
+  max-height: 38vh;
   resize: none;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: rgba(6, 8, 13, 0.65);
+  overflow-y: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--text);
-  line-height: 1.55;
-  transition:
-    border-color 120ms ease,
-    box-shadow 120ms ease;
-}
-
-html[data-theme="light"] .composer-textarea {
-  background: rgba(248, 245, 238, 0.92);
+  font-size: 16px;
+  line-height: 1.4;
 }
 
 .composer-textarea:focus {
   outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(200, 169, 106, 0.16);
 }
 
 .composer-textarea:disabled {
@@ -6236,59 +6222,6 @@ html[data-theme="light"] .composer-textarea {
   cursor: not-allowed;
 }
 
-.composer-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-
-.composer-actions-trail {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
-
-.composer-actions .send {
-  flex: 0 1 auto;
-  min-width: 120px;
-}
-
-.composer-actions .ghost {
-  background: transparent;
-  border: 1px solid var(--line);
-  color: var(--muted);
-  min-height: 36px;
-  padding: 0 12px;
-  font-family: var(--font-mono);
-  font-size: 0.76rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  border-radius: var(--radius-pill);
-}
-
-.composer-actions .ghost:hover:not(:disabled) {
-  border-color: var(--line-strong);
-  color: var(--text);
-}
-
-.composer-actions .ghost:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.composer-actions .interrupt {
-  color: var(--warn);
-  border-color: rgba(217, 154, 74, 0.32);
-}
-
-.composer-actions .interrupt:hover:not(:disabled) {
-  border-color: rgba(217, 154, 74, 0.6);
-  color: var(--accent-strong);
-  background: rgba(217, 154, 74, 0.08);
-}
 
 .composer-overflow {
   position: relative;
@@ -6352,6 +6285,17 @@ html[data-theme="light"] .composer-overflow-trigger.open {
 html[data-theme="light"] .composer-overflow-menu {
   background: rgba(252, 249, 242, 0.98);
   box-shadow: 0 12px 32px rgba(60, 45, 20, 0.15);
+}
+
+/* Desktop: the chat ⊕ trigger lives at the LEFT of the bar, so its menu opens
+ * rightward (left edge aligned) instead of the default right-aligned drop that
+ * would shoot off the left edge. Scoped to ≥641px so the ≤640 bottom-sheet
+ * (full-width) rule still wins on phones. */
+@media (min-width: 641px) {
+  .composer-plus .composer-overflow-menu {
+    left: 0;
+    right: auto;
+  }
 }
 
 .composer-overflow-item {
@@ -6450,6 +6394,316 @@ html[data-theme="light"] .composer-overflow-item.warn:hover:not(:disabled) {
   height: 1px;
   margin: 4px 0;
   background: var(--line);
+}
+
+/* ─── Composer command bar (capsule) ─────────────────────────────────────
+ * The reply input as a single native command capsule: a thin context rail
+ * (model/effort summary + usage) above, then [⊕ actions · field · morph send].
+ * The morph button is the one primary control — ↑ Send, ■ Stop while the
+ * agent runs, … while sending.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* Rail: the tune summary reads as a quiet, tappable text line, not a pill. */
+.composer-toprow .composer-tune {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.composer-tune-trigger {
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  min-height: 0;
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+}
+.composer-tune-trigger .composer-tune-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-tune-trigger:hover:not(:disabled) {
+  background: rgba(200, 169, 106, 0.1);
+}
+
+/* The bar is a transparent row: leading action buttons (or the ›-chevron) and
+ * the send button sit on the composer deck, flanking the input pill. */
+.composer-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 0;
+}
+
+/* The input pill — the rounded text field the buttons flank. It owns the
+ * border, fill, gold top-hairline, and focus ring (iMessage-style). Its single
+ * line height (38px) matches the flanking buttons; `justify-content: center`
+ * vertically centres the auto-grown textarea, and it grows past 38px only when
+ * the draft wraps to multiple lines. */
+.reply-textarea-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+  background: rgba(6, 8, 13, 0.66);
+  /* Right padding reserves room for the send button, which is pinned inside
+   * the pill so the text field reads wider. */
+  padding: 5px 46px 5px 16px;
+  box-shadow: inset 0 1px 0 rgba(200, 169, 106, 0.1);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+html[data-theme="light"] .reply-textarea-wrap {
+  background: rgba(255, 252, 245, 0.9);
+}
+.reply-textarea-wrap:focus-within {
+  border-color: var(--accent);
+  box-shadow:
+    inset 0 1px 0 rgba(200, 169, 106, 0.16),
+    0 0 0 3px rgba(200, 169, 106, 0.16);
+}
+
+/* The ›-chevron stand-in for the leading cluster. It is always in the DOM but
+ * only shown (and the ⊕/📎 collapsed) while the field is focused — driven by
+ * CSS :focus-within, so focusing never re-renders and can't drop focus.
+ * `lead-forced` (set when the chevron is tapped) reverses it back to ⊕/📎. */
+.composer-lead-expand {
+  display: none;
+  order: -3;
+  flex: 0 0 auto;
+  align-self: flex-end;
+  width: 32px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 1.5rem;
+  line-height: 1;
+  transition:
+    color 140ms ease,
+    transform 160ms ease;
+}
+.composer-lead-expand:hover {
+  color: var(--accent-strong);
+  transform: translateX(1px);
+}
+.composer-lead-expand:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Focused (and not force-opened): show the chevron, collapse ⊕ + 📎. */
+.composer-bar:focus-within:not(.lead-forced) .composer-lead-expand {
+  display: inline-flex;
+}
+.composer-bar:focus-within:not(.lead-forced) .composer-plus,
+.composer-bar:focus-within:not(.lead-forced) .composer-attach-btn {
+  display: none;
+}
+
+/* ⊕ actions + 📎 attach — left cluster (via order), circular and quiet */
+.composer-bar .composer-plus {
+  order: -2;
+  margin: 0;
+  flex: 0 0 auto;
+  align-self: flex-end;
+}
+.composer-attach-btn {
+  order: -1;
+  flex: 0 0 auto;
+  align-self: flex-end;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  color: var(--muted);
+  background: transparent;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease;
+}
+.composer-attach-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(200, 169, 106, 0.12);
+}
+.composer-attach-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.composer-attach-btn .glyph {
+  display: inline-flex;
+  width: 17px;
+  height: 17px;
+}
+.composer-plus-trigger {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  color: var(--muted);
+  background: transparent;
+  font-size: 1.3rem;
+  line-height: 1;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.composer-plus-trigger:hover {
+  color: var(--text);
+  background: rgba(200, 169, 106, 0.12);
+}
+.composer-plus-trigger.open {
+  color: var(--accent-strong);
+  transform: rotate(45deg);
+}
+
+/* The morph primary — circular, accent for Send, danger for Stop. Pinned to
+ * the bottom-right inside the input pill. */
+.composer-send-morph {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  color: #0c0f15;
+  background: linear-gradient(180deg, var(--accent-strong), var(--accent));
+  box-shadow: 0 4px 14px rgba(200, 169, 106, 0.3);
+  font-size: 0.98rem;
+  transition:
+    transform 140ms ease,
+    background 200ms ease,
+    box-shadow 200ms ease,
+    opacity 140ms ease;
+}
+.composer-send-glyph {
+  display: inline-flex;
+  line-height: 1;
+  transform: translateY(-1px);
+}
+.composer-send-morph:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(200, 169, 106, 0.42);
+}
+.composer-send-morph:disabled {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: none;
+}
+.composer-send-morph.is-stop {
+  color: #fff;
+  background: linear-gradient(180deg, #e8807f, var(--danger));
+  box-shadow: 0 4px 14px rgba(226, 108, 112, 0.34);
+}
+.composer-send-morph.is-stop .composer-send-glyph {
+  font-size: 0.78rem;
+  transform: none;
+}
+.composer-send-morph.is-stop::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1px solid rgba(226, 108, 112, 0.45);
+  animation: morph-pulse 1.8s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes morph-pulse {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.82);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-send-morph.is-stop::after {
+    animation: none;
+  }
+}
+
+/* Keyboard hint — desktop only, tucked in the capsule before Send. */
+.composer-bar .composer-shortcut {
+  align-self: center;
+  flex: 0 0 auto;
+  padding-right: 2px;
+}
+@media (pointer: coarse), (max-width: 640px) {
+  .composer-bar .composer-shortcut {
+    display: none;
+  }
+}
+
+/* On phones the ⊕ menu and the control popover become full-width sheets that
+ * rise from just above the composer. They must anchor to `.composer` (not the
+ * trigger), so the trigger wrappers go `position: static` and the sheet is
+ * absolutely positioned against the composer — `position: fixed` can't be used
+ * because `.composer`'s backdrop-filter makes it the containing block for
+ * fixed descendants, which would pin the sheet to the composer's own box. */
+@media (max-width: 640px) {
+  .composer-tune,
+  .composer-overflow {
+    position: static;
+  }
+  .composer-overflow-menu,
+  .composer-tune-popover {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + 8px);
+    top: auto;
+    width: auto;
+    min-width: 0;
+    max-width: 100%;
+    max-height: 58vh;
+    overflow-y: auto;
+    border-radius: 16px;
+    padding: 10px 12px;
+    box-shadow: 0 16px 44px rgba(0, 0, 0, 0.5);
+    animation: sheet-rise 200ms cubic-bezier(0.22, 1, 0.36, 1);
+    z-index: 60;
+  }
+  .composer-overflow-item {
+    padding: 12px 10px;
+    font-size: 0.95rem;
+  }
+  .composer {
+    gap: 6px;
+  }
+  .composer-toprow {
+    font-size: 0.72rem;
+  }
+}
+@keyframes sheet-rise {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 /* "Back to top" mirror of the latest-pill — same floating-pill language but
@@ -6958,10 +7212,10 @@ html[data-theme="light"] .ask-question-note-input {
 
 /* Drag target: a brass dashed frame that reads as "this surface accepts a drop". */
 .reply-textarea-wrap.is-drag-active,
-.term-compose-field.is-drag-active {
+.term-compose-field.is-drag-active .term-compose-input {
   outline: 1.5px dashed color-mix(in srgb, var(--accent) 68%, transparent);
   outline-offset: 3px;
-  border-radius: var(--radius-sm);
+  border-radius: 20px;
 }
 
 .composer-drop-hint {
@@ -8089,16 +8343,20 @@ html[data-theme="light"] .term-keys {
   flex: 0 0 auto;
   min-width: 44px;
   min-height: 36px;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.05);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 0.78rem;
   cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   -webkit-tap-highlight-color: transparent;
-  transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    transform 80ms ease;
 }
 
 html[data-theme="light"] .term-keys button {
@@ -8269,21 +8527,143 @@ html[data-theme="light"] .term-compose-handle:hover {
   transition-delay: 80ms;
 }
 
+/* Capsule field — the same command capsule as chat: [📁 📎 · input · ↑].
+ * `align-items: center` keeps a single-line draft vertically centred against
+ * the flanking buttons so their heights read as matched. */
+/* Transparent bar: the text pill plus the flanking buttons (whatsapp-style),
+ * matching the chat composer. */
 .term-compose-field {
   position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 0;
 }
 
-/* The reused .composer-resize-handle sits on the top edge of the
-   textarea on desktop; the existing @media (pointer: coarse) rule on
-   the base class hides it on touch. We override the absolute offset
-   to align with the textarea's own top edge instead of the parent
-   .composer's top edge. */
-.term-compose-resize {
-  top: -6px;
+.term-compose-rail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+  min-width: 0;
+}
+
+/* The text pill — owns the border, fill, gold hairline, focus ring, and the
+ * send button pinned inside its bottom-right. */
+.term-compose-input {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+  background: rgba(6, 8, 13, 0.66);
+  padding: 5px 46px 5px 16px;
+  box-shadow: inset 0 1px 0 rgba(200, 169, 106, 0.1);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+html[data-theme="light"] .term-compose-input {
+  background: rgba(255, 252, 245, 0.9);
+}
+.term-compose-input:focus-within {
+  border-color: var(--accent);
+  box-shadow:
+    inset 0 1px 0 rgba(200, 169, 106, 0.16),
+    0 0 0 3px rgba(200, 169, 106, 0.16);
+}
+
+/* ›-chevron: shown (and 📁/📎 collapsed) only while focused, via CSS
+ * :focus-within — no re-render on focus. `lead-forced` reverses it. */
+.term-compose-lead-expand {
+  display: none;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 1.5rem;
+  line-height: 1;
+}
+.term-compose-lead-expand:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+.term-compose-field:focus-within:not(.lead-forced) .term-compose-lead-expand {
+  display: inline-flex;
+}
+.term-compose-field:focus-within:not(.lead-forced) .term-compose-act {
+  display: none;
+}
+
+/* 📁 files + 📎 attach — quiet circular buttons on the left of the capsule */
+.term-compose-act {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  color: var(--muted);
+  background: transparent;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease;
+}
+.term-compose-act:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(200, 169, 106, 0.12);
+}
+.term-compose-act .glyph {
+  display: inline-flex;
+  width: 17px;
+  height: 17px;
+}
+
+/* ↑ send — circular accent, pinned inside the pill's bottom-right. */
+.term-compose-send {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  color: #0c0f15;
+  background: linear-gradient(180deg, var(--accent-strong), var(--accent));
+  box-shadow: 0 4px 14px rgba(200, 169, 106, 0.3);
+  font-size: 0.98rem;
+  transition:
+    transform 140ms ease,
+    box-shadow 200ms ease,
+    opacity 140ms ease;
+}
+.term-compose-send:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(200, 169, 106, 0.42);
+}
+.term-compose-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: none;
 }
 
 .term-compose-textarea {
-  min-height: 72px;
+  min-height: 0;
   max-height: min(36dvh, 320px);
   /* 16px suppresses iOS Safari's auto-zoom on focus. */
   font-size: 16px;
@@ -8299,14 +8679,6 @@ html[data-theme="light"] .term-compose-handle:hover {
   .term-compose-textarea {
     max-height: min(28dvh, 220px);
   }
-}
-
-.term-compose-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  min-width: 0;
 }
 
 .term-compose-meta-spacer {
@@ -8366,13 +8738,6 @@ html[data-theme="light"] .term-compose-handle:hover {
   .term-compose-shortcut {
     display: none;
   }
-}
-
-.term-compose-send {
-  /* The .primary.send base lives in the chat composer's rules; we just
-     tighten the padding for the smaller drawer footprint. */
-  padding: 6px 14px;
-  font-size: 0.82rem;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -8960,14 +9325,9 @@ html[data-theme="light"] .term-compose-handle:hover {
     display: none;
   }
 
-  .composer-resize-handle {
-    display: none;
-  }
-
   .composer-textarea {
-    min-height: 56px;
-    padding: 10px 12px;
-    line-height: 1.45;
+    min-height: 0;
+    padding: 0;
   }
 
   .composer-actions {

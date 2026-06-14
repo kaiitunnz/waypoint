@@ -54,11 +54,7 @@ import {
   useBackendCatalog,
 } from "@/lib/backends";
 import { clearToken } from "@/lib/store";
-import {
-  COMPOSER_MIN_HEIGHT,
-  SHORTCUT_IS_MAC,
-  type TerminalSubmitResult,
-} from "@/lib/composer";
+import { type TerminalSubmitResult } from "@/lib/composer";
 import { useCommandCompletions } from "@/lib/composer-completions";
 import { useFileMentions } from "@/lib/use-file-mentions";
 import {
@@ -277,7 +273,6 @@ type ConnectionState = "connecting" | "open" | "reconnecting";
 // read `--composer-height` to sit just above it. The fallback keeps things
 // sensible for the very first paint before the observer fires.
 const COMPOSER_HEIGHT_FALLBACK = 220;
-const COMPOSER_HEIGHT_STORAGE_KEY = "waypoint-composer-height";
 
 // Per-session dismissal of the task progress dock, persisted so a refresh
 // keeps it dismissed. We store the dismissed todo-event sequence: any later
@@ -2186,23 +2181,29 @@ const ReplyComposer = memo(function ReplyComposer({
   // — staged here until the user confirms via the Apply button. `null` means
   // no pending change.
   const [pendingEffort, setPendingEffort] = useState<string | null>(null);
-  const [textareaHeight, setTextareaHeight] = useState<number | undefined>(undefined);
+  // iMessage-style leading actions: ⊕ + 📎 collapse to a single ›-chevron via
+  // CSS (:focus-within) so focusing the field never triggers a React re-render
+  // that could drop focus mid-gesture. The chevron re-opens them by forcing
+  // `lead-forced`, which overrides the focus-within collapse; typing or
+  // blurring clears it.
+  const [leadForced, setLeadForced] = useState(false);
 
-  // Rehydrate from localStorage post-mount so SSR and client first-render
-  // produce identical markup (no inline height) and React doesn't warn
-  // about a hydration mismatch.
-  useEffect(() => {
-    const stored = window.localStorage.getItem(COMPOSER_HEIGHT_STORAGE_KEY);
-    if (!stored) return;
-    const parsed = Number.parseInt(stored, 10);
-    if (Number.isFinite(parsed) && parsed >= COMPOSER_MIN_HEIGHT) {
-      setTextareaHeight(parsed);
-    }
-  }, []);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composerRef = useRef<HTMLElement | null>(null);
   const overflowRef = useRef<HTMLDivElement | null>(null);
   const tuneRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-grow the field to fit its content: a single line by default (so the
+  // pill matches the flanking buttons), growing as the draft wraps up to the
+  // CSS max-height, then it scrolls.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) {
+      return;
+    }
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [draft]);
 
   // Built-in slash commands are intercepted on the backend only for
   // structured transports (see plugin.maybe_handle_input); skip
@@ -2314,46 +2315,6 @@ const ReplyComposer = memo(function ReplyComposer({
     };
   }, [tuneOpen]);
 
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const handle = e.currentTarget;
-    const pointerId = e.pointerId;
-    handle.setPointerCapture(pointerId);
-    const startY = e.clientY;
-    const startHeight = textareaRef.current?.getBoundingClientRect().height ?? 88;
-    let latestHeight = startHeight;
-
-    const onPointerMove = (moveEvent: PointerEvent) => {
-      const deltaY = startY - moveEvent.clientY;
-      const newHeight = Math.max(COMPOSER_MIN_HEIGHT, startHeight + deltaY);
-      latestHeight = newHeight;
-      setTextareaHeight(newHeight);
-    };
-
-    const finishDrag = () => {
-      try {
-        handle.releasePointerCapture(pointerId);
-      } catch {
-        // Capture may already be released (e.g. on pointercancel).
-      }
-      handle.removeEventListener("pointermove", onPointerMove);
-      handle.removeEventListener("pointerup", finishDrag);
-      handle.removeEventListener("pointercancel", finishDrag);
-      try {
-        window.localStorage.setItem(
-          COMPOSER_HEIGHT_STORAGE_KEY,
-          String(Math.round(latestHeight)),
-        );
-      } catch {
-        // localStorage unavailable (private mode, quota); skip persistence.
-      }
-    };
-
-    handle.addEventListener("pointermove", onPointerMove);
-    handle.addEventListener("pointerup", finishDrag);
-    handle.addEventListener("pointercancel", finishDrag);
-  };
-
   async function handleSend() {
     const text = draft.trim();
     const attachmentIds = attachments.readyIds;
@@ -2454,7 +2415,6 @@ const ReplyComposer = memo(function ReplyComposer({
   const modeOptions = permissionModeOptions;
   // Refresh is always available, so the overflow menu is always present.
   const hasOverflow = true;
-  const shortcutKey = SHORTCUT_IS_MAC ? "⌘" : "Ctrl";
   const hasModelPicker = modelOptions.length > 0 || currentModel !== null;
   // Surface a custom-named model the user already has even if it's not in the
   // curated list, so the dropdown reflects the truth instead of silently
@@ -2584,12 +2544,6 @@ const ReplyComposer = memo(function ReplyComposer({
 
   return (
     <section className="composer" ref={composerRef}>
-      <div
-        className="composer-resize-handle"
-        onPointerDown={handlePointerDown}
-        title="Drag to resize composer"
-        aria-hidden="true"
-      />
       <div className="composer-toprow">
         {tuneVisible ? (
           <div className="composer-tune" ref={tuneRef}>
@@ -2876,6 +2830,19 @@ const ReplyComposer = memo(function ReplyComposer({
           />
         </div>
       </div>
+      <div className={`composer-bar${leadForced ? " lead-forced" : ""}`}>
+      <button
+        type="button"
+        className="composer-lead-expand"
+        onClick={() => {
+          setLeadForced(true);
+          textareaRef.current?.focus();
+        }}
+        aria-label="Show actions"
+        title="Show actions"
+      >
+        ›
+      </button>
       <div
         className={`reply-textarea-wrap${dragActive ? " is-drag-active" : ""}`}
         onDragOver={handleDragOver}
@@ -2893,10 +2860,13 @@ const ReplyComposer = memo(function ReplyComposer({
         <textarea
           ref={textareaRef}
           className="composer-textarea"
-          style={textareaHeight ? { height: textareaHeight } : undefined}
-          rows={3}
+          rows={1}
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            setLeadForced(false);
+          }}
+          onBlur={() => setLeadForced(false)}
           onKeyDown={handleDraftKeyDown}
           onPaste={handlePaste}
           disabled={disabled}
@@ -2909,6 +2879,27 @@ const ReplyComposer = memo(function ReplyComposer({
             <span>Drop to attach</span>
           </div>
         ) : null}
+        <button
+          type="button"
+          className={`composer-send-morph ${agentBusy ? "is-stop" : "is-send"}`}
+          onClick={() => (agentBusy ? void onInterrupt() : void handleSend())}
+          disabled={
+            agentBusy
+              ? disabled || dormant
+              : disabled ||
+                sending ||
+                attachments.uploading ||
+                (!draft.trim() && attachments.readyIds.length === 0)
+          }
+          aria-label={agentBusy ? "Stop the agent" : "Send"}
+          title={
+            agentBusy ? "Interrupt the agent's current turn" : "Send (⌘/Ctrl + ↵)"
+          }
+        >
+          <span className="composer-send-glyph" aria-hidden>
+            {sending ? "…" : agentBusy ? "■" : "↑"}
+          </span>
+        </button>
         {suggestionsOpen ? (
           <CommandSuggestions
             ref={suggestionsRef}
@@ -2932,86 +2923,59 @@ const ReplyComposer = memo(function ReplyComposer({
           />
         ) : null}
       </div>
-      <div className="composer-actions">
-        <button
-          className="primary send"
-          onClick={() => void handleSend()}
-          type="button"
-          disabled={
-            disabled ||
-            sending ||
-            attachments.uploading ||
-            (!draft.trim() && attachments.readyIds.length === 0)
-          }
-        >
-          {sending ? "Sending…" : "Send"}
-        </button>
-        <button
-          className="ghost interrupt"
-          onClick={() => void onInterrupt()}
-          type="button"
-          disabled={disabled || dormant}
-          title="Interrupt the agent's current turn"
-        >
-          Interrupt
-        </button>
         {attachmentsEnabled ? (
-          <>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="composer-file-input"
-              onChange={addFilesFromInput}
-              aria-hidden="true"
-              tabIndex={-1}
-            />
-            <button
-              className="ghost composer-attach"
-              onClick={() => fileInputRef.current?.click()}
-              type="button"
-              disabled={disabled}
-              title="Attach files"
-              aria-label="Attach files"
-            >
-              <span className="glyph" aria-hidden>
-                <PaperclipIcon />
-              </span>
-            </button>
-          </>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="composer-file-input"
+            onChange={addFilesFromInput}
+            aria-hidden="true"
+            tabIndex={-1}
+          />
         ) : null}
-        {canResume ? (
+        {attachmentsEnabled ? (
           <button
-            className="ghost"
-            onClick={() => void onResume()}
             type="button"
+            className="composer-attach-btn"
+            onClick={() => fileInputRef.current?.click()}
             disabled={disabled}
-            title="Resume the underlying tmux session"
+            aria-label="Attach files"
+            title="Attach files"
           >
-            Resume
+            <span className="glyph" aria-hidden>
+              <PaperclipIcon />
+            </span>
           </button>
         ) : null}
-        <div className="composer-actions-trail">
-          <span className="composer-shortcut" aria-hidden>
-            <kbd>{shortcutKey}</kbd>
-            <span>+</span>
-            <kbd>↵</kbd>
-            <span>to send</span>
-          </span>
-          {hasOverflow ? (
-            <div className="composer-overflow" ref={overflowRef}>
-              <button
-                type="button"
-                className={`composer-overflow-trigger ${overflowOpen ? "open" : ""}`}
-                aria-haspopup="menu"
-                aria-expanded={overflowOpen}
-                aria-label="More actions"
-                onClick={() => setOverflowOpen((open) => !open)}
-              >
-                ⋯
-              </button>
-              {overflowOpen ? (
-                <div className="composer-overflow-menu" role="menu">
+        {hasOverflow ? (
+          <div className="composer-overflow composer-plus" ref={overflowRef}>
+            <button
+              type="button"
+              className={`composer-plus-trigger ${overflowOpen ? "open" : ""}`}
+              aria-haspopup="menu"
+              aria-expanded={overflowOpen}
+              aria-label="Actions"
+              onClick={() => setOverflowOpen((open) => !open)}
+            >
+              ＋
+            </button>
+            {overflowOpen ? (
+              <div className="composer-overflow-menu" role="menu">
+                {canResume ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="composer-overflow-item"
+                    onClick={() => {
+                      setOverflowOpen(false);
+                      void onResume();
+                    }}
+                  >
+                    <span className="glyph">⟳</span>
+                    Resume session
+                  </button>
+                ) : null}
                   <button
                     type="button"
                     role="menuitem"
@@ -3183,7 +3147,6 @@ const ReplyComposer = memo(function ReplyComposer({
             </div>
           ) : null}
         </div>
-      </div>
       {attachmentsEnabled ? (
         <SessionFilesPanel
           host={host}

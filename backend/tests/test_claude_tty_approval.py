@@ -231,17 +231,23 @@ async def test_reemits_distinct_dialog_after_screen_clears() -> None:
     assert runtime._emit_adapter_event.call_count == 2
 
 
-async def test_auto_mode_never_captures_pane() -> None:
+async def test_auto_mode_dialog_still_surfaced() -> None:
+    # claude_tty's stored permission_mode is launch-fixed, but the TUI posture
+    # can drift (shift+tab) into a prompting mode. Detection must not gate on
+    # the stored mode: a dialog present on an "auto" session's pane is still
+    # surfaced rather than silently missed (which would hang the session).
     for mode in ("auto", "bypassPermissions", "dontAsk"):
         plugin = ClaudeTtyPlugin()
         session = _make_session(permission_mode=mode)
         runtime = _make_runtime(session, _load("approval_write.txt"))
         tailer = _make_tailer(plugin, runtime)
 
-        await tailer._poll_dialog()
+        await tailer._poll_dialog()  # tick 1: debounce
+        await tailer._poll_dialog()  # tick 2: stable → emit
 
-        runtime.tmux.capture_snapshot.assert_not_called()
-        runtime._emit_adapter_event.assert_not_called()
+        runtime.tmux.capture_snapshot.assert_called()
+        runtime._emit_adapter_event.assert_called_once()
+        assert session.id in plugin._pending_approvals
 
 
 async def test_non_approval_screen_does_not_emit() -> None:

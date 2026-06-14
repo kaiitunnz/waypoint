@@ -155,9 +155,16 @@ class _StubPlugin:
 
 def test_default_registry_has_legacy_plugins() -> None:
     registry = get_registry()
-    assert registry.backends() == {"claude_code", "codex", "opencode", "tmux"}
+    assert registry.backends() == {
+        "claude_code",
+        "claude_tty",
+        "codex",
+        "opencode",
+        "tmux",
+    }
     assert registry.transports() == {
         "claude_cli",
+        "claude_tty",
         "codex_app_server",
         "opencode_http",
         "tmux",

@@ -375,6 +375,21 @@ async def test_respond_approve_sends_digit_1_enter() -> None:
     assert "sess-1" not in plugin._pending_approvals
 
 
+async def test_respond_accept_sends_approve_digit_not_decline() -> None:
+    # The frontend ApprovalCard sends decision="accept" for the primary approve;
+    # it must drive the Yes digit, not fall through to the decline branch.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    plugin._pending_approvals["sess-1"] = _pending(approve_number=1, decline_number=3)
+
+    transport, tmux = _make_transport(plugin)
+    result = await transport.respond_to_approval(session, "accept", None)
+
+    assert result is True
+    tmux.send_input.assert_called_once_with("%0", "1", submit=True)
+    assert "sess-1" not in plugin._pending_approvals
+
+
 async def test_respond_decline_sends_no_digit_enter() -> None:
     plugin = ClaudeTtyPlugin()
     session = _make_session()
@@ -425,6 +440,21 @@ async def test_respond_wrong_approval_id_returns_false() -> None:
 
     assert result is False
     assert "sess-1" in plugin._pending_approvals  # not cleared
+
+
+async def test_interrupt_clears_pending_approval_and_sends_esc() -> None:
+    # Esc declines an open dialog; dropping the pending entry up front closes
+    # the window where a racing approve would fire a digit at the ready prompt.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    plugin._pending_approvals["sess-1"] = _pending()
+
+    transport, tmux = _make_transport(plugin)
+    await transport.interrupt(session)
+
+    assert "sess-1" not in plugin._pending_approvals
+    tmux.send_bytes.assert_called_once_with("%0", b"\x1b")
+    assert not transport.has_pending_approval(session)
 
 
 async def test_respond_correct_approval_id_resolves() -> None:

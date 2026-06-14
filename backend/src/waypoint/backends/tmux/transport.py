@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from fastapi import HTTPException, status
 
 from waypoint.attachments import ResolvedAttachment, append_attachment_paths
+from waypoint.backends.approvals import is_approve_decision
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.schemas import (
     SessionInputRequest,
@@ -79,8 +80,7 @@ class TmuxTransport(TransportAdapter):
         text: str | None,
         approval_id: str | None = None,
     ) -> bool:
-        normalized = decision.strip().lower()
-        mapped = "y" if normalized in {"approve", "yes", "y"} else "n"
+        mapped = "y" if is_approve_decision(decision) else "n"
         reply = text or mapped
         await self._runtime.handle_input(
             session.id, SessionInputRequest(text=reply, submit=True)

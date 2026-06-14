@@ -3,6 +3,7 @@
 import pytest
 
 from waypoint.backends.claude_tty.normalize import (
+    NormalizedEvent,
     TranscriptNormalizer,
     _is_injected_turn,
 )
@@ -338,3 +339,215 @@ def test_result_text_non_end_turn_stop_reason() -> None:
     events = norm.process_record(record)
     result = next(e for e in events if e.metadata.get("method") == "result")
     assert "max_tokens" in result.text
+
+
+# ── Task tool handling ────────────────────────────────────────────────────────
+
+
+def _task_create_block(tool_id: str, subject: str, status: str = "pending") -> dict:
+    return _tool_use_block(
+        tool_id, "TaskCreate", {"subject": subject, "status": status}
+    )
+
+
+def _task_update_block(
+    tool_id: str, task_id: str, status: str, subject: str | None = None
+) -> dict:
+    inp: dict = {"taskId": task_id, "status": status}
+    if subject is not None:
+        inp["subject"] = subject
+    return _tool_use_block(tool_id, "TaskUpdate", inp)
+
+
+def _task_create_result(tool_use_id: str, task_id: str) -> dict:
+    return _tool_result_block(tool_use_id, f"Task #{task_id} created successfully")
+
+
+def _snapshot_event(events: list) -> "NormalizedEvent":
+    return next(
+        e for e in events if e.metadata.get("method") == "assistant.task_update"
+    )
+
+
+def test_task_create_assistant_emits_no_event() -> None:
+    norm = TranscriptNormalizer()
+    record = _assistant_record(
+        "msg1", [_task_create_block("tc1", "Write tests")], stop_reason="tool_use"
+    )
+    events = norm.process_record(record)
+    assert events == []
+
+
+def test_task_create_result_emits_snapshot() -> None:
+    norm = TranscriptNormalizer()
+    norm.process_record(
+        _assistant_record(
+            "msg1", [_task_create_block("tc1", "Write tests")], stop_reason="tool_use"
+        )
+    )
+    events = norm.process_record(_user_record([_task_create_result("tc1", "42")]))
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.kind == EventKind.TOOL_RESULT
+    assert ev.metadata["method"] == "assistant.task_update"
+    assert ev.metadata["tool_name"] == "TodoWrite"
+    assert ev.metadata["item_type"] == "todo_list"
+    todos = ev.metadata["payload"]["input"]["todos"]
+    assert len(todos) == 1
+    assert todos[0]["content"] == "Write tests"
+    assert todos[0]["status"] == "pending"
+
+
+def test_task_create_result_not_emitted_as_raw_tool_result() -> None:
+    norm = TranscriptNormalizer()
+    norm.process_record(
+        _assistant_record(
+            "msg1", [_task_create_block("tc1", "Do work")], stop_reason="tool_use"
+        )
+    )
+    events = norm.process_record(_user_record([_task_create_result("tc1", "1")]))
+    assert not any(e.metadata.get("method") == "user.tool_result" for e in events)
+
+
+def test_task_update_emits_snapshot_with_status_change() -> None:
+    norm = TranscriptNormalizer()
+    # Create a task first
+    norm.process_record(
+        _assistant_record(
+            "msg1", [_task_create_block("tc1", "Fix bug")], stop_reason="tool_use"
+        )
+    )
+    norm.process_record(_user_record([_task_create_result("tc1", "1")]))
+    # Now update it
+    events = norm.process_record(
+        _assistant_record(
+            "msg2",
+            [_task_update_block("tu2", "1", "in_progress", "Fix bug now")],
+            stop_reason="tool_use",
+        )
+    )
+    snapshot_ev = _snapshot_event(events)
+    todos = snapshot_ev.metadata["payload"]["input"]["todos"]
+    assert todos[0]["status"] == "in_progress"
+    assert todos[0]["content"] == "Fix bug now"
+
+
+def test_task_update_result_is_suppressed() -> None:
+    norm = TranscriptNormalizer()
+    norm.process_record(
+        _assistant_record(
+            "msg1", [_task_create_block("tc1", "Task A")], stop_reason="tool_use"
+        )
+    )
+    norm.process_record(_user_record([_task_create_result("tc1", "1")]))
+    norm.process_record(
+        _assistant_record(
+            "msg2",
+            [_task_update_block("tu2", "1", "completed")],
+            stop_reason="tool_use",
+        )
+    )
+    # The tool_result for the TaskUpdate should be silently dropped
+    events = norm.process_record(
+        _user_record([_tool_result_block("tu2", "Task updated")])
+    )
+    assert events == []
+
+
+def test_task_get_list_suppressed_no_snapshot() -> None:
+    for tool_name in ("TaskGet", "TaskList"):
+        n = TranscriptNormalizer()
+        events = n.process_record(
+            _assistant_record(
+                "msg1",
+                [_tool_use_block("tg1", tool_name, {"taskId": "1"})],
+                stop_reason="tool_use",
+            )
+        )
+        assert events == [], f"{tool_name} should emit no events"
+        # result is also suppressed
+        result_events = n.process_record(
+            _user_record([_tool_result_block("tg1", "some result")])
+        )
+        assert result_events == [], f"{tool_name} result should be suppressed"
+
+
+def test_task_tool_use_not_emitted_as_tool_call() -> None:
+    for tool_name in ("TaskCreate", "TaskUpdate", "TaskGet", "TaskList"):
+        n = TranscriptNormalizer()
+        events = n.process_record(
+            _assistant_record(
+                "msg1",
+                [_tool_use_block("x1", tool_name, {"subject": "t", "taskId": "1"})],
+                stop_reason="tool_use",
+            )
+        )
+        assert not any(
+            e.kind == EventKind.TOOL_CALL for e in events
+        ), f"{tool_name} must not emit TOOL_CALL"
+
+
+def test_task_card_item_id_stable_within_group() -> None:
+    norm = TranscriptNormalizer()
+    # Create two tasks
+    norm.process_record(
+        _assistant_record(
+            "msg1",
+            [
+                _task_create_block("tc1", "Task A"),
+                _task_create_block("tc2", "Task B"),
+            ],
+            stop_reason="tool_use",
+        )
+    )
+    ev1 = norm.process_record(_user_record([_task_create_result("tc1", "1")]))
+    ev2 = norm.process_record(_user_record([_task_create_result("tc2", "2")]))
+    id1 = ev1[0].metadata["item_id"]
+    id2 = ev2[0].metadata["item_id"]
+    assert id1 == id2, "item_id must be stable across snapshots in same group"
+
+
+def test_task_card_item_id_rotates_for_new_group() -> None:
+    norm = TranscriptNormalizer()
+    # First group: one task, completed
+    norm.process_record(
+        _assistant_record(
+            "msg1", [_task_create_block("tc1", "Task A")], stop_reason="tool_use"
+        )
+    )
+    ev1 = norm.process_record(_user_record([_task_create_result("tc1", "1")]))
+    # Mark as deleted (empties tracker)
+    norm.process_record(
+        _assistant_record(
+            "msg2",
+            [_task_update_block("tu2", "1", "deleted")],
+            stop_reason="tool_use",
+        )
+    )
+    norm.process_record(_user_record([_tool_result_block("tu2", "ok")]))
+    # Second group: new task
+    norm.process_record(
+        _assistant_record(
+            "msg3", [_task_create_block("tc3", "Task B")], stop_reason="tool_use"
+        )
+    )
+    ev2 = norm.process_record(_user_record([_task_create_result("tc3", "2")]))
+    id1 = ev1[0].metadata["item_id"]
+    id2 = ev2[0].metadata["item_id"]
+    assert id1 != id2, "item_id must rotate when a new task group starts"
+
+
+def test_non_task_tool_use_in_same_record_still_emits_tool_call() -> None:
+    norm = TranscriptNormalizer()
+    record = _assistant_record(
+        "msg1",
+        [
+            _task_create_block("tc1", "Task A"),
+            _tool_use_block("bash1", "Bash", {"command": "ls"}),
+        ],
+        stop_reason="tool_use",
+    )
+    events = norm.process_record(record)
+    tool_call_events = [e for e in events if e.kind == EventKind.TOOL_CALL]
+    assert len(tool_call_events) == 1
+    assert tool_call_events[0].metadata["tool_name"] == "Bash"

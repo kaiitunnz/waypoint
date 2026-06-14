@@ -33,11 +33,21 @@ unavailable, stop and report; do not guess.
 
 ## Ownership convention
 
-Waypoint has no parent/owner field on sessions, so a child you spawn is
-otherwise indistinguishable from a user's own session. Establish ownership by
-convention:
+Every session you spawn carries a `spawner_session_id` set at creation — this is
+the structural ownership link. It drives permission inheritance and lets you list
+or reap only your children:
 
-- Title every child you create with `--title "subagent:<short-purpose>"`.
+```bash
+waypoint sessions list --spawned-by <your-sid>   # list children you own
+waypoint sessions list --mine                     # shorthand: children of the current session
+waypoint sessions reap --spawned-by <your-sid>    # reap only your children
+waypoint sessions reap --mine                     # shorthand
+```
+
+Reinforce ownership with the title convention — title every child you create with
+`--title "subagent:<short-purpose>"` — because `spawner_session_id` may not be
+visible to a downstream lead reading the board.
+
 - Keep the returned session ids in your working state for the rest of the turn.
 - **You own the sessions you spawn, and only those.** You may steer, read, and
   terminate them freely. Never terminate, interrupt, or send to a session you

@@ -106,6 +106,8 @@ def _walk_leaf_paths(group: click.Group, prefix: str) -> list[str]:
             continue
         path = f"{prefix} {name}".strip()
         if isinstance(getattr(cmd, "commands", None), dict):
+            if getattr(cmd, "invoke_without_command", False):
+                paths.append(path)
             paths.extend(_walk_leaf_paths(cast(click.Group, cmd), path))
         else:
             paths.append(path)
@@ -121,6 +123,16 @@ def test_help_covers_every_leaf_command() -> None:
     root = cast(click.Group, typer.main.get_command(app))
     expected = set(_walk_leaf_paths(root, ""))
     assert expected <= dumped
+
+
+def test_help_surfaces_runnable_groups() -> None:
+    # `backends` runs without a subcommand (lists backend capabilities), so it
+    # must appear as its own command, not only its `threads` child.
+    result = runner.invoke(app, ["help", "--json"])
+    assert result.exit_code == 0
+    by_path = {entry["command"]: entry for entry in json.loads(result.stdout)}
+    assert "backends" in by_path
+    assert by_path["backends"]["help"]
 
 
 def test_board_post_rejects_malformed_meta(tmp_path: Path) -> None:

@@ -1622,6 +1622,11 @@ def _walk_commands(group: click.Group, prefix: str) -> list[dict[str, Any]]:
         # Typer vendors its own Click, so a sub-app is not an ``isinstance`` of
         # the top-level ``click.Group``; detect groups by the ``commands`` map.
         if isinstance(getattr(cmd, "commands", None), dict):
+            # A group that runs without a subcommand (e.g. ``backends``) is a
+            # usable command in its own right, so describe it alongside its
+            # children rather than only recursing.
+            if getattr(cmd, "invoke_without_command", False):
+                out.append(_describe_command(cmd, path))
             out.extend(_walk_commands(cast(click.Group, cmd), path))
             continue
         out.append(_describe_command(cmd, path))

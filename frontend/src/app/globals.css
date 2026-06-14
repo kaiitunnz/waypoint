@@ -6466,11 +6466,6 @@ html[data-theme="light"] .reply-textarea-wrap {
     inset 0 1px 0 rgba(200, 169, 106, 0.16),
     0 0 0 3px rgba(200, 169, 106, 0.16);
 }
-/* While busy the Interrupt button joins Send in the corner; widen the reserve
- * so neither button overlaps the text. */
-.reply-textarea-wrap.is-busy {
-  padding-right: 84px;
-}
 
 /* The ›-chevron stand-in for the leading cluster. It is always in the DOM but
  * only shown (and the ⊕/📎 collapsed) while the field is focused — driven by
@@ -6478,7 +6473,7 @@ html[data-theme="light"] .reply-textarea-wrap {
  * `lead-forced` (set when the chevron is tapped) reverses it back to ⊕/📎. */
 .composer-lead-expand {
   display: none;
-  order: -3;
+  order: -4;
   flex: 0 0 auto;
   align-self: flex-end;
   width: 32px;
@@ -6509,19 +6504,56 @@ html[data-theme="light"] .reply-textarea-wrap {
   display: inline-flex;
 }
 .composer-bar:focus-within:not(.lead-forced) .composer-plus,
+.composer-bar:focus-within:not(.lead-forced) .composer-interrupt-btn,
 .composer-bar:focus-within:not(.lead-forced) .composer-attach-btn {
   display: none;
 }
 
 /* ⊕ actions + 📎 attach — left cluster (via order), circular and quiet */
 .composer-bar .composer-plus {
-  order: -2;
+  order: -3;
   margin: 0;
   flex: 0 0 auto;
   align-self: flex-end;
 }
-.composer-attach-btn {
+
+/* ■ interrupt — last of the lead cluster, right after 📎 attach. Static (always
+ * present, never toggled by agent state) so it never flickers; sending an
+ * interrupt is safe in any state, the backend ignores it when there's nothing
+ * to stop. Quiet by default, danger only on hover so an idle composer doesn't
+ * read as alarming. */
+.composer-bar .composer-interrupt-btn {
   order: -1;
+  flex: 0 0 auto;
+  align-self: flex-end;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  color: var(--muted);
+  background: transparent;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease;
+}
+.composer-interrupt-btn:hover:not(:disabled) {
+  color: var(--danger);
+  background: rgba(226, 108, 112, 0.14);
+}
+.composer-interrupt-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.composer-interrupt-btn .glyph {
+  display: inline-flex;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+.composer-attach-btn {
+  order: -2;
   flex: 0 0 auto;
   align-self: flex-end;
   width: 40px;
@@ -6576,12 +6608,13 @@ html[data-theme="light"] .reply-textarea-wrap {
   transform: rotate(45deg);
 }
 
-/* Composer actions — a gold circular Send pinned bottom-right, with a danger
- * Interrupt that appears to its left while the agent is busy so a follow-up
- * can still be sent. Send keeps its slot so it never jumps between states. */
-.composer-send,
-.composer-interrupt {
+/* The send button — a gold circular primary pinned bottom-right inside the
+ * input pill. Always present; it sends a follow-up even while the agent is
+ * busy. Interrupting lives in the lead cluster (`.composer-interrupt-btn`), so
+ * it costs no width here. */
+.composer-send {
   position: absolute;
+  right: 3px;
   bottom: 3px;
   width: 32px;
   height: 32px;
@@ -6590,18 +6623,15 @@ html[data-theme="light"] .reply-textarea-wrap {
   justify-content: center;
   border: 0;
   border-radius: 50%;
+  color: #0c0f15;
+  background: linear-gradient(180deg, var(--accent-strong), var(--accent));
+  box-shadow: 0 4px 14px rgba(200, 169, 106, 0.3);
+  font-size: 0.98rem;
   transition:
     transform 140ms ease,
     background 200ms ease,
     box-shadow 200ms ease,
     opacity 140ms ease;
-}
-.composer-send {
-  right: 3px;
-  color: #0c0f15;
-  background: linear-gradient(180deg, var(--accent-strong), var(--accent));
-  box-shadow: 0 4px 14px rgba(200, 169, 106, 0.3);
-  font-size: 0.98rem;
 }
 .composer-send-glyph {
   display: inline-flex;
@@ -6612,50 +6642,10 @@ html[data-theme="light"] .reply-textarea-wrap {
   transform: translateY(-1px);
   box-shadow: 0 6px 18px rgba(200, 169, 106, 0.42);
 }
-.composer-send:disabled,
-.composer-interrupt:disabled {
+.composer-send:disabled {
   opacity: 0.4;
   cursor: default;
   box-shadow: none;
-}
-.composer-interrupt {
-  right: 39px;
-  color: #fff;
-  background: linear-gradient(180deg, #e8807f, var(--danger));
-  box-shadow: 0 4px 14px rgba(226, 108, 112, 0.34);
-}
-.composer-interrupt:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(226, 108, 112, 0.46);
-}
-.composer-interrupt .composer-send-glyph {
-  font-size: 0.78rem;
-  transform: none;
-}
-.composer-interrupt::after {
-  content: "";
-  position: absolute;
-  inset: -4px;
-  border-radius: 50%;
-  border: 1px solid rgba(226, 108, 112, 0.45);
-  animation: morph-pulse 1.8s ease-out infinite;
-  pointer-events: none;
-}
-@keyframes morph-pulse {
-  0% {
-    opacity: 0.7;
-    transform: scale(0.82);
-  }
-  100% {
-    opacity: 0;
-    transform: scale(1.3);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .composer-interrupt::after {
-    animation: none;
-  }
 }
 
 /* On phones the ⊕ menu and the control popover become full-width sheets that

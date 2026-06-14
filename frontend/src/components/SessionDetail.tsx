@@ -2021,7 +2021,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           connection={connection}
           disabled={composerDisabled}
           rateLimitRefreshBusy={rateLimitRefreshBusy}
-          dormant={dormantReattach}
           placeholder={composerPlaceholder}
           agentBusy={agentBusy}
           modeBusy={modeBusy}
@@ -2096,7 +2095,6 @@ interface ReplyComposerProps {
   connection: ConnectionState;
   disabled: boolean;
   rateLimitRefreshBusy: boolean;
-  dormant: boolean;
   placeholder: string;
   modeBusy: boolean;
   modelBusy: boolean;
@@ -2151,7 +2149,6 @@ const ReplyComposer = memo(function ReplyComposer({
   connection,
   disabled,
   rateLimitRefreshBusy,
-  dormant,
   placeholder,
   modeBusy,
   modelBusy,
@@ -2874,10 +2871,20 @@ const ReplyComposer = memo(function ReplyComposer({
       >
         ›
       </button>
+      <button
+        type="button"
+        className="composer-interrupt-btn"
+        onClick={() => void onInterrupt()}
+        disabled={disabled}
+        aria-label="Interrupt the agent"
+        title="Interrupt the agent"
+      >
+        <span className="glyph" aria-hidden>
+          ■
+        </span>
+      </button>
       <div
-        className={`reply-textarea-wrap${dragActive ? " is-drag-active" : ""}${
-          agentBusy ? " is-busy" : ""
-        }`}
+        className={`reply-textarea-wrap${dragActive ? " is-drag-active" : ""}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -2911,20 +2918,6 @@ const ReplyComposer = memo(function ReplyComposer({
             <span className="composer-drop-glyph">⤓</span>
             <span>Drop to attach</span>
           </div>
-        ) : null}
-        {agentBusy ? (
-          <button
-            type="button"
-            className="composer-interrupt"
-            onClick={() => void onInterrupt()}
-            disabled={disabled || dormant}
-            aria-label="Interrupt the agent"
-            title="Interrupt the agent's current turn"
-          >
-            <span className="composer-send-glyph" aria-hidden>
-              ■
-            </span>
-          </button>
         ) : null}
         <button
           type="button"

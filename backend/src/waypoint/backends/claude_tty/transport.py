@@ -48,6 +48,11 @@ class ClaudeTtyTransport(TmuxTransport):
         if approval_id is not None and pending.approval_id != approval_id:
             return False
 
+        # Claim the approval before the await below, so a concurrent call
+        # (double-click, retried POST) short-circuits on the None lookup above
+        # rather than sending a second keystroke and double-deleting the key.
+        self._plugin._pending_approvals.pop(session.id, None)
+
         target = self._target(session)
         normalized = decision.strip().lower()
 
@@ -65,5 +70,4 @@ class ClaudeTtyTransport(TmuxTransport):
             else:
                 await self.adapter.send_bytes(target, b"\x1b")
 
-        del self._plugin._pending_approvals[session.id]
         return True

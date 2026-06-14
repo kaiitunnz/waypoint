@@ -175,6 +175,7 @@ export interface BackendCapabilities {
   supports_set_effort_inline: boolean;
   supports_set_effort_with_restart: boolean;
   supports_set_permission_mode_inline: boolean;
+  settings_change_interrupts_turn: boolean;
   supports_thread_discovery: boolean;
   supports_thread_import: boolean;
   supports_plan_approval: boolean;

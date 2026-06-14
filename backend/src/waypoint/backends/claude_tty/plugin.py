@@ -121,11 +121,15 @@ class ClaudeTtyPlugin(TmuxPlugin):
         supports_fork=True,
         supports_attachments=True,
         # All control swaps restart the pane with `--resume <thread>` and a
-        # rebuilt flag set; none of them mutate a live process inline.
+        # rebuilt flag set; none of them mutate a live process inline. The
+        # ``*_inline`` flags here gate whether the change is *allowed* at all
+        # (the runtime's only knob), not whether it skips a restart, so they
+        # read True; ``settings_change_interrupts_turn`` records the real cost.
         supports_set_model_inline=True,
         supports_set_effort_inline=False,
         supports_set_effort_with_restart=True,
         supports_set_permission_mode_inline=True,
+        settings_change_interrupts_turn=True,
         supports_custom_cli_args=True,
         supports_thread_discovery=True,
         supports_thread_import=True,
@@ -599,11 +603,19 @@ class ClaudeTtyPlugin(TmuxPlugin):
             if model is not _UNSET
             else "effort" if effort is not _UNSET else "permission mode"
         )
-        if session.status is not SessionStatus.IDLE:
+        # The swap kills the pane and respawns ``--resume``, which interrupts
+        # any in-flight turn — acceptable (the frontend warns first) and the
+        # only way to apply the change. A STARTING pane has nothing to resume
+        # yet, so reject that one state.
+        if session.status is SessionStatus.STARTING:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"cannot change {field} while the session is running",
+                detail=f"cannot change {field} while the session is starting",
             )
+        interrupting = session.status in {
+            SessionStatus.RUNNING,
+            SessionStatus.WAITING_INPUT,
+        }
 
         new_model = session.model if model is _UNSET else model
         new_effort = session.effort if effort is _UNSET else effort
@@ -687,9 +699,15 @@ class ClaudeTtyPlugin(TmuxPlugin):
         runtime.storage.update_session(
             session.id, transport_state=new_state, status=SessionStatus.STARTING
         )
+        note = (
+            f"Interrupted the running turn and restarted Claude TUI session to "
+            f"apply {field} change (thread {thread_id})"
+            if interrupting
+            else f"Restarted Claude TUI session to apply {field} change (thread {thread_id})"
+        )
         await runtime._record_system_event(
             session.id,
-            f"Restarted Claude TUI session to apply {field} change (thread {thread_id})",
+            note,
             status=SessionStatus.IDLE,
         )
         # The resumed thread reopens its already-populated transcript, whose

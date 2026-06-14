@@ -135,12 +135,12 @@ class TranscriptTailer:
     async def _poll_dialog(self) -> None:
         """Capture the live pane and surface any stable tool-permission dialog.
 
-        Detection is intentionally mode-agnostic: ``claude_tty`` cannot change
-        permission mode inline (``supports_set_permission_mode_inline=False``),
-        so the session's stored ``permission_mode`` is fixed at launch, while
-        the TUI's real posture can drift independently (a human pressing
-        shift+tab in the pane, or choosing "allow all this session"). Gating on
-        the stored mode would miss a dialog that appears after an auto→prompting
+        Detection is intentionally mode-agnostic: ``claude_tty`` only changes
+        permission mode by relaunching the pane, so the stored
+        ``permission_mode`` holds whatever the last launch passed, while the
+        TUI's real posture can drift independently (a human pressing shift+tab
+        in the pane, or choosing "allow all this session"). Gating on the
+        stored mode would miss a dialog that appears after an auto→prompting
         drift and hang the session, so we always trust the on-screen dialog
         rather than the recorded mode. (The run loop throttles how often this
         runs to keep the capture cost low on sessions that never prompt.)

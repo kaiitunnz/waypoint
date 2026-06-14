@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from waypoint.backends.claude_code.normalize import format_approval_text
-from waypoint.backends.claude_code.permission_modes import CLAUDE_AUTO_APPROVE_MODES
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty._state import PendingTtyApproval
 from waypoint.backends.claude_tty.normalize import TranscriptNormalizer
@@ -32,6 +31,7 @@ log = logging.getLogger("waypoint.backends.claude_tty")
 
 _POLL_INTERVAL = 0.5  # seconds between transcript polls
 _PANE_CHECK_INTERVAL = 10.0  # seconds between tmux pane liveness checks
+_DIALOG_POLL_INTERVAL = 1.0  # seconds between live-pane dialog captures
 _DIALOG_STABLE_TICKS = 2  # consecutive identical captures before surfacing
 
 
@@ -66,6 +66,7 @@ class TranscriptTailer:
         self._plugin = plugin
         self._normalizer = TranscriptNormalizer()
         self._pane_check_elapsed = 0.0
+        self._dialog_check_elapsed = 0.0
         self._offset = (
             self._path.stat().st_size if start_at_end and self._path.exists() else 0
         )
@@ -123,13 +124,20 @@ class TranscriptTailer:
                 )
 
     async def _poll_dialog(self) -> None:
-        """Capture the live pane and surface any stable tool-permission dialog."""
+        """Capture the live pane and surface any stable tool-permission dialog.
+
+        Detection is intentionally mode-agnostic: ``claude_tty`` cannot change
+        permission mode inline (``supports_set_permission_mode_inline=False``),
+        so the session's stored ``permission_mode`` is fixed at launch, while
+        the TUI's real posture can drift independently (a human pressing
+        shift+tab in the pane, or choosing "allow all this session"). Gating on
+        the stored mode would miss a dialog that appears after an auto→prompting
+        drift and hang the session, so we always trust the on-screen dialog
+        rather than the recorded mode. (The run loop throttles how often this
+        runs to keep the capture cost low on sessions that never prompt.)
+        """
         session = self._runtime.storage.get_session(self._session_id)
         if session is None:
-            return
-
-        # Fully-automatic modes never show permission dialogs.
-        if session.permission_mode in CLAUDE_AUTO_APPROVE_MODES:
             return
 
         state = session.transport_state
@@ -237,7 +245,10 @@ class TranscriptTailer:
                 await self._drain()
 
                 if session.status not in (SessionStatus.EXITED, SessionStatus.ERROR):
-                    await self._poll_dialog()
+                    self._dialog_check_elapsed += _POLL_INTERVAL
+                    if self._dialog_check_elapsed >= _DIALOG_POLL_INTERVAL:
+                        self._dialog_check_elapsed = 0.0
+                        await self._poll_dialog()
 
                 if session.status in (SessionStatus.EXITED, SessionStatus.ERROR):
                     # One final drain in case records landed between the status

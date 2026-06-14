@@ -6,7 +6,7 @@ import {
   type CSSProperties,
 } from "react";
 
-import { fidelityFor, transportLabel } from "@/lib/backends";
+import { fidelityFor, transportLabel, type BackendCatalog } from "@/lib/backends";
 import { EventRecord, SessionTransport } from "@/lib/types";
 import {
   normalizeToolName,
@@ -107,6 +107,7 @@ export function PendingUserInputCard({
 interface TranscriptCardProps {
   event: EventRecord;
   transport: SessionTransport;
+  catalog?: BackendCatalog;
   pair?: ToolPair;
   onAnswerAskQuestion?: (
     text: string,
@@ -118,10 +119,11 @@ interface TranscriptCardProps {
 export const TranscriptCard = memo(function TranscriptCard({
   event,
   transport,
+  catalog,
   pair,
   onAnswerAskQuestion,
 }: TranscriptCardProps) {
-  if (fidelityFor(transport) === "structured") {
+  if (fidelityFor(transport, catalog) === "structured") {
     if (pair) {
       return (
         <ToolPairCard pair={pair} onAnswerAskQuestion={onAnswerAskQuestion} />
@@ -131,6 +133,7 @@ export const TranscriptCard = memo(function TranscriptCard({
       <StructuredCard
         event={event}
         transport={transport}
+        catalog={catalog}
         onAnswerAskQuestion={onAnswerAskQuestion}
       />
     );
@@ -141,10 +144,12 @@ export const TranscriptCard = memo(function TranscriptCard({
 function StructuredCard({
   event,
   transport,
+  catalog,
   onAnswerAskQuestion,
 }: {
   event: EventRecord;
   transport: SessionTransport;
+  catalog?: BackendCatalog;
   onAnswerAskQuestion?: (
     text: string,
     toolUseId?: string,
@@ -154,7 +159,7 @@ function StructuredCard({
   // transport label, lowercased ("Claude Cli" → "claude", "Codex App
   // Server" → "codex"). New backends inherit it for free as long as
   // their transport label leads with a single-word agent name.
-  const agentLabel = transportLabel(transport).split(" ")[0] || transport;
+  const agentLabel = transportLabel(transport, catalog).split(" ")[0] || transport;
   return (
     <CodexCard
       event={event}

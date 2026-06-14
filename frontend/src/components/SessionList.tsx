@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { MouseEvent, ReactNode, useEffect, useMemo, useState } from "react";
 
-import { humaniseBackend, transportLabel } from "@/lib/backends";
+import { humaniseBackend, transportLabel, type BackendCatalog } from "@/lib/backends";
 import { matchesQuery, parseQuery } from "@/lib/search";
 import { SessionRecord } from "@/lib/types";
 
@@ -11,6 +11,7 @@ import { SearchInput } from "./SearchInput";
 
 interface SessionListProps {
   sessions: SessionRecord[];
+  catalog?: BackendCatalog;
   onDelete?: (sessionId: string) => void | Promise<void>;
   onDeleteExited?: () => void | Promise<void>;
   onTerminate?: (sessionId: string) => void | Promise<void>;
@@ -22,6 +23,7 @@ const PAGE_SIZE = 10;
 
 export function SessionList({
   sessions,
+  catalog,
   onDelete,
   onDeleteExited,
   onTerminate,
@@ -182,11 +184,11 @@ export function SessionList({
       <Link className="panel session-card" href={`/session/${session.id}`} key={session.id}>
         <div className="session-row">
           <span className={`badge ${session.backend}`}>
-            {humaniseBackend(session.backend)}
+            {humaniseBackend(session.backend, catalog)}
           </span>
           {process.env.NEXT_PUBLIC_SHOW_TRANSPORT_BADGE === "1" ? (
             <span className={`badge transport ${session.transport}`}>
-              {transportLabel(session.transport)}
+              {transportLabel(session.transport, catalog)}
             </span>
           ) : null}
           {session.launch_target_id ? (

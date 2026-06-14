@@ -6,6 +6,7 @@ import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { TerminalCompose } from "@/components/TerminalCompose";
 import { TerminalScrollChips } from "@/components/TerminalScrollChips";
 import { XTerminal, type XTerminalHandle } from "@/components/XTerminal";
+import { useBackendCatalog } from "@/lib/backends";
 import type { TerminalSubmitResult } from "@/lib/composer";
 import { SessionRecord } from "@/lib/types";
 
@@ -100,6 +101,7 @@ export function SessionTerminalView({
   onSwitchSession,
   onError,
 }: SessionTerminalViewProps) {
+  const catalog = useBackendCatalog(host || null, token || null, null);
   // Primary action shown as a pill button next to the overflow trigger.
   // Only states the user can't trivially reach inside the pane — Reconnect
   // when exited (the pane is gone) and Refresh for read-only snapshots.
@@ -154,6 +156,7 @@ export function SessionTerminalView({
         <SessionUsagePill
           session={session}
           connection={connection}
+          catalog={catalog}
           onRateLimitRefresh={onRateLimitRefresh}
           rateLimitRefreshBusy={rateLimitRefreshBusy}
         />

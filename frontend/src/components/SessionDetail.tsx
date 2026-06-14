@@ -40,6 +40,7 @@ import {
 } from "@/lib/api";
 import {
   approvalDecisionsFor,
+  type BackendCatalog,
   fidelityFor,
   humaniseBackend,
   permissionModesFor,
@@ -825,9 +826,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   useEffect(() => {
     if (!session) return;
     const prev = document.title;
-    document.title = `${humaniseBackend(session.backend)} · ${session.title}`;
+    document.title = `${humaniseBackend(session.backend, catalog)} · ${session.title}`;
     return () => { document.title = prev; };
-  }, [session]);
+  }, [session, catalog]);
 
   useEffect(() => {
     if (view !== "chat") {
@@ -1207,7 +1208,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   }
 
   const pendingApprovals =
-    session && supportsStructuredApproval(session.transport)
+    session && supportsStructuredApproval(session.transport, catalog)
       ? findPendingApprovals(events)
       : [];
   const approvalCount = pendingApprovals.length;
@@ -1269,7 +1270,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // Tmux's Resume control only makes sense while the pane is alive; once the
   // session has exited there is nothing to resume into.
   const canResume = Boolean(
-    session && supportsResume(session.transport) && !sessionExited,
+    session && supportsResume(session.transport, catalog) && !sessionExited,
   );
   const activeView: ViewMode = terminalOnly ? "terminal" : view;
   const showTaskDock =
@@ -1547,6 +1548,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           session={session}
           connection={connection}
           modelOptions={modelOptions}
+          catalog={catalog}
           onSetTitle={handleSetTitle}
           assistant={assistant}
         />
@@ -1658,6 +1660,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                             event={child.pair.call ?? child.pair.result ?? child.event}
                             pair={child.pair}
                             transport={session.transport}
+                            catalog={catalog}
                             onAnswerAskQuestion={submitAskAnswer}
                             key={`pair-${child.pair.itemId}`}
                           />
@@ -1665,6 +1668,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                           <TranscriptCard
                             event={child.event}
                             transport={session.transport}
+                            catalog={catalog}
                             onAnswerAskQuestion={submitAskAnswer}
                             key={`${child.event.sequence}-${child.event.id ?? "local"}`}
                           />
@@ -1678,6 +1682,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                     event={item.pair.call ?? item.pair.result ?? item.event}
                     pair={item.pair}
                     transport={session.transport}
+                    catalog={catalog}
                     onAnswerAskQuestion={submitAskAnswer}
                     key={`pair-${item.pair.itemId}`}
                   />
@@ -1685,6 +1690,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                   <TranscriptCard
                     event={item.event}
                     transport={session.transport}
+                    catalog={catalog}
                     onAnswerAskQuestion={submitAskAnswer}
                     key={`${item.event.sequence}-${item.event.id ?? "local"}`}
                   />
@@ -1792,7 +1798,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       ) : null}
       {!terminalOnly && !pendingApproval && pendingPlanApprovalView ? (
         <PlanApprovalCard
-          agentLabel={session ? humaniseBackend(session.backend) : "Codex"}
+          agentLabel={session ? humaniseBackend(session.backend, catalog) : "Codex"}
           canApprove
           decisions={pendingPlanApprovalView.decisions}
           onDecide={(decision, note) =>
@@ -2003,6 +2009,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           effortBusy={effortBusy}
           permissionMode={session?.permission_mode ?? null}
           transport={session?.transport ?? null}
+          catalog={catalog}
           effortRequiresConfirm={
             // The plugin advertises "effort swap requires a restart"
             // (Claude does, Codex doesn't) and we surface the confirm
@@ -2076,6 +2083,7 @@ interface ReplyComposerProps {
   effortBusy: boolean;
   permissionMode: string | null;
   transport: SessionTransport | null;
+  catalog: BackendCatalog;
   // True when the backend's effort swap requires a session restart
   // (Claude respawns the CLI). Drives the "confirm before applying"
   // UX so the user knows the session will restart, vs. Codex which
@@ -2130,6 +2138,7 @@ const ReplyComposer = memo(function ReplyComposer({
   effortBusy,
   permissionMode,
   transport,
+  catalog,
   effortRequiresConfirm,
   hasToolRuns,
   toolRunsExpanded,
@@ -2200,7 +2209,7 @@ const ReplyComposer = memo(function ReplyComposer({
   // suggestions on tmux. While the session is still loading
   // (transport=null), default to off.
   const supportsSlash =
-    transport !== null && fidelityFor(transport) === "structured";
+    transport !== null && fidelityFor(transport, catalog) === "structured";
 
   const {
     suggestions,
@@ -2760,7 +2769,7 @@ const ReplyComposer = memo(function ReplyComposer({
                     <div className="composer-tune-confirm">
                       <p>
                         Switch to{" "}
-                        <strong>{humaniseBackend(pendingBackend)}</strong>? This
+                        <strong>{humaniseBackend(pendingBackend, catalog)}</strong>? This
                         starts a new conversation; the current one is kept as a
                         stopped session.
                       </p>
@@ -2861,6 +2870,7 @@ const ReplyComposer = memo(function ReplyComposer({
           <SessionUsagePill
             session={session}
             connection={connection}
+            catalog={catalog}
             onRateLimitRefresh={onRateLimitRefresh}
             rateLimitRefreshBusy={rateLimitRefreshBusy}
           />
@@ -3606,12 +3616,14 @@ function SessionHeader({
   session,
   connection,
   modelOptions,
+  catalog,
   onSetTitle,
   assistant = false,
 }: {
   session: SessionRecord;
   connection: ConnectionState;
   modelOptions: BackendModelOption[];
+  catalog: BackendCatalog;
   onSetTitle?: (title: string) => void | Promise<void>;
   assistant?: boolean;
 }) {
@@ -3702,15 +3714,15 @@ function SessionHeader({
       ) : null}
       <div className="session-header-tags">
         <span className={`badge ${session.backend}`}>
-          {humaniseBackend(session.backend)}
+          {humaniseBackend(session.backend, catalog)}
         </span>
         {!assistant ? (
           <>
             <span className={`badge transport ${session.transport}`}>
-              {transportLabel(session.transport)}
+              {transportLabel(session.transport, catalog)}
             </span>
-            <span className={`badge fidelity ${fidelityFor(session.transport)}`}>
-              {fidelityFor(session.transport)}
+            <span className={`badge fidelity ${fidelityFor(session.transport, catalog)}`}>
+              {fidelityFor(session.transport, catalog)}
             </span>
           </>
         ) : null}

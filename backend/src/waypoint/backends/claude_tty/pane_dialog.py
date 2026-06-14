@@ -192,9 +192,14 @@ def _extract_tool_target(
 ) -> tuple[str | None, str | None]:
     stripped = [line.strip() for line in head_lines]
 
-    # 1. Body label → tool; the next non-empty line is the command/path.
-    for i, line in enumerate(stripped):
-        tool = _BODY_TOOL_LABELS.get(line)
+    # 1. Body label → tool; the next non-empty line is the command/path. Scan
+    # bottom-up: the active dialog is the lowest block on the pane, so an
+    # identical label string sitting earlier in the scrollback can't win. The
+    # target is taken as a single line — at the fixed 120-col launch width with
+    # `capture-pane -J` joining wraps this holds; a label rendered without its
+    # body is the only degenerate case and yields no worse than a None target.
+    for i in range(len(stripped) - 1, -1, -1):
+        tool = _BODY_TOOL_LABELS.get(stripped[i])
         if tool is not None:
             target = next((s for s in stripped[i + 1 :] if s), None)
             return tool, target

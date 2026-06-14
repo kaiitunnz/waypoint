@@ -121,6 +121,19 @@ def test_parse_real_ansi_capture() -> None:
     assert dialog.decline_option is not None and dialog.decline_option.number == 3
 
 
+def test_body_extraction_ignores_earlier_scrollback_label() -> None:
+    # A line equal to a body label ("Bash command") sitting earlier in the
+    # scrollback (e.g. echoed transcript text) must not win over the actual
+    # dialog block at the bottom of the pane.
+    real = _load("approval_bash.txt")
+    decoy = "● I ran a Bash command\n Bash command\n   rm -rf /decoy\n\n"
+    dialog = parse_approval(decoy + real)
+    assert dialog is not None
+    assert dialog.tool_name == "Bash"
+    assert dialog.target == "mkdir /tmp/cc-tty-probe/probe_subdir"
+    assert dialog.target != "rm -rf /decoy"
+
+
 def test_classify_robust_to_wrapped_footer() -> None:
     # The footer wrapping across two lines breaks a raw substring match but not
     # the compact one.

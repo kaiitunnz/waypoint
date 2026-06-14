@@ -232,8 +232,13 @@ class BoardEntry(BaseModel):
     channel: str
     # The session that posted this, stamped by the CLI from
     # ``WAYPOINT_SESSION_ID``. ``None`` when posted outside a session (a user
-    # via the frontend, an ad-hoc CLI call). Pruned with its authoring session.
+    # via the frontend, an ad-hoc CLI call). Keyed cells authored by a session
+    # are pruned on session delete; keyless log posts are durable history and
+    # survive the session row being removed.
     author_session_id: str | None = None
+    # Snapshot of the authoring session's title at post time. Stays readable
+    # after the session row is deleted.
+    author_label: str | None = None
     key: str | None = None
     text: str
     metadata: dict[str, Any] = Field(default_factory=dict)

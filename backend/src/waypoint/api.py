@@ -578,9 +578,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def board_clear(
         channel: str,
         _: Annotated[str, Depends(token_dependency())],
+        keep_last: Annotated[int | None, Query(ge=1)] = None,
     ) -> Any:
         # Remove the channel's posts but keep the (now empty) channel.
-        removed = await context.runtime.clear_board_channel(channel)
+        # With keep_last, the N most-recent log posts are retained; cells are
+        # always dropped.
+        removed = await context.runtime.clear_board_channel(
+            channel, keep_last=keep_last
+        )
         return {"channel": channel, "cleared": removed}
 
     @app.delete("/api/board/{channel}")

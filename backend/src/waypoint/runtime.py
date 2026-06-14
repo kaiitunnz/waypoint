@@ -1213,11 +1213,17 @@ class SessionRuntime:
     async def post_board_entry(
         self, channel: str, request: BoardPostRequest
     ) -> BoardEntry:
+        author_label: str | None = None
+        if request.author_session_id is not None:
+            session = self.storage.get_session(request.author_session_id)
+            if session is not None:
+                author_label = session.title
         entry = self.storage.add_board_entry(
             channel,
             request.text,
             key=request.key,
             author_session_id=request.author_session_id,
+            author_label=author_label,
             metadata=request.metadata,
         )
         await self._publish_board_update(channel)
@@ -1238,8 +1244,10 @@ class SessionRuntime:
     def list_board_channels(self) -> list[BoardChannel]:
         return self.storage.list_board_channels()
 
-    async def clear_board_channel(self, channel: str) -> int:
-        removed = self.storage.clear_board_channel(channel)
+    async def clear_board_channel(
+        self, channel: str, keep_last: int | None = None
+    ) -> int:
+        removed = self.storage.clear_board_channel(channel, keep_last=keep_last)
         await self._publish_board_update(channel)
         return removed
 

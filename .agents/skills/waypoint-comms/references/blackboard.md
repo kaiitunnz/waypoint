@@ -67,9 +67,11 @@ stamps an `edited_at` the UI shows as "edited" while preserving `created_at`, so
 the log keeps its order.
 
 `post` stamps the author from `WAYPOINT_SESSION_ID` automatically (the same id as
-`addressing.md`); you don't pass it. When that session is deleted, its posts are
-pruned — so durable shared state should live on a long-lived session's channel,
-not a short subagent's.
+`addressing.md`); you don't pass it. When a session is deleted, only its **keyed
+cells** are pruned — keyless log posts are durable history and survive the session
+row being removed. Read the log with `board log <channel>`. Durable shared state
+(keyed cells) should live on a long-lived session; append-log posts are safe to
+make from short subagents.
 
 ## Channel naming
 

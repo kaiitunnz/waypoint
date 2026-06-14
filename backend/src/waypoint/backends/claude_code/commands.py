@@ -6,10 +6,29 @@ from typing import Any
 
 import yaml
 
+from waypoint.backends.capabilities import SlashCommandSpec
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import CommandCompletion, CompletionDispatch
 
 log = logging.getLogger("waypoint.backends.claude_code.commands")
+
+# A static baseline of Claude's built-in slash commands. The structured backend
+# normally learns these from the SDK's ``system.init`` stream, but a
+# tmux-transport Claude session never emits it — without this list such a session
+# would surface no built-ins at all. Plain-text dispatch: typed into the CLI/pane.
+CLAUDE_BUILTIN_SLASH_COMMANDS = (
+    SlashCommandSpec(
+        name="compact", description="Compact the conversation to free up context"
+    ),
+    SlashCommandSpec(name="clear", description="Clear the conversation history"),
+    SlashCommandSpec(name="context", description="Show context window usage"),
+    SlashCommandSpec(name="cost", description="Show token usage and cost"),
+    SlashCommandSpec(name="export", description="Export the conversation"),
+    SlashCommandSpec(name="memory", description="Edit Claude memory files"),
+    SlashCommandSpec(name="init", description="Generate a CLAUDE.md for the project"),
+    SlashCommandSpec(name="config", description="Open the settings panel"),
+    SlashCommandSpec(name="help", description="List available commands"),
+)
 
 _REMOTE_SCRIPT = r"""
 import glob

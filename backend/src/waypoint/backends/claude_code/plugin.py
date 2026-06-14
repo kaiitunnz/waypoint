@@ -23,7 +23,10 @@ from waypoint.backends.capabilities import (
     ModelSource,
 )
 from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeCliError
-from waypoint.backends.claude_code.commands import list_claude_command_completions
+from waypoint.backends.claude_code.commands import (
+    CLAUDE_BUILTIN_SLASH_COMMANDS,
+    list_claude_command_completions,
+)
 from waypoint.backends.claude_code.models import (
     CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
@@ -53,6 +56,7 @@ from waypoint.backends.claude_code.threads import (
     list_local_claude_threads,
 )
 from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
+from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.backends.tmux.plugin import TmuxPlugin
 from waypoint.git_meta import GitMeta
@@ -142,6 +146,7 @@ class ClaudeCodePlugin:
         permission_modes=CLAUDE_PERMISSION_MODE_SPECS,
         effort_levels=CLAUDE_EFFORT_LEVELS,
         model_source=ModelSource.STATIC,
+        slash_commands=CLAUDE_BUILTIN_SLASH_COMMANDS,
         badges={"glyph": "C", "color": "#a78bfa"},
         cli_binary="claude",
         target_aliases=("claude",),
@@ -491,6 +496,16 @@ class ClaudeCodePlugin:
             else _claude_waypoint_completions(prefix)
         )
         completions.extend(_claude_runtime_slash_completions(runtime_commands, prefix))
+        # Curated built-ins as a baseline for sessions with no live slash-command
+        # stream (tmux transport), deduped against anything the runtime reported.
+        present = {f"{item.trigger}{item.name}" for item in completions}
+        for builtin in static_slash_completions(
+            self.id, self.capabilities, prefix=prefix
+        ):
+            key = f"{builtin.trigger}{builtin.name}"
+            if key not in present:
+                completions.append(builtin)
+                present.add(key)
         launch_target = (
             runtime._find_launch_target(session.launch_target_id)
             if session.launch_target_id

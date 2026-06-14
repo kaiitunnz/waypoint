@@ -615,7 +615,7 @@ async def test_list_command_completions_uses_claude_runtime_commands(
 
 
 @pytest.mark.asyncio
-async def test_list_command_completions_claude_omits_unreported_tui_commands(
+async def test_list_command_completions_claude_surfaces_reported_and_curated(
     monkeypatch, tmp_path
 ) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
@@ -644,10 +644,14 @@ async def test_list_command_completions_claude_omits_unreported_tui_commands(
     )
 
     names = {item.name for item in completions}
-    assert "status" in names
-    assert "usage" in names
+    assert "status" in names  # waypoint builtin
+    assert "usage" in names  # SDK-reported
+    # Curated built-ins are surfaced as a baseline even when the session never
+    # reported them (e.g. tmux-transport Claude has no system.init stream).
+    assert "help" in names
+    assert "compact" in names
+    # …but a real TUI command that is neither reported nor curated stays absent.
     assert "permissions" not in names
-    assert "help" not in names
 
 
 @pytest.mark.asyncio

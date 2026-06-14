@@ -221,6 +221,32 @@ def test_error_tool_result_sets_is_error() -> None:
     assert events[0].metadata["is_error"] is True
 
 
+def test_generic_error_tool_result_stays_running() -> None:
+    # A failing tool (not a user decline) does not end the turn — the agent
+    # gets the error and continues — so status must stay RUNNING.
+    norm = TranscriptNormalizer()
+    record = _user_record([_tool_result_block("tu2", "ENOENT", is_error=True)])
+    events = norm.process_record(record)
+    assert all(e.status == SessionStatus.RUNNING for e in events)
+    assert not any(e.kind == EventKind.SYSTEM_NOTE for e in events)
+
+
+def test_user_rejected_tool_resolves_session_to_idle() -> None:
+    # A declined tool aborts the turn back to the prompt with no terminal
+    # stop_reason record, so the normalizer must synthesize an idle result or
+    # the session stays stuck running.
+    norm = TranscriptNormalizer()
+    record = _user_record(
+        [_tool_result_block("tu3", "The tool use was rejected", is_error=True)]
+    )
+    record["toolUseResult"] = "User rejected tool use"
+    events = norm.process_record(record)
+
+    note = next(e for e in events if e.kind == EventKind.SYSTEM_NOTE)
+    assert note.status == SessionStatus.IDLE
+    assert note.metadata["stop_reason"] == "tool_rejected"
+
+
 def test_injected_task_notification_produces_no_events() -> None:
     norm = TranscriptNormalizer()
     record = _user_record("<task-notification>some harness turn</task-notification>")

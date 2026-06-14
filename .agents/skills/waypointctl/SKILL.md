@@ -8,8 +8,12 @@ description: Use when managing the Waypoint stack with `waypointctl`, including 
 Use this skill for `waypointctl`, the local stack supervisor for Waypoint.
 These commands affect the deployment the assistant is running on.
 
-Start with `waypointctl status` for state and `waypointctl --help` or a
-subcommand's `--help` when the installed command surface is uncertain.
+Start with `waypointctl status` for state. To learn the command surface, run
+`waypointctl help` to dump every nested command with its arguments and options
+in one call (`waypointctl help --json` for structured output). It is generated
+from the command definitions, so it is ground truth for the installed version;
+prefer it over per-level `--help`, and defer to it for exact flags rather than
+trusting any list reproduced in this skill.
 
 ## Common Routing
 

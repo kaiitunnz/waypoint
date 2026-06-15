@@ -1371,7 +1371,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           // not have mounted at connect() time; the closure captured null
           // would silently skip this resize and leave the pane stuck at
           // xterm's default 80x24 if fit() produces the same dims and
-          // never fires onResize.
+          // never fires onResize. Non-resizable panes (claude_tty) own their
+          // geometry server-side and must never be resized from here, so skip
+          // the seed resize entirely for them.
+          if (!paneTransport || !terminalResizable(paneTransport, catalog)) {
+            return;
+          }
           const term = terminalRef.current;
           const cols = term?.cols();
           const rows = term?.rows();

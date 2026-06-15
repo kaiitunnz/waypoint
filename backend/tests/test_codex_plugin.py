@@ -176,7 +176,7 @@ async def test_capture_thread_id_pulls_uuid_from_filename(
 
     class _Runtime:
         storage = _Storage()
-        _tmux_thread_id_watchers: dict[str, Any] = {}
+        _thread_id_watchers: dict[str, Any] = {}
 
     cwd = "/Users/me/proj"
     codex_home = tmp_path / "codex"

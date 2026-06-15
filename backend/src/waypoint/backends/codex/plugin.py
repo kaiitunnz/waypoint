@@ -956,7 +956,7 @@ class CodexPlugin(DefaultLaunchContract):
             # a missing rollout file or a JSON decode hiccup.
             return
         finally:
-            runtime._tmux_thread_id_watchers.pop(session_id, None)
+            runtime._thread_id_watchers.pop(session_id, None)
 
     def _find_codex_thread_id_local(self, cwd: str, since: datetime) -> str | None:
         codex_home = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()

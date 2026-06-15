@@ -83,6 +83,7 @@ class TmuxPlugin:
         supports_attachments=True,
         model_source=ModelSource.NONE,
         badges={"glyph": "T", "color": "#94a3b8"},
+        live_terminal=True,
         is_fallback_for_managed_launch=True,
     )
 
@@ -134,7 +135,7 @@ class TmuxPlugin:
                 pass
             except Exception:
                 log.debug("monitor task raised during terminate", exc_info=True)
-        capture = runtime._tmux_thread_id_watchers.pop(session.id, None)
+        capture = runtime._thread_id_watchers.pop(session.id, None)
         if capture is not None:
             capture.cancel()
             try:
@@ -143,7 +144,7 @@ class TmuxPlugin:
                 pass
             except Exception:
                 log.debug("thread-id watcher raised during terminate", exc_info=True)
-        rl_watcher = runtime._tmux_rate_limit_watchers.pop(session.id, None)
+        rl_watcher = runtime._rate_limit_watchers.pop(session.id, None)
         if rl_watcher is not None:
             rl_watcher.cancel()
             try:
@@ -567,13 +568,13 @@ class TmuxPlugin:
         owns the polling and stores ``transport_state.thread_id`` so a later
         reconnect can resume. A no-op for agents that pregenerate their id.
         """
-        if session_id in runtime._tmux_thread_id_watchers:
+        if session_id in runtime._thread_id_watchers:
             return
         inner = self._agent_launch(runtime, backend)
         task = asyncio.create_task(
             inner.capture_thread_id(runtime, session_id, cwd, since, launch_target)
         )
-        runtime._tmux_thread_id_watchers[session_id] = task
+        runtime._thread_id_watchers[session_id] = task
 
     def _spawn_rate_limit_watcher(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -587,13 +588,13 @@ class TmuxPlugin:
         first refresh so the pill populates within the first paint
         instead of staying empty until the user clicks.
         """
-        if session.id in runtime._tmux_rate_limit_watchers:
+        if session.id in runtime._rate_limit_watchers:
             return
         inner = runtime.registry.get(session.backend)
         if getattr(inner, "probe_account_rate_limit", None) is None:
             return
         task = asyncio.create_task(self._rate_limit_refresh_loop(runtime, session.id))
-        runtime._tmux_rate_limit_watchers[session.id] = task
+        runtime._rate_limit_watchers[session.id] = task
 
     async def _rate_limit_refresh_loop(
         self, runtime: "SessionRuntime", session_id: str
@@ -623,7 +624,7 @@ class TmuxPlugin:
                     )
                 await asyncio.sleep(REFRESH_INTERVAL)
         finally:
-            runtime._tmux_rate_limit_watchers.pop(session_id, None)
+            runtime._rate_limit_watchers.pop(session_id, None)
 
     async def list_threads(
         self,

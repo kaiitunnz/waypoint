@@ -181,8 +181,8 @@ class _FakeRuntime:
     def __init__(self, inner_plugin: Any = None) -> None:
         self.tmux = _FakeTmux()
         self.file_offsets: dict[str, int] = {}
-        self._tmux_thread_id_watchers: dict[str, Any] = {}
-        self._tmux_rate_limit_watchers: dict[str, Any] = {}
+        self._thread_id_watchers: dict[str, Any] = {}
+        self._rate_limit_watchers: dict[str, Any] = {}
         self.monitor_tasks: dict[str, Any] = {}
         self.registry = _FakeRegistry(plugin_override=inner_plugin)
         self.updates: list[dict[str, Any]] = []
@@ -779,9 +779,9 @@ async def test_rate_limit_watcher_spawn_dedupes(plugin: TmuxPlugin) -> None:
     session = _watcher_session("sess-dedupe")
     runtime.sessions_by_id[session.id] = session
     plugin._spawn_rate_limit_watcher(cast(Any, runtime), session)
-    first = runtime._tmux_rate_limit_watchers[session.id]
+    first = runtime._rate_limit_watchers[session.id]
     plugin._spawn_rate_limit_watcher(cast(Any, runtime), session)
-    second = runtime._tmux_rate_limit_watchers[session.id]
+    second = runtime._rate_limit_watchers[session.id]
     assert first is second
     first.cancel()
     with suppress(asyncio.CancelledError):
@@ -799,12 +799,12 @@ async def test_rate_limit_watcher_terminate_cancels_and_clears(
     session = _watcher_session("sess-term")
     runtime.sessions_by_id[session.id] = session
     plugin._spawn_rate_limit_watcher(cast(Any, runtime), session)
-    task = runtime._tmux_rate_limit_watchers[session.id]
+    task = runtime._rate_limit_watchers[session.id]
     # Let the first iteration run so the probe is observed.
     await asyncio.sleep(0)
     await asyncio.sleep(0)
     await plugin.terminate_session(cast(Any, runtime), session)
-    assert session.id not in runtime._tmux_rate_limit_watchers
+    assert session.id not in runtime._rate_limit_watchers
     assert task.cancelled() or task.done()
 
 
@@ -829,7 +829,7 @@ async def test_rate_limit_watcher_stops_on_natural_exit(
     session = _watcher_session("sess-natural-exit")
     runtime.sessions_by_id[session.id] = session
     plugin._spawn_rate_limit_watcher(cast(Any, runtime), session)
-    task = runtime._tmux_rate_limit_watchers[session.id]
+    task = runtime._rate_limit_watchers[session.id]
 
     # Yield repeatedly so the loop runs at least one full iteration.
     for _ in range(5):
@@ -842,4 +842,4 @@ async def test_rate_limit_watcher_stops_on_natural_exit(
     )
     # The loop's next iteration should observe the EXITED status and exit.
     await asyncio.wait_for(task, timeout=1.0)
-    assert session.id not in runtime._tmux_rate_limit_watchers
+    assert session.id not in runtime._rate_limit_watchers

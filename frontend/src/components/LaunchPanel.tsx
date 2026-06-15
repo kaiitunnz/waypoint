@@ -73,7 +73,7 @@ interface LaunchPanelProps {
     backend: Backend,
     threadId: string,
     cwd: string,
-    launchMode: LaunchMode,
+    transport: SessionTransport | null,
   ) => Promise<void>;
   onAuthFailure?: () => void;
 }
@@ -305,8 +305,6 @@ export function LaunchPanel({
           preferredBackend={backend}
           onImportThread={onImportThread}
           catalog={catalog}
-          launchMode={launchMode}
-          onLaunchModeChange={setLaunchMode}
         />
       ) : null}
 

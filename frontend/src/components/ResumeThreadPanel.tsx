@@ -2,11 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { LaunchOptionsDetails } from "@/components/LaunchOptions";
+import {
+  AgentTransportPicker,
+  useTransportForAgent,
+} from "@/components/AgentTransportPicker";
 import type { BackendCatalog } from "@/lib/backends";
 import { humaniseBackend } from "@/lib/backends";
 import { matchesQuery, parseQuery } from "@/lib/search";
-import { Backend, LaunchMode } from "@/lib/types";
+import { Backend, SessionTransport } from "@/lib/types";
 
 import { SearchInput } from "./SearchInput";
 
@@ -35,17 +38,9 @@ interface ResumeThreadPanelProps {
     backend: Backend,
     threadId: string,
     cwd: string,
-    launchMode: LaunchMode,
+    transport: SessionTransport | null,
   ) => Promise<void>;
-  catalog?: BackendCatalog;
-  launchMode: LaunchMode;
-  onLaunchModeChange: (mode: LaunchMode) => void;
-}
-
-type Filter = "all" | Backend;
-
-interface UnifiedThread extends ThreadSummary {
-  backend: Backend;
+  catalog: BackendCatalog;
 }
 
 const COLLAPSED_VISIBLE = 2;
@@ -70,56 +65,16 @@ export function ResumeThreadPanel({
   preferredBackend,
   onImportThread,
   catalog,
-  launchMode,
-  onLaunchModeChange,
 }: ResumeThreadPanelProps) {
-  const dualBackend = supportedBackends.length >= 2;
-
-  const allThreads: UnifiedThread[] = useMemo(() => {
-    const merged: UnifiedThread[] = [];
-    for (const id of supportedBackends) {
-      for (const t of threadsByBackend[id] ?? []) {
-        merged.push({ ...t, backend: id });
-      }
-    }
-    merged.sort((a, b) =>
-      a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0,
-    );
-    return merged;
-  }, [threadsByBackend, supportedBackends]);
-
-  const counts = useMemo(() => {
-    const byBackend: Record<string, number> = { all: allThreads.length };
-    for (const id of supportedBackends) {
-      byBackend[id] = (threadsByBackend[id] ?? []).length;
-    }
-    return byBackend;
-  }, [allThreads.length, threadsByBackend, supportedBackends]);
-
-  const filterOptions = useMemo(
-    () => [
-      {
-        value: "all" as Filter,
-        label: `All (${counts.all})`,
-        disabled: false,
-      },
-      ...supportedBackends.map((id) => ({
-        value: id as Filter,
-        label: `${catalog?.byId(id)?.label ?? humaniseBackend(id)} (${counts[id] ?? 0})`,
-        disabled: (counts[id] ?? 0) === 0,
-      })),
-    ],
-    [catalog, counts, supportedBackends],
-  );
-
-  const initialFilter: Filter = dualBackend
-    ? supportedBackends.includes(preferredBackend)
-      ? preferredBackend
-      : "all"
-    : (supportedBackends[0] ?? "all");
-
-  const [filter, setFilter] = useState<Filter>(initialFilter);
-  const [filterTouched, setFilterTouched] = useState(false);
+  // The chosen agent both lists its stored threads and drives the transport
+  // the imported session is resumed over — so a Claude thread can come back as
+  // Chat or Emulated.
+  const initialAgent: Backend = supportedBackends.includes(preferredBackend)
+    ? preferredBackend
+    : (supportedBackends[0] ?? preferredBackend);
+  const [agent, setAgent] = useState<Backend>(initialAgent);
+  const [agentTouched, setAgentTouched] = useState(false);
+  const [transport, setTransport] = useTransportForAgent(agent, catalog);
   const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(1);
   const [importingId, setImportingId] = useState<string | null>(null);
@@ -127,32 +82,42 @@ export function ResumeThreadPanel({
 
   const isExpanded = expanded || query.trim().length > 0;
 
-  // Auto-follow the launch form's backend selection until the user
-  // explicitly picks an option; that lock stays for the session so the
-  // filter doesn't keep snapping out from under them.
+  // Auto-follow the launch form's agent selection until the user explicitly
+  // picks an agent here; that lock stays for the session so the list doesn't
+  // keep snapping out from under them.
   useEffect(() => {
-    if (!dualBackend || filterTouched) return;
+    if (agentTouched) return;
     if (supportedBackends.includes(preferredBackend)) {
-      setFilter(preferredBackend);
+      setAgent(preferredBackend);
     }
-  }, [dualBackend, filterTouched, preferredBackend, supportedBackends]);
+  }, [agentTouched, preferredBackend, supportedBackends]);
+
+  // Re-clamp if the selected agent drops out of the supported set.
+  useEffect(() => {
+    if (supportedBackends.length > 0 && !supportedBackends.includes(agent)) {
+      setAgent(supportedBackends[0]);
+    }
+  }, [supportedBackends, agent]);
+
+  const agentThreads = useMemo(() => {
+    const list = [...(threadsByBackend[agent] ?? [])];
+    list.sort((a, b) =>
+      a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0,
+    );
+    return list;
+  }, [threadsByBackend, agent]);
 
   const filteredThreads = useMemo(() => {
-    let list = filter === "all" ? allThreads : allThreads.filter((t) => t.backend === filter);
+    if (query.trim() === "") return agentThreads;
+    const terms = parseQuery(query.trim());
+    const defaultFields = ["title", "cwd", "repo_name", "branch", "preview"];
+    return agentThreads.filter((t) => matchesQuery(t, terms, defaultFields));
+  }, [agentThreads, query]);
 
-    if (query.trim() !== "") {
-      const terms = parseQuery(query.trim());
-      const defaultFields = ["title", "cwd", "repo_name", "branch", "preview", "backend"];
-      list = list.filter((t) => matchesQuery(t, terms, defaultFields));
-    }
-
-    return list;
-  }, [allThreads, filter, query]);
-
-  // Page reset whenever the filter or thread set changes underneath us.
+  // Page reset whenever the agent or thread set changes underneath us.
   useEffect(() => {
     setPage(1);
-  }, [filter, filteredThreads.length, query]);
+  }, [agent, filteredThreads.length, query]);
 
   const totalPages = Math.max(1, Math.ceil(filteredThreads.length / PAGE_SIZE));
   const pageStart = (page - 1) * PAGE_SIZE;
@@ -160,25 +125,36 @@ export function ResumeThreadPanel({
     ? filteredThreads.slice(pageStart, pageStart + PAGE_SIZE)
     : filteredThreads.slice(0, COLLAPSED_VISIBLE);
 
-  const loading = supportedBackends.some((id) => loadingByBackend[id]);
+  const loading = loadingByBackend[agent];
 
-  async function handleImport(thread: UnifiedThread) {
+  async function handleImport(thread: ThreadSummary) {
     setImportingId(thread.id);
     try {
-      await onImportThread(thread.backend, thread.id, thread.cwd, launchMode);
+      await onImportThread(agent, thread.id, thread.cwd, transport || null);
     } finally {
       setImportingId(null);
     }
   }
 
-  function chooseFilter(next: Filter) {
-    setFilter(next);
-    setFilterTouched(true);
+  function chooseAgent(next: Backend) {
+    setAgent(next);
+    setAgentTouched(true);
     setExpanded(false);
   }
 
+  const agentLabel = catalog.byId(agent)?.label ?? humaniseBackend(agent);
+
   return (
     <div className="launch-body resume-body">
+      <AgentTransportPicker
+        agents={supportedBackends}
+        agent={agent}
+        onAgentChange={chooseAgent}
+        transport={transport}
+        onTransportChange={setTransport}
+        catalog={catalog}
+      />
+
       <div className="resume-filters">
         <div className="resume-filters-search">
           <SearchInput
@@ -189,33 +165,7 @@ export function ResumeThreadPanel({
             showStatusExample={false}
           />
         </div>
-        {dualBackend ? (
-          <label className="field resume-filters-backend">
-            <span>Backend</span>
-            <select
-              aria-label="Filter by backend"
-              value={filter}
-              onChange={(event) => chooseFilter(event.target.value as Filter)}
-            >
-              {filterOptions.map((option) => (
-                <option
-                  key={option.value}
-                  value={option.value}
-                  disabled={option.disabled}
-                >
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
       </div>
-
-      <LaunchOptionsDetails
-        mode="resume"
-        launchMode={launchMode}
-        onLaunchModeChange={onLaunchModeChange}
-      />
 
       {loading ? (
         <p className="muted resume-panel-loading">Loading stored threads…</p>
@@ -225,7 +175,7 @@ export function ResumeThreadPanel({
         <p className="muted resume-panel-empty">
           {query.trim().length > 0
             ? "No threads match your search."
-            : emptyHintFor(filter, dualBackend, targetLabel, catalog)}
+            : emptyHintFor(agentLabel, targetLabel)}
         </p>
       ) : null}
 
@@ -233,20 +183,18 @@ export function ResumeThreadPanel({
         <div className="import-thread-list resume-thread-list">
           {visibleThreads.map((thread) => {
             const isImporting = importingId === thread.id;
-            const backendLabel =
-              catalog?.byId(thread.backend)?.label ?? humaniseBackend(thread.backend);
             return (
               <article
-                className={`import-thread-row resume-thread-row is-${thread.backend}`}
-                key={`${thread.backend}:${thread.id}`}
-                data-backend={thread.backend}
+                className={`import-thread-row resume-thread-row is-${agent}`}
+                key={`${agent}:${thread.id}`}
+                data-backend={agent}
               >
                 <span
-                  className={`import-thread-index resume-thread-mark is-${thread.backend}`}
-                  aria-label={backendLabel}
-                  title={backendLabel}
+                  className={`import-thread-index resume-thread-mark is-${agent}`}
+                  aria-label={agentLabel}
+                  title={agentLabel}
                 >
-                  {backendGlyph(thread.backend, catalog)}
+                  {backendGlyph(agent, catalog)}
                 </span>
                 <div className="import-thread-body">
                   <div className="import-thread-headline">
@@ -340,17 +288,9 @@ export function ResumeThreadPanel({
   );
 }
 
-function emptyHintFor(
-  filter: Filter,
-  dualBackend: boolean,
-  targetLabel: string | null,
-  catalog?: BackendCatalog,
-): string {
+function emptyHintFor(agentLabel: string, targetLabel: string | null): string {
   const where = targetLabel ? ` on ${targetLabel}` : "";
-  if (filter === "all" || !dualBackend) {
-    return `No importable threads found${where}.`;
-  }
-  return `No ${humaniseBackend(filter, catalog)} sessions${where}.`;
+  return `No ${agentLabel} threads to resume${where}.`;
 }
 
 function formatRelativeTime(value: string): string {

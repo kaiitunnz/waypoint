@@ -1,6 +1,8 @@
 import asyncio
 
-from waypoint.backends.tmux.adapter import TmuxAdapter
+import pytest
+
+from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
 
 
 def test_send_input_uses_literal_mode_and_submit() -> None:
@@ -149,3 +151,41 @@ def test_pane_screen_state_handles_normal_screen() -> None:
     alt, col, row = asyncio.run(adapter.pane_screen_state("%4"))
     assert alt is False
     assert (col, row) == (1, 1)
+
+
+def test_describe_target_parses_live_pane() -> None:
+    async def fake_run(*args: str) -> str:
+        return "sess|0|%7|/home/u|0|4242\n"
+
+    adapter = TmuxAdapter()
+    adapter._run = fake_run  # type: ignore[method-assign]
+
+    target = asyncio.run(adapter.describe_target("%7"))
+    assert target.pane == "%7"
+    assert target.pane_dead is False
+    assert target.pane_pid == 4242
+
+
+def test_describe_target_raises_on_missing_pane() -> None:
+    # `display-message -t` does not validate the target: a missing pane expands
+    # to all-empty fields with exit 0 ("|||||"). describe_target must treat that
+    # as a dead target so liveness checks mark the session exited instead of
+    # seeing pane_dead=False on a phantom pane.
+    async def fake_run(*args: str) -> str:
+        return "|||||"
+
+    adapter = TmuxAdapter()
+    adapter._run = fake_run  # type: ignore[method-assign]
+
+    with pytest.raises(TmuxError):
+        asyncio.run(adapter.describe_target("%77"))
+
+
+def test_target_exists_false_for_missing_pane() -> None:
+    async def fake_run(*args: str) -> str:
+        return "|||||"
+
+    adapter = TmuxAdapter()
+    adapter._run = fake_run  # type: ignore[method-assign]
+
+    assert asyncio.run(adapter.target_exists("%77")) is False

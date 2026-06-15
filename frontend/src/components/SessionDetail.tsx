@@ -3738,9 +3738,6 @@ function SessionHeader({
             <span className={`badge transport ${session.transport}`}>
               {transportLabel(session.transport, catalog)}
             </span>
-            <span className={`badge fidelity ${fidelityFor(session.transport, catalog)}`}>
-              {fidelityFor(session.transport, catalog)}
-            </span>
           </>
         ) : null}
         {session.model ? (

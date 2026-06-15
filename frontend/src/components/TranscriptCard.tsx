@@ -6,7 +6,12 @@ import {
   type CSSProperties,
 } from "react";
 
-import { fidelityFor, transportLabel, type BackendCatalog } from "@/lib/backends";
+import {
+  agentForTransport,
+  fidelityFor,
+  humaniseBackend,
+  type BackendCatalog,
+} from "@/lib/backends";
 import { EventRecord, SessionTransport } from "@/lib/types";
 import {
   normalizeToolName,
@@ -155,11 +160,14 @@ function StructuredCard({
     toolUseId?: string,
   ) => Promise<boolean> | void;
 }) {
-  // Convention: the chat-bubble agent label is the first word of the
-  // transport label, lowercased ("Claude Cli" → "claude", "Codex App
-  // Server" → "codex"). New backends inherit it for free as long as
-  // their transport label leads with a single-word agent name.
-  const agentLabel = transportLabel(transport, catalog).split(" ")[0] || transport;
+  // Convention: the chat-bubble agent label is the first word of the agent
+  // that owns this transport, lowercased ("Claude Code" → "claude", "Codex"
+  // → "codex"). Resolved from the transport's owning agent so it stays correct
+  // regardless of the transport's user-facing name.
+  const owner = agentForTransport(transport, catalog);
+  const agentLabel =
+    (owner ? humaniseBackend(owner, catalog).split(" ")[0].toLowerCase() : "") ||
+    transport;
   return (
     <CodexCard
       event={event}

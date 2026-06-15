@@ -11,10 +11,11 @@ Architecture summary:
 - ``is_structured=True`` so the frontend renders structured events, not the
   heuristic raw-terminal view.
 
-Inherits from ``TmuxPlugin`` to reuse shared infrastructure:
-``_conversation_exists``, ``_spawn_rate_limit_watcher``, ``_rate_limit_refresh_loop``,
-``refresh_rate_limit_usage``, ``_ssh_capture``, ``native_thread_id``,
-``on_session_deleted``, ``_resume_args``.
+Inherits from ``TmuxPlugin`` to reuse shared transport infrastructure:
+``_spawn_rate_limit_watcher``, ``_rate_limit_refresh_loop``,
+``refresh_rate_limit_usage``, ``native_thread_id``, ``on_session_deleted``.
+Thread-file existence checks defer to the claude_code agent's launch
+contract rather than reimplementing the ``~/.claude/projects`` lookup.
 """
 
 import asyncio
@@ -29,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 
+from waypoint.backends.base import AgentLaunchContract
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
 from waypoint.backends.claude_code.commands import (
     CLAUDE_BUILTIN_SLASH_COMMANDS,
@@ -217,7 +219,12 @@ class ClaudeTtyPlugin(TmuxPlugin):
         self,
         runtime: "SessionRuntime",
         launch_target: SshLaunchTargetConfig | None,
+        *,
+        cwd: str | None = None,
     ) -> SessionRateLimitUsage | None:
+        # ``cwd`` is accepted for a uniform probe signature across agents
+        # but unused — Claude's probe is independent of the working dir.
+        _ = cwd
         if launch_target is None:
             return await probe_claude_usage()
         return await probe_claude_usage_remote(launch_target)
@@ -266,6 +273,23 @@ class ClaudeTtyPlugin(TmuxPlugin):
                 completions.append(item)
                 seen.add(key)
         return completions
+
+    async def _conversation_exists(
+        self,
+        runtime: "SessionRuntime",
+        thread_id: str,
+        cwd: str,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> bool:
+        """Whether Claude has persisted ``thread_id`` to disk.
+
+        claude_tty stores transcripts in the same ``~/.claude/projects``
+        tree claude_code uses, so the existence check defers to the
+        claude_code agent's launch contract.
+        """
+        inner = runtime.registry.get("claude_code")
+        assert isinstance(inner, AgentLaunchContract)
+        return await inner.conversation_exists(thread_id, cwd, launch_target)
 
     # ── Session lifecycle ────────────────────────────────────────────────────
 
@@ -432,7 +456,7 @@ class ClaudeTtyPlugin(TmuxPlugin):
 
         effective_thread_id: str | None = None
         if thread_id and await self._conversation_exists(
-            "claude_code", thread_id, session.cwd, launch_target
+            runtime, thread_id, session.cwd, launch_target
         ):
             effective_thread_id = thread_id
 
@@ -725,7 +749,7 @@ class ClaudeTtyPlugin(TmuxPlugin):
         # the pane. Reuse the same thread id via `--session-id` in that case so the
         # relaunch starts the (still-empty) conversation cleanly with the new flags.
         resumed = await self._conversation_exists(
-            "claude_code", thread_id, session.cwd, launch_target
+            runtime, thread_id, session.cwd, launch_target
         )
         identity = ["--resume", thread_id] if resumed else ["--session-id", thread_id]
         launch_args = [*identity, *flag_pairs, *base_args]

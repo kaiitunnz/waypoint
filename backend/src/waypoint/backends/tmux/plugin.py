@@ -10,12 +10,7 @@ because no protocol is available to set them mid-session.
 """
 
 import asyncio
-import json
 import logging
-import os
-import re
-import shlex
-import uuid
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Never
 from fastapi import HTTPException, status
 from pydantic import BaseModel
 
+from waypoint.backends.base import AgentLaunchContract
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
@@ -285,11 +281,11 @@ class TmuxPlugin:
             if session.launch_target_id
             else None
         )
+        # The account-level probe is uniform across agents; ``cwd`` is
+        # always supplied (codex's ``/status`` PTY fallback needs it, the
+        # others ignore it) so no per-backend call shape is needed here.
         try:
-            if session.backend == "codex":
-                snapshot = await probe(runtime, launch_target, cwd=session.cwd)
-            else:
-                snapshot = await probe(runtime, launch_target)
+            snapshot = await probe(runtime, launch_target, cwd=session.cwd)
         except Exception:  # noqa: BLE001
             log.exception(
                 "tmux rate-limit probe failed",
@@ -320,11 +316,21 @@ class TmuxPlugin:
         #    so the conversation continues.
         state = session.transport_state
         if session.status != SessionStatus.EXITED:
+            inner = self._agent_launch(runtime, session.backend)
             runtime._ensure_monitor(session.id)
-            if session.backend == "codex" and "thread_id" not in state:
+            # Agents whose id only appears post-launch (no pregenerated id)
+            # need the rollout/thread-id watcher resumed if we never captured
+            # one; agents that pregenerate their id (claude) have nothing to
+            # discover.
+            if inner.pregenerate_thread_id() is None and "thread_id" not in state:
                 lt = runtime._find_launch_target(session.launch_target_id)
-                self._spawn_codex_thread_id_watcher(
-                    runtime, session.id, session.cwd, session.created_at, lt
+                self._spawn_thread_id_watcher(
+                    runtime,
+                    session.backend,
+                    session.id,
+                    session.cwd,
+                    session.created_at,
+                    lt,
                 )
             self._spawn_rate_limit_watcher(runtime, session)
             return
@@ -343,6 +349,7 @@ class TmuxPlugin:
         # under the old tmux session name so the new ``new-session``
         # doesn't collide; ignore errors since the typical case is that
         # nothing is there.
+        inner = self._agent_launch(runtime, session.backend)
         old_tmux_session = state.get("tmux_session")
         if old_tmux_session:
             with suppress(TmuxError):
@@ -362,12 +369,14 @@ class TmuxPlugin:
         # resume. Fall back to verbatim launch args in that case.
         launch_target = runtime._find_launch_target(session.launch_target_id)
         effective_thread_id: str | None = None
-        if thread_id and await self._conversation_exists(
-            session.backend, thread_id, session.cwd, launch_target
+        if thread_id and await inner.conversation_exists(
+            thread_id, session.cwd, launch_target
         ):
             effective_thread_id = thread_id
-        launch_args = self._resume_args(
-            session.backend, effective_thread_id, list(stored_args)
+        launch_args = (
+            inner.resume_args(effective_thread_id, list(stored_args))
+            if effective_thread_id
+            else list(stored_args)
         )
         try:
             command = runtime._command_for_backend(
@@ -419,13 +428,14 @@ class TmuxPlugin:
             "pid": target.pane_pid,
             "launch_args": launch_args,
         }
-        # Keep claude's pre-generated uuid even when the conversation
-        # file doesn't exist yet — the next reconnect re-checks. Codex
-        # gets its uuid from the rollout watcher, so a phantom carry-
-        # forward would suppress the watcher-spawn guard below.
+        # Keep a pregenerating agent's id (claude's ``--session-id`` uuid)
+        # even when the conversation file doesn't exist yet — the next
+        # reconnect re-checks. Agents that discover their id post-launch
+        # (codex's rollout watcher) must not carry a phantom forward, or
+        # it would suppress the watcher-spawn guard below.
         if effective_thread_id:
             new_state["thread_id"] = effective_thread_id
-        elif session.backend == "claude_code" and thread_id:
+        elif inner.pregenerate_thread_id() is not None and thread_id:
             new_state["thread_id"] = thread_id
         runtime.storage.update_session(
             session.id, transport_state=new_state, status=SessionStatus.STARTING
@@ -440,9 +450,9 @@ class TmuxPlugin:
             session.id, message, status=SessionStatus.STARTING
         )
         runtime._ensure_monitor(session.id)
-        if session.backend == "codex" and not effective_thread_id:
-            self._spawn_codex_thread_id_watcher(
-                runtime, session.id, session.cwd, now, launch_target
+        if inner.pregenerate_thread_id() is None and not effective_thread_id:
+            self._spawn_thread_id_watcher(
+                runtime, session.backend, session.id, session.cwd, now, launch_target
             )
         self._spawn_rate_limit_watcher(runtime, session)
 
@@ -508,12 +518,15 @@ class TmuxPlugin:
             status=SessionStatus.IDLE,
         )
         runtime._ensure_monitor(session.id)
-        # Respawn the codex rollout watcher if we never captured a uuid
-        # — the prior watcher was cancelled by terminate_session.
-        if session.backend == "codex" and not prior_thread_id:
+        # Respawn the post-launch thread-id watcher if we never captured a
+        # uuid — the prior watcher was cancelled by terminate_session.
+        # Agents that pregenerate their id (claude) have nothing to discover.
+        inner = self._agent_launch(runtime, session.backend)
+        if inner.pregenerate_thread_id() is None and not prior_thread_id:
             launch_target = runtime._find_launch_target(session.launch_target_id)
-            self._spawn_codex_thread_id_watcher(
+            self._spawn_thread_id_watcher(
                 runtime,
+                session.backend,
                 session.id,
                 session.cwd,
                 datetime.now(UTC),
@@ -521,181 +534,40 @@ class TmuxPlugin:
             )
         self._spawn_rate_limit_watcher(runtime, session)
 
-    async def _conversation_exists(
-        self,
-        backend: str,
-        thread_id: str,
-        cwd: str,
-        launch_target: SshLaunchTargetConfig | None,
-    ) -> bool:
-        """Return True if the inner CLI has actually persisted ``thread_id``.
-
-        Both Claude and Codex defer conversation-file creation until
-        first input. Resuming a never-written thread makes the CLI exit
-        with "no conversation found"; the caller falls back to a
-        verbatim launch when this returns False.
-        """
-        if backend == "claude_code":
-            # ~/.claude/projects/<dashed-absolute-cwd>/<uuid>.jsonl —
-            # but the dashed key uses claude's view of the absolute cwd,
-            # which may not match what we have on hand (SSH sessions
-            # carry the raw ``~/foo`` form; ``cd`` symlinks resolve on
-            # the remote). UUIDs are globally unique under projects/, so
-            # glob across all project dirs and pick the file by name.
-            needle = f"{thread_id}.jsonl"
-            if launch_target is None:
-                projects = Path.home() / ".claude" / "projects"
-                if not projects.is_dir():
-                    return False
-                return any(projects.glob(f"*/{needle}"))
-            # ``$HOME`` must be left *outside* the quoted needle so the
-            # remote shell expands it; shlex-quoting the whole path
-            # would single-quote the dollar and look for a literal
-            # ``$HOME`` directory.
-            stdout = await self._ssh_capture(
-                launch_target,
-                f"ls $HOME/.claude/projects/*/{shlex.quote(needle)} "
-                "2>/dev/null | head -n 1",
-            )
-            return bool(stdout.strip())
-        if backend == "codex":
-            # $CODEX_HOME/sessions/YYYY/MM/DD/rollout-*-<uuid>.jsonl
-            needle = f"-{thread_id}.jsonl"
-            if launch_target is None:
-                home = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
-                sessions_dir = home / "sessions"
-                if not sessions_dir.is_dir():
-                    return False
-                for entry in sessions_dir.glob("*/*/*/rollout-*.jsonl"):
-                    if entry.name.endswith(needle):
-                        return True
-                return False
-            stdout = await self._ssh_capture(
-                launch_target,
-                f'ls "${{CODEX_HOME:-$HOME/.codex}}/sessions/"*/*/*/rollout-*{needle} '
-                "2>/dev/null | head -n 1",
-            )
-            return bool(stdout.strip())
-        return False
-
     @staticmethod
-    async def _ssh_capture(
-        launch_target: SshLaunchTargetConfig, remote_cmd: str
-    ) -> str:
-        """``ssh <host> <cmd>`` — returns stdout (empty on non-zero exit)."""
-        proc = await asyncio.create_subprocess_exec(
-            launch_target.ssh_bin,
-            *launch_target.ssh_args,
-            launch_target.ssh_destination,
-            remote_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await proc.communicate()
-        if proc.returncode != 0:
-            return ""
-        return stdout.decode("utf-8", errors="ignore")
+    def _agent_launch(runtime: "SessionRuntime", backend: str) -> AgentLaunchContract:
+        """The wrapped agent's launch contract for ``backend``.
 
-    def _inner_cli_flags(
-        self,
-        backend: str,
-        *,
-        model: str | None,
-        effort: str | None,
-        permission_mode: str | None,
-    ) -> list[str]:
-        """Build launch-time flags for the wrapped CLI.
-
-        Mirrors the structured-launch flag set the user picks in
-        ``LaunchPanel``: model, effort, permission mode. The interactive
-        CLIs accept these at startup; subsequent swap requires relaunch,
-        not in scope for the tmux wrapper today.
-
-        Codex's CLI has no ``--effort`` flag (effort is selected through
-        the ``/model`` popup) so it's intentionally omitted; the caller
-        also nulls ``effort`` on the SessionRecord for codex tmux launches
-        to keep the UI consistent. Codex permission modes don't map
-        cleanly to ``-a``/``-s`` flags (``auto_review`` and ``plan`` are
-        collaboration-mode constructs, not pure approval policies), so
-        only the two unambiguous presets translate today.
+        Every backend a pane can wrap is an agent plugin mixing in
+        :class:`DefaultLaunchContract`, so the assertion documents the
+        invariant: the tmux wrapper only ever resolves agent ids here, never
+        its own transport id.
         """
-        flags: list[str] = []
-        if backend == "claude_code":
-            if model:
-                flags += ["--model", model]
-            if effort:
-                flags += ["--effort", effort]
-            if permission_mode:
-                flags += ["--permission-mode", permission_mode]
-        elif backend == "codex":
-            if model:
-                flags += ["-m", model]
-            if permission_mode == "default":
-                flags += ["-a", "on-request", "-s", "workspace-write"]
-            elif permission_mode == "full_access":
-                flags += ["--dangerously-bypass-approvals-and-sandbox"]
-        return flags
+        inner = runtime.registry.get(backend)
+        assert isinstance(inner, AgentLaunchContract)
+        return inner
 
-    def _resume_args(
-        self, backend: str, thread_id: str | None, stored_args: list[str]
-    ) -> list[str]:
-        """Translate the original launch args into the inner CLI's resume form."""
-        if backend == "claude_code" and thread_id:
-            # stored_args may carry ``--session-id <uuid>`` (the initial
-            # create form) or ``--resume <uuid>`` (the prior reconnect's
-            # output). Strip both so the new prefix doesn't compound on
-            # repeated reconnects.
-            scrubbed: list[str] = []
-            skip = 0
-            for arg in stored_args:
-                if skip:
-                    skip -= 1
-                    continue
-                if arg in ("--session-id", "--resume"):
-                    skip = 1
-                    continue
-                scrubbed.append(arg)
-            return ["--resume", thread_id, *scrubbed]
-        if backend == "codex" and thread_id:
-            # ``codex resume <uuid>`` is a subcommand, not a flag. Drop
-            # any prior ``resume <uuid>`` prefix so the new one doesn't
-            # compound across reconnects. Asymmetry with claude's
-            # flag-name scrub is deliberate: ``resume`` here is the
-            # subcommand position and a user can't legitimately place
-            # the literal string ``resume`` first via launch args.
-            scrubbed = list(stored_args)
-            if len(scrubbed) >= 2 and scrubbed[0] == "resume":
-                scrubbed = scrubbed[2:]
-            return ["resume", thread_id, *scrubbed]
-        return list(stored_args)
-
-    def _spawn_codex_thread_id_watcher(
+    def _spawn_thread_id_watcher(
         self,
         runtime: "SessionRuntime",
+        backend: str,
         session_id: str,
         cwd: str,
         since: datetime,
         launch_target: SshLaunchTargetConfig | None,
     ) -> None:
-        """Spawn a one-shot task that captures Codex's session UUID.
+        """Spawn the agent's post-launch thread-id discovery, if it has one.
 
-        Codex writes its rollout file to
-        ``$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<ts>-<UUID>.jsonl``
-        only after the first persist (typically the first user input),
-        and the UUID is embedded in the filename. The watcher polls
-        for that file (locally or over SSH for remote launch targets)
-        and stores ``transport_state.thread_id`` when found so a later
-        reconnect can ``codex resume <uuid>``.
-
-        The interactive ``codex`` CLI exposes no session-id flag, so
-        capture has to happen post-launch.
+        Agents whose native id only appears after the first persist (codex
+        writes a ``rollout-<ts>-<uuid>.jsonl``) discover it here; the agent
+        owns the polling and stores ``transport_state.thread_id`` so a later
+        reconnect can resume. A no-op for agents that pregenerate their id.
         """
         if session_id in runtime._tmux_thread_id_watchers:
             return
+        inner = self._agent_launch(runtime, backend)
         task = asyncio.create_task(
-            self._capture_codex_thread_id(
-                runtime, session_id, cwd, since, launch_target
-            )
+            inner.capture_thread_id(runtime, session_id, cwd, since, launch_target)
         )
         runtime._tmux_thread_id_watchers[session_id] = task
 
@@ -749,191 +621,6 @@ class TmuxPlugin:
         finally:
             runtime._tmux_rate_limit_watchers.pop(session_id, None)
 
-    # Filename UUID matches the trailing ``<uuid>`` in
-    # ``rollout-YYYY-MM-DDThh-mm-ss-<UUID>.jsonl``.
-    _ROLLOUT_UUID_RE = re.compile(
-        r"rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-"
-        r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-        r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$"
-    )
-
-    async def _capture_codex_thread_id(
-        self,
-        runtime: "SessionRuntime",
-        session_id: str,
-        cwd: str,
-        since: datetime,
-        launch_target: SshLaunchTargetConfig | None,
-    ) -> None:
-        # Give up after this many seconds of polling; if the user never
-        # interacted, there's no thread to resume and a fresh launch on
-        # reconnect is the correct behavior anyway.
-        DEADLINE = 30 * 60  # 30 minutes
-        # Polling interval: local fs is cheap, but the remote variant
-        # opens an SSH connection per tick, so back off there.
-        POLL_INTERVAL = 2.0 if launch_target is None else 10.0
-        elapsed = 0.0
-        try:
-            while elapsed < DEADLINE:
-                # Probe before sleeping so we don't waste POLL_INTERVAL
-                # in the case where the user has already typed and the
-                # rollout file exists when this watcher starts.
-                if launch_target is None:
-                    uuid_found = self._find_codex_thread_id_local(cwd, since)
-                else:
-                    uuid_found = await self._find_codex_thread_id_remote(
-                        cwd, since, launch_target
-                    )
-                if uuid_found is not None:
-                    session = runtime.storage.get_session(session_id)
-                    if session is None:
-                        return
-                    state = dict(session.transport_state or {})
-                    if state.get("thread_id"):
-                        return
-                    state["thread_id"] = uuid_found
-                    runtime.storage.update_session(session_id, transport_state=state)
-                    return
-                await asyncio.sleep(POLL_INTERVAL)
-                elapsed += POLL_INTERVAL
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            # The watcher is best-effort. Don't crash the session over
-            # a missing rollout file or a JSON decode hiccup.
-            return
-        finally:
-            runtime._tmux_thread_id_watchers.pop(session_id, None)
-
-    def _find_codex_thread_id_local(self, cwd: str, since: datetime) -> str | None:
-        codex_home = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
-        sessions_dir = codex_home / "sessions"
-        if not sessions_dir.is_dir():
-            return None
-        since_ts = since.timestamp()
-        best: tuple[float, str] | None = None
-        for entry in sessions_dir.glob("*/*/*/rollout-*.jsonl"):
-            try:
-                stat = entry.stat()
-            except OSError:
-                continue
-            if stat.st_mtime < since_ts - 5:
-                continue
-            match = self._ROLLOUT_UUID_RE.search(entry.name)
-            if not match:
-                continue
-            if not self._codex_rollout_matches_cwd(entry, cwd):
-                continue
-            if best is None or stat.st_mtime > best[0]:
-                best = (stat.st_mtime, match.group(1))
-        return best[1] if best else None
-
-    async def _find_codex_thread_id_remote(
-        self,
-        cwd: str,
-        since: datetime,
-        launch_target: SshLaunchTargetConfig,
-    ) -> str | None:
-        # Single SSH round-trip: list candidate rollout files and emit
-        # the filename + first JSONL line per file, tab-separated. The
-        # remote shell does the globbing; we filter in Python so the
-        # cwd-matching logic stays identical to the local path.
-        remote_cmd = (
-            'for f in "${CODEX_HOME:-$HOME/.codex}/sessions/"*/*/*/rollout-*.jsonl; '
-            "do "
-            '[ -f "$f" ] || continue; '
-            'printf "%s\\t" "$f"; '
-            'head -n1 "$f" 2>/dev/null; '
-            'printf "\\n"; '
-            "done 2>/dev/null"
-        )
-        stdout = await self._ssh_capture(launch_target, remote_cmd)
-        if not stdout:
-            return None
-
-        since_ts = since.timestamp()
-        best: tuple[float, str] | None = None
-        for line in stdout.splitlines():
-            path, sep, header = line.partition("\t")
-            if not sep or not header.strip():
-                continue
-            # Filename embeds the timestamp the rollout was opened at;
-            # use that to filter out files older than the watcher start
-            # (no need for a stat round-trip).
-            match = self._ROLLOUT_UUID_RE.search(path)
-            if not match:
-                continue
-            ts = self._parse_rollout_timestamp(path)
-            if ts is not None and ts < since_ts - 5:
-                continue
-            try:
-                payload = json.loads(header.strip())
-            except (json.JSONDecodeError, ValueError):
-                continue
-            if not self._payload_cwd_matches(payload, cwd):
-                continue
-            score = ts if ts is not None else since_ts
-            if best is None or score > best[0]:
-                best = (score, match.group(1))
-        return best[1] if best else None
-
-    @staticmethod
-    def _parse_rollout_timestamp(path: str) -> float | None:
-        """Extract the YYYY-MM-DDThh-mm-ss prefix from a rollout filename.
-
-        Codex writes the filename component in UTC
-        (``rollout/src/metadata.rs::parse_timestamp_to_utc``); building
-        an aware UTC datetime keeps comparisons against the watcher's
-        ``since`` (also UTC) consistent on non-UTC controllers.
-        """
-        match = re.search(
-            r"rollout-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-", path
-        )
-        if not match:
-            return None
-        try:
-            return datetime(
-                int(match.group(1)),
-                int(match.group(2)),
-                int(match.group(3)),
-                int(match.group(4)),
-                int(match.group(5)),
-                int(match.group(6)),
-                tzinfo=UTC,
-            ).timestamp()
-        except ValueError:
-            return None
-
-    @staticmethod
-    def _payload_cwd_matches(payload: Any, cwd: str) -> bool:
-        for candidate in (
-            payload.get("payload") if isinstance(payload, dict) else None,
-            payload if isinstance(payload, dict) else None,
-        ):
-            if not isinstance(candidate, dict):
-                continue
-            recorded = candidate.get("cwd")
-            if isinstance(recorded, str) and recorded == cwd:
-                return True
-        return False
-
-    @classmethod
-    def _codex_rollout_matches_cwd(cls, path: Path, cwd: str) -> bool:
-        try:
-            with path.open("r", encoding="utf-8", errors="ignore") as fh:
-                first_line = fh.readline()
-        except OSError:
-            return False
-
-        try:
-            payload = json.loads(first_line)
-        except (json.JSONDecodeError, ValueError):
-            return False
-        # SessionMeta is either nested under "payload" or at the top
-        # level depending on Codex's rollout schema version. The
-        # ``_payload_cwd_matches`` helper checks both.
-        return cls._payload_cwd_matches(payload, cwd)
-
     async def list_threads(
         self,
         runtime: "SessionRuntime",
@@ -980,32 +667,45 @@ class TmuxPlugin:
         resolved_model: str | None,
         resolved_effort: str | None,
     ) -> SessionRecord:
-        # Pre-generate Claude's session UUID via ``--session-id`` so we
-        # have a thread id ready for the reconnect path. Codex has no
-        # equivalent flag — its uuid is captured asynchronously by
-        # ``_spawn_codex_thread_id_watcher``.
-        inner_flags = self._inner_cli_flags(
-            request.backend,
+        inner = self._agent_launch(runtime, request.backend)
+        inner_flags = inner.launch_flags(
             model=resolved_model,
             effort=resolved_effort,
             permission_mode=permission_mode,
         )
         # Match the SessionRecord to what the wrapped CLI actually
-        # received. Codex's CLI has no --effort flag and only two of its
-        # waypoint permission presets map to launch flags, so storing the
-        # un-applied values would make the pill and launch-panel re-open
-        # lie about runtime behavior.
-        persisted_effort = resolved_effort if request.backend != "codex" else None
-        persisted_permission_mode = permission_mode
-        if request.backend == "codex" and permission_mode not in (
-            "default",
-            "full_access",
-        ):
-            persisted_permission_mode = None
+        # received: persist a control value only when the agent's
+        # launch_flags actually pin it at startup. Codex, for instance,
+        # has no --effort flag and maps only two of its permission presets,
+        # so storing the un-applied values would make the pill and
+        # launch-panel re-open lie about runtime behavior.
+        persisted_effort = (
+            resolved_effort
+            if inner.launch_flags(
+                model=resolved_model,
+                effort=None,
+                permission_mode=permission_mode,
+            )
+            != inner_flags
+            else None
+        )
+        persisted_permission_mode = (
+            permission_mode
+            if inner.launch_flags(
+                model=resolved_model,
+                effort=resolved_effort,
+                permission_mode=None,
+            )
+            != inner_flags
+            else None
+        )
         launch_args = [*inner_flags, *request.args]
-        thread_id: str | None = None
-        if request.backend == "claude_code":
-            thread_id = str(uuid.uuid4())
+        # Agents that accept a pregenerated id (claude's ``--session-id``)
+        # get one pinned now so the reconnect path has a thread id ready;
+        # agents that reveal their id post-launch return None here and rely
+        # on the thread-id watcher instead.
+        thread_id = inner.pregenerate_thread_id()
+        if thread_id is not None:
             launch_args = ["--session-id", thread_id, *launch_args]
         command = runtime._command_for_backend(
             request.backend,
@@ -1066,9 +766,9 @@ class TmuxPlugin:
             self.format_start_message(request.backend, launch_target, request.cwd),
         )
         runtime._ensure_monitor(session.id)
-        if request.backend == "codex":
-            self._spawn_codex_thread_id_watcher(
-                runtime, session.id, session.cwd, now, launch_target
+        if thread_id is None:
+            self._spawn_thread_id_watcher(
+                runtime, request.backend, session.id, session.cwd, now, launch_target
             )
         self._spawn_rate_limit_watcher(runtime, session)
         return runtime.get_session(session.id)
@@ -1088,13 +788,13 @@ class TmuxPlugin:
         The structured-plugin ``import_thread`` calls this when the
         user picks ``launch_mode=tmux_wrapper`` (or when ``auto``
         decides the structured backend isn't available for managed
-        launch). The plugin owns the resume contract for each inner
-        CLI (``--resume <uuid>`` for claude, ``resume <uuid>``
-        sub-command for codex) so the structured plugins don't have
-        to know about it.
+        launch). The agent owns the resume contract for its CLI
+        (``--resume <uuid>`` for claude, ``resume <uuid>`` sub-command
+        for codex) so the structured plugins don't have to know about it.
         """
+        inner = self._agent_launch(runtime, backend)
         launch_target = runtime._find_launch_target(launch_target_id)
-        if not await self._conversation_exists(backend, thread_id, cwd, launch_target):
+        if not await inner.conversation_exists(thread_id, cwd, launch_target):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
@@ -1102,7 +802,7 @@ class TmuxPlugin:
                     f"{thread_id} — cannot resume via tmux"
                 ),
             )
-        launch_args = self._resume_args(backend, thread_id, [])
+        launch_args = inner.resume_args(thread_id, [])
         session_id = runtime._generate_session_id(backend)
         try:
             command = runtime._command_for_backend(

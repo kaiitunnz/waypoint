@@ -16,12 +16,13 @@ waypoint models      # the model ids and reasoning efforts each backend offers
 ```
 
 `codex` and `opencode` discover their model lists live; `claude_code` serves a
-static curated list; `tmux` has none. `waypoint models` reports the exact ids
-and efforts each backend offers right now — run it and pass those ids verbatim
-to `--model` / `--effort`, rather than guessing from memory. With no argument it
-sweeps every selectable backend (a backend whose live discovery is down is
-reported with an `error` entry instead of failing the sweep); pass one
-(`waypoint models codex`) to query a single backend. The names below are
+static curated list; `claude_tty` has none (it tails Claude's TTY output, no
+separate model registry). `waypoint models` reports the exact ids and efforts
+each backend offers right now — run it and pass those ids verbatim to `--model`
+/ `--effort`, rather than guessing from memory. With no argument it sweeps every
+selectable agent backend (`tmux` is a transport and is excluded); a backend
+whose live discovery is down is reported with an `error` entry instead of
+failing the sweep. Pass one (`waypoint models codex`) to query a single backend. The names below are
 illustrative (mid-2026) and will age — trust `waypoint models` over them.
 
 If you are unsure whether the harness or model you want is available, or whether
@@ -46,11 +47,15 @@ a backend or model blindly.
   agents/rulesets as permission modes, `/compact`. *Reach for it when you need a
   specific, open, or local model, want to spread load across providers, or must
   avoid one vendor's rate limits.*
-- **`tmux`** — a raw terminal wrapper, not an agent: no model/effort/permission
-  knobs and an unstructured (scraped) transcript, but full shell and host access
-  and it can drive any CLI tool. Also the fallback when a structured backend is
-  unavailable. *Reach for it only when a task needs arbitrary shell tools or host
-  access — not for model-routed work.*
+- **`claude_tty`** — a TTY-tail wrapper around `claude_code`: launches Claude
+  Code in a tmux pane and scrapes its terminal output. Unstructured transcript
+  (no hook events), but selectable as `--backend claude_tty` and accepts
+  `--model`. *Use as a fallback when the structured `claude_code` transport is
+  unavailable — not as a first choice.*
+- **`tmux`** — a raw transport, not a selectable agent backend: no model /
+  effort / permission knobs, unstructured (scraped) transcript, but full shell
+  and host access. It backs `claude_tty` and other TTY-style sessions
+  internally; you do not spawn workers with `--backend tmux` directly.
 
 Mixing is the point: a crew can run different harnesses side by side, each placed
 where its task's code lives (`references/org-template.md`).

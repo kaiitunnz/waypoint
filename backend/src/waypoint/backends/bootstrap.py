@@ -1,7 +1,7 @@
 """Default registry assembly — entry point for built-in plugins.
 
-The built-ins (Claude Code, Codex, tmux) are registered directly so
-they always ship with waypoint. After that, entry points published
+The built-ins (Claude Code, Claude TTY, Codex, OpenCode, and tmux) are
+registered directly so they always ship with waypoint. After that, entry points published
 under the ``waypoint.backends`` group are loaded so third-party
 packages can register additional plugins by adding a single line to
 their ``pyproject.toml``:

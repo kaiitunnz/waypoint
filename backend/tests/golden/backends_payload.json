@@ -2,6 +2,12 @@
   {
     "id": "claude_code",
     "transport_id": "claude_cli",
+    "supported_transports": [
+      "claude_cli",
+      "claude_tty",
+      "tmux"
+    ],
+    "default_transport": "claude_cli",
     "label": "Claude Code",
     "badges": {
       "glyph": "C",
@@ -261,6 +267,10 @@
   {
     "id": "claude_tty",
     "transport_id": "claude_tty",
+    "supported_transports": [
+      "claude_tty"
+    ],
+    "default_transport": "claude_tty",
     "label": "Claude TUI",
     "badges": {
       "glyph": "C",
@@ -520,6 +530,11 @@
   {
     "id": "codex",
     "transport_id": "codex_app_server",
+    "supported_transports": [
+      "codex_app_server",
+      "tmux"
+    ],
+    "default_transport": "codex_app_server",
     "label": "Codex",
     "badges": {
       "glyph": "X",
@@ -687,6 +702,11 @@
   {
     "id": "opencode",
     "transport_id": "opencode_http",
+    "supported_transports": [
+      "opencode_http",
+      "tmux"
+    ],
+    "default_transport": "opencode_http",
     "label": "OpenCode",
     "badges": {
       "glyph": "O",
@@ -866,6 +886,10 @@
   {
     "id": "tmux",
     "transport_id": "tmux",
+    "supported_transports": [
+      "tmux"
+    ],
+    "default_transport": "tmux",
     "label": "Tmux",
     "badges": {
       "glyph": "T",

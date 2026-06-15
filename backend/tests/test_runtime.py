@@ -2215,6 +2215,91 @@ async def test_create_session_local_claude_defaults_to_tty_transport(
 
 
 @pytest.mark.asyncio
+async def test_create_session_default_transport_falls_back_when_driver_unavailable(
+    monkeypatch, tmp_path
+) -> None:
+    # When the default transport's driver isn't ready, an unpinned spawn falls
+    # through to the managed-launch wrapper rather than failing, mirroring the
+    # legacy launch_mode-derived fallback.
+    runtime, storage, settings = make_runtime(tmp_path)
+    tty = runtime.registry.get("claude_tty")
+    tmux = runtime.registry.fallback_for_managed_launch()
+    assert tmux is not None
+    calls: list[tuple[str, str, str | None]] = []
+
+    monkeypatch.setattr(tty, "is_available_for_managed_launch", lambda _runtime: False)
+    monkeypatch.setattr(
+        tty,
+        "create_session",
+        lambda *args, **kwargs: pytest.fail("an unavailable default must not launch"),
+    )
+    monkeypatch.setattr(
+        tmux,
+        "create_session",
+        _fake_plugin_create_session(storage, settings, transport="tmux", calls=calls),
+    )
+    monkeypatch.setattr(
+        runtime, "_warm_command_completions", lambda *_args, **_kwargs: None
+    )
+
+    session = await runtime.create_session(
+        SessionCreateRequest(
+            backend="claude_code",
+            cwd="~/workspace",
+            args=[],
+            source_mode=SessionSource.MANAGED,
+        )
+    )
+
+    assert calls == [(session.id, "claude_code", None)]
+    assert session.transport == "tmux"
+
+
+@pytest.mark.asyncio
+async def test_create_session_explicit_transport_skips_unavailable_fallback(
+    monkeypatch, tmp_path
+) -> None:
+    # An explicitly pinned transport is honored even when its driver reports
+    # unavailable — only the default (unpinned) path falls back to the wrapper,
+    # so a deliberate pin never silently swaps to tmux.
+    runtime, storage, settings = make_runtime(tmp_path)
+    tty = runtime.registry.get("claude_tty")
+    tmux = runtime.registry.fallback_for_managed_launch()
+    assert tmux is not None
+    calls: list[tuple[str, str, str | None]] = []
+
+    monkeypatch.setattr(tty, "is_available_for_managed_launch", lambda _runtime: False)
+    monkeypatch.setattr(
+        tty,
+        "create_session",
+        _fake_plugin_create_session(
+            storage, settings, transport="claude_tty", calls=calls
+        ),
+    )
+    monkeypatch.setattr(
+        tmux,
+        "create_session",
+        lambda *args, **kwargs: pytest.fail("an explicit pin must not fall back"),
+    )
+    monkeypatch.setattr(
+        runtime, "_warm_command_completions", lambda *_args, **_kwargs: None
+    )
+
+    session = await runtime.create_session(
+        SessionCreateRequest(
+            backend="claude_code",
+            cwd="~/workspace",
+            transport="claude_tty",
+            args=[],
+            source_mode=SessionSource.MANAGED,
+        )
+    )
+
+    assert calls == [(session.id, "claude_code", "claude_tty")]
+    assert session.transport == "claude_tty"
+
+
+@pytest.mark.asyncio
 async def test_list_importable_codex_threads_filters_existing_session(
     monkeypatch, tmp_path
 ) -> None:

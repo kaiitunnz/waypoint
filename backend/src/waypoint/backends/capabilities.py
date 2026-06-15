@@ -26,7 +26,74 @@ class SlashCommandSpec(_FrozenModel):
     argument_hint: str | None = None
 
 
+class AgentCapabilities(_FrozenModel):
+    """What the agent (the CLI / protocol) can do, independent of how a
+    session drives it.
+
+    These are properties of the coding agent itself — its model catalogue,
+    permission-mode vocabulary, thread/fork story, slash commands — and stay
+    the same whether the agent is driven through a structured adapter or a
+    tmux pane. ``supports_plan_approval`` and ``supports_config_overrides``
+    are not in the original split brief but are agent traits (claude's plan
+    gate, codex's ``--config`` wrapping), so they live here.
+    """
+
+    model_source: ModelSource = ModelSource.NONE
+    permission_modes: tuple[PermissionModeSpec, ...] = ()
+    effort_levels: tuple[str, ...] = ()
+    slash_commands: tuple[SlashCommandSpec, ...] = ()
+    approval_decisions: tuple[str, ...] = ("approve", "decline")
+    supports_thread_discovery: bool = False
+    supports_thread_import: bool = False
+    supports_fork: bool = False
+    supports_plan_approval: bool = False
+    supports_approval_note: bool = False
+    supports_attachments: bool = False
+    supports_custom_cli_args: bool = False
+    supports_config_overrides: bool = False
+    supports_slash_compact: bool = False
+    cli_binary: str | None = None
+    target_aliases: tuple[str, ...] = ()
+    badges: dict[str, str] = Field(default_factory=dict)
+
+
+class TransportCapabilities(_FrozenModel):
+    """What the transport (how the agent is driven) can do.
+
+    These are properties of the channel — structured stream vs scraped pane,
+    whether a detached session can be resumed/re-attached, which control
+    knobs can be set inline vs require a restart, and whether this transport
+    is the managed-launch fallback. ``supports_terminate`` is a transport
+    trait (can the channel tear a session down) not in the original brief but
+    placed here for that reason.
+    """
+
+    is_structured: bool
+    supports_resume: bool
+    supports_reattach_after_exit: bool = False
+    supports_terminate: bool = True
+    supports_set_model_inline: bool = False
+    supports_set_effort_inline: bool = False
+    supports_set_effort_with_restart: bool = False
+    supports_set_permission_mode_inline: bool = False
+    settings_change_interrupts_turn: bool = False
+    is_fallback_for_managed_launch: bool = False
+
+
 class BackendCapabilities(_FrozenModel):
+    """Flat compatibility aggregate over the agent / transport split.
+
+    A session is an (agent, transport) pair, and capabilities partition along
+    that axis — see :class:`AgentCapabilities` and :class:`TransportCapabilities`.
+    This flat model is retained as the single descriptor a plugin declares and
+    the runtime/API read: its field set and order are frozen so the
+    ``GET /api/backends`` payload stays byte-identical, and :meth:`split`,
+    :meth:`agent_capabilities`, :meth:`transport_capabilities`, and
+    :meth:`from_split` bridge to the two axis models. Migrating plugins to
+    declare the two halves directly (and a per-axis registry) is left to a
+    later phase; this is the thin compat layer.
+    """
+
     is_structured: bool
     supports_resume: bool
     # The plugin's ``restore_session`` knows how to bring an EXITED or
@@ -90,3 +157,55 @@ class BackendCapabilities(_FrozenModel):
     # one registered plugin should set this to ``True``; today only
     # the tmux fallback does.
     is_fallback_for_managed_launch: bool = False
+
+    def agent_capabilities(self) -> AgentCapabilities:
+        """Project the agent-axis subset (CLI/protocol traits)."""
+        return AgentCapabilities(
+            model_source=self.model_source,
+            permission_modes=self.permission_modes,
+            effort_levels=self.effort_levels,
+            slash_commands=self.slash_commands,
+            approval_decisions=self.approval_decisions,
+            supports_thread_discovery=self.supports_thread_discovery,
+            supports_thread_import=self.supports_thread_import,
+            supports_fork=self.supports_fork,
+            supports_plan_approval=self.supports_plan_approval,
+            supports_approval_note=self.supports_approval_note,
+            supports_attachments=self.supports_attachments,
+            supports_custom_cli_args=self.supports_custom_cli_args,
+            supports_config_overrides=self.supports_config_overrides,
+            supports_slash_compact=self.supports_slash_compact,
+            cli_binary=self.cli_binary,
+            target_aliases=self.target_aliases,
+            badges=self.badges,
+        )
+
+    def transport_capabilities(self) -> TransportCapabilities:
+        """Project the transport-axis subset (how the agent is driven)."""
+        return TransportCapabilities(
+            is_structured=self.is_structured,
+            supports_resume=self.supports_resume,
+            supports_reattach_after_exit=self.supports_reattach_after_exit,
+            supports_terminate=self.supports_terminate,
+            supports_set_model_inline=self.supports_set_model_inline,
+            supports_set_effort_inline=self.supports_set_effort_inline,
+            supports_set_effort_with_restart=self.supports_set_effort_with_restart,
+            supports_set_permission_mode_inline=self.supports_set_permission_mode_inline,
+            settings_change_interrupts_turn=self.settings_change_interrupts_turn,
+            is_fallback_for_managed_launch=self.is_fallback_for_managed_launch,
+        )
+
+    def split(self) -> tuple[AgentCapabilities, TransportCapabilities]:
+        """The (agent, transport) pair this descriptor flattens."""
+        return self.agent_capabilities(), self.transport_capabilities()
+
+    @classmethod
+    def from_split(
+        cls, agent: AgentCapabilities, transport: TransportCapabilities
+    ) -> "BackendCapabilities":
+        """Recompose a flat descriptor from the two axis models.
+
+        The path a future phase uses once plugins declare the halves
+        directly; round-trips with :meth:`split`.
+        """
+        return cls(**transport.model_dump(), **agent.model_dump())

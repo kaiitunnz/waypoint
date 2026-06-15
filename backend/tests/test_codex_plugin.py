@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from waypoint.backends.codex.plugin import CodexPlugin
+from waypoint.launch_targets import SshLaunchTargetConfig
 
 
 @pytest.fixture
@@ -144,15 +145,15 @@ async def test_find_codex_thread_id_remote_filters_by_cwd(
         f'{{"id": "{uuid_b}", "cwd": "/remote/proj"}}\n'
     )
 
-    async def fake_ssh_capture(_target: object, _remote_cmd: str) -> str:
+    async def fake_ssh_capture(self: SshLaunchTargetConfig, _remote_cmd: str) -> str:
         return payload
 
-    monkeypatch.setattr(CodexPlugin, "_ssh_capture", staticmethod(fake_ssh_capture))
+    monkeypatch.setattr(SshLaunchTargetConfig, "ssh_capture", fake_ssh_capture)
 
     found = await plugin._find_codex_thread_id_remote(
         "/remote/proj",
         datetime(2026, 1, 1, tzinfo=UTC),
-        object(),  # type: ignore[arg-type]
+        SshLaunchTargetConfig(id="t", name="t", ssh_destination="remote"),
     )
 
     assert found == uuid_b

@@ -1,11 +1,20 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
+from waypoint.backends import BackendRegistry, get_registry, reset_registry_for_tests
 from waypoint.schemas import (
     SessionRateLimitUsage,
     SessionRecord,
     UsageWindow,
 )
 from waypoint.usage_dashboard import account_bucket_for, build_dashboard
+
+
+@pytest.fixture
+def registry() -> BackendRegistry:
+    reset_registry_for_tests()
+    return get_registry()
 
 
 def _snapshot(
@@ -47,39 +56,43 @@ def _session(
     )
 
 
-def test_account_bucket_claude_uses_org_and_tier() -> None:
+def test_account_bucket_claude_uses_org_and_tier(registry: BackendRegistry) -> None:
     snap = _snapshot(
         source="claude_code",
         notes=["CLI OAuth", "org: Acme", "org tier: enterprise"],
         updated_at=datetime.now(UTC),
     )
-    key, label = account_bucket_for(snap, session_id="s1")
+    key, label = account_bucket_for(snap, session_id="s1", registry=registry)
     assert key == "claude_code:Acme"
     assert label == "Acme · enterprise"
 
 
-def test_account_bucket_claude_without_tier_falls_back_to_org_only_label() -> None:
+def test_account_bucket_claude_without_tier_falls_back_to_org_only_label(
+    registry: BackendRegistry,
+) -> None:
     snap = _snapshot(
         source="claude_code",
         notes=["CLI OAuth", "org: Acme"],
         updated_at=datetime.now(UTC),
     )
-    _, label = account_bucket_for(snap, session_id="s1")
+    _, label = account_bucket_for(snap, session_id="s1", registry=registry)
     assert label == "Acme"
 
 
-def test_account_bucket_codex_uses_email_and_plan() -> None:
+def test_account_bucket_codex_uses_email_and_plan(registry: BackendRegistry) -> None:
     snap = _snapshot(
         source="codex",
         notes=["CLI OAuth", "plan: education", "user@example.com"],
         updated_at=datetime.now(UTC),
     )
-    key, label = account_bucket_for(snap, session_id="s1")
+    key, label = account_bucket_for(snap, session_id="s1", registry=registry)
     assert key == "codex:user@example.com"
     assert label == "user@example.com · plan: education"
 
 
-def test_account_bucket_no_account_info_falls_back_to_session_scope() -> None:
+def test_account_bucket_no_account_info_falls_back_to_session_scope(
+    registry: BackendRegistry,
+) -> None:
     claude = _snapshot(
         source="claude_code",
         notes=["CLI OAuth"],
@@ -90,17 +103,19 @@ def test_account_bucket_no_account_info_falls_back_to_session_scope() -> None:
         notes=["CLI OAuth"],
         updated_at=datetime.now(UTC),
     )
-    assert account_bucket_for(claude, session_id="s1") == (
+    assert account_bucket_for(claude, session_id="s1", registry=registry) == (
         "claude_code:session:s1",
         "Claude Code",
     )
-    assert account_bucket_for(codex, session_id="s2") == (
+    assert account_bucket_for(codex, session_id="s2", registry=registry) == (
         "codex:session:s2",
         "Codex",
     )
 
 
-def test_build_dashboard_lists_freshest_session_first() -> None:
+def test_build_dashboard_lists_freshest_session_first(
+    registry: BackendRegistry,
+) -> None:
     # The refresh path probes ``session_ids[0]``; if the oldest-encountered
     # session is exited, ``force_refresh_rate_limit_usage`` would silently
     # no-op. Putting the freshest-snapshot session first keeps refresh
@@ -126,13 +141,15 @@ def test_build_dashboard_lists_freshest_session_first() -> None:
         _session(sid="s-new", backend="claude_code", snapshot=newer),
         _session(sid="s-mid", backend="claude_code", snapshot=middle),
     ]
-    dashboard = build_dashboard(sessions)
+    dashboard = build_dashboard(sessions, registry)
     assert len(dashboard.buckets) == 1
     assert dashboard.buckets[0].session_ids[0] == "s-new"
     assert set(dashboard.buckets[0].session_ids) == {"s-old", "s-new", "s-mid"}
 
 
-def test_build_dashboard_groups_sessions_and_keeps_freshest_snapshot() -> None:
+def test_build_dashboard_groups_sessions_and_keeps_freshest_snapshot(
+    registry: BackendRegistry,
+) -> None:
     now = datetime(2026, 5, 11, 12, 0, tzinfo=UTC)
     older = _snapshot(
         source="claude_code",
@@ -154,7 +171,7 @@ def test_build_dashboard_groups_sessions_and_keeps_freshest_snapshot() -> None:
         _session(sid="s-old", backend="claude_code", snapshot=older),
         _session(sid="s-new", backend="claude_code", snapshot=newer),
     ]
-    dashboard = build_dashboard(sessions)
+    dashboard = build_dashboard(sessions, registry)
     assert len(dashboard.buckets) == 1
     bucket = dashboard.buckets[0]
     assert bucket.account_key == "claude_code:Acme"
@@ -163,15 +180,19 @@ def test_build_dashboard_groups_sessions_and_keeps_freshest_snapshot() -> None:
     assert set(bucket.session_ids) == {"s-old", "s-new"}
 
 
-def test_build_dashboard_skips_sessions_without_snapshot() -> None:
+def test_build_dashboard_skips_sessions_without_snapshot(
+    registry: BackendRegistry,
+) -> None:
     sessions = [
         _session(sid="s1", backend="claude_code", snapshot=None),
     ]
-    dashboard = build_dashboard(sessions)
+    dashboard = build_dashboard(sessions, registry)
     assert dashboard.buckets == []
 
 
-def test_build_dashboard_separates_backends_and_accounts() -> None:
+def test_build_dashboard_separates_backends_and_accounts(
+    registry: BackendRegistry,
+) -> None:
     now = datetime.now(UTC)
     claude = _snapshot(
         source="claude_code",
@@ -193,7 +214,7 @@ def test_build_dashboard_separates_backends_and_accounts() -> None:
         _session(sid="s2", backend="codex", snapshot=codex),
         _session(sid="s3", backend="codex", snapshot=codex_other),
     ]
-    dashboard = build_dashboard(sessions)
+    dashboard = build_dashboard(sessions, registry)
     keys = {bucket.account_key for bucket in dashboard.buckets}
     assert keys == {
         "claude_code:Acme",

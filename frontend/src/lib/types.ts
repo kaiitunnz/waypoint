@@ -241,6 +241,11 @@ export interface BackendCapabilities {
 export interface BackendDescriptor {
   id: Backend;
   transport_id: SessionTransport;
+  // Every transport this agent can be driven over (its native one plus any
+  // folded-in alternatives such as `claude_tty` or the generic `tmux` pane).
+  // The launch picker offers these and defaults to `default_transport`.
+  supported_transports: SessionTransport[];
+  default_transport: SessionTransport;
   label: string;
   badges: Record<string, string>;
   // The flat union, kept for back-compat; prefer composing `agent_capabilities`

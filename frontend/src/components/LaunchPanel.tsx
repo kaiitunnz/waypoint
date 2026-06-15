@@ -17,7 +17,12 @@ import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
 import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
 import type { BackendCatalog } from "@/lib/backends";
 import { humaniseBackend, launchModesFor } from "@/lib/backends";
-import { Backend, BackendModelListResponse, LaunchMode } from "@/lib/types";
+import {
+  Backend,
+  BackendModelListResponse,
+  LaunchMode,
+  SessionTransport,
+} from "@/lib/types";
 
 interface ThreadSummary {
   id: string;
@@ -51,6 +56,7 @@ interface LaunchPanelProps {
     model: string | null,
     effort: string | null,
     launchMode: LaunchMode,
+    transport: SessionTransport | null,
     args: string[],
     configOverrides: string[],
   ) => Promise<void>;
@@ -196,6 +202,7 @@ export function LaunchPanel({
         model.trim() || null,
         effortSupported ? effort.trim() || null : null,
         launchMode,
+        null,
         args,
         configOverrides,
       );

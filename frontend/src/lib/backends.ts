@@ -303,6 +303,104 @@ export function launchModesFor(
   return modes;
 }
 
+// Transport ids that some agent folds in as a NON-native transport — listed in
+// a descriptor's `supported_transports` but not its own `transport_id`. An agent
+// whose native transport is folded into another agent is therefore not a
+// top-level launch entry: e.g. `claude_tty` folds into `claude_code`, and `tmux`
+// folds into every agent.
+function foldedTransportIds(catalog?: BackendCatalog): Set<string> {
+  const folded = new Set<string>();
+  for (const descriptor of catalog?.all() ?? []) {
+    for (const transport of descriptor.supported_transports) {
+      if (transport !== descriptor.transport_id) folded.add(transport);
+    }
+  }
+  return folded;
+}
+
+// The agent-primary launch list: registered backends minus the managed-launch
+// fallback and minus any agent whose native transport is folded into another
+// agent's transport menu. Fully data-driven, so a new agent or a newly-folded
+// transport needs no frontend edit.
+export function launchableAgents(
+  backends: Backend[],
+  catalog?: BackendCatalog,
+): Backend[] {
+  const folded = foldedTransportIds(catalog);
+  return backends.filter((id) => {
+    if (isManagedLaunchWrapper(id, catalog)) return false;
+    const descriptor = catalog?.byId(id);
+    if (!descriptor) return true;
+    return !folded.has(descriptor.transport_id);
+  });
+}
+
+// The transports an agent can be launched over, in descriptor order.
+export function agentTransports(
+  backend: Backend,
+  catalog?: BackendCatalog,
+): SessionTransport[] {
+  return catalog?.byId(backend)?.supported_transports ?? [];
+}
+
+// The transport the launch picker should preselect for an agent.
+export function defaultTransportFor(
+  backend: Backend,
+  catalog?: BackendCatalog,
+): SessionTransport | null {
+  return catalog?.byId(backend)?.default_transport ?? null;
+}
+
+// Friendly, user-facing names for the launch transport picker. Distinct from
+// `transportLabel()`, which surfaces the raw descriptor label (e.g. "claude
+// cli") for badges and status lines. Falls back to a capability-derived label
+// so a newly-registered transport still renders sensibly without a frontend
+// edit.
+const TRANSPORT_PICKER_LABELS: Record<string, string> = {
+  claude_cli: "Structured",
+  claude_tty: "Terminal UI",
+  codex_app_server: "Structured",
+  opencode_http: "Structured",
+  tmux: "Terminal (raw)",
+};
+
+export function transportPickerLabel(
+  transport: SessionTransport,
+  catalog?: BackendCatalog,
+): string {
+  return (
+    TRANSPORT_PICKER_LABELS[transport] ??
+    (liveTerminal(transport, catalog) ? "Terminal" : "Structured")
+  );
+}
+
+const TRANSPORT_FIDELITY_HINTS: Record<string, string> = {
+  claude_cli: "Native structured adapter — full-fidelity transcript cards.",
+  claude_tty: "Real Claude Code terminal UI, tailed live — resumable.",
+  codex_app_server: "Native structured adapter — full-fidelity transcript cards.",
+  opencode_http: "Native structured adapter — full-fidelity transcript cards.",
+  tmux: "Generic terminal pane — live output, heuristic transcript.",
+};
+
+// A transport's fidelity for the launch picker: a coarse `kind` tag (drives the
+// visual indicator) plus a one-line trade-off hint. Both derive from the live
+// transport capabilities, with a friendlier per-transport hint when known.
+export function transportFidelity(
+  transport: SessionTransport,
+  catalog?: BackendCatalog,
+): { kind: "structured" | "terminal"; hint: string } {
+  const structured =
+    fidelityFor(transport, catalog) === "structured" &&
+    !liveTerminal(transport, catalog);
+  const kind = structured ? "structured" : "terminal";
+  const hint =
+    TRANSPORT_FIDELITY_HINTS[transport] ??
+    (kind === "structured"
+      ? "Structured transcript — full-fidelity cards."
+      : "Live terminal — heuristic transcript.");
+  return { kind, hint };
+}
+
 /** Single-flight catalog hook fed by `MeResponse.backends`. */
 export function useBackendCatalog(
   host: string | null,

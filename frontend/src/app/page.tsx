@@ -58,6 +58,7 @@ import {
   ScheduledSession,
   SessionEnvelope,
   SessionRecord,
+  SessionTransport,
 } from "@/lib/types";
 
 interface ThreadSummary {
@@ -406,6 +407,7 @@ export default function HomePage() {
     model: string | null,
     effort: string | null,
     launchMode: LaunchMode,
+    transport: SessionTransport | null = null,
     args: string[] = [],
     configOverrides: string[] = [],
   ) {
@@ -415,6 +417,7 @@ export default function HomePage() {
         cwd,
         launch_target_id: activeLaunchTargetId || null,
         launch_mode: launchMode,
+        transport,
         title: title || null,
         source_mode: "managed",
         args,

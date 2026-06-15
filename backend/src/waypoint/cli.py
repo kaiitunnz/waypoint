@@ -399,7 +399,7 @@ async def _session_start(
         }
         # Omit launch_mode when unset so the request model's AUTO default applies.
         if launch_mode is not None:
-            request_fields["launch_mode"] = launch_mode
+            request_fields["launch_mode"] = launch_mode.value
         # Omit transport when unset so the request model's None default keeps
         # today's launch_mode-derived behavior.
         if transport is not None:

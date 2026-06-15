@@ -123,7 +123,7 @@ async def test_conversation_exists_routes_through_ssh_when_launch_target_set(
     # globs the project dirs and matches the uuid by filename.
     calls: list[str] = []
 
-    async def fake_ssh_capture(target: object, remote_cmd: str) -> str:
+    async def fake_ssh_capture(self: SshLaunchTargetConfig, remote_cmd: str) -> str:
         calls.append(remote_cmd)
         if "00000000-0000-0000-0000-000000000001" in remote_cmd:
             return (
@@ -132,10 +132,8 @@ async def test_conversation_exists_routes_through_ssh_when_launch_target_set(
             )
         return ""
 
-    monkeypatch.setattr(
-        ClaudeCodePlugin, "_ssh_capture", staticmethod(fake_ssh_capture)
-    )
-    target = cast(SshLaunchTargetConfig, object())
+    monkeypatch.setattr(SshLaunchTargetConfig, "ssh_capture", fake_ssh_capture)
+    target = SshLaunchTargetConfig(id="t", name="t", ssh_destination="remote")
     cwd = "/remote/proj"
     assert (
         await plugin.conversation_exists(
@@ -162,14 +160,12 @@ async def test_conversation_exists_ssh_leaves_home_unquoted(
     # remote shell expands it, while the uuid needle is still quoted.
     captured: list[str] = []
 
-    async def fake_ssh_capture(target: object, remote_cmd: str) -> str:
+    async def fake_ssh_capture(self: SshLaunchTargetConfig, remote_cmd: str) -> str:
         captured.append(remote_cmd)
         return ""
 
-    monkeypatch.setattr(
-        ClaudeCodePlugin, "_ssh_capture", staticmethod(fake_ssh_capture)
-    )
-    target = cast(SshLaunchTargetConfig, object())
+    monkeypatch.setattr(SshLaunchTargetConfig, "ssh_capture", fake_ssh_capture)
+    target = SshLaunchTargetConfig(id="t", name="t", ssh_destination="remote")
     await plugin.conversation_exists("abc-123", "/remote/proj", target)
     assert len(captured) == 1
     cmd = captured[0]

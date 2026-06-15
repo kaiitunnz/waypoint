@@ -41,6 +41,14 @@ class BackendPlugin(Protocol):
     # these at their own transport id. Not Protocol fields: keeping them off the
     # ``runtime_checkable`` surface lets third-party plugins predating them
     # still pass ``isinstance`` and register.
+    #
+    # ``rate_limit_account(snapshot) -> tuple[str, str] | None`` is another
+    # optional method read defensively by the usage dashboard (via
+    # ``getattr(plugin, "rate_limit_account", None)``). Agents that scope
+    # rate limits to an account (Claude's org/tier, Codex's email/plan)
+    # parse their own ``notes`` into ``(account_key, account_label)`` here;
+    # plugins that omit it fall back to a session-scoped dashboard bucket.
+    # Kept off the Protocol surface for the same predating-plugin reason.
     # Pydantic model used by the dispatcher in api.py to validate the
     # JSON body of POST /api/backends/{id}/sessions/import. ``None`` for
     # plugins that don't accept thread imports — the dispatcher gates on

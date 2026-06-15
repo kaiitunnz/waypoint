@@ -14,6 +14,7 @@ plugin's ``launch_target_schema`` so adding a per-target knob to a
 new plugin doesn't require editing this module.
 """
 
+import asyncio
 import re
 import shlex
 import shutil
@@ -193,6 +194,21 @@ class SshLaunchTargetConfig(BaseModel):
         if not shell:
             return command
         return f"{shell} {shlex.quote(command)}"
+
+    async def ssh_capture(self, remote_cmd: str) -> str:
+        """``ssh <host> <cmd>`` — returns stdout (empty on non-zero exit)."""
+        proc = await asyncio.create_subprocess_exec(
+            self.ssh_bin,
+            *self.ssh_args,
+            self.ssh_destination,
+            remote_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return ""
+        return stdout.decode("utf-8", errors="ignore")
 
 
 def quote_remote_path(path: str) -> str:

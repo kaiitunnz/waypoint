@@ -74,6 +74,29 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("waypoint.backends.codex")
 
+_PLAN_PREFIX = "plan: "
+_DEFAULT_SEED_NOTES = {"CLI OAuth", "remote OAuth"}
+
+
+def _find_prefixed(notes: list[str], prefix: str) -> str | None:
+    for note in notes:
+        if note.startswith(prefix):
+            value = note[len(prefix) :].strip()
+            if value:
+                return value
+    return None
+
+
+def _find_email(notes: list[str]) -> str | None:
+    for note in notes:
+        if note in _DEFAULT_SEED_NOTES:
+            continue
+        if note.startswith(_PLAN_PREFIX):
+            continue
+        if "@" in note and " " not in note:
+            return note
+    return None
+
 
 class CodexPluginConfig(PluginConfig):
     """Codex plugin configuration block.
@@ -264,6 +287,23 @@ class CodexPlugin(DefaultLaunchContract):
         binary = self.remote_executable(launch_target) or "codex"
         return await probe_codex_usage_remote(launch_target, binary=binary)
 
+    def rate_limit_account(
+        self, snapshot: SessionRateLimitUsage
+    ) -> tuple[str, str] | None:
+        """Derive the usage-dashboard ``(account_key, account_label)``.
+
+        Codex rate limits are scoped to the signed-in account; the
+        snapshot's ``notes`` carry the account email plus ``plan: <plan>``.
+        Returns ``None`` when no email note is present so the dashboard
+        falls back to a session-scoped bucket.
+        """
+        email = _find_email(snapshot.notes)
+        if email is None:
+            return None
+        plan = _find_prefixed(snapshot.notes, _PLAN_PREFIX)
+        label = f"{email} · plan: {plan}" if plan else email
+        return f"{self.id}:{email}", label
+
     def register_routes(self, app: Any, context: Any) -> None:
         return None
 
@@ -318,30 +358,11 @@ class CodexPlugin(DefaultLaunchContract):
                 entry.name.endswith(needle)
                 for entry in sessions_dir.glob("*/*/*/rollout-*.jsonl")
             )
-        stdout = await self._ssh_capture(
-            launch_target,
+        stdout = await launch_target.ssh_capture(
             f'ls "${{CODEX_HOME:-$HOME/.codex}}/sessions/"*/*/*/rollout-*{needle} '
             "2>/dev/null | head -n 1",
         )
         return bool(stdout.strip())
-
-    @staticmethod
-    async def _ssh_capture(
-        launch_target: SshLaunchTargetConfig, remote_cmd: str
-    ) -> str:
-        """``ssh <host> <cmd>`` — returns stdout (empty on non-zero exit)."""
-        proc = await asyncio.create_subprocess_exec(
-            launch_target.ssh_bin,
-            *launch_target.ssh_args,
-            launch_target.ssh_destination,
-            remote_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await proc.communicate()
-        if proc.returncode != 0:
-            return ""
-        return stdout.decode("utf-8", errors="ignore")
 
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -1000,7 +1021,7 @@ class CodexPlugin(DefaultLaunchContract):
             'printf "\\n"; '
             "done 2>/dev/null"
         )
-        stdout = await self._ssh_capture(launch_target, remote_cmd)
+        stdout = await launch_target.ssh_capture(remote_cmd)
         if not stdout:
             return None
 

@@ -85,6 +85,18 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("waypoint.backends.claude_code")
 
+_CLAUDE_ORG_PREFIX = "org: "
+_CLAUDE_ORG_TIER_PREFIX = "org tier: "
+
+
+def _find_prefixed(notes: list[str], prefix: str) -> str | None:
+    for note in notes:
+        if note.startswith(prefix):
+            value = note[len(prefix) :].strip()
+            if value:
+                return value
+    return None
+
 
 class ClaudeCodePluginConfig(PluginConfig):
     """Claude Code plugin configuration block.
@@ -288,6 +300,23 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         if launch_target is None:
             return await probe_claude_usage()
         return await probe_claude_usage_remote(launch_target)
+
+    def rate_limit_account(
+        self, snapshot: SessionRateLimitUsage
+    ) -> tuple[str, str] | None:
+        """Derive the usage-dashboard ``(account_key, account_label)``.
+
+        Claude rate limits are scoped to an org; the snapshot's ``notes``
+        carry ``org: <name>`` and ``org tier: <tier>``. Returns ``None``
+        when no org note is present so the dashboard falls back to a
+        session-scoped bucket.
+        """
+        org = _find_prefixed(snapshot.notes, _CLAUDE_ORG_PREFIX)
+        if org is None:
+            return None
+        tier = _find_prefixed(snapshot.notes, _CLAUDE_ORG_TIER_PREFIX)
+        label = f"{org} · {tier}" if tier else org
+        return f"{self.id}:{org}", label
 
     def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
         # The Claude adapter is wired up lazily by setup() — if the support
@@ -980,30 +1009,11 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         # ``$HOME`` must be left *outside* the quoted needle so the remote
         # shell expands it; shlex-quoting the whole path would single-quote
         # the dollar and look for a literal ``$HOME`` directory.
-        stdout = await self._ssh_capture(
-            launch_target,
+        stdout = await launch_target.ssh_capture(
             f"ls $HOME/.claude/projects/*/{shlex.quote(needle)} "
             "2>/dev/null | head -n 1",
         )
         return bool(stdout.strip())
-
-    @staticmethod
-    async def _ssh_capture(
-        launch_target: SshLaunchTargetConfig, remote_cmd: str
-    ) -> str:
-        """``ssh <host> <cmd>`` — returns stdout (empty on non-zero exit)."""
-        proc = await asyncio.create_subprocess_exec(
-            launch_target.ssh_bin,
-            *launch_target.ssh_args,
-            launch_target.ssh_destination,
-            remote_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await proc.communicate()
-        if proc.returncode != 0:
-            return ""
-        return stdout.decode("utf-8", errors="ignore")
 
     # --- launch / discovery helpers ----------------------------------
 

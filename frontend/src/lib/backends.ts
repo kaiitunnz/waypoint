@@ -8,6 +8,13 @@
  * consults this catalog instead of mirroring backend constants in
  * TypeScript so adding a new plugin doesn't require a frontend edit.
  *
+ * A session is an (agent, transport) pair, so its effective capabilities are
+ * *composed*: agent-level fields (permission modes, slash commands, fork /
+ * thread support) come from the agent plugin, while transport-level fields
+ * (structured vs heuristic, resume, live terminal) come from the transport.
+ * `capsFor(backend, transport)` resolves that pair; the per-axis helpers below
+ * read whichever half they belong to.
+ *
  * The hook reads from `me.backends` first (already loaded during the
  * auth bootstrap) and falls back to the dedicated endpoint when the
  * caller starts without a `MeResponse`.
@@ -17,16 +24,29 @@ import { useEffect, useMemo, useState } from "react";
 
 import { fetchBackends } from "@/lib/api";
 import type {
+  AgentCapabilities,
   Backend,
+  BackendCapabilities,
   BackendDescriptor,
   BackendPermissionMode,
+  LaunchMode,
   MeResponse,
   SessionTransport,
+  TransportCapabilities,
 } from "@/lib/types";
 
 export interface BackendCatalog {
   byId: (id: Backend) => BackendDescriptor | undefined;
-  byTransport: (transport: SessionTransport) => BackendDescriptor | undefined;
+  // Compose a session's capabilities from its (agent, transport) pair. Returns
+  // undefined only when the agent is unknown to the live catalog.
+  capsFor: (
+    backend: Backend,
+    transport: SessionTransport,
+  ) => BackendCapabilities | undefined;
+  agentCaps: (backend: Backend) => AgentCapabilities | undefined;
+  transportCaps: (transport: SessionTransport) => TransportCapabilities | undefined;
+  // Human label for a transport id, sourced from the descriptor that owns it.
+  transportLabel: (transport: SessionTransport) => string | undefined;
   all: () => BackendDescriptor[];
   ids: () => Backend[];
   // Pulled from `byId(id)?.label`, with a humane fallback so a backend
@@ -36,6 +56,7 @@ export interface BackendCatalog {
 
 const FALLBACK_LABELS: Record<string, string> = {
   claude_code: "Claude Code",
+  claude_tty: "Claude TUI",
   codex: "Codex",
   opencode: "OpenCode",
   tmux: "Tmux",
@@ -44,23 +65,28 @@ const FALLBACK_LABELS: Record<string, string> = {
 const FALLBACK_TRANSPORT_LABELS: Record<string, string> = {
   codex_app_server: "codex app server",
   claude_cli: "claude cli",
+  claude_tty: "claude tty",
   opencode_http: "opencode http",
   tmux: "tmux",
 };
 
-// Hand-mirrored from the backend's BackendCapabilities defaults so
-// catalog-less callers (early bootstrap, lib helpers) still get the
-// right answer for the built-ins. New backends MUST be reachable via
-// the live catalog — these fallbacks only cover today's known
-// transports.
+// Hand-mirrored from the backend's capability defaults so catalog-less callers
+// (early bootstrap, lib helpers) still get the right answer for the built-ins.
+// New backends MUST be reachable via the live catalog — these fallbacks only
+// cover today's known agents/transports. Transport-keyed sets resolve
+// transport-level flags; backend-keyed sets resolve agent-level ones.
 const FALLBACK_STRUCTURED = new Set([
   "codex_app_server",
   "claude_cli",
+  "claude_tty",
   "opencode_http",
 ]);
-const FALLBACK_RESUMABLE = new Set(["tmux"]);
+const FALLBACK_RESUMABLE = new Set(["tmux", "claude_tty"]);
+const FALLBACK_LIVE_TERMINAL = new Set(["tmux"]);
 const FALLBACK_APPROVAL_NOTE = new Set(["claude_code", "opencode"]);
 const FALLBACK_PLAN_APPROVAL = new Set(["codex"]);
+// Every agent can fork except the generic tmux fallback.
+const FALLBACK_NO_FORK = new Set(["tmux"]);
 
 const FALLBACK_PERMISSION_MODES: Record<string, BackendPermissionMode[]> = {
   claude_code: [
@@ -80,18 +106,38 @@ const FALLBACK_PERMISSION_MODES: Record<string, BackendPermissionMode[]> = {
 
 export function buildCatalog(descriptors: BackendDescriptor[]): BackendCatalog {
   const byIdMap = new Map<string, BackendDescriptor>();
-  const byTransportMap = new Map<string, BackendDescriptor>();
+  // Transport-level data is keyed by transport id so a session whose transport
+  // differs from its agent's native one (e.g. a tmux-wrapped Claude) resolves
+  // the transport's caps, not the agent's defaults.
+  const transportCapsMap = new Map<string, TransportCapabilities>();
+  const transportLabelMap = new Map<string, string>();
   for (const item of descriptors) {
     byIdMap.set(item.id, item);
-    byTransportMap.set(item.transport_id, item);
+    transportCapsMap.set(item.transport_id, item.transport_capabilities);
+    transportLabelMap.set(item.transport_id, item.label);
   }
+  const agentCaps = (backend: Backend) => byIdMap.get(backend)?.agent_capabilities;
+  const transportCaps = (transport: SessionTransport) =>
+    transportCapsMap.get(transport);
   return {
     byId: (id) => byIdMap.get(id),
-    byTransport: (transport) => byTransportMap.get(transport),
+    agentCaps,
+    transportCaps,
+    capsFor: (backend, transport) => {
+      const agent = agentCaps(backend);
+      if (!agent) return undefined;
+      // Fall back to the agent's own transport caps when the requested
+      // transport is unknown, so a stale transport id still yields a usable
+      // descriptor rather than throwing.
+      const tport =
+        transportCaps(transport) ?? byIdMap.get(backend)?.transport_capabilities;
+      if (!tport) return undefined;
+      return { ...agent, ...tport };
+    },
+    transportLabel: (transport) => transportLabelMap.get(transport),
     all: () => [...descriptors],
     ids: () => descriptors.map((d) => d.id),
-    labelFor: (id) =>
-      byIdMap.get(id)?.label ?? FALLBACK_LABELS[id] ?? id,
+    labelFor: (id) => byIdMap.get(id)?.label ?? FALLBACK_LABELS[id] ?? id,
   };
 }
 
@@ -101,7 +147,7 @@ export function humaniseBackend(id: Backend, catalog?: BackendCatalog): string {
 
 /**
  * Backend-agnostic helpers that consult the catalog when present and
- * fall back to the hand-mirrored defaults for the two built-ins so
+ * fall back to the hand-mirrored defaults for the built-ins so
  * pre-bootstrap callers (login screen, error boundaries) still render
  * sensibly without a hook.
  */
@@ -110,7 +156,7 @@ export function transportLabel(
   catalog?: BackendCatalog,
 ): string {
   return (
-    catalog?.byTransport(transport)?.label.toLowerCase() ??
+    catalog?.transportLabel(transport)?.toLowerCase() ??
     FALLBACK_TRANSPORT_LABELS[transport] ??
     transport
   );
@@ -120,7 +166,7 @@ export function fidelityFor(
   transport: SessionTransport,
   catalog?: BackendCatalog,
 ): "structured" | "heuristic" {
-  const caps = catalog?.byTransport(transport)?.capabilities;
+  const caps = catalog?.transportCaps(transport);
   const structured = caps
     ? caps.is_structured
     : FALLBACK_STRUCTURED.has(transport);
@@ -131,15 +177,28 @@ export function supportsResume(
   transport: SessionTransport,
   catalog?: BackendCatalog,
 ): boolean {
-  const caps = catalog?.byTransport(transport)?.capabilities;
+  const caps = catalog?.transportCaps(transport);
   return caps ? caps.supports_resume : FALLBACK_RESUMABLE.has(transport);
 }
 
+// Whether the transport renders a live terminal (xterm pane + WS stream)
+// rather than a structured chat transcript.
+export function liveTerminal(
+  transport: SessionTransport,
+  catalog?: BackendCatalog,
+): boolean {
+  const caps = catalog?.transportCaps(transport);
+  return caps ? caps.live_terminal : FALLBACK_LIVE_TERMINAL.has(transport);
+}
+
+// Reattach-after-exit is a transport-level property, advertised on each
+// agent's descriptor for its native transport. Keyed by agent id so callers
+// holding a `SessionRecord.backend` resolve it directly.
 export function supportsReattachAfterExit(
   backend: Backend,
   catalog?: BackendCatalog,
 ): boolean {
-  const caps = catalog?.byId(backend)?.capabilities;
+  const caps = catalog?.byId(backend)?.transport_capabilities;
   return caps ? Boolean(caps.supports_reattach_after_exit) : false;
 }
 
@@ -147,7 +206,7 @@ export function supportsStructuredApproval(
   transport: SessionTransport,
   catalog?: BackendCatalog,
 ): boolean {
-  const caps = catalog?.byTransport(transport)?.capabilities;
+  const caps = catalog?.transportCaps(transport);
   return caps ? caps.is_structured : FALLBACK_STRUCTURED.has(transport);
 }
 
@@ -155,7 +214,7 @@ export function supportsApprovalNote(
   backend: Backend,
   catalog?: BackendCatalog,
 ): boolean {
-  const caps = catalog?.byId(backend)?.capabilities;
+  const caps = catalog?.agentCaps(backend);
   return caps ? caps.supports_approval_note : FALLBACK_APPROVAL_NOTE.has(backend);
 }
 
@@ -163,7 +222,16 @@ export function supportsAttachments(
   backend: Backend,
   catalog?: BackendCatalog,
 ): boolean {
-  return Boolean(catalog?.byId(backend)?.capabilities.supports_attachments);
+  return Boolean(catalog?.agentCaps(backend)?.supports_attachments);
+}
+
+// Whether the agent can fork the current thread into a new session.
+export function supportsFork(
+  backend: Backend,
+  catalog?: BackendCatalog,
+): boolean {
+  const caps = catalog?.agentCaps(backend);
+  return caps ? caps.supports_fork : !FALLBACK_NO_FORK.has(backend);
 }
 
 // Which approval decisions a backend honours (e.g. codex/opencode add
@@ -174,8 +242,7 @@ export function approvalDecisionsFor(
   backend: Backend,
   catalog?: BackendCatalog,
 ): readonly string[] {
-  const caps = catalog?.byId(backend)?.capabilities;
-  const decisions = caps?.approval_decisions;
+  const decisions = catalog?.agentCaps(backend)?.approval_decisions;
   return decisions && decisions.length > 0 ? decisions : ["approve", "decline"];
 }
 
@@ -183,7 +250,7 @@ export function isManagedLaunchWrapper(
   backend: Backend,
   catalog?: BackendCatalog,
 ): boolean {
-  const caps = catalog?.byId(backend)?.capabilities;
+  const caps = catalog?.byId(backend)?.transport_capabilities;
   return caps
     ? Boolean(caps.is_fallback_for_managed_launch)
     : backend === "tmux";
@@ -193,7 +260,7 @@ export function supportsPlanApproval(
   backend: Backend,
   catalog?: BackendCatalog,
 ): boolean {
-  const caps = catalog?.byId(backend)?.capabilities;
+  const caps = catalog?.agentCaps(backend);
   return caps ? Boolean(caps.supports_plan_approval) : FALLBACK_PLAN_APPROVAL.has(backend);
 }
 
@@ -201,7 +268,7 @@ export function permissionModesFor(
   backend: Backend,
   catalog?: BackendCatalog,
 ): readonly BackendPermissionMode[] {
-  const live = catalog?.byId(backend)?.capabilities.permission_modes;
+  const live = catalog?.agentCaps(backend)?.permission_modes;
   if (live && live.length > 0) return live;
   return FALLBACK_PERMISSION_MODES[backend] ?? [];
 }
@@ -216,6 +283,24 @@ export function permissionModeLabel(
     (mode) => mode.id === value,
   );
   return match?.label ?? value;
+}
+
+// Launch modes (transport choices) available for an agent. "direct" maps to the
+// agent's native structured adapter, "tmux_wrapper" to the generic tmux pane,
+// and "auto" lets the backend pick. Only offer "direct" when the agent has a
+// structured native transport.
+export function launchModesFor(
+  backend: Backend,
+  catalog?: BackendCatalog,
+): LaunchMode[] {
+  const modes: LaunchMode[] = ["auto"];
+  const native = catalog?.byId(backend)?.transport_capabilities;
+  const hasStructuredNative = native
+    ? native.is_structured
+    : !FALLBACK_NO_FORK.has(backend);
+  if (hasStructuredNative) modes.push("direct");
+  modes.push("tmux_wrapper");
+  return modes;
 }
 
 /** Single-flight catalog hook fed by `MeResponse.backends`. */

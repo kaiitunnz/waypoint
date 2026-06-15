@@ -717,9 +717,18 @@ class ClaudeTtyPlugin(TmuxPlugin):
             flag_pairs += ["--effort", merged[1]]
         if merged[2]:
             flag_pairs += ["--permission-mode", merged[2]]
-        launch_args = ["--resume", thread_id, *flag_pairs, *base_args]
 
         launch_target = runtime._find_launch_target(session.launch_target_id)
+        # The thread file is only written on first input, so a settings change
+        # made before the session's first turn has nothing to resume — relaunching
+        # with `--resume` makes the CLI exit with "no conversation found" and kills
+        # the pane. Reuse the same thread id via `--session-id` in that case so the
+        # relaunch starts the (still-empty) conversation cleanly with the new flags.
+        resumed = await self._conversation_exists(
+            "claude_code", thread_id, session.cwd, launch_target
+        )
+        identity = ["--resume", thread_id] if resumed else ["--session-id", thread_id]
+        launch_args = [*identity, *flag_pairs, *base_args]
         command = runtime._command_for_backend(
             self.id,
             launch_args,
@@ -766,10 +775,11 @@ class ClaudeTtyPlugin(TmuxPlugin):
             note,
             status=SessionStatus.IDLE,
         )
-        # The resumed thread reopens its already-populated transcript, whose
-        # records are in the event DB; tail from the end so they aren't replayed.
+        # A resumed thread reopens its already-populated transcript (records are
+        # in the event DB) so tail from the end; a fresh --session-id thread
+        # starts an empty file, so read from byte 0.
         self._start_tailer(
-            runtime, session.id, thread_id, session.cwd, start_at_end=True
+            runtime, session.id, thread_id, session.cwd, start_at_end=resumed
         )
         return True
 

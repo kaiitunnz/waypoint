@@ -104,6 +104,9 @@ def _stub_lifecycle(plugin: ClaudeTtyPlugin) -> dict[str, object]:
 
     plugin._start_tailer = _fake_start_tailer  # type: ignore[method-assign]
     plugin._spawn_rate_limit_watcher = MagicMock()  # type: ignore[method-assign]
+    # Default to a persisted conversation so restarts resume; the
+    # before-first-turn case overrides this to False.
+    plugin._conversation_exists = AsyncMock(return_value=True)  # type: ignore[method-assign]
     return captured
 
 
@@ -227,6 +230,31 @@ async def test_restart_rebuilds_resume_flags_preserving_custom_args() -> None:
     assert update_kwargs["transport_state"]["thread_id"] == "thread-1"
     # Resumed transcript is already populated → tail from the end.
     assert captured["start_at_end"] is True
+
+
+async def test_restart_before_first_turn_uses_session_id_not_resume() -> None:
+    # A settings change made before the first message has no persisted thread to
+    # resume; relaunching with --resume would make the CLI exit with "no
+    # conversation found" and kill the pane. The relaunch must reuse the same
+    # thread id via --session-id instead.
+    plugin = ClaudeTtyPlugin()
+    captured = _stub_lifecycle(plugin)
+    plugin._conversation_exists = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    session = _make_session(
+        permission_mode="auto",
+        launch_args=["--session-id", "thread-1", "--permission-mode", "auto"],
+    )
+    runtime, _ = _restart_runtime()
+
+    result = await plugin._restart_with_args(runtime, session, permission_mode="plan")
+
+    assert result is True
+    built_args = runtime._command_for_backend.call_args.args[1]
+    assert built_args[:2] == ["--session-id", "thread-1"]
+    assert "--resume" not in built_args
+    assert "--permission-mode" in built_args and "plan" in built_args
+    # A never-written transcript is read from the start, not tailed from the end.
+    assert captured["start_at_end"] is False
 
 
 async def test_restart_clears_pending_approval_and_tailer() -> None:

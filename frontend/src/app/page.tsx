@@ -406,6 +406,7 @@ export default function HomePage() {
     transport: SessionTransport | null = null,
     args: string[] = [],
     configOverrides: string[] = [],
+    permissionMode: string | null = null,
   ) {
     try {
       const session = await createSession(host, token, {
@@ -419,6 +420,7 @@ export default function HomePage() {
         config_overrides: configOverrides,
         model,
         effort,
+        permission_mode: permissionMode,
       });
       setSessions((current) => [
         session,

@@ -255,7 +255,7 @@ export function SchedulePanel({
           </label>
           {permissionOptions.length > 0 ? (
             <label className="field">
-              <span>Starting permission mode</span>
+              <span>Permission mode</span>
               <select
                 value={permissionMode}
                 onChange={(event) => setPermissionMode(event.target.value)}

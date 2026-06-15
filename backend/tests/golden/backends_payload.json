@@ -7,7 +7,7 @@
       "claude_tty",
       "tmux"
     ],
-    "default_transport": "claude_cli",
+    "default_transport": "claude_tty",
     "label": "Claude Code",
     "badges": {
       "glyph": "C",

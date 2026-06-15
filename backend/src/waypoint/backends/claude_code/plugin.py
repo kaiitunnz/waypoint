@@ -118,7 +118,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
     # driver for a faithful TUI, or the generic tmux pane wrapper as the
     # managed-launch fallback.
     supported_transports = ("claude_cli", "claude_tty", "tmux")
-    default_transport = "claude_cli"
+    default_transport = "claude_tty"
     label = "Claude Code"
     import_request_schema: type[BaseModel] | None = ClaudeThreadImportRequest
     config_schema: type[PluginConfig] = ClaudeCodePluginConfig

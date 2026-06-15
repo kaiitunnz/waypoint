@@ -2172,6 +2172,49 @@ async def test_create_session_legacy_claude_tty_backend_routes_to_tty(
 
 
 @pytest.mark.asyncio
+async def test_create_session_local_claude_defaults_to_tty_transport(
+    monkeypatch, tmp_path
+) -> None:
+    # A local claude_code launch that pins no transport adopts the agent's
+    # declared default (claude_tty / Emulated), so every spawn path — UI, CLI,
+    # subagents — gets the same default the catalog advertises.
+    runtime, storage, settings = make_runtime(tmp_path)
+    claude = runtime.registry.get("claude_code")
+    tty = runtime.registry.get("claude_tty")
+    calls: list[tuple[str, str, str | None]] = []
+
+    monkeypatch.setattr(tty, "is_available_for_managed_launch", lambda _runtime: True)
+    monkeypatch.setattr(
+        tty,
+        "create_session",
+        _fake_plugin_create_session(
+            storage, settings, transport="claude_tty", calls=calls
+        ),
+    )
+    monkeypatch.setattr(
+        claude,
+        "create_session",
+        lambda *args, **kwargs: pytest.fail("structured adapter is no longer default"),
+    )
+    monkeypatch.setattr(
+        runtime, "_warm_command_completions", lambda *_args, **_kwargs: None
+    )
+
+    session = await runtime.create_session(
+        SessionCreateRequest(
+            backend="claude_code",
+            cwd="~/workspace",
+            args=[],
+            source_mode=SessionSource.MANAGED,
+        )
+    )
+
+    assert calls == [(session.id, "claude_code", None)]
+    assert session.backend == "claude_code"
+    assert session.transport == "claude_tty"
+
+
+@pytest.mark.asyncio
 async def test_list_importable_codex_threads_filters_existing_session(
     monkeypatch, tmp_path
 ) -> None:

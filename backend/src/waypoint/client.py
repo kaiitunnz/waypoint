@@ -335,6 +335,14 @@ class WaypointClient:
         ).json()["session"]
         return data
 
+    def set_permission_mode(self, session_id: str, mode: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST",
+            f"/api/sessions/{session_id}/mode",
+            json={"mode": mode},
+        ).json()["session"]
+        return data
+
     def interrupt(self, session_id: str) -> dict[str, Any]:
         data: dict[str, Any] = self._request(
             "POST", f"/api/sessions/{session_id}/interrupt"

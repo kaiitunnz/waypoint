@@ -161,10 +161,12 @@ def test_no_result_when_tool_use_block_present_despite_end_turn() -> None:
 # ── Usage deduplication ───────────────────────────────────────────────────────
 
 
-def test_usage_counted_only_on_first_seen_message_id() -> None:
+def test_result_note_emitted_once_per_message_id() -> None:
+    # A turn's content can arrive as several same-id end_turn records; the
+    # synthesized note (and the usage it carries) must fire exactly once, not
+    # once per record, or it duplicates and inflates token totals.
     norm = TranscriptNormalizer()
     usage = {"input_tokens": 100, "output_tokens": 50}
-    # First record: usage should appear in result metadata
     r1 = _assistant_record(
         "msgX", [_text_block("a")], stop_reason="end_turn", usage=usage
     )
@@ -172,13 +174,35 @@ def test_usage_counted_only_on_first_seen_message_id() -> None:
     result1 = next(e for e in events1 if e.metadata.get("method") == "result")
     assert result1.metadata["usage"] == usage
 
-    # Second record with same message.id: usage in result should be empty
+    # Second record, same message.id, also end_turn → no second note.
     r2 = _assistant_record(
         "msgX", [_text_block("b")], stop_reason="end_turn", usage=usage
     )
     events2 = norm.process_record(r2)
-    result2 = next(e for e in events2 if e.metadata.get("method") == "result")
-    assert result2.metadata["usage"] == {}
+    assert not any(e.metadata.get("method") == "result" for e in events2)
+
+
+def test_split_thinking_then_text_emits_single_result_after_text() -> None:
+    # The real-world duplicate: a turn's final message arrives as a thinking
+    # record then a text record, both stamped end_turn. Exactly one note must
+    # fire, and after the visible text — not prematurely off the thinking record
+    # (which also flickered the status idle→running→idle).
+    norm = TranscriptNormalizer()
+    r_think = _assistant_record(
+        "msgT", [{"type": "thinking", "thinking": "hmm"}], stop_reason="end_turn"
+    )
+    r_text = _assistant_record("msgT", [_text_block("Got it")], stop_reason="end_turn")
+
+    assert norm.process_record(r_think) == []
+
+    ev_text = norm.process_record(r_text)
+    assert [e.kind for e in ev_text] == [
+        EventKind.AGENT_OUTPUT,
+        EventKind.SYSTEM_NOTE,
+    ]
+    note = ev_text[1]
+    assert note.metadata["method"] == "result"
+    assert note.status == SessionStatus.IDLE
 
 
 def test_usage_counted_for_different_message_ids() -> None:

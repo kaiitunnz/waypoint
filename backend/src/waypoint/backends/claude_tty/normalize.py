@@ -69,6 +69,11 @@ class TranscriptNormalizer:
         self._pending_task_creates: dict[str, dict[str, Any]] = {}
         self._suppressed_result_tool_use_ids: set[str] = set()
         self._task_card_item_id: str | None = None
+        # Message ids that have already emitted a synthesized "turn complete"
+        # note. A turn's content can arrive as several same-id records (e.g. a
+        # thinking record then a text record, both stamped end_turn); the note
+        # must fire once, not once per record.
+        self._result_emitted_ids: set[str] = set()
         # Set by the tailer right after it Esc-dismisses an AskUserQuestion
         # popup. The Esc forces the TUI to flush the tool_use record (and a
         # "user rejected" result) to the transcript; the latch tells the next
@@ -101,12 +106,15 @@ class TranscriptNormalizer:
         events: list[NormalizedEvent] = []
         blocks = iter_content_blocks(message.get("content"))
         has_tool_use = False
+        had_text = False
+        had_thinking = False
 
         for block in blocks:
             bt = block.get("type")
             if bt == "text":
                 text = str(block.get("text") or "")
                 if text:
+                    had_text = True
                     events.append(
                         NormalizedEvent(
                             kind=EventKind.AGENT_OUTPUT,
@@ -184,11 +192,27 @@ class TranscriptNormalizer:
                         status=SessionStatus.RUNNING,
                     )
                 )
-            # thinking blocks: intentionally skipped
+            elif bt == "thinking":
+                had_thinking = True
+            # thinking blocks emit nothing; tracked only to defer the note below
 
         # Synthesize a result event when the turn is complete: stop_reason is
         # terminal (not "tool_use") and no tool_use blocks were in this record.
-        if stop_reason and stop_reason != "tool_use" and not has_tool_use:
+        # A turn's final message can split into a thinking record then a text
+        # record, both stamped end_turn; defer off the thinking-only record so
+        # the note lands after the visible text, and emit it at most once per
+        # message id so the split does not double the note.
+        already_noted = bool(message_id) and message_id in self._result_emitted_ids
+        thinking_only = had_thinking and not had_text
+        if (
+            stop_reason
+            and stop_reason != "tool_use"
+            and not has_tool_use
+            and not already_noted
+            and not thinking_only
+        ):
+            if message_id:
+                self._result_emitted_ids.add(message_id)
             usage_payload: dict[str, Any] = usage if first_seen else {}
             output_tokens = int(usage.get("output_tokens") or 0)
             if stop_reason == "end_turn":

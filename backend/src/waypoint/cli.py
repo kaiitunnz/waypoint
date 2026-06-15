@@ -1029,6 +1029,57 @@ def sessions_send(
         raise typer.Exit(code=1)
 
 
+def _validate_permission_mode(
+    client: WaypointClient, session: dict[str, Any], mode: str
+) -> None:
+    """Validate ``mode`` against the session's backend before the round trip.
+
+    Keeps the error local and lists the accepted ids rather than relaying a
+    bare server 400. A backend that doesn't advertise its modes (or that the
+    catalogue can't resolve) is left to the server to reject.
+    """
+    backend = session.get("backend")
+    descriptor = next(
+        (b for b in client.list_backends() if b.get("id") == backend), None
+    )
+    if descriptor is None:
+        return
+    caps = descriptor.get("capabilities", {})
+    if not caps.get("supports_set_permission_mode_inline"):
+        raise typer.BadParameter(
+            f"backend {backend!r} does not support setting the permission mode",
+            param_hint="MODE",
+        )
+    valid = [spec["id"] for spec in caps.get("permission_modes", [])]
+    if valid and mode not in valid:
+        raise typer.BadParameter(
+            f"unknown permission mode {mode!r} for backend {backend!r}; "
+            f"choose one of: {', '.join(valid)}",
+            param_hint="MODE",
+        )
+
+
+@sessions_app.command("set-permission-mode")
+@sessions_app.command("mode")
+def sessions_set_permission_mode(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    mode: Annotated[str, typer.Argument()],
+) -> None:
+    """Change a running session's permission mode in place.
+
+    Only structured backends that apply the change live accept it; others are
+    rejected with the accepted ids. Avoids reap + respawn just to widen a
+    stalled worker's auto-approval posture.
+    """
+
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        _validate_permission_mode(c, c.get_session(session_id), mode)
+        return {"session": c.set_permission_mode(session_id, mode)}
+
+    _emit(_settings_from_ctx(ctx), _run)
+
+
 @sessions_app.command("interrupt")
 def sessions_interrupt(
     ctx: typer.Context, session_id: Annotated[str, typer.Argument()]

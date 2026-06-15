@@ -1795,3 +1795,115 @@ def test_board_help_lists_log_command() -> None:
     result = runner.invoke(app, ["board", "--help"])
     assert result.exit_code == 0
     assert "log" in result.stdout
+
+
+def _permission_mode_handler(
+    posted: list[dict[str, Any]],
+    *,
+    backend: str,
+    supports_inline: bool,
+    modes: list[str],
+) -> Any:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/sessions/s1":
+            return httpx.Response(
+                200, json={"session": {"id": "s1", "backend": backend}}
+            )
+        if path == "/api/backends":
+            return httpx.Response(
+                200,
+                json={
+                    "backends": [
+                        {
+                            "id": backend,
+                            "capabilities": {
+                                "supports_set_permission_mode_inline": supports_inline,
+                                "permission_modes": [{"id": m} for m in modes],
+                            },
+                        }
+                    ]
+                },
+            )
+        if path == "/api/sessions/s1/mode":
+            posted.append(json.loads(request.content))
+            return httpx.Response(
+                200, json={"session": {"id": "s1", "permission_mode": "auto"}}
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {path}"})
+
+    return handler
+
+
+def _fake_client_factory(handler: Any) -> Any:
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    return fake_client
+
+
+def test_set_permission_mode_posts_valid_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    posted: list[dict[str, Any]] = []
+    handler = _permission_mode_handler(
+        posted, backend="claude_code", supports_inline=True, modes=["default", "auto"]
+    )
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "set-permission-mode",
+            "s1",
+            "auto",
+        ],
+    )
+    assert result.exit_code == 0
+    assert posted == [{"mode": "auto"}]
+    assert json.loads(result.stdout)["session"]["permission_mode"] == "auto"
+
+
+def test_set_permission_mode_rejects_unknown_mode_locally(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    posted: list[dict[str, Any]] = []
+    handler = _permission_mode_handler(
+        posted, backend="claude_code", supports_inline=True, modes=["default", "auto"]
+    )
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "mode", "s1", "bogus"],
+    )
+    assert result.exit_code != 0
+    assert "unknown permission mode" in result.output
+    # Validation is local — the server is never asked to set a bad mode.
+    assert posted == []
+
+
+def test_set_permission_mode_rejects_unsupported_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    posted: list[dict[str, Any]] = []
+    handler = _permission_mode_handler(
+        posted, backend="tmux", supports_inline=False, modes=[]
+    )
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "set-permission-mode",
+            "s1",
+            "auto",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "does not support" in result.output
+    assert posted == []

@@ -8892,18 +8892,21 @@ html[data-theme="light"] .term-compose-input {
 
 .agent-option:hover:not(.active) {
   color: var(--text);
-  border-color: color-mix(in srgb, var(--agent-color) 40%, var(--line));
+  border-color: color-mix(in srgb, var(--accent-cool) 40%, var(--line));
 }
 
 .agent-option:active:not(.active) {
   transform: scale(0.97);
 }
 
+/* One selection accent across both pickers: the cool-blue ring marks the
+   chosen agent / transport, leaving gold reserved for the Launch CTA. The
+   per-agent ``--agent-color`` survives only on the identity glyph. */
 .agent-option.active {
   color: var(--text);
-  border-color: color-mix(in srgb, var(--agent-color) 55%, var(--line));
-  background: color-mix(in srgb, var(--agent-color) 13%, var(--bg-input));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--agent-color) 35%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cool) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent-cool) 13%, var(--bg-input));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-cool) 38%, transparent);
 }
 
 .agent-option-glyph {
@@ -8927,91 +8930,37 @@ html[data-theme="light"] .term-compose-input {
   letter-spacing: 0.02em;
 }
 
-.transport-picker {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+/* Transport is a lighter, secondary choice than the agent, so it rides the
+   quiet segmented control (cool-blue active state) rather than dominating with
+   full-width cards. Each segment carries a distinct glyph + the transport's
+   user-facing name; the selected transport's description sits below. */
+.transport-segmented {
+  justify-self: start;
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 
-.transport-option {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 11px 13px;
-  text-align: left;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--bg-input);
-  color: var(--text);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  transition:
-    border-color 140ms ease,
-    background-color 140ms ease,
-    transform 120ms ease;
+.transport-segment {
+  gap: 7px;
+  padding: 0 13px;
 }
 
-.transport-option:hover:not(.active) {
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
-}
-
-.transport-option:active:not(.active) {
-  transform: scale(0.99);
-}
-
-.transport-option.active {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
-}
-
-.transport-option-icon {
+.transport-segment-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  flex: 0 0 auto;
-  border-radius: 8px;
-  background: var(--bg-card-soft);
-  color: var(--muted);
-  transition:
-    color 140ms ease,
-    background-color 140ms ease;
+  color: currentColor;
 }
 
-.transport-option-icon.is-structured {
-  color: var(--accent-cool);
-}
-
-.transport-option.active .transport-option-icon {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent-strong);
-}
-
-.transport-option-text {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.transport-option-label {
-  font-family: var(--font-mono);
-  font-size: 0.82rem;
-  letter-spacing: 0.03em;
-  color: var(--text);
-}
-
-.transport-option-hint {
-  font-size: 0.76rem;
-  line-height: 1.35;
+.transport-desc {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
   color: var(--muted);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .agent-option,
-  .transport-option {
+  .agent-option {
     transition:
       border-color 120ms ease,
       background-color 120ms ease;

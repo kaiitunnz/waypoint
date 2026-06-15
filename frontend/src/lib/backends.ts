@@ -394,26 +394,6 @@ export function defaultTransportFor(
   return catalog?.byId(backend)?.default_transport ?? null;
 }
 
-// Picker label + fidelity hint for the legacy transport cards. Superseded by
-// `transportPresentation`; retained only until the launch picker is rebuilt.
-export function transportPickerLabel(
-  transport: SessionTransport,
-  catalog?: BackendCatalog,
-): string {
-  return transportPresentation(transport, catalog).name;
-}
-
-export function transportFidelity(
-  transport: SessionTransport,
-  catalog?: BackendCatalog,
-): { kind: "structured" | "terminal"; hint: string } {
-  const pres = transportPresentation(transport, catalog);
-  return {
-    kind: pres.kind === "terminal" ? "terminal" : "structured",
-    hint: pres.description,
-  };
-}
-
 // The launchable agent that drives a transport: the non-folded agent whose
 // `supported_transports` includes it. Unique for the structured transports
 // (claude_cli/claude_tty → claude_code, codex_app_server → codex,

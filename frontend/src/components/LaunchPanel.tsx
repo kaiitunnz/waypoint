@@ -21,7 +21,6 @@ import {
   agentTransports,
   defaultTransportFor,
   humaniseBackend,
-  transportFidelity,
 } from "@/lib/backends";
 import {
   Backend,
@@ -312,11 +311,7 @@ export function LaunchPanel({
             formBusy={formBusy}
           />
           <div className="launch-actions">
-            <span className="grow muted">
-              {transport
-                ? transportFidelity(transport, catalog).hint
-                : "Pick an agent and how to drive it."}
-            </span>
+            <span className="grow" />
             <button className="primary" disabled={formBusy} type="submit">
               Launch session
             </button>

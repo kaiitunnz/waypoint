@@ -78,6 +78,14 @@ def _backend_descriptors(registry: BackendRegistry) -> list[dict[str, Any]]:
             {
                 "id": plugin.id,
                 "transport_id": plugin.transport_id,
+                # Transports this agent can be driven over (its native one plus
+                # any pane wrapper / tty-tail it pairs with) and the default
+                # when a launch doesn't pin one. Lets the picker render an
+                # agent-primary control with a transport/fidelity toggle.
+                "supported_transports": list(registry.supported_transports(plugin.id)),
+                "default_transport": getattr(
+                    plugin, "default_transport", plugin.transport_id
+                ),
                 "label": plugin.label,
                 "badges": dict(caps.badges),
                 # The flat ``capabilities`` object stays byte-identical for

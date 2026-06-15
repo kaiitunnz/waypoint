@@ -135,7 +135,9 @@ class _StubPlugin:
     ) -> list[Any]:
         return []
 
-    async def import_thread(self, runtime: Any, request: Any) -> Any:
+    async def import_thread(
+        self, runtime: Any, request: Any, *, agent: str | None = None
+    ) -> Any:
         raise NotImplementedError
 
     async def fork_session(

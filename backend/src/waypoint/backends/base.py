@@ -157,9 +157,16 @@ class BackendPlugin(Protocol):
         ...
 
     async def import_thread(
-        self, runtime: "SessionRuntime", request: Any
+        self, runtime: "SessionRuntime", request: Any, *, agent: str | None = None
     ) -> SessionRecord:
-        """Import an existing backend-side thread as a Waypoint session."""
+        """Import an existing backend-side thread as a Waypoint session.
+
+        ``agent`` is the agent id the imported session is persisted under. It
+        differs from ``self.id`` when a sibling plugin drives a pinned
+        transport (e.g. the tty-tail driver imports a Claude thread, persisting
+        ``backend=claude_code``). ``None`` defaults to ``self.id`` — the
+        behavior when no transport is pinned.
+        """
         ...
 
     async def create_session(

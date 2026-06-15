@@ -634,8 +634,10 @@ class TmuxPlugin:
         return []
 
     async def import_thread(
-        self, runtime: "SessionRuntime", request: Any
+        self, runtime: "SessionRuntime", request: Any, *, agent: str | None = None
     ) -> SessionRecord:
+        # The tmux wrapper cannot enumerate agent threads; the runtime drives
+        # tmux imports through the agent plugin's import_thread_via_resume.
         raise NotImplementedError
 
     async def fork_session(

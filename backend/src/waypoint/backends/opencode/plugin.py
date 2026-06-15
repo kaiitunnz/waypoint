@@ -1403,14 +1403,30 @@ class OpenCodePlugin(DefaultLaunchContract):
         return result
 
     async def import_thread(
-        self, runtime: "SessionRuntime", request: OpenCodeThreadImportRequest
+        self,
+        runtime: "SessionRuntime",
+        request: OpenCodeThreadImportRequest,
+        *,
+        agent: str | None = None,
     ) -> SessionRecord:
+        backend = agent or self.id
+        # OpenCode only imports over its native HTTP adapter. A pinned transport
+        # other than the native one (e.g. the tmux wrapper) has no resume path.
+        transport = getattr(request, "transport", None)
+        if transport is not None and transport != self.transport_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"thread import over transport {transport!r} "
+                    f"is not supported for {backend}"
+                ),
+            )
         launch_target_id = getattr(request, "launch_target_id", None)
         requested_cwd = getattr(request, "cwd", None)
         opencode_session_id = request.thread_id
         for s in runtime.storage.list_sessions():
             if (
-                s.backend == self.id
+                s.backend == backend
                 and s.transport_state.get("opencode_session_id") == opencode_session_id
                 and s.launch_target_id == launch_target_id
             ):
@@ -1450,7 +1466,7 @@ class OpenCodePlugin(DefaultLaunchContract):
         now = datetime.now(UTC)
         session = SessionRecord(
             id=session_id,
-            backend=self.id,
+            backend=backend,
             source=SessionSource.MANAGED,
             transport=self.transport_id,
             title=sess.get("title", "Imported session"),

@@ -947,14 +947,19 @@ class ClaudeTtyPlugin:
             updated_at=info.updated_at,
         )
 
-    def _imported_thread_ids(self, runtime: "SessionRuntime") -> set[str]:
+    def _imported_thread_ids(
+        self, runtime: "SessionRuntime", backend: str | None = None
+    ) -> set[str]:
         # Keyed on thread_id alone, which is sufficient only because claude_tty
         # imports the local store exclusively. If remote enumeration lands, switch
         # to a (launch_target_id, thread_id) key so a local import cannot mask the
-        # same thread on a remote target (cf. claude_code's dedup).
+        # same thread on a remote target (cf. claude_code's dedup). Filters on the
+        # persisted agent id (``backend``) so an import under ``claude_code`` over
+        # this transport dedups against the same agent's other transports.
+        agent_id = backend or self.id
         imported: set[str] = set()
         for session in runtime.storage.list_sessions():
-            if session.backend != self.id:
+            if session.backend != agent_id:
                 continue
             thread_id = session.transport_state.get("thread_id")
             if isinstance(thread_id, str) and thread_id:
@@ -977,7 +982,13 @@ class ClaudeTtyPlugin:
         self,
         runtime: "SessionRuntime",
         request: ClaudeThreadImportRequest,
+        *,
+        agent: str | None = None,
     ) -> SessionRecord:
+        # When the runtime resolves an agent's ``claude_tty`` transport to this
+        # driver, the session is persisted under that agent (e.g.
+        # ``claude_code``) rather than this plugin's own id.
+        backend = agent or self.id
         if request.launch_target_id is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -995,7 +1006,7 @@ class ClaudeTtyPlugin:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"claude thread cwd {info.cwd} no longer exists; cannot resume",
             )
-        if request.thread_id in self._imported_thread_ids(runtime):
+        if request.thread_id in self._imported_thread_ids(runtime, backend):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="claude thread already imported",
@@ -1032,7 +1043,7 @@ class ClaudeTtyPlugin:
         now = datetime.now(UTC)
         session = SessionRecord(
             id=session_id,
-            backend=self.id,
+            backend=backend,
             source=SessionSource.MANAGED,
             transport=self.transport_id,
             title=info.title,

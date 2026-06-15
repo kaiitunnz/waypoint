@@ -65,3 +65,8 @@ harness and model with `references/backends.md`.
 - Give each worker a task it can do with no other context, and its own worktree —
   never let two workers share a tree.
 - Check the **final merged** result, not just per-task success.
+- **Be inquisitive about environmental choices.** A crew runs unattended, so a
+  silently-guessed permission mode (workers park on `default`) or model (a wrong
+  id dies on turn 1) stalls the whole job. Settle both before spawning — pass ids
+  verbatim from `waypoint models`/`waypoint backends`, and ask the user when
+  unsure rather than guessing.

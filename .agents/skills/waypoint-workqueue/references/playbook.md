@@ -14,25 +14,41 @@ git -C "$repo" switch -c "wq/$job" "$base"
 ```
 
 Assign — for each free worker and each `todo` task, give it a worktree and send
-it off. **Choose the backend and model for the task**, and place the worker where
-its code lives:
+it off. Pre-spawn checklist, all settled **before** the `sessions start`:
+
+- **Model.** Run `waypoint models <backend>` and pass an id **verbatim** — never
+  guess from memory (a wrong id spawns fine and only dies on turn 1). Unsure
+  which tier fits? Ask the user. `sessions start` warns if the id isn't in the
+  backend's catalogue, but treat that as a backstop, not the check.
+- **Permission mode.** A crew runs unattended, so the workers must auto-approve —
+  do **not** leave them on the inherited `default` (they park silently on the
+  first approval). Pick an auto-approving `--permission-mode` for the backend
+  (`waypoint backends` lists the ids); if you can't determine a safe one, ask the
+  user rather than spawning blind.
+- **Placement.** `--cwd` is the repo root the worktree is cut from; place the
+  worker where its code lives.
 
 ```bash
 n=3
 lead=$WAYPOINT_SESSION_ID   # the lead's own session id; set --spawner-session-id explicitly if unset
 # `--worktree` creates branch `wq/$job-t$n` off the integration branch in a
 # sibling worktree, records the path on the session for cleanup, and launches
-# the worker there — no manual `git worktree add`. `--cwd` is the repo root the
-# worktree is cut from.
+# the worker there — no manual `git worktree add`.
 sid=$(waypoint sessions start \
-  --backend codex --model gpt-5-codex \
+  --backend <backend> --model <model-id> --permission-mode <auto-approving-mode> \
   --cwd "$repo" --worktree "wq/$job-t$n" --worktree-base "wq/$job" \
   --title "subagent:wq-$job-$n" --spawner-session-id "$lead" \
   | jq -r .session.id)
 # task:<n> is the immutable contract — never rewritten. Update status:<n> only.
 waypoint board set-meta job:$job --key status:$n --meta state=doing --meta assignee=$sid
 # then send the worker the fixed message from org-template.md
+# Confirm the worker actually started its turn before treating it as assigned —
+# a green `start` is not proof the model/mode were accepted:
+waypoint sessions show "$sid"   # expect running/working, not exited/error on turn 1
 ```
+
+A stalled worker isn't a respawn: widen its mode in place with
+`waypoint sessions set-permission-mode <sid> <mode>`.
 
 `--worktree` removes the whole class of plumbing this step used to need: it picks
 a sibling path outside the working tree (so nothing shows up as untracked) and
@@ -101,8 +117,10 @@ then — for a server/CLI/integration artifact — **exercise the real thing**, 
 just unit tests. Green mocked tests routinely miss wiring bugs (a 422 from an
 unset field, git chatter polluting stdout); start the app and run the new paths
 once. Post a summary to the board, reap the workers with `waypoint sessions reap
---spawned-by "$lead"` (this also removes their recorded worktrees), and report
-integrated vs. blocked counts.
+--spawned-by "$lead" --prune-branches` (this removes their recorded worktrees
+*and* force-deletes the leftover `wq/$job-t<n>` branches; without
+`--prune-branches`, an unmerged worker branch survives and collides with a later
+respawn's `--worktree`), and report integrated vs. blocked counts.
 
 ## Worker
 

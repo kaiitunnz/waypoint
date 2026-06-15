@@ -56,9 +56,28 @@ posture — but widening is a deliberate act, not a default. Guidance:
   auto-approving modes are `auto` / `dontAsk` / `bypassPermissions`; codex
   `full_access`; opencode `allow`). An auto-approving child runs tools without
   prompting, so only choose one for work you would pre-approve yourself.
-- If you cannot determine your own posture and need the child to run unattended,
-  prefer leaving it in `default` and servicing approvals over guessing a
-  permissive mode.
+- **When the child must run unattended, decide its posture before spawning.** A
+  child left on `default` parks silently on its first approval — it sits in
+  `waiting_input` while you block waiting for it, with no prompt back to you. If
+  you cannot determine a safe auto-approving mode yourself, **ask the user** which
+  `--permission-mode` to use (use the ask-question tool) rather than spawning on
+  `default` and discovering the stall later. Leaving it on `default` is only the
+  right default when you will be **interactively servicing** the child's approvals
+  yourself.
+
+## Fix a posture without respawning
+
+If a worker is already stalling on `default`, you do **not** have to reap and
+respawn it. On structured backends (claude_code / codex / opencode / claude_tty)
+you can widen its mode in place:
+
+```bash
+waypoint sessions set-permission-mode <child-id> <mode>   # alias: sessions mode
+```
+
+The command validates `<mode>` against the backend's advertised ids and reports
+them on a mismatch. Backends that can't change mode live are rejected cleanly —
+for those, reap and respawn remains the only path.
 
 ## Service a child's approvals
 

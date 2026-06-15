@@ -87,3 +87,7 @@ visible to a downstream lead reading the board.
 - Reap what you spawn. Leaving orphaned `subagent:*` sessions behind is a bug.
 - Ground every status claim in `waypoint sessions show`/`events` output, not
   assumption.
+- **Be inquisitive about environmental choices.** When the permission mode,
+  model, or backend for a child would otherwise be a silent guess — especially
+  for unattended work — surface it to the user (ask-question tool) rather than
+  guessing and discovering the stall or turn-1 death later.

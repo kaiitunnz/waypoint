@@ -485,6 +485,7 @@ class WaypointClient:
         cwd: str,
         launch_target_id: str | None = None,
         launch_mode: str | None = None,
+        transport: str | None = None,
         title: str | None = None,
         model: str | None = None,
         effort: str | None = None,
@@ -497,10 +498,12 @@ class WaypointClient:
         body: dict[str, Any] = {"backend": backend, "cwd": cwd, "args": args or []}
         # Omit unset optionals so the server's model defaults apply. Sending an
         # explicit null for a non-optional-with-default field like launch_mode
-        # is a 422 (it is validated against the enum, default or not).
+        # is a 422 (it is validated against the enum, default or not). transport
+        # is optional-with-None, so omit it to keep the launch_mode behavior.
         optional = {
             "launch_target_id": launch_target_id,
             "launch_mode": launch_mode,
+            "transport": transport,
             "title": title,
             "model": model,
             "effort": effort,

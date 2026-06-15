@@ -81,11 +81,16 @@ class Scheduler:
     def create_schedule(self, request: ScheduleCreateRequest) -> ScheduledSessionRecord:
         scheduled_at = self._resolve_scheduled_at(request)
         permission_mode = self._resolve_permission_mode(request)
-        # Validate launch target up-front so the user gets immediate feedback.
+        # Validate launch target and transport up-front so the user gets
+        # immediate feedback instead of a failure when the schedule fires.
         launch_target = None
         if request.launch_target_id:
             launch_target = self._runtime._resolve_launch_target(
                 request.launch_target_id, request.backend
+            )
+        if request.transport is not None:
+            self._runtime._validate_supported_transport(
+                request.backend, request.transport
             )
         cwd = request.cwd
         if launch_target is not None and not cwd:
@@ -97,6 +102,7 @@ class Scheduler:
             cwd=cwd,
             launch_target_id=request.launch_target_id,
             launch_mode=request.launch_mode,
+            transport=request.transport,
             title=request.title,
             args=list(request.args),
             config_overrides=list(request.config_overrides),
@@ -184,6 +190,7 @@ class Scheduler:
                     cwd=schedule.cwd,
                     launch_target_id=schedule.launch_target_id,
                     launch_mode=schedule.launch_mode,
+                    transport=schedule.transport,
                     title=schedule.title,
                     args=schedule.args,
                     config_overrides=schedule.config_overrides,

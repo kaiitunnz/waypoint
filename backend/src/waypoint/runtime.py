@@ -272,6 +272,22 @@ class SessionRuntime:
             )
         return session
 
+    def _validate_supported_transport(self, backend: str, transport: str) -> None:
+        """Reject a transport the named agent does not declare support for.
+
+        Shared by every launch entry point (create, schedule, import) so a
+        pinned transport is validated identically wherever a session begins.
+        """
+        supported = self.registry.supported_transports(backend)
+        if transport not in supported:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"{backend} cannot be driven over transport "
+                    f"{transport!r}; supported: {', '.join(supported)}"
+                ),
+            )
+
     async def create_session(self, request: SessionCreateRequest) -> SessionRecord:
         if request.source_mode != SessionSource.MANAGED:
             raise HTTPException(
@@ -328,15 +344,7 @@ class SessionRuntime:
             # transport must be one the agent declares; the resolved plugin owns
             # that transport (the agent's native adapter, the tty-tail driver, or
             # the tmux wrapper).
-            supported = self.registry.supported_transports(request.backend)
-            if request.transport not in supported:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        f"{request.backend} cannot be driven over transport "
-                        f"{request.transport!r}; supported: {', '.join(supported)}"
-                    ),
-                )
+            self._validate_supported_transport(request.backend, request.transport)
             plugin = self.registry.resolve(request.backend, request.transport)
         elif launch_mode == LaunchMode.TMUX_WRAPPER:
             fallback = self.registry.fallback_for_managed_launch()

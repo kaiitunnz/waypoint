@@ -284,3 +284,81 @@ async def test_fire_passes_launch_mode_to_create_session(tmp_path, monkeypatch) 
     await runtime.scheduler._fire_due_schedules()
 
     assert captured == [LaunchMode.TMUX_WRAPPER]
+
+
+@pytest.mark.asyncio
+async def test_create_schedule_persists_transport(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    schedule = runtime.scheduler.create_schedule(
+        ScheduleCreateRequest(
+            backend="claude_code",
+            cwd="/tmp/project",
+            transport="claude_tty",
+            delay_seconds=60,
+        )
+    )
+    assert schedule.transport == "claude_tty"
+    stored = runtime.storage.get_schedule(schedule.id)
+    assert stored is not None
+    assert stored.transport == "claude_tty"
+
+
+@pytest.mark.asyncio
+async def test_create_schedule_without_transport_defaults_none(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    schedule = runtime.scheduler.create_schedule(
+        ScheduleCreateRequest(
+            backend="claude_code",
+            cwd="/tmp/project",
+            delay_seconds=60,
+        )
+    )
+    assert schedule.transport is None
+    stored = runtime.storage.get_schedule(schedule.id)
+    assert stored is not None
+    assert stored.transport is None
+
+
+@pytest.mark.asyncio
+async def test_create_schedule_rejects_unsupported_transport(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    with pytest.raises(HTTPException) as exc:
+        runtime.scheduler.create_schedule(
+            ScheduleCreateRequest(
+                backend="claude_code",
+                cwd="/tmp/project",
+                transport="codex_app_server",
+                delay_seconds=60,
+            )
+        )
+    assert exc.value.status_code == 400
+    assert "codex_app_server" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_fire_passes_transport_to_create_session(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    schedule = runtime.scheduler.create_schedule(
+        ScheduleCreateRequest(
+            backend="claude_code",
+            cwd="/tmp/project",
+            transport="claude_tty",
+            delay_seconds=0,
+        )
+    )
+    runtime.storage.update_schedule(
+        schedule.id, scheduled_at=datetime.now(UTC) - timedelta(seconds=1)
+    )
+    created_session = make_session(runtime.settings, "claude-aaaaaaaa")
+    runtime.storage.create_session(created_session)
+    captured: list[str | None] = []
+
+    async def fake_create_session(request) -> SessionRecord:
+        captured.append(request.transport)
+        return created_session
+
+    monkeypatch.setattr(runtime, "create_session", fake_create_session)
+
+    await runtime.scheduler._fire_due_schedules()
+
+    assert captured == ["claude_tty"]

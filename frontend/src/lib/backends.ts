@@ -62,14 +62,6 @@ const FALLBACK_LABELS: Record<string, string> = {
   tmux: "Tmux",
 };
 
-const FALLBACK_TRANSPORT_LABELS: Record<string, string> = {
-  codex_app_server: "codex app server",
-  claude_cli: "claude cli",
-  claude_tty: "claude tty",
-  opencode_http: "opencode http",
-  tmux: "tmux",
-};
-
 // Hand-mirrored from the backend's capability defaults so catalog-less callers
 // (early bootstrap, lib helpers) still get the right answer for the built-ins.
 // New backends MUST be reachable via the live catalog — these fallbacks only
@@ -145,21 +137,72 @@ export function humaniseBackend(id: Backend, catalog?: BackendCatalog): string {
   return catalog?.byId(id)?.label ?? FALLBACK_LABELS[id] ?? id;
 }
 
-/**
- * Backend-agnostic helpers that consult the catalog when present and
- * fall back to the hand-mirrored defaults for the built-ins so
- * pre-bootstrap callers (login screen, error boundaries) still render
- * sensibly without a hook.
- */
+// How a transport is presented in the UI: a user-facing name, a one-line
+// description, and a coarse kind that drives the picker icon. This map is the
+// single source of truth — picker labels, session-card chips, and transport
+// badges all read from it. Unknown transports fall back to a capability-derived
+// presentation so a newly-registered transport still renders sensibly.
+export interface TransportPresentation {
+  name: string;
+  description: string;
+  kind: "chat" | "terminal";
+}
+
+const TRANSPORT_PRESENTATION: Record<string, TransportPresentation> = {
+  claude_cli: {
+    name: "Chat",
+    description: "Structured cards with inline model and permission control.",
+    kind: "chat",
+  },
+  claude_tty: {
+    name: "Emulated",
+    description:
+      "Same chat, run through the real Claude Code app — resumable and exempt from API rate limits.",
+    kind: "chat",
+  },
+  codex_app_server: {
+    name: "Chat",
+    description: "Structured cards with inline model and approval control.",
+    kind: "chat",
+  },
+  opencode_http: {
+    name: "Chat",
+    description: "Structured cards with inline model and approval control.",
+    kind: "chat",
+  },
+  tmux: {
+    name: "Terminal",
+    description: "Raw terminal pane for any CLI; plain text.",
+    kind: "terminal",
+  },
+};
+
+export function transportPresentation(
+  transport: SessionTransport,
+  catalog?: BackendCatalog,
+): TransportPresentation {
+  const known = TRANSPORT_PRESENTATION[transport];
+  if (known) return known;
+  if (liveTerminal(transport, catalog)) {
+    return {
+      name: "Terminal",
+      description: "Raw terminal pane for any CLI; plain text.",
+      kind: "terminal",
+    };
+  }
+  return {
+    name: "Chat",
+    description: "Structured cards with inline model control.",
+    kind: "chat",
+  };
+}
+
+// The user-facing transport name, sourced from the presentation map.
 export function transportLabel(
   transport: SessionTransport,
   catalog?: BackendCatalog,
 ): string {
-  return (
-    catalog?.transportLabel(transport)?.toLowerCase() ??
-    FALLBACK_TRANSPORT_LABELS[transport] ??
-    transport
-  );
+  return transportPresentation(transport, catalog).name;
 }
 
 export function fidelityFor(
@@ -351,54 +394,61 @@ export function defaultTransportFor(
   return catalog?.byId(backend)?.default_transport ?? null;
 }
 
-// Friendly, user-facing names for the launch transport picker. Distinct from
-// `transportLabel()`, which surfaces the raw descriptor label (e.g. "claude
-// cli") for badges and status lines. Falls back to a capability-derived label
-// so a newly-registered transport still renders sensibly without a frontend
-// edit.
-const TRANSPORT_PICKER_LABELS: Record<string, string> = {
-  claude_cli: "Structured",
-  claude_tty: "Terminal UI",
-  codex_app_server: "Structured",
-  opencode_http: "Structured",
-  tmux: "Terminal (raw)",
-};
-
+// Picker label + fidelity hint for the legacy transport cards. Superseded by
+// `transportPresentation`; retained only until the launch picker is rebuilt.
 export function transportPickerLabel(
   transport: SessionTransport,
   catalog?: BackendCatalog,
 ): string {
-  return (
-    TRANSPORT_PICKER_LABELS[transport] ??
-    (liveTerminal(transport, catalog) ? "Terminal" : "Structured")
-  );
+  return transportPresentation(transport, catalog).name;
 }
 
-const TRANSPORT_FIDELITY_HINTS: Record<string, string> = {
-  claude_cli: "Native structured adapter — full-fidelity transcript cards.",
-  claude_tty: "Real Claude Code terminal UI, tailed live — resumable.",
-  codex_app_server: "Native structured adapter — full-fidelity transcript cards.",
-  opencode_http: "Native structured adapter — full-fidelity transcript cards.",
-  tmux: "Generic terminal pane — live output, heuristic transcript.",
-};
-
-// A transport's fidelity for the launch picker: a coarse `kind` tag (drives the
-// visual indicator) plus a one-line trade-off hint. Both derive from the live
-// transport capabilities, with a friendlier per-transport hint when known.
 export function transportFidelity(
   transport: SessionTransport,
   catalog?: BackendCatalog,
 ): { kind: "structured" | "terminal"; hint: string } {
-  const structured =
-    fidelityFor(transport, catalog) === "structured" &&
-    !liveTerminal(transport, catalog);
-  const kind = structured ? "structured" : "terminal";
-  const hint =
-    TRANSPORT_FIDELITY_HINTS[transport] ??
-    (kind === "structured"
-      ? "Structured transcript — full-fidelity cards."
-      : "Live terminal — heuristic transcript.");
-  return { kind, hint };
+  const pres = transportPresentation(transport, catalog);
+  return {
+    kind: pres.kind === "terminal" ? "terminal" : "structured",
+    hint: pres.description,
+  };
+}
+
+// The launchable agent that drives a transport: the non-folded agent whose
+// `supported_transports` includes it. Unique for the structured transports
+// (claude_cli/claude_tty → claude_code, codex_app_server → codex,
+// opencode_http → opencode); for the shared tmux pane it returns the first
+// match, so callers that already know the session's own agent should prefer it.
+export function agentForTransport(
+  transport: SessionTransport,
+  catalog?: BackendCatalog,
+): Backend | undefined {
+  if (!catalog) return undefined;
+  const folded = foldedTransportIds(catalog);
+  return catalog
+    .all()
+    .find(
+      (descriptor) =>
+        !folded.has(descriptor.transport_id) &&
+        descriptor.supported_transports.includes(transport),
+    )?.id;
+}
+
+// Normalise a session's recorded backend to the agent the UI should show.
+// Legacy rows stored a folded transport as the backend (e.g. backend=claude_tty),
+// so a tty-tail Claude session and a new claude_code+claude_tty launch render
+// identically. When the recorded backend is already a launchable agent, trust
+// it; only fold transport-as-backend rows back to their owning agent.
+export function displayAgentFor(
+  backend: Backend,
+  transport: SessionTransport,
+  catalog?: BackendCatalog,
+): Backend {
+  if (!catalog) return backend;
+  const descriptor = catalog.byId(backend);
+  const folded = foldedTransportIds(catalog);
+  if (descriptor && !folded.has(descriptor.transport_id)) return backend;
+  return agentForTransport(transport, catalog) ?? backend;
 }
 
 /** Single-flight catalog hook fed by `MeResponse.backends`. */

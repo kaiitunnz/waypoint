@@ -34,6 +34,7 @@ interface LaunchOptionsDetailsProps {
   mode: "new" | "resume";
   launchMode: LaunchMode;
   onLaunchModeChange: (mode: LaunchMode) => void;
+  availableModes?: LaunchMode[];
   supportsCustomArgs?: boolean;
   supportsConfigOverrides?: boolean;
   customArgsText?: string;
@@ -47,6 +48,7 @@ export function LaunchOptionsDetails({
   mode,
   launchMode,
   onLaunchModeChange,
+  availableModes,
   supportsCustomArgs,
   supportsConfigOverrides,
   customArgsText,
@@ -74,7 +76,11 @@ export function LaunchOptionsDetails({
       </button>
       <div className="advanced-body">
         <div className="advanced-body-inner">
-          <LaunchModeField value={launchMode} onChange={onLaunchModeChange} />
+          <LaunchModeField
+            value={launchMode}
+            onChange={onLaunchModeChange}
+            availableModes={availableModes}
+          />
           {showCustomArgs ? (
             <label className="field advanced-args-field">
               <span>Custom CLI args</span>
@@ -121,32 +127,49 @@ export function LaunchOptionsDetails({
 interface LaunchModeFieldProps {
   value: LaunchMode;
   onChange: (mode: LaunchMode) => void;
+  // When provided, only these transport options are offered (capability-gated
+  // per agent). Defaults to all three.
+  availableModes?: LaunchMode[];
 }
 
-// Reusable launch-mode segmented control. Compact (content-width, not row-
-// wide) so it fits naturally inside Advanced sections in both LaunchPanel
-// and SchedulePanel.
-export function LaunchModeField({ value, onChange }: LaunchModeFieldProps) {
+// The launch mode is really a transport / fidelity choice: "direct" runs the
+// agent's native structured adapter, "tmux_wrapper" a generic terminal pane
+// (heuristic transcript), and "auto" lets the backend pick.
+const LAUNCH_MODE_OPTIONS: Array<[LaunchMode, string, string]> = [
+  ["auto", "Auto", "Let Waypoint pick the best transport for this agent"],
+  ["direct", "Direct", "Native structured adapter — full-fidelity transcript"],
+  [
+    "tmux_wrapper",
+    "tmux",
+    "Generic tmux pane — live terminal, heuristic transcript",
+  ],
+];
+
+// Reusable transport selector. Compact (content-width, not row-wide) so it
+// fits naturally inside Advanced sections in both LaunchPanel and SchedulePanel.
+export function LaunchModeField({
+  value,
+  onChange,
+  availableModes,
+}: LaunchModeFieldProps) {
+  const options = availableModes
+    ? LAUNCH_MODE_OPTIONS.filter(([opt]) => availableModes.includes(opt))
+    : LAUNCH_MODE_OPTIONS;
   return (
     <label className="field launch-mode-field">
-      <span>Launch mode</span>
+      <span>Transport</span>
       <div
         className="segmented segmented-quiet launch-mode-segmented"
         role="radiogroup"
-        aria-label="Launch mode"
+        aria-label="Transport"
       >
-        {(
-          [
-            ["auto", "Auto"],
-            ["direct", "Direct"],
-            ["tmux_wrapper", "tmux"],
-          ] as const
-        ).map(([opt, label]) => (
+        {options.map(([opt, label, hint]) => (
           <button
             key={opt}
             type="button"
             role="radio"
             aria-checked={value === opt}
+            title={hint}
             className={`segmented-item ${value === opt ? "active" : ""}`}
             onClick={() => onChange(opt)}
           >

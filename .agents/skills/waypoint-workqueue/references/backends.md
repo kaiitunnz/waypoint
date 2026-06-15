@@ -20,7 +20,7 @@ static curated list; `claude_tty` has none (it tails Claude's TTY output, no
 separate model registry). `waypoint models` reports the exact ids and efforts
 each backend offers right now — run it and pass those ids verbatim to `--model`
 / `--effort`, rather than guessing from memory. With no argument it sweeps every
-selectable agent backend (`tmux` is a transport and is excluded); a backend
+selectable backend id (`tmux`, a pure transport, is excluded); a backend
 whose live discovery is down is reported with an `error` entry instead of
 failing the sweep. Pass one (`waypoint models codex`) to query a single backend. The names below are
 illustrative (mid-2026) and will age — trust `waypoint models` over them.
@@ -47,14 +47,17 @@ a backend or model blindly.
   agents/rulesets as permission modes, `/compact`. *Reach for it when you need a
   specific, open, or local model, want to spread load across providers, or must
   avoid one vendor's rate limits.*
-- **`claude_tty`** — the `claude_code` agent driven over a TTY-tail transport:
-  launches Claude Code's interactive TUI in a tmux pane and tails its transcript
-  JSONL into the canonical event stream, so the transcript **is** structured
-  (`is_structured=True`) — same Claude model catalogue, selectable as `--backend
-  claude_tty`, accepts `--model`. It drives tool approvals via pane keystrokes
-  rather than the stdio hook, and the TUI is exempt from the `claude -p` API rate
-  limit. *Use it for autonomous Claude sessions or as a fallback when the
-  structured `claude_code` adapter is unavailable.*
+- **`claude_tty`** — not a fourth agent: it is the `claude_code` agent driven
+  over the **Emulated** TTY-tail transport. It launches Claude Code's interactive
+  TUI in a tmux pane and tails its transcript JSONL into the canonical event
+  stream, so the transcript **is** structured (`is_structured=True`) — same
+  Claude model catalogue, accepts `--model`. Tool approvals go through pane
+  keystrokes rather than the stdio hook, and the TUI is exempt from the
+  `claude -p` API rate limit. Select it with `--backend claude_code --transport
+  claude_tty` (and `claude_code` now **defaults** to this transport); `--backend
+  claude_tty` stays as a legacy alias. *Reach for the Emulated transport for
+  autonomous Claude sessions or as a fallback when the structured `claude_cli`
+  adapter is unavailable.*
 - **`tmux`** — a raw transport, not a selectable agent backend: no model /
   effort / permission knobs, unstructured (scraped) transcript, but full shell
   and host access. It backs `claude_tty` and other TTY-style sessions

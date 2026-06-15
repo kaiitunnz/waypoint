@@ -83,8 +83,9 @@ A session's behavior is the product of two independent questions:
   id is discovered. This is the agent's knowledge and lives on the agent
   plugin.
 - **How is it driven?** A structured stream (`claude -p`, the Codex App
-  Server, OpenCode's SSE) or a scraped terminal pane (`tmux`,
-  `claude_tty`). This is the transport's knowledge: whether the channel is
+  Server, OpenCode's SSE), a transcript tail that is still structured
+  (`claude_tty`), or a scraped terminal pane (`tmux`). This is the
+  transport's knowledge: whether the channel is
   structured, whether a detached session can be resumed, which control
   knobs apply inline vs. require a restart.
 
@@ -108,7 +109,7 @@ this section walks through it.
 ```python
 class MyPlugin:
     id: str                     # registry key + storage column value, e.g. "opencode"
-    transport_id: str           # storage column value, e.g. "opencode_ws"
+    transport_id: str           # storage column value, e.g. "opencode_http"
     label: str                  # human-readable, surfaced in pickers
     capabilities: BackendCapabilities
 ```
@@ -183,9 +184,10 @@ mechanisms behind it:
 
 ### The agent launch contract
 
-A *generic* transport — the `tmux` pane wrapper and the `claude_tty` tty-tail
-— drives any agent without knowing which one it is. The agent-specific bits
-of that flow live on the agent as the `AgentLaunchContract` Protocol (also in
+The generic `tmux` pane wrapper drives any agent without knowing which one it
+is; the `claude_tty` tty-tail is bound to the Claude agent but reuses the same
+machinery. Either way the agent-specific bits of that flow live on the agent as
+the `AgentLaunchContract` Protocol (also in
 [`base.py`](../backend/src/waypoint/backends/base.py)):
 
 ```python
@@ -547,9 +549,9 @@ implementation returned from that agent's `transport_view`. It owns
 stream, a websocket, an SDK client). No registry change is needed — it ships
 inside the agent package (`backends/<id>/transport.py`).
 
-**A generic transport that drives any agent** — like `tmux`, or `claude_tty`
-for the Claude agent — is registered as its own plugin with a distinct
-`transport_id`. It does not duplicate agent knowledge:
+**A transport registered as its own plugin** — the generic `tmux` pane wrapper
+that drives any agent, or an agent-bound tail like `claude_tty` for the Claude
+agent — has a distinct `transport_id`. It does not duplicate agent knowledge:
 
 1. Subclass or compose the shared `TmuxTransport` (input injection,
    pipe-pane logging) for the channel mechanics.

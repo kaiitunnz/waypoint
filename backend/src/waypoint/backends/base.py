@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -315,3 +316,138 @@ class BackendPlugin(Protocol):
         ``api.py``.
         """
         ...
+
+
+@runtime_checkable
+class AgentLaunchContract(Protocol):
+    """Transport-agnostic launch knowledge an agent exposes.
+
+    A *generic* transport — the tmux pane wrapper and the tty-tail driver —
+    drives any agent without knowing which one it is. The agent-specific
+    bits of that flow (how to pin model/effort/permission at startup, how to
+    resume a thread, how the agent's native conversation id is discovered)
+    are the agent's knowledge, not the transport's.
+
+    Historically these lived as ``if backend == "claude_code"`` /
+    ``if backend == "codex"`` branches inside ``backends/tmux/plugin.py`` —
+    the exact per-backend branching the plugin architecture forbids
+    everywhere else. This contract relocates them onto the agent: a generic
+    transport calls ``registry.get(session.backend)`` and dispatches through
+    these methods, so a new agent gets pane-wrapping for free and tmux holds
+    no backend literals.
+
+    Agent plugins satisfy this by mixing in :class:`DefaultLaunchContract`
+    and overriding the methods their CLI actually supports.
+    """
+
+    def launch_flags(
+        self,
+        *,
+        model: str | None,
+        effort: str | None,
+        permission_mode: str | None,
+    ) -> list[str]:
+        """CLI flags that pin model / effort / permission at process start.
+
+        Mirrors the structured-launch flag set the user picks in the launch
+        panel, for the interactive CLI a pane wrapper spawns. Omit flags the
+        CLI does not accept (e.g. codex has no ``--effort``).
+        """
+        ...
+
+    def pregenerate_thread_id(self) -> str | None:
+        """A thread/conversation id to pass at launch, or ``None``.
+
+        Claude accepts ``--session-id <uuid>`` so the id is known before the
+        first turn; codex only reveals its id after the first persist, so it
+        returns ``None`` and relies on :meth:`capture_thread_id`.
+        """
+        ...
+
+    def resume_args(self, thread_id: str, prior_args: list[str]) -> list[str]:
+        """Translate launch args into the CLI's resume form.
+
+        Claude prepends ``--resume <id>`` (scrubbing any prior
+        ``--session-id`` / ``--resume``); codex prepends the ``resume <id>``
+        subcommand. Agents with no resume contract return ``prior_args``
+        unchanged.
+        """
+        ...
+
+    async def conversation_exists(
+        self,
+        thread_id: str,
+        cwd: str,
+        launch_target: "SshLaunchTargetConfig | None",
+    ) -> bool:
+        """Whether the agent has persisted ``thread_id`` to disk yet.
+
+        Both Claude and Codex defer conversation-file creation until first
+        input; resuming a never-written thread makes the CLI exit with "no
+        conversation found", so callers gate resume on this. Checks the
+        local filesystem, or the remote one over SSH when ``launch_target``
+        is set.
+        """
+        ...
+
+    async def capture_thread_id(
+        self,
+        runtime: "SessionRuntime",
+        session_id: str,
+        cwd: str,
+        since: datetime,
+        launch_target: "SshLaunchTargetConfig | None",
+    ) -> None:
+        """Best-effort discovery of the native thread id after launch.
+
+        For agents whose id only appears post-launch (codex writes a
+        ``rollout-<ts>-<uuid>.jsonl`` on first persist), this polls for it
+        and stores ``transport_state.thread_id`` so a later reconnect can
+        resume. A no-op for agents that pregenerate the id.
+        """
+        ...
+
+
+class DefaultLaunchContract:
+    """Inert defaults for :class:`AgentLaunchContract`.
+
+    Agent plugins mix this in and override the methods their CLI supports.
+    The defaults are the correct behaviour for an agent with no pane-wrapper
+    launch knobs and no resumable thread (the opencode case today): no extra
+    flags, no pregenerated id, verbatim resume args, no on-disk thread to
+    find. ``claude_code`` and ``codex`` override every method with their real
+    logic.
+    """
+
+    def launch_flags(
+        self,
+        *,
+        model: str | None = None,
+        effort: str | None = None,
+        permission_mode: str | None = None,
+    ) -> list[str]:
+        return []
+
+    def pregenerate_thread_id(self) -> str | None:
+        return None
+
+    def resume_args(self, thread_id: str, prior_args: list[str]) -> list[str]:
+        return list(prior_args)
+
+    async def conversation_exists(
+        self,
+        thread_id: str,
+        cwd: str,
+        launch_target: "SshLaunchTargetConfig | None",
+    ) -> bool:
+        return False
+
+    async def capture_thread_id(
+        self,
+        runtime: "SessionRuntime",
+        session_id: str,
+        cwd: str,
+        since: datetime,
+        launch_target: "SshLaunchTargetConfig | None",
+    ) -> None:
+        return None

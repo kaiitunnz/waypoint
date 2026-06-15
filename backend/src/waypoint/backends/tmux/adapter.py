@@ -51,9 +51,16 @@ class TmuxAdapter:
     async def describe_target(self, target: str) -> TmuxTarget:
         template = "#{session_name}|#{window_index}|#{pane_id}|#{pane_current_path}|#{pane_dead}|#{pane_pid}"
         output = await self._run("display-message", "-p", "-t", target, template)
-        session_name, window_index, pane_id, cwd, pane_dead, pane_pid = (
-            output.strip().split("|")
-        )
+        fields = output.strip().split("|")
+        # Unlike capture-pane/send-keys, `display-message -t` does not validate
+        # the target: a missing pane expands the format with empty fields and
+        # exits 0 (e.g. "|||||"), so an empty pane id means the target no longer
+        # exists. Raise here so liveness checks (`_pane_alive`, `target_exists`,
+        # `_refresh_state`) see a dead pane instead of a phantom one whose
+        # ``pane_dead`` parses to False.
+        if len(fields) != 6 or not fields[2]:
+            raise TmuxError(f"can't find target: {target}")
+        session_name, window_index, pane_id, cwd, pane_dead, pane_pid = fields
         return TmuxTarget(
             session=session_name,
             window=window_index,

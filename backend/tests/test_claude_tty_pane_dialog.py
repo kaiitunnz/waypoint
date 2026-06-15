@@ -28,6 +28,7 @@ def _load(name: str) -> str:
         ("approval_write.txt", PaneScreen.APPROVAL),
         ("approval_bash.txt", PaneScreen.APPROVAL),
         ("question_dialog.txt", PaneScreen.QUESTION),
+        ("question_dialog_single.txt", PaneScreen.QUESTION),
         ("trust_dialog.txt", PaneScreen.TRUST),
         ("model_selector.txt", PaneScreen.MODEL_SELECTOR),
         ("effort_popup.txt", PaneScreen.EFFORT_POPUP),
@@ -37,6 +38,18 @@ def _load(name: str) -> str:
 )
 def test_classify(fixture: str, expected: PaneScreen) -> None:
     assert classify(_load(fixture)) is expected
+
+
+def test_single_and_multi_question_footers_both_classify() -> None:
+    # The navigation hint differs by arity — "↑/↓ to navigate" for one question,
+    # "Tab/Arrow keys to navigate" for several — so detection keys on the stable
+    # "Enter to select"/"Esc to cancel"/"Type something" markers, not the hint.
+    single = _load("question_dialog_single.txt")
+    multi = _load("question_dialog.txt")
+    assert "↑/↓ to navigate" in single
+    assert "Tab/Arrow keys to navigate" in multi
+    assert classify(single) is PaneScreen.QUESTION
+    assert classify(multi) is PaneScreen.QUESTION
 
 
 def test_question_dialog_not_mistaken_for_approval() -> None:

@@ -1,0 +1,15 @@
+● The backend is running, but on the old code — my runtime changes (#4 branch cleanup, --prune-branches) need a restart
+  to be exercised end-to-end. Per project rules I need your permission for that.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Restart backend
+May I restart the backend to run a full e2e validation against the new code?
+❯ 1. Yes, restart + e2e
+     Run `waypointctl restart backend`, then drive real commands: spawn a worktree session, set-permission-mode live,
+     reap --prune-branches, and confirm the branch/worktree are gone. Verifies #2 and #4 against the live stack.
+  2. No, skip restart
+     Leave the running backend as-is. I'll only e2e the parts that hit existing endpoints (set-permission-mode, model
+     warning) via `uv run waypoint`, and rely on unit tests for the runtime branch-cleanup.
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+Enter to select · ↑/↓ to navigate · Esc to cancel

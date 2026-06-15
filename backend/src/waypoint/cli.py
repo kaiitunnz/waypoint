@@ -932,6 +932,39 @@ def _create_worktree(branch: str, base: str | None, cwd: str) -> str:
     return worktree_path
 
 
+def _warn_unknown_model(
+    client: WaypointClient,
+    backend: str,
+    model: str,
+    launch_target_id: str | None,
+) -> None:
+    """Warn (never block) when ``--model`` isn't in the backend's catalogue.
+
+    A wrong id spawns fine and only dies on the first turn, so surfacing it
+    here gives a fast hint. Backends accept free-text ids, so this only warns;
+    if discovery is unavailable the check is skipped rather than guessed.
+    """
+    try:
+        catalog = client.list_models(backend, launch_target_id=launch_target_id)
+    except WaypointError:
+        return
+    ids = {m.get("id") for m in catalog.get("models", []) if m.get("id")}
+    if not ids or model in ids:
+        return
+    if catalog.get("supports_free_text"):
+        tail = (
+            "the backend accepts free-text ids, but confirm the worker survives "
+            "its first turn"
+        )
+    else:
+        tail = "it will likely be rejected on the first turn"
+    typer.echo(
+        f"warning: model {model!r} is not among {backend}'s advertised models "
+        f"({', '.join(sorted(ids))}); {tail}.",
+        err=True,
+    )
+
+
 @sessions_app.command("start")
 def sessions_start(
     ctx: typer.Context,
@@ -973,9 +1006,10 @@ def sessions_start(
         worktree_path = _create_worktree(worktree, worktree_base, cwd)
         effective_cwd = worktree_path
 
-    _emit(
-        _settings_from_ctx(ctx),
-        lambda c: {
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        if model is not None:
+            _warn_unknown_model(c, backend, model, launch_target_id)
+        return {
             "session": c.create_session(
                 backend=backend,
                 cwd=effective_cwd,
@@ -988,8 +1022,9 @@ def sessions_start(
                 worktree_path=worktree_path,
                 args=list(args or []),
             )
-        },
-    )
+        }
+
+    _emit(_settings_from_ctx(ctx), _run)
 
 
 @sessions_app.command("send")

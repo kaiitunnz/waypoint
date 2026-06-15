@@ -114,9 +114,9 @@ class ClaudeCodeLaunchTargetConfig(PluginLaunchTargetConfig):
 class ClaudeCodePlugin(DefaultLaunchContract):
     id = "claude_code"
     transport_id = "claude_cli"
-    # Driven over its native stream-json adapter by default, the tty-tail
-    # driver for a faithful TUI, or the generic tmux pane wrapper as the
-    # managed-launch fallback.
+    # Defaults to the tty-tail driver (the faithful TUI), with the native
+    # stream-json adapter and the generic tmux pane wrapper also available; the
+    # wrapper doubles as the managed-launch fallback.
     supported_transports = ("claude_cli", "claude_tty", "tmux")
     default_transport = "claude_tty"
     label = "Claude Code"

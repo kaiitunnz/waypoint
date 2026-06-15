@@ -41,6 +41,8 @@ import {
 import {
   approvalDecisionsFor,
   type BackendCatalog,
+  defaultTransportFor,
+  displayAgentFor,
   fidelityFor,
   humaniseBackend,
   liveTerminal,
@@ -3646,6 +3648,13 @@ function SessionHeader({
 }) {
   const cwdSegments = formatCwdSegments(session.cwd);
   const target = session.launch_target_id ?? null;
+  // Match the session card: fold a legacy transport-as-backend row (e.g.
+  // backend=claude_tty) to its owning agent, and show the transport chip only
+  // when it differs from that agent's default.
+  const headerAgent = displayAgentFor(session.backend, session.transport, catalog);
+  const headerAgentDefault = defaultTransportFor(headerAgent, catalog);
+  const showHeaderTransport =
+    headerAgentDefault !== null && session.transport !== headerAgentDefault;
   const sourceLabel = session.source === "managed" ? "Managed" : "Attached";
   const [isEditing, setIsEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
@@ -3730,15 +3739,13 @@ function SessionHeader({
         </p>
       ) : null}
       <div className="session-header-tags">
-        <span className={`badge ${session.backend}`}>
-          {humaniseBackend(session.backend, catalog)}
+        <span className={`badge ${headerAgent}`}>
+          {humaniseBackend(headerAgent, catalog)}
         </span>
-        {!assistant ? (
-          <>
-            <span className={`badge transport ${session.transport}`}>
-              {transportLabel(session.transport, catalog)}
-            </span>
-          </>
+        {!assistant && showHeaderTransport ? (
+          <span className={`badge transport ${session.transport}`}>
+            {transportLabel(session.transport, catalog)}
+          </span>
         ) : null}
         {session.model ? (
           <span className="badge model" title={`Model: ${session.model}`}>

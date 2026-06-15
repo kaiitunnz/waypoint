@@ -544,12 +544,18 @@ class TmuxPlugin:
         """The wrapped agent's launch contract for ``backend``.
 
         Every backend a pane can wrap is an agent plugin mixing in
-        :class:`DefaultLaunchContract`, so the assertion documents the
-        invariant: the tmux wrapper only ever resolves agent ids here, never
-        its own transport id.
+        :class:`DefaultLaunchContract`, so this enforces the invariant: the tmux
+        wrapper only ever resolves agent ids here, never its own transport id. A
+        plugin that doesn't satisfy the contract is a misconfiguration, surfaced
+        as a 400 rather than a stripped ``assert`` or an opaque 500.
         """
         inner = runtime.registry.get(backend)
-        assert isinstance(inner, AgentLaunchContract)
+        if not isinstance(inner, AgentLaunchContract):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{backend} cannot be wrapped in a tmux pane: "
+                "it does not implement the agent launch contract",
+            )
         return inner
 
     def _spawn_thread_id_watcher(

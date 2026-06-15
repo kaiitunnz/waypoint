@@ -12,7 +12,7 @@ def _supported_transports(plugin: BackendPlugin) -> tuple[str, ...]:
     still registers and resolves.
     """
     declared = getattr(plugin, "supported_transports", None)
-    if declared:
+    if declared is not None:
         return tuple(declared)
     return (plugin.transport_id,)
 

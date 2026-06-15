@@ -29,7 +29,6 @@ import type {
   BackendCapabilities,
   BackendDescriptor,
   BackendPermissionMode,
-  LaunchMode,
   MeResponse,
   SessionTransport,
   TransportCapabilities,
@@ -325,24 +324,6 @@ export function permissionModeLabel(
     (mode) => mode.id === value,
   );
   return match?.label ?? value;
-}
-
-// Launch modes (transport choices) available for an agent. "direct" maps to the
-// agent's native structured adapter, "tmux_wrapper" to the generic tmux pane,
-// and "auto" lets the backend pick. Only offer "direct" when the agent has a
-// structured native transport.
-export function launchModesFor(
-  backend: Backend,
-  catalog?: BackendCatalog,
-): LaunchMode[] {
-  const modes: LaunchMode[] = ["auto"];
-  const native = catalog?.byId(backend)?.transport_capabilities;
-  const hasStructuredNative = native
-    ? native.is_structured
-    : !FALLBACK_NO_FORK.has(backend);
-  if (hasStructuredNative) modes.push("direct");
-  modes.push("tmux_wrapper");
-  return modes;
 }
 
 // Transport ids that some agent folds in as a NON-native transport — listed in

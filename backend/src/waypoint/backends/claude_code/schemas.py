@@ -12,7 +12,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from waypoint.schemas import LaunchMode
+from waypoint.schemas import LaunchMode, SessionTransportId
 
 
 class ClaudeThreadSummary(BaseModel):
@@ -35,3 +35,11 @@ class ClaudeThreadImportRequest(BaseModel):
     # pane. ``auto`` falls through to tmux when the structured plugin
     # is not available for managed launch, matching create_session.
     launch_mode: LaunchMode = LaunchMode.AUTO
+    # Pins the transport the imported thread is driven over, mirroring
+    # ``SessionCreateRequest.transport``. ``None`` keeps the
+    # ``launch_mode``-derived path; an explicit transport supersedes
+    # ``launch_mode`` and must be one the agent declares (the runtime
+    # rejects mismatches with 400). E.g. ``claude_tty`` resumes the
+    # thread under the tty-tail driver while still persisting
+    # ``backend=claude_code``.
+    transport: SessionTransportId | None = None

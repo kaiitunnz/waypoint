@@ -31,6 +31,7 @@ from waypoint.schemas import (
     SessionRecord,
     SessionSource,
     SessionStatus,
+    SessionTransportId,
 )
 from waypoint.transports.base import TransportAdapter
 
@@ -114,6 +115,11 @@ class OpenCodeThreadImportRequest(BaseModel):
     thread_id: str
     launch_target_id: str | None = None
     cwd: str | None = None
+    # Pins the transport the imported thread is driven over. OpenCode imports
+    # only over its native ``opencode_http`` adapter; pinning any other
+    # transport (e.g. the tmux wrapper) is rejected with 400 since there is no
+    # resume-via-tmux path for OpenCode. ``None`` keeps the native behavior.
+    transport: SessionTransportId | None = None
 
 
 class OpenCodeThreadSummary(BaseModel):

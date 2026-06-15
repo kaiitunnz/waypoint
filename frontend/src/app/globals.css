@@ -8840,110 +8840,13 @@ html[data-theme="light"] .term-compose-input {
   width: auto;
 }
 
-/* ─── Agent & transport launch pickers ─── */
-/* Both pickers build on theme variables and ``color-mix`` over the (theme-fixed)
-   per-agent badge colour, so dark/light parity falls out automatically without
-   hand-written overrides. */
-.agent-picker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.agent-option {
-  --agent-color: var(--accent);
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  padding: 7px 15px 7px 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background: var(--bg-input);
-  color: var(--muted);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  transition:
-    border-color 140ms ease,
-    color 140ms ease,
-    background-color 140ms ease,
-    transform 120ms cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.agent-option:hover:not(.active) {
-  color: var(--text);
-  border-color: color-mix(in srgb, var(--accent-cool) 40%, var(--line));
-}
-
-.agent-option:active:not(.active) {
-  transform: scale(0.97);
-}
-
-/* One selection accent across both pickers: the cool-blue ring marks the
-   chosen agent / transport, leaving gold reserved for the Launch CTA. The
-   per-agent ``--agent-color`` survives only on the identity glyph. */
-.agent-option.active {
-  color: var(--text);
-  border-color: color-mix(in srgb, var(--accent-cool) 55%, var(--line));
-  background: color-mix(in srgb, var(--accent-cool) 13%, var(--bg-input));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-cool) 38%, transparent);
-}
-
-.agent-option-glyph {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--agent-color) 20%, transparent);
-  color: var(--agent-color);
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.agent-option-label {
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-  letter-spacing: 0.02em;
-}
-
-/* Transport is a lighter, secondary choice than the agent, so it rides the
-   quiet segmented control (cool-blue active state) rather than dominating with
-   full-width cards. Each segment carries a distinct glyph + the transport's
-   user-facing name; the selected transport's description sits below. */
-.transport-segmented {
-  justify-self: start;
-  max-width: 100%;
-  flex-wrap: wrap;
-}
-
-.transport-segment {
-  gap: 7px;
-  padding: 0 13px;
-}
-
-.transport-segment-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: currentColor;
-}
-
-.transport-desc {
-  margin: 0;
+/* ─── Form field hints ─── */
+/* Secondary one-line help beneath a ``.field`` control (e.g. the selected
+   Interface's description, the Reasoning-effort hint). Rides ``--muted`` so it
+   adapts across themes without an override. */
+.field-hint {
   font-size: 0.78rem;
   line-height: 1.4;
-  color: var(--muted);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agent-option {
-    transition:
-      border-color 120ms ease,
-      background-color 120ms ease;
-  }
 }
 
 .terminal pre {

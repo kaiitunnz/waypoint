@@ -312,7 +312,7 @@ export function LaunchPanel({
         <form className="launch-body" onSubmit={submitAttach}>
           <div className="launch-body-col">
             <label className="field">
-              <span>Tmux target</span>
+              <span>Terminal pane</span>
               <input
                 value={tmuxTarget}
                 onChange={(event) => setTmuxTarget(event.target.value)}
@@ -339,7 +339,7 @@ export function LaunchPanel({
             </label>
           </div>
           <div className="launch-actions">
-            <span className="grow muted">Waypoint will pipe the pane and forward keystrokes through xterm.</span>
+            <span className="grow muted">Attaches over the Terminal interface — Waypoint streams the live pane and forwards your keystrokes.</span>
             <button
               className="primary"
               disabled={formBusy || !tmuxTarget.trim()}
@@ -430,6 +430,6 @@ function subheadFor(mode: PanelMode, targetLabel: string | null): string {
     case "resume":
       return `Pick up a stored thread${where}.`;
     case "attach":
-      return "Observe an existing tmux pane with raw terminal fallback.";
+      return "Attach to a running terminal pane and drive it live.";
   }
 }

@@ -1907,3 +1907,42 @@ def test_set_permission_mode_rejects_unsupported_backend(
     assert result.exit_code != 0
     assert "does not support" in result.output
     assert posted == []
+
+
+def test_start_warns_on_unknown_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/backends/codex/models":
+            return httpx.Response(
+                200,
+                json={
+                    "backend": "codex",
+                    "models": [{"id": "gpt-5"}],
+                    "supports_free_text": True,
+                },
+            )
+        if path == "/api/sessions" and request.method == "POST":
+            return httpx.Response(200, json={"session": {"id": "new"}})
+        return httpx.Response(404, json={"detail": f"unexpected {path}"})
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "start",
+            "--backend",
+            "codex",
+            "--cwd",
+            "/tmp",
+            "--model",
+            "gpt-5-codex",
+        ],
+    )
+    # Warning, not rejection: the session is still created.
+    assert result.exit_code == 0
+    assert "is not among" in result.output

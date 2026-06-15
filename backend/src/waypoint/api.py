@@ -80,7 +80,15 @@ def _backend_descriptors(registry: BackendRegistry) -> list[dict[str, Any]]:
                 "transport_id": plugin.transport_id,
                 "label": plugin.label,
                 "badges": dict(caps.badges),
+                # The flat ``capabilities`` object stays byte-identical for
+                # existing consumers; the split sub-objects are emitted
+                # alongside it so the frontend can migrate to the (agent,
+                # transport) axes without an immediate break.
                 "capabilities": caps.model_dump(mode="json"),
+                "agent_capabilities": caps.agent_capabilities().model_dump(mode="json"),
+                "transport_capabilities": caps.transport_capabilities().model_dump(
+                    mode="json"
+                ),
             }
         )
     return payload

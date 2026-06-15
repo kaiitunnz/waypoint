@@ -1176,7 +1176,9 @@ class SessionRuntime:
             )
         return refreshed
 
-    async def delete(self, session_id: str, *, force: bool = False) -> None:
+    async def delete(
+        self, session_id: str, *, force: bool = False, prune_branches: bool = False
+    ) -> None:
         session = self.get_session(session_id)
         if session.source == SessionSource.ASSISTANT:
             raise HTTPException(
@@ -1196,11 +1198,7 @@ class SessionRuntime:
         self._close_structured_log(session_id)
         self.storage.delete_session(session_id)
         if session.worktree_path is not None:
-            with suppress(Exception):
-                subprocess.run(
-                    ["git", "worktree", "remove", "--force", session.worktree_path],
-                    check=False,
-                )
+            self._remove_worktree(session.worktree_path, prune_branches=prune_branches)
         # Reclaim the session's uploaded blobs, which can be large.
         self.attachments.discard(session_id)
         # Drop this session's blackboard posts along with its record.
@@ -1209,6 +1207,53 @@ class SessionRuntime:
         await self._broadcast_session_list()
         if pruned:
             await self._publish_board_update(None)
+
+    @staticmethod
+    def _git_capture(cwd: str, *args: str) -> str | None:
+        try:
+            result = subprocess.run(
+                ["git", "-C", cwd, *args],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            return None
+        return (result.stdout or "").strip() or None
+
+    def _remove_worktree(self, worktree_path: str, *, prune_branches: bool) -> None:
+        """Remove a session's worktree and, where safe, its branch.
+
+        The branch and the main repo root are captured from the live worktree
+        *before* removal so cleanup needs no stored branch name and never
+        stats a path git already deleted. ``git branch -d`` (the default)
+        refuses unmerged branches, protecting a worker reaped before its work
+        merged; ``prune_branches`` upgrades to ``-D`` for crew teardown where
+        the branches are meant to be discarded. Only the branch the worktree
+        owned is ever touched, and a branch checked out elsewhere is left for
+        git to refuse.
+        """
+        branch = self._git_capture(worktree_path, "rev-parse", "--abbrev-ref", "HEAD")
+        common_dir = self._git_capture(
+            worktree_path, "rev-parse", "--path-format=absolute", "--git-common-dir"
+        )
+        repo_root = str(Path(common_dir).parent) if common_dir else None
+        # Drive the removal (and branch delete) from the main worktree, not the
+        # server's cwd which may sit outside this session's repo.
+        remove_cmd = ["git", "worktree", "remove", "--force", worktree_path]
+        if repo_root is not None:
+            remove_cmd[1:1] = ["-C", repo_root]
+        with suppress(Exception):
+            subprocess.run(remove_cmd, check=False)
+        if branch is None or branch == "HEAD" or repo_root is None:
+            return
+        flag = "-D" if prune_branches else "-d"
+        with suppress(Exception):
+            subprocess.run(
+                ["git", "-C", repo_root, "branch", flag, branch],
+                capture_output=True,
+                check=False,
+            )
 
     async def post_board_entry(
         self, channel: str, request: BoardPostRequest

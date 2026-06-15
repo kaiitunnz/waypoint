@@ -355,11 +355,18 @@ class WaypointClient:
         ).json()["session"]
         return data
 
-    def delete(self, session_id: str, *, force: bool = False) -> dict[str, Any]:
+    def delete(
+        self, session_id: str, *, force: bool = False, prune_branches: bool = False
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if force:
+            params["force"] = force
+        if prune_branches:
+            params["prune_branches"] = prune_branches
         data: dict[str, Any] = self._request(
             "DELETE",
             f"/api/sessions/{session_id}",
-            params={"force": force} if force else None,
+            params=params or None,
         ).json()
         return data
 

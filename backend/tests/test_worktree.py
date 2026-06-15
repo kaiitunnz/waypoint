@@ -123,6 +123,88 @@ def test_delete_removes_worktree(tmp_path: Path) -> None:
     assert storage.get_session("wt-del") is None
 
 
+def _git(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def _init_repo_with_worktree(tmp_path: Path, branch: str) -> tuple[Path, Path]:
+    """Init a repo with one commit and a worktree on ``branch``; return both paths."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "Test")
+    (repo / "README.md").write_text("hi\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "init")
+    worktree = tmp_path / f"repo-{branch.replace('/', '-')}"
+    _git(repo, "worktree", "add", "-q", str(worktree), "-b", branch)
+    return repo, worktree
+
+
+def _branch_exists(repo: Path, branch: str) -> bool:
+    return (
+        subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", branch],
+            capture_output=True,
+        ).returncode
+        == 0
+    )
+
+
+def _delete_worktree_session(
+    tmp_path: Path, worktree: Path, *, prune_branches: bool
+) -> None:
+    from waypoint.runtime import SessionRuntime
+    from waypoint.settings import Settings
+
+    settings = Settings(data_dir=tmp_path / "data")
+    settings.ensure_dirs()
+    storage = Storage(settings.database_path)
+    runtime = SessionRuntime(settings, storage)
+    session = _make_session(
+        settings, settings.sessions_dir, id="wt", worktree_path=str(worktree)
+    )
+    storage.create_session(session)
+    asyncio.run(runtime.delete("wt", prune_branches=prune_branches))
+
+
+def test_delete_prunes_merged_worktree_branch(tmp_path: Path) -> None:
+    repo, worktree = _init_repo_with_worktree(tmp_path, "wq/job-t1")
+    # The branch is at the integration tip — merged — so the safe `-d` prunes it.
+    _delete_worktree_session(tmp_path, worktree, prune_branches=False)
+    assert not worktree.exists()
+    assert not _branch_exists(repo, "wq/job-t1")
+
+
+def test_delete_keeps_unmerged_branch_without_prune(tmp_path: Path) -> None:
+    repo, worktree = _init_repo_with_worktree(tmp_path, "wq/job-t2")
+    (worktree / "work.txt").write_text("wip\n")
+    _git(worktree, "add", "-A")
+    _git(worktree, "commit", "-q", "-m", "wip")
+    # Unmerged work: `-d` must refuse, leaving the branch for the lead to merge.
+    _delete_worktree_session(tmp_path, worktree, prune_branches=False)
+    assert not worktree.exists()
+    assert _branch_exists(repo, "wq/job-t2")
+
+
+def test_delete_force_prunes_unmerged_branch(tmp_path: Path) -> None:
+    repo, worktree = _init_repo_with_worktree(tmp_path, "wq/job-t3")
+    (worktree / "work.txt").write_text("wip\n")
+    _git(worktree, "add", "-A")
+    _git(worktree, "commit", "-q", "-m", "wip")
+    # Crew teardown: --prune-branches force-deletes even the unmerged branch.
+    _delete_worktree_session(tmp_path, worktree, prune_branches=True)
+    assert not worktree.exists()
+    assert not _branch_exists(repo, "wq/job-t3")
+
+
 def test_delete_skips_worktree_removal_when_none(tmp_path: Path) -> None:
     from waypoint.runtime import SessionRuntime
     from waypoint.settings import Settings

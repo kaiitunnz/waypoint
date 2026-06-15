@@ -179,6 +179,59 @@ def test_registry_lookup_by_transport() -> None:
     assert registry.for_transport("tmux").id == "tmux"
 
 
+def test_resolve_keys_on_agent_and_transport() -> None:
+    registry = get_registry()
+    # Native pairs resolve to the agent's own plugin.
+    assert registry.resolve("claude_code", "claude_cli").id == "claude_code"
+    assert registry.resolve("codex", "codex_app_server").id == "codex"
+    assert registry.resolve("opencode", "opencode_http").id == "opencode"
+    assert registry.resolve("claude_tty", "claude_tty").id == "claude_tty"
+    # A tmux-wrapped agent resolves to the tmux transport plugin, not the
+    # agent — the agent is still carried on session.backend.
+    assert registry.resolve("codex", "tmux").id == "tmux"
+    assert registry.resolve("claude_code", "tmux").id == "tmux"
+    assert registry.resolve("opencode", "tmux").id == "tmux"
+
+
+def test_resolve_falls_back_to_transport_owner_for_undeclared_pair() -> None:
+    registry = get_registry()
+    # claude_tty doesn't declare the tmux transport, but a legacy row pairing
+    # the two must still resolve to the transport owner rather than raise.
+    assert registry.resolve("claude_tty", "tmux").id == "tmux"
+    with pytest.raises(KeyError):
+        registry.resolve("codex", "unknown_transport")
+
+
+def test_plugin_for_uses_both_backend_and_transport() -> None:
+    from datetime import UTC, datetime
+
+    from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
+
+    registry = get_registry()
+    now = datetime.now(UTC)
+
+    def _record(backend: str, transport: str) -> SessionRecord:
+        return SessionRecord(
+            id="x",
+            backend=backend,
+            source=SessionSource.MANAGED,
+            title="t",
+            cwd="/",
+            status=SessionStatus.IDLE,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            raw_log_path="raw",
+            structured_log_path="events",
+            transport=transport,
+        )
+
+    # Same transport_id can't recur today, but the same agent over two
+    # transports must dispatch to two different driver plugins.
+    assert registry.plugin_for(_record("codex", "codex_app_server")).id == "codex"
+    assert registry.plugin_for(_record("codex", "tmux")).id == "tmux"
+
+
 def test_registry_get_unknown_raises() -> None:
     registry = get_registry()
     with pytest.raises(KeyError):
@@ -251,6 +304,14 @@ def test_registry_rejects_duplicate_id() -> None:
     registry.register(_StubPlugin())
     with pytest.raises(ValueError):
         registry.register(_StubPlugin())
+
+
+def test_plugin_without_supported_transports_defaults_to_own() -> None:
+    """A plugin that omits ``supported_transports`` (e.g. an older
+    third-party plugin) resolves only over its own transport id."""
+    registry = BackendRegistry()
+    registry.register(_StubPlugin())
+    assert registry.resolve("stub", "stub-tr").id == "stub"
 
 
 def test_entry_point_plugins_are_registered(monkeypatch: pytest.MonkeyPatch) -> None:

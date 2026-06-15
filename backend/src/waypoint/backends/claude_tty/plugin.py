@@ -110,6 +110,10 @@ class ClaudeTtyPluginConfig(PluginConfig):
 class ClaudeTtyPlugin:
     id = "claude_tty"
     transport_id = "claude_tty"
+    # The Claude agent composed over a single tty-tail transport; it pairs
+    # with nothing else.
+    supported_transports = ("claude_tty",)
+    default_transport = "claude_tty"
     label = "Claude TUI"
     import_request_schema: type[BaseModel] | None = ClaudeThreadImportRequest
     config_schema: type[PluginConfig] = ClaudeTtyPluginConfig

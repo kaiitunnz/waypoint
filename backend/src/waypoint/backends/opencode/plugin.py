@@ -127,6 +127,10 @@ class OpenCodeThreadSummary(BaseModel):
 class OpenCodePlugin(DefaultLaunchContract):
     id = "opencode"
     transport_id = "opencode_http"
+    # Driven over its native REST + SSE adapter by default, or the generic
+    # tmux pane wrapper as the managed-launch fallback.
+    supported_transports = ("opencode_http", "tmux")
+    default_transport = "opencode_http"
     label = "OpenCode"
     import_request_schema: type[BaseModel] | None = OpenCodeThreadImportRequest
     config_schema: type[PluginConfig] = OpenCodePluginConfig

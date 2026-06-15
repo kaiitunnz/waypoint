@@ -61,6 +61,10 @@ class TmuxPluginConfig(PluginConfig):
 class TmuxPlugin:
     id = "tmux"
     transport_id = "tmux"
+    # A generic transport, not an agent: it wraps other agents' CLIs and is
+    # never itself an agent in an (agent, transport) pair.
+    supported_transports = ("tmux",)
+    default_transport = "tmux"
     label = "Tmux"
     import_request_schema: type[BaseModel] | None = None
     config_schema: type[PluginConfig] = TmuxPluginConfig

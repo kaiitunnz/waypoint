@@ -1198,3 +1198,26 @@ def test_resume_slash_command_removed() -> None:
     names = {cmd.name for cmd in OPENCODE_SLASH_COMMANDS}
     assert "resume" not in names
     assert "compact" in names
+
+
+def test_agent_launch_contract() -> None:
+    from waypoint.backends.base import AgentLaunchContract
+
+    plugin = OpenCodePlugin()
+
+    assert isinstance(plugin, AgentLaunchContract)
+    assert plugin.launch_flags(model="foo", effort="bar", permission_mode="ask") == []
+    assert plugin.pregenerate_thread_id() is None
+    assert plugin.resume_args("123", ["a", "b"]) == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_agent_launch_contract_async() -> None:
+    from datetime import UTC, datetime
+    from typing import cast
+
+    plugin = OpenCodePlugin()
+    assert await plugin.conversation_exists("thread", "/cwd", None) is False
+    await plugin.capture_thread_id(
+        cast(Any, None), "sess", "/cwd", datetime.now(UTC), None
+    )

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel
 
+from waypoint.backends.base import DefaultLaunchContract
 from waypoint.backends.capabilities import (
     BackendCapabilities,
     ModelSource,
@@ -123,7 +124,7 @@ class OpenCodeThreadSummary(BaseModel):
     updated_at: int | None = None
 
 
-class OpenCodePlugin:
+class OpenCodePlugin(DefaultLaunchContract):
     id = "opencode"
     transport_id = "opencode_http"
     label = "OpenCode"

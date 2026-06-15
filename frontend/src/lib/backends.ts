@@ -74,6 +74,9 @@ const FALLBACK_STRUCTURED = new Set([
 ]);
 const FALLBACK_RESUMABLE = new Set(["tmux", "claude_tty"]);
 const FALLBACK_LIVE_TERMINAL = new Set(["tmux"]);
+const FALLBACK_HAS_TERMINAL_PANE = new Set(["tmux", "claude_tty"]);
+const FALLBACK_TERMINAL_INTERACTIVE = new Set(["tmux"]);
+const FALLBACK_TERMINAL_RESIZABLE = new Set(["tmux"]);
 const FALLBACK_APPROVAL_NOTE = new Set(["claude_code", "opencode"]);
 const FALLBACK_PLAN_APPROVAL = new Set(["codex"]);
 // Every agent can fork except the generic tmux fallback.
@@ -230,6 +233,34 @@ export function liveTerminal(
 ): boolean {
   const caps = catalog?.transportCaps(transport);
   return caps ? caps.live_terminal : FALLBACK_LIVE_TERMINAL.has(transport);
+}
+
+// Whether the transport exposes a terminal pane — a WS-backed xterm mirror
+// that may be read-only (claude_tty) or fully interactive (tmux).
+export function hasTerminalPane(
+  transport: SessionTransport,
+  catalog?: BackendCatalog,
+): boolean {
+  const caps = catalog?.transportCaps(transport);
+  return caps ? caps.has_terminal_pane : FALLBACK_HAS_TERMINAL_PANE.has(transport);
+}
+
+// Whether the terminal pane accepts keystroke input from the user.
+export function terminalInteractive(
+  transport: SessionTransport,
+  catalog?: BackendCatalog,
+): boolean {
+  const caps = catalog?.transportCaps(transport);
+  return caps ? caps.terminal_interactive : FALLBACK_TERMINAL_INTERACTIVE.has(transport);
+}
+
+// Whether the terminal pane accepts resize frames from the frontend.
+export function terminalResizable(
+  transport: SessionTransport,
+  catalog?: BackendCatalog,
+): boolean {
+  const caps = catalog?.transportCaps(transport);
+  return caps ? caps.terminal_resizable : FALLBACK_TERMINAL_RESIZABLE.has(transport);
 }
 
 // Reattach-after-exit is a transport-level property, advertised on each

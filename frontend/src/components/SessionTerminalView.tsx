@@ -19,11 +19,10 @@ interface SessionTerminalViewProps {
   token: string;
   sessionId: string;
   session: SessionRecord | null;
-  liveTmux: boolean;
+  interactive: boolean;
   terminalRef: MutableRefObject<XTerminalHandle | null>;
   theme: "dark" | "light";
   terminalDims: { cols: number; rows: number } | null;
-  snapshotLoading: boolean;
   sessionExited: boolean;
   dormantReattach: boolean;
   termMenuOpen: boolean;
@@ -56,9 +55,7 @@ interface SessionTerminalViewProps {
   onTerminalScrollChip: (direction: "up" | "down") => void;
   onTerminalScrollChange: (atBottom: boolean) => void;
   onJumpToLive: () => void;
-  // Refresh means "re-seed the terminal from the server". For live tmux
-  // that's a WS reconnect; for read-only snapshots that's a REST fetch.
-  // The parent picks which based on session.transport.
+  // Refresh reconnects the terminal WS, re-seeding the pane from the server.
   onRefresh: () => void;
   onReattach: () => void | Promise<void>;
   onTerminate: () => void | Promise<void>;
@@ -72,11 +69,10 @@ export function SessionTerminalView({
   token,
   sessionId,
   session,
-  liveTmux,
+  interactive,
   terminalRef,
   theme,
   terminalDims,
-  snapshotLoading,
   sessionExited,
   dormantReattach,
   termMenuOpen,
@@ -106,12 +102,10 @@ export function SessionTerminalView({
   const catalog = useBackendCatalog(host || null, token || null, null);
   // Primary action shown as a pill button next to the overflow trigger.
   // Only states the user can't trivially reach inside the pane — Reconnect
-  // when exited (the pane is gone) and Refresh for read-only snapshots.
-  // We deliberately do NOT surface "Interrupt" here because the keybar's
-  // ^C already sends SIGINT to the pane (the backend /interrupt action
-  // for tmux just writes ^C anyway).
+  // when exited (the pane is gone). We deliberately do NOT surface "Interrupt"
+  // here because the keybar's ^C already sends SIGINT to the pane.
   type PrimaryAction = {
-    kind: "refresh" | "reconnect";
+    kind: "reconnect";
     label: string;
     onClick: () => void;
     tone?: "primary";
@@ -124,12 +118,6 @@ export function SessionTerminalView({
       onClick: () => void onReattach(),
       tone: "primary",
     };
-  } else if (!liveTmux && session) {
-    primary = {
-      kind: "refresh",
-      label: snapshotLoading ? "Refreshing…" : "Refresh",
-      onClick: onRefresh,
-    };
   }
 
   const closeMenu = () => setTermMenuOpen(false);
@@ -140,9 +128,9 @@ export function SessionTerminalView({
 
   const [composeOpen, setComposeOpen] = useState(false);
   // The compose drawer collapses back to a hairline handle when the
-  // session isn't live, so we don't carry stale "open" state across a
+  // session isn't interactive, so we don't carry stale "open" state across a
   // disconnect / view switch.
-  const composeEnabled = liveTmux;
+  const composeEnabled = interactive;
   const refocusTerminal = useCallback(() => {
     terminalRef.current?.focus();
   }, [terminalRef]);
@@ -169,7 +157,7 @@ export function SessionTerminalView({
           anchored
         />
         <span className="term-bar-spacer" />
-        {liveTmux && terminalDims ? (
+        {interactive && terminalDims ? (
           <span className="term-bar-dims" aria-label="Pane dimensions">
             {terminalDims.cols}×{terminalDims.rows}
           </span>
@@ -179,7 +167,6 @@ export function SessionTerminalView({
             type="button"
             className={`term-bar-action ${primary.tone === "primary" ? "primary" : ""}`}
             onClick={primary.onClick}
-            disabled={snapshotLoading && primary.kind === "refresh"}
           >
             {primary.label}
           </button>
@@ -203,7 +190,7 @@ export function SessionTerminalView({
               data-term-overflow-menu
               style={overflowMenuStyle ?? undefined}
             >
-              {session && primary?.kind !== "refresh" ? (
+              {session ? (
                 <button
                   type="button"
                   role="menuitem"
@@ -212,7 +199,6 @@ export function SessionTerminalView({
                     closeMenu();
                     onRefresh();
                   }}
-                  disabled={snapshotLoading}
                 >
                   <span className="glyph">↻</span>
                   Refresh
@@ -280,13 +266,13 @@ export function SessionTerminalView({
           <XTerminal
             ref={terminalRef}
             theme={theme}
-            readOnly={!liveTmux}
-            onData={liveTmux ? onTerminalInput : undefined}
+            readOnly={!interactive}
+            onData={interactive ? onTerminalInput : undefined}
             onResize={onTerminalResize}
-            onScrollChange={liveTmux ? onTerminalScrollChange : undefined}
+            onScrollChange={interactive ? onTerminalScrollChange : undefined}
           />
         </div>
-        {liveTmux && !termAtBottom ? (
+        {interactive && !termAtBottom ? (
           <button
             type="button"
             className="term-jump"
@@ -296,14 +282,14 @@ export function SessionTerminalView({
             ↡ Jump to live
           </button>
         ) : null}
-        {liveTmux ? (
+        {interactive ? (
           <TerminalScrollChips
             onWheel={onTerminalScrollChip}
             withJump={!termAtBottom}
           />
         ) : null}
       </div>
-      {liveTmux ? (
+      {interactive ? (
         <TerminalKeyBar
           onSend={onTerminalInput}
           onRequestPaste={onRequestPaste}

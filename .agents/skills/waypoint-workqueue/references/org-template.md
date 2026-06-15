@@ -11,7 +11,7 @@ scale them to the job, and reshape the structure when the work calls for it.
   owns every board cell. Exactly one lead.
 - **Workers** — spawned `subagent:` sessions. Each does one task at a time, then
   reports. Interchangeable in role, but **not necessarily identical**: a worker
-  can run any backend/model (`claude_code`, `codex`, `opencode`, `claude_tty`) and live
+  can run any backend/model (`claude_code`, `codex`, `opencode`) and live
   in its own worktree or even a different repo. Mix them to fit the work — cheap
   models on mechanical tasks, a stronger one where it matters; place each worker
   where its task's code is (how to choose: `references/backends.md`). As many as

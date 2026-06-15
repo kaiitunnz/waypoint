@@ -20,8 +20,8 @@ A Waypoint crew can do two things your harness's own subagents cannot — and th
 are the whole reason to reach for this:
 
 - **Mix models and harnesses.** Each worker is its own session on any backend
-  (`claude_code`, `codex`, `opencode`, `claude_tty`; run `waypoint backends` for
-  the full current list), so the crew can be heterogeneous:
+  (`claude_code`, `codex`, `opencode` — each over a transport; run `waypoint
+  backends` for the full current list), so the crew can be heterogeneous:
   a cheap, fast model on the mechanical tasks and a stronger one on the hard
   ones, or whichever harness fits a given task. Pick `--backend` / `--model` per
   worker.

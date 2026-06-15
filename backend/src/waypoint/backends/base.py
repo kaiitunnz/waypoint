@@ -31,6 +31,16 @@ class BackendPlugin(Protocol):
     transport_id: str
     label: str
     capabilities: BackendCapabilities
+    # Optional agent declaration, read defensively by the registry (a plugin
+    # that omits it supports only its own ``transport_id``). ``supported_transports``
+    # lists the transport ids the agent can be driven over — its native
+    # ``transport_id`` plus any generic pane wrapper it pairs with, e.g.
+    # ``("claude_cli", "tmux")`` — and keys the registry's (agent, transport)
+    # pair resolution. ``default_transport`` names the one used when a launch
+    # request doesn't pin a transport. Generic transport plugins (tmux) leave
+    # these at their own transport id. Not Protocol fields: keeping them off the
+    # ``runtime_checkable`` surface lets third-party plugins predating them
+    # still pass ``isinstance`` and register.
     # Pydantic model used by the dispatcher in api.py to validate the
     # JSON body of POST /api/backends/{id}/sessions/import. ``None`` for
     # plugins that don't accept thread imports — the dispatcher gates on

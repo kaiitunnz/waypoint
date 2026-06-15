@@ -2,10 +2,29 @@ from waypoint.backends.base import BackendPlugin
 from waypoint.schemas import SessionRecord
 
 
+def _supported_transports(plugin: BackendPlugin) -> tuple[str, ...]:
+    """Transport ids a plugin can be driven over.
+
+    An agent declares the generic transports it pairs with (its own
+    native transport plus any pane wrapper) via ``supported_transports``;
+    plugins that don't declare it fall back to their own transport only.
+    Read defensively so a third-party plugin predating the attribute
+    still registers and resolves.
+    """
+    declared = getattr(plugin, "supported_transports", None)
+    if declared:
+        return tuple(declared)
+    return (plugin.transport_id,)
+
+
 class BackendRegistry:
     def __init__(self) -> None:
         self._by_id: dict[str, BackendPlugin] = {}
         self._by_transport: dict[str, BackendPlugin] = {}
+        # (agent_id, transport_id) -> the plugin that drives that pair.
+        # Cached after the first resolve; cleared on register since the
+        # registry is otherwise immutable once bootstrap finishes.
+        self._pairs: dict[tuple[str, str], BackendPlugin] | None = None
 
     def register(self, plugin: BackendPlugin) -> None:
         if plugin.id in self._by_id:
@@ -16,6 +35,7 @@ class BackendRegistry:
             )
         self._by_id[plugin.id] = plugin
         self._by_transport[plugin.transport_id] = plugin
+        self._pairs = None
 
     def get(self, backend_id: str) -> BackendPlugin:
         plugin = self._by_id.get(backend_id)
@@ -29,8 +49,40 @@ class BackendRegistry:
             raise KeyError(f"unknown transport: {transport_id}")
         return plugin
 
+    def _pair_map(self) -> dict[tuple[str, str], BackendPlugin]:
+        """Build (and cache) the (agent, transport) -> driver-plugin map.
+
+        Each agent contributes one pair per transport it declares
+        support for; the driving plugin is whichever plugin *owns* that
+        transport id — the agent itself for its native structured
+        transport, or a generic pane wrapper (tmux) for a wrapped pair.
+        """
+        if self._pairs is None:
+            pairs: dict[tuple[str, str], BackendPlugin] = {}
+            for plugin in self._by_id.values():
+                for transport_id in _supported_transports(plugin):
+                    owner = self._by_transport.get(transport_id)
+                    if owner is not None:
+                        pairs[(plugin.id, transport_id)] = owner
+            self._pairs = pairs
+        return self._pairs
+
+    def resolve(self, backend_id: str, transport_id: str) -> BackendPlugin:
+        """Resolve the plugin that drives a session's (agent, transport) pair.
+
+        A session is an (agent, transport) pair, so resolution keys on
+        both: the agent selects among plugins that declare the transport,
+        and the transport selects the driver (a native structured adapter
+        vs. a shared pane wrapper). Falls back to the transport owner for
+        a pair no agent declared, so legacy session rows still resolve.
+        """
+        plugin = self._pair_map().get((backend_id, transport_id))
+        if plugin is not None:
+            return plugin
+        return self.for_transport(transport_id)
+
     def plugin_for(self, session: SessionRecord) -> BackendPlugin:
-        return self.for_transport(session.transport)
+        return self.resolve(session.backend, session.transport)
 
     def has_backend(self, backend_id: str) -> bool:
         return backend_id in self._by_id

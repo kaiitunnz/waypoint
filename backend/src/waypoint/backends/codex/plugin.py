@@ -101,6 +101,10 @@ class CodexLaunchTargetConfig(PluginLaunchTargetConfig):
 class CodexPlugin(DefaultLaunchContract):
     id = "codex"
     transport_id = "codex_app_server"
+    # Driven over its native App Server adapter by default, or the generic
+    # tmux pane wrapper as the managed-launch fallback.
+    supported_transports = ("codex_app_server", "tmux")
+    default_transport = "codex_app_server"
     label = "Codex"
     import_request_schema: type[BaseModel] | None = CodexThreadImportRequest
     config_schema: type[PluginConfig] = CodexPluginConfig

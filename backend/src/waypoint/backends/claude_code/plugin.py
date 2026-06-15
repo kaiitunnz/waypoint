@@ -266,6 +266,8 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         self,
         runtime: "SessionRuntime",
         launch_target: SshLaunchTargetConfig | None,
+        *,
+        cwd: str | None = None,
     ) -> SessionRateLimitUsage | None:
         """Fetch the account's current rate-limit snapshot without a session.
 
@@ -273,8 +275,11 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         creds) is account-scoped, not session-scoped — same call the
         per-session adapter probe makes. Exposed so the tmux fallback can
         populate ``rate_limit_usage`` for wrapped-claude sessions without
-        wiring them through the structured adapter.
+        wiring them through the structured adapter. ``cwd`` is accepted for
+        a uniform probe signature across agents but unused — Claude's probe
+        is independent of the working directory.
         """
+        _ = cwd
         if launch_target is None:
             return await probe_claude_usage()
         return await probe_claude_usage_remote(launch_target)

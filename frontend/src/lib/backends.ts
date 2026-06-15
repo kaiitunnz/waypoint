@@ -151,28 +151,27 @@ export interface TransportPresentation {
 const TRANSPORT_PRESENTATION: Record<string, TransportPresentation> = {
   claude_cli: {
     name: "Chat",
-    description: "Structured cards with inline model and permission control.",
+    description: "Native chat interface backed by a structured event stream.",
     kind: "chat",
   },
   claude_tty: {
     name: "Emulated",
-    description:
-      "Same chat, run through the real Claude Code app — resumable and exempt from API rate limits.",
+    description: "Emulated chat interface wrapping the TUI app.",
     kind: "chat",
   },
   codex_app_server: {
     name: "Chat",
-    description: "Structured cards with inline model and approval control.",
+    description: "Native chat interface backed by a structured event stream.",
     kind: "chat",
   },
   opencode_http: {
     name: "Chat",
-    description: "Structured cards with inline model and approval control.",
+    description: "Native chat interface backed by a structured event stream.",
     kind: "chat",
   },
   tmux: {
     name: "Terminal",
-    description: "Raw terminal pane for any CLI; plain text.",
+    description: "Pass-through TUI for the raw terminal experience.",
     kind: "terminal",
   },
 };
@@ -186,13 +185,13 @@ export function transportPresentation(
   if (liveTerminal(transport, catalog)) {
     return {
       name: "Terminal",
-      description: "Raw terminal pane for any CLI; plain text.",
+      description: "Pass-through TUI for the raw terminal experience.",
       kind: "terminal",
     };
   }
   return {
     name: "Chat",
-    description: "Structured cards with inline model control.",
+    description: "Native chat interface backed by a structured event stream.",
     kind: "chat",
   };
 }

@@ -977,10 +977,17 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     [session, host, token, sessionId, router, handleAuthFailure],
   );
 
-  // Whether /fork is offered, driven by the agent's capability rather than a
-  // transport proxy. The persistent assistant additionally suppresses it
-  // (forking would spawn a stray managed session off the launchpad).
-  const canFork = Boolean(session && supportsFork(session.backend, catalog));
+  // Whether /fork is offered. Fork-ability is (agent supports it) AND (the
+  // transport allows it): the live-terminal/tmux-wrapper transport has no fork
+  // path (TmuxPlugin.fork_session is unimplemented), so an agent that otherwise
+  // forks (claude_code) still can't when wrapped in a pane. The persistent
+  // assistant additionally suppresses it (forking would spawn a stray managed
+  // session off the launchpad).
+  const canFork = Boolean(
+    session &&
+      supportsFork(session.backend, catalog) &&
+      !liveTerminal(session.transport, catalog),
+  );
 
   const submitInput = useCallback(async (
     text: string,

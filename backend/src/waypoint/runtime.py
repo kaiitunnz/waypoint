@@ -338,14 +338,41 @@ class SessionRuntime:
                 ),
             )
         launch_mode = request.launch_mode
-        if request.transport is not None:
-            # An explicitly pinned transport selects the driving plugin via the
+        # An omitted transport under AUTO launch resolves to the agent's
+        # declared default transport, so every spawn path (UI, CLI, spawned
+        # subagents, the scheduler) launches over the same default the catalog
+        # advertises rather than only the frontend honoring it. An explicit
+        # transport or a non-AUTO launch_mode still wins. Remote (SSH) launch
+        # targets are excluded: the local tty-tail/tmux transports can't drive a
+        # process on another host, so those keep the agent's native structured
+        # launch.
+        default_transport = (
+            getattr(plugin, "default_transport", plugin.transport_id)
+            if request.transport is None
+            and launch_mode == LaunchMode.AUTO
+            and launch_target is None
+            else None
+        )
+        pinned_transport = request.transport or default_transport
+        if pinned_transport is not None:
+            # A pinned transport selects the driving plugin via the
             # (agent, transport) pair and takes precedence over launch_mode. The
             # transport must be one the agent declares; the resolved plugin owns
             # that transport (the agent's native adapter, the tty-tail driver, or
             # the tmux wrapper).
-            self._validate_supported_transport(request.backend, request.transport)
-            plugin = self.registry.resolve(request.backend, request.transport)
+            self._validate_supported_transport(request.backend, pinned_transport)
+            plugin = self.registry.resolve(request.backend, pinned_transport)
+            # When the transport came from the default (not an explicit pin) and
+            # its driver isn't ready or isn't structured, fall through to the
+            # managed-launch wrapper so a spawn the user didn't pin still yields
+            # a session — mirroring the legacy launch_mode-derived fallback.
+            if default_transport is not None and (
+                not plugin.is_available_for_managed_launch(self)
+                or not plugin.capabilities.is_structured
+            ):
+                fallback = self.registry.fallback_for_managed_launch()
+                if fallback is not None:
+                    plugin = fallback
         elif launch_mode == LaunchMode.TMUX_WRAPPER:
             fallback = self.registry.fallback_for_managed_launch()
             if fallback is None:

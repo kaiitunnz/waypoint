@@ -4,18 +4,22 @@ Drives the interactive Claude Code TUI (``claude``) instead of ``claude -p``
 (stream-json mode).  The TUI path is exempt from the API rate limit applied to
 ``claude -p``, making it the preferred backend for autonomous Waypoint sessions.
 
-Architecture summary:
-- Input: reuses the ``tmux`` transport (send-keys injection, pipe-pane logging).
-- Output: a transcript tailer reads ``~/.claude/projects/<cwd>/<uuid>.jsonl`` by
-  byte offset and normalizes records into the canonical event stream.
-- ``is_structured=True`` so the frontend renders structured events, not the
-  heuristic raw-terminal view.
+This is the ``claude_code`` agent driven over a tty-tail transport rather
+than the structured ``claude -p`` adapter. It is a session shaped as an
+(agent, transport) pair: the plugin **composes** rather than reimplements
+both halves —
 
-Inherits from ``TmuxPlugin`` to reuse shared transport infrastructure:
-``_spawn_rate_limit_watcher``, ``_rate_limit_refresh_loop``,
-``refresh_rate_limit_usage``, ``native_thread_id``, ``on_session_deleted``.
-Thread-file existence checks defer to the claude_code agent's launch
-contract rather than reimplementing the ``~/.claude/projects`` lookup.
+- Agent half: a ``ClaudeCodePlugin`` instance (``self._claude``) supplies the
+  claude knowledge — permission-mode catalogue, effort-swap note, the
+  account rate-limit probe, and the conversation-file lookup. It is never
+  ``setup()``, so no structured SDK adapter is built.
+- Transport half: a ``TmuxPlugin`` instance (``self._tmux``) supplies the
+  shared pane-wrapper infrastructure — session teardown plus the rate-limit
+  refresh watcher.
+
+Output is read by a transcript tailer over ``~/.claude/projects/<cwd>/
+<uuid>.jsonl`` and normalized into the canonical event stream, so
+``is_structured=True`` and the frontend renders structured events.
 """
 
 import asyncio
@@ -30,26 +34,13 @@ from typing import TYPE_CHECKING, Any
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 
-from waypoint.backends.base import AgentLaunchContract
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
-from waypoint.backends.claude_code.commands import (
-    CLAUDE_BUILTIN_SLASH_COMMANDS,
-    list_claude_command_completions,
-)
+from waypoint.backends.claude_code.commands import list_claude_command_completions
 from waypoint.backends.claude_code.models import (
-    CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
     claude_default_model_id,
 )
-from waypoint.backends.claude_code.permission_modes import (
-    CLAUDE_PERMISSION_MODE_SPECS,
-    CLAUDE_PERMISSION_MODES,
-)
-from waypoint.backends.claude_code.plugin import _claude_effort_swap_message
-from waypoint.backends.claude_code.rate_limits import (
-    probe_claude_usage,
-    probe_claude_usage_remote,
-)
+from waypoint.backends.claude_code.plugin import ClaudeCodePlugin
 from waypoint.backends.claude_code.schemas import (
     ClaudeThreadImportRequest,
     ClaudeThreadSummary,
@@ -62,7 +53,7 @@ from waypoint.backends.claude_code.threads import (
 from waypoint.backends.claude_tty._state import PendingTtyApproval, PendingTtyQuestion
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.completions import static_slash_completions
-from waypoint.backends.plugin_config import PluginConfig
+from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.backends.tmux.plugin import TmuxPlugin
 from waypoint.git_meta import GitMeta
@@ -116,13 +107,16 @@ class ClaudeTtyPluginConfig(PluginConfig):
     default_effort: str | None = None
 
 
-class ClaudeTtyPlugin(TmuxPlugin):
+class ClaudeTtyPlugin:
     id = "claude_tty"
     transport_id = "claude_tty"
     label = "Claude TUI"
     import_request_schema: type[BaseModel] | None = ClaudeThreadImportRequest
     config_schema: type[PluginConfig] = ClaudeTtyPluginConfig
+    launch_target_schema: type[PluginLaunchTargetConfig] = PluginLaunchTargetConfig
     extra_env = {"CLAUDE_CODE_NO_FLICKER": "1"}
+    # Catalogues are the claude agent's, sourced from its capabilities so the
+    # two backends can't drift; the flags below are this transport's own.
     capabilities = BackendCapabilities(
         is_structured=True,
         supports_resume=True,
@@ -142,16 +136,22 @@ class ClaudeTtyPlugin(TmuxPlugin):
         supports_custom_cli_args=True,
         supports_thread_discovery=True,
         supports_thread_import=True,
-        effort_levels=CLAUDE_EFFORT_LEVELS,
+        effort_levels=ClaudeCodePlugin.capabilities.effort_levels,
         model_source=ModelSource.STATIC,
-        permission_modes=CLAUDE_PERMISSION_MODE_SPECS,
-        slash_commands=CLAUDE_BUILTIN_SLASH_COMMANDS,
+        permission_modes=ClaudeCodePlugin.capabilities.permission_modes,
+        slash_commands=ClaudeCodePlugin.capabilities.slash_commands,
         badges={"glyph": "C", "color": "#a78bfa"},
         cli_binary="claude",
         target_aliases=("claude_tty",),
     )
 
     def __init__(self) -> None:
+        # Compose the two halves of the session. The claude_code instance is
+        # the agent (catalogues, probe, conversation lookup) and is never
+        # ``setup()`` — claude_tty drives the CLI through tmux, not the SDK
+        # adapter. The tmux instance is the shared pane-wrapper transport.
+        self._claude = ClaudeCodePlugin()
+        self._tmux = TmuxPlugin()
         self._tailer_tasks: dict[str, asyncio.Task[None]] = {}
         self._pending_approvals: dict[str, PendingTtyApproval] = {}
         self._pending_questions: dict[str, PendingTtyQuestion] = {}
@@ -161,16 +161,80 @@ class ClaudeTtyPlugin(TmuxPlugin):
 
         return ClaudeTtyTransport(runtime, self)
 
+    # ── Composed transport infrastructure (tmux pane wrapper) ────────────────
+
+    def setup(self, runtime: "SessionRuntime") -> None:
+        return None
+
+    async def shutdown(self, runtime: "SessionRuntime") -> None:
+        return None
+
+    def register_routes(self, app: Any, context: Any) -> None:
+        return None
+
+    def native_thread_id(self, session: SessionRecord) -> str | None:
+        return self._tmux.native_thread_id(session)
+
+    def on_session_deleted(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        return None
+
+    async def maybe_handle_input(
+        self, runtime: "SessionRuntime", session: SessionRecord, request: Any
+    ) -> SessionRecord | None:
+        return None
+
+    async def approve_plan(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        plan_item_id: str,
+        decision: str,
+        text: str | None,
+    ) -> SessionRecord:
+        return await self._tmux.approve_plan(
+            runtime, session, plan_item_id, decision, text
+        )
+
+    async def post_approval(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        return None
+
+    def _spawn_rate_limit_watcher(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        self._tmux._spawn_rate_limit_watcher(runtime, session)
+
+    async def refresh_rate_limit_usage(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        await self._tmux.refresh_rate_limit_usage(runtime, session)
+
+    # ── Composed agent knowledge (claude_code) ───────────────────────────────
+
     def is_available_for_managed_launch(self, runtime: "SessionRuntime") -> bool:
         return shutil.which("claude") is not None
 
     def remote_executable(self, launch_target: SshLaunchTargetConfig) -> str:
         return "claude"
 
+    async def probe_account_rate_limit(
+        self,
+        runtime: "SessionRuntime",
+        launch_target: SshLaunchTargetConfig | None,
+        *,
+        cwd: str | None = None,
+    ) -> SessionRateLimitUsage | None:
+        return await self._claude.probe_account_rate_limit(
+            runtime, launch_target, cwd=cwd
+        )
+
     def validate_permission_mode(self, mode: str | None) -> str | None:
         if mode is None:
             return None
-        if mode not in CLAUDE_PERMISSION_MODES:
+        if mode not in self._claude.permission_mode_ids:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"unknown permission mode for claude_tty: {mode!r}",
@@ -214,20 +278,6 @@ class ClaudeTtyPlugin(TmuxPlugin):
             "default_effort": config.default_effort,
             "supports_free_text": True,
         }
-
-    async def probe_account_rate_limit(
-        self,
-        runtime: "SessionRuntime",
-        launch_target: SshLaunchTargetConfig | None,
-        *,
-        cwd: str | None = None,
-    ) -> SessionRateLimitUsage | None:
-        # ``cwd`` is accepted for a uniform probe signature across agents
-        # but unused — Claude's probe is independent of the working dir.
-        _ = cwd
-        if launch_target is None:
-            return await probe_claude_usage()
-        return await probe_claude_usage_remote(launch_target)
 
     async def list_command_completions(
         self,
@@ -276,7 +326,6 @@ class ClaudeTtyPlugin(TmuxPlugin):
 
     async def _conversation_exists(
         self,
-        runtime: "SessionRuntime",
         thread_id: str,
         cwd: str,
         launch_target: SshLaunchTargetConfig | None,
@@ -284,12 +333,10 @@ class ClaudeTtyPlugin(TmuxPlugin):
         """Whether Claude has persisted ``thread_id`` to disk.
 
         claude_tty stores transcripts in the same ``~/.claude/projects``
-        tree claude_code uses, so the existence check defers to the
+        tree claude_code uses, so the existence check defers to the composed
         claude_code agent's launch contract.
         """
-        inner = runtime.registry.get("claude_code")
-        assert isinstance(inner, AgentLaunchContract)
-        return await inner.conversation_exists(thread_id, cwd, launch_target)
+        return await self._claude.conversation_exists(thread_id, cwd, launch_target)
 
     # ── Session lifecycle ────────────────────────────────────────────────────
 
@@ -317,7 +364,7 @@ class ClaudeTtyPlugin(TmuxPlugin):
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        await super().terminate_session(runtime, session)
+        await self._tmux.terminate_session(runtime, session)
         tailer_task = self._tailer_tasks.pop(session.id, None)
         if tailer_task is not None:
             tailer_task.cancel()
@@ -456,7 +503,7 @@ class ClaudeTtyPlugin(TmuxPlugin):
 
         effective_thread_id: str | None = None
         if thread_id and await self._conversation_exists(
-            runtime, thread_id, session.cwd, launch_target
+            thread_id, session.cwd, launch_target
         ):
             effective_thread_id = thread_id
 
@@ -657,7 +704,7 @@ class ClaudeTtyPlugin(TmuxPlugin):
         return await self._restart_with_args(runtime, session, effort=effort)
 
     def effort_swap_message(self, effort: str | None) -> str:
-        return _claude_effort_swap_message(effort)
+        return self._claude.effort_swap_message(effort)
 
     async def _restart_with_args(
         self,
@@ -748,9 +795,7 @@ class ClaudeTtyPlugin(TmuxPlugin):
         # with `--resume` makes the CLI exit with "no conversation found" and kills
         # the pane. Reuse the same thread id via `--session-id` in that case so the
         # relaunch starts the (still-empty) conversation cleanly with the new flags.
-        resumed = await self._conversation_exists(
-            runtime, thread_id, session.cwd, launch_target
-        )
+        resumed = await self._conversation_exists(thread_id, session.cwd, launch_target)
         identity = ["--resume", thread_id] if resumed else ["--session-id", thread_id]
         launch_args = [*identity, *flag_pairs, *base_args]
         command = runtime._command_for_backend(

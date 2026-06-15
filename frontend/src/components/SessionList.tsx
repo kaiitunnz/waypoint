@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { MouseEvent, ReactNode, useEffect, useMemo, useState } from "react";
 
-import { humaniseBackend, transportLabel, type BackendCatalog } from "@/lib/backends";
+import {
+  fidelityFor,
+  humaniseBackend,
+  transportLabel,
+  type BackendCatalog,
+} from "@/lib/backends";
 import { matchesQuery, parseQuery } from "@/lib/search";
 import { SessionRecord } from "@/lib/types";
 
@@ -186,11 +191,12 @@ export function SessionList({
           <span className={`badge ${session.backend}`}>
             {humaniseBackend(session.backend, catalog)}
           </span>
-          {process.env.NEXT_PUBLIC_SHOW_TRANSPORT_BADGE === "1" ? (
-            <span className={`badge transport ${session.transport}`}>
-              {transportLabel(session.transport, catalog)}
-            </span>
-          ) : null}
+          <span className={`badge transport ${session.transport}`}>
+            {transportLabel(session.transport, catalog)}
+          </span>
+          <span className={`badge fidelity ${fidelityFor(session.transport, catalog)}`}>
+            {fidelityFor(session.transport, catalog)}
+          </span>
           {session.launch_target_id ? (
             <span className="badge neutral">{session.launch_target_id}</span>
           ) : null}

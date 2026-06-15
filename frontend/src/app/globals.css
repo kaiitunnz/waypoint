@@ -1772,6 +1772,19 @@ html[data-theme="light"] .badge.claude_code {
   border-color: rgba(184, 130, 14, 0.3);
 }
 
+/* The tty-tail Claude variant shares Claude's gold identity; the transport
+ * badge beside it is what distinguishes the TUI from the structured CLI. */
+.badge.claude_tty {
+  background: rgba(200, 169, 106, 0.12);
+  color: var(--accent);
+  border-color: rgba(200, 169, 106, 0.22);
+}
+
+html[data-theme="light"] .badge.claude_tty {
+  background: rgba(184, 130, 14, 0.12);
+  border-color: rgba(184, 130, 14, 0.3);
+}
+
 /* OpenCode's identity is monochrome — use a brighter slate than --muted so
  * the badge isn't mistaken for a grayed-out / disabled state. */
 .badge.opencode {
@@ -1805,6 +1818,7 @@ html[data-theme="light"] .badge.transport.tmux {
 
 .badge.transport.codex_app_server,
 .badge.transport.claude_cli,
+.badge.transport.claude_tty,
 .badge.fidelity.structured {
   background: rgba(200, 169, 106, 0.1);
   color: var(--accent);
@@ -1813,6 +1827,7 @@ html[data-theme="light"] .badge.transport.tmux {
 
 html[data-theme="light"] .badge.transport.codex_app_server,
 html[data-theme="light"] .badge.transport.claude_cli,
+html[data-theme="light"] .badge.transport.claude_tty,
 html[data-theme="light"] .badge.fidelity.structured {
   background: rgba(184, 130, 14, 0.12);
   border-color: rgba(184, 130, 14, 0.3);

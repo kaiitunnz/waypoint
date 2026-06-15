@@ -185,6 +185,9 @@ export interface TransportCapabilities {
   supports_set_permission_mode_inline: boolean;
   settings_change_interrupts_turn: boolean;
   live_terminal: boolean;
+  has_terminal_pane: boolean;
+  terminal_interactive: boolean;
+  terminal_resizable: boolean;
   is_fallback_for_managed_launch: boolean;
 }
 
@@ -218,6 +221,9 @@ export interface BackendCapabilities {
   supports_set_permission_mode_inline: boolean;
   settings_change_interrupts_turn: boolean;
   live_terminal: boolean;
+  has_terminal_pane: boolean;
+  terminal_interactive: boolean;
+  terminal_resizable: boolean;
   supports_thread_discovery: boolean;
   supports_thread_import: boolean;
   supports_fork: boolean;
@@ -384,7 +390,6 @@ export interface SessionEnvelope {
     | "session_list_update"
     | "event"
     | "session_state"
-    | "terminal_snapshot_ready"
     | "auth_revoked"
     | "schedule_list_update"
     | "board_update"

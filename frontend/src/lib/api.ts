@@ -235,16 +235,6 @@ export async function fetchEvents(
   };
 }
 
-export async function fetchTerminalSnapshot(host: string, token: string, sessionId: string): Promise<string> {
-  const response = await fetch(`${host}/api/sessions/${sessionId}/terminal-snapshot`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-  await ensureOk(response, "failed to fetch terminal snapshot");
-  const payload = await response.json();
-  return payload.text as string;
-}
-
 export async function createSession(
   host: string,
   token: string,

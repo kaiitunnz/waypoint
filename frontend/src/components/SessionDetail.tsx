@@ -27,7 +27,6 @@ import {
   fetchBackendModels,
   fetchEvents,
   fetchSession,
-  fetchTerminalSnapshot,
   forkSession,
   isAuthError,
   postAction,
@@ -44,6 +43,7 @@ import {
   defaultTransportFor,
   displayAgentFor,
   fidelityFor,
+  hasTerminalPane,
   humaniseBackend,
   liveTerminal,
   permissionModesFor,
@@ -54,6 +54,8 @@ import {
   supportsReattachAfterExit,
   supportsResume,
   supportsStructuredApproval,
+  terminalInteractive,
+  terminalResizable,
   transportLabel,
   useBackendCatalog,
 } from "@/lib/backends";
@@ -321,8 +323,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       setDismissedTaskSequence(null);
     }
   }, [sessionId]);
-  const [snapshot, setSnapshot] = useState("");
-  const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [view, setView] = useState<ViewMode>("chat");
   const [filterMode, setFilterMode] = useState<FilterMode>("important");
   const [toolRunsExpanded, setToolRunsExpanded] = useState(false);
@@ -416,22 +416,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     onAuthFailure?.();
     router.replace("/");
   }, [onAuthFailure, router]);
-
-  const refreshSnapshot = useCallback(async () => {
-    setSnapshotLoading(true);
-    try {
-      const text = await fetchTerminalSnapshot(host, token, sessionId);
-      setSnapshot(text);
-    } catch (snapshotError) {
-      if (isAuthError(snapshotError)) {
-        handleAuthFailure();
-        return;
-      }
-      setError(snapshotError instanceof Error ? snapshotError.message : "failed to fetch terminal snapshot");
-    } finally {
-      setSnapshotLoading(false);
-    }
-  }, [handleAuthFailure, host, token, sessionId]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     // Scroll the actual document to its full height — using the document
@@ -721,10 +705,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     let active = true;
     async function load() {
       try {
-        const [loadedSession, loadedPage, loadedSnapshot] = await Promise.all([
+        const [loadedSession, loadedPage] = await Promise.all([
           fetchSession(host, token, sessionId),
           fetchEvents(host, token, sessionId),
-          fetchTerminalSnapshot(host, token, sessionId),
         ]);
         if (!active) {
           return;
@@ -738,7 +721,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         setEvents(coalesced);
         setHasOlderEvents(loadedPage.has_more);
         setOldestRawSequence(minRawSequence(sanitized));
-        setSnapshot(loadedSnapshot);
       } catch (loadError) {
         if (active) {
           if (isAuthError(loadError)) {
@@ -841,12 +823,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       socket?.close();
     };
   }, [handleAuthFailure, host, token, sessionId, queueIncomingEvent]);
-
-  useEffect(() => {
-    if (view === "terminal") {
-      void refreshSnapshot();
-    }
-  }, [view, refreshSnapshot]);
 
   useEffect(() => {
     if (!session) return;
@@ -1311,21 +1287,35 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const canResume = Boolean(
     session && supportsResume(session.transport, catalog) && !sessionExited,
   );
-  const activeView: ViewMode = terminalOnly ? "terminal" : view;
+  // Whether the transport exposes a terminal pane (WS-backed xterm mirror).
+  // Drives terminal tab visibility and the WS-pane effect below.
+  const canShowTerminal = session
+    ? hasTerminalPane(session.transport, catalog)
+    : false;
+  // Whether the user can type into the terminal pane.
+  const canTerminalInteract = session
+    ? terminalInteractive(session.transport, catalog)
+    : false;
+  // Whether the terminal pane accepts resize frames.
+  const canTerminalResize = session
+    ? terminalResizable(session.transport, catalog)
+    : false;
+  const activeView: ViewMode = terminalOnly
+    ? "terminal"
+    : !canShowTerminal
+      ? "chat"
+      : view;
   const showTaskDock =
     activeView === "chat" &&
     taskProgress !== null &&
     currentTaskEvent !== null &&
     dismissedTaskSequence !== undefined &&
     currentTaskEvent.sequence !== dismissedTaskSequence;
-  // The live-terminal transport (tmux) streams its pane over a WebSocket; the
-  // WS-pane effects below key off this rather than a hardcoded transport id.
-  const liveTmux = terminalOnly;
   const { theme } = useTheme();
   const terminalRef = useRef<XTerminalHandle | null>(null);
   const terminalSocketRef = useRef<WebSocket | null>(null);
-  // Bumped on every EXITED → live transition so the terminal-WS effect
-  // re-runs against the reborn tmux pane instead of the closed socket.
+  // Bumped to reconnect the terminal WS: on EXITED → live transitions and
+  // when the pane target (tmux_pane) changes under a running session.
   const [terminalEpoch, setTerminalEpoch] = useState(0);
   const prevSessionExitedRef = useRef(sessionExited);
   useEffect(() => {
@@ -1334,34 +1324,37 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     }
     prevSessionExitedRef.current = sessionExited;
   }, [sessionExited]);
-  // Push the latest REST snapshot to xterm whenever it changes (or when the
-  // terminal tab mounts). For tmux sessions the WebSocket below seeds and
-  // streams the pane directly, so skip the REST replay to avoid duplicating
-  // content.
+  const tmuxPane =
+    typeof session?.transport_state?.tmux_pane === "string"
+      ? session.transport_state.tmux_pane
+      : null;
+  const prevTmuxPaneRef = useRef<string | null>(null);
   useEffect(() => {
-    if (activeView !== "terminal") return;
-    if (liveTmux) return;
-    const term = terminalRef.current;
-    if (!term) return;
-    term.reset();
-    if (snapshot) {
-      term.write(snapshot);
+    if (
+      prevTmuxPaneRef.current !== null &&
+      tmuxPane !== null &&
+      tmuxPane !== prevTmuxPaneRef.current
+    ) {
+      setTerminalEpoch((e) => e + 1);
     }
-  }, [activeView, snapshot, liveTmux]);
+    prevTmuxPaneRef.current = tmuxPane;
+  }, [tmuxPane]);
 
-  // Live tmux pane: connect a WebSocket, write streamed bytes into xterm,
-  // forward keystrokes and viewport-resize back to the pane. Reconnects with
-  // capped exponential backoff on transient drops.
+  // Terminal pane: connect a WebSocket when the terminal tab is open and the
+  // transport has a pane (lazy — defers connection until the tab is visible).
+  // Write streamed bytes into xterm; for interactive transports forward
+  // keystrokes and resize frames back. Reconnects with capped exponential
+  // backoff on transient drops.
   //
   // Deliberately does NOT depend on the full ``session`` object — the
   // session-state WS pushes updated SessionRecord references on every change
   // (effort/model/etc.), and re-running this effect would close the terminal
   // socket and ``term.reset()`` xterm on every push, which the user sees as
-  // the whole pane blanking out and re-painting. ``liveTmux`` already implies
-  // ``session !== null``.
+  // the whole pane blanking out and re-painting.
+  const paneTransport = session?.transport ?? null;
   useEffect(() => {
     if (activeView !== "terminal") return;
-    if (!liveTmux) return;
+    if (!paneTransport || !hasTerminalPane(paneTransport, catalog)) return;
     let active = true;
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1417,7 +1410,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       socket?.close();
       terminalSocketRef.current = null;
     };
-  }, [activeView, liveTmux, host, token, sessionId, handleAuthFailure, terminalEpoch]);
+  }, [activeView, paneTransport, catalog, host, token, sessionId, handleAuthFailure, terminalEpoch]);
 
   const handleTerminalInput = useCallback((data: string) => {
     const socket = terminalSocketRef.current;
@@ -1497,12 +1490,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const handleTerminalResize = useCallback(
     ({ cols, rows }: { cols: number; rows: number }) => {
       setTerminalDims({ cols, rows });
+      if (!canTerminalResize) return;
       const socket = terminalSocketRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: "resize", cols, rows }));
       }
     },
-    [],
+    [canTerminalResize],
   );
   const handleTerminalScrollChip = useCallback(
     (direction: "up" | "down") => {
@@ -1554,19 +1548,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const handleTerminalScrollChange = useCallback((atBottom: boolean) => {
     setTermAtBottom(atBottom);
   }, []);
-  // "Refresh" on the terminal page means different things for live vs.
-  // read-only sessions: live tmux already streams every byte, so the
-  // useful refresh is bumping the WS epoch — that closes the current
-  // socket, opens a fresh one, and re-seeds the pane from the server's
-  // current state. For read-only snapshots we still hit the REST
-  // /snapshot endpoint to pull the latest capture.
   const handleTerminalRefresh = useCallback(() => {
-    if (liveTmux) {
-      setTerminalEpoch((e) => e + 1);
-    } else {
-      void refreshSnapshot();
-    }
-  }, [liveTmux, refreshSnapshot]);
+    setTerminalEpoch((e) => e + 1);
+  }, []);
   const interruptSession = useCallback(() => {
     void runAction("interrupt");
   }, [runAction]);
@@ -1609,7 +1593,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
             <div className="segmented segmented-quiet" aria-label="View mode">
               <span className="segmented-item active">Terminal</span>
             </div>
-          ) : (
+          ) : canShowTerminal ? (
             <div className="segmented" role="tablist" aria-label="View">
               <button
                 type="button"
@@ -1630,7 +1614,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                 Terminal
               </button>
             </div>
-          )}
+          ) : null}
           {!terminalOnly && activeView === "chat" ? (
             <div className="segmented segmented-quiet" role="radiogroup" aria-label="Event filter">
               <button
@@ -1773,11 +1757,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           token={token}
           sessionId={sessionId}
           session={session}
-          liveTmux={liveTmux}
+          interactive={canTerminalInteract}
           terminalRef={terminalRef}
           theme={theme}
           terminalDims={terminalDims}
-          snapshotLoading={snapshotLoading}
           sessionExited={sessionExited}
           dormantReattach={dormantReattach}
           locked={terminalOnly}

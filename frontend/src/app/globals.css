@@ -1845,17 +1845,6 @@ html[data-theme="light"] .badge.transport.opencode_http {
   border-color: rgba(90, 100, 120, 0.26);
 }
 
-.badge.fidelity.heuristic {
-  background: rgba(217, 154, 74, 0.12);
-  color: var(--warn);
-  border-color: rgba(217, 154, 74, 0.24);
-}
-
-html[data-theme="light"] .badge.fidelity.heuristic {
-  background: rgba(170, 102, 24, 0.12);
-  border-color: rgba(170, 102, 24, 0.26);
-}
-
 .badge.model {
   font-family: var(--font-mono);
   background: rgba(120, 139, 188, 0.12);

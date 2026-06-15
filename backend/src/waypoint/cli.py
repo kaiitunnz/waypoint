@@ -22,7 +22,12 @@ from waypoint.client import (
     session_status_from_envelope,
     write_cli_token,
 )
-from waypoint.schemas import SessionAttachRequest, SessionCreateRequest, SessionStatus
+from waypoint.schemas import (
+    LaunchMode,
+    SessionAttachRequest,
+    SessionCreateRequest,
+    SessionStatus,
+)
 from waypoint.settings import Settings, load_settings
 
 # Statuses that, by default, end a `sessions wait`: the session is idle,
@@ -47,16 +52,17 @@ WAIT_POLL_INTERVAL_SECONDS = 2.0
 
 
 def _backend_choices() -> list[str]:
-    """Backend ids accepted by ``session`` / ``sessions`` launch commands.
+    """Agent ids accepted by ``session`` / ``sessions`` launch commands.
 
-    Excludes managed-launch fallback wrappers (capabilities flag
-    ``is_fallback_for_managed_launch``) — those are routed to via the
-    registry, not selected as a real backend.
+    Lists coding agents only. Transports — the generic ``tmux`` pane wrapper
+    and the ``claude_tty`` tty-tail — are not agents; a session's transport is
+    chosen with ``--launch-mode``, not ``--backend``. Both name themselves as
+    their own transport (``id == transport_id``), whereas an agent owns a
+    distinct native transport (``claude_code`` → ``claude_cli``), so that is
+    the test.
     """
     return [
-        plugin.id
-        for plugin in get_registry().all()
-        if not plugin.capabilities.is_fallback_for_managed_launch
+        plugin.id for plugin in get_registry().all() if plugin.id != plugin.transport_id
     ]
 
 
@@ -314,6 +320,13 @@ def session_start(
     backend: BackendOption,
     cwd: Annotated[str, typer.Option(help="Working directory for the session.")],
     launch_target_id: Annotated[str | None, typer.Option()] = None,
+    launch_mode: Annotated[
+        LaunchMode | None,
+        typer.Option(
+            help="Transport to drive the agent: 'auto' (default), 'direct' "
+            "(native structured adapter), or 'tmux_wrapper' (generic tmux pane).",
+        ),
+    ] = None,
     title: Annotated[str | None, typer.Option()] = None,
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
@@ -324,6 +337,7 @@ def session_start(
             backend=backend,
             cwd=cwd,
             launch_target_id=launch_target_id,
+            launch_mode=launch_mode,
             title=title,
             args=args or [],
         )
@@ -354,20 +368,25 @@ async def _session_start(
     backend: str,
     cwd: str,
     launch_target_id: str | None,
+    launch_mode: LaunchMode | None,
     title: str | None,
     args: list[str],
 ) -> None:
     context = AppContext(settings)
     context.settings.ensure_dirs()
     try:
+        request_fields: dict[str, Any] = {
+            "backend": backend,
+            "cwd": cwd,
+            "launch_target_id": launch_target_id,
+            "title": title,
+            "args": list(args),
+        }
+        # Omit launch_mode when unset so the request model's AUTO default applies.
+        if launch_mode is not None:
+            request_fields["launch_mode"] = launch_mode
         session = await context.runtime.create_session(
-            SessionCreateRequest(
-                backend=backend,
-                cwd=cwd,
-                launch_target_id=launch_target_id,
-                title=title,
-                args=list(args),
-            )
+            SessionCreateRequest(**request_fields)
         )
         typer.echo(json.dumps({"session": session.model_dump(mode="json")}, indent=2))
     finally:
@@ -965,12 +984,44 @@ def _warn_unknown_model(
     )
 
 
+def _validate_launch_permission_mode(
+    client: WaypointClient, backend: str, mode: str
+) -> None:
+    """Validate a launch-time ``--permission-mode`` against the chosen backend.
+
+    Mirrors ``_validate_permission_mode`` but for session creation: the mode is
+    a launch flag, not an in-place change, so it checks the agent's advertised
+    ``permission_modes`` vocabulary without requiring inline-set support. A
+    backend that advertises no modes is left to the server to reject.
+    """
+    descriptor = next(
+        (b for b in client.list_backends() if b.get("id") == backend), None
+    )
+    if descriptor is None:
+        return
+    caps = descriptor.get("capabilities", {})
+    valid = [spec["id"] for spec in caps.get("permission_modes", [])]
+    if valid and mode not in valid:
+        raise typer.BadParameter(
+            f"unknown permission mode {mode!r} for backend {backend!r}; "
+            f"choose one of: {', '.join(valid)}",
+            param_hint="--permission-mode",
+        )
+
+
 @sessions_app.command("start")
 def sessions_start(
     ctx: typer.Context,
     backend: BackendOption,
     cwd: Annotated[str, typer.Option(help="Working directory for the session.")],
     launch_target_id: Annotated[str | None, typer.Option()] = None,
+    launch_mode: Annotated[
+        LaunchMode | None,
+        typer.Option(
+            help="Transport to drive the agent: 'auto' (default), 'direct' "
+            "(native structured adapter), or 'tmux_wrapper' (generic tmux pane).",
+        ),
+    ] = None,
     title: Annotated[str | None, typer.Option()] = None,
     model: Annotated[str | None, typer.Option()] = None,
     effort: Annotated[str | None, typer.Option()] = None,
@@ -1007,6 +1058,8 @@ def sessions_start(
         effective_cwd = worktree_path
 
     def _run(c: WaypointClient) -> dict[str, Any]:
+        if permission_mode is not None:
+            _validate_launch_permission_mode(c, backend, permission_mode)
         if model is not None:
             _warn_unknown_model(c, backend, model, launch_target_id)
         return {
@@ -1014,6 +1067,7 @@ def sessions_start(
                 backend=backend,
                 cwd=effective_cwd,
                 launch_target_id=launch_target_id,
+                launch_mode=launch_mode.value if launch_mode is not None else None,
                 title=title,
                 model=model,
                 effort=effort,

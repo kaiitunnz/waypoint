@@ -1345,7 +1345,10 @@ class CodexPlugin(DefaultLaunchContract):
         self,
         runtime: "SessionRuntime",
         request: CodexThreadImportRequest,
+        *,
+        agent: str | None = None,
     ) -> SessionRecord:
+        backend = agent or self.id
         launch_target = runtime._resolve_launch_target(
             request.launch_target_id, self.id
         )
@@ -1365,14 +1368,20 @@ class CodexPlugin(DefaultLaunchContract):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="ephemeral codex threads cannot be imported",
             )
-        # Launch-mode dispatch mirrors create_session: TMUX_WRAPPER
-        # always delegates; AUTO falls through when the structured
-        # plugin isn't available for managed launch. DIRECT runs the
-        # existing structured-resume path below.
-        if request.launch_mode == LaunchMode.TMUX_WRAPPER or (
-            request.launch_mode == LaunchMode.AUTO
-            and not self.is_available_for_managed_launch(runtime)
-        ):
+        # A pinned transport supersedes launch_mode (mirrors create_session):
+        # the agent's native transport takes the structured path below, any
+        # other resolves to the tmux wrapper here. With no pinned transport,
+        # launch_mode decides: TMUX_WRAPPER always delegates; AUTO falls
+        # through when the structured plugin isn't available; DIRECT runs the
+        # structured-resume path below.
+        if request.transport is not None:
+            use_resume_wrapper = request.transport != self.transport_id
+        else:
+            use_resume_wrapper = request.launch_mode == LaunchMode.TMUX_WRAPPER or (
+                request.launch_mode == LaunchMode.AUTO
+                and not self.is_available_for_managed_launch(runtime)
+            )
+        if use_resume_wrapper:
             fallback = runtime.registry.fallback_for_managed_launch()
             if not isinstance(fallback, TmuxPlugin):
                 raise HTTPException(
@@ -1381,7 +1390,7 @@ class CodexPlugin(DefaultLaunchContract):
                 )
             return await fallback.import_thread_via_resume(
                 runtime,
-                backend=self.id,
+                backend=backend,
                 thread_id=request.thread_id,
                 cwd=_thread_cwd(thread),
                 launch_target_id=request.launch_target_id,
@@ -1396,7 +1405,7 @@ class CodexPlugin(DefaultLaunchContract):
         now = datetime.now(UTC)
         session = SessionRecord(
             id=session_id,
-            backend=self.id,
+            backend=backend,
             source=SessionSource.MANAGED,
             transport=self.transport_id,
             title=_thread_title(thread),

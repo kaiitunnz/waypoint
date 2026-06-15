@@ -616,6 +616,51 @@ class SessionRuntime:
         await self._retire_previous_assistant(old, created.id)
         return self._require_assistant_summary()
 
+    async def import_thread(self, backend: str, body: dict[str, Any]) -> SessionRecord:
+        """Import a backend-side thread as a session, honoring a pinned transport.
+
+        Mirrors ``create_session``: the agent id selects the importing plugin
+        and is persisted as the session's ``backend``, while a pinned transport
+        selects the plugin that drives the resulting session. The agent owns
+        thread-metadata lookup, so the tmux wrapper — which cannot enumerate
+        threads — is driven through the agent plugin's resume-via-tmux
+        delegation rather than called directly. ``transport=None`` preserves the
+        ``launch_mode``-derived path exactly.
+        """
+        if not self.registry.has_backend(backend):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"unknown backend: {backend}",
+            )
+        agent_plugin = self.registry.get(backend)
+        if agent_plugin.capabilities.is_fallback_for_managed_launch:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"{backend} is a managed-launch wrapper and "
+                    "cannot be requested as the target backend"
+                ),
+            )
+        schema = agent_plugin.import_request_schema
+        if not agent_plugin.capabilities.supports_thread_import or schema is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"thread import is not supported for {backend}",
+            )
+        request = schema.model_validate(body)
+        transport = getattr(request, "transport", None)
+        if transport is not None:
+            self._validate_supported_transport(backend, transport)
+            driver = self.registry.resolve(backend, transport)
+            # resolve() returns the transport owner; for a wrapper transport
+            # (tmux) that owner cannot enumerate threads, so the agent plugin
+            # drives the resume-via-tmux path instead.
+            if not driver.capabilities.supports_thread_import:
+                driver = agent_plugin
+        else:
+            driver = agent_plugin
+        return await driver.import_thread(self, request, agent=backend)
+
     async def attach_assistant(
         self,
         *,
@@ -637,26 +682,15 @@ class SessionRuntime:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="the assistant is disabled",
             )
-        if not self.registry.has_backend(backend):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"unknown backend: {backend}",
-            )
-        plugin = self.registry.get(backend)
-        schema = plugin.import_request_schema
-        if not plugin.capabilities.supports_thread_import or schema is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"thread import is not supported for {backend}",
-            )
         old_id = self.assistant_session_id
         old = self.storage.get_session(old_id) if old_id is not None else None
         # Import before touching the current thread so a failed import (unknown
-        # thread, already imported) leaves the live assistant intact.
-        request = schema.model_validate(
-            {"thread_id": thread_id, "launch_target_id": launch_target_id}
+        # thread, already imported) leaves the live assistant intact. The
+        # assistant always adopts a thread over the agent's native transport,
+        # so no transport is pinned here.
+        imported = await self.import_thread(
+            backend, {"thread_id": thread_id, "launch_target_id": launch_target_id}
         )
-        imported = await plugin.import_thread(self, request)
         adopted = self.storage.update_session(
             imported.id, source=SessionSource.ASSISTANT, pinned_at=datetime.now(UTC)
         )

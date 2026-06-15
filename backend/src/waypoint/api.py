@@ -267,38 +267,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body: dict[str, Any],
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        if not context.runtime.registry.has_backend(backend):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"unknown backend: {backend}",
-            )
-        plugin = context.runtime.registry.get(backend)
-        if plugin.capabilities.is_fallback_for_managed_launch:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"{backend} is a managed-launch wrapper and "
-                    "cannot be requested as the target backend"
-                ),
-            )
-        if not plugin.capabilities.supports_thread_import:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"thread import is not supported for {backend}",
-            )
-        # Each plugin declares its own request shape via
-        # `import_request_schema`. The dispatcher validates and hands a
-        # typed object to `import_thread`; plugins without a schema fall
-        # back to the raw dict.
-        schema = plugin.import_request_schema
-        request: Any = schema.model_validate(body) if schema is not None else body
-        # A pinned transport must be one the agent declares (mirrors the
-        # create/schedule paths); the runtime drives the resulting session
-        # over the (agent, transport) pair while persisting backend=agent.
-        transport = getattr(request, "transport", None)
-        if transport is not None:
-            context.runtime._validate_supported_transport(backend, transport)
-        session = await plugin.import_thread(context.runtime, request)
+        # The runtime owns import orchestration: it validates the agent and a
+        # pinned transport, resolves the (agent, transport) driver, and
+        # persists backend=agent — mirroring create_session.
+        session = await context.runtime.import_thread(backend, body)
         return {"session": session.model_dump(mode="json")}
 
     @app.get("/api/sessions/{session_id}")

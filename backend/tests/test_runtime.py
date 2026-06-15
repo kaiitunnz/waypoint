@@ -4199,8 +4199,11 @@ async def test_attach_assistant_adopts_imported_thread(tmp_path, monkeypatch) ->
 
     runtime.terminate = _fake_terminate  # type: ignore[method-assign]
 
-    async def _fake_import(rt: Any, request: Any) -> SessionRecord:
+    async def _fake_import(
+        rt: Any, request: Any, *, agent: str | None = None
+    ) -> SessionRecord:
         assert request.thread_id == "thread-xyz"
+        assert agent == "codex"
         # import_thread persists a MANAGED session living in the thread's own cwd.
         session = make_session(
             settings,
@@ -4245,7 +4248,9 @@ async def test_attach_assistant_keeps_current_when_import_fails(
     )
     runtime.assistant_session_id = "codex-live"
 
-    async def _boom(rt: Any, request: Any) -> SessionRecord:
+    async def _boom(
+        rt: Any, request: Any, *, agent: str | None = None
+    ) -> SessionRecord:
         raise HTTPException(status_code=404, detail="thread not found")
 
     monkeypatch.setattr(runtime.registry.get("codex"), "import_thread", _boom)

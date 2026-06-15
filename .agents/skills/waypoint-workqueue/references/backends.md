@@ -47,11 +47,14 @@ a backend or model blindly.
   agents/rulesets as permission modes, `/compact`. *Reach for it when you need a
   specific, open, or local model, want to spread load across providers, or must
   avoid one vendor's rate limits.*
-- **`claude_tty`** — a TTY-tail wrapper around `claude_code`: launches Claude
-  Code in a tmux pane and scrapes its terminal output. Unstructured transcript
-  (no hook events), but selectable as `--backend claude_tty` and accepts
-  `--model`. *Use as a fallback when the structured `claude_code` transport is
-  unavailable — not as a first choice.*
+- **`claude_tty`** — the `claude_code` agent driven over a TTY-tail transport:
+  launches Claude Code's interactive TUI in a tmux pane and tails its transcript
+  JSONL into the canonical event stream, so the transcript **is** structured
+  (`is_structured=True`) — same Claude model catalogue, selectable as `--backend
+  claude_tty`, accepts `--model`. It drives tool approvals via pane keystrokes
+  rather than the stdio hook, and the TUI is exempt from the `claude -p` API rate
+  limit. *Use it for autonomous Claude sessions or as a fallback when the
+  structured `claude_code` adapter is unavailable.*
 - **`tmux`** — a raw transport, not a selectable agent backend: no model /
   effort / permission knobs, unstructured (scraped) transcript, but full shell
   and host access. It backs `claude_tty` and other TTY-style sessions

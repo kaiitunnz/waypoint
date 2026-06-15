@@ -9,7 +9,13 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from waypoint.cli import _json_safe, app, exit_code_for_wait, parse_wait_until
+from waypoint.cli import (
+    _backend_choices,
+    _json_safe,
+    app,
+    exit_code_for_wait,
+    parse_wait_until,
+)
 from waypoint.client import WaypointClient
 from waypoint.settings import Settings
 
@@ -180,6 +186,33 @@ def test_board_edit_entry_rejects_malformed_meta(tmp_path: Path) -> None:
     )
     assert result.exit_code != 0
     assert "key=value" in result.output
+
+
+def test_backend_choices_lists_agents_not_transports() -> None:
+    """Launch ``--backend`` choices are agents only; the tmux and claude_tty
+    transports are reached via ``--launch-mode``, not selected as agents."""
+    choices = set(_backend_choices())
+    assert {"claude_code", "codex", "opencode"}.issubset(choices)
+    assert "tmux" not in choices
+    assert "claude_tty" not in choices
+
+
+def test_session_start_rejects_transport_as_backend(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "session",
+            "start",
+            "--backend",
+            "claude_tty",
+            "--cwd",
+            "/tmp",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "unknown backend" in result.output
 
 
 def test_models_rejects_unknown_backend(tmp_path: Path) -> None:

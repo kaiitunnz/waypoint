@@ -249,6 +249,7 @@ class WaypointClient:
         backend: str,
         cwd: str,
         launch_target_id: str | None = None,
+        launch_mode: str | None = None,
         title: str | None = None,
         model: str | None = None,
         effort: str | None = None,
@@ -257,7 +258,7 @@ class WaypointClient:
         worktree_path: str | None = None,
         args: list[str] | None = None,
     ) -> dict[str, Any]:
-        body = {
+        body: dict[str, Any] = {
             "backend": backend,
             "cwd": cwd,
             "launch_target_id": launch_target_id,
@@ -269,6 +270,10 @@ class WaypointClient:
             "worktree_path": worktree_path,
             "args": args or [],
         }
+        # Omit launch_mode when unset: it is a non-optional-with-default enum
+        # field, so an explicit null is a 422 (mirrors create_schedule).
+        if launch_mode is not None:
+            body["launch_mode"] = launch_mode
         data: dict[str, Any] = self._request("POST", "/api/sessions", json=body).json()[
             "session"
         ]

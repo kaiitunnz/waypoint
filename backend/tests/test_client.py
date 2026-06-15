@@ -121,6 +121,7 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
                 return httpx.Response(200, json={"channel": channel, "deleted": 5})
         if request.url.path == "/api/sessions" and request.method == "POST":
             payload = json.loads(request.content)
+            state["session_create"] = payload
             return httpx.Response(200, json={"session": {"id": "new", **payload}})
         if (
             request.url.path == "/api/sessions/s1/attachments"
@@ -385,6 +386,27 @@ def test_send_input_omits_attachments_when_none(
     with _client(_settings(tmp_path), state) as client:
         client.send_input("s1", "hi")
     assert "attachments" not in state["input_body"]
+
+
+def test_create_session_omits_launch_mode_when_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.create_session(backend="codex", cwd="/tmp")
+    # Same enum-default reason as create_schedule: a null launch_mode is a 422.
+    assert "launch_mode" not in state["session_create"]
+
+
+def test_create_session_passes_launch_mode_when_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.create_session(backend="codex", cwd="/tmp", launch_mode="tmux_wrapper")
+    assert state["session_create"]["launch_mode"] == "tmux_wrapper"
 
 
 def test_create_session_passes_spawner_session_id(

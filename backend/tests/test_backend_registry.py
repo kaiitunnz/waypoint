@@ -191,6 +191,19 @@ def test_resolve_keys_on_agent_and_transport() -> None:
     assert registry.resolve("codex", "tmux").id == "tmux"
     assert registry.resolve("claude_code", "tmux").id == "tmux"
     assert registry.resolve("opencode", "tmux").id == "tmux"
+    # claude_code declares the tty-tail transport, so the pair resolves to the
+    # claude_tty driver while the row still records backend=claude_code.
+    assert registry.resolve("claude_code", "claude_tty").id == "claude_tty"
+
+
+def test_supported_transports_reports_agent_declaration() -> None:
+    registry = get_registry()
+    assert registry.supported_transports("claude_code") == (
+        "claude_cli",
+        "claude_tty",
+        "tmux",
+    )
+    assert registry.supported_transports("codex") == ("codex_app_server", "tmux")
 
 
 def test_resolve_falls_back_to_transport_owner_for_undeclared_pair() -> None:
@@ -230,6 +243,9 @@ def test_plugin_for_uses_both_backend_and_transport() -> None:
     # transports must dispatch to two different driver plugins.
     assert registry.plugin_for(_record("codex", "codex_app_server")).id == "codex"
     assert registry.plugin_for(_record("codex", "tmux")).id == "tmux"
+    # A claude_code session driven over the tty-tail transport dispatches to
+    # the claude_tty driver, not the structured claude_code adapter.
+    assert registry.plugin_for(_record("claude_code", "claude_tty")).id == "claude_tty"
 
 
 def test_registry_get_unknown_raises() -> None:

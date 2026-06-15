@@ -205,6 +205,23 @@ def test_split_thinking_then_text_emits_single_result_after_text() -> None:
     assert note.status == SessionStatus.IDLE
 
 
+def test_thinking_only_abnormal_stop_emits_note_immediately() -> None:
+    # Only an end_turn message splits thinking/text across records. An abnormal
+    # termination (max_tokens hit mid-thinking) has no text sibling coming, so
+    # the note must fire on the thinking record rather than be deferred forever.
+    norm = TranscriptNormalizer()
+    record = _assistant_record(
+        "msgK",
+        [{"type": "thinking", "thinking": "long thought"}],
+        stop_reason="max_tokens",
+    )
+    note = next(
+        e for e in norm.process_record(record) if e.metadata.get("method") == "result"
+    )
+    assert note.status == SessionStatus.IDLE
+    assert note.metadata["stop_reason"] == "max_tokens"
+
+
 def test_usage_counted_for_different_message_ids() -> None:
     norm = TranscriptNormalizer()
     usage = {"input_tokens": 100, "output_tokens": 50}

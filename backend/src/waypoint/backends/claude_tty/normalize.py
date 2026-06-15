@@ -203,7 +203,11 @@ class TranscriptNormalizer:
         # the note lands after the visible text, and emit it at most once per
         # message id so the split does not double the note.
         already_noted = bool(message_id) and message_id in self._result_emitted_ids
-        thinking_only = had_thinking and not had_text
+        # Only an end_turn message splits its thinking and text across sibling
+        # records, so the note can wait for the text. An abnormal termination
+        # (e.g. max_tokens hit mid-thinking) has no text sibling coming, so its
+        # note must fire on the thinking record or the turn never resolves.
+        thinking_only = had_thinking and not had_text and stop_reason == "end_turn"
         if (
             stop_reason
             and stop_reason != "tool_use"

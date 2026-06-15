@@ -84,6 +84,9 @@ class TmuxPlugin:
         model_source=ModelSource.NONE,
         badges={"glyph": "T", "color": "#94a3b8"},
         live_terminal=True,
+        has_terminal_pane=True,
+        terminal_interactive=True,
+        terminal_resizable=True,
         is_fallback_for_managed_launch=True,
     )
 

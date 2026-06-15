@@ -45,9 +45,6 @@ class TransportAdapter(ABC):
     @abstractmethod
     def has_pending_approval(self, session: SessionRecord) -> bool: ...
 
-    @abstractmethod
-    def terminal_snapshot(self, session: SessionRecord) -> str: ...
-
     async def resume(self, session: SessionRecord) -> None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

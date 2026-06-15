@@ -147,7 +147,6 @@ class CodexSessionState:
     active_turn_id: str | None = None
     stream_task: asyncio.Task[None] | None = None
     pending_approval: PendingApproval | None = None
-    terminal_fragments: list[str] = field(default_factory=list)
     streamed_tool_result_ids: set[str] = field(default_factory=set)
     file_diff_previews: dict[str, DiffPreviewPayload] = field(default_factory=dict)
     # Most recent model selection. Codex's protocol exposes model as a per-turn
@@ -562,12 +561,6 @@ class CodexAppServerAdapter:
         state = self._sessions.get(session_id)
         return bool(state and state.pending_approval is not None)
 
-    def terminal_snapshot(self, session_id: str) -> str:
-        state = self._sessions.get(session_id)
-        if state is None:
-            return ""
-        return "".join(state.terminal_fragments)
-
     async def shutdown(self) -> None:
         for session_id in list(self._sessions.keys()):
             await self.terminate_session(session_id)
@@ -624,8 +617,6 @@ class CodexAppServerAdapter:
                     }
                 kind, text, status = map_notification(notification.method, payload)
                 if kind is not None and text:
-                    if notification.method == "item/commandExecution/outputDelta":
-                        state.terminal_fragments.append(text)
                     diff_preview = diff_preview_for_notification(
                         notification.method, payload
                     )

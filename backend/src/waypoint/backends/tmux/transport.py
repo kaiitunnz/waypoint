@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
@@ -92,12 +91,3 @@ class TmuxTransport(TransportAdapter):
 
     def has_pending_approval(self, session: SessionRecord) -> bool:
         return False
-
-    def terminal_snapshot(self, session: SessionRecord) -> str:
-        raw_log_path = Path(session.raw_log_path)
-        if not raw_log_path.exists():
-            return ""
-        # Return the pipe-pane bytes verbatim — ANSI sequences included —
-        # so the frontend's terminal emulator can render colors, cursor
-        # moves, and alternate-screen redraws produced by the agent's TUI.
-        return raw_log_path.read_text(encoding="utf-8", errors="ignore")

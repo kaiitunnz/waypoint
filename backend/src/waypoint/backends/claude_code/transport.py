@@ -74,8 +74,3 @@ class ClaudeTransport(TransportAdapter):
         if self.adapter is None:
             return False
         return self.adapter.has_pending_approval(session.id)
-
-    def terminal_snapshot(self, session: SessionRecord) -> str:
-        if self.adapter is None:
-            return ""
-        return self.adapter.terminal_snapshot(session.id)

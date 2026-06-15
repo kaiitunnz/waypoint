@@ -1616,10 +1616,6 @@ class SessionRuntime:
             )
         return EventsPageResponse(events=events, has_more=has_more)
 
-    def terminal_snapshot(self, session_id: str) -> str:
-        session = self.get_session(session_id)
-        return self.transport_for(session).terminal_snapshot(session)
-
     def launch_target_summaries(self) -> list[dict[str, Any]]:
         summaries: list[dict[str, Any]] = []
         for target in self.ssh_targets.values():

@@ -145,6 +145,9 @@ class ClaudeTtyPlugin:
         permission_modes=ClaudeCodePlugin.capabilities.permission_modes,
         slash_commands=ClaudeCodePlugin.capabilities.slash_commands,
         badges={"glyph": "C", "color": "#a78bfa"},
+        has_terminal_pane=True,
+        terminal_interactive=False,
+        terminal_resizable=False,
         cli_binary="claude",
         target_aliases=("claude_tty",),
     )

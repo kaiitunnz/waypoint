@@ -36,11 +36,15 @@ class PaneScreen(StrEnum):
 # brittle to that.
 _APPROVAL_FOOTER = "Esc to cancel · Tab to amend"
 _APPROVAL_QUESTION_MARKER = "Do you want to"
-# The AskUserQuestion popup carries its own navigation footer, distinct from the
-# permission dialog's "Tab to amend". We only need to recognize it: the dialog
-# is dismissed with Esc so the TUI flushes the structured questions to the
+# The AskUserQuestion popup. We only need to recognize it — the dialog is
+# dismissed with Esc so the TUI flushes the structured questions to the
 # transcript, which is surfaced from there rather than parsed off the pane.
-_QUESTION_FOOTER = "Tab/Arrow keys to navigate"
+# Match cctty's detector: the "Enter to select" / "Esc to cancel" footer plus
+# the always-present "Type something" free-text option. The navigation hint
+# itself is not stable — it reads "↑/↓ to navigate" for a single-question
+# dialog but "Tab/Arrow keys to navigate" for a multi-question one — so keying
+# on it would miss the single-question form.
+_QUESTION_MARKERS = ("Enter to select", "Esc to cancel", "Type something")
 _MODEL_FOOTER = "Enter to set as default"
 _MODEL_MARKER = "Select model"
 _EFFORT_FOOTER = "←/→ to adjust · Enter to confirm"
@@ -109,7 +113,7 @@ def classify(screen: str) -> PaneScreen:
         screen, compact, _APPROVAL_QUESTION_MARKER
     ):
         return PaneScreen.APPROVAL
-    if _contains(screen, compact, _QUESTION_FOOTER):
+    if all(_contains(screen, compact, marker) for marker in _QUESTION_MARKERS):
         return PaneScreen.QUESTION
     if _contains(screen, compact, _TRUST_MARKER):
         return PaneScreen.TRUST

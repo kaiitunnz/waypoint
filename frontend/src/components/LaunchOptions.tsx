@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import type { BackendCatalog } from "@/lib/backends";
-import { transportFidelity, transportPickerLabel } from "@/lib/backends";
+import { transportPresentation } from "@/lib/backends";
 import { LaunchMode, SessionTransport } from "@/lib/types";
 
 export function GearGlyph() {
@@ -201,9 +201,10 @@ interface TransportPickerProps {
   catalog: BackendCatalog;
 }
 
-// Agent-primary transport / fidelity selector. Populated from an agent's
-// supported_transports and rendered as cards that spell out the fidelity
-// trade-off (structured cards vs live terminal). Collapses to nothing when the
+// Agent-primary transport selector. Populated from an agent's
+// supported_transports and rendered as a light segmented control: each
+// transport gets a distinct icon and its user-facing name, with the selected
+// transport's one-line description shown beneath. Collapses to nothing when the
 // agent exposes a single transport, since there is nothing to choose.
 export function TransportPicker({
   transports,
@@ -214,16 +215,20 @@ export function TransportPicker({
   if (transports.length <= 1) {
     return null;
   }
+  const selected = transportPresentation(value, catalog);
   return (
     <div className="field transport-field">
-      <span>Transport · Fidelity</span>
+      <span>Interface</span>
       <div
-        className="transport-picker"
+        className="segmented segmented-quiet transport-segmented"
         role="radiogroup"
-        aria-label="Transport and fidelity"
+        aria-label="Interface"
       >
         {transports.map((transport) => {
-          const { kind, hint } = transportFidelity(transport, catalog);
+          const { name, description, kind } = transportPresentation(
+            transport,
+            catalog,
+          );
           const active = value === transport;
           return (
             <button
@@ -231,42 +236,77 @@ export function TransportPicker({
               type="button"
               role="radio"
               aria-checked={active}
-              className={`transport-option${active ? " active" : ""}`}
+              title={description}
+              className={`segmented-item transport-segment${active ? " active" : ""}`}
               onClick={() => onChange(transport)}
             >
-              <span
-                className={`transport-option-icon is-${kind}`}
-                aria-hidden="true"
-              >
-                {kind === "structured" ? <StructuredGlyph /> : <TerminalGlyph />}
+              <span className="transport-segment-icon" aria-hidden="true">
+                <TransportGlyph transport={transport} kind={kind} />
               </span>
-              <span className="transport-option-text">
-                <span className="transport-option-label">
-                  {transportPickerLabel(transport, catalog)}
-                </span>
-                <span className="transport-option-hint">{hint}</span>
-              </span>
+              {name}
             </button>
           );
         })}
       </div>
+      <p className="transport-desc">{selected.description}</p>
     </div>
   );
 }
 
-function StructuredGlyph() {
+// Distinct glyph per transport: a speech bubble for the structured Chat
+// adapter, an app window for the Emulated (real-app) tail, and a terminal
+// prompt for the raw Terminal pane. Falls back to the kind for unknown
+// transports.
+function TransportGlyph({
+  transport,
+  kind,
+}: {
+  transport: SessionTransport;
+  kind: "chat" | "terminal";
+}) {
+  if (transport === "claude_tty") return <EmulatedGlyph />;
+  if (kind === "terminal") return <TerminalGlyph />;
+  return <ChatGlyph />;
+}
+
+function ChatGlyph() {
   return (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="2" y="2.5" width="12" height="3.4" rx="1.1" fill="currentColor" opacity="0.85" />
-      <rect x="2" y="7.3" width="12" height="2.4" rx="0.9" fill="currentColor" opacity="0.45" />
-      <rect x="2" y="11" width="8" height="2.4" rx="0.9" fill="currentColor" opacity="0.45" />
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M3 2.9h10A1.3 1.3 0 0 1 14.3 4.2v4.9A1.3 1.3 0 0 1 13 10.4H6.7L4 12.8V10.4H3A1.3 1.3 0 0 1 1.7 9.1V4.2A1.3 1.3 0 0 1 3 2.9Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      <path d="M4.3 5.4h7.4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.65" />
+      <path d="M4.3 7.5h4.8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.65" />
+    </svg>
+  );
+}
+
+function EmulatedGlyph() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect
+        x="1.7"
+        y="2.7"
+        width="12.6"
+        height="10.6"
+        rx="1.7"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      <path d="M1.7 5.5h12.6" stroke="currentColor" strokeWidth="1.2" opacity="0.65" />
+      <circle cx="3.8" cy="4.1" r="0.55" fill="currentColor" />
+      <circle cx="5.6" cy="4.1" r="0.55" fill="currentColor" opacity="0.6" />
+      <path d="M4.4 8h6.2M4.4 10.3h3.9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.65" />
     </svg>
   );
 }
 
 function TerminalGlyph() {
   return (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <rect
         x="1.6"
         y="2.6"
@@ -274,17 +314,16 @@ function TerminalGlyph() {
         height="10.8"
         rx="1.6"
         stroke="currentColor"
-        strokeWidth="1.3"
-        opacity="0.85"
+        strokeWidth="1.2"
       />
       <path
         d="M4.3 6.2l2 1.9-2 1.9"
         stroke="currentColor"
-        strokeWidth="1.3"
+        strokeWidth="1.2"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <path d="M7.8 10.2h3.6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M7.8 10.2h3.6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
     </svg>
   );
 }

@@ -1950,6 +1950,227 @@ async def test_create_session_rejects_tmux_backend(tmp_path) -> None:
     assert exc.value.status_code == 400
 
 
+def _fake_plugin_create_session(
+    storage: Storage,
+    settings: Settings,
+    *,
+    transport: str,
+    calls: list[tuple[str, str, str | None]],
+):
+    async def _create(
+        _runtime: SessionRuntime,
+        request: SessionCreateRequest,
+        *,
+        session_id: str,
+        launch_target: Any,
+        title: str,
+        raw_log: Any,
+        structured_log: Any,
+        git_meta: Any,
+        permission_mode: str | None,
+        resolved_model: str | None,
+        resolved_effort: str | None,
+    ) -> SessionRecord:
+        calls.append((session_id, request.backend, request.transport))
+        session = make_session(
+            settings,
+            id=session_id,
+            backend=request.backend,
+            transport=transport,
+            thread_id="thread-x",
+        )
+        session.cwd = request.cwd
+        session.title = title
+        storage.create_session(session)
+        return session
+
+    return _create
+
+
+@pytest.mark.asyncio
+async def test_create_session_explicit_transport_routes_to_tty_driver(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    claude = runtime.registry.get("claude_code")
+    tty = runtime.registry.get("claude_tty")
+    calls: list[tuple[str, str, str | None]] = []
+
+    monkeypatch.setattr(
+        tty,
+        "create_session",
+        _fake_plugin_create_session(
+            storage, settings, transport="claude_tty", calls=calls
+        ),
+    )
+    monkeypatch.setattr(
+        claude,
+        "create_session",
+        lambda *args, **kwargs: pytest.fail("structured adapter should not be used"),
+    )
+    monkeypatch.setattr(
+        runtime, "_warm_command_completions", lambda *_args, **_kwargs: None
+    )
+
+    session = await runtime.create_session(
+        SessionCreateRequest(
+            backend="claude_code",
+            cwd="~/workspace",
+            transport="claude_tty",
+            title="TUI",
+            args=[],
+            source_mode=SessionSource.MANAGED,
+        )
+    )
+
+    assert calls == [(session.id, "claude_code", "claude_tty")]
+    assert session.backend == "claude_code"
+    assert session.transport == "claude_tty"
+
+
+@pytest.mark.asyncio
+async def test_create_session_explicit_transport_takes_precedence_over_launch_mode(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    tty = runtime.registry.get("claude_tty")
+    tmux = runtime.registry.fallback_for_managed_launch()
+    assert tmux is not None
+    calls: list[tuple[str, str, str | None]] = []
+
+    monkeypatch.setattr(
+        tty,
+        "create_session",
+        _fake_plugin_create_session(
+            storage, settings, transport="claude_tty", calls=calls
+        ),
+    )
+    monkeypatch.setattr(
+        tmux,
+        "create_session",
+        lambda *args, **kwargs: pytest.fail("launch_mode tmux path should be ignored"),
+    )
+    monkeypatch.setattr(
+        runtime, "_warm_command_completions", lambda *_args, **_kwargs: None
+    )
+
+    # launch_mode asks for the tmux wrapper, but an explicit transport wins.
+    session = await runtime.create_session(
+        SessionCreateRequest(
+            backend="claude_code",
+            cwd="~/workspace",
+            launch_mode=LaunchMode.TMUX_WRAPPER,
+            transport="claude_tty",
+            args=[],
+            source_mode=SessionSource.MANAGED,
+        )
+    )
+
+    assert calls == [(session.id, "claude_code", "claude_tty")]
+    assert session.transport == "claude_tty"
+
+
+@pytest.mark.asyncio
+async def test_create_session_explicit_cli_transport_uses_structured_adapter(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    claude = runtime.registry.get("claude_code")
+    tty = runtime.registry.get("claude_tty")
+    calls: list[tuple[str, str, str | None]] = []
+
+    monkeypatch.setattr(
+        claude,
+        "create_session",
+        _fake_plugin_create_session(
+            storage, settings, transport="claude_cli", calls=calls
+        ),
+    )
+    monkeypatch.setattr(
+        tty,
+        "create_session",
+        lambda *args, **kwargs: pytest.fail("tty driver should not be used"),
+    )
+    monkeypatch.setattr(
+        runtime, "_warm_command_completions", lambda *_args, **_kwargs: None
+    )
+
+    session = await runtime.create_session(
+        SessionCreateRequest(
+            backend="claude_code",
+            cwd="~/workspace",
+            transport="claude_cli",
+            args=[],
+            source_mode=SessionSource.MANAGED,
+        )
+    )
+
+    assert calls == [(session.id, "claude_code", "claude_cli")]
+    assert session.backend == "claude_code"
+    assert session.transport == "claude_cli"
+
+
+@pytest.mark.asyncio
+async def test_create_session_rejects_unsupported_transport(tmp_path) -> None:
+    runtime, _, _ = make_runtime(tmp_path)
+    with pytest.raises(HTTPException) as exc:
+        await runtime.create_session(
+            SessionCreateRequest(
+                backend="claude_code",
+                cwd="~/workspace",
+                transport="codex_app_server",
+                args=[],
+                source_mode=SessionSource.MANAGED,
+            )
+        )
+
+    assert exc.value.status_code == 400
+    assert "codex_app_server" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_create_session_legacy_claude_tty_backend_routes_to_tty(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    tty = runtime.registry.get("claude_tty")
+    tmux = runtime.registry.fallback_for_managed_launch()
+    assert tmux is not None
+    calls: list[tuple[str, str, str | None]] = []
+
+    # A legacy launch pins no transport; the claude_tty agent stays the driver
+    # as long as its CLI is available.
+    monkeypatch.setattr(tty, "is_available_for_managed_launch", lambda _runtime: True)
+    monkeypatch.setattr(
+        tty,
+        "create_session",
+        _fake_plugin_create_session(
+            storage, settings, transport="claude_tty", calls=calls
+        ),
+    )
+    monkeypatch.setattr(
+        tmux,
+        "create_session",
+        lambda *args, **kwargs: pytest.fail("legacy claude_tty must not fall back"),
+    )
+    monkeypatch.setattr(
+        runtime, "_warm_command_completions", lambda *_args, **_kwargs: None
+    )
+
+    session = await runtime.create_session(
+        SessionCreateRequest(
+            backend="claude_tty",
+            cwd="~/workspace",
+            args=[],
+            source_mode=SessionSource.MANAGED,
+        )
+    )
+
+    assert calls == [(session.id, "claude_tty", None)]
+    assert session.backend == "claude_tty"
+    assert session.transport == "claude_tty"
+
+
 @pytest.mark.asyncio
 async def test_list_importable_codex_threads_filters_existing_session(
     monkeypatch, tmp_path

@@ -332,6 +332,100 @@ async def test_create_session_rejects_reserved_flags() -> None:
     runtime.tmux.start_managed_session.assert_not_called()
 
 
+def _launch_runtime() -> tuple[MagicMock, dict[str, SessionRecord]]:
+    """A runtime that records whatever SessionRecord the plugin persists."""
+    target = MagicMock(session="s-1", window="0", pane="%0", pane_pid=99)
+    runtime = MagicMock()
+    runtime.tmux.start_managed_session = AsyncMock(return_value=target)
+    runtime.tmux.pipe_output = AsyncMock()
+    runtime.tmux.resize_window = AsyncMock()
+    runtime._find_launch_target.return_value = None
+    runtime._command_for_backend.return_value = ["claude"]
+    runtime._record_system_event = AsyncMock()
+    created: dict[str, SessionRecord] = {}
+
+    def _store(record: SessionRecord) -> None:
+        created["record"] = record
+
+    runtime.storage.create_session = MagicMock(side_effect=_store)
+    runtime.get_session = MagicMock(side_effect=lambda _sid: created["record"])
+    return runtime, created
+
+
+@pytest.mark.asyncio
+async def test_create_session_records_requested_agent_backend() -> None:
+    plugin = ClaudeTtyPlugin()
+    _stub_lifecycle(plugin)
+    runtime, created = _launch_runtime()
+
+    session = await plugin.create_session(
+        runtime,
+        SessionCreateRequest(backend="claude_code", cwd="/tmp", args=[]),
+        session_id="sess-1",
+        launch_target=None,
+        title="t",
+        raw_log=Path("/tmp/raw.log"),
+        structured_log=Path("/tmp/events.jsonl"),
+        git_meta=MagicMock(repo_name=None, branch=None),
+        permission_mode=None,
+        resolved_model=None,
+        resolved_effort=None,
+    )
+
+    # The (agent, transport) pair is recorded as claude_code + claude_tty even
+    # though the claude_tty driver built and launched the TUI command.
+    assert session.backend == "claude_code"
+    assert session.transport == "claude_tty"
+    assert created["record"].backend == "claude_code"
+    assert runtime._command_for_backend.call_args.args[0] == "claude_tty"
+
+
+@pytest.mark.asyncio
+async def test_create_session_legacy_claude_tty_backend_unchanged() -> None:
+    plugin = ClaudeTtyPlugin()
+    _stub_lifecycle(plugin)
+    runtime, _ = _launch_runtime()
+
+    session = await plugin.create_session(
+        runtime,
+        SessionCreateRequest(backend="claude_tty", cwd="/tmp", args=[]),
+        session_id="sess-1",
+        launch_target=None,
+        title="t",
+        raw_log=Path("/tmp/raw.log"),
+        structured_log=Path("/tmp/events.jsonl"),
+        git_meta=MagicMock(repo_name=None, branch=None),
+        permission_mode=None,
+        resolved_model=None,
+        resolved_effort=None,
+    )
+
+    assert session.backend == "claude_tty"
+    assert session.transport == "claude_tty"
+
+
+@pytest.mark.asyncio
+async def test_fork_session_inherits_source_agent_backend() -> None:
+    plugin = ClaudeTtyPlugin()
+    _stub_lifecycle(plugin)
+    runtime, created = _launch_runtime()
+    source = _make_session(session_id="src", thread_id="thread-src")
+    source.backend = "claude_code"
+
+    forked = await plugin.fork_session(
+        runtime,
+        source,
+        new_session_id="fork-1",
+        title="forked",
+        raw_log=Path("/tmp/raw.log"),
+        structured_log=Path("/tmp/events.jsonl"),
+    )
+
+    assert forked.backend == "claude_code"
+    assert forked.transport == "claude_tty"
+    assert created["record"].backend == "claude_code"
+
+
 # ── list_threads dedup ────────────────────────────────────────────────────────
 
 

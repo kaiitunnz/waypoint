@@ -331,6 +331,15 @@ def session_start(
             "(native structured adapter), or 'tmux_wrapper' (generic tmux pane).",
         ),
     ] = None,
+    transport: Annotated[
+        str | None,
+        typer.Option(
+            help="Pin the transport id the agent is driven over (e.g. "
+            "'claude_cli', 'claude_tty', 'tmux'). Must be one of the agent's "
+            "supported transports; takes precedence over --launch-mode. "
+            "Omit to keep the --launch-mode-derived behavior.",
+        ),
+    ] = None,
     title: Annotated[str | None, typer.Option()] = None,
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
@@ -342,6 +351,7 @@ def session_start(
             cwd=cwd,
             launch_target_id=launch_target_id,
             launch_mode=launch_mode,
+            transport=transport,
             title=title,
             args=args or [],
         )
@@ -373,6 +383,7 @@ async def _session_start(
     cwd: str,
     launch_target_id: str | None,
     launch_mode: LaunchMode | None,
+    transport: str | None,
     title: str | None,
     args: list[str],
 ) -> None:
@@ -389,6 +400,10 @@ async def _session_start(
         # Omit launch_mode when unset so the request model's AUTO default applies.
         if launch_mode is not None:
             request_fields["launch_mode"] = launch_mode
+        # Omit transport when unset so the request model's None default keeps
+        # today's launch_mode-derived behavior.
+        if transport is not None:
+            request_fields["transport"] = transport
         session = await context.runtime.create_session(
             SessionCreateRequest(**request_fields)
         )
@@ -1026,6 +1041,15 @@ def sessions_start(
             "(native structured adapter), or 'tmux_wrapper' (generic tmux pane).",
         ),
     ] = None,
+    transport: Annotated[
+        str | None,
+        typer.Option(
+            help="Pin the transport id the agent is driven over (e.g. "
+            "'claude_cli', 'claude_tty', 'tmux'). Must be one of the agent's "
+            "supported transports; takes precedence over --launch-mode. "
+            "Omit to keep the --launch-mode-derived behavior.",
+        ),
+    ] = None,
     title: Annotated[str | None, typer.Option()] = None,
     model: Annotated[str | None, typer.Option()] = None,
     effort: Annotated[str | None, typer.Option()] = None,
@@ -1072,6 +1096,7 @@ def sessions_start(
                 cwd=effective_cwd,
                 launch_target_id=launch_target_id,
                 launch_mode=launch_mode.value if launch_mode is not None else None,
+                transport=transport,
                 title=title,
                 model=model,
                 effort=effort,

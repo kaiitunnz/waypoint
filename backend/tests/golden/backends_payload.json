@@ -1,0 +1,476 @@
+[
+  {
+    "id": "claude_code",
+    "transport_id": "claude_cli",
+    "label": "Claude Code",
+    "badges": {
+      "glyph": "C",
+      "color": "#a78bfa"
+    },
+    "capabilities": {
+      "is_structured": true,
+      "supports_resume": false,
+      "supports_reattach_after_exit": true,
+      "supports_terminate": true,
+      "supports_set_model_inline": true,
+      "supports_set_effort_inline": false,
+      "supports_set_effort_with_restart": true,
+      "supports_set_permission_mode_inline": true,
+      "settings_change_interrupts_turn": false,
+      "supports_thread_discovery": true,
+      "supports_thread_import": true,
+      "supports_fork": true,
+      "supports_plan_approval": false,
+      "supports_slash_compact": false,
+      "supports_approval_note": true,
+      "supports_attachments": true,
+      "permission_modes": [
+        {
+          "id": "default",
+          "label": "Default",
+          "description": null,
+          "requires_session_restart": false
+        },
+        {
+          "id": "plan",
+          "label": "Plan",
+          "description": null,
+          "requires_session_restart": false
+        },
+        {
+          "id": "acceptEdits",
+          "label": "Accept edits",
+          "description": null,
+          "requires_session_restart": false
+        },
+        {
+          "id": "auto",
+          "label": "Auto",
+          "description": null,
+          "requires_session_restart": false
+        },
+        {
+          "id": "bypassPermissions",
+          "label": "Bypass",
+          "description": null,
+          "requires_session_restart": false
+        },
+        {
+          "id": "dontAsk",
+          "label": "Don't ask",
+          "description": null,
+          "requires_session_restart": false
+        }
+      ],
+      "effort_levels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "model_source": "static",
+      "slash_commands": [
+        {
+          "name": "compact",
+          "description": "Compact the conversation to free up context",
+          "argument_hint": null
+        },
+        {
+          "name": "clear",
+          "description": "Clear the conversation history",
+          "argument_hint": null
+        },
+        {
+          "name": "context",
+          "description": "Show context window usage",
+          "argument_hint": null
+        },
+        {
+          "name": "cost",
+          "description": "Show token usage and cost",
+          "argument_hint": null
+        },
+        {
+          "name": "export",
+          "description": "Export the conversation",
+          "argument_hint": null
+        },
+        {
+          "name": "memory",
+          "description": "Edit Claude memory files",
+          "argument_hint": null
+        },
+        {
+          "name": "init",
+          "description": "Generate a CLAUDE.md for the project",
+          "argument_hint": null
+        },
+        {
+          "name": "config",
+          "description": "Open the settings panel",
+          "argument_hint": null
+        },
+        {
+          "name": "help",
+          "description": "List available commands",
+          "argument_hint": null
+        }
+      ],
+      "approval_decisions": [
+        "approve",
+        "decline"
+      ],
+      "supports_custom_cli_args": true,
+      "supports_config_overrides": false,
+      "cli_binary": "claude",
+      "target_aliases": [
+        "claude"
+      ],
+      "is_fallback_for_managed_launch": false
+    }
+  },
+  {
+    "id": "claude_tty",
+    "transport_id": "claude_tty",
+    "label": "Claude TUI",
+    "badges": {
+      "glyph": "C",
+      "color": "#a78bfa"
+    },
+    "capabilities": {
+      "is_structured": true,
+      "supports_resume": true,
+      "supports_reattach_after_exit": true,
+      "supports_terminate": true,
+      "supports_set_model_inline": true,
+      "supports_set_effort_inline": false,
+      "supports_set_effort_with_restart": true,
+      "supports_set_permission_mode_inline": true,
+      "settings_change_interrupts_turn": true,
+      "supports_thread_discovery": true,
+      "supports_thread_import": true,
+      "supports_fork": true,
+      "supports_plan_approval": false,
+      "supports_slash_compact": false,
+      "supports_approval_note": false,
+      "supports_attachments": true,
+      "permission_modes": [
+        {
+          "id": "default",
+          "label": "Default",
+          "description": null,
+          "requires_session_restart": false
+        },
+        {
+          "id": "plan",
+          "label": "Plan",
+          "description": null,
+          "requires_session_restart": false
+        },
+        {
+          "id": "acceptEdits",
+          "label": "Accept edits",
+          "description": null,
+          "requires_session_restart": false
+        },
+        {
+          "id": "auto",
+          "label": "Auto",
+          "description": null,
+          "requires_session_restart": false
+        },
+        {
+          "id": "bypassPermissions",
+          "label": "Bypass",
+          "description": null,
+          "requires_session_restart": false
+        },
+        {
+          "id": "dontAsk",
+          "label": "Don't ask",
+          "description": null,
+          "requires_session_restart": false
+        }
+      ],
+      "effort_levels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "model_source": "static",
+      "slash_commands": [
+        {
+          "name": "compact",
+          "description": "Compact the conversation to free up context",
+          "argument_hint": null
+        },
+        {
+          "name": "clear",
+          "description": "Clear the conversation history",
+          "argument_hint": null
+        },
+        {
+          "name": "context",
+          "description": "Show context window usage",
+          "argument_hint": null
+        },
+        {
+          "name": "cost",
+          "description": "Show token usage and cost",
+          "argument_hint": null
+        },
+        {
+          "name": "export",
+          "description": "Export the conversation",
+          "argument_hint": null
+        },
+        {
+          "name": "memory",
+          "description": "Edit Claude memory files",
+          "argument_hint": null
+        },
+        {
+          "name": "init",
+          "description": "Generate a CLAUDE.md for the project",
+          "argument_hint": null
+        },
+        {
+          "name": "config",
+          "description": "Open the settings panel",
+          "argument_hint": null
+        },
+        {
+          "name": "help",
+          "description": "List available commands",
+          "argument_hint": null
+        }
+      ],
+      "approval_decisions": [
+        "approve",
+        "decline"
+      ],
+      "supports_custom_cli_args": true,
+      "supports_config_overrides": false,
+      "cli_binary": "claude",
+      "target_aliases": [
+        "claude_tty"
+      ],
+      "is_fallback_for_managed_launch": false
+    }
+  },
+  {
+    "id": "codex",
+    "transport_id": "codex_app_server",
+    "label": "Codex",
+    "badges": {
+      "glyph": "X",
+      "color": "#34d399"
+    },
+    "capabilities": {
+      "is_structured": true,
+      "supports_resume": false,
+      "supports_reattach_after_exit": true,
+      "supports_terminate": true,
+      "supports_set_model_inline": true,
+      "supports_set_effort_inline": true,
+      "supports_set_effort_with_restart": false,
+      "supports_set_permission_mode_inline": true,
+      "settings_change_interrupts_turn": false,
+      "supports_thread_discovery": true,
+      "supports_thread_import": true,
+      "supports_fork": true,
+      "supports_plan_approval": true,
+      "supports_slash_compact": true,
+      "supports_approval_note": false,
+      "supports_attachments": true,
+      "permission_modes": [
+        {
+          "id": "default",
+          "label": "Default",
+          "description": null,
+          "requires_session_restart": false
+        },
+        {
+          "id": "plan",
+          "label": "Plan",
+          "description": "Use Codex Plan collaboration mode with the previous permission preset",
+          "requires_session_restart": false
+        },
+        {
+          "id": "auto_review",
+          "label": "Auto review",
+          "description": null,
+          "requires_session_restart": false
+        },
+        {
+          "id": "full_access",
+          "label": "Full access",
+          "description": null,
+          "requires_session_restart": false
+        }
+      ],
+      "effort_levels": [],
+      "model_source": "live_rpc",
+      "slash_commands": [
+        {
+          "name": "status",
+          "description": "Show session status",
+          "argument_hint": null
+        },
+        {
+          "name": "compact",
+          "description": "Compact the current thread",
+          "argument_hint": null
+        },
+        {
+          "name": "plan",
+          "description": "Switch to Codex Plan mode or plan the provided prompt",
+          "argument_hint": "[prompt]"
+        }
+      ],
+      "approval_decisions": [
+        "approve",
+        "acceptForSession",
+        "decline"
+      ],
+      "supports_custom_cli_args": true,
+      "supports_config_overrides": true,
+      "cli_binary": "codex",
+      "target_aliases": [
+        "codex"
+      ],
+      "is_fallback_for_managed_launch": false
+    }
+  },
+  {
+    "id": "opencode",
+    "transport_id": "opencode_http",
+    "label": "OpenCode",
+    "badges": {
+      "glyph": "O",
+      "color": "#cbd5e1"
+    },
+    "capabilities": {
+      "is_structured": true,
+      "supports_resume": false,
+      "supports_reattach_after_exit": true,
+      "supports_terminate": true,
+      "supports_set_model_inline": true,
+      "supports_set_effort_inline": true,
+      "supports_set_effort_with_restart": false,
+      "supports_set_permission_mode_inline": true,
+      "settings_change_interrupts_turn": false,
+      "supports_thread_discovery": true,
+      "supports_thread_import": true,
+      "supports_fork": true,
+      "supports_plan_approval": false,
+      "supports_slash_compact": true,
+      "supports_approval_note": true,
+      "supports_attachments": true,
+      "permission_modes": [
+        {
+          "id": "default",
+          "label": "Default",
+          "description": "Use OpenCode's built-in defaults (no rule attached)",
+          "requires_session_restart": false
+        },
+        {
+          "id": "ask",
+          "label": "Ask",
+          "description": "Ask for permission on every action",
+          "requires_session_restart": false
+        },
+        {
+          "id": "allow",
+          "label": "Allow",
+          "description": "Automatically approve actions",
+          "requires_session_restart": false
+        },
+        {
+          "id": "deny",
+          "label": "Deny",
+          "description": "Deny all actions",
+          "requires_session_restart": false
+        },
+        {
+          "id": "plan",
+          "label": "Plan",
+          "description": "Draft and save an architecture plan before coding",
+          "requires_session_restart": false
+        }
+      ],
+      "effort_levels": [],
+      "model_source": "live_rpc",
+      "slash_commands": [
+        {
+          "name": "compact",
+          "description": "Compact the session to reduce context",
+          "argument_hint": null
+        },
+        {
+          "name": "new",
+          "description": "Start a new session",
+          "argument_hint": null
+        },
+        {
+          "name": "status",
+          "description": "Show session status",
+          "argument_hint": null
+        }
+      ],
+      "approval_decisions": [
+        "approve",
+        "acceptForSession",
+        "decline"
+      ],
+      "supports_custom_cli_args": true,
+      "supports_config_overrides": false,
+      "cli_binary": "opencode",
+      "target_aliases": [
+        "opencode"
+      ],
+      "is_fallback_for_managed_launch": false
+    }
+  },
+  {
+    "id": "tmux",
+    "transport_id": "tmux",
+    "label": "Tmux",
+    "badges": {
+      "glyph": "T",
+      "color": "#94a3b8"
+    },
+    "capabilities": {
+      "is_structured": false,
+      "supports_resume": true,
+      "supports_reattach_after_exit": true,
+      "supports_terminate": true,
+      "supports_set_model_inline": false,
+      "supports_set_effort_inline": false,
+      "supports_set_effort_with_restart": false,
+      "supports_set_permission_mode_inline": false,
+      "settings_change_interrupts_turn": false,
+      "supports_thread_discovery": false,
+      "supports_thread_import": false,
+      "supports_fork": false,
+      "supports_plan_approval": false,
+      "supports_slash_compact": false,
+      "supports_approval_note": false,
+      "supports_attachments": true,
+      "permission_modes": [],
+      "effort_levels": [],
+      "model_source": "none",
+      "slash_commands": [],
+      "approval_decisions": [
+        "approve",
+        "decline"
+      ],
+      "supports_custom_cli_args": false,
+      "supports_config_overrides": false,
+      "cli_binary": null,
+      "target_aliases": [],
+      "is_fallback_for_managed_launch": true
+    }
+  }
+]

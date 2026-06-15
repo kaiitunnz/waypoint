@@ -48,6 +48,16 @@ def test_split_round_trips_for_every_backend() -> None:
         assert BackendCapabilities.from_split(*caps.split()) == caps
 
 
+def test_live_terminal_flag_is_tmux_only() -> None:
+    """The live-terminal flag (raw-log monitor + pane mirror) is set by the
+    generic tmux wrapper only; every structured transport leaves it False."""
+    registry = build_default_registry()
+    for plugin in registry.all():
+        expected = plugin.id == "tmux"
+        assert plugin.capabilities.live_terminal is expected
+        assert plugin.capabilities.transport_capabilities().live_terminal is expected
+
+
 def test_backends_payload_matches_golden() -> None:
     """``GET /api/backends`` matches the pinned superset payload.
 

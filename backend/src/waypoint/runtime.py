@@ -151,17 +151,17 @@ class SessionRuntime:
             target.id: target for target in self.settings.ssh_targets if target.enabled
         }
         self.monitor_tasks: dict[str, asyncio.Task[None]] = {}
-        # Per-session helpers spawned by TmuxPlugin to capture the
-        # inner CLI's session/conversation id once the underlying app
-        # has materialized it on disk (Codex writes its rollout file
-        # only after the first user input). Stored here so terminate
-        # can cancel them alongside the pane monitor.
-        self._tmux_thread_id_watchers: dict[str, asyncio.Task[None]] = {}
-        # Periodic rate-limit refreshers spawned by TmuxPlugin. Structured
-        # backends start their own per-session probe inside the SDK adapter
-        # at create time; tmux-wrapped sessions have no adapter and need
-        # this fallback to keep the usage pill live.
-        self._tmux_rate_limit_watchers: dict[str, asyncio.Task[None]] = {}
+        # Per-session helpers that capture the agent's native thread id once
+        # the underlying CLI has materialized it on disk (Codex writes its
+        # rollout file only after the first user input). Spawned by the tmux
+        # pane wrapper and by the Codex adapter; stored here so terminate can
+        # cancel them alongside the pane monitor.
+        self._thread_id_watchers: dict[str, asyncio.Task[None]] = {}
+        # Periodic rate-limit refreshers. Structured backends start their own
+        # per-session probe inside the SDK adapter at create time; tmux-wrapped
+        # sessions have no adapter and need this fallback to keep the usage pill
+        # live.
+        self._rate_limit_watchers: dict[str, asyncio.Task[None]] = {}
         self._restore_tasks: set[asyncio.Task[None]] = set()
         self._completion_cache: dict[CompletionCacheKey, list[CommandCompletion]] = {}
         self._completion_cache_updated_at: dict[CompletionCacheKey, float] = {}
@@ -1799,7 +1799,7 @@ class SessionRuntime:
         if session_id in self.monitor_tasks:
             return
         session = self.get_session(session_id)
-        if session.transport != TMUX_TRANSPORT_ID:
+        if not self.registry.plugin_for(session).capabilities.live_terminal:
             return
         if session_id not in self.file_offsets:
             # A missing offset means this process has never ingested this raw

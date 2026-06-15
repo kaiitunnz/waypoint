@@ -77,6 +77,12 @@ class TransportCapabilities(_FrozenModel):
     supports_set_effort_with_restart: bool = False
     supports_set_permission_mode_inline: bool = False
     settings_change_interrupts_turn: bool = False
+    # The transport drives the agent in a live terminal pane (a pty). The
+    # runtime tails its raw log to scrape session state, and the frontend can
+    # mirror the pane over the terminal websocket. True for the generic tmux
+    # wrapper only; structured transports (including claude_tty, which runs in
+    # a pane but is tailed from its transcript) publish to the event stream.
+    live_terminal: bool = False
     is_fallback_for_managed_launch: bool = False
 
 
@@ -118,6 +124,10 @@ class BackendCapabilities(_FrozenModel):
     # so every swap kills the pane and respawns ``--resume``. The frontend
     # reads this to warn before changing settings on a running session.
     settings_change_interrupts_turn: bool = False
+    # The transport drives the agent in a live terminal pane (a pty): the
+    # runtime tails its raw log to scrape state and the frontend can mirror the
+    # pane over the terminal websocket. True for the generic tmux wrapper only.
+    live_terminal: bool = False
     supports_thread_discovery: bool = False
     supports_thread_import: bool = False
     supports_fork: bool = False
@@ -192,6 +202,7 @@ class BackendCapabilities(_FrozenModel):
             supports_set_effort_with_restart=self.supports_set_effort_with_restart,
             supports_set_permission_mode_inline=self.supports_set_permission_mode_inline,
             settings_change_interrupts_turn=self.settings_change_interrupts_turn,
+            live_terminal=self.live_terminal,
             is_fallback_for_managed_launch=self.is_fallback_for_managed_launch,
         )
 

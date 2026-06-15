@@ -161,6 +161,7 @@ Properties of the channel — how the agent is driven.
 | `supports_set_effort_with_restart` | `bool` | Gates effort changes that restart-and-resume between turns instead of applying mid-stream. |
 | `supports_set_permission_mode_inline` | `bool` | Gates the permission-mode picker + the `/api/sessions/{id}/mode` endpoint. |
 | `settings_change_interrupts_turn` | `bool` | Frontend hint that applying a model/permission/effort change relaunches the session and interrupts the running turn (claude_tty), so the composer confirms first. |
+| `live_terminal` | `bool` | The transport drives the agent in a live terminal pane (a pty): the runtime tails its raw log to scrape state (`_ensure_monitor`) and the frontend can mirror the pane over the terminal websocket. True for the generic `tmux` wrapper only; structured transports (including `claude_tty`, which runs in a pane but is tailed from its transcript) publish to the event stream instead. |
 | `is_fallback_for_managed_launch` | `bool` | Marks the transport the runtime falls back to when a structured agent's adapter isn't ready (or it isn't structured). Exactly one registered plugin sets this — today only `tmux`. |
 
 > Migrating plugins to declare the two halves directly (and a per-axis

@@ -17,6 +17,7 @@
       "supports_set_effort_with_restart": true,
       "supports_set_permission_mode_inline": true,
       "settings_change_interrupts_turn": false,
+      "live_terminal": false,
       "supports_thread_discovery": true,
       "supports_thread_import": true,
       "supports_fork": true,
@@ -253,6 +254,7 @@
       "supports_set_effort_with_restart": true,
       "supports_set_permission_mode_inline": true,
       "settings_change_interrupts_turn": false,
+      "live_terminal": false,
       "is_fallback_for_managed_launch": false
     }
   },
@@ -274,6 +276,7 @@
       "supports_set_effort_with_restart": true,
       "supports_set_permission_mode_inline": true,
       "settings_change_interrupts_turn": true,
+      "live_terminal": false,
       "supports_thread_discovery": true,
       "supports_thread_import": true,
       "supports_fork": true,
@@ -510,6 +513,7 @@
       "supports_set_effort_with_restart": true,
       "supports_set_permission_mode_inline": true,
       "settings_change_interrupts_turn": true,
+      "live_terminal": false,
       "is_fallback_for_managed_launch": false
     }
   },
@@ -531,6 +535,7 @@
       "supports_set_effort_with_restart": false,
       "supports_set_permission_mode_inline": true,
       "settings_change_interrupts_turn": false,
+      "live_terminal": false,
       "supports_thread_discovery": true,
       "supports_thread_import": true,
       "supports_fork": true,
@@ -675,6 +680,7 @@
       "supports_set_effort_with_restart": false,
       "supports_set_permission_mode_inline": true,
       "settings_change_interrupts_turn": false,
+      "live_terminal": false,
       "is_fallback_for_managed_launch": false
     }
   },
@@ -696,6 +702,7 @@
       "supports_set_effort_with_restart": false,
       "supports_set_permission_mode_inline": true,
       "settings_change_interrupts_turn": false,
+      "live_terminal": false,
       "supports_thread_discovery": true,
       "supports_thread_import": true,
       "supports_fork": true,
@@ -852,6 +859,7 @@
       "supports_set_effort_with_restart": false,
       "supports_set_permission_mode_inline": true,
       "settings_change_interrupts_turn": false,
+      "live_terminal": false,
       "is_fallback_for_managed_launch": false
     }
   },
@@ -873,6 +881,7 @@
       "supports_set_effort_with_restart": false,
       "supports_set_permission_mode_inline": false,
       "settings_change_interrupts_turn": false,
+      "live_terminal": true,
       "supports_thread_discovery": false,
       "supports_thread_import": false,
       "supports_fork": false,
@@ -929,6 +938,7 @@
       "supports_set_effort_with_restart": false,
       "supports_set_permission_mode_inline": false,
       "settings_change_interrupts_turn": false,
+      "live_terminal": true,
       "is_fallback_for_managed_launch": true
     }
   }

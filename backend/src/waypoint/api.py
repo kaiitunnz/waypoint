@@ -853,10 +853,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except HTTPException:
             await websocket.close(code=4404)
             return
-        # Tmux is the only transport that gives us a live pane to mirror;
-        # structured backends already publish to the event stream and have
-        # no pty to wrap.
-        if session.transport != "tmux":
+        # Only a live-terminal transport gives us a pane to mirror; structured
+        # backends already publish to the event stream and have no pty to wrap.
+        plugin = context.runtime.registry.plugin_for(session)
+        if not plugin.capabilities.live_terminal:
             await websocket.close(code=4403)
             return
         # Refuse to attach to an already-dead pane — the renderer would

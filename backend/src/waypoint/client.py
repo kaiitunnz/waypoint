@@ -250,6 +250,7 @@ class WaypointClient:
         cwd: str,
         launch_target_id: str | None = None,
         launch_mode: str | None = None,
+        transport: str | None = None,
         title: str | None = None,
         model: str | None = None,
         effort: str | None = None,
@@ -274,6 +275,10 @@ class WaypointClient:
         # field, so an explicit null is a 422 (mirrors create_schedule).
         if launch_mode is not None:
             body["launch_mode"] = launch_mode
+        # Omit transport when unset so the request model's None default keeps
+        # today's launch_mode-derived behavior.
+        if transport is not None:
+            body["transport"] = transport
         data: dict[str, Any] = self._request("POST", "/api/sessions", json=body).json()[
             "session"
         ]

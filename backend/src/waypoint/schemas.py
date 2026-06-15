@@ -340,6 +340,11 @@ class SessionCreateRequest(BaseModel):
     cwd: str
     launch_target_id: str | None = None
     launch_mode: LaunchMode = LaunchMode.AUTO
+    # Pins the transport the agent is driven over. ``None`` keeps the
+    # ``launch_mode``-derived behavior; an explicit transport takes
+    # precedence over ``launch_mode`` and must be in the chosen agent's
+    # ``supported_transports`` (the runtime rejects mismatches with 400).
+    transport: SessionTransportId | None = None
     title: str | None = None
     args: list[str] = Field(default_factory=list)
     config_overrides: list[str] = Field(default_factory=list)

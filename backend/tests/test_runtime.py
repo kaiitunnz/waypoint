@@ -2534,6 +2534,259 @@ async def test_import_claude_thread_remote_target_uses_remote_factory(
     assert "Imported stored Claude thread via SSH target Devbox" in events[-1].text
 
 
+# ── import dispatch over the (agent, transport) pair ──────────────────────────
+
+
+def _fake_plugin_import_thread(
+    storage: Storage,
+    settings: Settings,
+    *,
+    transport: str,
+    calls: list[tuple[str | None, str | None]],
+):
+    """Record (agent, request.transport) and persist a session under the agent.
+
+    Mirrors the real plugins: the importing driver persists ``backend=agent``
+    (the id the runtime resolved the pair under) and its own transport.
+    """
+
+    async def _import(
+        _runtime: SessionRuntime, request: Any, *, agent: str | None = None
+    ) -> SessionRecord:
+        calls.append((agent, getattr(request, "transport", None)))
+        session = make_session(
+            settings,
+            id=f"imported-{transport}",
+            backend=agent or "?",
+            transport=transport,
+            thread_id=request.thread_id,
+        )
+        storage.create_session(session)
+        return session
+
+    return _import
+
+
+@pytest.mark.asyncio
+async def test_import_thread_native_transport_drives_agent_plugin(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    claude = runtime.registry.get("claude_code")
+    tty = runtime.registry.get("claude_tty")
+    calls: list[tuple[str | None, str | None]] = []
+    monkeypatch.setattr(
+        claude,
+        "import_thread",
+        _fake_plugin_import_thread(
+            storage, settings, transport="claude_cli", calls=calls
+        ),
+    )
+    monkeypatch.setattr(
+        tty,
+        "import_thread",
+        lambda *a, **k: pytest.fail("tty driver must not be used for a native import"),
+    )
+
+    session = await runtime.import_thread("claude_code", {"thread_id": "t-1"})
+
+    # transport=None routes to the agent plugin, which is handed agent=backend.
+    assert calls == [("claude_code", None)]
+    assert session.backend == "claude_code"
+    assert session.transport == "claude_cli"
+
+
+@pytest.mark.asyncio
+async def test_import_thread_emulated_routes_to_tty_and_persists_agent(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    claude = runtime.registry.get("claude_code")
+    tty = runtime.registry.get("claude_tty")
+    calls: list[tuple[str | None, str | None]] = []
+    monkeypatch.setattr(
+        tty,
+        "import_thread",
+        _fake_plugin_import_thread(
+            storage, settings, transport="claude_tty", calls=calls
+        ),
+    )
+    monkeypatch.setattr(
+        claude,
+        "import_thread",
+        lambda *a, **k: pytest.fail("agent plugin must not drive an emulated import"),
+    )
+
+    session = await runtime.import_thread(
+        "claude_code", {"thread_id": "t-1", "transport": "claude_tty"}
+    )
+
+    # The tty-tail driver imports the thread but persists backend=claude_code.
+    assert calls == [("claude_code", "claude_tty")]
+    assert session.backend == "claude_code"
+    assert session.transport == "claude_tty"
+
+
+@pytest.mark.asyncio
+async def test_import_thread_terminal_routes_tmux_through_agent_plugin(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    claude = runtime.registry.get("claude_code")
+    tmux = runtime.registry.fallback_for_managed_launch()
+    assert tmux is not None
+    calls: list[tuple[str | None, str | None]] = []
+    monkeypatch.setattr(
+        claude,
+        "import_thread",
+        _fake_plugin_import_thread(storage, settings, transport="tmux", calls=calls),
+    )
+    monkeypatch.setattr(
+        tmux,
+        "import_thread",
+        lambda *a, **k: pytest.fail("tmux wrapper cannot import directly"),
+    )
+
+    session = await runtime.import_thread(
+        "claude_code", {"thread_id": "t-1", "transport": "tmux"}
+    )
+
+    # tmux cannot enumerate threads, so the agent plugin drives the import; it
+    # still receives the pinned transport so it can take the resume path.
+    assert calls == [("claude_code", "tmux")]
+    assert session.backend == "claude_code"
+
+
+@pytest.mark.asyncio
+async def test_import_thread_rejects_unsupported_transport(tmp_path) -> None:
+    runtime, _, _ = make_runtime(tmp_path)
+    with pytest.raises(HTTPException) as exc:
+        await runtime.import_thread(
+            "codex", {"thread_id": "t-1", "transport": "claude_tty"}
+        )
+
+    assert exc.value.status_code == 400
+    assert "claude_tty" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_import_thread_wrapper_backend_rejected(tmp_path) -> None:
+    runtime, _, _ = make_runtime(tmp_path)
+    tmux = runtime.registry.fallback_for_managed_launch()
+    assert tmux is not None
+    with pytest.raises(HTTPException) as exc:
+        await runtime.import_thread(tmux.id, {"thread_id": "t-1"})
+
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_import_claude_thread_terminal_supersedes_launch_mode(
+    monkeypatch, tmp_path
+) -> None:
+    # An explicit tmux transport forces the resume-via-tmux path even though the
+    # structured adapter is available and launch_mode would prefer it.
+    runtime, storage, settings = make_runtime(tmp_path)
+    _claude_plugin(runtime).adapter = cast(Any, FakeClaudeAdapter())
+    info = _make_claude_thread_info(
+        id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", cwd=str(tmp_path)
+    )
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.find_local_claude_thread",
+        lambda thread_id: info if thread_id == info.id else None,
+    )
+    tmux = runtime.registry.fallback_for_managed_launch()
+    assert tmux is not None
+    resume_calls: list[str] = []
+
+    async def _fake_resume(
+        _runtime, *, backend, thread_id, cwd, launch_target_id, title
+    ):
+        resume_calls.append(backend)
+        session = make_session(
+            settings,
+            id="tmux-imported",
+            backend=backend,
+            transport="tmux",
+            thread_id=thread_id,
+        )
+        storage.create_session(session)
+        return storage.get_session(session.id)
+
+    monkeypatch.setattr(tmux, "import_thread_via_resume", _fake_resume)
+
+    session = await runtime.import_thread(
+        "claude_code",
+        {"thread_id": info.id, "transport": "tmux", "launch_mode": "auto"},
+    )
+
+    assert resume_calls == ["claude_code"]
+    assert session.backend == "claude_code"
+    assert session.transport == "tmux"
+
+
+@pytest.mark.asyncio
+async def test_import_claude_thread_native_supersedes_tmux_launch_mode(
+    monkeypatch, tmp_path
+) -> None:
+    # An explicit native transport pins the structured path even when
+    # launch_mode asks for the tmux wrapper.
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    _claude_plugin(runtime).adapter = cast(Any, fake)
+    info = _make_claude_thread_info(
+        id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", cwd=str(tmp_path)
+    )
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.find_local_claude_thread",
+        lambda thread_id: info if thread_id == info.id else None,
+    )
+    tmux = runtime.registry.fallback_for_managed_launch()
+    assert tmux is not None
+    monkeypatch.setattr(
+        tmux,
+        "import_thread_via_resume",
+        lambda *a, **k: pytest.fail("native transport must not fall to tmux resume"),
+    )
+
+    session = await runtime.import_thread(
+        "claude_code",
+        {
+            "thread_id": info.id,
+            "transport": "claude_cli",
+            "launch_mode": "tmux_wrapper",
+        },
+    )
+
+    assert session.backend == "claude_code"
+    assert session.transport == "claude_cli"
+    assert len(fake.restore_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_import_thread_transport_none_matches_default(
+    monkeypatch, tmp_path
+) -> None:
+    # transport omitted reproduces today's structured import exactly.
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    _claude_plugin(runtime).adapter = cast(Any, fake)
+    info = _make_claude_thread_info(
+        id="cccccccc-cccc-4ccc-8ccc-cccccccccccc", cwd=str(tmp_path)
+    )
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.find_local_claude_thread",
+        lambda thread_id: info if thread_id == info.id else None,
+    )
+
+    session = await runtime.import_thread("claude_code", {"thread_id": info.id})
+
+    assert session.backend == "claude_code"
+    assert session.transport == "claude_cli"
+    assert session.transport_state["thread_id"] == info.id
+    assert len(fake.restore_calls) == 1
+
+
 @pytest.mark.asyncio
 async def test_find_imported_claude_session_scopes_by_launch_target(
     tmp_path,

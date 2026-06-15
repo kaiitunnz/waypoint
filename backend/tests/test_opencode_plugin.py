@@ -488,10 +488,6 @@ class _FakeAdapter:
         self.calls.append(("has_pending_approval", session_id, ()))
         return True
 
-    def terminal_snapshot(self, session_id: str) -> str:
-        self.calls.append(("terminal_snapshot", session_id, ()))
-        return "snapshot"
-
 
 @pytest.mark.asyncio
 async def test_transport_routes_calls_by_session_launch_target() -> None:
@@ -555,7 +551,6 @@ async def test_transport_routes_calls_by_session_launch_target() -> None:
         ("approve",),
     )
     assert transport.has_pending_approval(remote_session) is True
-    assert transport.terminal_snapshot(remote_session) == "snapshot"
 
 
 @pytest.mark.asyncio

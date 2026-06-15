@@ -87,16 +87,3 @@ class OpenCodeTransport(TransportAdapter):
         if adapter is None:
             return False
         return adapter.has_pending_approval(session.id)
-
-    def terminal_snapshot(self, session: SessionRecord) -> str:
-        adapter = self._plugin._adapters.get(
-            self._plugin._adapter_key(
-                self._runtime,
-                session.launch_target_id,
-                session.cwd,
-                self._effective_args(session),
-            )
-        )
-        if adapter is None:
-            return ""
-        return adapter.terminal_snapshot(session.id)

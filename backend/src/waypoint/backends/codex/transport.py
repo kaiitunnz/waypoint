@@ -75,9 +75,6 @@ class CodexTransport(TransportAdapter):
     def has_pending_approval(self, session: SessionRecord) -> bool:
         return self.adapter.has_pending_approval(session.id)
 
-    def terminal_snapshot(self, session: SessionRecord) -> str:
-        return self.adapter.terminal_snapshot(session.id)
-
 
 def _input_items(
     text: str, attachments: list[ResolvedAttachment]

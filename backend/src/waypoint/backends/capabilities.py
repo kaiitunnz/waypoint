@@ -83,6 +83,16 @@ class TransportCapabilities(_FrozenModel):
     # wrapper only; structured transports (including claude_tty, which runs in
     # a pane but is tailed from its transcript) publish to the event stream.
     live_terminal: bool = False
+    # The transport exposes a tmux pane that the terminal websocket can mirror.
+    # Unlike live_terminal (raw-scrape-only), a terminal pane may be read-only
+    # (terminal_interactive=False) or fixed-size (terminal_resizable=False).
+    has_terminal_pane: bool = False
+    # The terminal pane accepts keyboard input forwarded from the frontend.
+    # False for claude_tty (read-only mirror of the structured TUI).
+    terminal_interactive: bool = False
+    # The terminal pane's dimensions can be driven by the client viewport.
+    # False for claude_tty (pane is managed by the structured relaunch cycle).
+    terminal_resizable: bool = False
     is_fallback_for_managed_launch: bool = False
 
 
@@ -128,6 +138,12 @@ class BackendCapabilities(_FrozenModel):
     # runtime tails its raw log to scrape state and the frontend can mirror the
     # pane over the terminal websocket. True for the generic tmux wrapper only.
     live_terminal: bool = False
+    # The transport exposes a tmux pane the terminal websocket can mirror.
+    has_terminal_pane: bool = False
+    # The terminal pane accepts keyboard input forwarded from the frontend.
+    terminal_interactive: bool = False
+    # The terminal pane's dimensions can be driven by the client viewport.
+    terminal_resizable: bool = False
     supports_thread_discovery: bool = False
     supports_thread_import: bool = False
     supports_fork: bool = False
@@ -203,6 +219,9 @@ class BackendCapabilities(_FrozenModel):
             supports_set_permission_mode_inline=self.supports_set_permission_mode_inline,
             settings_change_interrupts_turn=self.settings_change_interrupts_turn,
             live_terminal=self.live_terminal,
+            has_terminal_pane=self.has_terminal_pane,
+            terminal_interactive=self.terminal_interactive,
+            terminal_resizable=self.terminal_resizable,
             is_fallback_for_managed_launch=self.is_fallback_for_managed_launch,
         )
 

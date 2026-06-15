@@ -304,7 +304,6 @@ class ClaudeSessionState:
     pending_task_creates: dict[str, dict[str, Any]] = field(default_factory=dict)
     task_card_item_id: str | None = None
     last_message_text: dict[str, str] = field(default_factory=dict)
-    terminal_fragments: list[str] = field(default_factory=list)
     stderr_tail: deque[str] = field(
         default_factory=lambda: deque(maxlen=STDERR_TAIL_LINES)
     )
@@ -1194,12 +1193,6 @@ class ClaudeCliAdapter:
         for session_id in list(self._sessions.keys()):
             await self.terminate_session(session_id)
 
-    def terminal_snapshot(self, session_id: str) -> str:
-        state = self._sessions.get(session_id)
-        if state is None:
-            return ""
-        return "".join(state.terminal_fragments)
-
     async def _spawn(
         self,
         session_id: str,
@@ -1718,7 +1711,6 @@ class ClaudeCliAdapter:
                 "status": status,
             }
             if tool_use_id:
-                state.terminal_fragments.append(text + "\n")
                 preview_metadata = state.file_edit_preview_metadata.pop(
                     tool_use_id, None
                 )

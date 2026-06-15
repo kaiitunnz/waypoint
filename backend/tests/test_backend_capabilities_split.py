@@ -58,6 +58,29 @@ def test_live_terminal_flag_is_tmux_only() -> None:
         assert plugin.capabilities.transport_capabilities().live_terminal is expected
 
 
+def test_terminal_pane_caps() -> None:
+    """has_terminal_pane is set for tmux (interactive+resizable) and claude_tty
+    (read-only, fixed-size); all other plugins leave all three False."""
+    registry = build_default_registry()
+    caps_by_id = {p.id: p.capabilities for p in registry.all()}
+
+    tmux = caps_by_id["tmux"]
+    assert tmux.has_terminal_pane is True
+    assert tmux.terminal_interactive is True
+    assert tmux.terminal_resizable is True
+
+    tty = caps_by_id["claude_tty"]
+    assert tty.has_terminal_pane is True
+    assert tty.terminal_interactive is False
+    assert tty.terminal_resizable is False
+
+    for pid in ("claude_code", "codex", "opencode"):
+        c = caps_by_id[pid]
+        assert c.has_terminal_pane is False
+        assert c.terminal_interactive is False
+        assert c.terminal_resizable is False
+
+
 def test_backends_payload_matches_golden() -> None:
     """``GET /api/backends`` matches the pinned superset payload.
 

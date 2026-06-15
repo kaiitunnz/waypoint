@@ -1320,9 +1320,6 @@ class OpenCodeAdapter:
         self._part_sessions.clear()
         self._started = False
 
-    def terminal_snapshot(self, session_id: str) -> str:
-        return ""
-
     def has_pending_approval(self, session_id: str) -> bool:
         state = self._sessions.get(session_id)
         return bool(state and state.pending_permission_ids)

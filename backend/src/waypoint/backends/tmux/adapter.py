@@ -137,6 +137,14 @@ class TmuxAdapter:
             "capture-pane", "-p", "-J", "-e", "-t", target, "-S", str(start_line)
         )
 
+    async def pane_dimensions(self, target: str) -> tuple[int, int]:
+        """Return the pane's current (width, height) in columns and rows."""
+        output = await self._run(
+            "display-message", "-p", "-t", target, "#{pane_width}|#{pane_height}"
+        )
+        w_str, h_str = output.strip().split("|")
+        return int(w_str), int(h_str)
+
     async def pane_screen_state(self, target: str) -> tuple[bool, int, int]:
         """Return whether the pane is on the alternate screen and the
         program's current cursor position (1-based row, col).

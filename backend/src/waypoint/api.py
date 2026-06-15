@@ -53,7 +53,6 @@ from waypoint.schemas import (
     SessionPlanApprovalRequest,
     SessionStatus,
     SessionTitleRequest,
-    TerminalSnapshot,
 )
 from waypoint.settings import Settings, load_settings
 from waypoint.storage import Storage
@@ -763,17 +762,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return page.model_dump(mode="json")
 
-    @app.get(
-        "/api/sessions/{session_id}/terminal-snapshot", response_model=TerminalSnapshot
-    )
-    async def terminal_snapshot(
-        session_id: str,
-        _: Annotated[str, Depends(token_dependency())],
-    ) -> TerminalSnapshot:
-        return TerminalSnapshot(
-            session_id=session_id, text=context.runtime.terminal_snapshot(session_id)
-        )
-
     @app.websocket("/ws/sessions")
     async def ws_sessions(websocket: WebSocket) -> None:
         await websocket.accept()
@@ -845,12 +833,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except HTTPException:
             await websocket.close(code=4404)
             return
-        # Only a live-terminal transport gives us a pane to mirror; structured
-        # backends already publish to the event stream and have no pty to wrap.
+        # Only transports with a terminal pane can be mirrored here; backends
+        # with no pane (pure structured streams) publish via the event WS.
         plugin = context.runtime.registry.plugin_for(session)
-        if not plugin.capabilities.live_terminal:
+        caps = plugin.capabilities
+        if not caps.has_terminal_pane:
             await websocket.close(code=4403)
             return
+        terminal_interactive = caps.terminal_interactive
+        terminal_resizable = caps.terminal_resizable
         # Refuse to attach to an already-dead pane — the renderer would
         # seed from a stale capture and the stream would never produce
         # bytes. 4410 tells the frontend to surface the reconnect
@@ -864,40 +855,51 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         adapter = context.runtime.tmux
         raw_log_path = Path(session.raw_log_path)
 
-        # Wait briefly for the client's initial resize so the capture-pane
-        # seed is rendered at the viewport's dimensions, not the pane's
-        # previous size. The frontend always sends a resize on socket open,
-        # so the timeout only matters when an unusual client connects.
-        viewport_cols = 0
-        viewport_rows = 0
-        try:
-            first = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
-            handshake = json.loads(first)
-            if handshake.get("type") == "resize":
-                try:
-                    viewport_cols = int(handshake.get("cols", 0))
-                    viewport_rows = int(handshake.get("rows", 0))
-                except (TypeError, ValueError):
-                    viewport_cols = viewport_rows = 0
-                if viewport_cols > 0 and viewport_rows > 0:
-                    with suppress(TmuxError):
-                        await adapter.resize_window(
-                            tmux_session, viewport_cols, viewport_rows
-                        )
-                        await adapter.resize_pane(pane, viewport_cols, viewport_rows)
-        except WebSocketDisconnect:
-            # Client closed during the handshake; nothing left to seed.
-            return
-        except (TimeoutError, json.JSONDecodeError):
-            # No handshake — fall through with default viewport.
-            pass
-
-        # Give the pane process a beat to handle SIGWINCH and emit its
-        # redraw before we capture — otherwise the seed reflects the stale
-        # pre-resize buffer (cursor at the old pane's bottom row, content
-        # clipped to the old size) and the live stream has to overpaint it.
-        if viewport_cols and viewport_rows:
-            await asyncio.sleep(0.1)
+        # Resizable transports wait for the client's initial resize frame so
+        # the seed is rendered at the viewport's dimensions. Non-resizable
+        # transports (claude_tty) have their size fixed by the pane manager;
+        # query the actual dimensions instead.
+        cols = 80
+        rows = 24
+        if terminal_resizable:
+            viewport_cols = 0
+            viewport_rows = 0
+            try:
+                first = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                handshake = json.loads(first)
+                if handshake.get("type") == "resize":
+                    try:
+                        viewport_cols = int(handshake.get("cols", 0))
+                        viewport_rows = int(handshake.get("rows", 0))
+                    except (TypeError, ValueError):
+                        viewport_cols = viewport_rows = 0
+                    if viewport_cols > 0 and viewport_rows > 0:
+                        with suppress(TmuxError):
+                            await adapter.resize_window(
+                                tmux_session, viewport_cols, viewport_rows
+                            )
+                            await adapter.resize_pane(
+                                pane, viewport_cols, viewport_rows
+                            )
+            except WebSocketDisconnect:
+                # Client closed during the handshake; nothing left to seed.
+                return
+            except (TimeoutError, json.JSONDecodeError):
+                # No handshake — fall through with default viewport.
+                pass
+            cols = viewport_cols or 80
+            rows = viewport_rows or 24
+            # Give the pane process a beat to handle SIGWINCH and emit its
+            # redraw before we capture — otherwise the seed reflects the stale
+            # pre-resize buffer (cursor at the old pane's bottom row, content
+            # clipped to the old size) and the live stream has to overpaint it.
+            if viewport_cols and viewport_rows:
+                await asyncio.sleep(0.1)
+        else:
+            # Seed the renderer at the pane's actual current dimensions so
+            # the diff encoding matches what the pane produces.
+            with suppress(TmuxError):
+                cols, rows = await adapter.pane_dimensions(pane)
 
         # Server-side terminal emulator: bytes from the pane go through
         # pyte, which maintains the authoritative screen state. The
@@ -906,8 +908,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # has to interpret DECSTBM scroll regions, partial sync-output
         # frames, or other sequences browser emulators handle
         # inconsistently from native terminals.
-        cols = viewport_cols or 80
-        rows = viewport_rows or 24
         renderer = make_renderer(cols, rows)
 
         # Seed pyte with the pane's current ANSI snapshot so the renderer
@@ -1074,6 +1074,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         with suppress(Exception):
                             await websocket.close(code=4410)
                         break
+                    # For non-resizable panes (e.g. claude_tty) the pane is
+                    # replaced on each relaunch. Detect a target change and
+                    # close so the client reconnects to the new pane.
+                    if not terminal_resizable:
+                        cur_state = current.transport_state or {}
+                        cur_pane = cur_state.get("tmux_pane") or current.id
+                        if cur_pane != pane:
+                            await emit_diff()
+                            with suppress(Exception):
+                                await websocket.close(code=4410)
+                            break
                 # 20ms keeps perceived latency below the threshold most
                 # users notice for typing echo without burning CPU on
                 # idle polling.
@@ -1114,17 +1125,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         continue
                     kind = payload.get("type")
                     if kind == "input":
-                        data = payload.get("data", "")
-                        if isinstance(data, str) and data:
-                            input_bytes += data.encode("utf-8")
+                        if terminal_interactive:
+                            data = payload.get("data", "")
+                            if isinstance(data, str) and data:
+                                input_bytes += data.encode("utf-8")
                     elif kind == "input_submit":
-                        text = payload.get("text", "")
-                        if not isinstance(text, str):
-                            continue
-                        submit = bool(payload.get("submit", True))
-                        if text or submit:
-                            submits.append((text, submit))
+                        if terminal_interactive:
+                            text = payload.get("text", "")
+                            if not isinstance(text, str):
+                                continue
+                            submit = bool(payload.get("submit", True))
+                            if text or submit:
+                                submits.append((text, submit))
                     elif kind == "resize":
+                        if not terminal_resizable:
+                            continue
                         try:
                             r_cols = int(payload.get("cols", 0))
                             r_rows = int(payload.get("rows", 0))
@@ -1133,13 +1148,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         if r_cols > 0 and r_rows > 0:
                             resize_target = (r_cols, r_rows)
 
-                if input_bytes:
-                    with suppress(TmuxError):
-                        await adapter.send_bytes(pane, input_bytes)
-                for text, submit in submits:
-                    with suppress(TmuxError):
-                        await adapter.send_input(pane, text, submit=submit)
-                if resize_target is not None:
+                if terminal_interactive:
+                    if input_bytes:
+                        with suppress(TmuxError):
+                            await adapter.send_bytes(pane, input_bytes)
+                    for text, submit in submits:
+                        with suppress(TmuxError):
+                            await adapter.send_input(pane, text, submit=submit)
+                if terminal_resizable and resize_target is not None:
                     new_cols, new_rows = resize_target
                     renderer.resize(new_cols, new_rows)
                     with suppress(TmuxError):

@@ -444,12 +444,6 @@ class SessionAnswerQuestionRequest(BaseModel):
     answers: list[AskQuestionAnswer] | None = None
 
 
-class TerminalSnapshot(BaseModel):
-    session_id: str
-    text: str
-    from_raw_log: bool = True
-
-
 class ScheduleStatus(StrEnum):
     PENDING = "pending"
     LAUNCHED = "launched"

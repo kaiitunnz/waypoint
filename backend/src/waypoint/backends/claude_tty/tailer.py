@@ -22,7 +22,7 @@ from waypoint.backends.claude_code.threads import (
     encode_project_dir,
 )
 from waypoint.backends.claude_tty import pane_dialog
-from waypoint.backends.claude_tty._state import PendingTtyApproval
+from waypoint.backends.claude_tty._state import PendingTtyApproval, PendingTtyQuestion
 from waypoint.backends.claude_tty.normalize import TranscriptNormalizer
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.schemas import EventKind, SessionStatus
@@ -86,6 +86,10 @@ class TranscriptTailer:
         # until the dialog leaves the screen so a response that clears pending
         # before the pane redraws cannot trigger a duplicate emit.
         self._surfaced_sig: str | None = None
+        # True once we have Esc-dismissed the current AskUserQuestion popup, so
+        # the dismissal fires once per appearance; reset when the pane leaves
+        # the question screen.
+        self._question_dismissed: bool = False
 
     def _read_new_bytes(self) -> bytes:
         if not self._path.exists():
@@ -124,6 +128,18 @@ class TranscriptTailer:
                 )
                 continue
             for ev in self._normalizer.process_record(record):
+                if (
+                    ev.kind == EventKind.TOOL_CALL
+                    and ev.metadata.get("tool_name") == "AskUserQuestion"
+                    and ev.status == SessionStatus.WAITING_INPUT
+                ):
+                    tool_use_id = str(ev.metadata.get("tool_use_id") or "")
+                    self._plugin._pending_questions[self._session_id] = (
+                        PendingTtyQuestion(
+                            approval_id=uuid.uuid4().hex,
+                            tool_use_id=tool_use_id,
+                        )
+                    )
                 await self._runtime._emit_adapter_event(
                     self._session_id,
                     ev.kind,
@@ -173,12 +189,39 @@ class TranscriptTailer:
             await self._runtime.tmux.send_input(pane, "", submit=True)
             return
 
+        if screen_type is pane_dialog.PaneScreen.QUESTION:
+            # The AskUserQuestion popup withholds its structured questions from
+            # the transcript until it is resolved, so it is invisible to the
+            # tailer while it blocks the turn. Esc dismisses it, which flushes
+            # the full tool_use record to the JSONL; the armed normalizer then
+            # surfaces it as an answerable card (and swallows the resulting
+            # "user rejected" result). The answer is delivered later as a normal
+            # user turn via the plugin's answer_question.
+            if self._prev_dialog_sig == "question":
+                self._dialog_stable_count += 1
+            else:
+                self._prev_dialog_sig = "question"
+                self._dialog_stable_count = 1
+            if (
+                self._dialog_stable_count >= _DIALOG_STABLE_TICKS
+                and not self._question_dismissed
+            ):
+                log.info(
+                    "dismissing AskUserQuestion popup to surface it",
+                    extra={"session_id": self._session_id},
+                )
+                await self._runtime.tmux.send_bytes(pane, b"\x1b")
+                self._normalizer.arm_question_dismissal()
+                self._question_dismissed = True
+            return
+
         if screen_type is not pane_dialog.PaneScreen.APPROVAL:
             # Dialog gone — clear any pending approval for this session.
             self._plugin._pending_approvals.pop(self._session_id, None)
             self._prev_dialog_sig = None
             self._dialog_stable_count = 0
             self._surfaced_sig = None
+            self._question_dismissed = False
             return
 
         dialog = pane_dialog.parse_approval(snapshot)

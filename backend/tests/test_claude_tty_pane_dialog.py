@@ -27,6 +27,7 @@ def _load(name: str) -> str:
     [
         ("approval_write.txt", PaneScreen.APPROVAL),
         ("approval_bash.txt", PaneScreen.APPROVAL),
+        ("question_dialog.txt", PaneScreen.QUESTION),
         ("trust_dialog.txt", PaneScreen.TRUST),
         ("model_selector.txt", PaneScreen.MODEL_SELECTOR),
         ("effort_popup.txt", PaneScreen.EFFORT_POPUP),
@@ -36,6 +37,13 @@ def _load(name: str) -> str:
 )
 def test_classify(fixture: str, expected: PaneScreen) -> None:
     assert classify(_load(fixture)) is expected
+
+
+def test_question_dialog_not_mistaken_for_approval() -> None:
+    # The AskUserQuestion popup carries options and a navigation footer but is
+    # not a permission prompt; parse_approval must reject it so the tailer Escs
+    # it rather than firing an approve/decline digit at it.
+    assert parse_approval(_load("question_dialog.txt")) is None
 
 
 def test_parse_write_approval() -> None:

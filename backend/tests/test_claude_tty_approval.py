@@ -12,11 +12,15 @@ Verifies:
   - vanished dialog clears pending
 """
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from waypoint.backends.claude_tty._state import PendingTtyApproval
+import pytest
+from fastapi import HTTPException
+
+from waypoint.backends.claude_tty._state import PendingTtyApproval, PendingTtyQuestion
 from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.claude_tty.transport import ClaudeTtyTransport
@@ -278,6 +282,161 @@ async def test_non_approval_screen_does_not_emit() -> None:
         await tailer._poll_dialog()
 
         runtime._emit_adapter_event.assert_not_called()
+
+
+# ── tailer: AskUserQuestion dialog ───────────────────────────────────────────
+
+
+async def test_question_dialog_dismissed_when_stable() -> None:
+    # The popup withholds its questions from the transcript until resolved, so
+    # the tailer Escs it (which flushes the record) and arms the normalizer to
+    # surface it. No approval is emitted for it.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    runtime = _make_runtime(session, _load("question_dialog.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()  # tick 1: debounce
+    runtime.tmux.send_bytes.assert_not_called()
+
+    await tailer._poll_dialog()  # tick 2: stable → Esc + arm
+    runtime.tmux.send_bytes.assert_called_once_with("%0", b"\x1b")
+    assert tailer._normalizer._expect_dismissed_question is True
+    assert tailer._question_dismissed is True
+    runtime._emit_adapter_event.assert_not_called()
+
+
+async def test_question_dialog_dismissed_only_once() -> None:
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    runtime = _make_runtime(session, _load("question_dialog.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    for _ in range(5):
+        await tailer._poll_dialog()
+
+    runtime.tmux.send_bytes.assert_called_once()
+
+
+async def test_question_drain_registers_pending() -> None:
+    # Once the armed normalizer surfaces the flushed tool_use as a WAITING_INPUT
+    # card, the tailer registers the pending question so an answer can route.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    runtime = _make_runtime(session, _load("ready.txt"))
+    tailer = _make_tailer(plugin, runtime)
+    tailer._normalizer.arm_question_dismissal()
+
+    record = {
+        "type": "assistant",
+        "message": {
+            "id": "m1",
+            "stop_reason": "tool_use",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "auq1",
+                    "name": "AskUserQuestion",
+                    "input": {"questions": [{"question": "Q", "options": []}]},
+                }
+            ],
+        },
+    }
+    data = (json.dumps(record) + "\n").encode()
+    tailer._read_new_bytes = lambda: data  # type: ignore[method-assign]
+
+    await tailer._drain()
+
+    assert "sess-1" in plugin._pending_questions
+    assert plugin._pending_questions["sess-1"].tool_use_id == "auq1"
+
+
+# ── plugin: answer_question ───────────────────────────────────────────────────
+
+
+def _make_answer_runtime(session: SessionRecord, transport: MagicMock) -> MagicMock:
+    runtime = MagicMock()
+    runtime.transport_for.return_value = transport
+    runtime._emit_adapter_event = AsyncMock()
+    runtime._record_user_event = AsyncMock()
+    runtime.storage.update_session = MagicMock(return_value=session)
+    return runtime
+
+
+async def test_answer_question_delivers_message_and_resolves_card() -> None:
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    plugin._pending_questions["sess-1"] = PendingTtyQuestion(
+        approval_id="aid", tool_use_id="auq1"
+    )
+    transport = MagicMock()
+    transport.send_input = AsyncMock()
+    runtime = _make_answer_runtime(session, transport)
+    answers = [{"question": "Tabs or spaces?", "answer": "Spaces"}]
+
+    await plugin.answer_question(
+        runtime, session, '"Tabs or spaces?"="Spaces"', "auq1", answers
+    )
+
+    # Answer is delivered to the pane as a normal user turn.
+    transport.send_input.assert_awaited_once()
+    sent = transport.send_input.call_args.args
+    assert sent[0] is session
+    assert "User has answered your questions" in sent[1]
+    # A synthetic tool_result flips the surfaced card to answered.
+    runtime._emit_adapter_event.assert_awaited_once()
+    res = runtime._emit_adapter_event.call_args.args
+    assert res[1] is EventKind.TOOL_RESULT
+    assert res[3]["tool_use_id"] == "auq1"
+    # The styled answers card carries the structured answers.
+    extra = runtime._record_user_event.call_args.kwargs["extra_metadata"]
+    assert extra["kind"] == "ask_user_question_answer"
+    assert extra["answers"] == answers
+    assert extra["tool_use_id"] == "auq1"
+    assert "sess-1" not in plugin._pending_questions
+
+
+async def test_answer_question_no_pending_raises() -> None:
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    transport = MagicMock()
+    transport.send_input = AsyncMock()
+    runtime = _make_answer_runtime(session, transport)
+
+    with pytest.raises(HTTPException) as exc:
+        await plugin.answer_question(runtime, session, "x", None, None)
+    assert exc.value.status_code == 400
+    transport.send_input.assert_not_called()
+
+
+async def test_answer_question_mismatched_tool_use_id_keeps_pending() -> None:
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    plugin._pending_questions["sess-1"] = PendingTtyQuestion(
+        approval_id="aid", tool_use_id="auq1"
+    )
+    transport = MagicMock()
+    transport.send_input = AsyncMock()
+    runtime = _make_answer_runtime(session, transport)
+
+    with pytest.raises(HTTPException):
+        await plugin.answer_question(runtime, session, "x", "stale-id", None)
+    transport.send_input.assert_not_called()
+    assert "sess-1" in plugin._pending_questions
+
+
+async def test_interrupt_clears_pending_question() -> None:
+    plugin = ClaudeTtyPlugin()
+    session = _make_session()
+    plugin._pending_questions["sess-1"] = PendingTtyQuestion(
+        approval_id="aid", tool_use_id="auq1"
+    )
+
+    transport, tmux = _make_transport(plugin)
+    await transport.interrupt(session)
+
+    assert "sess-1" not in plugin._pending_questions
+    tmux.send_bytes.assert_called_once_with("%0", b"\x1b")
 
 
 # ── plugin: reconnect resume must not replay the transcript ──────────────────

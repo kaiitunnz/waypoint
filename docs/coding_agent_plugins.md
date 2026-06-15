@@ -144,6 +144,19 @@ Thread discovery/import for `claude_tty` reads the same
 `~/.claude/projects` transcript store as `claude_code`, so the same
 Claude threads appear under both backend ids.
 
+`AskUserQuestion` needs special handling because the TUI withholds the
+tool_use record from the transcript until the popup is resolved, so the
+question is invisible to the tailer while it blocks the turn. The dialog
+poller detects the question screen and sends `Esc`, which makes the TUI
+flush the full structured `questions` record (and a "user rejected"
+result) to the JSONL. The normalizer, armed by the poller, surfaces that
+record as a `WAITING_INPUT` `AskUserQuestion` tool_call — the same card
+the frontend renders for `claude_code` — and swallows the rejection so the
+card stays answerable. `answer_question` then delivers the answer as an
+ordinary user turn (the pane is back at the ready prompt), the way
+`claude_code` carries it on a denied tool, and emits a synthetic
+tool_result so the card resolves to answered.
+
 ### Transport view
 
 ```python

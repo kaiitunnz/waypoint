@@ -16,7 +16,7 @@ import { ModelPicker } from "@/components/ModelPicker";
 import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
 import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
 import type { BackendCatalog } from "@/lib/backends";
-import { humaniseBackend } from "@/lib/backends";
+import { humaniseBackend, launchModesFor } from "@/lib/backends";
 import { Backend, BackendModelListResponse, LaunchMode } from "@/lib/types";
 
 interface ThreadSummary {
@@ -101,6 +101,13 @@ export function LaunchPanel({
   const capabilities = catalog.byId(backend)?.capabilities;
   const supportsCustomArgs = capabilities?.supports_custom_cli_args ?? false;
   const supportsConfigOverrides = capabilities?.supports_config_overrides ?? false;
+  // The transport/fidelity options available for the selected agent. "direct"
+  // is the native structured adapter, "tmux_wrapper" the generic terminal
+  // pane, "auto" lets the backend choose.
+  const availableLaunchModes = useMemo(
+    () => launchModesFor(backend, catalog),
+    [backend, catalog],
+  );
   // Codex's CLI has no `--effort` flag, so a tmux-wrapped codex session
   // can't honor an effort selection at launch time. Hide the picker
   // instead of letting the user pick a value that silently drops.
@@ -127,6 +134,13 @@ export function LaunchPanel({
     setModel("");
     setModelInfo(null);
   }, [backend, launchTargetId]);
+
+  // Fall back to "auto" when the chosen transport isn't offered by the agent.
+  useEffect(() => {
+    setLaunchMode((mode) =>
+      availableLaunchModes.includes(mode) ? mode : "auto",
+    );
+  }, [availableLaunchModes]);
 
   const effortOptions = useMemo(() => {
     if (!modelInfo) return [];
@@ -219,8 +233,16 @@ export function LaunchPanel({
         <form className="launch-body" onSubmit={submitCreate}>
           <div className="launch-body-grid two-col">
             <div className="launch-body-col">
+              {/* The Backend select lists the launchable agents (the catalog
+                  minus the tmux managed-launch fallback); the transport is
+                  chosen separately in Advanced. claude_tty stays its own agent
+                  entry rather than a claude_code transport option because no
+                  launch-mode selects the tty-tail transport yet.
+                  TODO: collapse to a single agent-primary picker (agent +
+                  transport sub-select) once the backend wires a launch-mode
+                  for the tty-tail transport. */}
               <label className="field">
-                <span>Backend</span>
+                <span>Agent</span>
                 <select value={backend} onChange={(event) => handleBackendChange(event.target.value as Backend)}>
                   {supportedBackends.map((id) => (
                     <option key={id} value={id}>
@@ -268,6 +290,7 @@ export function LaunchPanel({
             mode="new"
             launchMode={launchMode}
             onLaunchModeChange={setLaunchMode}
+            availableModes={availableLaunchModes}
             supportsCustomArgs={supportsCustomArgs}
             supportsConfigOverrides={supportsConfigOverrides}
             customArgsText={customArgsText}
@@ -277,7 +300,7 @@ export function LaunchPanel({
             formBusy={formBusy}
           />
           <div className="launch-actions">
-            <span className="grow muted">Launches through the wrapper for better transcript fidelity.</span>
+            <span className="grow muted">Auto picks the structured adapter when available for better transcript fidelity.</span>
             <button className="primary" disabled={formBusy} type="submit">
               Launch session
             </button>
@@ -311,7 +334,7 @@ export function LaunchPanel({
               />
             </label>
             <label className="field">
-              <span>Backend hint</span>
+              <span>Agent hint</span>
               <select value={backend} onChange={(event) => handleBackendChange(event.target.value as Backend)}>
                 {supportedBackends.map((id) => (
                   <option key={id} value={id}>

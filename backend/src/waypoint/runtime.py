@@ -322,7 +322,23 @@ class SessionRuntime:
                 ),
             )
         launch_mode = request.launch_mode
-        if launch_mode == LaunchMode.TMUX_WRAPPER:
+        if request.transport is not None:
+            # An explicitly pinned transport selects the driving plugin via the
+            # (agent, transport) pair and takes precedence over launch_mode. The
+            # transport must be one the agent declares; the resolved plugin owns
+            # that transport (the agent's native adapter, the tty-tail driver, or
+            # the tmux wrapper).
+            supported = self.registry.supported_transports(request.backend)
+            if request.transport not in supported:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"{request.backend} cannot be driven over transport "
+                        f"{request.transport!r}; supported: {', '.join(supported)}"
+                    ),
+                )
+            plugin = self.registry.resolve(request.backend, request.transport)
+        elif launch_mode == LaunchMode.TMUX_WRAPPER:
             fallback = self.registry.fallback_for_managed_launch()
             if fallback is None:
                 raise HTTPException(

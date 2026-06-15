@@ -427,7 +427,10 @@ class ClaudeTtyPlugin:
         now = datetime.now(UTC)
         session = SessionRecord(
             id=session_id,
-            backend=self.id,
+            # The driving plugin is resolved from the (agent, transport) pair,
+            # so this row records the requested agent (claude_code or the
+            # legacy claude_tty) while transport pins the tty-tail driver.
+            backend=request.backend,
             source=SessionSource.MANAGED,
             transport=self.transport_id,
             title=title,
@@ -647,7 +650,9 @@ class ClaudeTtyPlugin:
         now = datetime.now(UTC)
         new_session = SessionRecord(
             id=new_session_id,
-            backend=self.id,
+            # Inherit the source session's agent so a forked claude_code+claude_tty
+            # session stays backend=claude_code, transport=claude_tty.
+            backend=session.backend,
             source=SessionSource.MANAGED,
             transport=self.transport_id,
             title=title,

@@ -84,6 +84,10 @@ class BackendRegistry:
     def plugin_for(self, session: SessionRecord) -> BackendPlugin:
         return self.resolve(session.backend, session.transport)
 
+    def supported_transports(self, backend_id: str) -> tuple[str, ...]:
+        """Transport ids the named agent declares it can be driven over."""
+        return _supported_transports(self.get(backend_id))
+
     def has_backend(self, backend_id: str) -> bool:
         return backend_id in self._by_id
 

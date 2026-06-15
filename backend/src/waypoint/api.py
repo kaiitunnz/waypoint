@@ -521,11 +521,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session_id: str,
         _: Annotated[str, Depends(token_dependency())],
         force: Annotated[bool, Query()] = False,
+        prune_branches: Annotated[bool, Query()] = False,
     ) -> Any:
         # `force=true` skips terminate failures entirely — last-resort escape
         # hatch when the adapter is wedged (SSH stuck, etc.) and the
-        # graceful path won't complete.
-        await context.runtime.delete(session_id, force=force)
+        # graceful path won't complete. `prune_branches=true` force-deletes a
+        # worktree session's branch even when unmerged (crew teardown).
+        await context.runtime.delete(
+            session_id, force=force, prune_branches=prune_branches
+        )
         return {"deleted": session_id}
 
     @app.get("/api/board")

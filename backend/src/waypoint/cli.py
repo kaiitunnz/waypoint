@@ -1107,9 +1107,21 @@ def sessions_delete(
             help="Drop the record even if graceful terminate fails (wedged adapter).",
         ),
     ] = False,
+    prune_branches: Annotated[
+        bool,
+        typer.Option(
+            "--prune-branches",
+            help="Force-delete the worktree's branch even if unmerged. Without "
+            "this, an unmerged branch is left in place (merged ones are always "
+            "pruned).",
+        ),
+    ] = False,
 ) -> None:
     """Terminate (if needed) and remove a session record."""
-    _emit(_settings_from_ctx(ctx), lambda c: c.delete(session_id, force=force))
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: c.delete(session_id, force=force, prune_branches=prune_branches),
+    )
 
 
 @sessions_app.command("reap")
@@ -1135,6 +1147,15 @@ def sessions_reap(
             help="Reap all sessions regardless of spawner. Required when no scope is given.",
         ),
     ] = False,
+    prune_branches: Annotated[
+        bool,
+        typer.Option(
+            "--prune-branches",
+            help="Force-delete each reaped worktree's branch even if unmerged. "
+            "Use for crew teardown where worker branches are discarded; "
+            "leftover branches otherwise collide with a respawn's --worktree.",
+        ),
+    ] = False,
 ) -> None:
     """Terminate and delete sessions in bulk."""
     if mine:
@@ -1158,7 +1179,7 @@ def sessions_reap(
         for session in sessions:
             sid = session["id"]
             try:
-                client.delete(sid)
+                client.delete(sid, prune_branches=prune_branches)
                 reaped.append(sid)
             except Exception:
                 failed.append(sid)

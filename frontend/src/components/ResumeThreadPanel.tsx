@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   TransportPicker,
@@ -200,60 +200,29 @@ export function ResumeThreadPanel({
   return (
     <div className="launch-body resume-body">
       {filterOptions.length > 1 ? (
-        <div className="field agent-field">
+        <label className="field">
           <span>Agent</span>
-          <div className="agent-picker" role="radiogroup" aria-label="Agent">
+          <select
+            value={filter}
+            onChange={(event) => chooseFilter(event.target.value as Filter)}
+          >
             {filterOptions.map((option) => {
-              const active = filter === option;
               if (option === "all") {
                 return (
-                  <button
-                    key="all"
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    className={`agent-option${active ? " active" : ""}`}
-                    onClick={() => chooseFilter("all")}
-                  >
-                    <span className="agent-option-glyph" aria-hidden="true">
-                      ∗
-                    </span>
-                    <span className="agent-option-label">
-                      All ({counts.all})
-                    </span>
-                  </button>
+                  <option key="all" value="all">
+                    All ({counts.all})
+                  </option>
                 );
               }
-              const descriptor = catalog.byId(option);
-              const label = descriptor?.label ?? humaniseBackend(option);
-              const glyph =
-                descriptor?.badges?.glyph ?? label.slice(0, 1).toUpperCase();
-              const color = descriptor?.badges?.color;
+              const label = catalog.byId(option)?.label ?? humaniseBackend(option);
               return (
-                <button
-                  key={option}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  className={`agent-option${active ? " active" : ""}`}
-                  style={
-                    color
-                      ? ({ "--agent-color": color } as CSSProperties)
-                      : undefined
-                  }
-                  onClick={() => chooseFilter(option)}
-                >
-                  <span className="agent-option-glyph" aria-hidden="true">
-                    {glyph}
-                  </span>
-                  <span className="agent-option-label">
-                    {label} ({counts[option] ?? 0})
-                  </span>
-                </button>
+                <option key={option} value={option}>
+                  {label} ({counts[option] ?? 0})
+                </option>
               );
             })}
-          </div>
-        </div>
+          </select>
+        </label>
       ) : null}
 
       {filter !== "all" ? (

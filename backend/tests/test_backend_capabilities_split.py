@@ -49,13 +49,34 @@ def test_split_round_trips_for_every_backend() -> None:
 
 
 def test_backends_payload_matches_golden() -> None:
-    """``GET /api/backends`` stays byte-identical across the split.
+    """``GET /api/backends`` matches the pinned superset payload.
 
     The frontend reads model sources, permission modes, and capability flags
-    from this payload; the split must not reorder keys or change values.
-    Regenerate the fixture deliberately if the contract intentionally changes.
+    from this payload; the descriptor keeps the flat ``capabilities`` object
+    and now also emits ``agent_capabilities`` / ``transport_capabilities``
+    sub-objects so the frontend can migrate to the split. Regenerate the
+    fixture deliberately if the contract intentionally changes.
     """
     registry = build_default_registry()
     live = _backend_descriptors(registry)
     expected = json.loads(_GOLDEN.read_text())
     assert live == expected
+
+
+def test_backends_payload_carries_split_subobjects() -> None:
+    """Each descriptor adds the split sub-objects additively, without
+    disturbing the flat ``capabilities`` block (kept byte-identical for
+    existing consumers) — and the sub-objects are exactly the projections."""
+    registry = build_default_registry()
+    descriptors = _backend_descriptors(registry)
+    for plugin, entry in zip(registry.all(), descriptors, strict=True):
+        caps = plugin.capabilities
+        assert entry["capabilities"] == caps.model_dump(mode="json")
+        assert entry["agent_capabilities"] == caps.agent_capabilities().model_dump(
+            mode="json"
+        )
+        transport = caps.transport_capabilities().model_dump(mode="json")
+        assert entry["transport_capabilities"] == transport
+        # The split is a total cover, so recomposing the two halves
+        # reconstructs the flat descriptor the frontend sees today.
+        assert BackendCapabilities.from_split(*caps.split()) == caps

@@ -21,7 +21,7 @@ Use GitHub Issues directly for active bugs and feature requests.
 ## Layout
 
 - `backend/` — FastAPI daemon, tmux/session runtime, auth, persistence
-- `backend/src/waypoint/backends/` — one package per coding agent (`claude_code/`, `codex/`, `opencode/`, `tmux/`); see [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the plugin contract and extension recipe
+- `backend/src/waypoint/backends/` — one package per coding agent (`claude_code/`, `claude_tty/`, `codex/`, `opencode/`), plus `tmux/` which is a shared transport; see [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the plugin contract and extension recipe
 - `waypointctl/` — standalone control-plane package and daemon (`uv tool install ./waypointctl`, `pipx install ./waypointctl`)
 - `frontend/` — Next.js PWA client
 - `3rdparty/codex/` — pinned Codex submodule used for the local app-server SDK

@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { CSSProperties, useEffect, useMemo, useState } from "react";
 
 import {
-  AgentTransportPicker,
+  TransportPicker,
   useTransportForAgent,
 } from "@/components/AgentTransportPicker";
 import type { BackendCatalog } from "@/lib/backends";
-import { humaniseBackend } from "@/lib/backends";
+import { defaultTransportFor, humaniseBackend } from "@/lib/backends";
 import { matchesQuery, parseQuery } from "@/lib/search";
 import { Backend, SessionTransport } from "@/lib/types";
 
@@ -43,6 +43,14 @@ interface ResumeThreadPanelProps {
   catalog: BackendCatalog;
 }
 
+// "all" merges every agent's threads into one list; a concrete backend narrows
+// it to that agent and unlocks the transport picker for the import.
+type Filter = "all" | Backend;
+
+interface UnifiedThread extends ThreadSummary {
+  backend: Backend;
+}
+
 const COLLAPSED_VISIBLE = 2;
 const PAGE_SIZE = 5;
 
@@ -66,58 +74,92 @@ export function ResumeThreadPanel({
   onImportThread,
   catalog,
 }: ResumeThreadPanelProps) {
-  // The chosen agent both lists its stored threads and drives the transport
-  // the imported session is resumed over — so a Claude thread can come back as
-  // Chat or Emulated.
-  const initialAgent: Backend = supportedBackends.includes(preferredBackend)
-    ? preferredBackend
-    : (supportedBackends[0] ?? preferredBackend);
-  const [agent, setAgent] = useState<Backend>(initialAgent);
-  const [agentTouched, setAgentTouched] = useState(false);
-  const [transport, setTransport] = useTransportForAgent(agent, catalog);
+  const multiAgent = supportedBackends.length >= 2;
+
+  const allThreads: UnifiedThread[] = useMemo(() => {
+    const merged: UnifiedThread[] = [];
+    for (const id of supportedBackends) {
+      for (const t of threadsByBackend[id] ?? []) {
+        merged.push({ ...t, backend: id });
+      }
+    }
+    merged.sort((a, b) =>
+      a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0,
+    );
+    return merged;
+  }, [threadsByBackend, supportedBackends]);
+
+  const counts = useMemo(() => {
+    const byBackend: Record<string, number> = { all: allThreads.length };
+    for (const id of supportedBackends) {
+      byBackend[id] = (threadsByBackend[id] ?? []).length;
+    }
+    return byBackend;
+  }, [allThreads.length, threadsByBackend, supportedBackends]);
+
+  // Default to the cross-agent list when more than one agent can resume; a
+  // lone agent skips the "All" chip entirely.
+  const initialFilter: Filter = multiAgent
+    ? "all"
+    : (supportedBackends[0] ?? "all");
+  const [filter, setFilter] = useState<Filter>(initialFilter);
   const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(1);
   const [importingId, setImportingId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
-  const isExpanded = expanded || query.trim().length > 0;
+  // The transport picker only applies to a single-agent view. Feed the hook a
+  // concrete agent (the filtered one, or the preferred fallback while "All" is
+  // active) so its state stays valid; the value is only read when a concrete
+  // agent is selected.
+  const transportAgent: Backend =
+    filter === "all"
+      ? supportedBackends.includes(preferredBackend)
+        ? preferredBackend
+        : (supportedBackends[0] ?? preferredBackend)
+      : filter;
+  const [transport, setTransport, transports] = useTransportForAgent(
+    transportAgent,
+    catalog,
+  );
 
-  // Auto-follow the launch form's agent selection until the user explicitly
-  // picks an agent here; that lock stays for the session so the list doesn't
-  // keep snapping out from under them.
-  useEffect(() => {
-    if (agentTouched) return;
-    if (supportedBackends.includes(preferredBackend)) {
-      setAgent(preferredBackend);
-    }
-  }, [agentTouched, preferredBackend, supportedBackends]);
+  const isExpanded = expanded || query.trim().length > 0;
 
   // Re-clamp if the selected agent drops out of the supported set.
   useEffect(() => {
-    if (supportedBackends.length > 0 && !supportedBackends.includes(agent)) {
-      setAgent(supportedBackends[0]);
+    if (
+      filter !== "all" &&
+      supportedBackends.length > 0 &&
+      !supportedBackends.includes(filter)
+    ) {
+      setFilter(multiAgent ? "all" : supportedBackends[0]);
     }
-  }, [supportedBackends, agent]);
-
-  const agentThreads = useMemo(() => {
-    const list = [...(threadsByBackend[agent] ?? [])];
-    list.sort((a, b) =>
-      a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0,
-    );
-    return list;
-  }, [threadsByBackend, agent]);
+  }, [supportedBackends, filter, multiAgent]);
 
   const filteredThreads = useMemo(() => {
-    if (query.trim() === "") return agentThreads;
-    const terms = parseQuery(query.trim());
-    const defaultFields = ["title", "cwd", "repo_name", "branch", "preview"];
-    return agentThreads.filter((t) => matchesQuery(t, terms, defaultFields));
-  }, [agentThreads, query]);
+    let list =
+      filter === "all"
+        ? allThreads
+        : allThreads.filter((t) => t.backend === filter);
+    if (query.trim() !== "") {
+      const terms = parseQuery(query.trim());
+      const defaultFields = [
+        "title",
+        "cwd",
+        "repo_name",
+        "branch",
+        "preview",
+        "backend",
+      ];
+      list = list.filter((t) => matchesQuery(t, terms, defaultFields));
+    }
+    return list;
+  }, [allThreads, filter, query]);
 
-  // Page reset whenever the agent or thread set changes underneath us.
+  // Page reset whenever the filter or thread set changes underneath us.
   useEffect(() => {
     setPage(1);
-  }, [agent, filteredThreads.length, query]);
+  }, [filter, filteredThreads.length, query]);
 
   const totalPages = Math.max(1, Math.ceil(filteredThreads.length / PAGE_SIZE));
   const pageStart = (page - 1) * PAGE_SIZE;
@@ -125,35 +167,103 @@ export function ResumeThreadPanel({
     ? filteredThreads.slice(pageStart, pageStart + PAGE_SIZE)
     : filteredThreads.slice(0, COLLAPSED_VISIBLE);
 
-  const loading = loadingByBackend[agent];
+  const loading =
+    filter === "all"
+      ? supportedBackends.some((id) => loadingByBackend[id])
+      : loadingByBackend[filter];
 
-  async function handleImport(thread: ThreadSummary) {
+  async function handleImport(thread: UnifiedThread) {
+    // Single-agent view resumes over the chosen transport; the merged "All"
+    // view can't offer one control across mixed agents, so each row imports
+    // over its own agent's default transport.
+    const chosen =
+      filter === thread.backend
+        ? transport || null
+        : defaultTransportFor(thread.backend, catalog);
     setImportingId(thread.id);
     try {
-      await onImportThread(agent, thread.id, thread.cwd, transport || null);
+      await onImportThread(thread.backend, thread.id, thread.cwd, chosen);
     } finally {
       setImportingId(null);
     }
   }
 
-  function chooseAgent(next: Backend) {
-    setAgent(next);
-    setAgentTouched(true);
+  function chooseFilter(next: Filter) {
+    setFilter(next);
     setExpanded(false);
   }
 
-  const agentLabel = catalog.byId(agent)?.label ?? humaniseBackend(agent);
+  const filterOptions: Filter[] = multiAgent
+    ? ["all", ...supportedBackends]
+    : supportedBackends;
 
   return (
     <div className="launch-body resume-body">
-      <AgentTransportPicker
-        agents={supportedBackends}
-        agent={agent}
-        onAgentChange={chooseAgent}
-        transport={transport}
-        onTransportChange={setTransport}
-        catalog={catalog}
-      />
+      {filterOptions.length > 1 ? (
+        <div className="field agent-field">
+          <span>Agent</span>
+          <div className="agent-picker" role="radiogroup" aria-label="Agent">
+            {filterOptions.map((option) => {
+              const active = filter === option;
+              if (option === "all") {
+                return (
+                  <button
+                    key="all"
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    className={`agent-option${active ? " active" : ""}`}
+                    onClick={() => chooseFilter("all")}
+                  >
+                    <span className="agent-option-glyph" aria-hidden="true">
+                      ∗
+                    </span>
+                    <span className="agent-option-label">
+                      All ({counts.all})
+                    </span>
+                  </button>
+                );
+              }
+              const descriptor = catalog.byId(option);
+              const label = descriptor?.label ?? humaniseBackend(option);
+              const glyph =
+                descriptor?.badges?.glyph ?? label.slice(0, 1).toUpperCase();
+              const color = descriptor?.badges?.color;
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  className={`agent-option${active ? " active" : ""}`}
+                  style={
+                    color
+                      ? ({ "--agent-color": color } as CSSProperties)
+                      : undefined
+                  }
+                  onClick={() => chooseFilter(option)}
+                >
+                  <span className="agent-option-glyph" aria-hidden="true">
+                    {glyph}
+                  </span>
+                  <span className="agent-option-label">
+                    {label} ({counts[option] ?? 0})
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {filter !== "all" ? (
+        <TransportPicker
+          transports={transports}
+          value={transport}
+          onChange={setTransport}
+          catalog={catalog}
+        />
+      ) : null}
 
       <div className="resume-filters">
         <div className="resume-filters-search">
@@ -175,7 +285,7 @@ export function ResumeThreadPanel({
         <p className="muted resume-panel-empty">
           {query.trim().length > 0
             ? "No threads match your search."
-            : emptyHintFor(agentLabel, targetLabel)}
+            : emptyHintFor(filter, catalog, targetLabel)}
         </p>
       ) : null}
 
@@ -183,18 +293,21 @@ export function ResumeThreadPanel({
         <div className="import-thread-list resume-thread-list">
           {visibleThreads.map((thread) => {
             const isImporting = importingId === thread.id;
+            const backendLabel =
+              catalog.byId(thread.backend)?.label ??
+              humaniseBackend(thread.backend);
             return (
               <article
-                className={`import-thread-row resume-thread-row is-${agent}`}
-                key={`${agent}:${thread.id}`}
-                data-backend={agent}
+                className={`import-thread-row resume-thread-row is-${thread.backend}`}
+                key={`${thread.backend}:${thread.id}`}
+                data-backend={thread.backend}
               >
                 <span
-                  className={`import-thread-index resume-thread-mark is-${agent}`}
-                  aria-label={agentLabel}
-                  title={agentLabel}
+                  className={`import-thread-index resume-thread-mark is-${thread.backend}`}
+                  aria-label={backendLabel}
+                  title={backendLabel}
                 >
-                  {backendGlyph(agent, catalog)}
+                  {backendGlyph(thread.backend, catalog)}
                 </span>
                 <div className="import-thread-body">
                   <div className="import-thread-headline">
@@ -288,9 +401,17 @@ export function ResumeThreadPanel({
   );
 }
 
-function emptyHintFor(agentLabel: string, targetLabel: string | null): string {
+function emptyHintFor(
+  filter: Filter,
+  catalog: BackendCatalog,
+  targetLabel: string | null,
+): string {
   const where = targetLabel ? ` on ${targetLabel}` : "";
-  return `No ${agentLabel} threads to resume${where}.`;
+  if (filter === "all") {
+    return `No importable threads found${where}.`;
+  }
+  const label = catalog.byId(filter)?.label ?? humaniseBackend(filter);
+  return `No ${label} threads to resume${where}.`;
 }
 
 function formatRelativeTime(value: string): string {

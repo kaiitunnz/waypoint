@@ -8373,7 +8373,7 @@ html[data-theme="light"] .term-compose {
   );
 }
 
-/* When the drawer is rendered (liveTmux only), the keybar's own
+/* When the drawer is rendered (interactive terminals only), the keybar's own
    safe-area inset would double-pad the gesture area. Flatten it so
    the gap lives on .term-compose where the visible anchor is. */
 .session-terminal:has(.term-compose) .term-keys {

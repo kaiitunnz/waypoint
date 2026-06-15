@@ -24,7 +24,6 @@ import { humaniseBackend } from "@/lib/backends";
 import {
   Backend,
   BackendModelListResponse,
-  LaunchMode,
   SessionTransport,
 } from "@/lib/types";
 
@@ -59,7 +58,6 @@ interface LaunchPanelProps {
     title: string,
     model: string | null,
     effort: string | null,
-    launchMode: LaunchMode,
     transport: SessionTransport | null,
     args: string[],
     configOverrides: string[],
@@ -101,7 +99,6 @@ export function LaunchPanel({
   const [title, setTitle] = useState("");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
-  const [launchMode, setLaunchMode] = useState<LaunchMode>("auto");
   const [transport, setTransport] = useTransportForAgent(backend, catalog);
   const [customArgsText, setCustomArgsText] = useState("");
   const [configOverridesText, setConfigOverridesText] = useState("");
@@ -192,7 +189,6 @@ export function LaunchPanel({
         title,
         model.trim() || null,
         effortSupported ? effort.trim() || null : null,
-        "auto",
         transport || null,
         args,
         configOverrides,
@@ -276,9 +272,6 @@ export function LaunchPanel({
           </div>
           <LaunchOptionsDetails
             mode="new"
-            launchMode={launchMode}
-            onLaunchModeChange={setLaunchMode}
-            showLaunchMode={false}
             supportsCustomArgs={supportsCustomArgs}
             supportsConfigOverrides={supportsConfigOverrides}
             customArgsText={customArgsText}

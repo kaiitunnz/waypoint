@@ -1705,6 +1705,15 @@ def schedule_create(
     cwd: Annotated[str, typer.Option(help="Working directory for the session.")],
     launch_target_id: Annotated[str | None, typer.Option()] = None,
     launch_mode: Annotated[str | None, typer.Option()] = None,
+    transport: Annotated[
+        str | None,
+        typer.Option(
+            help="Pin the transport id the scheduled agent is driven over (e.g. "
+            "'claude_cli', 'claude_tty', 'tmux'). Must be one of the agent's "
+            "supported transports; takes precedence over --launch-mode. "
+            "Omit to keep the --launch-mode-derived behavior.",
+        ),
+    ] = None,
     title: Annotated[str | None, typer.Option()] = None,
     model: Annotated[str | None, typer.Option()] = None,
     effort: Annotated[str | None, typer.Option()] = None,
@@ -1732,6 +1741,7 @@ def schedule_create(
                 cwd=cwd,
                 launch_target_id=launch_target_id,
                 launch_mode=launch_mode,
+                transport=transport,
                 title=title,
                 model=model,
                 effort=effort,

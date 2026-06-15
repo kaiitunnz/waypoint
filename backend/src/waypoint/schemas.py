@@ -463,6 +463,7 @@ class ScheduledSessionRecord(BaseModel):
     cwd: str
     launch_target_id: str | None = None
     launch_mode: LaunchMode = LaunchMode.AUTO
+    transport: SessionTransportId | None = None
     title: str | None = None
     args: list[str] = Field(default_factory=list)
     config_overrides: list[str] = Field(default_factory=list)
@@ -482,6 +483,10 @@ class ScheduleCreateRequest(BaseModel):
     cwd: str
     launch_target_id: str | None = None
     launch_mode: LaunchMode = LaunchMode.AUTO
+    # Pins the transport the scheduled session is driven over; carried into the
+    # ``SessionCreateRequest`` the schedule fires so it reuses the create path's
+    # (agent, transport) dispatch. ``None`` keeps the ``launch_mode`` behavior.
+    transport: SessionTransportId | None = None
     title: str | None = None
     args: list[str] = Field(default_factory=list)
     config_overrides: list[str] = Field(default_factory=list)

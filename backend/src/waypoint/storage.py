@@ -168,6 +168,7 @@ class Storage:
                 cwd TEXT NOT NULL,
                 launch_target_id TEXT,
                 launch_mode TEXT NOT NULL DEFAULT 'auto',
+                transport TEXT,
                 title TEXT,
                 args TEXT NOT NULL DEFAULT '[]',
                 config_overrides TEXT NOT NULL DEFAULT '[]',
@@ -217,6 +218,7 @@ class Storage:
         self._ensure_column(
             "scheduled_sessions", "launch_mode", "TEXT NOT NULL DEFAULT 'auto'"
         )
+        self._ensure_column("scheduled_sessions", "transport", "TEXT")
         self._ensure_column("sessions", "args", "TEXT NOT NULL DEFAULT '[]'")
         self._ensure_column(
             "sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
@@ -818,10 +820,10 @@ class Storage:
         self.connection.execute(
             """
             INSERT INTO scheduled_sessions (
-                id, backend, cwd, launch_target_id, launch_mode, title, args, config_overrides,
-                initial_prompt, permission_mode, model, effort, scheduled_at, created_at, status,
-                session_id, failure_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, backend, cwd, launch_target_id, launch_mode, transport, title, args,
+                config_overrides, initial_prompt, permission_mode, model, effort, scheduled_at,
+                created_at, status, session_id, failure_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 schedule.id,
@@ -829,6 +831,7 @@ class Storage:
                 schedule.cwd,
                 schedule.launch_target_id,
                 schedule.launch_mode,
+                schedule.transport,
                 schedule.title,
                 json.dumps(list(schedule.args)),
                 json.dumps(list(schedule.config_overrides)),

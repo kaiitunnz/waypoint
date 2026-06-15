@@ -593,9 +593,8 @@ html[data-theme="light"] .import-thread-footer {
 }
 
 /* ---------- Resume thread panel (unified) ---------- */
-/* Top row in the Resume launch mode: search + (optional) backend filter.
-   Search grows to fill the row; backend dropdown is right-aligned on
-   desktop, full-width on mobile. */
+/* Search row in the Resume launch mode; the agent + transport choice rides
+   the shared picker above it. Search grows to fill the row. */
 .resume-filters {
   display: flex;
   flex-wrap: wrap;
@@ -605,15 +604,6 @@ html[data-theme="light"] .import-thread-footer {
 
 .resume-filters-search {
   flex: 1 1 220px;
-  min-width: 0;
-}
-
-.resume-filters-backend {
-  width: min(100%, 200px);
-  flex: 0 0 auto;
-}
-
-.resume-filters-backend select {
   min-width: 0;
 }
 

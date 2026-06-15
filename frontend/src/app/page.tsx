@@ -476,14 +476,17 @@ export default function HomePage() {
     backend: Backend,
     threadId: string,
     cwd: string,
-    launchMode: LaunchMode,
+    transport: SessionTransport | null,
   ) {
     try {
       const payload = {
         thread_id: threadId,
         launch_target_id: activeLaunchTargetId || null,
         cwd,
-        launch_mode: launchMode,
+        // An explicit transport supersedes launch_mode at the import API, so
+        // pin the chosen transport and leave the launch mode on "auto".
+        launch_mode: "auto",
+        transport: transport || null,
       };
       const session = await importBackendThread(host, token, backend, payload);
       setSessions((current) => [

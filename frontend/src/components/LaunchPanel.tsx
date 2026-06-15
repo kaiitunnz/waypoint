@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  CSSProperties,
   FormEvent,
   useCallback,
   useEffect,
@@ -11,17 +10,17 @@ import {
   useState,
 } from "react";
 
+import {
+  AgentTransportPicker,
+  useTransportForAgent,
+} from "@/components/AgentTransportPicker";
 import { EffortPicker } from "@/components/EffortPicker";
-import { LaunchOptionsDetails, TransportPicker } from "@/components/LaunchOptions";
+import { LaunchOptionsDetails } from "@/components/LaunchOptions";
 import { ModelPicker } from "@/components/ModelPicker";
 import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
 import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
 import type { BackendCatalog } from "@/lib/backends";
-import {
-  agentTransports,
-  defaultTransportFor,
-  humaniseBackend,
-} from "@/lib/backends";
+import { humaniseBackend } from "@/lib/backends";
 import {
   Backend,
   BackendModelListResponse,
@@ -103,7 +102,7 @@ export function LaunchPanel({
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const [launchMode, setLaunchMode] = useState<LaunchMode>("auto");
-  const [transport, setTransport] = useState<SessionTransport>("");
+  const [transport, setTransport] = useTransportForAgent(backend, catalog);
   const [customArgsText, setCustomArgsText] = useState("");
   const [configOverridesText, setConfigOverridesText] = useState("");
   const [modelInfo, setModelInfo] = useState<BackendModelListResponse | null>(null);
@@ -113,14 +112,6 @@ export function LaunchPanel({
   const capabilities = catalog.byId(backend)?.capabilities;
   const supportsCustomArgs = capabilities?.supports_custom_cli_args ?? false;
   const supportsConfigOverrides = capabilities?.supports_config_overrides ?? false;
-  // The transports this agent can be launched over, defaulting to its preferred
-  // one. An explicit transport supersedes launch_mode at the API, so the new
-  // flow always sends launch_mode "auto" and pins the transport instead.
-  const transports = useMemo(
-    () => agentTransports(backend, catalog),
-    [backend, catalog],
-  );
-  const defaultTransport = defaultTransportFor(backend, catalog);
   // Codex's CLI has no `--effort` flag, so a tmux-wrapped codex session
   // can't honor an effort selection at launch time. Hide the picker
   // instead of letting the user pick a value that silently drops.
@@ -147,16 +138,6 @@ export function LaunchPanel({
     setModel("");
     setModelInfo(null);
   }, [backend, launchTargetId]);
-
-  // Default to the agent's preferred transport, and re-clamp whenever the agent
-  // changes so a transport carried over from another agent never sticks.
-  useEffect(() => {
-    setTransport((current) =>
-      transports.includes(current)
-        ? current
-        : (defaultTransport ?? transports[0] ?? ""),
-    );
-  }, [transports, defaultTransport]);
 
   const effortOptions = useMemo(() => {
     if (!modelInfo) return [];
@@ -248,16 +229,12 @@ export function LaunchPanel({
 
       {mode === "new" ? (
         <form className="launch-body" onSubmit={submitCreate}>
-          <AgentPicker
+          <AgentTransportPicker
             agents={supportedBackends}
-            value={backend}
-            onChange={handleBackendChange}
-            catalog={catalog}
-          />
-          <TransportPicker
-            transports={transports}
-            value={transport}
-            onChange={setTransport}
+            agent={backend}
+            onAgentChange={handleBackendChange}
+            transport={transport}
+            onTransportChange={setTransport}
             catalog={catalog}
           />
           <div className="launch-body-grid two-col">
@@ -376,52 +353,6 @@ export function LaunchPanel({
         </form>
       ) : null}
     </section>
-  );
-}
-
-interface AgentPickerProps {
-  agents: Backend[];
-  value: Backend;
-  onChange: (backend: Backend) => void;
-  catalog: BackendCatalog;
-}
-
-// Agent-primary launch selector: each registered agent rendered as a chip with
-// its badge glyph and label. The chosen agent drives which transports the
-// TransportPicker offers below it.
-function AgentPicker({ agents, value, onChange, catalog }: AgentPickerProps) {
-  return (
-    <div className="field agent-field">
-      <span>Agent</span>
-      <div className="agent-picker" role="radiogroup" aria-label="Agent">
-        {agents.map((id) => {
-          const descriptor = catalog.byId(id);
-          const label = descriptor?.label ?? humaniseBackend(id);
-          const glyph =
-            descriptor?.badges?.glyph ?? label.slice(0, 1).toUpperCase();
-          const color = descriptor?.badges?.color;
-          const active = value === id;
-          return (
-            <button
-              key={id}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              className={`agent-option${active ? " active" : ""}`}
-              style={
-                color ? ({ "--agent-color": color } as CSSProperties) : undefined
-              }
-              onClick={() => onChange(id)}
-            >
-              <span className="agent-option-glyph" aria-hidden="true">
-                {glyph}
-              </span>
-              <span className="agent-option-label">{label}</span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
   );
 }
 

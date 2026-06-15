@@ -10,6 +10,7 @@ no longer leak into runtime.py.
 
 import asyncio
 import logging
+import shlex
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
+from waypoint.backends.base import DefaultLaunchContract
 from waypoint.backends.capabilities import (
     BackendCapabilities,
     ModelSource,
@@ -109,7 +111,7 @@ class ClaudeCodeLaunchTargetConfig(PluginLaunchTargetConfig):
     hook_timeout_seconds: int | None = Field(default=None, ge=1)
 
 
-class ClaudeCodePlugin:
+class ClaudeCodePlugin(DefaultLaunchContract):
     id = "claude_code"
     transport_id = "claude_cli"
     label = "Claude Code"
@@ -904,6 +906,94 @@ class ClaudeCodePlugin:
                 f"on {launch_target.ssh_destination} ({cwd})"
             )
         return f"Imported stored Claude thread ({cwd})"
+
+    # --- agent launch contract ---------------------------------------
+    #
+    # Pane-wrapper launch knowledge a generic transport drives without
+    # knowing it's Claude. ``capture_thread_id`` stays the inert
+    # ``DefaultLaunchContract`` no-op: Claude pregenerates its id via
+    # ``--session-id``, so there's nothing to discover post-launch.
+
+    def launch_flags(
+        self,
+        *,
+        model: str | None = None,
+        effort: str | None = None,
+        permission_mode: str | None = None,
+    ) -> list[str]:
+        flags: list[str] = []
+        if model:
+            flags += ["--model", model]
+        if effort:
+            flags += ["--effort", effort]
+        if permission_mode:
+            flags += ["--permission-mode", permission_mode]
+        return flags
+
+    def pregenerate_thread_id(self) -> str | None:
+        return str(uuid.uuid4())
+
+    def resume_args(self, thread_id: str, prior_args: list[str]) -> list[str]:
+        # prior_args may carry ``--session-id <uuid>`` (the initial create
+        # form) or ``--resume <uuid>`` (a prior reconnect's output). Strip
+        # both so the new prefix doesn't compound on repeated reconnects.
+        scrubbed: list[str] = []
+        skip = 0
+        for arg in prior_args:
+            if skip:
+                skip -= 1
+                continue
+            if arg in ("--session-id", "--resume"):
+                skip = 1
+                continue
+            scrubbed.append(arg)
+        return ["--resume", thread_id, *scrubbed]
+
+    async def conversation_exists(
+        self,
+        thread_id: str,
+        cwd: str,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> bool:
+        # ~/.claude/projects/<dashed-absolute-cwd>/<uuid>.jsonl — but the
+        # dashed key uses claude's view of the absolute cwd, which may not
+        # match what we have on hand (SSH sessions carry the raw ``~/foo``
+        # form; ``cd`` symlinks resolve on the remote). UUIDs are globally
+        # unique under projects/, so glob across all project dirs and pick
+        # the file by name.
+        needle = f"{thread_id}.jsonl"
+        if launch_target is None:
+            projects = Path.home() / ".claude" / "projects"
+            if not projects.is_dir():
+                return False
+            return any(projects.glob(f"*/{needle}"))
+        # ``$HOME`` must be left *outside* the quoted needle so the remote
+        # shell expands it; shlex-quoting the whole path would single-quote
+        # the dollar and look for a literal ``$HOME`` directory.
+        stdout = await self._ssh_capture(
+            launch_target,
+            f"ls $HOME/.claude/projects/*/{shlex.quote(needle)} "
+            "2>/dev/null | head -n 1",
+        )
+        return bool(stdout.strip())
+
+    @staticmethod
+    async def _ssh_capture(
+        launch_target: SshLaunchTargetConfig, remote_cmd: str
+    ) -> str:
+        """``ssh <host> <cmd>`` — returns stdout (empty on non-zero exit)."""
+        proc = await asyncio.create_subprocess_exec(
+            launch_target.ssh_bin,
+            *launch_target.ssh_args,
+            launch_target.ssh_destination,
+            remote_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return ""
+        return stdout.decode("utf-8", errors="ignore")
 
     # --- launch / discovery helpers ----------------------------------
 

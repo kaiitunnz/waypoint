@@ -52,17 +52,21 @@ WAIT_POLL_INTERVAL_SECONDS = 2.0
 
 
 def _backend_choices() -> list[str]:
-    """Agent ids accepted by ``session`` / ``sessions`` launch commands.
+    """Backend ids accepted by ``session`` / ``sessions`` launch commands.
 
-    Lists coding agents only. Transports — the generic ``tmux`` pane wrapper
-    and the ``claude_tty`` tty-tail — are not agents; a session's transport is
-    chosen with ``--launch-mode``, not ``--backend``. Both name themselves as
-    their own transport (``id == transport_id``), whereas an agent owns a
-    distinct native transport (``claude_code`` → ``claude_cli``), so that is
-    the test.
+    Excludes only the managed-launch fallback wrapper (``tmux``, flagged
+    ``is_fallback_for_managed_launch``): it is routed to via the registry, not
+    selected directly. ``claude_tty`` stays selectable — it currently bundles
+    the Claude agent with its tty-tail transport under one id, and there is no
+    ``--launch-mode`` value that selects the tty-tail transport on
+    ``claude_code`` yet, so ``--backend claude_tty`` is its only launch path.
+    Demoting it to a pure transport selected via ``--launch-mode`` waits on the
+    deeper agent×transport launch wiring (Phase 3 frontend).
     """
     return [
-        plugin.id for plugin in get_registry().all() if plugin.id != plugin.transport_id
+        plugin.id
+        for plugin in get_registry().all()
+        if not plugin.capabilities.is_fallback_for_managed_launch
     ]
 
 

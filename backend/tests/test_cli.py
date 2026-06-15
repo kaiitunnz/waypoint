@@ -188,16 +188,16 @@ def test_board_edit_entry_rejects_malformed_meta(tmp_path: Path) -> None:
     assert "key=value" in result.output
 
 
-def test_backend_choices_lists_agents_not_transports() -> None:
-    """Launch ``--backend`` choices are agents only; the tmux and claude_tty
-    transports are reached via ``--launch-mode``, not selected as agents."""
+def test_backend_choices_excludes_only_the_fallback_wrapper() -> None:
+    """Launch ``--backend`` lists agents plus claude_tty; only the tmux
+    managed-launch fallback wrapper is excluded (it is routed to via the
+    registry, never selected directly)."""
     choices = set(_backend_choices())
-    assert {"claude_code", "codex", "opencode"}.issubset(choices)
+    assert {"claude_code", "codex", "opencode", "claude_tty"}.issubset(choices)
     assert "tmux" not in choices
-    assert "claude_tty" not in choices
 
 
-def test_session_start_rejects_transport_as_backend(tmp_path: Path) -> None:
+def test_session_start_rejects_fallback_wrapper_as_backend(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
         [
@@ -206,7 +206,7 @@ def test_session_start_rejects_transport_as_backend(tmp_path: Path) -> None:
             "session",
             "start",
             "--backend",
-            "claude_tty",
+            "tmux",
             "--cwd",
             "/tmp",
         ],

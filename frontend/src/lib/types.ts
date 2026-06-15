@@ -167,6 +167,47 @@ export interface SessionCommandInvocation {
   metadata: Record<string, unknown>;
 }
 
+// A session is an (agent, transport) pair. The backend splits the flat
+// capability descriptor along that seam: agent-level fields (model source,
+// permission modes, slash commands, fork/thread support) come from the
+// AgentPlugin; transport-level fields (structured vs heuristic, resume,
+// live terminal) come from the Transport. `BackendCapabilities` keeps the
+// flat union for callers that only have a single descriptor.
+
+export interface TransportCapabilities {
+  is_structured: boolean;
+  supports_resume: boolean;
+  supports_reattach_after_exit: boolean;
+  supports_terminate: boolean;
+  supports_set_model_inline: boolean;
+  supports_set_effort_inline: boolean;
+  supports_set_effort_with_restart: boolean;
+  supports_set_permission_mode_inline: boolean;
+  settings_change_interrupts_turn: boolean;
+  live_terminal: boolean;
+  is_fallback_for_managed_launch: boolean;
+}
+
+export interface AgentCapabilities {
+  model_source: "static" | "live_rpc" | "none";
+  permission_modes: BackendPermissionMode[];
+  effort_levels: string[];
+  slash_commands: BackendSlashCommand[];
+  approval_decisions: string[];
+  supports_thread_discovery: boolean;
+  supports_thread_import: boolean;
+  supports_fork: boolean;
+  supports_plan_approval: boolean;
+  supports_approval_note: boolean;
+  supports_attachments: boolean;
+  supports_custom_cli_args: boolean;
+  supports_config_overrides: boolean;
+  supports_slash_compact: boolean;
+  cli_binary?: string | null;
+  target_aliases: string[];
+  badges: Record<string, string>;
+}
+
 export interface BackendCapabilities {
   is_structured: boolean;
   supports_resume: boolean;
@@ -176,8 +217,10 @@ export interface BackendCapabilities {
   supports_set_effort_with_restart: boolean;
   supports_set_permission_mode_inline: boolean;
   settings_change_interrupts_turn: boolean;
+  live_terminal: boolean;
   supports_thread_discovery: boolean;
   supports_thread_import: boolean;
+  supports_fork: boolean;
   supports_plan_approval: boolean;
   supports_slash_compact: boolean;
   supports_approval_note: boolean;
@@ -200,7 +243,11 @@ export interface BackendDescriptor {
   transport_id: SessionTransport;
   label: string;
   badges: Record<string, string>;
+  // The flat union, kept for back-compat; prefer composing `agent_capabilities`
+  // with `transport_capabilities` via `capsFor()` for an (agent, transport) pair.
   capabilities: BackendCapabilities;
+  agent_capabilities: AgentCapabilities;
+  transport_capabilities: TransportCapabilities;
 }
 
 export interface AssistantSummary {

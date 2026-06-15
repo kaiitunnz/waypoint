@@ -8799,15 +8799,8 @@ html[data-theme="light"] .term-compose-input {
 .launch-body-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   min-width: 0;
-}
-
-@media (min-width: 720px) {
-  .launch-body-grid.two-col {
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-    gap: 18px;
-  }
 }
 
 .launch-body-col {

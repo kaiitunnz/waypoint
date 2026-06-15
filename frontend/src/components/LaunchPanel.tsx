@@ -20,7 +20,7 @@ import { ModelPicker } from "@/components/ModelPicker";
 import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
 import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
 import type { BackendCatalog } from "@/lib/backends";
-import { humaniseBackend } from "@/lib/backends";
+import { humaniseBackend, permissionModesFor } from "@/lib/backends";
 import {
   Backend,
   BackendModelListResponse,
@@ -61,6 +61,7 @@ interface LaunchPanelProps {
     transport: SessionTransport | null,
     args: string[],
     configOverrides: string[],
+    permissionMode: string | null,
   ) => Promise<void>;
   onAttach: (
     target: string,
@@ -100,11 +101,17 @@ export function LaunchPanel({
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const [transport, setTransport] = useTransportForAgent(backend, catalog);
+  const [permissionMode, setPermissionMode] = useState<string>("default");
   const [customArgsText, setCustomArgsText] = useState("");
   const [configOverridesText, setConfigOverridesText] = useState("");
   const [modelInfo, setModelInfo] = useState<BackendModelListResponse | null>(null);
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [formBusy, setFormBusy] = useState(false);
+
+  const permissionOptions = useMemo(
+    () => permissionModesFor(backend, catalog),
+    [backend, catalog],
+  );
 
   const capabilities = catalog.byId(backend)?.capabilities;
   const supportsCustomArgs = capabilities?.supports_custom_cli_args ?? false;
@@ -127,6 +134,12 @@ export function LaunchPanel({
     setEffort("");
     setModelInfo(null);
   }, [defaultBackend]);
+
+  useEffect(() => {
+    if (!permissionOptions.some((option) => option.id === permissionMode)) {
+      setPermissionMode(permissionOptions[0]?.id ?? "default");
+    }
+  }, [permissionOptions, permissionMode]);
 
   // An "xhigh" effort carried over from one backend would be invalid
   // on the next, and per-backend model lists don't overlap.
@@ -192,6 +205,7 @@ export function LaunchPanel({
         transport || null,
         args,
         configOverrides,
+        permissionMode || null,
       );
       setTitle("");
     } finally {
@@ -233,42 +247,53 @@ export function LaunchPanel({
             onTransportChange={setTransport}
             catalog={catalog}
           />
-          <div className="launch-body-grid two-col">
-            <div className="launch-body-col">
-              <WorkingDirectoryField
-                cwd={cwd}
-                onChange={setCwd}
-                targetLabel={targetLabel}
-                recentCwds={recentCwds}
-              />
+          <div className="launch-body-grid">
+            <WorkingDirectoryField
+              cwd={cwd}
+              onChange={setCwd}
+              targetLabel={targetLabel}
+              recentCwds={recentCwds}
+            />
+            <label className="field">
+              <span>Title</span>
+              <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Optional" />
+            </label>
+            {permissionOptions.length > 0 ? (
               <label className="field">
-                <span>Title</span>
-                <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Optional" />
+                <span>Permission mode</span>
+                <select
+                  value={permissionMode}
+                  onChange={(event) => setPermissionMode(event.target.value)}
+                >
+                  {permissionOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </label>
-            </div>
-            <div className="launch-body-col">
-              <ModelPicker
-                key={`${backend}:${launchTargetId ?? "local"}`}
-                host={host}
-                token={token}
-                backend={backend}
-                launchTargetId={launchTargetId}
-                value={model}
-                onChange={setModel}
-                onAuthFailure={onAuthFailure}
-                onModelsLoaded={handleModelsLoaded}
+            ) : null}
+            <ModelPicker
+              key={`${backend}:${launchTargetId ?? "local"}`}
+              host={host}
+              token={token}
+              backend={backend}
+              launchTargetId={launchTargetId}
+              value={model}
+              onChange={setModel}
+              onAuthFailure={onAuthFailure}
+              onModelsLoaded={handleModelsLoaded}
+              disabled={formBusy}
+              defaultModelLabel={modelInfo?.default_model_label ?? null}
+            />
+            {effortSupported ? (
+              <EffortPicker
+                options={effortOptions}
+                value={effort}
+                onChange={setEffort}
                 disabled={formBusy}
-                defaultModelLabel={modelInfo?.default_model_label ?? null}
               />
-              {effortSupported ? (
-                <EffortPicker
-                  options={effortOptions}
-                  value={effort}
-                  onChange={setEffort}
-                  disabled={formBusy}
-                />
-              ) : null}
-            </div>
+            ) : null}
           </div>
           <LaunchOptionsDetails
             mode="new"

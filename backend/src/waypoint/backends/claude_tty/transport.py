@@ -35,8 +35,11 @@ class ClaudeTtyTransport(TmuxTransport):
         # permission dialog, which it declines. Drop any pending approval now
         # so ``has_pending_approval`` goes false immediately instead of lingering
         # until the next dialog poll, where a racing ``respond_to_approval``
-        # would fire a stray digit at the ready prompt.
+        # would fire a stray digit at the ready prompt. A pending question is
+        # already dismissed on the pane (we Esc it when surfacing), so just drop
+        # the entry so a later answer is rejected rather than misrouted.
         self._plugin._pending_approvals.pop(session.id, None)
+        self._plugin._pending_questions.pop(session.id, None)
         await self.adapter.send_bytes(self._target(session), b"\x1b")
 
     def has_pending_approval(self, session: SessionRecord) -> bool:

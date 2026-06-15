@@ -19,6 +19,7 @@ from enum import StrEnum
 
 class PaneScreen(StrEnum):
     APPROVAL = "approval"
+    QUESTION = "question"
     TRUST = "trust"
     MODEL_SELECTOR = "model_selector"
     EFFORT_POPUP = "effort_popup"
@@ -35,6 +36,11 @@ class PaneScreen(StrEnum):
 # brittle to that.
 _APPROVAL_FOOTER = "Esc to cancel · Tab to amend"
 _APPROVAL_QUESTION_MARKER = "Do you want to"
+# The AskUserQuestion popup carries its own navigation footer, distinct from the
+# permission dialog's "Tab to amend". We only need to recognize it: the dialog
+# is dismissed with Esc so the TUI flushes the structured questions to the
+# transcript, which is surfaced from there rather than parsed off the pane.
+_QUESTION_FOOTER = "Tab/Arrow keys to navigate"
 _MODEL_FOOTER = "Enter to set as default"
 _MODEL_MARKER = "Select model"
 _EFFORT_FOOTER = "←/→ to adjust · Enter to confirm"
@@ -103,6 +109,8 @@ def classify(screen: str) -> PaneScreen:
         screen, compact, _APPROVAL_QUESTION_MARKER
     ):
         return PaneScreen.APPROVAL
+    if _contains(screen, compact, _QUESTION_FOOTER):
+        return PaneScreen.QUESTION
     if _contains(screen, compact, _TRUST_MARKER):
         return PaneScreen.TRUST
     if _contains(screen, compact, _MODEL_FOOTER) and _contains(

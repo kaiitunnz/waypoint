@@ -1,0 +1,13 @@
+❯ Use the AskUserQuestion tool to ask me TWO questions at once: (1) tabs or spaces, (2) light or dark theme. Each with
+  two options. Do not do anything else first.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☐ Indentation  ☐ Theme  ✔ Submit  →
+Tabs or spaces?
+❯ 1. Tabs
+     Use tab characters for indentation
+  2. Spaces
+     Use spaces for indentation
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

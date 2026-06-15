@@ -57,7 +57,7 @@ from waypoint.backends.claude_code.threads import (
     find_local_claude_thread,
     list_local_claude_threads,
 )
-from waypoint.backends.claude_tty._state import PendingTtyApproval
+from waypoint.backends.claude_tty._state import PendingTtyApproval, PendingTtyQuestion
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import PluginConfig
@@ -68,6 +68,7 @@ from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
     BackendModelOption,
     CommandCompletion,
+    EventKind,
     SessionCreateRequest,
     SessionRateLimitUsage,
     SessionRecord,
@@ -151,6 +152,7 @@ class ClaudeTtyPlugin(TmuxPlugin):
     def __init__(self) -> None:
         self._tailer_tasks: dict[str, asyncio.Task[None]] = {}
         self._pending_approvals: dict[str, PendingTtyApproval] = {}
+        self._pending_questions: dict[str, PendingTtyQuestion] = {}
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
         from waypoint.backends.claude_tty.transport import ClaudeTtyTransport
@@ -298,6 +300,7 @@ class ClaudeTtyPlugin(TmuxPlugin):
             with suppress(asyncio.CancelledError, Exception):
                 await tailer_task
         self._pending_approvals.pop(session.id, None)
+        self._pending_questions.pop(session.id, None)
 
     async def create_session(
         self,
@@ -696,6 +699,7 @@ class ClaudeTtyPlugin(TmuxPlugin):
             with suppress(TmuxError):
                 await runtime.tmux.kill_session(old_tmux_session)
         self._pending_approvals.pop(session.id, None)
+        self._pending_questions.pop(session.id, None)
         tailer_task = self._tailer_tasks.pop(session.id, None)
         if tailer_task is not None:
             tailer_task.cancel()
@@ -768,6 +772,78 @@ class ClaudeTtyPlugin(TmuxPlugin):
             runtime, session.id, thread_id, session.cwd, start_at_end=True
         )
         return True
+
+    # ── AskUserQuestion ──────────────────────────────────────────────────────
+
+    async def answer_question(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        answer: str,
+        tool_use_id: str | None,
+        answers: list[dict[str, Any]] | None,
+    ) -> SessionRecord:
+        """Deliver an answer to a surfaced AskUserQuestion as a new user turn.
+
+        The popup was already Esc-dismissed when the tailer surfaced it, so the
+        pane sits at the ready prompt; the answer is sent as an ordinary message
+        the way claude_code carries it on a denied tool. A synthetic tool_result
+        flips the surfaced card to answered so it stops accepting input, and a
+        styled answers card records the choices.
+        """
+        pending = self._pending_questions.get(session.id)
+        if pending is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="no pending question for this session",
+            )
+        if (
+            tool_use_id is not None
+            and pending.tool_use_id
+            and pending.tool_use_id != tool_use_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="question answer does not match the pending question",
+            )
+        self._pending_questions.pop(session.id, None)
+        resolved_tool_use_id = pending.tool_use_id or tool_use_id
+
+        transport = runtime.transport_for(session)
+        await transport.send_input(
+            session,
+            f"User has answered your questions: {answer}. "
+            "You can now continue with the user's answers in mind.",
+        )
+
+        if resolved_tool_use_id:
+            await runtime._emit_adapter_event(
+                session.id,
+                EventKind.TOOL_RESULT,
+                "User answered the question.",
+                {
+                    "method": "user.tool_result",
+                    "item_id": resolved_tool_use_id,
+                    "tool_use_id": resolved_tool_use_id,
+                    "is_error": False,
+                },
+                SessionStatus.RUNNING,
+            )
+
+        extra: dict[str, Any] = {"kind": "ask_user_question_answer"}
+        if answers:
+            extra["answers"] = answers
+        if resolved_tool_use_id:
+            extra["tool_use_id"] = resolved_tool_use_id
+        # Flip status to RUNNING before recording the answer so the broadcast
+        # snapshot shows the spinner immediately, matching handle_input.
+        updated = runtime.storage.update_session(
+            session.id, status=SessionStatus.RUNNING
+        )
+        await runtime._record_user_event(
+            session.id, answer, submit=True, extra_metadata=extra
+        )
+        return updated
 
     # ── Thread discovery + import ────────────────────────────────────────────
 

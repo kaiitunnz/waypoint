@@ -69,6 +69,16 @@ class TranscriptNormalizer:
         self._pending_task_creates: dict[str, dict[str, Any]] = {}
         self._suppressed_result_tool_use_ids: set[str] = set()
         self._task_card_item_id: str | None = None
+        # Set by the tailer right after it Esc-dismisses an AskUserQuestion
+        # popup. The Esc forces the TUI to flush the tool_use record (and a
+        # "user rejected" result) to the transcript; the latch tells the next
+        # AskUserQuestion record to surface as an answerable card rather than a
+        # plain tool_call, and to swallow the synthetic rejection.
+        self._expect_dismissed_question: bool = False
+        self._dismissed_question_ids: set[str] = set()
+
+    def arm_question_dismissal(self) -> None:
+        self._expect_dismissed_question = True
 
     def process_record(self, record: dict[str, Any]) -> list[NormalizedEvent]:
         rec_type = record.get("type")
@@ -114,6 +124,27 @@ class TranscriptNormalizer:
                 has_tool_use = True
                 tool_use_id = str(block.get("id") or "")
                 tool_name = str(block.get("name") or "tool")
+                if tool_name == "AskUserQuestion" and self._expect_dismissed_question:
+                    self._expect_dismissed_question = False
+                    if tool_use_id:
+                        self._dismissed_question_ids.add(tool_use_id)
+                    events.append(
+                        NormalizedEvent(
+                            kind=EventKind.TOOL_CALL,
+                            text=f"{tool_name}\n"
+                            f"{json.dumps(block.get('input') or {}, indent=2)}",
+                            metadata={
+                                "method": "assistant.tool_use",
+                                "item_id": tool_use_id,
+                                "tool_name": tool_name,
+                                "tool_use_id": tool_use_id,
+                                "payload": block,
+                                "status": SessionStatus.WAITING_INPUT,
+                            },
+                            status=SessionStatus.WAITING_INPUT,
+                        )
+                    )
+                    continue
                 if tool_name in TASK_TOOL_NAMES:
                     tool_input: dict[str, Any] = block.get("input") or {}
                     if tool_name == "TaskCreate":
@@ -194,6 +225,7 @@ class TranscriptNormalizer:
             return []
 
         turn_aborted = _is_user_rejection(record)
+        dismissed_question = False
 
         # Only tool_result blocks are surfaced from user records. A user/peer
         # turn's own text is already recorded at the input boundary
@@ -204,6 +236,14 @@ class TranscriptNormalizer:
             if block.get("type") != "tool_result":
                 continue
             tool_use_id = str(block.get("tool_use_id") or "")
+            if tool_use_id and tool_use_id in self._dismissed_question_ids:
+                # The "user rejected" result the TUI writes when we Esc the
+                # popup to surface it. Drop it so the question card stays
+                # answerable, and skip the abort note below — the session
+                # waits on the user, it has not ended the turn.
+                self._dismissed_question_ids.discard(tool_use_id)
+                dismissed_question = True
+                continue
             if tool_use_id and tool_use_id in self._pending_task_creates:
                 create_input = self._pending_task_creates.pop(tool_use_id)
                 task_id = extract_created_task_id(block) or tool_use_id
@@ -241,7 +281,7 @@ class TranscriptNormalizer:
 
         # A declined tool ends the turn with no terminal-stop_reason record to
         # follow, so resolve the session to idle here or it stays stuck running.
-        if turn_aborted:
+        if turn_aborted and not dismissed_question:
             events.append(
                 NormalizedEvent(
                     kind=EventKind.SYSTEM_NOTE,

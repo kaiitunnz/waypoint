@@ -1,11 +1,10 @@
 # Coding-agent backend plugins
 
-Waypoint orchestrates coding agents — Claude Code, Codex, OpenCode, future ones —
-through a plugin registry. The runtime, API, storage, and frontend
-catalog all dispatch by plugin id; adding a new backend means writing a
-plugin module, not editing the core. This doc covers the design, the
-contract each plugin must satisfy, and a recipe for shipping a new
-backend.
+Waypoint orchestrates coding sessions as an (agent, transport) pair through a plugin registry. The AgentPlugin (e.g., `claude_code`, `codex`, `opencode`) owns the protocol, discovery, event normalizer, and the `AgentLaunchContract` (`launch_flags`, `pregenerate_thread_id`, `resume_args`, `conversation_exists`, `capture_thread_id`). The Transport (whether a native structured adapter per agent, a generic `tmux` wrapper, or a tty-tail like `claude_tty`) owns `send`, `interrupt`, `approval`, `lifecycle`, and the `is_structured` / `supports_resume` flags.
+
+Importantly, `tmux` and `claude_tty` are transports, not peer backends. The generic transports drive any agent without knowing which one it is, because the launch contract lives on the agent itself (e.g., there are no backend-specific `if` branches in the `tmux` pane wrapper).
+
+The runtime, API, storage, and frontend catalog all dispatch by plugin id; adding a new backend means writing a plugin module, not editing the core. This doc covers the design, the contract each plugin must satisfy, and a recipe for shipping a new backend.
 
 ## Goals
 

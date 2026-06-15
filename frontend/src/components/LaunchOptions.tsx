@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 
-import { LaunchMode } from "@/lib/types";
+import type { BackendCatalog } from "@/lib/backends";
+import { transportFidelity, transportPickerLabel } from "@/lib/backends";
+import { LaunchMode, SessionTransport } from "@/lib/types";
 
 export function GearGlyph() {
   return (
@@ -35,6 +37,9 @@ interface LaunchOptionsDetailsProps {
   launchMode: LaunchMode;
   onLaunchModeChange: (mode: LaunchMode) => void;
   availableModes?: LaunchMode[];
+  // The agent-primary launch flow drives the transport with TransportPicker, so
+  // it hides the legacy launch-mode selector here. Resume / schedule keep it.
+  showLaunchMode?: boolean;
   supportsCustomArgs?: boolean;
   supportsConfigOverrides?: boolean;
   customArgsText?: string;
@@ -49,6 +54,7 @@ export function LaunchOptionsDetails({
   launchMode,
   onLaunchModeChange,
   availableModes,
+  showLaunchMode = true,
   supportsCustomArgs,
   supportsConfigOverrides,
   customArgsText,
@@ -61,6 +67,11 @@ export function LaunchOptionsDetails({
   const showCustomArgs = mode === "new" && Boolean(supportsCustomArgs);
   const showConfigOverrides = mode === "new" && Boolean(supportsConfigOverrides);
   const showWarning = showCustomArgs || showConfigOverrides;
+
+  // Nothing to configure — don't render an empty Advanced toggle.
+  if (!showLaunchMode && !showCustomArgs && !showConfigOverrides) {
+    return null;
+  }
 
   return (
     <div className={`advanced-section${open ? " open" : ""}`}>
@@ -76,11 +87,13 @@ export function LaunchOptionsDetails({
       </button>
       <div className="advanced-body">
         <div className="advanced-body-inner">
-          <LaunchModeField
-            value={launchMode}
-            onChange={onLaunchModeChange}
-            availableModes={availableModes}
-          />
+          {showLaunchMode ? (
+            <LaunchModeField
+              value={launchMode}
+              onChange={onLaunchModeChange}
+              availableModes={availableModes}
+            />
+          ) : null}
           {showCustomArgs ? (
             <label className="field advanced-args-field">
               <span>Custom CLI args</span>
@@ -178,5 +191,100 @@ export function LaunchModeField({
         ))}
       </div>
     </label>
+  );
+}
+
+interface TransportPickerProps {
+  transports: SessionTransport[];
+  value: SessionTransport;
+  onChange: (transport: SessionTransport) => void;
+  catalog: BackendCatalog;
+}
+
+// Agent-primary transport / fidelity selector. Populated from an agent's
+// supported_transports and rendered as cards that spell out the fidelity
+// trade-off (structured cards vs live terminal). Collapses to nothing when the
+// agent exposes a single transport, since there is nothing to choose.
+export function TransportPicker({
+  transports,
+  value,
+  onChange,
+  catalog,
+}: TransportPickerProps) {
+  if (transports.length <= 1) {
+    return null;
+  }
+  return (
+    <div className="field transport-field">
+      <span>Transport · Fidelity</span>
+      <div
+        className="transport-picker"
+        role="radiogroup"
+        aria-label="Transport and fidelity"
+      >
+        {transports.map((transport) => {
+          const { kind, hint } = transportFidelity(transport, catalog);
+          const active = value === transport;
+          return (
+            <button
+              key={transport}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              className={`transport-option${active ? " active" : ""}`}
+              onClick={() => onChange(transport)}
+            >
+              <span
+                className={`transport-option-icon is-${kind}`}
+                aria-hidden="true"
+              >
+                {kind === "structured" ? <StructuredGlyph /> : <TerminalGlyph />}
+              </span>
+              <span className="transport-option-text">
+                <span className="transport-option-label">
+                  {transportPickerLabel(transport, catalog)}
+                </span>
+                <span className="transport-option-hint">{hint}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function StructuredGlyph() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="2" y="2.5" width="12" height="3.4" rx="1.1" fill="currentColor" opacity="0.85" />
+      <rect x="2" y="7.3" width="12" height="2.4" rx="0.9" fill="currentColor" opacity="0.45" />
+      <rect x="2" y="11" width="8" height="2.4" rx="0.9" fill="currentColor" opacity="0.45" />
+    </svg>
+  );
+}
+
+function TerminalGlyph() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect
+        x="1.6"
+        y="2.6"
+        width="12.8"
+        height="10.8"
+        rx="1.6"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        opacity="0.85"
+      />
+      <path
+        d="M4.3 6.2l2 1.9-2 1.9"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M7.8 10.2h3.6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
   );
 }

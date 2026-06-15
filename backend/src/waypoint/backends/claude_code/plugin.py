@@ -114,9 +114,10 @@ class ClaudeCodeLaunchTargetConfig(PluginLaunchTargetConfig):
 class ClaudeCodePlugin(DefaultLaunchContract):
     id = "claude_code"
     transport_id = "claude_cli"
-    # Driven over its native stream-json adapter by default, or the generic
-    # tmux pane wrapper as the managed-launch fallback.
-    supported_transports = ("claude_cli", "tmux")
+    # Driven over its native stream-json adapter by default, the tty-tail
+    # driver for a faithful TUI, or the generic tmux pane wrapper as the
+    # managed-launch fallback.
+    supported_transports = ("claude_cli", "claude_tty", "tmux")
     default_transport = "claude_cli"
     label = "Claude Code"
     import_request_schema: type[BaseModel] | None = ClaudeThreadImportRequest

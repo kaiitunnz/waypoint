@@ -292,6 +292,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # back to the raw dict.
         schema = plugin.import_request_schema
         request: Any = schema.model_validate(body) if schema is not None else body
+        # A pinned transport must be one the agent declares (mirrors the
+        # create/schedule paths); the runtime drives the resulting session
+        # over the (agent, transport) pair while persisting backend=agent.
+        transport = getattr(request, "transport", None)
+        if transport is not None:
+            context.runtime._validate_supported_transport(backend, transport)
         session = await plugin.import_thread(context.runtime, request)
         return {"session": session.model_dump(mode="json")}
 

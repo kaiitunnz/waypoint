@@ -8830,16 +8830,6 @@ html[data-theme="light"] .term-compose-input {
   font-size: 0.82rem;
 }
 
-/* Launch-mode segmented control — content-width, not row-wide. The
-   ``.field`` ancestor is ``display: grid``; ``justify-self: start`` is
-   what actually keeps the segmented div from stretching to the full
-   row. ``align-self: flex-start`` does nothing here. */
-.launch-mode-field .launch-mode-segmented {
-  justify-self: start;
-  display: inline-flex;
-  width: auto;
-}
-
 /* ─── Form field hints ─── */
 /* Secondary one-line help beneath a ``.field`` control (e.g. the selected
    Interface's description, the Reasoning-effort hint). Rides ``--muted`` so it

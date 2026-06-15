@@ -2,8 +2,6 @@
 
 import { useState } from "react";
 
-import { LaunchMode } from "@/lib/types";
-
 export function GearGlyph() {
   return (
     <svg
@@ -32,12 +30,6 @@ export function GearGlyph() {
 
 interface LaunchOptionsDetailsProps {
   mode: "new" | "resume";
-  launchMode: LaunchMode;
-  onLaunchModeChange: (mode: LaunchMode) => void;
-  availableModes?: LaunchMode[];
-  // The agent-primary launch flow drives the transport with TransportPicker, so
-  // it hides the legacy launch-mode selector here. Resume / schedule keep it.
-  showLaunchMode?: boolean;
   supportsCustomArgs?: boolean;
   supportsConfigOverrides?: boolean;
   customArgsText?: string;
@@ -49,10 +41,6 @@ interface LaunchOptionsDetailsProps {
 
 export function LaunchOptionsDetails({
   mode,
-  launchMode,
-  onLaunchModeChange,
-  availableModes,
-  showLaunchMode = true,
   supportsCustomArgs,
   supportsConfigOverrides,
   customArgsText,
@@ -67,7 +55,7 @@ export function LaunchOptionsDetails({
   const showWarning = showCustomArgs || showConfigOverrides;
 
   // Nothing to configure — don't render an empty Advanced toggle.
-  if (!showLaunchMode && !showCustomArgs && !showConfigOverrides) {
+  if (!showCustomArgs && !showConfigOverrides) {
     return null;
   }
 
@@ -85,13 +73,6 @@ export function LaunchOptionsDetails({
       </button>
       <div className="advanced-body">
         <div className="advanced-body-inner">
-          {showLaunchMode ? (
-            <LaunchModeField
-              value={launchMode}
-              onChange={onLaunchModeChange}
-              availableModes={availableModes}
-            />
-          ) : null}
           {showCustomArgs ? (
             <label className="field advanced-args-field">
               <span>Custom CLI args</span>
@@ -132,62 +113,5 @@ export function LaunchOptionsDetails({
         </div>
       </div>
     </div>
-  );
-}
-
-interface LaunchModeFieldProps {
-  value: LaunchMode;
-  onChange: (mode: LaunchMode) => void;
-  // When provided, only these transport options are offered (capability-gated
-  // per agent). Defaults to all three.
-  availableModes?: LaunchMode[];
-}
-
-// The launch mode is really a transport / fidelity choice: "direct" runs the
-// agent's native structured adapter, "tmux_wrapper" a generic terminal pane
-// (heuristic transcript), and "auto" lets the backend pick.
-const LAUNCH_MODE_OPTIONS: Array<[LaunchMode, string, string]> = [
-  ["auto", "Auto", "Let Waypoint pick the best transport for this agent"],
-  ["direct", "Direct", "Native structured adapter — full-fidelity transcript"],
-  [
-    "tmux_wrapper",
-    "tmux",
-    "Generic tmux pane — live terminal, heuristic transcript",
-  ],
-];
-
-// Reusable transport selector. Compact (content-width, not row-wide) so it
-// fits naturally inside Advanced sections in both LaunchPanel and SchedulePanel.
-export function LaunchModeField({
-  value,
-  onChange,
-  availableModes,
-}: LaunchModeFieldProps) {
-  const options = availableModes
-    ? LAUNCH_MODE_OPTIONS.filter(([opt]) => availableModes.includes(opt))
-    : LAUNCH_MODE_OPTIONS;
-  return (
-    <label className="field launch-mode-field">
-      <span>Transport</span>
-      <div
-        className="segmented segmented-quiet launch-mode-segmented"
-        role="radiogroup"
-        aria-label="Transport"
-      >
-        {options.map(([opt, label, hint]) => (
-          <button
-            key={opt}
-            type="button"
-            role="radio"
-            aria-checked={value === opt}
-            title={hint}
-            className={`segmented-item ${value === opt ? "active" : ""}`}
-            onClick={() => onChange(opt)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-    </label>
   );
 }

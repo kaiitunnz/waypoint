@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  CSSProperties,
   FormEvent,
   useCallback,
   useEffect,
@@ -11,12 +12,17 @@ import {
 } from "react";
 
 import { EffortPicker } from "@/components/EffortPicker";
-import { LaunchOptionsDetails } from "@/components/LaunchOptions";
+import { LaunchOptionsDetails, TransportPicker } from "@/components/LaunchOptions";
 import { ModelPicker } from "@/components/ModelPicker";
 import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
 import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
 import type { BackendCatalog } from "@/lib/backends";
-import { humaniseBackend, launchModesFor } from "@/lib/backends";
+import {
+  agentTransports,
+  defaultTransportFor,
+  humaniseBackend,
+  transportFidelity,
+} from "@/lib/backends";
 import {
   Backend,
   BackendModelListResponse,
@@ -98,6 +104,7 @@ export function LaunchPanel({
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const [launchMode, setLaunchMode] = useState<LaunchMode>("auto");
+  const [transport, setTransport] = useState<SessionTransport>("");
   const [customArgsText, setCustomArgsText] = useState("");
   const [configOverridesText, setConfigOverridesText] = useState("");
   const [modelInfo, setModelInfo] = useState<BackendModelListResponse | null>(null);
@@ -107,17 +114,18 @@ export function LaunchPanel({
   const capabilities = catalog.byId(backend)?.capabilities;
   const supportsCustomArgs = capabilities?.supports_custom_cli_args ?? false;
   const supportsConfigOverrides = capabilities?.supports_config_overrides ?? false;
-  // The transport/fidelity options available for the selected agent. "direct"
-  // is the native structured adapter, "tmux_wrapper" the generic terminal
-  // pane, "auto" lets the backend choose.
-  const availableLaunchModes = useMemo(
-    () => launchModesFor(backend, catalog),
+  // The transports this agent can be launched over, defaulting to its preferred
+  // one. An explicit transport supersedes launch_mode at the API, so the new
+  // flow always sends launch_mode "auto" and pins the transport instead.
+  const transports = useMemo(
+    () => agentTransports(backend, catalog),
     [backend, catalog],
   );
+  const defaultTransport = defaultTransportFor(backend, catalog);
   // Codex's CLI has no `--effort` flag, so a tmux-wrapped codex session
   // can't honor an effort selection at launch time. Hide the picker
   // instead of letting the user pick a value that silently drops.
-  const effortSupported = !(backend === "codex" && launchMode === "tmux_wrapper");
+  const effortSupported = !(backend === "codex" && transport === "tmux");
 
   const handleBackendChange = useCallback((nextBackend: Backend) => {
     setBackend(nextBackend);
@@ -141,12 +149,15 @@ export function LaunchPanel({
     setModelInfo(null);
   }, [backend, launchTargetId]);
 
-  // Fall back to "auto" when the chosen transport isn't offered by the agent.
+  // Default to the agent's preferred transport, and re-clamp whenever the agent
+  // changes so a transport carried over from another agent never sticks.
   useEffect(() => {
-    setLaunchMode((mode) =>
-      availableLaunchModes.includes(mode) ? mode : "auto",
+    setTransport((current) =>
+      transports.includes(current)
+        ? current
+        : (defaultTransport ?? transports[0] ?? ""),
     );
-  }, [availableLaunchModes]);
+  }, [transports, defaultTransport]);
 
   const effortOptions = useMemo(() => {
     if (!modelInfo) return [];
@@ -201,8 +212,8 @@ export function LaunchPanel({
         title,
         model.trim() || null,
         effortSupported ? effort.trim() || null : null,
-        launchMode,
-        null,
+        "auto",
+        transport || null,
         args,
         configOverrides,
       );
@@ -238,26 +249,20 @@ export function LaunchPanel({
 
       {mode === "new" ? (
         <form className="launch-body" onSubmit={submitCreate}>
+          <AgentPicker
+            agents={supportedBackends}
+            value={backend}
+            onChange={handleBackendChange}
+            catalog={catalog}
+          />
+          <TransportPicker
+            transports={transports}
+            value={transport}
+            onChange={setTransport}
+            catalog={catalog}
+          />
           <div className="launch-body-grid two-col">
             <div className="launch-body-col">
-              {/* The Backend select lists the launchable agents (the catalog
-                  minus the tmux managed-launch fallback); the transport is
-                  chosen separately in Advanced. claude_tty stays its own agent
-                  entry rather than a claude_code transport option because no
-                  launch-mode selects the tty-tail transport yet.
-                  TODO: collapse to a single agent-primary picker (agent +
-                  transport sub-select) once the backend wires a launch-mode
-                  for the tty-tail transport. */}
-              <label className="field">
-                <span>Agent</span>
-                <select value={backend} onChange={(event) => handleBackendChange(event.target.value as Backend)}>
-                  {supportedBackends.map((id) => (
-                    <option key={id} value={id}>
-                      {catalog.byId(id)?.label ?? humaniseBackend(id)}
-                    </option>
-                  ))}
-                </select>
-              </label>
               <WorkingDirectoryField
                 cwd={cwd}
                 onChange={setCwd}
@@ -297,7 +302,7 @@ export function LaunchPanel({
             mode="new"
             launchMode={launchMode}
             onLaunchModeChange={setLaunchMode}
-            availableModes={availableLaunchModes}
+            showLaunchMode={false}
             supportsCustomArgs={supportsCustomArgs}
             supportsConfigOverrides={supportsConfigOverrides}
             customArgsText={customArgsText}
@@ -307,7 +312,11 @@ export function LaunchPanel({
             formBusy={formBusy}
           />
           <div className="launch-actions">
-            <span className="grow muted">Auto picks the structured adapter when available for better transcript fidelity.</span>
+            <span className="grow muted">
+              {transport
+                ? transportFidelity(transport, catalog).hint
+                : "Pick an agent and how to drive it."}
+            </span>
             <button className="primary" disabled={formBusy} type="submit">
               Launch session
             </button>
@@ -372,6 +381,52 @@ export function LaunchPanel({
         </form>
       ) : null}
     </section>
+  );
+}
+
+interface AgentPickerProps {
+  agents: Backend[];
+  value: Backend;
+  onChange: (backend: Backend) => void;
+  catalog: BackendCatalog;
+}
+
+// Agent-primary launch selector: each registered agent rendered as a chip with
+// its badge glyph and label. The chosen agent drives which transports the
+// TransportPicker offers below it.
+function AgentPicker({ agents, value, onChange, catalog }: AgentPickerProps) {
+  return (
+    <div className="field agent-field">
+      <span>Agent</span>
+      <div className="agent-picker" role="radiogroup" aria-label="Agent">
+        {agents.map((id) => {
+          const descriptor = catalog.byId(id);
+          const label = descriptor?.label ?? humaniseBackend(id);
+          const glyph =
+            descriptor?.badges?.glyph ?? label.slice(0, 1).toUpperCase();
+          const color = descriptor?.badges?.color;
+          const active = value === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              className={`agent-option${active ? " active" : ""}`}
+              style={
+                color ? ({ "--agent-color": color } as CSSProperties) : undefined
+              }
+              onClick={() => onChange(id)}
+            >
+              <span className="agent-option-glyph" aria-hidden="true">
+                {glyph}
+              </span>
+              <span className="agent-option-label">{label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

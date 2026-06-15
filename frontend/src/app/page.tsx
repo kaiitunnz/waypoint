@@ -46,7 +46,7 @@ import {
   writeLaunchTarget,
   writeToken,
 } from "@/lib/store";
-import { isManagedLaunchWrapper, useBackendCatalog } from "@/lib/backends";
+import { launchableAgents, useBackendCatalog } from "@/lib/backends";
 import {
   AssistantSummary,
   Backend,
@@ -156,9 +156,7 @@ export default function HomePage() {
   const supportedBackends = activeLaunchTarget?.supported_backends.length
     ? activeLaunchTarget.supported_backends
     : registeredBackends;
-  const launchableBackends = supportedBackends.filter(
-    (id) => !isManagedLaunchWrapper(id, catalog),
-  );
+  const launchableBackends = launchableAgents(supportedBackends, catalog);
   const effectiveDefaultBackend = launchableBackends.includes(activeLaunchTarget?.default_backend ?? defaultBackend)
     ? (activeLaunchTarget?.default_backend ?? defaultBackend)
     : launchableBackends[0] ?? supportedBackends[0];

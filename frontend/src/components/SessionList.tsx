@@ -4,7 +4,8 @@ import Link from "next/link";
 import { MouseEvent, ReactNode, useEffect, useMemo, useState } from "react";
 
 import {
-  fidelityFor,
+  defaultTransportFor,
+  displayAgentFor,
   humaniseBackend,
   transportLabel,
   type BackendCatalog,
@@ -185,18 +186,25 @@ export function SessionList({
 
   function renderCard(session: SessionRecord): ReactNode {
     const pinned = Boolean(session.pinned_at);
+    // Normalise legacy transport-as-backend rows (e.g. backend=claude_tty) to
+    // their owning agent so old and new sessions render identically. The
+    // transport chip is redundant when the session runs over the agent's
+    // default transport, so show it only when it differs (Emulated/Terminal).
+    const agent = displayAgentFor(session.backend, session.transport, catalog);
+    const agentDefault = defaultTransportFor(agent, catalog);
+    const showTransport =
+      agentDefault !== null && session.transport !== agentDefault;
     return (
       <Link className="panel session-card" href={`/session/${session.id}`} key={session.id}>
         <div className="session-row">
-          <span className={`badge ${session.backend}`}>
-            {humaniseBackend(session.backend, catalog)}
+          <span className={`badge ${agent}`}>
+            {humaniseBackend(agent, catalog)}
           </span>
-          <span className={`badge transport ${session.transport}`}>
-            {transportLabel(session.transport, catalog)}
-          </span>
-          <span className={`badge fidelity ${fidelityFor(session.transport, catalog)}`}>
-            {fidelityFor(session.transport, catalog)}
-          </span>
+          {showTransport ? (
+            <span className={`badge transport ${session.transport}`}>
+              {transportLabel(session.transport, catalog)}
+            </span>
+          ) : null}
           {session.launch_target_id ? (
             <span className="badge neutral">{session.launch_target_id}</span>
           ) : null}

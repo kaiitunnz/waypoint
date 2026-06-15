@@ -43,9 +43,11 @@ import {
   type BackendCatalog,
   fidelityFor,
   humaniseBackend,
+  liveTerminal,
   permissionModesFor,
   supportsApprovalNote,
   supportsAttachments,
+  supportsFork,
   supportsPlanApproval,
   supportsReattachAfterExit,
   supportsResume,
@@ -912,7 +914,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // through here so terminal sessions get the same behaviour as chat ones.
   // Returns ``"handled"`` / ``"error"`` when the text was a control command,
   // or ``null`` when the caller should fall through to its normal send path.
-  // ``allowFork`` is false for tmux, whose backend can't fork.
+  // ``allowFork`` reflects the agent's fork capability (and the launchpad guard).
   const runFrontendControlCommand = useCallback(
     async (
       text: string,
@@ -975,6 +977,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     [session, host, token, sessionId, router, handleAuthFailure],
   );
 
+  // Whether /fork is offered, driven by the agent's capability rather than a
+  // transport proxy. The persistent assistant additionally suppresses it
+  // (forking would spawn a stray managed session off the launchpad).
+  const canFork = Boolean(session && supportsFork(session.backend, catalog));
+
   const submitInput = useCallback(async (
     text: string,
     command?: SessionCommandInvocation,
@@ -989,7 +996,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     // Attachment-bearing turns are never control commands, so skip the check.
     if (!attachments?.length) {
       const handled = await runFrontendControlCommand(text, {
-        allowFork: !assistant,
+        allowFork: canFork && !assistant,
         allowNew: !assistant,
       });
       if (handled !== null) {
@@ -1008,7 +1015,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       setError(sendError instanceof Error ? sendError.message : "failed to send input");
       return false;
     }
-  }, [runFrontendControlCommand, handleAuthFailure, host, token, sessionId, assistant]);
+  }, [runFrontendControlCommand, handleAuthFailure, host, token, sessionId, assistant, canFork]);
 
   const onSendWithOptimistic = useCallback(
     async (
@@ -1274,7 +1281,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const sessionExited = Boolean(
     session && (session.status === "exited" || session.status === "error"),
   );
-  const terminalOnly = session?.transport === "tmux";
+  // The transport renders a live xterm pane (and locks the chat composer into
+  // terminal mode) rather than a structured transcript.
+  const terminalOnly = Boolean(session && liveTerminal(session.transport, catalog));
   const canReattachAfterExit = Boolean(
     session && supportsReattachAfterExit(session.backend, catalog),
   );
@@ -1300,7 +1309,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     currentTaskEvent !== null &&
     dismissedTaskSequence !== undefined &&
     currentTaskEvent.sequence !== dismissedTaskSequence;
-  const liveTmux = session?.transport === "tmux";
+  // The live-terminal transport (tmux) streams its pane over a WebSocket; the
+  // WS-pane effects below key off this rather than a hardcoded transport id.
+  const liveTmux = terminalOnly;
   const { theme } = useTheme();
   const terminalRef = useRef<XTerminalHandle | null>(null);
   const terminalSocketRef = useRef<WebSocket | null>(null);
@@ -1410,9 +1421,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // appends Enter when ``submit`` is true so each call lands as one
   // logical message rather than a stream of keystrokes. ``/new`` is caught
   // here as a Waypoint control command instead of being typed into the
-  // wrapped CLI; ``/fork`` is excluded because tmux sessions can't fork.
+  // wrapped CLI; ``/fork`` follows the agent's fork capability.
   const handleTerminalSubmit = useCallback(async (text: string): Promise<TerminalSubmitResult> => {
-    const handled = await runFrontendControlCommand(text, { allowFork: false });
+    const handled = await runFrontendControlCommand(text, { allowFork: canFork });
     if (handled !== null) {
       return handled === "handled" ? "ok" : "command-error";
     }
@@ -1420,7 +1431,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     if (socket?.readyState !== WebSocket.OPEN) return "socket-closed";
     socket.send(JSON.stringify({ type: "input_submit", text, submit: true }));
     return "ok";
-  }, [runFrontendControlCommand]);
+  }, [runFrontendControlCommand, canFork]);
 
   // Attachment-bearing terminal submits go over HTTP, not the terminal WS:
   // handle_input routes them through the tmux transport, which appends the

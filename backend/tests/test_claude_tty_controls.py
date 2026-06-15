@@ -564,6 +564,42 @@ async def test_import_thread_resumes_and_starts_tailer(
     assert meta["imported_thread_id"] == "imp-1"
 
 
+async def test_import_thread_persists_resolving_agent_backend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # When the runtime resolves claude_code's emulated transport to this driver,
+    # the imported session is persisted under the agent (claude_code), not the
+    # driver's own id, while the transport stays claude_tty.
+    info = _thread_info("imp-2")
+    info.cwd = str(tmp_path)
+    monkeypatch.setattr(plugin_mod, "find_local_claude_thread", lambda thread_id: info)
+    plugin = ClaudeTtyPlugin()
+    _stub_lifecycle(plugin)
+
+    target = MagicMock(session="s", window="0", pane="%1", pane_pid=7)
+    runtime = MagicMock()
+    runtime._generate_session_id.return_value = "claude_tty-efgh"
+    runtime._session_dir.return_value = tmp_path
+    runtime._command_for_backend.return_value = ["claude", "--resume", "imp-2"]
+    runtime.tmux.start_managed_session = AsyncMock(return_value=target)
+    runtime.tmux.pipe_output = AsyncMock()
+    runtime.tmux.resize_window = AsyncMock()
+    runtime.storage.list_sessions.return_value = []
+    created_holder: dict[str, SessionRecord] = {}
+    runtime.storage.create_session.side_effect = lambda s: created_holder.update(
+        session=s
+    )
+    runtime.get_session.side_effect = lambda sid: created_holder["session"]
+    runtime._record_system_event = AsyncMock()
+
+    request = ClaudeThreadImportRequest(thread_id="imp-2")
+    result = await plugin.import_thread(runtime, request, agent="claude_code")
+
+    assert result.backend == "claude_code"
+    assert result.transport == "claude_tty"
+    assert result.transport_state["thread_id"] == "imp-2"
+
+
 async def test_import_thread_missing_raises_404(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

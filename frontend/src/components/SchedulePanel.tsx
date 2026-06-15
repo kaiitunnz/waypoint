@@ -2,8 +2,12 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import {
+  AgentTransportPicker,
+  useTransportForAgent,
+} from "@/components/AgentTransportPicker";
 import { EffortPicker } from "@/components/EffortPicker";
-import { GearGlyph, LaunchModeField } from "@/components/LaunchOptions";
+import { GearGlyph } from "@/components/LaunchOptions";
 import { ModelPicker } from "@/components/ModelPicker";
 import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
 import type { BackendCatalog } from "@/lib/backends";
@@ -17,7 +21,6 @@ import {
   Backend,
   BackendModelListResponse,
   BackendModelOption,
-  LaunchMode,
   ScheduleCreateRequest,
   ScheduledSession,
 } from "@/lib/types";
@@ -62,7 +65,7 @@ export function SchedulePanel({
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [permissionMode, setPermissionMode] = useState<string>("default");
-  const [launchMode, setLaunchMode] = useState<LaunchMode>("auto");
+  const [transport, setTransport] = useTransportForAgent(backend, catalog);
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const [customArgsText, setCustomArgsText] = useState("");
@@ -84,8 +87,9 @@ export function SchedulePanel({
   const capabilities = catalog.byId(backend)?.capabilities;
   const supportsCustomArgs = capabilities?.supports_custom_cli_args ?? false;
   const supportsConfigOverrides = capabilities?.supports_config_overrides ?? false;
-  // Advanced section is always shown — launch_mode lives in there now, so
-  // even backends without custom args / config overrides surface it.
+  // The transport picker supersedes the launch-mode choice, so the Advanced
+  // section only carries the CLI passthrough fields now.
+  const showAdvancedSection = supportsCustomArgs || supportsConfigOverrides;
 
   useEffect(() => setBackend(defaultBackend), [defaultBackend]);
   useEffect(() => setCwd(defaultCwd), [defaultCwd]);
@@ -163,7 +167,10 @@ export function SchedulePanel({
     const payload: ScheduleCreateRequest = {
       backend,
       cwd,
-      launch_mode: launchMode,
+      // An explicit transport supersedes launch_mode at the API, so pin the
+      // transport and leave the launch mode on "auto", matching the New panel.
+      launch_mode: "auto",
+      transport: transport || null,
       title: title.trim() || null,
       initial_prompt: prompt.trim() || null,
       permission_mode: permissionMode || null,
@@ -227,17 +234,15 @@ export function SchedulePanel({
         </p>
       </div>
       <form className="stack" onSubmit={submit}>
+        <AgentTransportPicker
+          agents={supportedBackends}
+          agent={backend}
+          onAgentChange={setBackend}
+          transport={transport}
+          onTransportChange={setTransport}
+          catalog={catalog}
+        />
         <div className="schedule-grid">
-          <label className="field">
-            <span>Backend</span>
-            <select value={backend} onChange={(event) => setBackend(event.target.value as Backend)}>
-              {supportedBackends.map((id) => (
-                <option key={id} value={id}>
-                  {catalog.byId(id)?.label ?? humaniseBackend(id)}
-                </option>
-              ))}
-            </select>
-          </label>
           <WorkingDirectoryField
             cwd={cwd}
             onChange={setCwd}
@@ -284,6 +289,7 @@ export function SchedulePanel({
             disabled={busy}
           />
         </div>
+        {showAdvancedSection ? (
         <div className={`advanced-section${showAdvanced ? " open" : ""}`}>
           <button
             type="button"
@@ -297,7 +303,6 @@ export function SchedulePanel({
           </button>
           <div className="advanced-body">
             <div className="advanced-body-inner">
-              <LaunchModeField value={launchMode} onChange={setLaunchMode} />
               {supportsCustomArgs ? (
                   <label className="field advanced-args-field">
                     <span>Custom CLI args</span>
@@ -338,6 +343,7 @@ export function SchedulePanel({
             </div>
           </div>
         </div>
+        ) : null}
         <label className="field">
           <span>Initial prompt</span>
           <textarea

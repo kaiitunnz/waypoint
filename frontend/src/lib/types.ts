@@ -309,6 +309,7 @@ export interface ScheduledSession {
   cwd: string;
   launch_target_id?: string | null;
   launch_mode: LaunchMode;
+  transport?: SessionTransport | null;
   title?: string | null;
   args: string[];
   config_overrides?: string[];
@@ -328,6 +329,9 @@ export interface ScheduleCreateRequest {
   cwd: string;
   launch_target_id?: string | null;
   launch_mode?: LaunchMode;
+  // Pins the transport the scheduled session is driven over; an explicit
+  // transport supersedes launch_mode when the schedule fires.
+  transport?: SessionTransport | null;
   title?: string | null;
   args?: string[];
   config_overrides?: string[];

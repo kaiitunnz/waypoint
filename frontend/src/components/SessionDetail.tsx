@@ -54,7 +54,6 @@ import {
   supportsFork,
   supportsPlanApproval,
   supportsReattachAfterExit,
-  supportsResume,
   supportsStructuredApproval,
   terminalInteractive,
   terminalResizable,
@@ -1290,11 +1289,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       : composerDisabled
         ? "Session has exited — composer disabled."
         : "Reply to the agent…";
-  // Tmux's Resume control only makes sense while the pane is alive; once the
-  // session has exited there is nothing to resume into.
-  const canResume = Boolean(
-    session && supportsResume(session.transport, catalog) && !sessionExited,
-  );
   // Whether the transport exposes a terminal pane (WS-backed xterm mirror).
   // Drives terminal tab visibility and the WS-pane effect below.
   const canShowTerminal = session
@@ -1796,6 +1790,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onTerminalScrollChange={handleTerminalScrollChange}
           onJumpToLive={handleJumpToLive}
           onRefresh={handleTerminalRefresh}
+          onResume={resumeSession}
           onReattach={reattach}
           onTerminate={terminate}
           onRemoveFromList={removeFromList}
@@ -2031,7 +2026,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
             session ? permissionModesFor(session.backend, catalog) : []
           }
           canDelete={sessionExited}
-          canResume={canResume}
           canReattach={dormantReattach}
           canTerminate={Boolean(session && !sessionExited)}
           connection={connection}
@@ -2078,7 +2072,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onRefresh={refresh}
           onRateLimitRefresh={handleRateLimitRefresh}
           onReattach={reattach}
-          onResume={resumeSession}
           onSwitchSession={openSwitcher}
           onSend={onSendWithOptimistic}
           attachmentsEnabled={
@@ -2105,7 +2098,6 @@ interface ReplyComposerProps {
   toolRunsExpanded: boolean;
   onToggleToolRuns: () => void;
   canDelete: boolean;
-  canResume: boolean;
   canReattach: boolean;
   canTerminate: boolean;
   connection: ConnectionState;
@@ -2137,7 +2129,6 @@ interface ReplyComposerProps {
   onRefresh: () => void;
   onRateLimitRefresh: () => void | Promise<void>;
   onReattach: () => void | Promise<void>;
-  onResume: () => void | Promise<void>;
   onSwitchSession: () => void;
   onSend: (
     text: string,
@@ -2159,7 +2150,6 @@ const ReplyComposer = memo(function ReplyComposer({
   agentBusy,
   permissionModeOptions,
   canDelete,
-  canResume,
   canReattach,
   canTerminate,
   connection,
@@ -2190,7 +2180,6 @@ const ReplyComposer = memo(function ReplyComposer({
   onRefresh,
   onRateLimitRefresh,
   onReattach,
-  onResume,
   onSwitchSession,
   onSend,
   attachmentsEnabled,
@@ -3091,20 +3080,6 @@ const ReplyComposer = memo(function ReplyComposer({
             </button>
             {overflowOpen ? (
               <div className="composer-overflow-menu" role="menu">
-                {canResume ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="composer-overflow-item"
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      void onResume();
-                    }}
-                  >
-                    <span className="glyph">⟳</span>
-                    Resume session
-                  </button>
-                ) : null}
                   <button
                     type="button"
                     role="menuitem"

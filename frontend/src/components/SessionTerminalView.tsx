@@ -57,6 +57,7 @@ interface SessionTerminalViewProps {
   onJumpToLive: () => void;
   // Refresh reconnects the terminal WS, re-seeding the pane from the server.
   onRefresh: () => void;
+  onResume: () => void | Promise<void>;
   onReattach: () => void | Promise<void>;
   onTerminate: () => void | Promise<void>;
   onRemoveFromList: () => void | Promise<void>;
@@ -93,6 +94,7 @@ export function SessionTerminalView({
   onTerminalScrollChange,
   onJumpToLive,
   onRefresh,
+  onResume,
   onReattach,
   onTerminate,
   onRemoveFromList,
@@ -213,6 +215,17 @@ export function SessionTerminalView({
                 >
                   <span className="glyph">↺</span>
                   Reconnect session
+                </button>
+              ) : null}
+              {locked && !sessionExited && session?.status !== "running" ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="composer-overflow-item"
+                  onClick={() => fireFromMenu(onResume)}
+                >
+                  <span className="glyph">⟳</span>
+                  Resume pane
                 </button>
               ) : null}
               <button

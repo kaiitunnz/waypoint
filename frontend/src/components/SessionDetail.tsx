@@ -2666,7 +2666,12 @@ const ReplyComposer = memo(function ReplyComposer({
                           return;
                         }
                         setPendingBackend(next);
-                        setAssistantConfirm("switch");
+                        // Stage the confirm only once the new agent's default
+                        // interface resolves; until the catalog loads it would
+                        // be set but not renderable.
+                        setAssistantConfirm(
+                          defaultTransportFor(next, catalog) ? "switch" : null,
+                        );
                       }}
                       disabled={assistantBusy}
                     >

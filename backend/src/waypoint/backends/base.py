@@ -12,6 +12,7 @@ from waypoint.transports.base import TransportAdapter
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
+    from waypoint.backends.context_usage_source import ContextUsageSource
     from waypoint.launch_targets import SshLaunchTargetConfig
     from waypoint.runtime import SessionRuntime
 
@@ -328,6 +329,18 @@ class BackendPlugin(Protocol):
         Plugins that cache cross-session metadata (e.g. Claude's remote
         thread enumerator) invalidate here so the next listing reflects
         the deletion.
+        """
+        ...
+
+    def create_context_usage_source(
+        self, session: SessionRecord, runtime: "SessionRuntime"
+    ) -> "ContextUsageSource | None":
+        """Return a background source that publishes context usage, or ``None``.
+
+        Only called for sessions whose active transport has
+        ``is_structured == False``.  The runtime starts the returned source as a
+        tracked asyncio task and cancels it when the session exits.
+        Default returns ``None`` (no-op).
         """
         ...
 

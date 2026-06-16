@@ -80,6 +80,7 @@ from waypoint.schemas import (
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
+    from waypoint.backends.context_usage_source import ContextUsageSource
     from waypoint.runtime import SessionRuntime
 
 
@@ -348,6 +349,11 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         # Drop any todo tracker stashed for a respawn that will never come.
         if self.adapter is not None:
             self.adapter.discard_session(session.id)
+
+    def create_context_usage_source(
+        self, session: SessionRecord, runtime: "SessionRuntime"
+    ) -> "ContextUsageSource | None":
+        return None
 
     def register_routes(self, app: FastAPI, context: Any) -> None:
         # Tool approval now rides the `can_use_tool` control protocol over the

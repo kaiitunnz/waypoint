@@ -70,6 +70,7 @@ from waypoint.schemas import (
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
+    from waypoint.backends.context_usage_source import ContextUsageSource
     from waypoint.runtime import SessionRuntime
 
 log = logging.getLogger("waypoint.backends.codex")
@@ -303,6 +304,11 @@ class CodexPlugin(DefaultLaunchContract):
         plan = _find_prefixed(snapshot.notes, _PLAN_PREFIX)
         label = f"{email} · plan: {plan}" if plan else email
         return f"{self.id}:{email}", label
+
+    def create_context_usage_source(
+        self, session: SessionRecord, runtime: "SessionRuntime"
+    ) -> "ContextUsageSource | None":
+        return None
 
     def register_routes(self, app: Any, context: Any) -> None:
         return None

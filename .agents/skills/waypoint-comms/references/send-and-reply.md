@@ -45,8 +45,9 @@ waypoint sessions events <target-id> --messages 20
 ```
 
 Filter events for `kind == "agent_output"` to get the reply; skip
-`system_note`, `tool_call`, and `tool_result`. (For the `tmux` backend, kinds
-are heuristic — also check `raw_terminal_chunk`.) This path does not disturb your
+`system_note`, `tool_call`, and `tool_result`. (For sessions on the `tmux`
+(Terminal) transport, kinds are heuristic — also check `raw_terminal_chunk`.)
+This path does not disturb your
 own turn: you choose when to look.
 
 ## Push: the answer arrives in your input (you set `reply-to`)

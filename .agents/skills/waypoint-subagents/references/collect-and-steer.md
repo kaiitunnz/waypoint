@@ -12,8 +12,9 @@ waypoint sessions events <session-id> --before-sequence <sequence>   # page back
 
 `events` returns JSON. Filter for `kind == "agent_output"` to read the agent's
 replies; skip the verbose `system_note` init payload and the `tool_call` /
-`tool_result` chatter. For the `tmux` backend, event kinds are inferred
-heuristically — also check `raw_terminal_chunk` if a reply seems missing.
+`tool_result` chatter. For sessions on the `tmux` (Terminal) transport, event
+kinds are inferred heuristically — also check `raw_terminal_chunk` if a reply
+seems missing.
 
 Quote only the minimum transcript text needed to justify your conclusion;
 summarize the rest. Distinguish the reported `status` from your interpretation of

@@ -4,16 +4,21 @@
 
 ```bash
 waypoint sessions start \
-  --backend <id> \
+  --backend <agent-id> \
   --cwd <path> \
   --title "subagent:<short-purpose>" \
-  [--model <model>] [--effort <effort>] [--permission-mode <mode>]
+  [--transport <transport-id>] [--model <model>] [--effort <effort>] [--permission-mode <mode>]
 ```
 
-- Pick `--backend` deliberately — this is the main reason to use a Waypoint
-  sub-session over a harness subagent. Use `waypoint backends` to see which
-  backend ids are registered, and `waypoint doctor` to check local CLI
-  availability when launch fails.
+- Pick `--backend` (the agent) deliberately — this is the main reason to use a
+  Waypoint sub-session over a harness subagent. Use `waypoint backends` to see
+  which agent ids are registered (and their `supported_transports`), and
+  `waypoint doctor` to check local CLI availability when launch fails.
+- `--transport` is an optional secondary axis selecting the interface — Chat
+  (`claude_cli`), Emulated (`claude_tty`), or Terminal (`tmux`). Omit it to take
+  the agent's `default_transport` (a local `claude_code` child defaults to the
+  Emulated `claude_tty` transport). Set it explicitly when the task needs a
+  specific interface; `claude_tty`/`tmux` are transports, not `--backend` values.
 - Pick `--model` / `--effort` from `waypoint models <backend>`, which reports the
   ids and efforts that backend actually offers. Pass them verbatim; do not guess
   model names from memory.

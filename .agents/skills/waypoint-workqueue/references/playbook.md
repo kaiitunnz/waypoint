@@ -27,6 +27,12 @@ it off. Pre-spawn checklist, all settled **before** the `sessions start`:
   user rather than spawning blind.
 - **Placement.** `--cwd` is the repo root the worktree is cut from; place the
   worker where its code lives.
+- **Transport (optional).** `--backend` is the agent; `--transport` picks the
+  interface. Omit it to take the agent's `default_transport` — a `claude_code`
+  worker then runs over the Emulated (`claude_tty`) transport, where model /
+  permission swaps relaunch the pane rather than applying inline. Pass
+  `--transport <id>` when a task needs a specific interface; `claude_tty` /
+  `tmux` are transport ids, not `--backend` values.
 
 ```bash
 n=3
@@ -35,7 +41,7 @@ lead=$WAYPOINT_SESSION_ID   # the lead's own session id; set --spawner-session-i
 # sibling worktree, records the path on the session for cleanup, and launches
 # the worker there — no manual `git worktree add`.
 sid=$(waypoint sessions start \
-  --backend <backend> --model <model-id> --permission-mode <auto-approving-mode> \
+  --backend <agent> --model <model-id> --permission-mode <auto-approving-mode> \
   --cwd "$repo" --worktree "wq/$job-t$n" --worktree-base "wq/$job" \
   --title "subagent:wq-$job-$n" --spawner-session-id "$lead" \
   | jq -r .session.id)

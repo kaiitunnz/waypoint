@@ -21,7 +21,7 @@ Use GitHub Issues directly for active bugs and feature requests.
 ## Layout
 
 - `backend/` — FastAPI daemon, tmux/session runtime, auth, persistence
-- `backend/src/waypoint/backends/` — one package per coding agent (`claude_code/`, `claude_tty/`, `codex/`, `opencode/`), plus `tmux/` which is a shared transport; see [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the plugin contract and extension recipe
+- `backend/src/waypoint/backends/` — one package per coding agent (`claude_code/`, `codex/`, `opencode/`) plus the transport packages (`claude_tty/` for the tty-tail Emulated transport, `tmux/` for the raw Terminal transport); see [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the plugin contract and extension recipe
 - `waypointctl/` — standalone control-plane package and daemon (`uv tool install ./waypointctl`, `pipx install ./waypointctl`)
 - `frontend/` — Next.js PWA client
 - `3rdparty/codex/` — pinned Codex submodule used for the local app-server SDK
@@ -34,10 +34,10 @@ Waypoint speaks to Claude Code, Codex, and OpenCode through wire formats that ch
 
 | Agent       | Tested versions   | Wire entry point                                                     | Notes                                                                                       |
 | ----------- | ----------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Claude Code | `2.1.157` | `claude -p --input-format=stream-json --output-format=stream-json --permission-prompt-tool stdio` | Approvals ride the `can_use_tool` control protocol; `CLAUDE_CODE_WORKFLOWS=1` enables the Workflow tool. Also relies on `--include-hook-events`, the `system/status`/`compact_boundary` events, and `--session-id`/`--resume`. |
-| Codex CLI   | `0.125.0`-`0.129.0` | `codex app-server --listen stdio://`                                 | Driven via the vendored Python SDK in `3rdparty/codex/sdk/python` (`thread_*` / `turn_*` RPCs). |
-| Codex SDK   | `0.116.0a1`       | `3rdparty/codex/` submodule pin                                      | Bumped together with Codex CLI; track via `git submodule update --remote 3rdparty/codex`.   |
-| OpenCode   | `1.14.30`        | `opencode serve` with REST + SSE API                             | HTTP-based; discovers models from `/provider`. |
+| Claude Code | `2.1.178` | `claude -p --input-format=stream-json --output-format=stream-json --permission-prompt-tool stdio` | Approvals ride the `can_use_tool` control protocol; `CLAUDE_CODE_WORKFLOWS=1` enables the Workflow tool. Also relies on `--include-hook-events`, the `system/status`/`compact_boundary` events, and `--session-id`/`--resume`. |
+| Codex CLI   | `0.139.0` | `codex app-server --listen stdio://`                                 | Driven via the vendored Python SDK in `3rdparty/codex/sdk/python` (`thread_*` / `turn_*` RPCs). |
+| Codex SDK   | `python-v0.1.0b2` | `3rdparty/codex/` submodule pin                                      | Bumped together with Codex CLI; track via `git submodule update --remote 3rdparty/codex`.   |
+| OpenCode   | `1.17.4`        | `opencode serve` with REST + SSE API                             | HTTP-based; discovers models from `/provider`. |
 
 To extend this matrix:
 
@@ -48,7 +48,7 @@ To extend this matrix:
    - OpenCode: `backend/src/waypoint/backends/opencode/normalize.py::map_event` and the HTTP/SSE adapter in `backends/opencode/adapter.py::OpenCodeAdapter`.
 3. If a bump breaks an event shape, prefer adding a branch in the relevant `normalize.py` over hard-pinning.
 
-Adding a brand-new coding agent (Aider, …) is its own flow — the runtime, API, and frontend dispatch by plugin id, so a new backend is "implement [`BackendPlugin`](backend/src/waypoint/backends/base.py) and register it." See [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the contract, capability descriptor, and a step-by-step recipe.
+Adding a brand-new coding agent (Aider, …) is its own flow — the runtime, API, and frontend dispatch by plugin id, so a new agent is "implement an agent plugin that satisfies the [`BackendPlugin`](backend/src/waypoint/backends/base.py) protocol, declare its supported transports, and register it." See [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the contract, capability descriptor, and a step-by-step recipe.
 
 ## Quick start
 

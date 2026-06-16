@@ -56,12 +56,11 @@ def _backend_choices() -> list[str]:
 
     Excludes only the managed-launch fallback wrapper (``tmux``, flagged
     ``is_fallback_for_managed_launch``): it is routed to via the registry, not
-    selected directly. ``claude_tty`` stays selectable — it currently bundles
-    the Claude agent with its tty-tail transport under one id, and there is no
-    ``--launch-mode`` value that selects the tty-tail transport on
-    ``claude_code`` yet, so ``--backend claude_tty`` is its only launch path.
-    Demoting it to a pure transport selected via ``--launch-mode`` waits on the
-    deeper agent×transport launch wiring (Phase 3 frontend).
+    selected directly. ``claude_tty`` stays selectable as a legacy alias that
+    bundles the Claude agent with its tty-tail transport under one id; the
+    preferred way to reach that transport is ``--backend claude_code
+    --transport claude_tty`` (or omitting ``--transport``, since ``claude_code``
+    defaults to the Emulated transport).
     """
     return [
         plugin.id
@@ -334,10 +333,11 @@ def session_start(
     transport: Annotated[
         str | None,
         typer.Option(
-            help="Pin the transport id the agent is driven over (e.g. "
-            "'claude_cli', 'claude_tty', 'tmux'). Must be one of the agent's "
-            "supported transports; takes precedence over --launch-mode. "
-            "Omit to keep the --launch-mode-derived behavior.",
+            help="Pin the transport (interface) the agent is driven over: "
+            "'claude_cli' (Chat), 'claude_tty' (Emulated), or 'tmux' (Terminal). "
+            "Must be one of the agent's supported transports; takes precedence "
+            "over --launch-mode. Omit to use the agent's default transport "
+            "(claude_code defaults to Emulated).",
         ),
     ] = None,
     title: Annotated[str | None, typer.Option()] = None,
@@ -1044,10 +1044,11 @@ def sessions_start(
     transport: Annotated[
         str | None,
         typer.Option(
-            help="Pin the transport id the agent is driven over (e.g. "
-            "'claude_cli', 'claude_tty', 'tmux'). Must be one of the agent's "
-            "supported transports; takes precedence over --launch-mode. "
-            "Omit to keep the --launch-mode-derived behavior.",
+            help="Pin the transport (interface) the agent is driven over: "
+            "'claude_cli' (Chat), 'claude_tty' (Emulated), or 'tmux' (Terminal). "
+            "Must be one of the agent's supported transports; takes precedence "
+            "over --launch-mode. Omit to use the agent's default transport "
+            "(claude_code defaults to Emulated).",
         ),
     ] = None,
     title: Annotated[str | None, typer.Option()] = None,
@@ -1708,10 +1709,11 @@ def schedule_create(
     transport: Annotated[
         str | None,
         typer.Option(
-            help="Pin the transport id the scheduled agent is driven over (e.g. "
-            "'claude_cli', 'claude_tty', 'tmux'). Must be one of the agent's "
-            "supported transports; takes precedence over --launch-mode. "
-            "Omit to keep the --launch-mode-derived behavior.",
+            help="Pin the transport (interface) the scheduled agent is driven "
+            "over: 'claude_cli' (Chat), 'claude_tty' (Emulated), or 'tmux' "
+            "(Terminal). Must be one of the agent's supported transports; takes "
+            "precedence over --launch-mode. Omit to use the agent's default "
+            "transport (claude_code defaults to Emulated).",
         ),
     ] = None,
     title: Annotated[str | None, typer.Option()] = None,

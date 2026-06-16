@@ -1,8 +1,8 @@
-"""Claude TUI backend plugin (claude_tty).
+"""Claude TUI / Emulated transport plugin (claude_tty).
 
 Drives the interactive Claude Code TUI (``claude``) instead of ``claude -p``
 (stream-json mode).  The TUI path is exempt from the API rate limit applied to
-``claude -p``, making it the preferred backend for autonomous Waypoint sessions.
+``claude -p``, making it the preferred transport for autonomous Claude Code sessions.
 
 This is the ``claude_code`` agent driven over a tty-tail transport rather
 than the structured ``claude -p`` adapter. It is a session shaped as an

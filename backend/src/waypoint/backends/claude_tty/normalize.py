@@ -1,4 +1,4 @@
-"""Transcript-record → canonical-event normalization for the claude_tty backend.
+"""Transcript-record → canonical-event normalization for the claude_tty (Emulated) transport.
 
 The Claude TUI writes a JSONL transcript to
 ``~/.claude/projects/<dashed-cwd>/<session-id>.jsonl``.  Each record wraps the

@@ -1,4 +1,4 @@
-"""Transport adapter for the claude_tty backend.
+"""Transport adapter for the claude_tty (Emulated) transport.
 
 Thin subclass of ``TmuxTransport`` that overrides:
 

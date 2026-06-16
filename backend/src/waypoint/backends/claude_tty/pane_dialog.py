@@ -40,7 +40,8 @@ _APPROVAL_QUESTION_MARKER = "Do you want to"
 # dismissed with Esc so the TUI flushes the structured questions to the
 # transcript, which is surfaced from there rather than parsed off the pane. The
 # only footer tokens stable across every layout are "Enter to select" (unique
-# to this popup) and "Esc to cancel". Everything else varies: the navigation
+# to this popup among the screens we classify, as of the fixture-pinned Claude
+# Code version) and "Esc to cancel". Everything else varies: the navigation
 # hint reads "↑/↓ to navigate" / "Tab/Arrow keys to navigate" by arity, and a
 # dialog with option previews offers free-text via "n to add notes" instead of
 # an inline "Type something" option — so requiring "Type something" (as cctty

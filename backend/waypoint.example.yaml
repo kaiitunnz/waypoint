@@ -48,14 +48,15 @@ plugin_configs:
 # long-lived session of `backend` alive, reachable from the assistant UI
 # page. It can answer host-environment questions, inspect Waypoint
 # sessions, and manage them via the `waypoint sessions` CLI. `model`,
-# `effort`, and `permission_mode` seed the thread; the UI can override
-# them live. Switching `backend` replaces the thread on next restart.
+# `effort`, `permission_mode`, and `transport` seed the thread; the UI can
+# override them live. Switching `backend` replaces the thread on next restart.
 # assistant:
 #   enabled: true
 #   backend: claude_code          # defaults to `default_backend`
 #   model: opus                   # must exist in the backend's catalogue
 #   effort: high                  # ignored by backends without an effort knob
 #   permission_mode: bypassPermissions  # backend default (usually prompts) if unset
+#   transport: claude_cli         # agent default (Emulated for Claude Code) if unset
 
 ssh_targets:
   - id: devbox

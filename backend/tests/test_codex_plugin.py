@@ -5,11 +5,15 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from waypoint.backends.codex.plugin import CodexPlugin
-from waypoint.backends.codex.usage_source import _parse_token_count_record
+from waypoint.backends.codex.usage_source import (
+    CodexRolloutUsageSource,
+    _parse_token_count_record,
+)
 from waypoint.launch_targets import SshLaunchTargetConfig
 
 
@@ -261,3 +265,51 @@ def test_parse_token_count_record_omits_zero_breakdown_fields() -> None:
     snapshot = _parse_token_count_record(record)
     assert snapshot is not None
     assert "cached_input_tokens" not in snapshot.breakdown
+
+
+def _token_count_line(total: int) -> str:
+    return json.dumps(
+        {
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "last_token_usage": {"total_tokens": total, "input_tokens": total},
+                    "model_context_window": 200000,
+                },
+            },
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_rollout_drain_publishes_and_dedupes(tmp_path: Path) -> None:
+    runtime = MagicMock()
+    runtime.update_session_fields = AsyncMock()
+    source = CodexRolloutUsageSource("sess-1", runtime)
+
+    path = tmp_path / "rollout.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "session_meta", "payload": {"cwd": "/x"}}),
+                _token_count_line(5000),
+                _token_count_line(5000),  # unchanged -> deduped
+                _token_count_line(9000),
+            ]
+        )
+        + "\n"
+    )
+
+    await source._drain(path)
+
+    # 5000 (publish), 5000 (dedup), 9000 (publish) => two publishes
+    assert runtime.update_session_fields.call_count == 2
+    snapshots = [
+        c.kwargs["context_usage"] for c in runtime.update_session_fields.call_args_list
+    ]
+    assert [s.used_tokens for s in snapshots] == [5000, 9000]
+    assert snapshots[0].context_window_tokens == 200000
+    assert all(
+        c.args[0] == "sess-1" for c in runtime.update_session_fields.call_args_list
+    )

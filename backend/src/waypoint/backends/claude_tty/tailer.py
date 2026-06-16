@@ -16,6 +16,7 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from waypoint.backends.claude_code.adapter import _context_usage_snapshot_from_message
 from waypoint.backends.claude_code.normalize import format_approval_text
 from waypoint.backends.claude_code.threads import (
     claude_projects_root,
@@ -79,6 +80,7 @@ class TranscriptTailer:
         self._offset = (
             self._path.stat().st_size if start_at_end and self._path.exists() else 0
         )
+        self._context_usage_signature: tuple[int, int | None] | None = None
         # Dialog debounce state
         self._prev_dialog_sig: str | None = None
         self._dialog_stable_count: int = 0
@@ -147,6 +149,23 @@ class TranscriptTailer:
                     ev.metadata,
                     ev.status,
                 )
+            if record.get("type") == "assistant":
+                await self._maybe_publish_context_usage(record)
+
+    async def _maybe_publish_context_usage(self, record: dict[str, Any]) -> None:
+        message: dict[str, Any] = record.get("message") or {}
+        usage: dict[str, Any] = message.get("usage") or {}
+        model = str(message.get("model") or "") or None
+        snapshot = _context_usage_snapshot_from_message(model, usage)
+        if snapshot is None:
+            return
+        sig = (snapshot.used_tokens, snapshot.context_window_tokens)
+        if sig == self._context_usage_signature:
+            return
+        self._context_usage_signature = sig
+        await self._runtime.update_session_fields(
+            self._session_id, context_usage=snapshot
+        )
 
     async def _poll_dialog(self) -> None:
         """Capture the live pane and surface any stable tool-permission dialog.

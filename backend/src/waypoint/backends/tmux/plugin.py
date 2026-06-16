@@ -105,7 +105,17 @@ class TmuxPlugin:
     def create_context_usage_source(
         self, session: SessionRecord, runtime: "SessionRuntime"
     ) -> "ContextUsageSource | None":
-        return None
+        # Tmux is the transport wrapper; context usage is an agent-axis
+        # concern, so delegate to the wrapped agent plugin (which reads its
+        # own on-disk artifact). Mirrors how the wrapper delegates other
+        # agent-specific calls (built-ins, rate-limit probe, resume).
+        if session.backend == self.id or not runtime.registry.has_backend(
+            session.backend
+        ):
+            return None
+        return runtime.registry.get(session.backend).create_context_usage_source(
+            session, runtime
+        )
 
     def register_routes(self, app: Any, context: Any) -> None:
         return None

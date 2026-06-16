@@ -57,6 +57,10 @@ class TmuxTransport(TransportAdapter):
             if confirmer is None:
                 await self.adapter.send_input(target, payload, True)
                 return
+            # A reattach/restart relaunches the pane, and the wrapped TUI is
+            # still booting when this fires — pasting before the composer exists
+            # drops the keystrokes. Wait for it to draw first.
+            await self._await_pane_ready(target, confirmer)
             # Some wrapped TUIs absorb the submit Enter while still ingesting
             # the paste (the Claude TUI does this loading an image pasted by
             # path), leaving the message typed but unsent. Paste without
@@ -68,6 +72,26 @@ class TmuxTransport(TransportAdapter):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
+
+    async def _await_pane_ready(
+        self,
+        target: str,
+        confirmer: PaneSubmitConfirming,
+        *,
+        attempts: int = 20,
+        poll_seconds: float = 0.3,
+    ) -> None:
+        # Poll until the composer is drawn so the paste lands in it rather than
+        # the boot screen. Checked before sleeping so an already-ready pane (the
+        # common case — sending to a live session) costs one snapshot and no
+        # delay. Bounded; if the TUI never reports ready, fall through and send
+        # anyway rather than block the request indefinitely.
+        for _ in range(attempts):
+            if confirmer.pane_ready_for_input(
+                await self.adapter.capture_snapshot(target)
+            ):
+                return
+            await asyncio.sleep(poll_seconds)
 
     async def _submit_confirmed(
         self,

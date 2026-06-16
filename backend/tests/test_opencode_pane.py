@@ -4,7 +4,7 @@ submitted messages echo in ``┃`` boxes above, so the live composer is the
 region directly above the *last* border. Submission is keyed on the sent text
 leaving that region (an empty composer shows the ``Ask anything…`` placeholder)."""
 
-from waypoint.backends.opencode.pane import composer_submitted
+from waypoint.backends.opencode.pane import composer_ready, composer_submitted
 
 SENT = "Reply with exactly the token X and nothing else.\n\nAttached files:\n- /tmp/a"
 
@@ -44,9 +44,18 @@ def test_submitted_when_composer_shows_placeholder() -> None:
     assert composer_submitted(pane, SENT) is True
 
 
-def test_submitted_when_no_border_found() -> None:
-    assert composer_submitted("booting opencode...", SENT) is True
+def test_not_submitted_when_no_border_found() -> None:
+    # No composer box drawn → booting/dead pane, nothing submitted; keep trying.
+    assert composer_submitted("booting opencode...", SENT) is False
 
 
 def test_empty_message_treated_as_submitted() -> None:
     assert composer_submitted("┃  Ask anything...\n╹▀▀▀", "") is True
+
+
+def test_composer_ready_when_box_drawn() -> None:
+    assert composer_ready("┃  Ask anything...\n╹▀▀▀▀▀▀▀▀") is True
+
+
+def test_composer_not_ready_while_booting() -> None:
+    assert composer_ready("starting opencode...\nno box yet") is False

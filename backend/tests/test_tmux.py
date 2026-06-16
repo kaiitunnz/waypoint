@@ -302,6 +302,9 @@ class _FakeAdapter:
 
 
 class _Confirmer:
+    def pane_ready_for_input(self, pane_text: str) -> bool:
+        return True
+
     def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
         return pane_text == "SUBMITTED"
 
@@ -355,10 +358,14 @@ def test_submit_confirmed_is_bounded_when_never_confirmed() -> None:
 
 class _RecordingAdapter:
     """Records the high-level calls send_input makes so we can assert which
-    submit path (confirm-retry vs single Enter) the transport chose."""
+    submit path (confirm-retry vs single Enter) the transport chose. Replays
+    `boot_frames` "BOOTING" snapshots before "SUBMITTED" to model a pane that is
+    still launching when the message arrives."""
 
-    def __init__(self) -> None:
+    def __init__(self, boot_frames: int = 0) -> None:
         self.calls: list[tuple] = []
+        self._boot_frames = boot_frames
+        self._captures = 0
 
     async def send_input(self, target, text, submit=True):
         self.calls.append(("send_input", target, text, submit))
@@ -367,22 +374,28 @@ class _RecordingAdapter:
         self.calls.append(("submit", target))
 
     async def capture_snapshot(self, target, start_line=-200):
-        return "SUBMITTED"  # confirmer (below) treats this as cleared
+        self.calls.append(("capture", target))
+        frame = "BOOTING" if self._captures < self._boot_frames else "SUBMITTED"
+        self._captures += 1
+        return frame  # confirmer (below) treats "SUBMITTED" as ready/cleared
 
 
 class _AgentConfirmer:
     id = "codex"
+
+    def pane_ready_for_input(self, pane_text):
+        return pane_text == "SUBMITTED"
 
     def confirm_pane_submit(self, pane_text, sent_text):
         return pane_text == "SUBMITTED"
 
 
 class _PlainAgent:
-    id = "opencode"  # no confirm_pane_submit -> not a confirmer
+    id = "opencode"  # no pane hooks -> not a confirmer
 
 
-def _transport_with(agent):
-    adapter = _RecordingAdapter()
+def _transport_with(agent, boot_frames: int = 0):
+    adapter = _RecordingAdapter(boot_frames)
     registry = SimpleNamespace(get=lambda backend_id: agent)
     runtime = SimpleNamespace(tmux=adapter, registry=registry)
     return TmuxTransport(runtime), adapter  # type: ignore[arg-type]
@@ -397,7 +410,7 @@ def test_send_input_uses_confirm_path_for_confirmer_agent() -> None:
     asyncio.run(transport.send_input(_session("codex"), "hi"))
     # Pastes without submitting, then drives submit via the confirm loop —
     # NOT a single bundled submit. Resolved by agent id, not the tmux transport.
-    assert adapter.calls[0] == ("send_input", "%9", "hi", False)
+    assert ("send_input", "%9", "hi", False) in adapter.calls
     assert ("submit", "%9") in adapter.calls
     assert not any(c == ("send_input", "%9", "hi", True) for c in adapter.calls)
 
@@ -406,3 +419,25 @@ def test_send_input_single_enter_for_non_confirmer_agent() -> None:
     transport, adapter = _transport_with(_PlainAgent())
     asyncio.run(transport.send_input(_session("opencode"), "hi"))
     assert adapter.calls == [("send_input", "%9", "hi", True)]
+
+
+def test_send_input_waits_for_ready_before_pasting() -> None:
+    # A relaunched pane needs two frames to draw its composer; the transport
+    # must poll readiness and only paste once it is ready, never into the boot
+    # screen (which would drop the keystrokes).
+    transport, adapter = _transport_with(_AgentConfirmer(), boot_frames=2)
+    asyncio.run(transport.send_input(_session("codex"), "hi"))
+    paste_idx = adapter.calls.index(("send_input", "%9", "hi", False))
+    captures_before_paste = adapter.calls[:paste_idx].count(("capture", "%9"))
+    assert captures_before_paste == 3  # two BOOTING frames, then ready
+
+
+def test_await_pane_ready_is_bounded_when_never_ready() -> None:
+    # A pane that never draws its composer must not block the request forever.
+    transport, adapter = _transport_with(_AgentConfirmer(), boot_frames=99)
+    asyncio.run(
+        transport._await_pane_ready(
+            "%9", _AgentConfirmer(), attempts=4, poll_seconds=0.0
+        )
+    )
+    assert adapter.calls.count(("capture", "%9")) == 4

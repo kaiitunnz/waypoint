@@ -34,7 +34,7 @@ from waypoint.backends.codex.adapter import (
     CodexAppServerAdapter,
     default_client_factory,
 )
-from waypoint.backends.codex.pane import composer_submitted
+from waypoint.backends.codex.pane import composer_ready, composer_submitted
 from waypoint.backends.codex.permission_modes import (
     CODEX_PERMISSION_MODE_IDS,
     CODEX_PERMISSION_MODE_SPECS,
@@ -180,6 +180,9 @@ class CodexPlugin(DefaultLaunchContract):
         from waypoint.backends.codex.transport import CodexTransport
 
         return CodexTransport(runtime, self)
+
+    def pane_ready_for_input(self, pane_text: str) -> bool:
+        return composer_ready(pane_text)
 
     def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
         # Over the tmux/Terminal transport the Codex TUI can absorb the submit

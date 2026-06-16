@@ -25,17 +25,28 @@ def _compact(text: str) -> str:
     return _WHITESPACE_RE.sub("", _ANSI_RE.sub("", text))
 
 
+def composer_ready(pane_text: str) -> bool:
+    """Whether the Codex composer prompt is drawn and able to take input.
+
+    True once a ``›`` prompt line exists. A freshly relaunched pane (reattach or
+    restart) shows the boot screen with no prompt for a beat; the tmux transport
+    waits on this before pasting so the keystrokes are not dropped.
+    """
+    return any(_PROMPT in line for line in pane_text.splitlines())
+
+
 def composer_submitted(pane_text: str, sent_text: str) -> bool:
     """Whether ``sent_text`` has left the Codex composer (i.e. was submitted).
 
     Returns ``True`` when the composer prompt line no longer carries the start
-    of the message. If the message is empty or the composer can't be located,
-    returns ``True`` so the caller doesn't retry blindly (its loop is bounded).
+    of the message. An empty message counts as submitted. If the composer can't
+    be located the pane is booting or dead, so nothing has been submitted —
+    return ``False`` so the bounded confirm loop keeps retrying.
     """
     probe = _compact(sent_text)[:_PROBE_LEN]
     if not probe:
         return True
     prompt_lines = [line for line in pane_text.splitlines() if _PROMPT in line]
     if not prompt_lines:
-        return True
+        return False
     return probe not in _compact(prompt_lines[-1])

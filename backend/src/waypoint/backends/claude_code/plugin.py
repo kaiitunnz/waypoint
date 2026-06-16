@@ -58,7 +58,7 @@ from waypoint.backends.claude_code.threads import (
     list_local_claude_threads,
 )
 from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
-from waypoint.backends.claude_tty.pane_dialog import composer_is_empty
+from waypoint.backends.claude_tty.pane_dialog import composer_is_empty, composer_ready
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.backends.tmux.plugin import TmuxPlugin
@@ -184,6 +184,9 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         from waypoint.backends.claude_code.transport import ClaudeTransport
 
         return ClaudeTransport(runtime, self)
+
+    def pane_ready_for_input(self, pane_text: str) -> bool:
+        return composer_ready(pane_text)
 
     def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
         # Over the tmux/Terminal transport the Claude TUI can absorb the submit

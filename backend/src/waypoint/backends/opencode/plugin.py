@@ -18,6 +18,7 @@ from waypoint.backends.capabilities import (
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.opencode.adapter import OpenCodeAdapter, OpenCodeError
 from waypoint.backends.opencode.health import AdapterHealth
+from waypoint.backends.opencode.pane import composer_submitted
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
@@ -551,6 +552,12 @@ class OpenCodePlugin(DefaultLaunchContract):
         from waypoint.backends.opencode.transport import OpenCodeTransport
 
         return OpenCodeTransport(runtime, self)
+
+    def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
+        # Over the tmux/Terminal transport the OpenCode TUI can absorb the
+        # submit Enter while ingesting input; the composer box no longer
+        # carrying the message is the signal it was sent.
+        return composer_submitted(pane_text, sent_text)
 
     def setup(self, runtime: "SessionRuntime") -> None:
         log.info("setting up opencode plugin")

@@ -843,3 +843,73 @@ async def test_rate_limit_watcher_stops_on_natural_exit(
     # The loop's next iteration should observe the EXITED status and exit.
     await asyncio.wait_for(task, timeout=1.0)
     assert session.id not in runtime._rate_limit_watchers
+
+
+def _ctx_session(backend: str) -> SessionRecord:
+    now = datetime.now(UTC)
+    return SessionRecord(
+        id="s-ctx",
+        backend=backend,
+        source=SessionSource.MANAGED,
+        transport="tmux",
+        title="t",
+        cwd="/proj",
+        status=SessionStatus.RUNNING,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        transport_state={},
+        raw_log_path="/tmp/s-ctx.raw.log",
+        structured_log_path="/tmp/s-ctx.events.jsonl",
+    )
+
+
+class _CtxRegistry:
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def has_backend(self, backend_id: str) -> bool:
+        return backend_id == "claude_code"
+
+    def get(self, _backend_id: str) -> Any:
+        return self._inner
+
+
+class _CtxRuntime:
+    def __init__(self, inner: Any) -> None:
+        self.registry = _CtxRegistry(inner)
+
+
+def test_create_context_usage_source_delegates_to_inner_agent(
+    plugin: TmuxPlugin,
+) -> None:
+    sentinel = object()
+    captured: dict[str, Any] = {}
+
+    class _Inner:
+        def create_context_usage_source(self, session: Any, runtime: Any) -> Any:
+            captured["session"] = session
+            return sentinel
+
+    session = _ctx_session("claude_code")
+    runtime = _CtxRuntime(_Inner())
+    result = plugin.create_context_usage_source(session, cast(Any, runtime))
+    assert result is sentinel
+    assert captured["session"] is session
+
+
+def test_create_context_usage_source_none_for_self_or_unknown_backend(
+    plugin: TmuxPlugin,
+) -> None:
+    runtime = _CtxRuntime(object())
+    # wrapper's own id -> no inner agent to delegate to
+    assert (
+        plugin.create_context_usage_source(_ctx_session("tmux"), cast(Any, runtime))
+        is None
+    )
+    # a valid agent the registry doesn't have loaded -> None, no delegation
+    # (_CtxRegistry.has_backend only knows claude_code)
+    assert (
+        plugin.create_context_usage_source(_ctx_session("codex"), cast(Any, runtime))
+        is None
+    )

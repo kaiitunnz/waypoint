@@ -170,6 +170,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # session, never deleted.
         return await context.runtime.reset_assistant(
             backend=body.backend,
+            transport=body.transport,
             model=body.model,
             effort=body.effort,
             permission_mode=body.permission_mode,

@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from waypoint.backends.plugin_config import PluginConfig
 from waypoint.backends.registry import get_registry
 from waypoint.launch_targets import SshLaunchTargetConfig
-from waypoint.schemas import BackendId
+from waypoint.schemas import BackendId, SessionTransportId
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -73,8 +73,9 @@ class AssistantConfig(BaseModel):
     The assistant is a long-lived session of an ordinary coding backend
     (chosen by ``backend``, falling back to ``default_backend``) that the
     runtime creates and keeps alive on its own. ``model`` / ``effort`` /
-    ``permission_mode`` seed the initial thread; the user can override them
-    live from the assistant UI, so these are defaults, not a lockdown.
+    ``permission_mode`` / ``transport`` seed the initial thread; the user can
+    override them live from the assistant UI, so these are defaults, not a
+    lockdown.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -84,6 +85,10 @@ class AssistantConfig(BaseModel):
     backend: BackendId | None = None
     model: str | None = None
     effort: str | None = None
+    # Transport the agent is driven over. ``None`` lets the agent pick its
+    # default (Emulated for Claude Code); must be one of the agent's supported
+    # transports, validated when the thread launches.
+    transport: SessionTransportId | None = None
     # Permission mode passed through to the backend. ``None`` lets the
     # backend pick its default (which usually prompts for approvals — set an
     # autonomous mode here for an unattended assistant).

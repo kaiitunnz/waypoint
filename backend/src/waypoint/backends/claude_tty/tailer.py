@@ -1,4 +1,4 @@
-"""Transcript file tailer for the claude_tty backend.
+"""Transcript file tailer for the claude_tty (Emulated) transport.
 
 Polls the session JSONL transcript by byte offset, normalizes each new record
 into canonical events, and emits them through the runtime.  Periodically checks

@@ -59,8 +59,9 @@ def append_attachment_paths(text: str, attachments: list[ResolvedAttachment]) ->
     """Append absolute attachment paths to ``text`` for text-only transports.
 
     The underlying CLI agent reads the referenced files itself, so this is the
-    universal fallback for backends without native attachment support (tmux)
-    and for non-image files on backends that only embed images inline.
+    universal fallback for transports without native attachment support (the
+    tmux/Terminal transport) and for non-image files on transports that only
+    embed images inline.
     """
     if not attachments:
         return text

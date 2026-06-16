@@ -16,11 +16,17 @@ import {
   resetAssistant,
   terminateAssistant,
 } from "@/lib/api";
-import { buildCatalog, humaniseBackend } from "@/lib/backends";
+import { buildCatalog, humaniseBackend, transportPresentation } from "@/lib/backends";
 import { copyText } from "@/lib/clipboard";
 import { clearToken, readHost, readToken } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
-import { AssistantSummary, Backend, BackendDescriptor, SessionStatus } from "@/lib/types";
+import {
+  AssistantSummary,
+  Backend,
+  BackendDescriptor,
+  SessionStatus,
+  SessionTransport,
+} from "@/lib/types";
 
 type LoadState = "loading" | "ready" | "disabled" | "error";
 
@@ -155,8 +161,8 @@ export default function AssistantPage() {
     () => ({
       backends,
       supportsReattach: assistant?.supports_reattach ?? false,
-      onSwitchBackend: (backend: Backend) =>
-        applyControl(() => resetAssistant(host, token, { backend })),
+      onSwitchBackend: (backend: Backend, transport: SessionTransport) =>
+        applyControl(() => resetAssistant(host, token, { backend, transport })),
       onAttachThread: (backend: Backend, threadId: string) =>
         applyControl(() =>
           attachAssistant(host, token, { backend, thread_id: threadId }),
@@ -229,7 +235,8 @@ export default function AssistantPage() {
               </span>
               <div className="assistant-banner-text">
                 <p className="assistant-banner-eyebrow">
-                  {humaniseBackend(assistant.backend, catalog)}
+                  {humaniseBackend(assistant.backend, catalog)} ·{" "}
+                  {transportPresentation(assistant.transport, catalog).name}
                 </p>
                 <p className="assistant-banner-note">
                   Your persistent assistant — ask about this host or your running

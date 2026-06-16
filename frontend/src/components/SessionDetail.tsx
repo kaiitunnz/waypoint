@@ -38,6 +38,7 @@ import {
   setSessionTitle,
 } from "@/lib/api";
 import {
+  agentTransports,
   approvalDecisionsFor,
   type BackendCatalog,
   defaultTransportFor,
@@ -45,6 +46,7 @@ import {
   fidelityFor,
   hasTerminalPane,
   humaniseBackend,
+  launchableAgents,
   liveTerminal,
   permissionModesFor,
   supportsApprovalNote,
@@ -57,6 +59,7 @@ import {
   terminalInteractive,
   terminalResizable,
   transportLabel,
+  transportPresentation,
   useBackendCatalog,
 } from "@/lib/backends";
 import { clearToken } from "@/lib/store";
@@ -247,7 +250,12 @@ export interface AssistantThreadOption {
 export interface AssistantControls {
   backends: BackendDescriptor[];
   supportsReattach: boolean;
-  onSwitchBackend: (backend: Backend) => Promise<void> | void;
+  // Rebuild the assistant on the chosen agent and transport. Changing either
+  // starts a fresh thread, since the transport is fixed at launch.
+  onSwitchBackend: (
+    backend: Backend,
+    transport: SessionTransport,
+  ) => Promise<void> | void;
   onAttachThread: (backend: Backend, threadId: string) => Promise<void> | void;
   onClearContext: () => Promise<void> | void;
   onTerminate: () => Promise<void> | void;
@@ -2211,6 +2219,10 @@ const ReplyComposer = memo(function ReplyComposer({
     "switch" | "attach" | null
   >(null);
   const [pendingBackend, setPendingBackend] = useState<Backend | null>(null);
+  // Staged transport for the switch confirm; `null` keeps the live one (or the
+  // newly-picked agent's default once a different agent is staged).
+  const [pendingTransport, setPendingTransport] =
+    useState<SessionTransport | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState("");
   const [threadOptions, setThreadOptions] = useState<AssistantThreadOption[]>([]);
   // Pending effort for backends that need a session restart to apply (Claude)
@@ -2521,6 +2533,32 @@ const ReplyComposer = memo(function ReplyComposer({
     assistantTargetCaps?.supports_thread_discovery &&
       assistantTargetCaps?.supports_thread_import,
   );
+  // Agent-primary list, folding out the tmux/tty wrappers and the managed
+  // fallback, plus the transports the staged agent can run over.
+  const assistantAgentOptions =
+    assistantOps && session
+      ? launchableAgents(
+          assistantOps.backends.map((b) => b.id),
+          catalog,
+        )
+      : [];
+  const assistantTransportOptions = assistantTargetBackend
+    ? agentTransports(assistantTargetBackend, catalog)
+    : [];
+  // The transport the switch will launch over: an explicit pick, else the new
+  // agent's default when the agent changed, else the live transport.
+  const assistantTargetTransport: SessionTransport | null =
+    pendingTransport ??
+    (pendingBackend
+      ? defaultTransportFor(pendingBackend, catalog)
+      : session?.transport ?? null);
+  const assistantSwitchDiffers = Boolean(
+    session &&
+      assistantTargetBackend &&
+      assistantTargetTransport &&
+      (assistantTargetBackend !== session.backend ||
+        assistantTargetTransport !== session.transport),
+  );
   // Load resumable threads for the target backend when the popover is open.
   useEffect(() => {
     if (
@@ -2550,6 +2588,7 @@ const ReplyComposer = memo(function ReplyComposer({
       // the user can retry or cancel.
       setAssistantConfirm(null);
       setPendingBackend(null);
+      setPendingTransport(null);
       setSelectedThreadId("");
     } catch (err) {
       onError(err instanceof Error ? err.message : "Action failed");
@@ -2610,14 +2649,17 @@ const ReplyComposer = memo(function ReplyComposer({
               >
                 {assistantOps && session ? (
                   <label className="composer-tune-field">
-                    <span>Backend</span>
+                    <span>Agent</span>
                     <select
                       value={pendingBackend ?? session.backend}
                       onChange={(event) => {
                         const next = event.target.value;
                         onError("");
-                        // Threads are per-backend; drop any thread selection.
+                        // Threads and transports are per-agent; drop any thread
+                        // selection and let the transport fall to the new
+                        // agent's default.
                         setSelectedThreadId("");
+                        setPendingTransport(null);
                         if (next === session.backend) {
                           setPendingBackend(null);
                           setAssistantConfirm(null);
@@ -2628,9 +2670,37 @@ const ReplyComposer = memo(function ReplyComposer({
                       }}
                       disabled={assistantBusy}
                     >
-                      {assistantOps.backends.map((backend) => (
-                        <option key={backend.id} value={backend.id}>
-                          {backend.label}
+                      {assistantAgentOptions.map((backend) => (
+                        <option key={backend} value={backend}>
+                          {humaniseBackend(backend, catalog)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                {assistantOps && session && assistantTransportOptions.length > 1 ? (
+                  <label className="composer-tune-field">
+                    <span>Interface</span>
+                    <select
+                      value={assistantTargetTransport ?? ""}
+                      onChange={(event) => {
+                        const next = event.target.value as SessionTransport;
+                        onError("");
+                        // Picking a thread takes priority; a fresh transport
+                        // pick rebuilds the thread like an agent switch.
+                        setSelectedThreadId("");
+                        setPendingTransport(next);
+                        const stagedBackend = pendingBackend ?? session.backend;
+                        const differs =
+                          stagedBackend !== session.backend ||
+                          next !== session.transport;
+                        setAssistantConfirm(differs ? "switch" : null);
+                      }}
+                      disabled={assistantBusy}
+                    >
+                      {assistantTransportOptions.map((transportId) => (
+                        <option key={transportId} value={transportId}>
+                          {transportPresentation(transportId, catalog).name}
                         </option>
                       ))}
                     </select>
@@ -2652,9 +2722,7 @@ const ReplyComposer = memo(function ReplyComposer({
                           setAssistantConfirm("attach");
                         } else {
                           setAssistantConfirm(
-                            pendingBackend && pendingBackend !== session.backend
-                              ? "switch"
-                              : null,
+                            assistantSwitchDiffers ? "switch" : null,
                           );
                         }
                       }}
@@ -2754,14 +2822,24 @@ const ReplyComposer = memo(function ReplyComposer({
                 ) : null}
                 {assistantOps &&
                 assistantConfirm === "switch" &&
-                pendingBackend ? (
+                assistantSwitchDiffers &&
+                assistantTargetBackend &&
+                assistantTargetTransport ? (
                   <div className="composer-tune-lifecycle">
                     <div className="composer-tune-confirm">
                       <p>
                         Switch to{" "}
-                        <strong>{humaniseBackend(pendingBackend, catalog)}</strong>? This
-                        starts a new conversation; the current one is kept as a
-                        stopped session.
+                        <strong>
+                          {humaniseBackend(assistantTargetBackend, catalog)} ·{" "}
+                          {
+                            transportPresentation(
+                              assistantTargetTransport,
+                              catalog,
+                            ).name
+                          }
+                        </strong>
+                        ? This starts a new conversation; the current one is kept
+                        as a stopped session.
                       </p>
                       <div className="composer-tune-confirm-actions">
                         <button
@@ -2769,6 +2847,7 @@ const ReplyComposer = memo(function ReplyComposer({
                           className="composer-tune-confirm-cancel"
                           onClick={() => {
                             setPendingBackend(null);
+                            setPendingTransport(null);
                             setAssistantConfirm(null);
                             onError("");
                           }}
@@ -2781,12 +2860,15 @@ const ReplyComposer = memo(function ReplyComposer({
                           className="composer-tune-confirm-apply"
                           onClick={() =>
                             void runAssistantAction(() =>
-                              assistantOps.onSwitchBackend(pendingBackend),
+                              assistantOps.onSwitchBackend(
+                                assistantTargetBackend,
+                                assistantTargetTransport,
+                              ),
                             )
                           }
                           disabled={assistantBusy}
                         >
-                          {assistantBusy ? "Switching…" : "Switch backend"}
+                          {assistantBusy ? "Switching…" : "Switch"}
                         </button>
                       </div>
                     </div>
@@ -2813,9 +2895,7 @@ const ReplyComposer = memo(function ReplyComposer({
                           onClick={() => {
                             setSelectedThreadId("");
                             setAssistantConfirm(
-                              pendingBackend && pendingBackend !== session?.backend
-                                ? "switch"
-                                : null,
+                              assistantSwitchDiffers ? "switch" : null,
                             );
                             onError("");
                           }}

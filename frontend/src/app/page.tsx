@@ -9,7 +9,7 @@ import { BackendSwitcher } from "@/components/BackendSwitcher";
 import { BoardPanel } from "@/components/BoardPanel";
 import { LaunchPanel } from "@/components/LaunchPanel";
 import { LoginForm } from "@/components/LoginForm";
-import { SchedulePanel } from "@/components/SchedulePanel";
+import { ScheduledSessionsPanel } from "@/components/ScheduledSessionsPanel";
 import { SessionList } from "@/components/SessionList";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { UsageDashboardSection } from "@/components/UsageDashboardSection";
@@ -756,25 +756,18 @@ export default function HomePage() {
           onAttach={handleAttach}
           onCreate={handleCreate}
           onImportThread={handleImportThread}
+          onCreateSchedule={handleCreateSchedule}
           onAuthFailure={handleAuthFailure}
         />
       ) : null}
       {token ? (
-        <SchedulePanel
+        <ScheduledSessionsPanel
           host={host}
           token={token}
-          defaultBackend={effectiveDefaultBackend}
-          defaultCwd={effectiveDefaultCwd}
-          targetLabel={activeLaunchTarget?.name ?? null}
-          launchTargetId={activeLaunchTargetId || null}
-          recentCwds={recentCwds}
-          supportedBackends={launchableBackends}
-          catalog={catalog}
           schedules={schedules}
-          onCreate={handleCreateSchedule}
+          catalog={catalog}
           onCancel={handleCancelSchedule}
           onClearHistory={handleClearScheduleHistory}
-          onAuthFailure={handleAuthFailure}
         />
       ) : null}
       {token ? (

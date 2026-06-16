@@ -38,13 +38,14 @@ _APPROVAL_FOOTER = "Esc to cancel · Tab to amend"
 _APPROVAL_QUESTION_MARKER = "Do you want to"
 # The AskUserQuestion popup. We only need to recognize it — the dialog is
 # dismissed with Esc so the TUI flushes the structured questions to the
-# transcript, which is surfaced from there rather than parsed off the pane.
-# Match cctty's detector: the "Enter to select" / "Esc to cancel" footer plus
-# the always-present "Type something" free-text option. The navigation hint
-# itself is not stable — it reads "↑/↓ to navigate" for a single-question
-# dialog but "Tab/Arrow keys to navigate" for a multi-question one — so keying
-# on it would miss the single-question form.
-_QUESTION_MARKERS = ("Enter to select", "Esc to cancel", "Type something")
+# transcript, which is surfaced from there rather than parsed off the pane. The
+# only footer tokens stable across every layout are "Enter to select" (unique
+# to this popup) and "Esc to cancel". Everything else varies: the navigation
+# hint reads "↑/↓ to navigate" / "Tab/Arrow keys to navigate" by arity, and a
+# dialog with option previews offers free-text via "n to add notes" instead of
+# an inline "Type something" option — so requiring "Type something" (as cctty
+# does for its form parsing) misses the preview/notes variant entirely.
+_QUESTION_MARKERS = ("Enter to select", "Esc to cancel")
 _MODEL_FOOTER = "Enter to set as default"
 _MODEL_MARKER = "Select model"
 _EFFORT_FOOTER = "←/→ to adjust · Enter to confirm"

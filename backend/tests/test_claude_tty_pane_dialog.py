@@ -29,6 +29,7 @@ def _load(name: str) -> str:
         ("approval_bash.txt", PaneScreen.APPROVAL),
         ("question_dialog.txt", PaneScreen.QUESTION),
         ("question_dialog_single.txt", PaneScreen.QUESTION),
+        ("question_dialog_notes.txt", PaneScreen.QUESTION),
         ("trust_dialog.txt", PaneScreen.TRUST),
         ("model_selector.txt", PaneScreen.MODEL_SELECTOR),
         ("effort_popup.txt", PaneScreen.EFFORT_POPUP),
@@ -40,16 +41,21 @@ def test_classify(fixture: str, expected: PaneScreen) -> None:
     assert classify(_load(fixture)) is expected
 
 
-def test_single_and_multi_question_footers_both_classify() -> None:
-    # The navigation hint differs by arity — "↑/↓ to navigate" for one question,
-    # "Tab/Arrow keys to navigate" for several — so detection keys on the stable
-    # "Enter to select"/"Esc to cancel"/"Type something" markers, not the hint.
+def test_question_footers_across_variants_classify() -> None:
+    # Detection keys only on the stable "Enter to select"/"Esc to cancel" footer.
+    # Everything else varies: the nav hint reads "↑/↓ to navigate" for one
+    # question vs "Tab/Arrow keys to navigate" for several, and a dialog with
+    # option previews offers free-text via "n to add notes" with no inline
+    # "Type something" option — so requiring "Type something" misses it.
     single = _load("question_dialog_single.txt")
     multi = _load("question_dialog.txt")
+    notes = _load("question_dialog_notes.txt")
     assert "↑/↓ to navigate" in single
     assert "Tab/Arrow keys to navigate" in multi
+    assert "n to add notes" in notes and "Type something" not in notes
     assert classify(single) is PaneScreen.QUESTION
     assert classify(multi) is PaneScreen.QUESTION
+    assert classify(notes) is PaneScreen.QUESTION
 
 
 def test_question_dialog_not_mistaken_for_approval() -> None:

@@ -35,6 +35,7 @@ import {
   setSessionEffort,
   setSessionModel,
   setSessionPermissionMode,
+  setSessionPinned,
   setSessionTitle,
 } from "@/lib/api";
 import {
@@ -1187,6 +1188,22 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     [host, token, sessionId, handleAuthFailure],
   );
 
+  const handleSetPinned = useCallback(
+    async (pinned: boolean) => {
+      try {
+        const updated = await setSessionPinned(host, token, sessionId, pinned);
+        setSession(updated);
+      } catch (pinError) {
+        if (isAuthError(pinError)) {
+          handleAuthFailure();
+          return;
+        }
+        setError(pinError instanceof Error ? pinError.message : "failed to update pin");
+      }
+    },
+    [host, token, sessionId, handleAuthFailure],
+  );
+
   async function submitApproval(decision: string, text?: string, approvalId?: string) {
     try {
       await approveSession(host, token, sessionId, decision, text, approvalId);
@@ -1587,6 +1604,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           modelOptions={modelOptions}
           catalog={catalog}
           onSetTitle={handleSetTitle}
+          onSetPinned={handleSetPinned}
           assistant={assistant}
         />
       ) : (
@@ -3685,6 +3703,7 @@ function SessionHeader({
   modelOptions,
   catalog,
   onSetTitle,
+  onSetPinned,
   assistant = false,
 }: {
   session: SessionRecord;
@@ -3692,6 +3711,7 @@ function SessionHeader({
   modelOptions: BackendModelOption[];
   catalog: BackendCatalog;
   onSetTitle?: (title: string) => void | Promise<void>;
+  onSetPinned?: (pinned: boolean) => void | Promise<void>;
   assistant?: boolean;
 }) {
   const cwdSegments = formatCwdSegments(session.cwd);
@@ -3704,6 +3724,7 @@ function SessionHeader({
   const showHeaderTransport =
     headerAgentDefault !== null && session.transport !== headerAgentDefault;
   const sourceLabel = session.source === "managed" ? "Managed" : "Attached";
+  const pinned = Boolean(session.pinned_at);
   const [isEditing, setIsEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
 
@@ -3731,7 +3752,7 @@ function SessionHeader({
   }
 
   return (
-    <header className="session-header">
+    <header className={`session-header${pinned ? " pinned" : ""}`}>
       <div className="session-header-top">
         <div className="session-header-title-row">
           {isEditing ? (
@@ -3756,6 +3777,18 @@ function SessionHeader({
                   aria-label="Rename session"
                 >
                   ✎
+                </button>
+              ) : null}
+              {onSetPinned && !assistant ? (
+                <button
+                  className={`link-button session-header-pin${pinned ? " active" : ""}`}
+                  type="button"
+                  onClick={() => void onSetPinned(!pinned)}
+                  title={pinned ? "Unpin session" : "Pin session"}
+                  aria-label={pinned ? "Unpin session" : "Pin session"}
+                  aria-pressed={pinned}
+                >
+                  {pinned ? "★" : "☆"}
                 </button>
               ) : null}
             </>

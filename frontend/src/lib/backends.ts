@@ -72,7 +72,6 @@ const FALLBACK_STRUCTURED = new Set([
   "claude_tty",
   "opencode_http",
 ]);
-const FALLBACK_RESUMABLE = new Set(["tmux", "claude_tty"]);
 const FALLBACK_LIVE_TERMINAL = new Set(["tmux"]);
 const FALLBACK_HAS_TERMINAL_PANE = new Set(["tmux", "claude_tty"]);
 const FALLBACK_TERMINAL_INTERACTIVE = new Set(["tmux"]);
@@ -215,14 +214,6 @@ export function fidelityFor(
     ? caps.is_structured
     : FALLBACK_STRUCTURED.has(transport);
   return structured ? "structured" : "heuristic";
-}
-
-export function supportsResume(
-  transport: SessionTransport,
-  catalog?: BackendCatalog,
-): boolean {
-  const caps = catalog?.transportCaps(transport);
-  return caps ? caps.supports_resume : FALLBACK_RESUMABLE.has(transport);
 }
 
 // Whether the transport renders a live terminal (xterm pane + WS stream)

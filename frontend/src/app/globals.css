@@ -1250,8 +1250,7 @@ html[data-theme="light"] .session-header {
   opacity: 0.55;
   transition:
     width 0.2s ease,
-    opacity 0.2s ease,
-    background 0.2s ease;
+    opacity 0.2s ease;
 }
 
 .session-header.pinned::before {

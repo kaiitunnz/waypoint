@@ -203,3 +203,17 @@ async def test_source_cancelled_on_delete_already_exited(tmp_path: Path) -> None
     await runtime.delete(session.id)
 
     assert session.id not in runtime._context_usage_sources
+
+
+async def test_source_not_started_for_terminal_session(tmp_path: Path) -> None:
+    """Boot-restore can pass an already-terminal session; no source should start
+    (its poll loop would leak with nothing to cancel it until delete)."""
+    _RunningSource.started = False
+    runtime = _make_runtime(tmp_path, _RunningSource(), is_structured=False)
+
+    for status in (SessionStatus.EXITED, SessionStatus.ERROR):
+        session = _make_session(tmp_path).model_copy(update={"status": status})
+        runtime._start_context_usage_source(session)
+        assert session.id not in runtime._context_usage_sources
+
+    assert not _RunningSource.started

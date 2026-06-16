@@ -1908,6 +1908,11 @@ class SessionRuntime:
         return self.settings.default_backend
 
     def _start_context_usage_source(self, session: SessionRecord) -> None:
+        if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
+            # Boot-restore passes already-terminal sessions through here; a
+            # source started for one would poll until delete with nothing to
+            # cancel it (the terminal transition already fired).
+            return
         transport = self._transports.get(session.transport)
         if transport is None or transport.is_structured:
             return

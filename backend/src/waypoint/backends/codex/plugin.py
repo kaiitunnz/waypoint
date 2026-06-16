@@ -308,7 +308,11 @@ class CodexPlugin(DefaultLaunchContract):
     def create_context_usage_source(
         self, session: SessionRecord, runtime: "SessionRuntime"
     ) -> "ContextUsageSource | None":
-        return None
+        if session.transport != "tmux":
+            return None
+        from waypoint.backends.codex.usage_source import CodexRolloutUsageSource
+
+        return CodexRolloutUsageSource(session.id, runtime)
 
     def register_routes(self, app: Any, context: Any) -> None:
         return None

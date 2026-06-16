@@ -16,6 +16,8 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
+from waypoint.backends.pane_text import strip_ansi, strip_whitespace
+
 
 class PaneScreen(StrEnum):
     APPROVAL = "approval"
@@ -56,21 +58,14 @@ _TRUST_MARKER = "Is this a project you created or one you trust?"
 _OPTION_RE = re.compile(r"^\s*(❯)?\s*(\d+)\.\s+(.*\S)\s*$")
 _TOOL_HEADER_RE = re.compile(r"^\s*●\s*([A-Za-z][\w-]*)\((.*)\)\s*$")
 _QUESTION_RE = re.compile(r"^\s*(Do you want to .*\?)\s*$", re.MULTILINE)
-_WHITESPACE_RE = re.compile(r"\s+")
-# CSI / OSC / two-byte escape sequences. A pane captured with `tmux capture-pane
-# -e` carries colour and cursor codes interleaved with the text, which would
-# shred the substring/regex anchors; strip them before any matching.
-_ANSI_RE = re.compile(
-    r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))"
-)
 
 
 def _strip_ansi(text: str) -> str:
-    return _ANSI_RE.sub("", text)
+    return strip_ansi(text)
 
 
 def _compact(text: str) -> str:
-    return _WHITESPACE_RE.sub("", text)
+    return strip_whitespace(text)
 
 
 def _contains(screen: str, screen_compact: str, marker: str) -> bool:

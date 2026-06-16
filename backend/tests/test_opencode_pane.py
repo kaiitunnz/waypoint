@@ -44,6 +44,30 @@ def test_submitted_when_composer_shows_placeholder() -> None:
     assert composer_submitted(pane, SENT) is True
 
 
+def test_not_submitted_when_message_taller_than_a_fixed_window() -> None:
+    # A long pasted message renders its start at the TOP of the composer box,
+    # far from the bottom border; the scan must cover the whole box (between the
+    # previous border and the last) so the probe is still found and the loop
+    # does not declare a premature success.
+    pane = "\n".join(
+        [
+            "┃  earlier conversation",
+            "╹▀▀▀▀▀▀▀▀",
+            "┃",
+            "┃  Reply with exactly the token X and nothing else.",
+            "┃  line 2 of the pasted message",
+            "┃  line 3 of the pasted message",
+            "┃  line 4 of the pasted message",
+            "┃  Attached files:",
+            "┃  - /tmp/a",
+            "┃  Build · Gemini 3.1 Pro Preview Google · high",
+            "╹▀▀▀▀▀▀▀▀",
+            "  tab agents  ctrl+p commands",
+        ]
+    )
+    assert composer_submitted(pane, SENT) is False
+
+
 def test_not_submitted_when_no_border_found() -> None:
     # No composer box drawn → booting/dead pane, nothing submitted; keep trying.
     assert composer_submitted("booting opencode...", SENT) is False

@@ -8799,7 +8799,13 @@ html[data-theme="light"] .term-compose-input {
 .launch-body-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  min-width: 0;
+}
+
+.field-grid-row {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   min-width: 0;
 }
 

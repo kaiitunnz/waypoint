@@ -1,0 +1,104 @@
+"""Context-usage source for the claude_code plugin on the generic tmux transport.
+
+Tails the Claude TUI JSONL transcript (same file as the claude_tty tailer)
+to extract context-usage data and publish it to the runtime without the
+dialog/pane-management machinery that claude_tty needs.
+"""
+
+import asyncio
+import json
+import logging
+from typing import TYPE_CHECKING, Any
+
+from waypoint.backends.claude_code.adapter import _context_usage_snapshot_from_message
+from waypoint.backends.claude_tty.tailer import transcript_path
+from waypoint.backends.context_usage_source import ContextUsageSource
+
+if TYPE_CHECKING:
+    from waypoint.runtime import SessionRuntime
+
+log = logging.getLogger("waypoint.backends.claude_code")
+
+_POLL_INTERVAL = 0.5
+
+
+class TranscriptContextUsageSource(ContextUsageSource):
+    """Tails the Claude TUI transcript and publishes context usage for tmux-wrapped sessions."""
+
+    def __init__(
+        self,
+        session_id: str,
+        session_uuid: str,
+        cwd: str,
+        runtime: "SessionRuntime",
+    ) -> None:
+        self._session_id = session_id
+        self._path = transcript_path(cwd, session_uuid)
+        self._runtime = runtime
+        self._offset = 0
+        self._context_usage_signature: tuple[int, int | None] | None = None
+
+    def _read_new_bytes(self) -> bytes:
+        if not self._path.exists():
+            return b""
+        try:
+            with self._path.open("rb") as fh:
+                fh.seek(self._offset)
+                return fh.read()
+        except OSError:
+            return b""
+
+    async def _drain(self) -> None:
+        data = await asyncio.to_thread(self._read_new_bytes)
+        if not data:
+            return
+
+        lines = data.split(b"\n")
+        consumed = len(data)
+        if not data.endswith(b"\n"):
+            partial = lines.pop()
+            consumed -= len(partial)
+        self._offset += consumed
+
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                record: dict[str, Any] = json.loads(line)
+            except json.JSONDecodeError:
+                log.warning(
+                    "transcript JSON decode error",
+                    extra={"session_id": self._session_id, "line": raw_line[:200]},
+                )
+                continue
+            if record.get("type") == "assistant":
+                await self._maybe_publish_context_usage(record)
+
+    async def _maybe_publish_context_usage(self, record: dict[str, Any]) -> None:
+        message: dict[str, Any] = record.get("message") or {}
+        usage: dict[str, Any] = message.get("usage") or {}
+        model = str(message.get("model") or "") or None
+        snapshot = _context_usage_snapshot_from_message(model, usage)
+        if snapshot is None:
+            return
+        sig = (snapshot.used_tokens, snapshot.context_window_tokens)
+        if sig == self._context_usage_signature:
+            return
+        self._context_usage_signature = sig
+        await self._runtime.update_session_fields(
+            self._session_id, context_usage=snapshot
+        )
+
+    async def run(self) -> None:
+        try:
+            while True:
+                await self._drain()
+                await asyncio.sleep(_POLL_INTERVAL)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception(
+                "context usage tailer crashed",
+                extra={"session_id": self._session_id},
+            )

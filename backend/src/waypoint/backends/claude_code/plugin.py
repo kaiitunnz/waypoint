@@ -353,7 +353,21 @@ class ClaudeCodePlugin(DefaultLaunchContract):
     def create_context_usage_source(
         self, session: SessionRecord, runtime: "SessionRuntime"
     ) -> "ContextUsageSource | None":
-        return None
+        if session.transport != "tmux":
+            return None
+        thread_id = session.transport_state.get("thread_id")
+        if not isinstance(thread_id, str) or not thread_id:
+            return None
+        from waypoint.backends.claude_code.usage_source import (
+            TranscriptContextUsageSource,
+        )
+
+        return TranscriptContextUsageSource(
+            session_id=session.id,
+            session_uuid=thread_id,
+            cwd=session.cwd,
+            runtime=runtime,
+        )
 
     def register_routes(self, app: FastAPI, context: Any) -> None:
         # Tool approval now rides the `can_use_tool` control protocol over the

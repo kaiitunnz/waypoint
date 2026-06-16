@@ -264,6 +264,9 @@ export interface BackendDescriptor {
 export interface AssistantSummary {
   session_id: string;
   backend: Backend;
+  // Transport the assistant runs over (Chat / Emulated / Terminal); lets the
+  // UI label it and preselect it in the settings popover.
+  transport: SessionTransport;
   native_thread_id: string | null;
   status: SessionStatus;
   // Whether the backend can revive the thread after it exits — drives the
@@ -273,6 +276,7 @@ export interface AssistantSummary {
 
 export interface AssistantResetRequest {
   backend?: Backend;
+  transport?: SessionTransport | null;
   model?: string | null;
   effort?: string | null;
   permission_mode?: string | null;

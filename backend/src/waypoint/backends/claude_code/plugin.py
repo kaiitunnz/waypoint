@@ -58,6 +58,7 @@ from waypoint.backends.claude_code.threads import (
     list_local_claude_threads,
 )
 from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
+from waypoint.backends.claude_tty.pane_dialog import composer_is_empty
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.backends.tmux.plugin import TmuxPlugin
@@ -183,6 +184,15 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         from waypoint.backends.claude_code.transport import ClaudeTransport
 
         return ClaudeTransport(runtime, self)
+
+    def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
+        # Over the tmux/Terminal transport the Claude TUI can absorb the submit
+        # Enter while loading an image pasted by path; the composer clearing is
+        # the signal the message was actually sent. The TUI collapses a pasted
+        # message to an ``[Image]``/``[Pasted text]`` chip, so the sent text is
+        # not literally on screen — emptiness is the only reliable signal.
+        # Shared with claude_tty, which wraps the same TUI.
+        return composer_is_empty(pane_text)
 
     def setup(self, runtime: "SessionRuntime") -> None:
         # Build the host-side support bundle, the CLI adapter, and the remote

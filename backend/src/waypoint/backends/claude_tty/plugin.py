@@ -50,6 +50,7 @@ from waypoint.backends.claude_code.threads import (
     find_local_claude_thread,
     list_local_claude_threads,
 )
+from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty._state import PendingTtyApproval, PendingTtyQuestion
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.completions import static_slash_completions
@@ -187,6 +188,14 @@ class ClaudeTtyPlugin:
 
     def native_thread_id(self, session: SessionRecord) -> str | None:
         return self._tmux.native_thread_id(session)
+
+    def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
+        # The Claude TUI can swallow the submit Enter while loading an image
+        # pasted by path; the composer clearing is how the tmux transport
+        # confirms the message was actually sent (vs typed-but-unsent). The TUI
+        # collapses the paste to a chip, so emptiness — not the sent text — is
+        # the signal.
+        return pane_dialog.composer_is_empty(pane_text)
 
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord

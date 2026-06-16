@@ -76,7 +76,16 @@ class TmuxAdapter:
         if text:
             await self._send_literal_text(target, text)
         if submit:
-            await self._run("send-keys", "-t", target, "Enter")
+            await self.submit(target)
+
+    async def submit(self, target: str) -> None:
+        """Send a bare Enter to submit the pane's current composer content.
+
+        Separated from :meth:`send_input` so a caller can paste with
+        ``submit=False`` and then drive the submit on its own — e.g. retrying it
+        when the wrapped TUI swallowed the keystroke while ingesting the paste.
+        """
+        await self._run("send-keys", "-t", target, "Enter")
 
     async def send_bytes(self, target: str, data: bytes) -> None:
         """Forward arbitrary terminal input bytes to the pane.

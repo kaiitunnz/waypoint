@@ -18,6 +18,28 @@ if TYPE_CHECKING:
 
 
 @runtime_checkable
+class PaneSubmitConfirming(Protocol):
+    """A plugin whose tmux-wrapped TUI can absorb the submit ``Enter`` while it
+    is still ingesting a paste — e.g. the Claude TUI loading an image pasted by
+    path — leaving the message typed in the composer but unsent.
+
+    The tmux transport narrows to this protocol (``isinstance``) and, when a
+    plugin satisfies it, sends ``Enter`` and confirms the composer actually
+    cleared via :meth:`confirm_pane_submit`, retrying the keystroke if it was
+    swallowed. Agents whose composer submits synchronously simply do not
+    implement it and keep the single-``Enter`` path.
+    """
+
+    def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
+        """Return whether the just-sent input has left the composer (submitted),
+        given a ``capture-pane`` snapshot of the wrapped TUI and the text that
+        was sent. Agents that render input literally check that ``sent_text``
+        no longer occupies the composer; ones that collapse it (Claude pastes an
+        image to an ``[Image]`` chip) check that the composer is empty instead."""
+        ...
+
+
+@runtime_checkable
 class BackendPlugin(Protocol):
     """Source of truth for everything backend-specific.
 

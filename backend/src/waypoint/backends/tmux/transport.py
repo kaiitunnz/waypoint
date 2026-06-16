@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 
 from waypoint.attachments import ResolvedAttachment, append_attachment_paths
 from waypoint.backends.approvals import is_approve_decision
+from waypoint.backends.base import PaneSubmitConfirming
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.schemas import (
     SessionInputRequest,
@@ -45,12 +46,49 @@ class TmuxTransport(TransportAdapter):
         # A raw terminal can't carry binary, so attachments degrade to their
         # host paths appended to the message; the inner CLI reads them itself.
         payload = append_attachment_paths(text, attachments or [])
+        target = self._target(session)
+        # Resolve the *agent* plugin (by backend), not plugin_for(session),
+        # which is transport-keyed and returns this TmuxPlugin for the generic
+        # tmux transport — the agent (Claude/Codex/OpenCode) owns the
+        # composer-confirmation knowledge.
+        plugin = self._runtime.registry.get(session.backend)
+        confirmer = plugin if isinstance(plugin, PaneSubmitConfirming) else None
         try:
-            await self.adapter.send_input(self._target(session), payload, True)
+            if confirmer is None:
+                await self.adapter.send_input(target, payload, True)
+                return
+            # Some wrapped TUIs absorb the submit Enter while still ingesting
+            # the paste (the Claude TUI does this loading an image pasted by
+            # path), leaving the message typed but unsent. Paste without
+            # submitting, then send Enter and confirm the composer cleared,
+            # retrying the keystroke if it was swallowed.
+            await self.adapter.send_input(target, payload, submit=False)
+            await self._submit_confirmed(target, confirmer, payload)
         except TmuxError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
+
+    async def _submit_confirmed(
+        self,
+        target: str,
+        confirmer: PaneSubmitConfirming,
+        sent_text: str,
+        *,
+        attempts: int = 8,
+        poll_seconds: float = 0.4,
+    ) -> None:
+        # Re-send Enter until the composer reports cleared. Stop on the first
+        # confirmed submit so a landed keystroke is never followed by a stray
+        # one (which could hit a started turn or a dialog). Bounded; if the TUI
+        # never confirms, leave the input rather than spamming keystrokes.
+        for _ in range(attempts):
+            await self.adapter.submit(target)
+            await asyncio.sleep(poll_seconds)
+            if confirmer.confirm_pane_submit(
+                await self.adapter.capture_snapshot(target), sent_text
+            ):
+                return
 
     async def interrupt(self, session: SessionRecord) -> None:
         await self.adapter.interrupt(self._target(session))

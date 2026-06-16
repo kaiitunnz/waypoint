@@ -1,8 +1,10 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
+from waypoint.backends.tmux.transport import TmuxTransport
 
 
 def test_send_input_uses_literal_mode_and_submit() -> None:
@@ -266,3 +268,141 @@ def test_target_exists_false_for_missing_pane() -> None:
     adapter._run = fake_run  # type: ignore[method-assign]
 
     assert asyncio.run(adapter.target_exists("%77")) is False
+
+
+def test_submit_sends_bare_enter() -> None:
+    commands: list[tuple[str, ...]] = []
+
+    async def fake_run(*args: str) -> str:
+        commands.append(args)
+        return ""
+
+    adapter = TmuxAdapter()
+    adapter._run = fake_run  # type: ignore[method-assign]
+
+    asyncio.run(adapter.submit("%1"))
+
+    assert commands == [("send-keys", "-t", "%1", "Enter")]
+
+
+class _FakeAdapter:
+    """Adapter stub for the transport submit-confirm loop: counts Enters and
+    replays a scripted sequence of pane snapshots (one per Enter)."""
+
+    def __init__(self, snapshots: list[str]) -> None:
+        self._snapshots = snapshots
+        self.submits = 0
+
+    async def submit(self, target: str) -> None:
+        self.submits += 1
+
+    async def capture_snapshot(self, target: str, start_line: int = -200) -> str:
+        idx = min(self.submits - 1, len(self._snapshots) - 1)
+        return self._snapshots[idx]
+
+
+class _Confirmer:
+    def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
+        return pane_text == "SUBMITTED"
+
+
+def _transport(adapter: _FakeAdapter) -> TmuxTransport:
+    return TmuxTransport(SimpleNamespace(tmux=adapter))  # type: ignore[arg-type]
+
+
+def test_submit_confirmed_retries_until_composer_clears() -> None:
+    # First two Enters absorbed (composer still populated), third lands.
+    adapter = _FakeAdapter(["PENDING", "PENDING", "SUBMITTED"])
+    transport = _transport(adapter)
+
+    asyncio.run(
+        transport._submit_confirmed(
+            "%1", _Confirmer(), "msg", attempts=8, poll_seconds=0.0
+        )
+    )
+
+    assert adapter.submits == 3
+
+
+def test_submit_confirmed_stops_after_first_success() -> None:
+    # A landed Enter must not be followed by a stray one (could hit a started
+    # turn or a dialog).
+    adapter = _FakeAdapter(["SUBMITTED"])
+    transport = _transport(adapter)
+
+    asyncio.run(
+        transport._submit_confirmed(
+            "%1", _Confirmer(), "msg", attempts=8, poll_seconds=0.0
+        )
+    )
+
+    assert adapter.submits == 1
+
+
+def test_submit_confirmed_is_bounded_when_never_confirmed() -> None:
+    # If the TUI never confirms, stop after `attempts` rather than spamming.
+    adapter = _FakeAdapter(["PENDING"])
+    transport = _transport(adapter)
+
+    asyncio.run(
+        transport._submit_confirmed(
+            "%1", _Confirmer(), "msg", attempts=4, poll_seconds=0.0
+        )
+    )
+
+    assert adapter.submits == 4
+
+
+class _RecordingAdapter:
+    """Records the high-level calls send_input makes so we can assert which
+    submit path (confirm-retry vs single Enter) the transport chose."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    async def send_input(self, target, text, submit=True):
+        self.calls.append(("send_input", target, text, submit))
+
+    async def submit(self, target):
+        self.calls.append(("submit", target))
+
+    async def capture_snapshot(self, target, start_line=-200):
+        return "SUBMITTED"  # confirmer (below) treats this as cleared
+
+
+class _AgentConfirmer:
+    id = "codex"
+
+    def confirm_pane_submit(self, pane_text, sent_text):
+        return pane_text == "SUBMITTED"
+
+
+class _PlainAgent:
+    id = "opencode"  # no confirm_pane_submit -> not a confirmer
+
+
+def _transport_with(agent):
+    adapter = _RecordingAdapter()
+    registry = SimpleNamespace(get=lambda backend_id: agent)
+    runtime = SimpleNamespace(tmux=adapter, registry=registry)
+    return TmuxTransport(runtime), adapter  # type: ignore[arg-type]
+
+
+def _session(backend):
+    return SimpleNamespace(backend=backend, transport_state={"tmux_pane": "%9"})
+
+
+def test_send_input_uses_confirm_path_for_confirmer_agent() -> None:
+    transport, adapter = _transport_with(_AgentConfirmer())
+    asyncio.run(transport.send_input(_session("codex"), "hi"))
+    # Pastes without submitting, then drives submit via the confirm loop —
+    # NOT a single bundled submit. Resolved by agent id, not the tmux transport.
+    assert adapter.calls[0] == ("send_input", "%9", "hi", False)
+    assert ("submit", "%9") in adapter.calls
+    assert not any(c == ("send_input", "%9", "hi", True) for c in adapter.calls)
+
+
+def test_send_input_single_enter_for_non_confirmer_agent() -> None:
+    transport, adapter = _transport_with(_PlainAgent())
+    asyncio.run(transport.send_input(_session("opencode"), "hi"))
+    assert adapter.calls == [("send_input", "%9", "hi", True)]

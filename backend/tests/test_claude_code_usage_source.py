@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -9,9 +10,14 @@ import pytest
 from waypoint.backends.claude_code.usage_source import TranscriptContextUsageSource
 
 
-def _make_runtime() -> MagicMock:
+def _make_runtime(session_model: str | None = None) -> MagicMock:
     runtime = MagicMock()
     runtime.update_session_fields = AsyncMock()
+    # The source reads the session's configured model fresh on each publish to
+    # resolve the context window (the transcript only carries the resolved API
+    # id, which loses the ``[1m]`` marker). Tests reassign
+    # ``get_session.return_value`` to simulate a dynamic model change mid-run.
+    runtime.storage.get_session.return_value = SimpleNamespace(model=session_model)
     return runtime
 
 
@@ -157,3 +163,51 @@ async def test_drain_tolerates_missing_file(tmp_path: Path) -> None:
         await source._drain()
 
     runtime.update_session_fields.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_session_model_overrides_transcript_for_1m_window(tmp_path: Path) -> None:
+    # Session configured with the [1m] alias must yield the 1M window even though
+    # the transcript's resolved API id (claude-opus-4-8) normalizes to base opus.
+    runtime = _make_runtime(session_model="opus[1m]")
+    source = _make_source(runtime, tmp_path)
+    record = _assistant_record(
+        model="claude-opus-4-8",
+        usage={"input_tokens": 20, "cache_read_input_tokens": 5, "output_tokens": 3},
+    )
+    with patch.object(source, "_read_new_bytes", return_value=_jsonl(record)):
+        await source._drain()
+    snapshot = runtime.update_session_fields.call_args.kwargs["context_usage"]
+    assert snapshot.context_window_tokens == 1_000_000
+
+
+@pytest.mark.asyncio
+async def test_dynamic_model_change_updates_window(tmp_path: Path) -> None:
+    # A model switch mid-session must be reflected: the window follows the
+    # session's current model, read fresh on each publish.
+    runtime = _make_runtime(session_model="sonnet[1m]")
+    source = _make_source(runtime, tmp_path)
+    rec1 = _assistant_record(
+        model="claude-sonnet-4-6", usage={"input_tokens": 11, "output_tokens": 1}
+    )
+    with patch.object(source, "_read_new_bytes", return_value=_jsonl(rec1)):
+        await source._drain()
+    assert (
+        runtime.update_session_fields.call_args.kwargs[
+            "context_usage"
+        ].context_window_tokens
+        == 1_000_000
+    )
+    # Switch the configured model to the base alias; next publish uses 200k.
+    runtime.storage.get_session.return_value = SimpleNamespace(model="sonnet")
+    rec2 = _assistant_record(
+        model="claude-sonnet-4-6", usage={"input_tokens": 99, "output_tokens": 1}
+    )
+    with patch.object(source, "_read_new_bytes", return_value=_jsonl(rec2)):
+        await source._drain()
+    assert (
+        runtime.update_session_fields.call_args.kwargs[
+            "context_usage"
+        ].context_window_tokens
+        == 200_000
+    )

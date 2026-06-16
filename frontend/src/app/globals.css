@@ -9016,12 +9016,6 @@ html[data-theme="light"] .term-compose-input {
   border-color: var(--line);
 }
 
-.schedule-grid {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-}
-
 .schedule-mode-row {
   display: flex;
   gap: 8px;

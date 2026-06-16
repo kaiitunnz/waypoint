@@ -2,28 +2,21 @@
 
 import {
   FormEvent,
-  useCallback,
-  useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
 
 import {
-  AgentTransportPicker,
-  useTransportForAgent,
-} from "@/components/AgentTransportPicker";
-import { EffortPicker } from "@/components/EffortPicker";
-import { LaunchOptionsDetails } from "@/components/LaunchOptions";
-import { ModelPicker } from "@/components/ModelPicker";
+  LaunchFormFields,
+  useLaunchForm,
+} from "@/components/LaunchFormFields";
 import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
-import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
 import type { BackendCatalog } from "@/lib/backends";
-import { humaniseBackend, permissionModesFor } from "@/lib/backends";
+import { humaniseBackend } from "@/lib/backends";
 import {
   Backend,
-  BackendModelListResponse,
+  ScheduleCreateRequest,
   SessionTransport,
 } from "@/lib/types";
 
@@ -38,7 +31,9 @@ interface ThreadSummary {
   updated_at: string;
 }
 
-type PanelMode = "new" | "resume" | "attach";
+type PanelMode = "new" | "resume" | "attach" | "schedule";
+
+type ScheduleTiming = "delay" | "datetime";
 
 interface LaunchPanelProps {
   host: string;
@@ -74,6 +69,7 @@ interface LaunchPanelProps {
     cwd: string,
     transport: SessionTransport | null,
   ) => Promise<void>;
+  onCreateSchedule: (payload: ScheduleCreateRequest) => Promise<void>;
   onAuthFailure?: () => void;
 }
 
@@ -92,122 +88,36 @@ export function LaunchPanel({
   onCreate,
   onAttach,
   onImportThread,
+  onCreateSchedule,
   onAuthFailure,
 }: LaunchPanelProps) {
   const [mode, setMode] = useState<PanelMode>("new");
-  const [backend, setBackend] = useState<Backend>(defaultBackend);
-  const [cwd, setCwd] = useState(defaultCwd);
-  const [title, setTitle] = useState("");
-  const [model, setModel] = useState("");
-  const [effort, setEffort] = useState("");
-  const [transport, setTransport] = useTransportForAgent(backend, catalog);
-  const [permissionMode, setPermissionMode] = useState<string>("default");
-  const [customArgsText, setCustomArgsText] = useState("");
-  const [configOverridesText, setConfigOverridesText] = useState("");
-  const [modelInfo, setModelInfo] = useState<BackendModelListResponse | null>(null);
+  const form = useLaunchForm({ defaultBackend, defaultCwd, launchTargetId, catalog });
   const [tmuxTarget, setTmuxTarget] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [scheduleTiming, setScheduleTiming] = useState<ScheduleTiming>("delay");
+  const [delayMinutes, setDelayMinutes] = useState("15");
+  const [scheduledAt, setScheduledAt] = useState(defaultScheduledAt());
+  const [scheduleError, setScheduleError] = useState("");
   const [formBusy, setFormBusy] = useState(false);
-
-  const permissionOptions = useMemo(
-    () => permissionModesFor(backend, catalog),
-    [backend, catalog],
-  );
-
-  const capabilities = catalog.byId(backend)?.capabilities;
-  const supportsCustomArgs = capabilities?.supports_custom_cli_args ?? false;
-  const supportsConfigOverrides = capabilities?.supports_config_overrides ?? false;
-  // Codex's CLI has no `--effort` flag, so a tmux-wrapped codex session
-  // can't honor an effort selection at launch time. Hide the picker
-  // instead of letting the user pick a value that silently drops.
-  const effortSupported = !(backend === "codex" && transport === "tmux");
-
-  const handleBackendChange = useCallback((nextBackend: Backend) => {
-    setBackend(nextBackend);
-    setModel("");
-    setEffort("");
-    setModelInfo(null);
-  }, []);
-
-  useEffect(() => {
-    setBackend(defaultBackend);
-    setModel("");
-    setEffort("");
-    setModelInfo(null);
-  }, [defaultBackend]);
-
-  useEffect(() => {
-    if (!permissionOptions.some((option) => option.id === permissionMode)) {
-      setPermissionMode(permissionOptions[0]?.id ?? "default");
-    }
-  }, [permissionOptions, permissionMode]);
-
-  // An "xhigh" effort carried over from one backend would be invalid
-  // on the next, and per-backend model lists don't overlap.
-  useEffect(() => {
-    setEffort("");
-    setModel("");
-    setModelInfo(null);
-  }, [backend, launchTargetId]);
-
-  const effortOptions = useMemo(() => {
-    if (!modelInfo) return [];
-
-    const resolvedModelId = model || modelInfo.default_model_id;
-    if (resolvedModelId) {
-      const opt = modelInfo.models.find((entry) => entry.id === resolvedModelId);
-      if (opt) {
-        return opt.supported_efforts ?? [];
-      }
-    }
-
-    // No explicit model picked and no default_model_id found — show the union
-    // of every supported level so the picker still works against the backend's default model.
-    const union = new Set<string>();
-    for (const entry of modelInfo.models) {
-      for (const level of entry.supported_efforts ?? []) {
-        union.add(level);
-      }
-    }
-    return Array.from(union);
-  }, [modelInfo, model]);
-
-  // Drop the picked level if the new model doesn't support it.
-  useEffect(() => {
-    if (effort && !effortOptions.includes(effort)) {
-      setEffort("");
-    }
-  }, [effort, effortOptions]);
-
-  const handleModelsLoaded = useCallback((response: BackendModelListResponse) => {
-    setModelInfo(response);
-  }, []);
-
-  useEffect(() => {
-    setCwd(defaultCwd);
-  }, [defaultCwd]);
 
   async function submitCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormBusy(true);
     try {
-      const args = supportsCustomArgs
-        ? customArgsText.split("\n").map((a) => a.trim()).filter(Boolean)
-        : [];
-      const configOverrides = supportsConfigOverrides
-        ? configOverridesText.split("\n").map((a) => a.trim()).filter(Boolean)
-        : [];
+      const { args, configOverrides } = form.collectArgs();
       await onCreate(
-        backend,
-        cwd,
-        title,
-        model.trim() || null,
-        effortSupported ? effort.trim() || null : null,
-        transport || null,
+        form.backend,
+        form.cwd,
+        form.title,
+        form.model.trim() || null,
+        form.effortSupported ? form.effort.trim() || null : null,
+        form.transport || null,
         args,
         configOverrides,
-        permissionMode || null,
+        form.permissionMode || null,
       );
-      setTitle("");
+      form.setTitle("");
     } finally {
       setFormBusy(false);
     }
@@ -217,9 +127,55 @@ export function LaunchPanel({
     event.preventDefault();
     setFormBusy(true);
     try {
-      await onAttach(tmuxTarget, backend, title);
+      await onAttach(tmuxTarget, form.backend, form.title);
       setTmuxTarget("");
-      setTitle("");
+      form.setTitle("");
+    } finally {
+      setFormBusy(false);
+    }
+  }
+
+  async function submitSchedule(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setScheduleError("");
+    const { args, configOverrides } = form.collectArgs();
+    const payload: ScheduleCreateRequest = {
+      backend: form.backend,
+      cwd: form.cwd,
+      // An explicit transport supersedes launch_mode at the API, so pin the
+      // transport and leave the launch mode on "auto", matching the New panel.
+      launch_mode: "auto",
+      transport: form.transport || null,
+      title: form.title.trim() || null,
+      initial_prompt: prompt.trim() || null,
+      permission_mode: form.permissionMode || null,
+      model: form.model.trim() || null,
+      effort: form.effortSupported ? form.effort.trim() || null : null,
+      args,
+      config_overrides: configOverrides,
+    };
+    if (scheduleTiming === "delay") {
+      const minutes = Number.parseFloat(delayMinutes);
+      if (!Number.isFinite(minutes) || minutes < 0) {
+        setScheduleError("Enter a non-negative delay in minutes.");
+        return;
+      }
+      payload.delay_seconds = Math.round(minutes * 60);
+    } else {
+      const local = new Date(scheduledAt);
+      if (Number.isNaN(local.getTime())) {
+        setScheduleError("Enter a valid scheduled time.");
+        return;
+      }
+      payload.scheduled_at = local.toISOString();
+    }
+    setFormBusy(true);
+    try {
+      await onCreateSchedule(payload);
+      form.setTitle("");
+      setPrompt("");
+    } catch (createError) {
+      setScheduleError(createError instanceof Error ? createError.message : "schedule failed");
     } finally {
       setFormBusy(false);
     }
@@ -239,76 +195,92 @@ export function LaunchPanel({
 
       {mode === "new" ? (
         <form className="launch-body" onSubmit={submitCreate}>
-          <AgentTransportPicker
-            agents={supportedBackends}
-            agent={backend}
-            onAgentChange={handleBackendChange}
-            transport={transport}
-            onTransportChange={setTransport}
+          <LaunchFormFields
+            form={form}
+            host={host}
+            token={token}
+            launchTargetId={launchTargetId}
+            targetLabel={targetLabel}
+            recentCwds={recentCwds}
+            supportedBackends={supportedBackends}
             catalog={catalog}
-          />
-          <div className="launch-body-grid">
-            <WorkingDirectoryField
-              cwd={cwd}
-              onChange={setCwd}
-              targetLabel={targetLabel}
-              recentCwds={recentCwds}
-            />
-            <label className="field">
-              <span>Title</span>
-              <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Optional" />
-            </label>
-            {permissionOptions.length > 0 ? (
-              <label className="field">
-                <span>Permission mode</span>
-                <select
-                  value={permissionMode}
-                  onChange={(event) => setPermissionMode(event.target.value)}
-                >
-                  {permissionOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-            <ModelPicker
-              key={`${backend}:${launchTargetId ?? "local"}`}
-              host={host}
-              token={token}
-              backend={backend}
-              launchTargetId={launchTargetId}
-              value={model}
-              onChange={setModel}
-              onAuthFailure={onAuthFailure}
-              onModelsLoaded={handleModelsLoaded}
-              disabled={formBusy}
-              defaultModelLabel={modelInfo?.default_model_label ?? null}
-            />
-            {effortSupported ? (
-              <EffortPicker
-                options={effortOptions}
-                value={effort}
-                onChange={setEffort}
-                disabled={formBusy}
-              />
-            ) : null}
-          </div>
-          <LaunchOptionsDetails
-            mode="new"
-            supportsCustomArgs={supportsCustomArgs}
-            supportsConfigOverrides={supportsConfigOverrides}
-            customArgsText={customArgsText}
-            onCustomArgsChange={setCustomArgsText}
-            configOverridesText={configOverridesText}
-            onConfigOverridesChange={setConfigOverridesText}
-            formBusy={formBusy}
+            busy={formBusy}
+            onAuthFailure={onAuthFailure}
           />
           <div className="launch-actions">
             <span className="grow" />
             <button className="primary" disabled={formBusy} type="submit">
               Launch session
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      {mode === "schedule" ? (
+        <form className="launch-body" onSubmit={submitSchedule}>
+          <LaunchFormFields
+            form={form}
+            host={host}
+            token={token}
+            launchTargetId={launchTargetId}
+            targetLabel={targetLabel}
+            recentCwds={recentCwds}
+            supportedBackends={supportedBackends}
+            catalog={catalog}
+            busy={formBusy}
+            onAuthFailure={onAuthFailure}
+          />
+          <label className="field">
+            <span>Initial prompt</span>
+            <textarea
+              rows={3}
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder="Optional — sent automatically once the session starts"
+            />
+          </label>
+          <div className="schedule-mode-row">
+            <button
+              type="button"
+              className={scheduleTiming === "delay" ? "primary" : "secondary"}
+              onClick={() => setScheduleTiming("delay")}
+            >
+              After delay
+            </button>
+            <button
+              type="button"
+              className={scheduleTiming === "datetime" ? "primary" : "secondary"}
+              onClick={() => setScheduleTiming("datetime")}
+            >
+              At specific time
+            </button>
+          </div>
+          {scheduleTiming === "delay" ? (
+            <label className="field">
+              <span>Minutes from now</span>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={delayMinutes}
+                onChange={(event) => setDelayMinutes(event.target.value)}
+              />
+            </label>
+          ) : (
+            <label className="field">
+              <span>Local time</span>
+              <input
+                type="datetime-local"
+                value={scheduledAt}
+                onChange={(event) => setScheduledAt(event.target.value)}
+              />
+            </label>
+          )}
+          {scheduleError ? <p className="error">{scheduleError}</p> : null}
+          <div className="launch-actions">
+            <span className="grow" />
+            <button className="primary" disabled={formBusy} type="submit">
+              {formBusy ? "Scheduling…" : "Schedule"}
             </button>
           </div>
         </form>
@@ -320,7 +292,7 @@ export function LaunchPanel({
           loadingByBackend={loadingByBackend}
           targetLabel={targetLabel}
           supportedBackends={supportedBackends}
-          preferredBackend={backend}
+          preferredBackend={form.backend}
           onImportThread={onImportThread}
           catalog={catalog}
         />
@@ -339,7 +311,7 @@ export function LaunchPanel({
             </label>
             <label className="field">
               <span>Agent hint</span>
-              <select value={backend} onChange={(event) => handleBackendChange(event.target.value as Backend)}>
+              <select value={form.backend} onChange={(event) => form.changeBackend(event.target.value as Backend)}>
                 {supportedBackends.map((id) => (
                   <option key={id} value={id}>
                     {catalog.byId(id)?.label ?? humaniseBackend(id)}
@@ -350,8 +322,8 @@ export function LaunchPanel({
             <label className="field">
               <span>Title</span>
               <input
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
+                value={form.title}
+                onChange={(event) => form.setTitle(event.target.value)}
                 placeholder="Optional"
               />
             </label>
@@ -381,19 +353,21 @@ const MODE_OPTIONS: Array<[PanelMode, string]> = [
   ["new", "New"],
   ["resume", "Resume"],
   ["attach", "Attach"],
+  ["schedule", "Schedule"],
 ];
 
 // Animated segmented control: a sliding pill backdrop tracks the active
 // button by measuring its offsetLeft/offsetWidth in a layout effect, then
 // setting CSS variables on the parent. The transition between positions
-// is a smooth spring curve, so flipping between New / Resume / Attach
-// feels alive rather than the old hard color flip.
+// is a smooth spring curve, so flipping between modes feels alive rather
+// than the old hard color flip.
 function LaunchModeChooser({ mode, onChange }: LaunchModeChooserProps) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const buttonRefs = useRef<Record<PanelMode, HTMLButtonElement | null>>({
     new: null,
     resume: null,
     attach: null,
+    schedule: null,
   });
 
   // ResizeObserver catches width changes from window resize, label
@@ -449,5 +423,18 @@ function subheadFor(mode: PanelMode, targetLabel: string | null): string {
       return `Pick up a stored thread${where}.`;
     case "attach":
       return "Attach to a running terminal pane and drive it live.";
+    case "schedule":
+      return `Spin up an agent${where} at a future time, optionally with an opening prompt.`;
   }
+}
+
+function defaultScheduledAt(): string {
+  const date = new Date();
+  date.setMinutes(date.getMinutes() + 15);
+  // Format as YYYY-MM-DDTHH:mm for datetime-local input.
+  const pad = (value: number) => value.toString().padStart(2, "0");
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
+  );
 }

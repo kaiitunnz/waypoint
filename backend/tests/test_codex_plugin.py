@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from waypoint.backends.codex.plugin import CodexPlugin
+from waypoint.backends.codex.usage_source import _parse_token_count_record
 from waypoint.launch_targets import SshLaunchTargetConfig
 
 
@@ -202,3 +203,61 @@ async def test_capture_thread_id_pulls_uuid_from_filename(
     )
 
     assert captured["sess-1"] == {"transport_state": {"thread_id": uuid_str}}
+
+
+def test_parse_token_count_record_returns_snapshot() -> None:
+    record = {
+        "type": "event_msg",
+        "payload": {
+            "type": "token_count",
+            "info": {
+                "last_token_usage": {
+                    "total_tokens": 8000,
+                    "input_tokens": 6000,
+                    "cached_input_tokens": 1500,
+                    "output_tokens": 400,
+                    "reasoning_output_tokens": 100,
+                },
+                "model_context_window": 200000,
+            },
+        },
+    }
+    snapshot = _parse_token_count_record(record)
+    assert snapshot is not None
+    assert snapshot.used_tokens == 8000
+    assert snapshot.context_window_tokens == 200000
+    assert snapshot.source == "codex"
+    assert snapshot.breakdown == {
+        "input_tokens": 6000,
+        "cached_input_tokens": 1500,
+        "output_tokens": 400,
+        "reasoning_output_tokens": 100,
+    }
+
+
+def test_parse_token_count_record_ignores_non_token_count() -> None:
+    assert _parse_token_count_record({"type": "session_meta", "payload": {}}) is None
+    assert (
+        _parse_token_count_record({"type": "event_msg", "payload": {"type": "other"}})
+        is None
+    )
+
+
+def test_parse_token_count_record_omits_zero_breakdown_fields() -> None:
+    record = {
+        "type": "event_msg",
+        "payload": {
+            "type": "token_count",
+            "info": {
+                "last_token_usage": {
+                    "total_tokens": 100,
+                    "input_tokens": 100,
+                    "cached_input_tokens": 0,
+                },
+                "model_context_window": 50000,
+            },
+        },
+    }
+    snapshot = _parse_token_count_record(record)
+    assert snapshot is not None
+    assert "cached_input_tokens" not in snapshot.breakdown

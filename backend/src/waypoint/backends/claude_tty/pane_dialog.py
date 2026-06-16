@@ -108,6 +108,34 @@ class ApprovalDialog:
         return None
 
 
+_COMPOSER_PROMPT = "❯"
+# An idle composer shows dim ghost placeholder text (``Try "…"``) after the
+# prompt rather than a bare prompt; it is empty for submit-confirmation
+# purposes. A pending message never collides with this — an attachment turn
+# leads with the ``[Image #N]`` chip / ``Attached files:`` block.
+_COMPOSER_PLACEHOLDER_PREFIX = 'Try "'
+
+
+def composer_is_empty(screen: str) -> bool:
+    """Whether the Claude TUI composer (input box) is empty.
+
+    The composer prompt (``❯``) is the bottom-most prompt line; a submitted user
+    turn echoes *above* it in the transcript with the same glyph, so the last
+    ``❯`` line is the live input. It holds the typed message before submission
+    and returns to a bare prompt (while a turn runs) or the idle placeholder
+    (once idle) after — which is how the tmux submit-confirm loop tells an
+    absorbed ``Enter`` (composer still populated) from a real submission. If no
+    prompt line is found, treat it as empty so the caller does not retry blindly
+    (its loop is bounded regardless).
+    """
+    lines = _strip_ansi(screen).replace("\xa0", " ").splitlines()
+    prompt_lines = [line for line in lines if _COMPOSER_PROMPT in line]
+    if not prompt_lines:
+        return True
+    after_prompt = prompt_lines[-1].split(_COMPOSER_PROMPT, 1)[1].strip()
+    return after_prompt == "" or after_prompt.startswith(_COMPOSER_PLACEHOLDER_PREFIX)
+
+
 def classify(screen: str) -> PaneScreen:
     screen = _strip_ansi(screen)
     compact = _compact(screen)

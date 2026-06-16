@@ -11,6 +11,7 @@ import pytest
 from waypoint.backends.claude_tty.pane_dialog import (
     PaneScreen,
     classify,
+    composer_is_empty,
     parse_approval,
     parse_model_selector,
 )
@@ -168,3 +169,54 @@ def test_classify_robust_to_wrapped_footer() -> None:
         "Esc to cancel · Tab to amend", "Esc to cancel · Tab to\namend"
     )
     assert classify(screen) is PaneScreen.APPROVAL
+
+
+def test_composer_is_empty_for_bare_prompt() -> None:
+    # After a real submit the composer clears to a bare ``❯`` above the footer.
+    screen = "\n".join(
+        [
+            "● Done",
+            "────────────────────────────",
+            "❯ ",
+            "────────────────────────────",
+            "  ⏸ plan mode on (shift+tab to cycle)",
+        ]
+    )
+    assert composer_is_empty(screen) is True
+
+
+def test_composer_not_empty_while_message_pending() -> None:
+    # The pasted message (incl. an image chip) sits on the last ``❯`` line; a
+    # prior submitted turn echoes above with the same glyph and must be ignored.
+    screen = "\n".join(
+        [
+            "❯ earlier submitted message",
+            "────────────────────────────",
+            "❯ [Image #1]Describe the image.",
+            "  Attached files:",
+            "  - /tmp/x.png",
+            "────────────────────────────",
+            "  ⏸ plan mode on (shift+tab to cycle)",
+        ]
+    )
+    assert composer_is_empty(screen) is False
+
+
+def test_composer_is_empty_tolerates_ansi_and_nbsp() -> None:
+    # capture-pane -e carries colour codes, and the prompt is padded with a
+    # non-breaking space; both must be normalized before the emptiness check.
+    screen = "\x1b[2m❯\xa0\x1b[0m   "
+    assert composer_is_empty(screen) is True
+
+
+def test_composer_is_empty_when_no_prompt_found() -> None:
+    # No locatable composer → treat as empty so the caller does not retry
+    # blindly (its loop is bounded regardless).
+    assert composer_is_empty("just some text\nno prompt here") is True
+
+
+def test_composer_is_empty_for_idle_placeholder() -> None:
+    # An idle composer renders dim ghost placeholder text after the prompt
+    # (e.g. ``❯ Try "fix typecheck errors"``); it is empty for submit-confirm
+    # purposes, so the confirm loop must not keep firing Enter at it.
+    assert composer_is_empty(_load("ready.txt")) is True

@@ -4,13 +4,15 @@ Waypoint orchestrates each coding session as an **(agent, transport) pair** thro
 
 The split matters because the generic transports drive *any* agent without knowing which one it is: the launch knowledge lives on the agent, so the `tmux` pane wrapper holds **no** `if backend == "codex"` branches — it calls `registry.get(session.backend)` and dispatches through the `AgentLaunchContract`. A new agent gets pane-wrapping for free.
 
-The runtime, API, scheduler, storage, and frontend catalog all dispatch by plugin id; adding a new backend means writing a plugin module, not editing the core. This doc covers the design, the two contracts a plugin satisfies, the capability split, and recipes for shipping a new agent or transport.
+The runtime, API, scheduler, storage, and frontend catalog all dispatch by plugin id; adding a new agent or transport means writing a plugin module, not editing the core. This doc covers the design, the two contracts a plugin satisfies, the capability split, and recipes for shipping a new agent or transport.
 
 ## Goals
 
-- One place per backend for everything backend-specific: lifecycle,
-  control surface, model/thread discovery, transport, event
-  normalization, route registration.
+- One place per plugin for everything it owns, with no concern
+  implemented twice: an agent owns protocol, model/thread discovery,
+  event normalization, route registration, and the launch contract; a
+  transport owns the control surface and lifecycle (send, interrupt,
+  approval, teardown).
 - The runtime — and the generic transports — stay agent-agnostic. No
   `if backend == "codex"` branches anywhere in `runtime.py`, `api.py`,
   `scheduler.py`, or `backends/tmux/`.

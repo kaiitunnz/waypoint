@@ -16,8 +16,9 @@ waypoint models      # the model ids and reasoning efforts each backend offers
 ```
 
 `codex` and `opencode` discover their model lists live; `claude_code` serves a
-static curated list; `claude_tty` has none (it tails Claude's TTY output, no
-separate model registry). `waypoint models` reports the exact ids and efforts
+static curated Claude catalogue, which it reuses over the Emulated `claude_tty`
+transport as well (`waypoint models claude_tty` returns the same ids). `waypoint
+models` reports the exact ids and efforts
 each backend offers right now — run it and pass those ids verbatim to `--model`
 / `--effort`, rather than guessing from memory. With no argument it sweeps every
 selectable backend id (`tmux`, a pure transport, is excluded); a backend

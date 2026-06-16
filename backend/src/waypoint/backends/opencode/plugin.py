@@ -36,6 +36,7 @@ from waypoint.schemas import (
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
+    from waypoint.backends.context_usage_source import ContextUsageSource
     from waypoint.runtime import SessionRuntime
 
 log = logging.getLogger("waypoint.backends.opencode")
@@ -647,6 +648,11 @@ class OpenCodePlugin(DefaultLaunchContract):
             task = asyncio.create_task(adapter.terminate_session(session.id))
             self._pending_tasks.add(task)
             task.add_done_callback(self._pending_tasks.discard)
+
+    def create_context_usage_source(
+        self, session: SessionRecord, runtime: "SessionRuntime"
+    ) -> "ContextUsageSource | None":
+        return None
 
     def register_routes(self, app: FastAPI, context: Any) -> None:
         pass

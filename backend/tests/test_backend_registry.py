@@ -125,6 +125,9 @@ class _StubPlugin:
     async def shutdown(self, runtime: Any) -> None:
         return None
 
+    def create_context_usage_source(self, session: Any, runtime: Any) -> None:
+        return None
+
     def register_routes(self, app: Any, context: Any) -> None:
         return None
 

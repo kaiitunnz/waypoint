@@ -162,6 +162,10 @@ class SessionRuntime:
         # sessions have no adapter and need this fallback to keep the usage pill
         # live.
         self._rate_limit_watchers: dict[str, asyncio.Task[None]] = {}
+        # Per-session context-usage sources for non-structured transports.
+        # Started when a session with is_structured=False is created or restored;
+        # cancelled on session exit alongside the other per-session tasks.
+        self._context_usage_sources: dict[str, asyncio.Task[None]] = {}
         self._restore_tasks: set[asyncio.Task[None]] = set()
         self._completion_cache: dict[CompletionCacheKey, list[CommandCompletion]] = {}
         self._completion_cache_updated_at: dict[CompletionCacheKey, float] = {}
@@ -234,6 +238,12 @@ class SessionRuntime:
             with suppress(asyncio.CancelledError):
                 await task
         self.monitor_tasks.clear()
+        for task in self._context_usage_sources.values():
+            task.cancel()
+        for task in self._context_usage_sources.values():
+            with suppress(asyncio.CancelledError):
+                await task
+        self._context_usage_sources.clear()
         restore_tasks = list(self._restore_tasks)
         for task in restore_tasks:
             task.cancel()
@@ -423,6 +433,7 @@ class SessionRuntime:
                 session.id, worktree_path=request.worktree_path
             )
         self._warm_command_completions(session)
+        self._start_context_usage_source(session)
         return session
 
     def _effective_permission_mode(self, request: SessionCreateRequest) -> str | None:
@@ -1045,6 +1056,7 @@ class SessionRuntime:
             # ``create_session`` / fork; reattached ones fall back to
             # stale-while-revalidate on the first `/` press.
             self._warm_command_completions(refreshed, include_remote=False)
+            self._start_context_usage_source(refreshed)
 
     def _warm_command_completions(
         self, session: SessionRecord, *, include_remote: bool = True
@@ -1215,6 +1227,7 @@ class SessionRuntime:
         # adapter is missing.
         plugin = self.registry.plugin_for(session)
         await plugin.terminate_session(self, session)
+        await self._cancel_context_usage_source(session_id)
         await self._record_system_event(
             session.id, "Session terminated", status=SessionStatus.EXITED
         )
@@ -1252,6 +1265,7 @@ class SessionRuntime:
                 detail="this session cannot be reattached after exit",
             )
         await plugin.terminate_session(self, session)
+        await self._cancel_context_usage_source(session.id)
         # User-initiated retry: bypass any per-target cooldown / circuit
         # breaker so the click takes effect immediately. Plugins without
         # this opt-in hook ignore the call.
@@ -1270,6 +1284,7 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"failed to reattach session ({refreshed.status})",
             )
+        self._start_context_usage_source(refreshed)
         return refreshed
 
     async def delete(
@@ -1291,6 +1306,9 @@ class SessionRuntime:
                     await self.terminate(session_id)
             else:
                 await self.terminate(session_id)
+        # terminate() covers the non-EXITED path; cover the already-EXITED
+        # case (natural exit never called terminate()) here.
+        await self._cancel_context_usage_source(session_id)
         self._close_structured_log(session_id)
         self.storage.delete_session(session_id)
         if session.worktree_path is not None:
@@ -1719,6 +1737,8 @@ class SessionRuntime:
         persisted = self.storage.append_event(event)
         self._append_structured_log(session_id, persisted)
         await self._publish_event(persisted)
+        if status in {SessionStatus.EXITED, SessionStatus.ERROR}:
+            await self._cancel_context_usage_source(session_id)
 
     async def update_session_fields(
         self, session_id: str, *, publish: bool = True, **updates: Any
@@ -1886,6 +1906,28 @@ class SessionRuntime:
                 if alias and alias.lower() in lowered:
                     return plugin.id
         return self.settings.default_backend
+
+    def _start_context_usage_source(self, session: SessionRecord) -> None:
+        transport = self._transports.get(session.transport)
+        if transport is None or transport.is_structured:
+            return
+        plugin = self.registry.plugin_for(session)
+        source = plugin.create_context_usage_source(session, self)
+        if source is None:
+            return
+        old = self._context_usage_sources.pop(session.id, None)
+        if old is not None:
+            old.cancel()
+        self._context_usage_sources[session.id] = asyncio.create_task(
+            source.run(), name=f"ctx-usage-{session.id}"
+        )
+
+    async def _cancel_context_usage_source(self, session_id: str) -> None:
+        task = self._context_usage_sources.pop(session_id, None)
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
     def _ensure_monitor(self, session_id: str) -> None:
         if session_id in self.monitor_tasks:

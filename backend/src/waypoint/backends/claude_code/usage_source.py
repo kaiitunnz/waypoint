@@ -78,7 +78,14 @@ class TranscriptContextUsageSource(ContextUsageSource):
     async def _maybe_publish_context_usage(self, record: dict[str, Any]) -> None:
         message: dict[str, Any] = record.get("message") or {}
         usage: dict[str, Any] = message.get("usage") or {}
-        model = str(message.get("model") or "") or None
+        # Prefer the session's configured model alias for the window: it carries
+        # the ``[1m]`` marker (→ 1M window), whereas the transcript's resolved API
+        # id normalizes to the base family and loses it. Read it fresh each publish
+        # so a dynamic model change is reflected on the next snapshot.
+        session = self._runtime.storage.get_session(self._session_id)
+        model = (session.model if session is not None else None) or (
+            str(message.get("model") or "") or None
+        )
         snapshot = _context_usage_snapshot_from_message(model, usage)
         if snapshot is None:
             return

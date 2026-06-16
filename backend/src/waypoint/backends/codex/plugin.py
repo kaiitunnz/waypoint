@@ -34,6 +34,7 @@ from waypoint.backends.codex.adapter import (
     CodexAppServerAdapter,
     default_client_factory,
 )
+from waypoint.backends.codex.pane import composer_submitted
 from waypoint.backends.codex.permission_modes import (
     CODEX_PERMISSION_MODE_IDS,
     CODEX_PERMISSION_MODE_SPECS,
@@ -179,6 +180,12 @@ class CodexPlugin(DefaultLaunchContract):
         from waypoint.backends.codex.transport import CodexTransport
 
         return CodexTransport(runtime, self)
+
+    def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
+        # Over the tmux/Terminal transport the Codex TUI can absorb the submit
+        # Enter while ingesting a long typed line, leaving it unsent; the
+        # composer no longer carrying the message is the signal it was sent.
+        return composer_submitted(pane_text, sent_text)
 
     def setup(self, runtime: "SessionRuntime") -> None:
         # Codex's adapter wires straight to the App Server SDK with no

@@ -23,7 +23,7 @@ def test_send_input_uses_literal_mode_and_submit() -> None:
     ]
 
 
-def test_send_input_sends_multiline_text_as_single_submission() -> None:
+def test_send_input_pastes_multiline_text_then_submits() -> None:
     commands: list[tuple[str, ...]] = []
 
     async def fake_run(*args: str) -> str:
@@ -35,15 +35,92 @@ def test_send_input_sends_multiline_text_as_single_submission() -> None:
 
     asyncio.run(adapter.send_input("%2", "first line\nsecond line", submit=True))
 
-    # Embedded newlines emit as Ctrl-J (soft newline) so the TUI treats
-    # the whole block as one multi-line message terminated by the final
-    # Enter that ``submit=True`` adds.
-    assert commands == [
-        ("send-keys", "-t", "%2", "-l", "--", "first line"),
-        ("send-keys", "-t", "%2", "C-j"),
-        ("send-keys", "-t", "%2", "-l", "--", "second line"),
-        ("send-keys", "-t", "%2", "Enter"),
-    ]
+    # Multi-line text is delivered as a bracketed paste rather than a burst
+    # of literal keystrokes + Ctrl-J: the C-j/Enter emulation intermittently
+    # left the message typed-but-unsent against the wrapped TUI's line editor
+    # (which has bracketed paste enabled). The paste carries the whole block;
+    # the trailing Enter that ``submit=True`` adds submits it.
+    set_buffer, paste_buffer, submit = commands
+    assert set_buffer[:2] == ("set-buffer", "-b")
+    buffer_name = set_buffer[2]
+    assert buffer_name.startswith("waypoint-input-")
+    assert set_buffer[3:] == ("--", "first line\nsecond line")
+    # The paste targets the same buffer the set-buffer just wrote.
+    assert paste_buffer == (
+        "paste-buffer",
+        "-d",
+        "-p",
+        "-r",
+        "-b",
+        buffer_name,
+        "-t",
+        "%2",
+    )
+    assert submit == ("send-keys", "-t", "%2", "Enter")
+
+
+def test_send_input_pastes_carriage_returns_normalized_to_lf() -> None:
+    commands: list[tuple[str, ...]] = []
+
+    async def fake_run(*args: str) -> str:
+        commands.append(args)
+        return ""
+
+    adapter = TmuxAdapter()
+    adapter._run = fake_run  # type: ignore[method-assign]
+
+    asyncio.run(
+        adapter.send_input("%2", "msg\r\n\r\nAttached files:\r\n- /tmp/a", submit=True)
+    )
+
+    # CRLF/CR are normalized to LF before the buffer is set, so the paste
+    # never carries a bare CR that the inner app would read as accept-line.
+    set_buffer = commands[0]
+    assert set_buffer[:2] == ("set-buffer", "-b")
+    assert set_buffer[3:] == ("--", "msg\n\nAttached files:\n- /tmp/a")
+
+
+def test_multiline_sends_use_distinct_buffer_names() -> None:
+    names: list[str] = []
+
+    async def fake_run(*args: str) -> str:
+        if args[0] == "set-buffer":
+            names.append(args[2])
+        return ""
+
+    adapter = TmuxAdapter()
+    adapter._run = fake_run  # type: ignore[method-assign]
+
+    # Input is not serialized per pane, so each send must use its own buffer
+    # name or concurrent sends to the same pane would clobber each other.
+    asyncio.run(adapter.send_input("%2", "a\nb", submit=True))
+    asyncio.run(adapter.send_input("%2", "c\nd", submit=True))
+
+    assert len(names) == 2
+    assert names[0] != names[1]
+
+
+def test_multiline_paste_failure_drops_orphaned_buffer() -> None:
+    commands: list[tuple[str, ...]] = []
+
+    async def fake_run(*args: str) -> str:
+        commands.append(args)
+        if args[0] == "paste-buffer":
+            raise TmuxError("pane gone")
+        return ""
+
+    adapter = TmuxAdapter()
+    adapter._run = fake_run  # type: ignore[method-assign]
+
+    with pytest.raises(TmuxError):
+        asyncio.run(adapter.send_input("%2", "a\nb", submit=True))
+
+    # paste-buffer -d never deleted the buffer (it failed), so a best-effort
+    # delete-buffer runs for the same buffer before the error propagates.
+    set_buffer, paste_buffer, delete_buffer = commands
+    buffer_name = set_buffer[2]
+    assert paste_buffer[0] == "paste-buffer"
+    assert delete_buffer == ("delete-buffer", "-b", buffer_name)
 
 
 def test_send_bytes_forwards_hex_escape_sequences() -> None:

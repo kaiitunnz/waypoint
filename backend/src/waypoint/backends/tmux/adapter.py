@@ -1,5 +1,7 @@
 import asyncio
 import shlex
+import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -195,17 +197,35 @@ class TmuxAdapter:
         return stdout.decode()
 
     async def _send_literal_text(self, target: str, text: str) -> None:
-        # Embedded newlines go in as Ctrl-J (literal LF) so a multi-line
-        # message lands as one submission terminated by the caller's
-        # optional trailing ``Enter`` (the ``submit`` flag on
-        # ``send_input``). Splitting on ``Enter`` instead would submit
-        # each line as a separate message — Claude Code, Codex, and
-        # OpenCode all treat ``\r`` as accept-line and ``\n`` (Ctrl-J,
-        # same byte the keybar's ``⇧↵`` chip emits) as soft newline.
+        # Single-line text goes in as literal keystrokes. Multi-line text is
+        # delivered as a bracketed paste instead. Emulating the newlines with
+        # ``C-j`` keystrokes and relying on the caller's trailing ``Enter`` to
+        # submit is unreliable: the wrapped CLIs enable bracketed paste
+        # (``\e[?2004h``), and a raw multi-key burst is sometimes interpreted
+        # such that the trailing ``Enter`` lands inside the composer rather
+        # than submitting — leaving the message typed but unsent. A real
+        # paste round-trips deterministically. The submitting ``Enter`` is
+        # still appended by the caller via the ``submit`` flag on
+        # ``send_input``, outside the paste.
         normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-        lines = normalized.split("\n")
-        for index, line in enumerate(lines):
-            if line:
-                await self._run("send-keys", "-t", target, "-l", "--", line)
-            if index < len(lines) - 1:
-                await self._run("send-keys", "-t", target, "C-j")
+        if "\n" not in normalized:
+            await self._run("send-keys", "-t", target, "-l", "--", normalized)
+            return
+        # A fresh name per send: input is not serialized per pane (an HTTP
+        # send and a terminal-WS submit can race), so a deterministic name
+        # would let one send paste or delete another's buffer.
+        buffer_name = f"waypoint-input-{uuid.uuid4().hex}"
+        await self._run("set-buffer", "-b", buffer_name, "--", normalized)
+        # -p wraps the paste in bracketed-paste markers when the pane's app
+        # requested them; -r keeps LF (no newline-to-CR translation, so the
+        # paste never submits on its own); -d drops the buffer afterward.
+        try:
+            await self._run(
+                "paste-buffer", "-d", "-p", "-r", "-b", buffer_name, "-t", target
+            )
+        except TmuxError:
+            # -d only runs on a successful paste, so drop the orphaned buffer
+            # before propagating (e.g. the pane died between set and paste).
+            with suppress(TmuxError):
+                await self._run("delete-buffer", "-b", buffer_name)
+            raise

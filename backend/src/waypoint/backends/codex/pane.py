@@ -9,12 +9,8 @@ bottom-most prompt line; a submitted message echoes above it with the same
 glyph, so only the last ``›`` line is the live composer.
 """
 
-import re
+from waypoint.backends.pane_text import strip_ansi, strip_whitespace
 
-_ANSI_RE = re.compile(
-    r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))"
-)
-_WHITESPACE_RE = re.compile(r"\s+")
 _PROMPT = "›"
 # Enough of the message to be distinctive without tripping over the TUI
 # wrapping/truncating a long composer line.
@@ -22,7 +18,7 @@ _PROBE_LEN = 24
 
 
 def _compact(text: str) -> str:
-    return _WHITESPACE_RE.sub("", _ANSI_RE.sub("", text))
+    return strip_whitespace(strip_ansi(text))
 
 
 def composer_ready(pane_text: str) -> bool:

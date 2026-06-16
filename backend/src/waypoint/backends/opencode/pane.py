@@ -5,28 +5,14 @@ box at the bottom of the pane: ``┃`` content lines closed by a ``╹▀▀`` b
 border. An empty composer shows the ``Ask anything…`` placeholder, a populated
 one the typed text (OpenCode renders input, and attachment paths, literally).
 Submitted messages echo in ``┃`` boxes higher up, so the live composer is the
-``┃`` region directly above the *last* box border; submission is confirmed by
-the sent text no longer occupying it.
+``┃`` region between the second-to-last box border and the last one; submission
+is confirmed by the sent text no longer occupying it.
 """
 
-import re
+from waypoint.backends.pane_text import strip_ansi, strip_whitespace
 
-_ANSI_RE = re.compile(
-    r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))"
-)
-_WHITESPACE_RE = re.compile(r"\s+")
 _BORDER = "╹"
-# Content rows of the composer box sit just above its bottom border.
-_COMPOSER_SPAN = 5
 _PROBE_LEN = 24
-
-
-def _strip(text: str) -> str:
-    return _ANSI_RE.sub("", text)
-
-
-def _compact(text: str) -> str:
-    return _WHITESPACE_RE.sub("", text)
 
 
 def composer_ready(pane_text: str) -> bool:
@@ -36,7 +22,7 @@ def composer_ready(pane_text: str) -> bool:
     or restart) shows the boot screen with no box for a beat; the tmux transport
     waits on this before pasting so the keystrokes are not dropped.
     """
-    return any(_BORDER in line for line in _strip(pane_text).splitlines())
+    return any(_BORDER in line for line in strip_ansi(pane_text).splitlines())
 
 
 def composer_submitted(pane_text: str, sent_text: str) -> bool:
@@ -47,13 +33,18 @@ def composer_submitted(pane_text: str, sent_text: str) -> bool:
     located the pane is booting or dead, so nothing has been submitted — return
     ``False`` so the bounded confirm loop keeps retrying.
     """
-    probe = _compact(sent_text)[:_PROBE_LEN]
+    probe = strip_whitespace(strip_ansi(sent_text))[:_PROBE_LEN]
     if not probe:
         return True
-    lines = _strip(pane_text).splitlines()
+    lines = strip_ansi(pane_text).splitlines()
     borders = [i for i, line in enumerate(lines) if _BORDER in line]
     if not borders:
         return False
+    # The live composer spans from just below the previous box border (the
+    # transcript's last box) to the last border. Scanning the whole box rather
+    # than a fixed window keeps a tall pasted message — whose start renders at
+    # the top, furthest from the bottom border — inside the searched region.
     bottom = borders[-1]
-    region = _compact(" ".join(lines[max(0, bottom - _COMPOSER_SPAN) : bottom]))
+    top = borders[-2] + 1 if len(borders) >= 2 else 0
+    region = strip_whitespace(" ".join(lines[top:bottom]))
     return probe not in region

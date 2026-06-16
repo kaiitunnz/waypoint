@@ -12,6 +12,7 @@ from waypoint.backends.claude_tty.pane_dialog import (
     PaneScreen,
     classify,
     composer_is_empty,
+    composer_ready,
     parse_approval,
     parse_model_selector,
 )
@@ -210,9 +211,9 @@ def test_composer_is_empty_tolerates_ansi_and_nbsp() -> None:
 
 
 def test_composer_is_empty_when_no_prompt_found() -> None:
-    # No locatable composer → treat as empty so the caller does not retry
-    # blindly (its loop is bounded regardless).
-    assert composer_is_empty("just some text\nno prompt here") is True
+    # No locatable composer → the pane is booting or dead, so nothing has been
+    # submitted; report not-empty so the confirm loop keeps retrying.
+    assert composer_is_empty("just some text\nno prompt here") is False
 
 
 def test_composer_is_empty_for_idle_placeholder() -> None:
@@ -220,3 +221,15 @@ def test_composer_is_empty_for_idle_placeholder() -> None:
     # (e.g. ``❯ Try "fix typecheck errors"``); it is empty for submit-confirm
     # purposes, so the confirm loop must not keep firing Enter at it.
     assert composer_is_empty(_load("ready.txt")) is True
+
+
+def test_composer_ready_when_prompt_drawn() -> None:
+    # The composer prompt is present once the TUI has booted.
+    assert composer_ready("❯ ") is True
+    assert composer_ready(_load("ready.txt")) is True
+
+
+def test_composer_not_ready_while_booting() -> None:
+    # A freshly relaunched pane has no prompt yet; the transport must wait
+    # rather than paste into the boot screen.
+    assert composer_ready("loading Claude...\nno prompt yet") is False

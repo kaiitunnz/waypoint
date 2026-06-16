@@ -29,12 +29,23 @@ def _compact(text: str) -> str:
     return _WHITESPACE_RE.sub("", text)
 
 
+def composer_ready(pane_text: str) -> bool:
+    """Whether the OpenCode composer box is drawn and able to take input.
+
+    True once the ``╹`` box border exists. A freshly relaunched pane (reattach
+    or restart) shows the boot screen with no box for a beat; the tmux transport
+    waits on this before pasting so the keystrokes are not dropped.
+    """
+    return any(_BORDER in line for line in _strip(pane_text).splitlines())
+
+
 def composer_submitted(pane_text: str, sent_text: str) -> bool:
     """Whether ``sent_text`` has left the OpenCode composer (i.e. was submitted).
 
     Returns ``True`` when the composer box no longer carries the start of the
-    message. If the message is empty or the composer box can't be located,
-    returns ``True`` so the caller doesn't retry blindly (its loop is bounded).
+    message. An empty message counts as submitted. If the composer box can't be
+    located the pane is booting or dead, so nothing has been submitted — return
+    ``False`` so the bounded confirm loop keeps retrying.
     """
     probe = _compact(sent_text)[:_PROBE_LEN]
     if not probe:
@@ -42,7 +53,7 @@ def composer_submitted(pane_text: str, sent_text: str) -> bool:
     lines = _strip(pane_text).splitlines()
     borders = [i for i, line in enumerate(lines) if _BORDER in line]
     if not borders:
-        return True
+        return False
     bottom = borders[-1]
     region = _compact(" ".join(lines[max(0, bottom - _COMPOSER_SPAN) : bottom]))
     return probe not in region

@@ -19,16 +19,30 @@ if TYPE_CHECKING:
 
 @runtime_checkable
 class PaneSubmitConfirming(Protocol):
-    """A plugin whose tmux-wrapped TUI can absorb the submit ``Enter`` while it
-    is still ingesting a paste — e.g. the Claude TUI loading an image pasted by
-    path — leaving the message typed in the composer but unsent.
+    """A plugin that can read its tmux-wrapped TUI's composer to drive input
+    reliably, against two failure modes of a raw ``send-keys`` submit:
 
-    The tmux transport narrows to this protocol (``isinstance``) and, when a
-    plugin satisfies it, sends ``Enter`` and confirms the composer actually
-    cleared via :meth:`confirm_pane_submit`, retrying the keystroke if it was
-    swallowed. Agents whose composer submits synchronously simply do not
-    implement it and keep the single-``Enter`` path.
+    - A freshly relaunched pane (reattach after exit, or a model/permission
+      restart) is still booting when the message is sent, so the composer does
+      not yet exist and the keystrokes are dropped.
+    - The composer exists but absorbs the submit ``Enter`` while ingesting the
+      paste — e.g. the Claude TUI loading an image pasted by path — leaving the
+      message typed but unsent.
+
+    The tmux transport narrows to this protocol (``isinstance``) and, for a
+    plugin that satisfies it, waits for :meth:`pane_ready_for_input` before
+    pasting, then sends ``Enter`` and confirms the composer cleared via
+    :meth:`confirm_pane_submit`, retrying the keystroke if it was swallowed.
+    Agents whose composer submits synchronously simply do not implement it and
+    keep the single-``Enter`` path.
     """
+
+    def pane_ready_for_input(self, pane_text: str) -> bool:
+        """Return whether the wrapped TUI's composer is rendered and able to
+        accept input, given a ``capture-pane`` snapshot. False while the pane is
+        still booting (no composer drawn yet), so the transport waits rather than
+        pasting into a TUI that will drop the keystrokes."""
+        ...
 
     def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
         """Return whether the just-sent input has left the composer (submitted),

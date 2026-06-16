@@ -116,6 +116,17 @@ _COMPOSER_PROMPT = "❯"
 _COMPOSER_PLACEHOLDER_PREFIX = 'Try "'
 
 
+def composer_ready(screen: str) -> bool:
+    """Whether the Claude TUI composer prompt is drawn and able to take input.
+
+    True once the ``❯`` prompt line exists. A freshly relaunched pane (reattach
+    or restart) shows the boot screen with no prompt for a beat; the tmux
+    transport waits on this before pasting so the keystrokes are not dropped.
+    """
+    lines = _strip_ansi(screen).replace("\xa0", " ").splitlines()
+    return any(_COMPOSER_PROMPT in line for line in lines)
+
+
 def composer_is_empty(screen: str) -> bool:
     """Whether the Claude TUI composer (input box) is empty.
 
@@ -125,13 +136,14 @@ def composer_is_empty(screen: str) -> bool:
     and returns to a bare prompt (while a turn runs) or the idle placeholder
     (once idle) after — which is how the tmux submit-confirm loop tells an
     absorbed ``Enter`` (composer still populated) from a real submission. If no
-    prompt line is found, treat it as empty so the caller does not retry blindly
-    (its loop is bounded regardless).
+    prompt line is found the composer is not drawn (a booting or dead pane), so
+    nothing has been submitted — return False so the bounded confirm loop keeps
+    retrying rather than declaring a phantom success.
     """
     lines = _strip_ansi(screen).replace("\xa0", " ").splitlines()
     prompt_lines = [line for line in lines if _COMPOSER_PROMPT in line]
     if not prompt_lines:
-        return True
+        return False
     after_prompt = prompt_lines[-1].split(_COMPOSER_PROMPT, 1)[1].strip()
     return after_prompt == "" or after_prompt.startswith(_COMPOSER_PLACEHOLDER_PREFIX)
 

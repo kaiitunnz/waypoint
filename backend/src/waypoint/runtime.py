@@ -514,6 +514,7 @@ class SessionRuntime:
             model=assistant.model,
             effort=assistant.effort,
             permission_mode=assistant.permission_mode,
+            transport=assistant.transport,
         )
         self.assistant_session_id = created.id
 
@@ -524,6 +525,7 @@ class SessionRuntime:
         model: str | None,
         effort: str | None,
         permission_mode: str | None,
+        transport: str | None,
     ) -> SessionRecord:
         plugin = self.registry.get(backend)
         validated_mode = (
@@ -539,6 +541,7 @@ class SessionRuntime:
             model=model,
             effort=effort,
             permission_mode=validated_mode,
+            transport=transport,
         )
         session = await self.create_session(request)
         return self.storage.update_session(
@@ -575,6 +578,7 @@ class SessionRuntime:
         return AssistantSummary(
             session_id=session.id,
             backend=session.backend,
+            transport=session.transport,
             native_thread_id=plugin.native_thread_id(session),
             status=session.status,
             supports_reattach=plugin.capabilities.supports_reattach_after_exit,
@@ -593,6 +597,7 @@ class SessionRuntime:
         self,
         *,
         backend: str | None = None,
+        transport: str | None = None,
         model: str | None = None,
         effort: str | None = None,
         permission_mode: str | None = None,
@@ -600,10 +605,11 @@ class SessionRuntime:
         """Rebuild the assistant on a fresh thread (clear context / switch backend).
 
         Clearing context keeps the *current* thread's backend and live config
-        (model / effort / permission mode), so a context wipe doesn't silently
-        revert tuning done from the UI; only an explicit ``backend`` switch
-        overrides them, since model/effort are backend-specific. waypoint.yaml
-        only seeds the first creation, when no live thread exists.
+        (model / effort / permission mode / transport), so a context wipe
+        doesn't silently revert tuning done from the UI; only an explicit
+        ``backend`` switch overrides them, since model/effort/transport are
+        backend-specific. waypoint.yaml only seeds the first creation, when no
+        live thread exists.
 
         The previous thread is demoted to an ordinary stopped session so its
         transcript survives in the normal session list — it is never deleted.
@@ -626,18 +632,23 @@ class SessionRuntime:
             )
         # Inherit the live thread's config when staying on the same backend;
         # an explicit request value always wins. A backend switch starts from
-        # that backend's defaults because model/effort don't transfer.
+        # that backend's defaults because model/effort/transport don't transfer.
         if old is not None and chosen == old.backend:
             model = model if model is not None else old.model
             effort = effort if effort is not None else old.effort
             permission_mode = (
                 permission_mode if permission_mode is not None else old.permission_mode
             )
+            transport = transport if transport is not None else old.transport
         # Spawn the replacement before touching the current thread so a failed
         # launch (e.g. a misconfigured backend) leaves the live, pinned
         # assistant intact rather than orphaning the pointer at a stopped row.
         created = await self._create_assistant_session(
-            chosen, model=model, effort=effort, permission_mode=permission_mode
+            chosen,
+            model=model,
+            effort=effort,
+            permission_mode=permission_mode,
+            transport=transport,
         )
         self.assistant_session_id = created.id
         await self._retire_previous_assistant(old, created.id)

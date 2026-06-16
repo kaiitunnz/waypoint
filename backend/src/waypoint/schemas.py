@@ -288,6 +288,9 @@ class LaunchTargetSummary(BaseModel):
 class AssistantSummary(BaseModel):
     session_id: str
     backend: BackendId
+    # Transport the assistant is driven over, so the UI can label it (Chat /
+    # Emulated / Terminal) and preselect it in the settings popover.
+    transport: SessionTransportId
     # Backend-native conversation id (e.g. the value for `claude --resume`).
     # Surfaced alongside ``session_id`` so a user can recover the thread
     # outside the app. ``None`` when the backend has no resumable id.
@@ -301,8 +304,11 @@ class AssistantSummary(BaseModel):
 class AssistantResetRequest(BaseModel):
     # Rebuild the assistant on a fresh thread. ``backend`` switches the coding
     # agent (``None`` keeps the current one); the rest seed the new thread,
-    # where ``None`` means the backend's default.
+    # where ``None`` means the backend's default. ``transport`` repins the
+    # interface (``None`` keeps the current one on a clear, or the agent's
+    # default on a backend switch).
     backend: BackendId | None = None
+    transport: SessionTransportId | None = None
     model: str | None = None
     effort: str | None = None
     permission_mode: str | None = None

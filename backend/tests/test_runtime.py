@@ -4117,6 +4117,35 @@ async def test_assistant_recreates_when_prior_thread_exited(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_assistant_first_boot_seeds_config_transport(tmp_path) -> None:
+    # The waypoint.yaml `transport` seed is forwarded on first creation; the
+    # resolution itself (None => the agent default) is covered by the
+    # create_session default-transport tests.
+    runtime, storage, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(backend="claude_code", transport="claude_cli")
+    captured: dict[str, Any] = {}
+
+    async def _fake_create(backend: str, **kwargs: Any) -> SessionRecord:
+        captured.update(backend=backend, **kwargs)
+        return _make_assistant_row(
+            storage,
+            settings,
+            session_id="claude-fresh",
+            backend="claude_code",
+            status=SessionStatus.STARTING,
+            transport="claude_cli",
+            cwd=str(runtime._assistant_workspace_dir()),
+        )
+
+    runtime._create_assistant_session = _fake_create  # type: ignore[method-assign]
+
+    await runtime._ensure_assistant_session()
+
+    assert runtime.assistant_session_id == "claude-fresh"
+    assert captured["transport"] == "claude_cli"
+
+
+@pytest.mark.asyncio
 async def test_delete_and_terminate_protect_assistant(tmp_path) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
     _make_assistant_row(
@@ -4157,6 +4186,7 @@ async def test_assistant_summary_reports_native_thread_id(tmp_path) -> None:
     assert summary is not None
     assert summary.session_id == "codex-assistant"
     assert summary.backend == "codex"
+    assert summary.transport == "codex_app_server"
     assert summary.native_thread_id == "thread-1"
     assert summary.status == SessionStatus.IDLE
     assert (
@@ -4342,10 +4372,19 @@ async def test_reset_assistant_rebuilds_thread_and_keeps_old(tmp_path) -> None:
     captured: dict[str, Any] = {}
 
     async def _fake_create(
-        backend: str, *, model: Any, effort: Any, permission_mode: Any
+        backend: str,
+        *,
+        model: Any,
+        effort: Any,
+        permission_mode: Any,
+        transport: Any,
     ) -> SessionRecord:
         captured.update(
-            backend=backend, model=model, effort=effort, permission_mode=permission_mode
+            backend=backend,
+            model=model,
+            effort=effort,
+            permission_mode=permission_mode,
+            transport=transport,
         )
         return _make_assistant_row(
             storage,
@@ -4364,13 +4403,14 @@ async def test_reset_assistant_rebuilds_thread_and_keeps_old(tmp_path) -> None:
     assert summary.session_id == "claude-new"
     assert runtime.assistant_session_id == "claude-new"
     assert terminated == ["codex-old"]
-    # New backend starts from its own defaults — codex's model/effort/mode do
-    # not transfer to claude_code.
+    # New backend starts from its own defaults — codex's model/effort/mode and
+    # transport do not transfer to claude_code (None => the agent default).
     assert captured == {
         "backend": "claude_code",
         "model": None,
         "effort": None,
         "permission_mode": None,
+        "transport": None,
     }
     old = storage.get_session("codex-old")
     assert old is not None
@@ -4408,10 +4448,19 @@ async def test_reset_assistant_clear_context_inherits_live_config(tmp_path) -> N
     captured: dict[str, Any] = {}
 
     async def _fake_create(
-        backend: str, *, model: Any, effort: Any, permission_mode: Any
+        backend: str,
+        *,
+        model: Any,
+        effort: Any,
+        permission_mode: Any,
+        transport: Any,
     ) -> SessionRecord:
         captured.update(
-            backend=backend, model=model, effort=effort, permission_mode=permission_mode
+            backend=backend,
+            model=model,
+            effort=effort,
+            permission_mode=permission_mode,
+            transport=transport,
         )
         return _make_assistant_row(
             storage,
@@ -4427,11 +4476,13 @@ async def test_reset_assistant_clear_context_inherits_live_config(tmp_path) -> N
 
     await runtime.reset_assistant()
 
+    # Clearing context inherits the live thread's tuned config and transport.
     assert captured == {
         "backend": "codex",
         "model": "gpt-5",
         "effort": "high",
         "permission_mode": "full-access",
+        "transport": "codex_app_server",
     }
 
 
@@ -4453,7 +4504,12 @@ async def test_reset_assistant_keeps_current_thread_when_create_fails(tmp_path) 
     runtime.assistant_session_id = "codex-live"
 
     async def _boom(
-        backend: str, *, model: Any, effort: Any, permission_mode: Any
+        backend: str,
+        *,
+        model: Any,
+        effort: Any,
+        permission_mode: Any,
+        transport: Any,
     ) -> SessionRecord:
         raise RuntimeError("spawn failed")
 

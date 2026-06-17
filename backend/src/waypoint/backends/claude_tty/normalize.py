@@ -139,7 +139,10 @@ class TranscriptNormalizer:
         # nothing to compact, /status) prints to stdout and returns without a
         # model turn. handle_input already flipped the session to RUNNING on
         # send, and nothing else follows, so resolve it here and surface the
-        # command's output as the note.
+        # command's output as the note. Commands that DO run a turn expand into
+        # a user prompt rather than emitting this subtype, so resolving to idle
+        # here is safe; a stray case would self-correct on the next assistant
+        # record (which re-asserts RUNNING).
         text = _strip_local_command_output(record.get("content")) or "Command complete"
         return [self._result_note(text, "local_command")]
 

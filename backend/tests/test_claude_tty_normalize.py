@@ -525,6 +525,104 @@ def test_edit_result_attaches_update_diff_from_structured_patch() -> None:
     assert file["additions"] == 1
 
 
+def _update_result_record(tool_use_id: str, structured_patch: list) -> dict:
+    return _edit_result_record(
+        tool_use_id,
+        {
+            "type": "update",
+            "filePath": "/repo/a.py",
+            "structuredPatch": structured_patch,
+        },
+    )
+
+
+def _diff_from_edit(tool_name: str, structured_patch: list[dict]) -> dict:
+    norm = TranscriptNormalizer()
+    norm.process_record(
+        _assistant_record(
+            "msg",
+            [_tool_use_block("tu1", tool_name, {"file_path": "a.py"})],
+            stop_reason="tool_use",
+        )
+    )
+    events = norm.process_record(_update_result_record("tu1", structured_patch))
+    result = next(e for e in events if e.kind == EventKind.TOOL_RESULT)
+    return result.metadata["diff_preview"]["files"][0]
+
+
+def test_multiedit_multi_hunk_patch_preserves_order_and_counts() -> None:
+    file = _diff_from_edit(
+        "MultiEdit",
+        [
+            {
+                "oldStart": 1,
+                "oldLines": 1,
+                "newStart": 1,
+                "newLines": 2,
+                "lines": [" a", "+b"],
+            },
+            {
+                "oldStart": 10,
+                "oldLines": 2,
+                "newStart": 11,
+                "newLines": 1,
+                "lines": [" c", "-d"],
+            },
+        ],
+    )
+    diff = file["diff"]
+    assert "@@ -1,1 +1,2 @@" in diff
+    assert "@@ -10,2 +11,1 @@" in diff
+    assert diff.index("@@ -1,1") < diff.index("@@ -10,2")
+    assert file["additions"] == 1
+    assert file["deletions"] == 1
+
+
+def test_structured_patch_deletion_and_no_newline_marker() -> None:
+    file = _diff_from_edit(
+        "Edit",
+        [
+            {
+                "oldStart": 1,
+                "oldLines": 2,
+                "newStart": 1,
+                "newLines": 1,
+                "lines": [" keep", "-gone", "\\ No newline at end of file"],
+            },
+        ],
+    )
+    assert "-gone" in file["diff"]
+    assert "\\ No newline at end of file" in file["diff"]
+    # The marker line must not be counted as a deletion.
+    assert file["deletions"] == 1
+    assert file["additions"] == 0
+
+
+def test_structured_patch_non_int_counters_coerced_to_zero() -> None:
+    file = _diff_from_edit(
+        "Edit",
+        [{"oldStart": None, "newStart": "x", "lines": [" a", "+b"]}],
+    )
+    assert "@@ -0,0 +0,0 @@" in file["diff"]
+    assert "+b" in file["diff"]
+
+
+def test_structured_patch_all_hunks_malformed_yields_no_preview() -> None:
+    norm = TranscriptNormalizer()
+    norm.process_record(
+        _assistant_record(
+            "msg",
+            [_tool_use_block("tu1", "Edit", {"file_path": "a.py"})],
+            stop_reason="tool_use",
+        )
+    )
+    events = norm.process_record(
+        _update_result_record("tu1", ["not-a-dict", {"no_lines": True}])
+    )
+    result = next(e for e in events if e.kind == EventKind.TOOL_RESULT)
+    assert "diff_preview" not in result.metadata
+
+
 def test_non_edit_tool_result_has_no_diff_preview() -> None:
     norm = TranscriptNormalizer()
     norm.process_record(
@@ -662,6 +760,20 @@ def test_local_command_without_stdout_falls_back_to_generic_note() -> None:
     events = norm.process_record(record)
     assert events[0].text == "Command complete"
     assert events[0].status == SessionStatus.IDLE
+
+
+def test_local_command_joins_multiple_output_blocks() -> None:
+    norm = TranscriptNormalizer()
+    record = {
+        "type": "system",
+        "subtype": "local_command",
+        "content": (
+            "<local-command-stdout>first</local-command-stdout>"
+            "ignored between blocks"
+            "<local-command-stderr>second</local-command-stderr>"
+        ),
+    }
+    assert norm.process_record(record)[0].text == "first\nsecond"
 
 
 def test_local_command_stdout_is_truncated() -> None:

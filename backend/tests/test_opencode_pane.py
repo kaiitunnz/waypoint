@@ -1,68 +1,109 @@
 """Offline validation of OpenCode composer-submit detection used by the tmux
-submit-confirm loop. The composer is a ``┃`` box closed by a ``╹▀▀`` border;
-submitted messages echo in ``┃`` boxes above, so the live composer is the
-region directly above the *last* border. Submission is keyed on the sent text
-leaving that region (an empty composer shows the ``Ask anything…`` placeholder)."""
+submit-confirm loop. Captured from a live OpenCode 1.17.7 pane: the composer is
+the run of ``┃`` lines directly above the *only* ``╹▀▀`` border (its bottom),
+with the typed message at the top of the box and the model/status footer at the
+bottom. Submitted messages echo in ``┃`` boxes higher up, but those carry no
+``╹`` border, so submission is keyed on the sent text leaving the composer box."""
 
 from waypoint.backends.opencode.pane import composer_ready, composer_submitted
 
 SENT = "Reply with exactly the token X and nothing else.\n\nAttached files:\n- /tmp/a"
 
+# Live capture with the message typed but not yet submitted: a prior turn echoes
+# in a borderless ``┃`` box at the top, the composer box sits at the bottom
+# closed by the lone ``╹`` border.
+POPULATED = "\n".join(
+    [
+        "",
+        "  ┃",
+        "  ┃  Say PING-1 and stop.",
+        "  ┃",
+        "",
+        "     PING-1",
+        "",
+        "",
+        "  ┃",
+        "  ┃  Reply with exactly the token X and nothing else.",
+        "  ┃",
+        "  ┃  Attached files:",
+        "  ┃  - /tmp/a",
+        "  ┃  Build · Gemini 3.1 Pro Preview Google · high",
+        "  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+        "                                            9.8K (1%)",
+    ]
+)
+
+# Same pane just after submitting: the composer is empty and the just-sent
+# message now echoes in the transcript box at the top.
+AFTER_SUBMIT = "\n".join(
+    [
+        "",
+        "  ┃",
+        "  ┃  Reply with exactly the token X and nothing else.",
+        "  ┃",
+        "",
+        "     X",
+        "",
+        "",
+        "  ┃",
+        "  ┃",
+        "  ┃",
+        "  ┃  Build · Gemini 3.1 Pro Preview Google · high",
+        "  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+        "                                            9.8K (1%)",
+    ]
+)
+
 
 def test_not_submitted_while_message_in_composer_box() -> None:
-    pane = "\n".join(
-        [
-            "┃  earlier conversation",
-            "╹▀▀▀▀▀▀▀▀",
-            "  tab agents  ctrl+p commands",
-            "┃",
-            "┃  Reply with exactly the token X and nothing else.",
-            "┃",
-            "┃  Build · Gemini 3.1 Pro Preview Google · high",
-            "╹▀▀▀▀▀▀▀▀",
-            "  tab agents  ctrl+p commands",
-        ]
-    )
-    assert composer_submitted(pane, SENT) is False
+    assert composer_submitted(POPULATED, SENT) is False
+
+
+def test_submitted_when_composer_is_empty_after_send() -> None:
+    # The just-sent message echoes in the transcript box at the top; the scan
+    # must stay within the composer box so that echo is not mistaken for an
+    # unsent message (the regression that made every send burn the full retry
+    # budget).
+    assert composer_submitted(AFTER_SUBMIT, SENT) is True
 
 
 def test_submitted_when_composer_shows_placeholder() -> None:
-    # The message echoes in a box above; the live composer (above the last
-    # border) is back to the placeholder.
     pane = "\n".join(
         [
-            "┃  Reply with exactly the token X and nothing else.",  # transcript echo
-            "╹▀▀▀▀▀▀▀▀",
-            "┃",
-            '┃  Ask anything... "Fix broken tests"',
-            "┃",
-            "┃  Build · Gemini 3.1 Pro Preview Google · high",
-            "╹▀▀▀▀▀▀▀▀",
-            "  tab agents  ctrl+p commands",
+            "  ┃",
+            "  ┃  Reply with exactly the token X and nothing else.",  # transcript echo
+            "  ┃",
+            "",
+            "  ┃",
+            '  ┃  Ask anything... "Fix broken tests"',
+            "  ┃",
+            "  ┃  Build · Gemini 3.1 Pro Preview Google · high",
+            "  ╹▀▀▀▀▀▀▀▀",
+            "                                            9.8K (1%)",
         ]
     )
     assert composer_submitted(pane, SENT) is True
 
 
 def test_not_submitted_when_message_taller_than_a_fixed_window() -> None:
-    # A long pasted message renders its start at the TOP of the composer box,
-    # far from the bottom border; the scan must cover the whole box (between the
-    # previous border and the last) so the probe is still found and the loop
-    # does not declare a premature success.
+    # The message start renders at the TOP of the composer box, far from the
+    # bottom border; scanning the whole box (not a fixed window) keeps it found.
     pane = "\n".join(
         [
-            "┃  earlier conversation",
-            "╹▀▀▀▀▀▀▀▀",
-            "┃",
-            "┃  Reply with exactly the token X and nothing else.",
-            "┃  line 2 of the pasted message",
-            "┃  line 3 of the pasted message",
-            "┃  line 4 of the pasted message",
-            "┃  Attached files:",
-            "┃  - /tmp/a",
-            "┃  Build · Gemini 3.1 Pro Preview Google · high",
-            "╹▀▀▀▀▀▀▀▀",
-            "  tab agents  ctrl+p commands",
+            "  ┃",
+            "  ┃  earlier conversation",
+            "  ┃",
+            "",
+            "  ┃",
+            "  ┃  Reply with exactly the token X and nothing else.",
+            "  ┃  line 2 of the pasted message",
+            "  ┃  line 3 of the pasted message",
+            "  ┃  line 4 of the pasted message",
+            "  ┃  Attached files:",
+            "  ┃  - /tmp/a",
+            "  ┃  Build · Gemini 3.1 Pro Preview Google · high",
+            "  ╹▀▀▀▀▀▀▀▀",
+            "                                            9.8K (1%)",
         ]
     )
     assert composer_submitted(pane, SENT) is False

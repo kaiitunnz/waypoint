@@ -4,14 +4,16 @@ Used by the tmux transport's submit-confirm loop. The composer is a bordered
 box at the bottom of the pane: ``┃`` content lines closed by a ``╹▀▀`` bottom
 border. An empty composer shows the ``Ask anything…`` placeholder, a populated
 one the typed text (OpenCode renders input, and attachment paths, literally).
-Submitted messages echo in ``┃`` boxes higher up, so the live composer is the
-``┃`` region between the second-to-last box border and the last one; submission
+Submitted messages echo in ``┃`` boxes higher up, but only the composer box is
+closed by a ``╹`` bottom border; the transcript boxes are not. So the composer
+is the run of ``┃`` lines directly above the *last* ``╹`` border, and submission
 is confirmed by the sent text no longer occupying it.
 """
 
 from waypoint.backends.pane_text import strip_ansi, strip_whitespace
 
 _BORDER = "╹"
+_CONTENT = "┃"
 _PROBE_LEN = 24
 
 
@@ -40,11 +42,14 @@ def composer_submitted(pane_text: str, sent_text: str) -> bool:
     borders = [i for i, line in enumerate(lines) if _BORDER in line]
     if not borders:
         return False
-    # The live composer spans from just below the previous box border (the
-    # transcript's last box) to the last border. Scanning the whole box rather
-    # than a fixed window keeps a tall pasted message — whose start renders at
-    # the top, furthest from the bottom border — inside the searched region.
+    # Walk up from the border over the composer box's contiguous ``┃`` content
+    # lines, stopping at the blank gap above it. This covers the full typed
+    # message — whose start renders at the top of the box, however tall it grows
+    # with wrapping or attachment paths — without bleeding into the transcript,
+    # whose echoed user-message boxes carry no ``╹`` border to scan past.
     bottom = borders[-1]
-    top = borders[-2] + 1 if len(borders) >= 2 else 0
+    top = bottom
+    while top > 0 and _CONTENT in lines[top - 1]:
+        top -= 1
     region = strip_whitespace(" ".join(lines[top:bottom]))
     return probe not in region

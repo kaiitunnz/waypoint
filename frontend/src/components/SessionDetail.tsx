@@ -1793,7 +1793,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           terminalDims={terminalDims}
           sessionExited={sessionExited}
           dormantReattach={dormantReattach}
-          locked={terminalOnly}
+          // The Terminal tab is presented fullscreen (sticky, viewport-filling)
+          // for every session, so an emulated session's pane matches a
+          // terminal-only session's height. The pane only renders in terminal
+          // view, so this is effectively always on here.
+          locked={terminalOnly || activeView === "terminal"}
           termMenuOpen={termMenuOpen}
           setTermMenuOpen={setTermMenuOpen}
           termMenuWrapRef={termMenuWrapRef}

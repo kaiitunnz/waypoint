@@ -32,10 +32,10 @@ interface SessionTerminalViewProps {
   connection: Connection;
   rateLimitRefreshBusy: boolean;
   onRateLimitRefresh: () => void | Promise<void>;
-  // True on terminal-only (tmux) sessions where no composer follows — the
-  // pane sticky-locks to the viewport bottom once the user scrolls past
-  // the SessionHeader. Chat-capable Terminal tabs stay bounded so the
-  // composer beneath remains visible.
+  // Presents the pane fullscreen: it sticky-locks to the viewport and fills it
+  // (minus any composer) once the user scrolls past the SessionHeader. On for
+  // the Terminal tab of every session so emulated panes match a terminal-only
+  // session's height; the is-locked rule reserves the composer when present.
   locked: boolean;
   onTerminalInput: (data: string) => void;
   // Resolves a ``TerminalSubmitResult`` so the composer can keep the draft
@@ -148,14 +148,9 @@ export function SessionTerminalView({
 
   return (
     <section
-      // is-fixed-grid hugs the grid height, which only makes sense when the
-      // pane isn't viewport-locked. No transport is both non-resizable and
-      // terminal-only today, so fixed-grid + locked is currently unreachable;
-      // the !locked guard just keeps is-locked's explicit height authoritative
-      // if that ever changes.
       className={`session-terminal ${locked ? "is-locked" : ""} ${
-        fixedGrid && !locked ? "is-fixed-grid" : ""
-      } ${composeEnabled && composeOpen ? "has-compose-open" : ""}`}
+        composeEnabled && composeOpen ? "has-compose-open" : ""
+      }`}
       aria-label="Terminal session"
     >
       <div className="term-bar">

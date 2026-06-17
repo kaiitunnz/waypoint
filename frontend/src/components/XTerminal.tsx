@@ -145,6 +145,15 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       term.loadAddon(new WebLinksAddon());
       term.open(host);
 
+      // Fixed-grid panes scroll the host (.xterm-host--scroll) over the
+      // over-tall grid, but xterm's viewport still consumes the wheel: with no
+      // scrollback it preventDefaults and emits cursor-key sequences instead.
+      // Returning false opts xterm out so the wheel scrolls the host. Resizable
+      // panes keep xterm's wheel handling (scrollback / mouse-mode passthrough).
+      if (!autoFit) {
+        term.attachCustomWheelEventHandler(() => false);
+      }
+
       // Subscribe before the first fit so the initial dimension change
       // (default 80x24 → fitted size) actually reaches the parent. Then
       // push the current dims unconditionally after setup; if fit() was

@@ -31,7 +31,13 @@ from waypoint.backends.claude_code.normalize import (
     iter_content_blocks,
     stringify_tool_result,
 )
+from waypoint.backends.diff_preview import (
+    build_preview,
+    files_from_claude_tool_result,
+)
 from waypoint.schemas import EventKind, SessionStatus
+
+FILE_EDIT_TOOL_NAMES: frozenset[str] = frozenset({"Edit", "Write", "MultiEdit"})
 
 # Allowlist of record types we handle; everything else is dropped silently.
 # This is an allowlist rather than a denylist so undocumented TUI record types
@@ -81,6 +87,10 @@ class TranscriptNormalizer:
         # plain tool_call, and to swallow the synthetic rejection.
         self._expect_dismissed_question: bool = False
         self._dismissed_question_ids: set[str] = set()
+        # tool_use ids of file-edit calls, so the matching tool_result record
+        # (which carries the applied diff in its toolUseResult) can attach a
+        # diff preview. The TUI records the change on the result, not the call.
+        self._file_edit_tool_use_ids: set[str] = set()
 
     def arm_question_dismissal(self) -> None:
         self._expect_dismissed_question = True
@@ -176,6 +186,8 @@ class TranscriptNormalizer:
                         if tool_use_id:
                             self._suppressed_result_tool_use_ids.add(tool_use_id)
                     continue
+                if tool_name in FILE_EDIT_TOOL_NAMES and tool_use_id:
+                    self._file_edit_tool_use_ids.add(tool_use_id)
                 input_text = json.dumps(block.get("input") or {}, indent=2)
                 events.append(
                     NormalizedEvent(
@@ -291,18 +303,25 @@ class TranscriptNormalizer:
                 continue
             text = stringify_tool_result(block.get("content"))
             is_error = bool(block.get("is_error"))
+            metadata: dict[str, Any] = {
+                "method": "user.tool_result",
+                "item_id": tool_use_id,
+                "tool_use_id": tool_use_id,
+                "is_error": is_error,
+                "payload": block,
+                "status": SessionStatus.RUNNING,
+            }
+            if tool_use_id in self._file_edit_tool_use_ids:
+                self._file_edit_tool_use_ids.discard(tool_use_id)
+                if not is_error:
+                    diff_preview = _diff_preview_from_tool_result(record)
+                    if diff_preview is not None:
+                        metadata["diff_preview"] = diff_preview
             events.append(
                 NormalizedEvent(
                     kind=EventKind.TOOL_RESULT,
                     text=text,
-                    metadata={
-                        "method": "user.tool_result",
-                        "item_id": tool_use_id,
-                        "tool_use_id": tool_use_id,
-                        "is_error": is_error,
-                        "payload": block,
-                        "status": SessionStatus.RUNNING,
-                    },
+                    metadata=metadata,
                     status=SessionStatus.RUNNING,
                 )
             )
@@ -344,6 +363,15 @@ class TranscriptNormalizer:
                 status=SessionStatus.RUNNING,
             )
         ]
+
+
+def _diff_preview_from_tool_result(record: dict[str, Any]) -> dict[str, Any] | None:
+    """Build an applied-phase diff preview from an edit's ``toolUseResult``."""
+    files = files_from_claude_tool_result(record.get("toolUseResult"))
+    if not files:
+        return None
+    preview = build_preview("applied", files)
+    return preview.model_dump(mode="json") if preview else None
 
 
 def _is_injected_turn(content: Any) -> bool:

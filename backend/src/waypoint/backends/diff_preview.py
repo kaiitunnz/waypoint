@@ -279,6 +279,61 @@ def files_from_opencode_diffs(diffs: Any) -> list[DiffPreviewFile]:
     return files
 
 
+def files_from_claude_tool_result(tool_use_result: Any) -> list[DiffPreviewFile]:
+    """Build diff files from a Claude TUI ``toolUseResult`` for a file edit.
+
+    The TUI records the applied change on the tool's ``user`` result rather than
+    on the call, so this reconstructs the diff after the fact: ``create`` carries
+    the full new ``content``; ``update`` carries a ``structuredPatch`` of hunks
+    (``oldStart``/``oldLines``/``newStart``/``newLines``/``lines``) that we render
+    back into a unified diff.
+    """
+    if not isinstance(tool_use_result, dict):
+        return []
+    path = str(tool_use_result.get("filePath") or "").strip()
+    if not path:
+        return []
+    change_type = _normalize_change_type(tool_use_result.get("type"))
+    if change_type == "add":
+        content = tool_use_result.get("content")
+        if isinstance(content, str):
+            return [file_from_old_new(path, "", content, "add")]
+        return []
+    patch = tool_use_result.get("structuredPatch")
+    diff = _unified_diff_from_structured_patch(path, patch)
+    if diff is None:
+        return []
+    return [file_from_unified_diff(path, diff, "update")]
+
+
+def _unified_diff_from_structured_patch(path: str, patch: Any) -> str | None:
+    if not isinstance(patch, list) or not patch:
+        return None
+    out: list[str] = [f"--- {path}", f"+++ {path}"]
+    for hunk in patch:
+        if not isinstance(hunk, dict):
+            continue
+        lines = hunk.get("lines")
+        if not isinstance(lines, list):
+            continue
+        old_start = _patch_int(hunk.get("oldStart"))
+        old_lines = _patch_int(hunk.get("oldLines"))
+        new_start = _patch_int(hunk.get("newStart"))
+        new_lines = _patch_int(hunk.get("newLines"))
+        out.append(f"@@ -{old_start},{old_lines} +{new_start},{new_lines} @@")
+        out.extend(str(line) for line in lines)
+    if len(out) <= 2:
+        return None
+    return "\n".join(out) + "\n"
+
+
+def _patch_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def preview_to_metadata(preview: DiffPreviewPayload | None) -> dict[str, Any]:
     if preview is None:
         return {}

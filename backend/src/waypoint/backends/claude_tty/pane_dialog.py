@@ -165,6 +165,18 @@ def classify(screen: str) -> PaneScreen:
     return PaneScreen.OTHER
 
 
+def shows_blocking_dialog(screen: str) -> bool:
+    """Whether a modal popup is on screen that would capture ``Enter``.
+
+    The composer prompt glyph ``❯`` also marks the selected option of an
+    approval/trust dialog, so a snapshot showing a dialog looks "ready" to the
+    composer probes. The tmux transport consults this to avoid pasting or
+    submitting a message into a dialog (which would select an option — e.g.
+    auto-approve a tool).
+    """
+    return classify(screen) is not PaneScreen.OTHER
+
+
 def _parse_options(lines: list[str]) -> list[DialogOption]:
     options: list[DialogOption] = []
     for line in lines:

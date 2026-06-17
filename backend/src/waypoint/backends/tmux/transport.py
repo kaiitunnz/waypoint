@@ -59,7 +59,9 @@ class TmuxTransport(TransportAdapter):
                 return
             # A reattach/restart relaunches the pane, and the wrapped TUI is
             # still booting when this fires — pasting before the composer exists
-            # drops the keystrokes. Wait for it to draw first.
+            # drops the keystrokes. Wait for it to draw first. This also refuses
+            # to send while a modal dialog is open, so the message is never
+            # pasted (and Enter'd) into an approval/trust prompt.
             await self._await_pane_ready(target, confirmer)
             # Some wrapped TUIs absorb the submit Enter while still ingesting
             # the paste (the Claude TUI does this loading an image pasted by
@@ -87,9 +89,15 @@ class TmuxTransport(TransportAdapter):
         # delay. Bounded; if the TUI never reports ready, fall through and send
         # anyway rather than block the request indefinitely.
         for _ in range(attempts):
-            if confirmer.pane_ready_for_input(
-                await self.adapter.capture_snapshot(target)
-            ):
+            snapshot = await self.adapter.capture_snapshot(target)
+            # Never paste/Enter into a modal dialog — that would select an
+            # option (e.g. approve a tool or accept a trust prompt). Surface it
+            # so the caller responds to the dialog instead of bulldozing it.
+            if confirmer.pane_shows_blocking_dialog(snapshot):
+                raise TmuxError(
+                    "the pane has an open dialog; respond to it before sending"
+                )
+            if confirmer.pane_ready_for_input(snapshot):
                 return
             await asyncio.sleep(poll_seconds)
 
@@ -102,11 +110,20 @@ class TmuxTransport(TransportAdapter):
         attempts: int = 8,
         poll_seconds: float = 0.4,
     ) -> None:
-        # Re-send Enter until the composer reports cleared. Stop on the first
-        # confirmed submit so a landed keystroke is never followed by a stray
-        # one (which could hit a started turn or a dialog). Bounded; if the TUI
+        # Re-send Enter until the composer reports cleared. Submit before
+        # confirming so at least one Enter always lands (a snapshot taken right
+        # after the paste can transiently read as empty before the text renders,
+        # which would otherwise end the loop having sent nothing). Stop on the
+        # first confirmed submit so a landed keystroke is never followed by a
+        # stray one. Before each Enter, bail if a modal dialog is on screen — the
+        # message already submitted and opened one (or one raced in), and an
+        # Enter would select an option (e.g. approve a tool). Bounded; if the TUI
         # never confirms, leave the input rather than spamming keystrokes.
         for _ in range(attempts):
+            if confirmer.pane_shows_blocking_dialog(
+                await self.adapter.capture_snapshot(target)
+            ):
+                return
             await self.adapter.submit(target)
             await asyncio.sleep(poll_seconds)
             if confirmer.confirm_pane_submit(

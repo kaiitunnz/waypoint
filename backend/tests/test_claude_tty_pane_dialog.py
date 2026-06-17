@@ -15,6 +15,7 @@ from waypoint.backends.claude_tty.pane_dialog import (
     composer_ready,
     parse_approval,
     parse_model_selector,
+    shows_blocking_dialog,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "claude_tty_pane"
@@ -41,6 +42,26 @@ def _load(name: str) -> str:
 )
 def test_classify(fixture: str, expected: PaneScreen) -> None:
     assert classify(_load(fixture)) is expected
+
+
+@pytest.mark.parametrize(
+    "fixture, blocks",
+    [
+        ("approval_write.txt", True),
+        ("approval_bash.txt", True),
+        ("question_dialog.txt", True),
+        ("trust_dialog.txt", True),
+        ("model_selector.txt", True),
+        ("effort_popup.txt", True),
+        ("ready.txt", False),
+        ("slash_menu.txt", False),
+    ],
+)
+def test_shows_blocking_dialog(fixture: str, blocks: bool) -> None:
+    # The composer glyph ❯ also marks a dialog's selected option, so the tmux
+    # transport must treat any non-composer screen as blocking and refuse to
+    # paste/Enter into it (which would auto-select — e.g. approve a tool).
+    assert shows_blocking_dialog(_load(fixture)) is blocks
 
 
 def test_question_footers_across_variants_classify() -> None:

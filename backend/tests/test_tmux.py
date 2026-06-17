@@ -2,6 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
 from waypoint.backends.tmux.transport import TmuxTransport
@@ -286,19 +287,27 @@ def test_submit_sends_bare_enter() -> None:
 
 
 class _FakeAdapter:
-    """Adapter stub for the transport submit-confirm loop: counts Enters and
-    replays a scripted sequence of pane snapshots (one per Enter)."""
+    """Adapter stub for the transport submit-confirm loop. The pane state is a
+    function of how many Enters have landed: the composer reports cleared once
+    ``clear_after`` submits land, and a modal dialog appears once
+    ``dialog_after`` submits land (the message submitted and opened one)."""
 
-    def __init__(self, snapshots: list[str]) -> None:
-        self._snapshots = snapshots
+    def __init__(
+        self, *, clear_after: int = 1, dialog_after: int | None = None
+    ) -> None:
         self.submits = 0
+        self.captures = 0
+        self._clear_after = clear_after
+        self._dialog_after = dialog_after
 
     async def submit(self, target: str) -> None:
         self.submits += 1
 
     async def capture_snapshot(self, target: str, start_line: int = -200) -> str:
-        idx = min(self.submits - 1, len(self._snapshots) - 1)
-        return self._snapshots[idx]
+        self.captures += 1
+        if self._dialog_after is not None and self.submits >= self._dialog_after:
+            return "DIALOG"
+        return "SUBMITTED" if self.submits >= self._clear_after else "PENDING"
 
 
 class _Confirmer:
@@ -308,14 +317,17 @@ class _Confirmer:
     def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
         return pane_text == "SUBMITTED"
 
+    def pane_shows_blocking_dialog(self, pane_text: str) -> bool:
+        return pane_text == "DIALOG"
+
 
 def _transport(adapter: _FakeAdapter) -> TmuxTransport:
     return TmuxTransport(SimpleNamespace(tmux=adapter))  # type: ignore[arg-type]
 
 
 def test_submit_confirmed_retries_until_composer_clears() -> None:
-    # First two Enters absorbed (composer still populated), third lands.
-    adapter = _FakeAdapter(["PENDING", "PENDING", "SUBMITTED"])
+    # First Enter absorbed (composer still populated), second lands.
+    adapter = _FakeAdapter(clear_after=2)
     transport = _transport(adapter)
 
     asyncio.run(
@@ -324,13 +336,13 @@ def test_submit_confirmed_retries_until_composer_clears() -> None:
         )
     )
 
-    assert adapter.submits == 3
+    assert adapter.submits == 2
 
 
 def test_submit_confirmed_stops_after_first_success() -> None:
     # A landed Enter must not be followed by a stray one (could hit a started
     # turn or a dialog).
-    adapter = _FakeAdapter(["SUBMITTED"])
+    adapter = _FakeAdapter(clear_after=1)
     transport = _transport(adapter)
 
     asyncio.run(
@@ -344,7 +356,7 @@ def test_submit_confirmed_stops_after_first_success() -> None:
 
 def test_submit_confirmed_is_bounded_when_never_confirmed() -> None:
     # If the TUI never confirms, stop after `attempts` rather than spamming.
-    adapter = _FakeAdapter(["PENDING"])
+    adapter = _FakeAdapter(clear_after=999)
     transport = _transport(adapter)
 
     asyncio.run(
@@ -356,46 +368,73 @@ def test_submit_confirmed_is_bounded_when_never_confirmed() -> None:
     assert adapter.submits == 4
 
 
+def test_submit_confirmed_stops_when_dialog_appears() -> None:
+    # The message submits (one Enter) and opens a dialog; the loop must stop
+    # rather than drive a second Enter into it — which would select an option
+    # (e.g. auto-approve a tool).
+    adapter = _FakeAdapter(clear_after=999, dialog_after=1)
+    transport = _transport(adapter)
+
+    asyncio.run(
+        transport._submit_confirmed(
+            "%1", _Confirmer(), "msg", attempts=8, poll_seconds=0.0
+        )
+    )
+
+    assert adapter.submits == 1
+
+
 class _RecordingAdapter:
     """Records the high-level calls send_input makes so we can assert which
     submit path (confirm-retry vs single Enter) the transport chose. Replays
     `boot_frames` "BOOTING" snapshots before "SUBMITTED" to model a pane that is
     still launching when the message arrives."""
 
-    def __init__(self, boot_frames: int = 0) -> None:
+    def __init__(self, boot_frames: int = 0, dialog: bool = False) -> None:
         self.calls: list[tuple] = []
         self._boot_frames = boot_frames
+        self._dialog = dialog
         self._captures = 0
+        self.submits = 0
 
     async def send_input(self, target, text, submit=True):
         self.calls.append(("send_input", target, text, submit))
 
     async def submit(self, target):
         self.calls.append(("submit", target))
+        self.submits += 1
 
     async def capture_snapshot(self, target, start_line=-200):
         self.calls.append(("capture", target))
-        frame = "BOOTING" if self._captures < self._boot_frames else "SUBMITTED"
+        if self._dialog:
+            return "DIALOG"
+        if self._captures < self._boot_frames:
+            self._captures += 1
+            return "BOOTING"  # composer not drawn yet
         self._captures += 1
-        return frame  # confirmer (below) treats "SUBMITTED" as ready/cleared
+        # Composer is drawn (READY); it reports cleared only once an Enter lands.
+        return "SUBMITTED" if self.submits > 0 else "READY"
 
 
 class _AgentConfirmer:
     id = "codex"
 
     def pane_ready_for_input(self, pane_text):
-        return pane_text == "SUBMITTED"
+        return pane_text in ("READY", "SUBMITTED")
 
     def confirm_pane_submit(self, pane_text, sent_text):
         return pane_text == "SUBMITTED"
+
+    def pane_shows_blocking_dialog(self, pane_text):
+        return pane_text == "DIALOG"
 
 
 class _PlainAgent:
     id = "opencode"  # no pane hooks -> not a confirmer
 
 
-def _transport_with(agent, boot_frames: int = 0):
-    adapter = _RecordingAdapter(boot_frames)
+def _transport_with(agent, boot_frames: int = 0, dialog: bool = False):
+    adapter = _RecordingAdapter(boot_frames, dialog)
     registry = SimpleNamespace(get=lambda backend_id: agent)
     runtime = SimpleNamespace(tmux=adapter, registry=registry)
     return TmuxTransport(runtime), adapter  # type: ignore[arg-type]
@@ -441,3 +480,23 @@ def test_await_pane_ready_is_bounded_when_never_ready() -> None:
         )
     )
     assert adapter.calls.count(("capture", "%9")) == 4
+
+
+def test_await_pane_ready_raises_on_blocking_dialog() -> None:
+    # A modal dialog must not be treated as a ready composer; surface it instead
+    # of pasting/Enter'ing into it.
+    transport, _ = _transport_with(_AgentConfirmer(), dialog=True)
+    with pytest.raises(TmuxError):
+        asyncio.run(transport._await_pane_ready("%9", _AgentConfirmer()))
+
+
+def test_send_input_refuses_when_dialog_open() -> None:
+    # Sending a message while an approval/trust dialog is open must not paste or
+    # fire Enter into it (which would select an option). It surfaces an error
+    # and never reaches the paste.
+    transport, adapter = _transport_with(_AgentConfirmer(), dialog=True)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(transport.send_input(_session("codex"), "hi"))
+    assert exc.value.status_code == 400
+    assert not any(c[0] == "send_input" for c in adapter.calls)
+    assert not any(c[0] == "submit" for c in adapter.calls)

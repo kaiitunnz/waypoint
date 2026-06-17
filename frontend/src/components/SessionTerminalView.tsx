@@ -7,7 +7,7 @@ import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { TerminalCompose } from "@/components/TerminalCompose";
 import { TerminalScrollChips } from "@/components/TerminalScrollChips";
 import { XTerminal, type XTerminalHandle } from "@/components/XTerminal";
-import { useBackendCatalog } from "@/lib/backends";
+import { terminalResizable, useBackendCatalog } from "@/lib/backends";
 import type { TerminalSubmitResult } from "@/lib/composer";
 import { SessionRecord } from "@/lib/types";
 import { usePopoverAnchor } from "@/lib/use-popover-anchor";
@@ -102,6 +102,10 @@ export function SessionTerminalView({
   onError,
 }: SessionTerminalViewProps) {
   const catalog = useBackendCatalog(host || null, token || null, null);
+  // Emulated panes (claude_tty) are pinned to a fixed server-side grid. The
+  // terminal must mirror that grid exactly rather than fit to the viewport,
+  // or the cell-positioned stream misaligns; the host scrolls at native size.
+  const fixedGrid = session ? !terminalResizable(session.transport, catalog) : false;
   // Primary action shown as a pill button next to the overflow trigger.
   // Only states the user can't trivially reach inside the pane — Reconnect
   // when exited (the pane is gone). We deliberately do NOT surface "Interrupt"
@@ -145,8 +149,8 @@ export function SessionTerminalView({
   return (
     <section
       className={`session-terminal ${locked ? "is-locked" : ""} ${
-        composeEnabled && composeOpen ? "has-compose-open" : ""
-      }`}
+        fixedGrid && !locked ? "is-fixed-grid" : ""
+      } ${composeEnabled && composeOpen ? "has-compose-open" : ""}`}
       aria-label="Terminal session"
     >
       <div className="term-bar">
@@ -275,11 +279,19 @@ export function SessionTerminalView({
         </div>
       </div>
       <div className="term-stage">
-        <div className="term-stage-host" role="log" aria-live="polite">
+        <div
+          className={`term-stage-host${fixedGrid ? " is-fixed-grid" : ""}`}
+          role="log"
+          aria-live="polite"
+        >
           <XTerminal
+            // Remount when the transport (and thus fit mode) changes — autoFit
+            // is fixed at mount, so switching sessions must rebuild the term.
+            key={session?.transport ?? "none"}
             ref={terminalRef}
             theme={theme}
             readOnly={!interactive}
+            autoFit={!fixedGrid}
             onData={interactive ? onTerminalInput : undefined}
             onResize={onTerminalResize}
             onScrollChange={interactive ? onTerminalScrollChange : undefined}

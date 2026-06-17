@@ -3725,6 +3725,10 @@ html[data-theme="light"] .task-dock-panel {
   bottom: 0;
   z-index: 6;
   display: grid;
+  /* Clamp the single column to the container so a wide child (e.g. the
+     no-wrap attachment strip) scrolls inside its own box instead of stretching
+     the composer and skewing the whole page. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 7px;
   padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
   border: 1px solid var(--line-strong);
@@ -6443,6 +6447,10 @@ html[data-theme="light"] .composer-overflow-item.warn:hover:not(:disabled) {
  * vertically centres the auto-grown textarea, and it grows past 38px only when
  * the draft wraps to multiple lines. */
 .reply-textarea-wrap {
+  /* Right padding reserves room for the send button pinned inside the pill;
+   * the tray above the button reclaims the difference (see .attachment-tray-wrap). */
+  --pill-inset-left: 16px;
+  --pill-send-gutter: 46px;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 40px;
@@ -6452,9 +6460,7 @@ html[data-theme="light"] .composer-overflow-item.warn:hover:not(:disabled) {
   border: 1px solid var(--line-strong);
   border-radius: 20px;
   background: rgba(6, 8, 13, 0.66);
-  /* Right padding reserves room for the send button, which is pinned inside
-   * the pill so the text field reads wider. */
-  padding: 5px 46px 5px 16px;
+  padding: 5px var(--pill-send-gutter) 5px var(--pill-inset-left);
   box-shadow: inset 0 1px 0 rgba(200, 169, 106, 0.1);
   transition:
     border-color 160ms ease,
@@ -7250,6 +7256,14 @@ html[data-theme="light"] .ask-question-note-input {
 
 .attachment-tray-wrap {
   margin-bottom: 8px;
+  /* Let the no-wrap scroll strip below clamp to the composer width. */
+  min-width: 0;
+  /* The pill reserves a right gutter for the send button, but the button only
+     sits on the bottom row — reclaim that gutter for the tray above it so the
+     chips align to the same inset as the left edge instead of being squeezed.
+     Derived from the pill padding so it tracks any send-button geometry change;
+     resolves to 0 outside a composer pill where the vars are undefined. */
+  margin-right: calc(var(--pill-inset-left) - var(--pill-send-gutter));
 }
 
 .attachment-tray-header {
@@ -7290,6 +7304,7 @@ html[data-theme="light"] .ask-question-note-input {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
 }
 
 .attachment-chip {
@@ -8496,6 +8511,9 @@ html[data-theme="light"] .term-compose-handle:hover {
 /* The text pill — owns the border, fill, gold hairline, focus ring, and the
  * send button pinned inside its bottom-right. */
 .term-compose-input {
+  /* Same pinned-send-button geometry as .reply-textarea-wrap. */
+  --pill-inset-left: 16px;
+  --pill-send-gutter: 46px;
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
@@ -8506,7 +8524,7 @@ html[data-theme="light"] .term-compose-handle:hover {
   border: 1px solid var(--line-strong);
   border-radius: 20px;
   background: rgba(6, 8, 13, 0.66);
-  padding: 5px 46px 5px 16px;
+  padding: 5px var(--pill-send-gutter) 5px var(--pill-inset-left);
   box-shadow: inset 0 1px 0 rgba(200, 169, 106, 0.1);
   transition:
     border-color 160ms ease,

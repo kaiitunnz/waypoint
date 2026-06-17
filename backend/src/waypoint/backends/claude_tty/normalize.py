@@ -21,9 +21,13 @@ Key invariants (all verified against real transcripts in Phase 0):
   an injected continuation summary, with no terminal assistant record, so a
   synthesized result (SYSTEM_NOTE, status=IDLE) is emitted off the boundary to
   resolve the turn. Auto-compaction fires mid-turn and is left alone.
+- A builtin local slash command (e.g. ``/compact`` with nothing to compact,
+  ``/status``) prints a ``local_command`` system record and runs no model turn,
+  so it too is resolved to IDLE off that record with its stdout as the note.
 """
 
 import json
+import re
 import uuid
 from typing import Any
 
@@ -106,13 +110,19 @@ class TranscriptNormalizer:
         return []
 
     def _process_system(self, record: dict[str, Any]) -> list[NormalizedEvent]:
+        subtype = record.get("subtype")
+        if subtype == "compact_boundary":
+            return self._compact_boundary_event(record)
+        if subtype == "local_command":
+            return self._local_command_event(record)
+        return []
+
+    def _compact_boundary_event(self, record: dict[str, Any]) -> list[NormalizedEvent]:
         # A manual /compact is a turn whose only output is the compaction
         # boundary and an injected continuation summary, both otherwise dropped.
         # Without a terminal assistant record the session never resolves, so
         # synthesize the result note here. Auto-compaction fires mid-turn and the
         # surrounding turn ends with its own end_turn, so it needs no note.
-        if record.get("subtype") != "compact_boundary":
-            return []
         meta: dict[str, Any] = record.get("compactMetadata") or {}
         if meta.get("trigger") != "manual":
             return []
@@ -122,18 +132,28 @@ class TranscriptNormalizer:
             if pre_tokens
             else "Context compacted"
         )
-        return [
-            NormalizedEvent(
-                kind=EventKind.SYSTEM_NOTE,
-                text=text,
-                metadata={
-                    "method": "result",
-                    "stop_reason": "compact",
-                    "status": SessionStatus.IDLE,
-                },
-                status=SessionStatus.IDLE,
-            )
-        ]
+        return [self._result_note(text, "compact")]
+
+    def _local_command_event(self, record: dict[str, Any]) -> list[NormalizedEvent]:
+        # A builtin slash command that runs locally (e.g. /compact when there is
+        # nothing to compact, /status) prints to stdout and returns without a
+        # model turn. handle_input already flipped the session to RUNNING on
+        # send, and nothing else follows, so resolve it here and surface the
+        # command's output as the note.
+        text = _strip_local_command_output(record.get("content")) or "Command complete"
+        return [self._result_note(text, "local_command")]
+
+    def _result_note(self, text: str, stop_reason: str) -> NormalizedEvent:
+        return NormalizedEvent(
+            kind=EventKind.SYSTEM_NOTE,
+            text=text,
+            metadata={
+                "method": "result",
+                "stop_reason": stop_reason,
+                "status": SessionStatus.IDLE,
+            },
+            status=SessionStatus.IDLE,
+        )
 
     def _process_assistant(self, record: dict[str, Any]) -> list[NormalizedEvent]:
         message: dict[str, Any] = record.get("message") or {}
@@ -404,6 +424,24 @@ def _diff_preview_from_tool_result(record: dict[str, Any]) -> dict[str, Any] | N
         return None
     preview = build_preview("applied", files)
     return preview.model_dump(mode="json") if preview else None
+
+
+_LOCAL_COMMAND_OUTPUT_RE = re.compile(
+    r"<local-command-(?:stdout|stderr)>(.*?)</local-command-(?:stdout|stderr)>",
+    re.DOTALL,
+)
+_LOCAL_COMMAND_MAX_LEN = 500
+
+
+def _strip_local_command_output(content: Any) -> str:
+    """Pull the human-readable text out of a local_command record's content."""
+    if not isinstance(content, str):
+        return ""
+    parts = _LOCAL_COMMAND_OUTPUT_RE.findall(content)
+    text = "\n".join(parts).strip() if parts else content.strip()
+    if len(text) > _LOCAL_COMMAND_MAX_LEN:
+        text = text[: _LOCAL_COMMAND_MAX_LEN - 1].rstrip() + "…"
+    return text
 
 
 def _is_injected_turn(content: Any) -> bool:

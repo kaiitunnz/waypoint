@@ -637,6 +637,46 @@ def test_compact_summary_user_record_still_dropped() -> None:
     assert norm.process_record(record) == []
 
 
+def test_local_command_resolves_session_to_idle_with_stdout() -> None:
+    # A rejected /compact (and other builtin local commands) prints a
+    # local_command record and runs no turn, leaving the send-flipped RUNNING
+    # status unresolved without this.
+    norm = TranscriptNormalizer()
+    record = {
+        "type": "system",
+        "subtype": "local_command",
+        "content": "<local-command-stdout>Not enough messages to compact.</local-command-stdout>",
+    }
+    events = norm.process_record(record)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.kind == EventKind.SYSTEM_NOTE
+    assert ev.status == SessionStatus.IDLE
+    assert ev.metadata["stop_reason"] == "local_command"
+    assert ev.text == "Not enough messages to compact."
+
+
+def test_local_command_without_stdout_falls_back_to_generic_note() -> None:
+    norm = TranscriptNormalizer()
+    record = {"type": "system", "subtype": "local_command", "content": ""}
+    events = norm.process_record(record)
+    assert events[0].text == "Command complete"
+    assert events[0].status == SessionStatus.IDLE
+
+
+def test_local_command_stdout_is_truncated() -> None:
+    norm = TranscriptNormalizer()
+    body = "x" * 1000
+    record = {
+        "type": "system",
+        "subtype": "local_command",
+        "content": f"<local-command-stdout>{body}</local-command-stdout>",
+    }
+    text = norm.process_record(record)[0].text
+    assert len(text) <= 500
+    assert text.endswith("…")
+
+
 # ── result text formatting ────────────────────────────────────────────────────
 
 

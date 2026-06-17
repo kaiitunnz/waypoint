@@ -916,6 +916,11 @@ export function connectSessionSocket(
 
 interface TerminalSocketHandlers {
   onChunk: (text: string) => void;
+  // Fixed-grid (emulated) panes own their geometry server-side and announce
+  // it out of band as a ``{type:"size"}`` JSON frame, since xterm ignores
+  // in-band resize ops. The client applies it via term.resize() so its grid
+  // matches the cell-positioned stream.
+  onResize?: (cols: number, rows: number) => void;
   onAuthFailure?: () => void;
   // Backend sends 4410 when the underlying tmux pane has exited. The
   // user has to click Reconnect explicitly; we don't auto-retry.
@@ -933,9 +938,21 @@ export function connectTerminalSocket(
   const url = `${host.replace(/^http/, "ws")}/ws/sessions/${sessionId}/terminal?token=${encodeURIComponent(token)}`;
   const socket = new WebSocket(url);
   socket.onmessage = (event) => {
-    if (typeof event.data === "string") {
-      handlers.onChunk(event.data);
+    if (typeof event.data !== "string") return;
+    // Terminal output is always wrapped in a sync-update escape, so it begins
+    // with ESC; a leading "{" marks an out-of-band control frame (e.g. size).
+    if (event.data.charCodeAt(0) === 0x7b) {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg?.type === "size" && typeof msg.cols === "number" && typeof msg.rows === "number") {
+          handlers.onResize?.(msg.cols, msg.rows);
+          return;
+        }
+      } catch {
+        // Not a control frame after all — fall through and treat as output.
+      }
     }
+    handlers.onChunk(event.data);
   };
   socket.onopen = () => {
     handlers.onOpen?.();

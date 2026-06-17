@@ -958,6 +958,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if prefix_bytes:
                     renderer.snoop_modes(prefix_bytes)
 
+        # Non-resizable panes own their geometry server-side, so the client
+        # must size its grid to ours rather than fitting to the viewport —
+        # otherwise the CUP-positioned deltas below land in the wrong cells.
+        # xterm ignores in-band resize ops (CSI 8 t), so announce the size as
+        # an out-of-band JSON frame the client applies via term.resize(). It
+        # precedes the repaint so the seed lands in the matching grid.
+        # Resizable transports drive their own size, so we don't fight them.
+        if not terminal_resizable:
+            with suppress(Exception):
+                await websocket.send_text(
+                    json.dumps({"type": "size", "cols": cols, "rows": rows})
+                )
         initial_frame = renderer.render_full()
         if initial_frame:
             with suppress(Exception):

@@ -11,6 +11,7 @@ export interface XTerminalHandle {
   write(data: string): void;
   reset(): void;
   fit(): void;
+  resize(cols: number, rows: number): void;
   cols(): number;
   rows(): number;
   focus(): void;
@@ -20,6 +21,12 @@ export interface XTerminalHandle {
 interface XTerminalProps {
   theme?: "dark" | "light";
   readOnly?: boolean;
+  // When false, the terminal does not fit its grid to the container. The
+  // server owns the geometry (emulated panes like claude_tty are pinned to a
+  // fixed size) and drives the grid via a ``CSI 8 ; rows ; cols t`` resize, so
+  // fitting here would override it and misalign the cell-positioned stream.
+  // The host scrolls instead. Defaults to true (resizable tmux behavior).
+  autoFit?: boolean;
   onData?: (data: string) => void;
   onResize?: (size: { cols: number; rows: number }) => void;
   // Fires whenever the user's distance from the live cursor changes. Used
@@ -83,7 +90,15 @@ function themeFor(mode: "dark" | "light"): ITheme {
 
 export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
   function XTerminal(
-    { theme = "dark", readOnly = false, onData, onResize, onScrollChange, className },
+    {
+      theme = "dark",
+      readOnly = false,
+      autoFit = true,
+      onData,
+      onResize,
+      onScrollChange,
+      className,
+    },
     ref,
   ) {
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -124,8 +139,8 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
         disableStdin: readOnly,
         theme: themeFor(theme),
       });
-      const fit = new FitAddon();
-      term.loadAddon(fit);
+      const fit = autoFit ? new FitAddon() : null;
+      if (fit) term.loadAddon(fit);
       term.loadAddon(new WebLinksAddon());
       term.open(host);
 
@@ -190,7 +205,7 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       // Initial fit can throw if the container is still 0-sized (animation,
       // hidden tab, etc.) — guard so we don't crash the React tree.
       try {
-        fit.fit();
+        fit?.fit();
       } catch {
         // ResizeObserver below will retry once the container has a size.
       }
@@ -198,21 +213,25 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       fitRef.current = fit;
       onResizeRef.current?.({ cols: term.cols, rows: term.rows });
 
-      const ro = new ResizeObserver(() => {
-        try {
-          fit.fit();
-        } catch {
-          // Container detached mid-resize; ignore until next tick.
-        }
-      });
-      ro.observe(host);
+      // Only resizable panes refit on container changes. Fixed-grid panes
+      // keep the server-driven grid and let the host scroll instead.
+      const ro = fit
+        ? new ResizeObserver(() => {
+            try {
+              fit.fit();
+            } catch {
+              // Container detached mid-resize; ignore until next tick.
+            }
+          })
+        : null;
+      ro?.observe(host);
 
       return () => {
         onDataSub.dispose();
         onResizeSub.dispose();
         onScrollSub.dispose();
         osc52Sub.dispose();
-        ro.disconnect();
+        ro?.disconnect();
         term.dispose();
         termRef.current = null;
         fitRef.current = null;
@@ -245,6 +264,11 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
         } catch {
           // see above
         }
+      },
+      // Used for fixed-grid panes: the server dictates the grid size and we
+      // apply it directly rather than fitting to the container.
+      resize: (cols: number, rows: number) => {
+        if (cols > 0 && rows > 0) termRef.current?.resize(cols, rows);
       },
       cols: () => termRef.current?.cols ?? 80,
       rows: () => termRef.current?.rows ?? 24,

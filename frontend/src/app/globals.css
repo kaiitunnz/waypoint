@@ -7970,6 +7970,15 @@ html[data-theme="light"] .terminal {
   box-shadow: var(--shadow-soft);
 }
 
+/* Fixed-grid (emulated) panes render at a fixed server-side size, so the
+   pane hugs the grid's natural height instead of filling the viewport —
+   otherwise the shorter grid leaves a tall void above the composer. The cap
+   keeps it scrolling when the grid is taller than the viewport. */
+.session-terminal.is-fixed-grid {
+  height: auto;
+  max-height: min(78dvh, calc(100dvh - 160px), 900px);
+}
+
 /* Terminal-only sessions (no composer below) lock the pane to the
    viewport once the user scrolls past the SessionHeader: position: sticky
    keeps the pane glued to the top of the viewport while the page
@@ -7995,6 +8004,9 @@ html[data-theme="light"] .terminal {
   }
   .session-terminal.is-locked {
     height: calc(100dvh - env(safe-area-inset-top, 0px));
+  }
+  .session-terminal.is-fixed-grid {
+    max-height: calc(100dvh - 120px);
   }
 }
 
@@ -8118,6 +8130,18 @@ html[data-theme="light"] .term-stage {
   padding: 10px 12px;
   overflow: hidden;
   position: relative;
+}
+
+/* Fixed-grid (emulated) panes render at the server's native size, which can
+ * exceed the viewport. The host scrolls both axes instead of clipping, and
+ * xterm's own viewport scrollbar is suppressed so the host owns scrolling
+ * (these panes run on the alt screen, so there is no scrollback to reach). */
+.term-stage-host.is-fixed-grid {
+  overflow: auto;
+}
+
+.term-stage-host.is-fixed-grid .xterm-viewport {
+  overflow: hidden !important;
 }
 
 .term-stage-host .xterm,

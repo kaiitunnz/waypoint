@@ -1406,6 +1406,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         onChunk: (text) => {
           terminalRef.current?.write(text);
         },
+        onResize: (cols, rows) => {
+          // Fixed-grid panes (claude_tty) are pinned server-side; match our
+          // grid so the cell-positioned stream aligns instead of rewrapping.
+          terminalRef.current?.resize(cols, rows);
+        },
         onAuthFailure: () => {
           handleAuthFailure();
         },

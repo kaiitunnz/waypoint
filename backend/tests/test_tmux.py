@@ -368,6 +368,21 @@ def test_submit_confirmed_is_bounded_when_never_confirmed() -> None:
     assert adapter.submits == 4
 
 
+def test_submit_confirmed_default_budget_outlasts_image_ingestion() -> None:
+    # The Claude TUI drops the submit Enter while it ingests pasted image paths
+    # into chips; the default retry budget must keep firing through that window
+    # so the first message with attachments is not stranded. Model a long
+    # ingestion as many absorbed Enters before the composer clears.
+    adapter = _FakeAdapter(clear_after=20)
+    transport = _transport(adapter)
+
+    asyncio.run(
+        transport._submit_confirmed("%1", _Confirmer(), "msg", poll_seconds=0.0)
+    )
+
+    assert adapter.submits == 20
+
+
 def test_submit_confirmed_stops_when_dialog_appears() -> None:
     # The message submits (one Enter) and opens a dialog; the loop must stop
     # rather than drive a second Enter into it — which would select an option

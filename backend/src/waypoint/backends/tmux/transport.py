@@ -107,7 +107,7 @@ class TmuxTransport(TransportAdapter):
         confirmer: PaneSubmitConfirming,
         sent_text: str,
         *,
-        attempts: int = 8,
+        attempts: int = 30,
         poll_seconds: float = 0.4,
     ) -> None:
         # Re-send Enter until the composer reports cleared. Submit before
@@ -119,6 +119,17 @@ class TmuxTransport(TransportAdapter):
         # message already submitted and opened one (or one raced in), and an
         # Enter would select an option (e.g. approve a tool). Bounded; if the TUI
         # never confirms, leave the input rather than spamming keystrokes.
+        #
+        # The budget (attempts × poll) must outlast the wrapped TUI's paste
+        # ingestion: the Claude TUI converts pasted image paths into ``[Image
+        # #N]`` chips asynchronously and *drops* the submit Enter for the whole
+        # window (the keystrokes are discarded, not queued), which on a
+        # cold-booting session with several large images can run well past the
+        # first few seconds. A budget too short here gives up mid-ingestion and
+        # strands the message in the composer until the next send re-triggers it
+        # — the original "first message with attachments never sends" bug. ~12s
+        # comfortably covers observed ingestion; the loop still exits the instant
+        # the composer clears, so the common (fast) case is unchanged.
         for _ in range(attempts):
             if confirmer.pane_shows_blocking_dialog(
                 await self.adapter.capture_snapshot(target)

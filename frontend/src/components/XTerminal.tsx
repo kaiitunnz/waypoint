@@ -23,9 +23,10 @@ interface XTerminalProps {
   readOnly?: boolean;
   // When false, the terminal does not fit its grid to the container. The
   // server owns the geometry (emulated panes like claude_tty are pinned to a
-  // fixed size) and drives the grid via a ``CSI 8 ; rows ; cols t`` resize, so
-  // fitting here would override it and misalign the cell-positioned stream.
-  // The host scrolls instead. Defaults to true (resizable tmux behavior).
+  // fixed size) and announces it out of band; the parent applies it via the
+  // imperative ``resize()`` handle. Fitting here would override that and
+  // misalign the cell-positioned stream, so the host scrolls instead.
+  // Defaults to true (resizable tmux behavior).
   autoFit?: boolean;
   onData?: (data: string) => void;
   onResize?: (size: { cols: number; rows: number }) => void;

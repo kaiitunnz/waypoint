@@ -267,9 +267,20 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
         }
       },
       // Used for fixed-grid panes: the server dictates the grid size and we
-      // apply it directly rather than fitting to the container.
+      // apply it directly rather than fitting to the container. The grid can
+      // exceed the viewport, so land the scroll at the bottom — the live row
+      // is the grid's last line, and the fixed grid repaints in place so this
+      // stays put as content updates (the user can still scroll up).
       resize: (cols: number, rows: number) => {
-        if (cols > 0 && rows > 0) termRef.current?.resize(cols, rows);
+        const term = termRef.current;
+        if (!term || cols <= 0 || rows <= 0) return;
+        term.resize(cols, rows);
+        const host = containerRef.current;
+        if (host) {
+          requestAnimationFrame(() => {
+            host.scrollTop = host.scrollHeight;
+          });
+        }
       },
       cols: () => termRef.current?.cols ?? 80,
       rows: () => termRef.current?.rows ?? 24,
@@ -282,7 +293,10 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
     return (
       <div
         ref={containerRef}
-        className={className ?? "xterm-host"}
+        // Fixed-grid panes own a scroll viewport (the grid can exceed the
+        // container); resizable panes must not scroll so mouse events pass
+        // through to the backend.
+        className={`${className ?? "xterm-host"}${autoFit ? "" : " xterm-host--scroll"}`}
         style={{ width: "100%", height: "100%" }}
       />
     );

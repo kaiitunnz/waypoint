@@ -7970,10 +7970,10 @@ html[data-theme="light"] .terminal {
   box-shadow: var(--shadow-soft);
 }
 
-/* Fixed-grid (emulated) panes render at a fixed server-side size, so the
-   pane hugs the grid's natural height instead of filling the viewport —
-   otherwise the shorter grid leaves a tall void above the composer. The cap
-   keeps it scrolling when the grid is taller than the viewport. */
+/* Fixed-grid (emulated) panes render at a fixed server-side size. The pane
+   hugs the grid's natural height so a short grid leaves no void above the
+   composer, but stays capped to the viewport (like resizable terminals); when
+   the grid is taller, the host scrolls to reach it (see .term-stage-host). */
 .session-terminal.is-fixed-grid {
   height: auto;
   max-height: min(78dvh, calc(100dvh - 160px), 900px);
@@ -8133,14 +8133,14 @@ html[data-theme="light"] .term-stage {
 }
 
 /* Fixed-grid (emulated) panes render at the server's native size, which can
- * exceed the viewport. The host scrolls both axes instead of clipping, and
- * xterm's own viewport scrollbar is suppressed so the host owns scrolling
- * (these panes run on the alt screen, so there is no scrollback to reach). */
-.term-stage-host.is-fixed-grid {
+ * exceed the viewport. The xterm host scrolls both axes instead of clipping,
+ * and xterm's own viewport scrollbar is suppressed so the host owns scrolling
+ * (the grid repaints in place, so there is no scrollback to reach). */
+.xterm-host--scroll {
   overflow: auto;
 }
 
-.term-stage-host.is-fixed-grid .xterm-viewport {
+.xterm-host--scroll .xterm-viewport {
   overflow: hidden !important;
 }
 

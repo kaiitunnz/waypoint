@@ -284,11 +284,7 @@ export function SessionTerminalView({
         </div>
       </div>
       <div className="term-stage">
-        <div
-          className={`term-stage-host${fixedGrid ? " is-fixed-grid" : ""}`}
-          role="log"
-          aria-live="polite"
-        >
+        <div className="term-stage-host" role="log" aria-live="polite">
           <XTerminal
             // Remount when the transport (and thus fit mode) changes — autoFit
             // is fixed at mount, so switching sessions must rebuild the term.

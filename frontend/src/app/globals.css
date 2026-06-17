@@ -7973,7 +7973,7 @@ html[data-theme="light"] .terminal {
 /* Fixed-grid (emulated) panes render at a fixed server-side size. The pane
    hugs the grid's natural height so a short grid leaves no void above the
    composer, but stays capped to the viewport (like resizable terminals); when
-   the grid is taller, the host scrolls to reach it (see .term-stage-host). */
+   the grid is taller, the host scrolls to reach it (see .xterm-host--scroll). */
 .session-terminal.is-fixed-grid {
   height: auto;
   max-height: min(78dvh, calc(100dvh - 160px), 900px);

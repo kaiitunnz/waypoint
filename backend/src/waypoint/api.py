@@ -909,7 +909,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # has to interpret DECSTBM scroll regions, partial sync-output
         # frames, or other sequences browser emulators handle
         # inconsistently from native terminals.
-        renderer = make_renderer(cols, rows)
+        # Read-only panes can't send mouse input, and mirroring mouse modes
+        # would make xterm swallow wheel events (blocking scroll), so only
+        # forward them for interactive transports.
+        renderer = make_renderer(cols, rows, forward_mouse_modes=terminal_interactive)
 
         # Seed pyte with the pane's current ANSI snapshot so the renderer
         # has the same starting state the user would see if they ran

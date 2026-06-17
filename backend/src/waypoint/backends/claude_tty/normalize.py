@@ -17,6 +17,10 @@ Key invariants (all verified against real transcripts in Phase 0):
   ``tool_use``) and contains no ``tool_use`` blocks.
 - Injected harness user turns (``<task-notification>`` and context-window
   summaries beginning with "This session is being continued") are dropped.
+- A manual ``/compact`` produces only a ``compact_boundary`` system record and
+  an injected continuation summary, with no terminal assistant record, so a
+  synthesized result (SYSTEM_NOTE, status=IDLE) is emitted off the boundary to
+  resolve the turn. Auto-compaction fires mid-turn and is left alone.
 """
 
 import json
@@ -38,12 +42,6 @@ from waypoint.backends.diff_preview import (
 from waypoint.schemas import EventKind, SessionStatus
 
 FILE_EDIT_TOOL_NAMES: frozenset[str] = frozenset({"Edit", "Write", "MultiEdit"})
-
-# Allowlist of record types we handle; everything else is dropped silently.
-# This is an allowlist rather than a denylist so undocumented TUI record types
-# (e.g. the ``pr-link`` type observed in real transcripts) are dropped rather
-# than mis-rendered.
-HANDLED_RECORD_TYPES: frozenset[str] = frozenset({"assistant", "user"})
 
 
 class NormalizedEvent:
@@ -101,7 +99,41 @@ class TranscriptNormalizer:
             return self._process_assistant(record)
         if rec_type == "user":
             return self._process_user(record)
+        if rec_type == "system":
+            return self._process_system(record)
+        # Allowlist dispatch: undocumented TUI record types (e.g. the ``pr-link``
+        # type seen in real transcripts) are dropped rather than mis-rendered.
         return []
+
+    def _process_system(self, record: dict[str, Any]) -> list[NormalizedEvent]:
+        # A manual /compact is a turn whose only output is the compaction
+        # boundary and an injected continuation summary, both otherwise dropped.
+        # Without a terminal assistant record the session never resolves, so
+        # synthesize the result note here. Auto-compaction fires mid-turn and the
+        # surrounding turn ends with its own end_turn, so it needs no note.
+        if record.get("subtype") != "compact_boundary":
+            return []
+        meta: dict[str, Any] = record.get("compactMetadata") or {}
+        if meta.get("trigger") != "manual":
+            return []
+        pre_tokens = meta.get("preTokens")
+        text = (
+            f"Context compacted · {pre_tokens} tokens"
+            if pre_tokens
+            else "Context compacted"
+        )
+        return [
+            NormalizedEvent(
+                kind=EventKind.SYSTEM_NOTE,
+                text=text,
+                metadata={
+                    "method": "result",
+                    "stop_reason": "compact",
+                    "status": SessionStatus.IDLE,
+                },
+                status=SessionStatus.IDLE,
+            )
+        ]
 
     def _process_assistant(self, record: dict[str, Any]) -> list[NormalizedEvent]:
         message: dict[str, Any] = record.get("message") or {}

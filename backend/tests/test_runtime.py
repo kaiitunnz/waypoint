@@ -1143,6 +1143,31 @@ async def test_handle_input_reattaches_exited_codex_session(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_resume_reattaches_exited_session(tmp_path) -> None:
+    # The "Resume" endpoint on a terminated session must relaunch it, not send
+    # Enter to the dead pane (which raised a 500). Mirror handle_input's guard.
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeCodexRuntimeAdapter()
+    _codex_plugin(runtime).adapter = cast(Any, fake)
+    session = make_session(
+        settings,
+        status=SessionStatus.EXITED,
+        thread_id="thread-resume",
+    )
+    storage.create_session(session)
+
+    updated = await runtime.resume("sess")
+
+    # Relaunched via restore (no input forwarded), and never poked the dead pane.
+    # Reattach leaves it IDLE (alive, ready), not RUNNING — no turn was started.
+    assert fake.restore_calls == [
+        ("sess", "/tmp/project", "thread-resume", None, None, None)
+    ]
+    assert fake.inputs == []
+    assert updated.status == SessionStatus.IDLE
+
+
+@pytest.mark.asyncio
 async def test_handle_input_reattaches_errored_claude_session(tmp_path) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
     fake = FakeClaudeAdapter()

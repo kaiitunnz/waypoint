@@ -1204,6 +1204,11 @@ class SessionRuntime:
 
     async def resume(self, session_id: str) -> SessionRecord:
         session = self.get_session(session_id)
+        # A terminated session has no live pane to wake — sending Enter to the
+        # dead target would raise. Relaunch it instead, mirroring handle_input's
+        # reattach guard, so "Resume" on an exited session brings it back.
+        if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
+            return await self._reattach_session(session)
         await self.transport_for(session).resume(session)
         await self._record_system_event(
             session.id, "Sent resume", status=SessionStatus.RUNNING

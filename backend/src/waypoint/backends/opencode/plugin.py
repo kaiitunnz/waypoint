@@ -556,6 +556,13 @@ class OpenCodePlugin(DefaultLaunchContract):
     def pane_ready_for_input(self, pane_text: str) -> bool:
         return composer_ready(pane_text)
 
+    def pane_shows_blocking_dialog(self, pane_text: str) -> bool:
+        # OpenCode's approvals run inline in its own TUI and are not surfaced to
+        # Waypoint over the generic tmux transport, and there is no pane-dialog
+        # parser to read them off the screen, so the transport's dialog guard is
+        # a no-op here. Add detection if a collision is ever observed.
+        return False
+
     def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
         # Over the tmux/Terminal transport the OpenCode TUI can absorb the
         # submit Enter while ingesting input; the composer box no longer

@@ -192,6 +192,9 @@ class ClaudeTtyPlugin:
     def pane_ready_for_input(self, pane_text: str) -> bool:
         return pane_dialog.composer_ready(pane_text)
 
+    def pane_shows_blocking_dialog(self, pane_text: str) -> bool:
+        return pane_dialog.shows_blocking_dialog(pane_text)
+
     def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
         # The Claude TUI can swallow the submit Enter while loading an image
         # pasted by path; the composer clearing is how the tmux transport

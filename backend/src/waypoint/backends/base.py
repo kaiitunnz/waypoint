@@ -44,6 +44,15 @@ class PaneSubmitConfirming(Protocol):
         pasting into a TUI that will drop the keystrokes."""
         ...
 
+    def pane_shows_blocking_dialog(self, pane_text: str) -> bool:
+        """Return whether a modal popup (tool-permission approval, trust prompt,
+        AskUserQuestion, model/effort picker) is on screen. Such dialogs capture
+        ``Enter`` to select an option, so the transport must not paste a message
+        or fire the submit ``Enter`` into one — that would silently approve a
+        tool or accept a prompt. Agents that cannot read their dialogs off the
+        pane return False (the guard is then a no-op for them)."""
+        ...
+
     def confirm_pane_submit(self, pane_text: str, sent_text: str) -> bool:
         """Return whether the just-sent input has left the composer (submitted),
         given a ``capture-pane`` snapshot of the wrapped TUI and the text that

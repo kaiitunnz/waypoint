@@ -148,6 +148,11 @@ export function SessionTerminalView({
 
   return (
     <section
+      // is-fixed-grid hugs the grid height, which only makes sense when the
+      // pane isn't viewport-locked. No transport is both non-resizable and
+      // terminal-only today, so fixed-grid + locked is currently unreachable;
+      // the !locked guard just keeps is-locked's explicit height authoritative
+      // if that ever changes.
       className={`session-terminal ${locked ? "is-locked" : ""} ${
         fixedGrid && !locked ? "is-fixed-grid" : ""
       } ${composeEnabled && composeOpen ? "has-compose-open" : ""}`}

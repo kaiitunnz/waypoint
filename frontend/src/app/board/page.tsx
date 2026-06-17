@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -36,6 +37,28 @@ type LoadState = "loading" | "ready" | "error";
 
 function shortId(value: string): string {
   return value.length > 16 ? `${value.slice(0, 16)}…` : value;
+}
+
+// A scalar cell holds a short single-line value (a status flag, a count). It
+// renders as a compact strip row instead of a card so a wall of one-word cells
+// doesn't dominate the board.
+const SCALAR_MAX_LEN = 64;
+function isScalarCell(entry: BoardEntry): boolean {
+  return !entry.text.includes("\n") && entry.text.trim().length <= SCALAR_MAX_LEN;
+}
+
+// The brief cell, promoted above the rest of the board.
+const HERO_CELL_KEY = "plan";
+
+// The common author of a set of entries, or null when they disagree or none
+// has one. Lets the board state authorship once instead of on every card.
+function uniformAuthor(entries: BoardEntry[]): string | null {
+  if (entries.length === 0) return null;
+  const first = entries[0].author_session_id;
+  if (!first) return null;
+  return entries.every((entry) => entry.author_session_id === first)
+    ? first
+    : null;
 }
 
 function MetaChips({ metadata }: { metadata: Record<string, unknown> }) {
@@ -210,6 +233,65 @@ function EntryDetail({
   );
 }
 
+interface EntryControls {
+  editingId: number | null;
+  editDraft: string;
+  savingEdit: boolean;
+  expandedId: number | null;
+  confirmDeleteId: number | null;
+  onEditChange: (value: string) => void;
+  onEditSave: (entry: BoardEntry) => void;
+  onEditCancel: () => void;
+  onStartEdit: (entry: BoardEntry) => void;
+  onRequestDelete: (entry: BoardEntry) => void;
+  onConfirmDelete: (entry: BoardEntry) => void;
+  onCancelDelete: () => void;
+}
+
+// Shared body for every expandable entry: the editor swaps in for the value
+// while editing, and the detail panel appends while expanded. `children` is the
+// value markup, which differs per layout (card, hero, log line). State-strip
+// rows render their value inline in the row instead and pass `null`, so they
+// get only the editor/detail behavior.
+function EntryExpansion({
+  entry,
+  controls,
+  children,
+}: {
+  entry: BoardEntry;
+  controls: EntryControls;
+  children: ReactNode;
+}) {
+  const editing = controls.editingId === entry.id;
+  const expanded = controls.expandedId === entry.id;
+  return (
+    <>
+      {editing ? (
+        <EntryEditor
+          entry={entry}
+          draft={controls.editDraft}
+          saving={controls.savingEdit}
+          onChange={controls.onEditChange}
+          onSave={controls.onEditSave}
+          onCancel={controls.onEditCancel}
+        />
+      ) : (
+        children
+      )}
+      {expanded && !editing ? (
+        <EntryDetail
+          entry={entry}
+          confirmingDelete={controls.confirmDeleteId === entry.id}
+          onStartEdit={controls.onStartEdit}
+          onRequestDelete={controls.onRequestDelete}
+          onConfirmDelete={controls.onConfirmDelete}
+          onCancelDelete={controls.onCancelDelete}
+        />
+      ) : null}
+    </>
+  );
+}
+
 export default function BoardPage() {
   const router = useRouter();
   const { theme } = useTheme();
@@ -226,6 +308,7 @@ export default function BoardPage() {
   const [draftText, setDraftText] = useState("");
   const [draftKey, setDraftKey] = useState("");
   const [posting, setPosting] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
@@ -606,6 +689,36 @@ export default function BoardPage() {
   const log = entries.filter((entry) => !entry.key).reverse();
   const hasOlder = log.length < logTotal;
 
+  // Cells are ranked by shape rather than rendered uniformly: `plan` is the
+  // brief and leads as a hero; short scalars collapse into a state strip; the
+  // rest stay as cards.
+  const heroCell = cells.find((entry) => entry.key === HERO_CELL_KEY) ?? null;
+  const bodyCells = cells.filter((entry) => entry !== heroCell);
+  const scalarCells = bodyCells.filter(isScalarCell);
+  const cardCells = bodyCells.filter((entry) => !isScalarCell(entry));
+  // When every cell shares an author, name them once above the grid and drop
+  // the repeated per-card line. Cells always load in full, so this is stable;
+  // the log is paginated, so only collapse its author once the whole log is
+  // loaded — otherwise "Load older" could reveal a new author and make the
+  // header flip away mid-session.
+  const cellAuthor = uniformAuthor(cells);
+  const logAuthor = hasOlder ? null : uniformAuthor(log);
+
+  const controls: EntryControls = {
+    editingId,
+    editDraft,
+    savingEdit,
+    expandedId,
+    confirmDeleteId,
+    onEditChange: setEditDraft,
+    onEditSave: handleEditSave,
+    onEditCancel: cancelEdit,
+    onStartEdit: startEdit,
+    onRequestDelete: requestDelete,
+    onConfirmDelete: handleDeleteEntry,
+    onCancelDelete: cancelDelete,
+  };
+
   return (
     <main className="page-shell">
       <header className="app-bar">
@@ -645,46 +758,72 @@ export default function BoardPage() {
         </div>
       ) : null}
 
-      <section className="panel board-composer" aria-label="Post to a channel">
-        <div className="board-composer-fields">
-          <input
-            className="board-input board-input-channel"
-            placeholder="channel — e.g. topic:plan"
-            value={draftChannel}
-            onChange={(event) => setDraftChannel(event.target.value)}
-            aria-label="Channel"
-          />
-          <span className="board-composer-sep" aria-hidden="true">
-            /
+      <section
+        className={`panel board-composer${composerOpen ? " is-open" : ""}`}
+        aria-label="Post to a channel"
+      >
+        <button
+          type="button"
+          className="board-composer-toggle"
+          onClick={() => setComposerOpen((open) => !open)}
+          aria-expanded={composerOpen}
+        >
+          <span className="board-composer-cue" aria-hidden="true">
+            ＋
           </span>
-          <input
-            className="board-input board-input-key"
-            placeholder="key — blank appends to the log"
-            value={draftKey}
-            onChange={(event) => setDraftKey(event.target.value)}
-            aria-label="Key"
-          />
-        </div>
-        <div className="board-composer-row">
-          <input
-            className="board-input board-input-text"
-            placeholder="message"
-            value={draftText}
-            onChange={(event) => setDraftText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void handlePost();
-            }}
-            aria-label="Message"
-          />
-          <button
-            type="button"
-            className="primary"
-            onClick={() => void handlePost()}
-            disabled={posting || !draftChannel.trim() || !draftText.trim()}
-          >
-            {draftKey.trim() ? "Set cell" : "Post"}
-          </button>
-        </div>
+          <span className="board-composer-toggle-label">Post to a channel</span>
+          {!composerOpen && (draftChannel.trim() || activeChannel) ? (
+            <span className="board-composer-target">
+              {draftChannel.trim() || activeChannel}
+            </span>
+          ) : null}
+          <span className="board-composer-chevron" aria-hidden="true">
+            ›
+          </span>
+        </button>
+        {composerOpen ? (
+          <div className="board-composer-body">
+            <div className="board-composer-fields">
+              <input
+                className="board-input board-input-channel"
+                placeholder="channel — e.g. topic:plan"
+                value={draftChannel}
+                onChange={(event) => setDraftChannel(event.target.value)}
+                aria-label="Channel"
+              />
+              <span className="board-composer-sep" aria-hidden="true">
+                /
+              </span>
+              <input
+                className="board-input board-input-key"
+                placeholder="key — blank appends to the log"
+                value={draftKey}
+                onChange={(event) => setDraftKey(event.target.value)}
+                aria-label="Key"
+              />
+            </div>
+            <div className="board-composer-row">
+              <input
+                className="board-input board-input-text"
+                placeholder="message"
+                value={draftText}
+                onChange={(event) => setDraftText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void handlePost();
+                }}
+                aria-label="Message"
+              />
+              <button
+                type="button"
+                className="primary"
+                onClick={() => void handlePost()}
+                disabled={posting || !draftChannel.trim() || !draftText.trim()}
+              >
+                {draftKey.trim() ? "Set cell" : "Post"}
+              </button>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       {state === "ready" && channels.length === 0 ? (
@@ -757,69 +896,154 @@ export default function BoardPage() {
             ) : null}
 
             {cells.length > 0 ? (
-              <section aria-label="Cells">
-                <h3 className="board-group-label">Cells · latest value</h3>
-                <div className="board-cell-grid">
-                  {cells.map((entry) => (
-                    <article
-                      key={entry.id}
-                      className={`board-cell${
-                        expandedId === entry.id ? " is-expanded" : ""
-                      }`}
-                      role="button"
-                      tabIndex={0}
-                      aria-expanded={expandedId === entry.id}
-                      onClick={() => activateEntry(entry.id)}
-                      onKeyDown={(event) => onEntryKeyDown(event, entry.id)}
-                    >
-                      <header className="board-cell-head">
-                        <span className="board-cell-key">{entry.key}</span>
-                        <span className="board-cell-time">
-                          {formatRelativeTime(entry.created_at)}
-                          {entry.edited_at ? (
-                            <span className="board-edited"> · edited</span>
-                          ) : null}
+              <section className="board-cells" aria-label="Cells">
+                <h3 className="board-group-label">
+                  Cells · latest value
+                  {cellAuthor ? (
+                    <span className="board-group-by">
+                      {" · all by "}
+                      {shortId(cellAuthor)}
+                    </span>
+                  ) : null}
+                </h3>
+
+                {heroCell ? (
+                  <article
+                    className={`board-hero${
+                      expandedId === heroCell.id ? " is-expanded" : ""
+                    }`}
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={expandedId === heroCell.id}
+                    onClick={() => activateEntry(heroCell.id)}
+                    onKeyDown={(event) => onEntryKeyDown(event, heroCell.id)}
+                  >
+                    <header className="board-hero-head">
+                      <span className="board-hero-key">{heroCell.key}</span>
+                      <span className="board-cell-time">
+                        {formatRelativeTime(heroCell.created_at)}
+                        {heroCell.edited_at ? (
+                          <span className="board-edited"> · edited</span>
+                        ) : null}
+                        <span className="board-expand-cue" aria-hidden="true">
+                          ›
                         </span>
-                      </header>
-                      {editingId === entry.id ? (
-                        <EntryEditor
-                          entry={entry}
-                          draft={editDraft}
-                          saving={savingEdit}
-                          onChange={setEditDraft}
-                          onSave={handleEditSave}
-                          onCancel={cancelEdit}
-                        />
-                      ) : (
-                        <p className="board-cell-value">{entry.text}</p>
-                      )}
-                      <footer className="board-cell-foot">
-                        <span className="board-cell-author">
-                          {entry.author_session_id
-                            ? shortId(entry.author_session_id)
-                            : "—"}
-                        </span>
-                      </footer>
-                      <MetaChips metadata={entry.metadata} />
-                      {expandedId === entry.id && editingId !== entry.id ? (
-                        <EntryDetail
-                          entry={entry}
-                          confirmingDelete={confirmDeleteId === entry.id}
-                          onStartEdit={startEdit}
-                          onRequestDelete={requestDelete}
-                          onConfirmDelete={handleDeleteEntry}
-                          onCancelDelete={cancelDelete}
-                        />
-                      ) : null}
-                    </article>
-                  ))}
-                </div>
+                      </span>
+                    </header>
+                    <EntryExpansion entry={heroCell} controls={controls}>
+                      <>
+                        <p className="board-hero-value">{heroCell.text}</p>
+                        <MetaChips metadata={heroCell.metadata} />
+                      </>
+                    </EntryExpansion>
+                  </article>
+                ) : null}
+
+                {scalarCells.length > 0 ? (
+                  <ul className="board-state-list">
+                    {scalarCells.map((entry) => (
+                      <li key={entry.id} className="board-state-wrap">
+                        <div
+                          className={`board-state-row${
+                            expandedId === entry.id ? " is-expanded" : ""
+                          }`}
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={expandedId === entry.id}
+                          onClick={() => activateEntry(entry.id)}
+                          onKeyDown={(event) => onEntryKeyDown(event, entry.id)}
+                        >
+                          <span className="board-state-key">{entry.key}</span>
+                          {editingId === entry.id ? null : (
+                            <span className="board-state-value">
+                              {entry.text}
+                            </span>
+                          )}
+                          <MetaChips metadata={entry.metadata} />
+                          {cellAuthor ? null : (
+                            <span className="board-state-author">
+                              {entry.author_session_id
+                                ? shortId(entry.author_session_id)
+                                : "—"}
+                            </span>
+                          )}
+                          <span className="board-state-time">
+                            {formatRelativeTime(entry.created_at)}
+                            {entry.edited_at ? (
+                              <span className="board-edited"> · edited</span>
+                            ) : null}
+                            <span className="board-expand-cue" aria-hidden="true">
+                              ›
+                            </span>
+                          </span>
+                        </div>
+                        <EntryExpansion entry={entry} controls={controls}>
+                          {null}
+                        </EntryExpansion>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+
+                {cardCells.length > 0 ? (
+                  <div className="board-cell-grid">
+                    {cardCells.map((entry) => (
+                      <article
+                        key={entry.id}
+                        className={`board-cell${
+                          expandedId === entry.id ? " is-expanded" : ""
+                        }`}
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={expandedId === entry.id}
+                        onClick={() => activateEntry(entry.id)}
+                        onKeyDown={(event) => onEntryKeyDown(event, entry.id)}
+                      >
+                        <header className="board-cell-head">
+                          <span className="board-cell-key">{entry.key}</span>
+                          <span className="board-cell-time">
+                            {formatRelativeTime(entry.created_at)}
+                            {entry.edited_at ? (
+                              <span className="board-edited"> · edited</span>
+                            ) : null}
+                            <span className="board-expand-cue" aria-hidden="true">
+                              ›
+                            </span>
+                          </span>
+                        </header>
+                        <EntryExpansion entry={entry} controls={controls}>
+                          <>
+                            <p className="board-cell-value">{entry.text}</p>
+                            {cellAuthor ? null : (
+                              <footer className="board-cell-foot">
+                                <span className="board-cell-author">
+                                  {entry.author_session_id
+                                    ? shortId(entry.author_session_id)
+                                    : "—"}
+                                </span>
+                              </footer>
+                            )}
+                            <MetaChips metadata={entry.metadata} />
+                          </>
+                        </EntryExpansion>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
               </section>
             ) : null}
 
-            <section aria-label="Log">
+            <section className="board-log" aria-label="Log">
               {cells.length > 0 ? (
-                <h3 className="board-group-label">Log · newest first</h3>
+                <h3 className="board-group-label">
+                  Log · newest first
+                  {logAuthor ? (
+                    <span className="board-group-by">
+                      {" · all by "}
+                      {shortId(logAuthor)}
+                    </span>
+                  ) : null}
+                </h3>
               ) : null}
               {log.length === 0 ? (
                 <p className="board-log-empty">
@@ -842,42 +1066,27 @@ export default function BoardPage() {
                         onClick={() => activateEntry(entry.id)}
                         onKeyDown={(event) => onEntryKeyDown(event, entry.id)}
                       >
-                        <div className="board-log-head">
-                          <span className="board-log-author">
-                            {entry.author_session_id
-                              ? shortId(entry.author_session_id)
-                              : "—"}
-                          </span>
-                          <span className="board-log-time">
-                            {formatRelativeTime(entry.created_at)}
-                            {entry.edited_at ? (
-                              <span className="board-edited"> · edited</span>
-                            ) : null}
-                          </span>
-                        </div>
-                        {editingId === entry.id ? (
-                          <EntryEditor
-                            entry={entry}
-                            draft={editDraft}
-                            saving={savingEdit}
-                            onChange={setEditDraft}
-                            onSave={handleEditSave}
-                            onCancel={cancelEdit}
-                          />
-                        ) : (
-                          <p className="board-log-text">{entry.text}</p>
-                        )}
-                        <MetaChips metadata={entry.metadata} />
-                        {expandedId === entry.id && editingId !== entry.id ? (
-                          <EntryDetail
-                            entry={entry}
-                            confirmingDelete={confirmDeleteId === entry.id}
-                            onStartEdit={startEdit}
-                            onRequestDelete={requestDelete}
-                            onConfirmDelete={handleDeleteEntry}
-                            onCancelDelete={cancelDelete}
-                          />
-                        ) : null}
+                        <EntryExpansion entry={entry} controls={controls}>
+                          <div className="board-log-main">
+                            <p className="board-log-text">{entry.text}</p>
+                            <div className="board-log-meta">
+                              <span className="board-log-time">
+                                {formatRelativeTime(entry.created_at)}
+                                {entry.edited_at ? (
+                                  <span className="board-edited"> · edited</span>
+                                ) : null}
+                              </span>
+                              {logAuthor ? null : (
+                                <span className="board-log-author">
+                                  {entry.author_session_id
+                                    ? shortId(entry.author_session_id)
+                                    : "—"}
+                                </span>
+                              )}
+                              <MetaChips metadata={entry.metadata} />
+                            </div>
+                          </div>
+                        </EntryExpansion>
                       </div>
                     </li>
                   ))}

@@ -10571,10 +10571,78 @@ html[data-theme="light"]
 }
 
 /* Composer */
+/* Composer collapses to a slim bar so reading the board, not posting, owns the
+   top of the page. */
 .board-composer {
   display: flex;
   flex-direction: column;
+  gap: 12px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.board-composer-toggle {
+  display: flex;
+  align-items: center;
   gap: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.board-composer-cue {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--accent-cool);
+}
+
+.board-composer-toggle-label {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.board-composer-toggle:hover .board-composer-toggle-label {
+  color: var(--text);
+}
+
+.board-composer-target {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--accent-cool);
+}
+
+.board-composer-chevron {
+  margin-left: auto;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--muted-soft);
+  transition: transform 0.16s ease;
+}
+
+.board-composer.is-open .board-composer-chevron {
+  transform: rotate(90deg);
+}
+
+.board-composer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 16px 14px;
 }
 
 .board-composer-fields {
@@ -10752,7 +10820,8 @@ html[data-theme="light"]
   font-size: 1.5rem;
   letter-spacing: 0.01em;
   color: var(--text-strong);
-  word-break: break-all;
+  /* Break at the channel's own separators (`:` `-`) before splitting a word. */
+  overflow-wrap: anywhere;
 }
 
 .board-actions {
@@ -10804,10 +10873,179 @@ html[data-theme="light"]
   color: var(--muted-soft);
 }
 
-/* Pinned keyed cells */
+/* Keyed cells, ranked by shape: a `plan` hero, a scalar state strip, then
+   long-form cards. */
+.board-cells {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.board-group-by {
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* The brief — promoted above the rest of the cells. */
+.board-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--line));
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-card));
+}
+
+.board-hero-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.board-hero-key {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+
+.board-hero-value {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 1.02rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  overflow: hidden;
+}
+
+.board-hero.is-expanded .board-hero-value {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+/* Scalar cells render as a dense state strip instead of a grid of near-empty
+   cards. */
+.board-state-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.board-state-wrap:not(:last-child) {
+  border-bottom: 1px solid var(--line);
+}
+
+.board-state-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 14px;
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+
+.board-state-row:hover,
+.board-state-row.is-expanded {
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--bg-card));
+}
+
+.board-state-row:focus-visible {
+  outline: 2px solid var(--accent-cool);
+  outline-offset: -2px;
+}
+
+.board-state-key {
+  flex-shrink: 0;
+  min-width: 96px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent-cool);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-state-value {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-strong);
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-state-row .board-meta {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.board-state-author {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.board-state-time {
+  flex-shrink: 0;
+  margin-left: auto;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted-soft);
+}
+
+.board-state-wrap .board-edit,
+.board-state-wrap .board-detail {
+  padding: 12px 14px;
+  margin: 0;
+  background: color-mix(in srgb, var(--accent-cool) 6%, var(--bg-card));
+  border-top: 1px solid var(--line);
+}
+
+.board-state-wrap .board-detail {
+  border-top: 1px dashed var(--line);
+}
+
+/* A faint chevron signals a card expands; it rotates open. */
+.board-expand-cue {
+  display: inline-block;
+  margin-left: 6px;
+  color: var(--muted-soft);
+  transition: transform 0.14s ease;
+}
+
+.board-cell.is-expanded .board-expand-cue,
+.board-hero.is-expanded .board-expand-cue,
+.board-state-row.is-expanded .board-expand-cue {
+  transform: rotate(90deg);
+  color: var(--accent-cool);
+}
+
+/* Long-form cells */
 .board-cell-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 12px;
   /* Size each card to its own content so expanding one doesn't stretch the
      rest of its row to match. */
@@ -10922,13 +11160,25 @@ html[data-theme="light"]
   min-width: 0;
 }
 
-.board-log-head {
+/* Message-first: the post text leads, authorship trails as dim meta. */
+.board-log-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.board-log-meta {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--muted);
+  font-size: 0.68rem;
+  color: var(--muted-soft);
+}
+
+.board-log-meta .board-meta {
+  margin: 0;
 }
 
 .board-log-author,
@@ -10940,12 +11190,8 @@ html[data-theme="light"]
   color: var(--muted);
 }
 
-.board-log-time {
-  margin-left: auto;
-}
-
 .board-log-text {
-  margin: 4px 0 0;
+  margin: 0;
   color: var(--text);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -11024,6 +11270,11 @@ html[data-theme="light"]
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   padding: 1px 8px;
+  /* A long value (e.g. a session id) ellipsizes instead of overflowing. */
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Expandable entries + detail */
@@ -11203,5 +11454,17 @@ html[data-theme="light"]
   }
   .board-rail {
     position: static;
+  }
+  /* Stack the title above its actions so a long channel name doesn't collide
+     with the Clear/Delete buttons. */
+  .board-main-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .board-main-title {
+    font-size: 1.25rem;
+  }
+  .board-actions {
+    flex-wrap: wrap;
   }
 }

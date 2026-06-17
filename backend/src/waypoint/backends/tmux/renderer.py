@@ -43,14 +43,26 @@ _DCS_RE = re.compile(rb"\x1bP[^\x1b]*(?:\x1b\x1b[^\x1b]*)*\x1b\\")
 # these (mouse/focus/paste are input concerns), so without an explicit
 # pass-through xterm never learns about mouse mode and scroll events
 # fall on the floor.
-_TRACKED_PRIVATE_MODES = frozenset(
+# Mouse-tracking modes. Mirroring these lets xterm encode wheel/clicks as
+# mouse sequences for the backend — useful for interactive panes, but on a
+# read-only pane it only makes xterm's mouse handler swallow the wheel
+# (preventDefault) so neither the pane nor the page scrolls. They're excluded
+# for non-interactive transports (see PyteRenderer.forward_mouse_modes).
+_MOUSE_PRIVATE_MODES = frozenset(
     {
         1000,  # X10 mouse reporting
         1002,  # button-event mouse tracking
         1003,  # any-event mouse tracking
-        1004,  # focus in/out events
         1006,  # SGR mouse encoding (modern, what xterm.js expects)
         1015,  # URXVT mouse encoding (fallback some apps still set)
+    }
+)
+# DEC private modes we mirror from pane to xterm. Pyte doesn't surface
+# these (mouse/focus/paste are input concerns), so without an explicit
+# pass-through xterm never learns about them.
+_TRACKED_PRIVATE_MODES = _MOUSE_PRIVATE_MODES | frozenset(
+    {
+        1004,  # focus in/out events
         2004,  # bracketed paste
     }
 )
@@ -231,9 +243,16 @@ def _color_sgr(color: str, is_bg: bool) -> list[str]:
 class PyteRenderer:
     """:class:`TerminalRenderer` backed by ``pyte``."""
 
-    def __init__(self, cols: int, rows: int) -> None:
+    def __init__(self, cols: int, rows: int, forward_mouse_modes: bool = True) -> None:
         self.cols = cols
         self.rows = rows
+        # Read-only panes can't send input, so mirroring mouse modes only
+        # breaks wheel scrolling in xterm (see _MOUSE_PRIVATE_MODES).
+        self._tracked_modes = (
+            _TRACKED_PRIVATE_MODES
+            if forward_mouse_modes
+            else _TRACKED_PRIVATE_MODES - _MOUSE_PRIVATE_MODES
+        )
         self._screen = pyte.Screen(cols, rows)
         self._stream = pyte.ByteStream(self._screen)
         # pyte marks every row dirty on construction; discard since the
@@ -294,7 +313,7 @@ class PyteRenderer:
                     mode = int(part)
                 except ValueError:
                     continue
-                if mode in _TRACKED_PRIVATE_MODES:
+                if mode in self._tracked_modes:
                     self._modes[mode] = on
 
     def set_cursor(self, col: int, row: int) -> None:
@@ -501,13 +520,16 @@ class PyteRenderer:
         self._last_cursor = (c.x, c.y, c.hidden)
 
 
-def make_renderer(cols: int, rows: int) -> TerminalRenderer:
+def make_renderer(
+    cols: int, rows: int, forward_mouse_modes: bool = True
+) -> TerminalRenderer:
     """Factory for the default renderer.
 
     Centralises construction so future implementations can be selected
-    via env/config without touching the WS handler.
+    via env/config without touching the WS handler. ``forward_mouse_modes``
+    should be false for read-only panes so xterm doesn't capture the wheel.
     """
-    return PyteRenderer(cols, rows)
+    return PyteRenderer(cols, rows, forward_mouse_modes=forward_mouse_modes)
 
 
 class SyncFrameTracker:

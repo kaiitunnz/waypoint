@@ -583,6 +583,60 @@ def test_rejected_file_edit_has_no_diff_preview_and_aborts_turn() -> None:
     )
 
 
+# ── compaction ────────────────────────────────────────────────────────────────
+
+
+def _compact_boundary_record(trigger: str, pre_tokens: int | None = None) -> dict:
+    meta: dict = {"trigger": trigger}
+    if pre_tokens is not None:
+        meta["preTokens"] = pre_tokens
+    return {
+        "type": "system",
+        "subtype": "compact_boundary",
+        "content": "Conversation compacted",
+        "compactMetadata": meta,
+    }
+
+
+def test_manual_compact_resolves_session_to_idle() -> None:
+    norm = TranscriptNormalizer()
+    events = norm.process_record(_compact_boundary_record("manual", pre_tokens=89941))
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.kind == EventKind.SYSTEM_NOTE
+    assert ev.status == SessionStatus.IDLE
+    assert ev.metadata["stop_reason"] == "compact"
+    assert "89941" in ev.text
+
+
+def test_manual_compact_without_pre_tokens_uses_plain_text() -> None:
+    norm = TranscriptNormalizer()
+    events = norm.process_record(_compact_boundary_record("manual"))
+    assert events[0].text == "Context compacted"
+
+
+def test_auto_compact_emits_no_event() -> None:
+    norm = TranscriptNormalizer()
+    assert (
+        norm.process_record(_compact_boundary_record("auto", pre_tokens=120000)) == []
+    )
+
+
+def test_compact_boundary_without_metadata_emits_no_event() -> None:
+    # Missing compactMetadata means no trigger, so it cannot be confirmed manual.
+    norm = TranscriptNormalizer()
+    record = {"type": "system", "subtype": "compact_boundary"}
+    assert norm.process_record(record) == []
+
+
+def test_compact_summary_user_record_still_dropped() -> None:
+    norm = TranscriptNormalizer()
+    record = _user_record(
+        "This session is being continued from a previous conversation"
+    )
+    assert norm.process_record(record) == []
+
+
 # ── result text formatting ────────────────────────────────────────────────────
 
 

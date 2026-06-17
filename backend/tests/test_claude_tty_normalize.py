@@ -50,6 +50,18 @@ def _text_block(text: str) -> dict:
     return {"type": "text", "text": text}
 
 
+def _edit_result_record(
+    tool_use_id: str, tool_use_result: dict, is_error: bool = False
+) -> dict:
+    return {
+        "type": "user",
+        "message": {
+            "content": [_tool_result_block(tool_use_id, "ok", is_error=is_error)]
+        },
+        "toolUseResult": tool_use_result,
+    }
+
+
 # ── _is_injected_turn ─────────────────────────────────────────────────────────
 
 
@@ -449,6 +461,126 @@ def test_interleaved_tool_use_and_tool_result() -> None:
     # r3 with same id is not first_seen → usage dict should be empty)
     result3 = next(e for e in ev3 if e.metadata.get("method") == "result")
     assert result3.metadata["usage"] == {}
+
+
+# ── file-edit diff previews ───────────────────────────────────────────────────
+
+
+def test_write_result_attaches_add_diff_preview() -> None:
+    norm = TranscriptNormalizer()
+    norm.process_record(
+        _assistant_record(
+            "msgW",
+            [_tool_use_block("tu1", "Write", {"file_path": "a.py"})],
+            stop_reason="tool_use",
+        )
+    )
+    events = norm.process_record(
+        _edit_result_record(
+            "tu1",
+            {"type": "create", "filePath": "/repo/a.py", "content": "x = 1\n"},
+        )
+    )
+    result = next(e for e in events if e.kind == EventKind.TOOL_RESULT)
+    preview = result.metadata["diff_preview"]
+    assert preview["phase"] == "applied"
+    file = preview["files"][0]
+    assert file["change_type"] == "add"
+    assert file["path"] == "/repo/a.py"
+    assert file["additions"] == 1
+
+
+def test_edit_result_attaches_update_diff_from_structured_patch() -> None:
+    norm = TranscriptNormalizer()
+    norm.process_record(
+        _assistant_record(
+            "msgE",
+            [_tool_use_block("tu1", "Edit", {"file_path": "a.py"})],
+            stop_reason="tool_use",
+        )
+    )
+    events = norm.process_record(
+        _edit_result_record(
+            "tu1",
+            {
+                "type": "update",
+                "filePath": "/repo/a.py",
+                "structuredPatch": [
+                    {
+                        "oldStart": 1,
+                        "oldLines": 1,
+                        "newStart": 1,
+                        "newLines": 2,
+                        "lines": [" keep", "+added"],
+                    }
+                ],
+            },
+        )
+    )
+    result = next(e for e in events if e.kind == EventKind.TOOL_RESULT)
+    file = result.metadata["diff_preview"]["files"][0]
+    assert file["change_type"] == "update"
+    assert "@@ -1,1 +1,2 @@" in file["diff"]
+    assert "+added" in file["diff"]
+    assert file["additions"] == 1
+
+
+def test_non_edit_tool_result_has_no_diff_preview() -> None:
+    norm = TranscriptNormalizer()
+    norm.process_record(
+        _assistant_record(
+            "msgR",
+            [_tool_use_block("tu1", "Read", {"file_path": "a.py"})],
+            stop_reason="tool_use",
+        )
+    )
+    events = norm.process_record(_user_record([_tool_result_block("tu1", "data")]))
+    result = next(e for e in events if e.kind == EventKind.TOOL_RESULT)
+    assert "diff_preview" not in result.metadata
+
+
+def test_failed_edit_result_has_no_diff_preview() -> None:
+    norm = TranscriptNormalizer()
+    norm.process_record(
+        _assistant_record(
+            "msgF",
+            [_tool_use_block("tu1", "Edit", {"file_path": "a.py"})],
+            stop_reason="tool_use",
+        )
+    )
+    events = norm.process_record(
+        _edit_result_record(
+            "tu1",
+            {"type": "update", "filePath": "/repo/a.py", "structuredPatch": []},
+            is_error=True,
+        )
+    )
+    result = next(e for e in events if e.kind == EventKind.TOOL_RESULT)
+    assert "diff_preview" not in result.metadata
+
+
+def test_rejected_file_edit_has_no_diff_preview_and_aborts_turn() -> None:
+    norm = TranscriptNormalizer()
+    norm.process_record(
+        _assistant_record(
+            "msgX",
+            [_tool_use_block("tu1", "Edit", {"file_path": "a.py"})],
+            stop_reason="tool_use",
+        )
+    )
+    rejection = {
+        "type": "user",
+        "message": {"content": [_tool_result_block("tu1", "denied", is_error=True)]},
+        "toolUseResult": "User rejected tool use",
+    }
+    events = norm.process_record(rejection)
+    result = next(e for e in events if e.kind == EventKind.TOOL_RESULT)
+    assert "diff_preview" not in result.metadata
+    assert any(
+        e.kind == EventKind.SYSTEM_NOTE
+        and e.metadata.get("stop_reason") == "tool_rejected"
+        for e in events
+    )
 
 
 # ── result text formatting ────────────────────────────────────────────────────

@@ -2916,6 +2916,19 @@ html[data-theme="light"] .diff-code {
   white-space: pre;
 }
 
+/* On phones, a per-line min-width: max-content makes each long line a block
+ * wider than the viewport, which iOS WebKit's text-autosizer then inflates
+ * (text-size-adjust does not suppress it here). Wrapping keeps every line
+ * within the viewport so no block is wide enough to boost, and the full-width
+ * line background falls out naturally without horizontal scroll. */
+@media (max-width: 720px) {
+  .diff-line {
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+}
+
 .diff-line.add {
   background: rgba(108, 201, 154, 0.13);
   color: #a8e6c5;

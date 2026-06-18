@@ -21,7 +21,11 @@ waypoint sessions start \
   specific interface; `claude_tty`/`tmux` are transports, not `--backend` values.
 - Pick `--model` / `--effort` from `waypoint models <backend>`, which reports the
   ids and efforts that backend actually offers. Pass them verbatim; do not guess
-  model names from memory.
+  model names from memory. Some agents list several **context-window variants**
+  of the same model under distinct ids (e.g. claude_code exposes `sonnet` and a
+  separate large-context `sonnet[1m]`); for a child doing real implementation
+  work, prefer the large-context variant — a small-window model thrashes and
+  auto-compacts mid-task on anything non-trivial.
 - Pick `--cwd` deliberately. For repo work, pass the repo root; for scratch or
   host inspection, pass an explicit safe directory. Do not assume the child
   should inherit your own working directory.

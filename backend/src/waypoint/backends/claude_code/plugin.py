@@ -317,6 +317,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         launch_target: SshLaunchTargetConfig | None,
         *,
         cwd: str | None = None,
+        force: bool = False,
     ) -> SessionRateLimitUsage | None:
         """Fetch the account's current rate-limit snapshot without a session.
 
@@ -326,12 +327,13 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         populate ``rate_limit_usage`` for wrapped-claude sessions without
         wiring them through the structured adapter. ``cwd`` is accepted for
         a uniform probe signature across agents but unused — Claude's probe
-        is independent of the working directory.
+        is independent of the working directory. ``force`` bypasses the shared
+        TTL cache for a user-driven refresh so the click makes a live call.
         """
         _ = cwd
         if launch_target is None:
-            return await probe_claude_usage_shared()
-        return await probe_claude_usage_remote_shared(launch_target)
+            return await probe_claude_usage_shared(force=force)
+        return await probe_claude_usage_remote_shared(launch_target, force=force)
 
     def rate_limit_account(
         self, snapshot: SessionRateLimitUsage

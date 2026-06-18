@@ -287,14 +287,18 @@ class CodexPlugin(DefaultLaunchContract):
         launch_target: SshLaunchTargetConfig | None,
         *,
         cwd: str,
+        force: bool = False,
     ) -> SessionRateLimitUsage | None:
         """Fetch the account's current rate-limit snapshot without a session.
 
         Exposed so the tmux fallback can populate ``rate_limit_usage`` for
         wrapped-codex sessions without wiring them through the structured
         adapter. ``cwd`` is forwarded to the local probe because codex's
-        ``/status`` PTY fallback needs a working directory.
+        ``/status`` PTY fallback needs a working directory. ``force`` is
+        accepted for a uniform probe signature; codex always makes a live
+        call (it has no shared TTL cache), so it has no effect here.
         """
+        _ = force
         if launch_target is None:
             binary = (
                 self._config(runtime).local_bin

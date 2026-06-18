@@ -286,7 +286,7 @@ class TmuxPlugin:
         return None
 
     async def refresh_rate_limit_usage(
-        self, runtime: "SessionRuntime", session: SessionRecord
+        self, runtime: "SessionRuntime", session: SessionRecord, *, force: bool = True
     ) -> None:
         """Populate ``rate_limit_usage`` on tmux-wrapped sessions.
 
@@ -295,6 +295,10 @@ class TmuxPlugin:
         fires. Delegate to the inner plugin's account-level probe (same
         upstream API call the structured adapter makes) and persist +
         broadcast the snapshot via ``update_session_fields``.
+
+        ``force`` defaults to True because the user-driven refresh contract
+        reaches here directly; the background watcher passes ``force=False``
+        so its periodic ticks coalesce through the shared probe cache.
         """
         inner = runtime.registry.get(session.backend)
         probe = getattr(inner, "probe_account_rate_limit", None)
@@ -309,7 +313,7 @@ class TmuxPlugin:
         # always supplied (codex's ``/status`` PTY fallback needs it, the
         # others ignore it) so no per-backend call shape is needed here.
         try:
-            snapshot = await probe(runtime, launch_target, cwd=session.cwd)
+            snapshot = await probe(runtime, launch_target, cwd=session.cwd, force=force)
         except Exception:  # noqa: BLE001
             log.exception(
                 "tmux rate-limit probe failed",
@@ -641,7 +645,7 @@ class TmuxPlugin:
                 if session.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
                     return
                 try:
-                    await self.refresh_rate_limit_usage(runtime, session)
+                    await self.refresh_rate_limit_usage(runtime, session, force=False)
                 except Exception:  # noqa: BLE001
                     log.exception(
                         "tmux rate-limit refresh loop probe failed",

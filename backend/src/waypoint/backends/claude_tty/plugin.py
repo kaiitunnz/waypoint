@@ -238,7 +238,7 @@ class ClaudeTtyPlugin:
     async def refresh_rate_limit_usage(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        await self._tmux.refresh_rate_limit_usage(runtime, session)
+        await self._tmux.refresh_rate_limit_usage(runtime, session, force=True)
 
     # ── Composed agent knowledge (claude_code) ───────────────────────────────
 
@@ -254,9 +254,10 @@ class ClaudeTtyPlugin:
         launch_target: SshLaunchTargetConfig | None,
         *,
         cwd: str | None = None,
+        force: bool = False,
     ) -> SessionRateLimitUsage | None:
         return await self._claude.probe_account_rate_limit(
-            runtime, launch_target, cwd=cwd
+            runtime, launch_target, cwd=cwd, force=force
         )
 
     def validate_permission_mode(self, mode: str | None) -> str | None:

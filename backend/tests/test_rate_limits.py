@@ -5,12 +5,16 @@ import pytest
 
 from waypoint.backends.claude_code.rate_limits import (
     _ClaudeHTTPResponse,
+    _local_probe_cache_key,
     _read_cli_credentials_for_env,
     _read_oauth_account_notes,
+    _remote_probe_cache_key,
+    invalidate_shared_probe_local,
     parse_claude_rate_limit_headers,
     parse_claude_usage_payload,
     probe_claude_usage,
     probe_claude_usage_remote,
+    probe_claude_usage_shared,
 )
 from waypoint.backends.codex.rate_limits import (
     _load_oauth_credentials,
@@ -661,3 +665,56 @@ def test_probe_codex_usage_remote_falls_back_when_oauth_payload_is_empty(
     assert snapshot is not None
     assert [w.label for w in snapshot.windows] == ["5h", "Weekly"]
     assert "remote /status" in snapshot.notes
+
+
+def test_probe_cache_keys_distinguish_local_and_remote() -> None:
+    local_default = _local_probe_cache_key({})
+    local_scoped = _local_probe_cache_key({"CLAUDE_CONFIG_DIR": "/tmp/acct-a"})
+    remote = _remote_probe_cache_key(_ssh_target())
+
+    assert local_default != local_scoped
+    assert local_scoped == "local:/tmp/acct-a"
+    assert remote == "remote:rover"
+    assert remote != local_default and remote != local_scoped
+
+
+def _usage_snapshot(used: float) -> SessionRateLimitUsage:
+    return SessionRateLimitUsage(
+        source="claude_code",
+        updated_at=datetime.now(UTC),
+        windows=[UsageWindow(id="five_hour", label="5h", used_percent=used)],
+        notes=["CLI creds"],
+    )
+
+
+def test_probe_claude_usage_shared_round_trips_force_and_invalidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = {"CLAUDE_CONFIG_DIR": "/tmp/shared-wrapper-test"}
+    invalidate_shared_probe_local(env)
+    calls = 0
+
+    async def _fake_probe(*, env, timeout_seconds):
+        nonlocal calls
+        calls += 1
+        return _usage_snapshot(float(calls))
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits.probe_claude_usage",
+        _fake_probe,
+    )
+
+    first = asyncio.run(probe_claude_usage_shared(env=env))
+    cached = asyncio.run(probe_claude_usage_shared(env=env))
+    assert calls == 1
+    assert first is cached
+
+    forced = asyncio.run(probe_claude_usage_shared(env=env, force=True))
+    assert calls == 2
+    assert forced is not None and forced.windows[0].used_percent == 2.0
+
+    invalidate_shared_probe_local(env)
+    asyncio.run(probe_claude_usage_shared(env=env))
+    assert calls == 3
+
+    invalidate_shared_probe_local(env)

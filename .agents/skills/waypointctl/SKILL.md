@@ -33,3 +33,10 @@ trusting any list reproduced in this skill.
 - Check active sessions with `waypoint sessions list` before backend or
   full-stack restarts.
 - Prefer `waypointctl restart frontend` for frontend-only changes.
+- `start`/`restart` are non-blocking: a service shown `stopped`/`starting` right
+  after is the build in progress, not a failure. Poll `status` for health
+  instead of concluding it failed (see `references/lifecycle.md`).
+- `restart` deploys the **checked-out branch**, not `main`; confirm the checkout
+  is current first or a stale branch silently drops merged fixes.
+- `waypointctl logs` blocks like `tail -f` — never run it as a foreground step
+  to "verify" a restart; use `status` (see `references/observe.md`).

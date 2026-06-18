@@ -4,6 +4,13 @@ from datetime import UTC, datetime
 
 from waypoint.schemas import EventKind, EventRecord, SessionStatus
 
+# Event kinds emitted by the tmux normalizer that carry only raw terminal
+# content and are never rendered by the frontend. These are filtered out of
+# the DB for tmux-transport sessions to avoid storing 99% waste.
+TMUX_CONTENT_KINDS: frozenset[EventKind] = frozenset(
+    {EventKind.AGENT_OUTPUT, EventKind.RAW_TERMINAL_CHUNK}
+)
+
 ANSI_CSI_PATTERN = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 ANSI_OSC_PATTERN = re.compile(r"\x1b\].*?(?:\x07|\x1b\\)", re.DOTALL)
 ANSI_SINGLE_PATTERN = re.compile(r"\x1b[@-_]")

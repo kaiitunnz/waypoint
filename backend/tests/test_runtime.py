@@ -4855,3 +4855,116 @@ def test_structured_log_on_writes_file(tmp_path) -> None:
 
     assert log_path.exists()
     assert len(log_path.read_text().splitlines()) == 1
+
+
+# ---------------------------------------------------------------------------
+# _ingest_raw_output — tmux content-event filtering
+# ---------------------------------------------------------------------------
+
+
+def _make_tmux_session(
+    settings: Settings, tmp_path: Path, session_id: str = "tmux-1"
+) -> SessionRecord:
+    session_dir = settings.sessions_dir / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(UTC)
+    raw_log = session_dir / "raw.log"
+    structured_log = session_dir / "events.jsonl"
+    session = SessionRecord(
+        id=session_id,
+        backend="claude_code",
+        source=SessionSource.MANAGED,
+        transport="tmux",
+        title="tmux session",
+        cwd="/tmp/project",
+        status=SessionStatus.IDLE,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path=str(raw_log),
+        structured_log_path=str(structured_log),
+    )
+    return session
+
+
+@pytest.mark.asyncio
+async def test_ingest_raw_output_tmux_skips_content_events_updates_session(
+    tmp_path,
+) -> None:
+    """Tmux ingest must bump last_event_at / status WITHOUT inserting agent_output rows."""
+    runtime, storage, settings = make_runtime(tmp_path)
+    session = _make_tmux_session(settings, tmp_path)
+    storage.create_session(session)
+    raw_log = Path(session.raw_log_path)
+    raw_log.write_text("Agent is working on the task...\n", encoding="utf-8")
+    runtime.file_offsets[session.id] = 0
+
+    original_last_event_at = storage.get_session(session.id).last_event_at  # type: ignore[union-attr]
+
+    await runtime._ingest_raw_output(session.id)
+
+    events = storage.list_events(session.id)
+    assert all(
+        e.kind not in {EventKind.AGENT_OUTPUT, EventKind.RAW_TERMINAL_CHUNK}
+        for e in events
+    ), "tmux content events must not be persisted to the DB"
+    refreshed = storage.get_session(session.id)
+    assert refreshed is not None
+    assert (
+        refreshed.last_event_at > original_last_event_at
+    ), "last_event_at must be bumped even when content events are skipped"
+
+
+@pytest.mark.asyncio
+async def test_ingest_raw_output_tmux_still_persists_approval_request(
+    tmp_path,
+) -> None:
+    """Approval-request events in tmux output must still be persisted."""
+    runtime, storage, settings = make_runtime(tmp_path)
+    session = _make_tmux_session(settings, tmp_path)
+    storage.create_session(session)
+    raw_log = Path(session.raw_log_path)
+    raw_log.write_text("Approve this command? y/n\n", encoding="utf-8")
+    runtime.file_offsets[session.id] = 0
+
+    await runtime._ingest_raw_output(session.id)
+
+    events = storage.list_events(session.id)
+    assert any(
+        e.kind == EventKind.APPROVAL_REQUEST for e in events
+    ), "approval_request events must still be persisted for tmux sessions"
+
+
+@pytest.mark.asyncio
+async def test_ingest_raw_output_structured_session_unchanged(tmp_path) -> None:
+    """Structured-transport sessions must persist all event kinds normally."""
+    runtime, storage, settings = make_runtime(tmp_path)
+    session_dir = settings.sessions_dir / "cli-1"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(UTC)
+    raw_log = session_dir / "raw.log"
+    structured_log = session_dir / "events.jsonl"
+    session = SessionRecord(
+        id="cli-1",
+        backend="claude_code",
+        source=SessionSource.MANAGED,
+        transport="claude_cli",
+        title="structured session",
+        cwd="/tmp/project",
+        status=SessionStatus.IDLE,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path=str(raw_log),
+        structured_log_path=str(structured_log),
+    )
+    storage.create_session(session)
+    raw_log.write_text("Agent is working on the task...\n", encoding="utf-8")
+    runtime.file_offsets[session.id] = 0
+
+    await runtime._ingest_raw_output(session.id)
+
+    events = storage.list_events(session.id)
+    assert any(
+        e.kind in {EventKind.AGENT_OUTPUT, EventKind.RAW_TERMINAL_CHUNK} for e in events
+    ), "structured sessions must still persist content events"

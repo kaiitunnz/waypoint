@@ -42,6 +42,27 @@ Then send the task as the first input:
 waypoint sessions send <session-id> "<task instructions>"
 ```
 
+## Do not assume the child can load your skills
+
+A child does **not** automatically inherit the skills you are running. Skills are
+discovered per agent from that agent's own skill directories (Claude Code reads
+`~/.claude/skills` and a repo `.claude/skills`; Codex reads `.codex/skills` via a
+project config layer; OpenCode has its own), and a repo's `.agents/skills` only
+reaches them if installed/symlinked there (`scripts/install_skills.sh`, or
+`waypointctl skills install`). Discovery is silent when it misses — the agent
+just behaves as if the skill does not exist.
+
+So when the child's task depends on a skill — and **especially across backends**,
+where you cannot assume the same skills are installed — do not name the skill and
+trust it loaded. Instead:
+
+- Put the essential steps directly in the `sessions send` message, treating any
+  skill as an optional enhancement rather than a prerequisite, and/or
+- confirm the skill is installed for that backend before relying on it (its
+  `SKILL.md` present under that agent's skills dir), and
+- verify from the child's events that it actually did the work, not that it
+  merely acknowledged a skill name.
+
 ## Wait to completion
 
 `waypoint sessions wait` blocks until the child reaches a terminal/idle status,

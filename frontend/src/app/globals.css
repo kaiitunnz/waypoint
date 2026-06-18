@@ -61,13 +61,22 @@ html[data-theme="light"] {
 }
 
 html {
-  /* Painted under the page so iOS Safari's rubber-band area renders the
-   * dark slate instead of revealing a white default background. Keep all
+  /* The gradient lives on the root element so it propagates to the viewport
+   * canvas: it spans the whole viewport and stays put while content scrolls,
+   * matching the old `background-attachment: fixed` look without forcing a
+   * full-screen repaint on every scroll frame. The solid `background-color`
+   * stays as a fallback and paints iOS Safari's rubber-band area. Keep all
    * other layout / scroll properties off the html element so the browser
    * uses it as the natural scroll root and trackpad wheel events reach it. */
+  background: linear-gradient(180deg, #0b0f15 0%, #0a0d12 60%, #08090d 100%);
   background-color: var(--bg-deep);
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+}
+
+html[data-theme="light"] {
+  background: linear-gradient(180deg, #f7f4ee 0%, #f4f0e8 60%, #efe9d8 100%);
+  background-color: var(--bg-deep);
 }
 
 body {
@@ -79,18 +88,10 @@ body {
    * the white flash at the top/bottom on macOS rubber-band). */
   overscroll-behavior-y: none;
   position: relative;
-  background: linear-gradient(180deg, #0b0f15 0%, #0a0d12 60%, #08090d 100%);
-  background-color: var(--bg-deep);
-  background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-sans);
   font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
-}
-
-html[data-theme="light"] body {
-  background: linear-gradient(180deg, #f7f4ee 0%, #f4f0e8 60%, #efe9d8 100%);
-  background-color: var(--bg-deep);
 }
 
 body::before {

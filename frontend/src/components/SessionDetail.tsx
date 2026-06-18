@@ -1244,34 +1244,63 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     }
   }
 
-  const pendingApprovals =
-    session && supportsStructuredApproval(session.transport, catalog)
-      ? findPendingApprovals(events)
-      : [];
+  const pendingApprovals = useMemo(
+    () =>
+      session && supportsStructuredApproval(session.transport, catalog)
+        ? findPendingApprovals(events)
+        : [],
+    [session, catalog, events],
+  );
   const approvalCount = pendingApprovals.length;
   const safeApprovalPage = approvalCount > 0 ? Math.min(approvalPageIndex, approvalCount - 1) : 0;
   const pendingApproval = pendingApprovals[safeApprovalPage] ?? null;
   const agentBusy = session ? isAgentBusy(session, connection) : false;
-  const displayEvents = collapseSupersededPlanEvents(renderedEvents);
-  const visibleEvents = filterMode === "all" ? displayEvents : displayEvents.filter(isImportantEvent);
+  const displayEvents = useMemo(
+    () => collapseSupersededPlanEvents(renderedEvents),
+    [renderedEvents],
+  );
+  const visibleEvents = useMemo(
+    () =>
+      filterMode === "all"
+        ? displayEvents
+        : displayEvents.filter(isImportantEvent),
+    [filterMode, displayEvents],
+  );
   const hiddenEventCount = displayEvents.length - visibleEvents.length;
-  const transcriptEvents =
-    optimisticMessages.length > 0
-      ? filterOptimisticTranscriptEvents(visibleEvents, optimisticMessages)
-      : visibleEvents;
-  const pendingPlanApprovalEvent =
-    session?.permission_mode === "plan" &&
-    supportsPlanApproval(session.backend, catalog)
-      ? latestActionablePlanEvent(displayEvents)
-      : null;
-  const pendingPlanApprovalView: PlanViewModel | null = pendingPlanApprovalEvent
-    ? planForEvent(pendingPlanApprovalEvent)
-    : null;
-  const transcriptEventsForDisplay = pendingPlanApprovalEvent
-    ? transcriptEvents.filter((event) => event !== pendingPlanApprovalEvent)
-    : transcriptEvents;
-  const transcriptItems = buildTranscriptItems(transcriptEventsForDisplay);
-  const hasToolRuns = transcriptItems.some((item) => item.kind === "tool_run");
+  const transcriptEvents = useMemo(
+    () =>
+      optimisticMessages.length > 0
+        ? filterOptimisticTranscriptEvents(visibleEvents, optimisticMessages)
+        : visibleEvents,
+    [visibleEvents, optimisticMessages],
+  );
+  const pendingPlanApprovalEvent = useMemo(
+    () =>
+      session?.permission_mode === "plan" &&
+      supportsPlanApproval(session.backend, catalog)
+        ? latestActionablePlanEvent(displayEvents)
+        : null,
+    [session, catalog, displayEvents],
+  );
+  const pendingPlanApprovalView: PlanViewModel | null = useMemo(
+    () => (pendingPlanApprovalEvent ? planForEvent(pendingPlanApprovalEvent) : null),
+    [pendingPlanApprovalEvent],
+  );
+  const transcriptEventsForDisplay = useMemo(
+    () =>
+      pendingPlanApprovalEvent
+        ? transcriptEvents.filter((event) => event !== pendingPlanApprovalEvent)
+        : transcriptEvents,
+    [pendingPlanApprovalEvent, transcriptEvents],
+  );
+  const transcriptItems = useMemo(
+    () => buildTranscriptItems(transcriptEventsForDisplay),
+    [transcriptEventsForDisplay],
+  );
+  const hasToolRuns = useMemo(
+    () => transcriptItems.some((item) => item.kind === "tool_run"),
+    [transcriptItems],
+  );
   // Latest task group, read off the raw event stream so the dock reflects the
   // true current state regardless of the transcript's event filter.
   const currentTaskEvent = useMemo(() => {

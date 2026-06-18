@@ -75,6 +75,7 @@ type ConnectionState = "idle" | "connecting" | "open" | "reconnecting";
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
+const BOARD_REFRESH_DEBOUNCE_MS = 300;
 
 function seedRecentCwdsFromHistory(
   host: string,
@@ -242,6 +243,25 @@ export default function HomePage() {
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let attempt = 0;
+    // Coalesce bursts of board_update notifications into a single trailing
+    // refetch; the board channel list is small but each update otherwise
+    // triggers a full round-trip.
+    let boardRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleBoardRefresh = () => {
+      if (boardRefreshTimer !== null) {
+        clearTimeout(boardRefreshTimer);
+      }
+      boardRefreshTimer = setTimeout(() => {
+        boardRefreshTimer = null;
+        fetchBoardChannels(host, token)
+          .then((list) => {
+            if (active) {
+              setBoardChannels(list);
+            }
+          })
+          .catch(() => {});
+      }, BOARD_REFRESH_DEBOUNCE_MS);
+    };
 
     function connect() {
       setConnection(attempt === 0 ? "connecting" : "reconnecting");
@@ -256,9 +276,7 @@ export default function HomePage() {
             setSchedules(message.payload.schedules as ScheduledSession[]);
           }
           if (message.type === "board_update") {
-            fetchBoardChannels(host, token)
-              .then((list) => setBoardChannels(list))
-              .catch(() => {});
+            scheduleBoardRefresh();
           }
           if (message.type === "auth_revoked") {
             resetAuthState("Session expired. Log in again.");
@@ -293,6 +311,9 @@ export default function HomePage() {
       active = false;
       if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer);
+      }
+      if (boardRefreshTimer !== null) {
+        clearTimeout(boardRefreshTimer);
       }
       socket?.close();
     };

@@ -13,11 +13,10 @@ git diff --cached     # exactly what you are about to commit
 
 Read the staged diff as a self-contained unit and confirm it is **complete**:
 every symbol, class, function, import, CSS class, or file the change references is
-defined or updated within the same diff. A concrete failure this catches: a panel
-refactor was committed where the JSX referenced a `.field-grid-row` CSS class and
-a single-column grid, but the matching `globals.css` edits had been stranded in
-`stash@{0}` and never reached the working tree — the commit was internally
-inconsistent and the UI rendered broken.
+defined or updated within the same diff. This catches the classic split-change
+failure — e.g. JSX that references a CSS class whose defining edit is still
+stranded in a stash, so the commit is internally inconsistent and the UI renders
+broken even though each file looked right in isolation.
 
 If the diff references something it does not define, the defining edit is missing
 — find it (see stashes below) before committing, do not commit the half.

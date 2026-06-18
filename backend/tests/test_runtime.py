@@ -4788,8 +4788,17 @@ def _structured_event(session_id: str, sequence: int) -> EventRecord:
     )
 
 
+def _make_runtime_with_structured_log(
+    tmp_path: Path,
+) -> tuple[SessionRuntime, Storage, Settings]:
+    settings = Settings(data_dir=tmp_path / "data", write_structured_log=True)
+    settings.ensure_dirs()
+    storage = Storage(settings.database_path)
+    return SessionRuntime(settings, storage), storage, settings
+
+
 def test_append_structured_log_batches_flush(tmp_path) -> None:
-    runtime, storage, _ = make_runtime(tmp_path)
+    runtime, storage, _ = _make_runtime_with_structured_log(tmp_path)
     log_path = tmp_path / "events.jsonl"
     _seed_running_session(storage, "streamer", log_path)
 
@@ -4809,11 +4818,40 @@ def test_append_structured_log_batches_flush(tmp_path) -> None:
 
 
 def test_close_structured_log_flushes_pending_writes(tmp_path) -> None:
-    runtime, storage, _ = make_runtime(tmp_path)
+    runtime, storage, _ = _make_runtime_with_structured_log(tmp_path)
     log_path = tmp_path / "events.jsonl"
     _seed_running_session(storage, "streamer", log_path)
 
     runtime._append_structured_log("streamer", _structured_event("streamer", 0))
     runtime._close_structured_log("streamer")
 
+    assert len(log_path.read_text().splitlines()) == 1
+
+
+def test_structured_log_off_skips_file_and_db_intact(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    assert not settings.write_structured_log
+    log_path = tmp_path / "events.jsonl"
+    _seed_running_session(storage, "streamer", log_path)
+
+    event = _structured_event("streamer", 0)
+    stored = storage.append_event(event)
+    runtime._append_structured_log("streamer", stored)
+    runtime._close_structured_log("streamer")
+
+    assert not log_path.exists()
+    assert len(storage.list_events("streamer")) == 1
+
+
+def test_structured_log_on_writes_file(tmp_path) -> None:
+    runtime, storage, _ = _make_runtime_with_structured_log(tmp_path)
+    log_path = tmp_path / "events.jsonl"
+    _seed_running_session(storage, "streamer", log_path)
+
+    event = _structured_event("streamer", 0)
+    stored = storage.append_event(event)
+    runtime._append_structured_log("streamer", stored)
+    runtime._close_structured_log("streamer")
+
+    assert log_path.exists()
     assert len(log_path.read_text().splitlines()) == 1

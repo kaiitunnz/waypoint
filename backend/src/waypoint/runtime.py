@@ -1846,6 +1846,8 @@ class SessionRuntime:
                 await self._broadcast_session_list()
 
     def _append_structured_log(self, session_id: str, event: EventRecord) -> None:
+        if not self.settings.write_structured_log:
+            return
         with debug_timer(log, "_append_structured_log", session=session_id):
             entry = self._structured_log_handles.get(session_id)
             if entry is None:
@@ -1860,6 +1862,8 @@ class SessionRuntime:
                 entry.pending = 0
 
     def _close_structured_log(self, session_id: str) -> None:
+        if not self.settings.write_structured_log:
+            return
         entry = self._structured_log_handles.pop(session_id, None)
         if entry is not None:
             with suppress(Exception):

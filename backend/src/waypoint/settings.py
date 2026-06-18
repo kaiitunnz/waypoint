@@ -140,6 +140,11 @@ class Settings(BaseModel):
     # surfaces N visible bubbles regardless of how many raw events the
     # backend emitted per message.
     chat_page_messages: int = Field(default=20, ge=1, le=200)
+    # When True, each session gets a per-session events.jsonl written
+    # alongside the SQLite events table. Disabled by default because the
+    # JSONL is a write-only audit/debug artifact (~290 MB in production) and
+    # SQLite is the source of truth. Override with WAYPOINT_WRITE_STRUCTURED_LOG.
+    write_structured_log: bool = False
     # Personal-assistant singleton. ``None`` (the default) means no
     # assistant is created. A present block is enabled unless it sets
     # ``enabled: false``.
@@ -263,6 +268,10 @@ def _env_overrides() -> dict[str, Any]:
         overrides["cors_allow_origin_regex"] = parse_cors_origin_regex(
             os.environ["WAYPOINT_CORS_ORIGIN_REGEX"]
         )
+    if "WAYPOINT_WRITE_STRUCTURED_LOG" in os.environ:
+        overrides["write_structured_log"] = os.environ[
+            "WAYPOINT_WRITE_STRUCTURED_LOG"
+        ].lower() not in {"0", "false", "no", ""}
     return overrides
 
 

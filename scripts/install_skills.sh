@@ -7,7 +7,7 @@ SOURCE_DIR="${ROOT_DIR}/.agents/skills"
 # Default skill installed for use by arbitrary coding sessions. The other repo
 # skills (waypoint, waypointctl) target the personal assistant and are mirrored
 # into its workspace already, so they are not installed globally by default.
-DEFAULT_SKILLS=("waypoint-subagents" "waypoint-comms" "waypoint-workqueue")
+DEFAULT_SKILLS=("waypoint-subagents" "waypoint-comms" "waypoint-workqueue" "waypoint-worktree")
 
 # Default destination skill root: the cross-agent global skills directory.
 # Override with --skill-dir or WAYPOINT_SKILLS_DIR to target an agent-specific
@@ -38,7 +38,7 @@ Environment:
                        --skill-dir is given.
 
 Defaults:
-  skills        waypoint-subagents waypoint-comms waypoint-workqueue
+  skills        waypoint-subagents waypoint-comms waypoint-workqueue waypoint-worktree
   destination   ~/.agents/skills
 
 Symlink installs track this repo's copy of the skill. Copied installs are

@@ -22,7 +22,11 @@ from waypoint.attachments import AttachmentStore, ResolvedAttachment
 from waypoint.backends import BackendRegistry, get_registry
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
-from waypoint.backends.tmux.normalize import NormalizedChunk, TerminalNormalizer
+from waypoint.backends.tmux.normalize import (
+    TMUX_CONTENT_KINDS,
+    NormalizedChunk,
+    TerminalNormalizer,
+)
 from waypoint.builtin_completions import waypoint_builtin_completions
 from waypoint.git_meta import resolve_git_meta
 from waypoint.launch_targets import SshLaunchTargetConfig
@@ -2074,10 +2078,29 @@ class SessionRuntime:
         self.file_offsets[session_id] = new_offset
         if normalized is None:
             return
+        is_tmux = session.transport == TMUX_TRANSPORT_ID
         for event in normalized.events:
+            if is_tmux and event.kind in TMUX_CONTENT_KINDS:
+                continue
             persisted = self.storage.append_event(event)
             self._append_structured_log(session_id, persisted)
             await self._publish_event(persisted)
+        # For tmux sessions, content events (agent_output / raw_terminal_chunk)
+        # are not persisted but their two side-effects must still be applied:
+        # (1) bump last_event_at, (2) advance the heuristic status. Use
+        # update_session when the last event in the chunk was a content event —
+        # if a non-content event came last, append_event already handled both.
+        if (
+            is_tmux
+            and normalized.events
+            and normalized.events[-1].kind in TMUX_CONTENT_KINDS
+        ):
+            self.storage.update_session(
+                session_id,
+                last_event_at=normalized.events[-1].ts,
+                status=normalized.status,
+            )
+            self._publish_session_state(session_id)
 
     async def _refresh_state(self, session_id: str) -> None:
         session = self.get_session(session_id)

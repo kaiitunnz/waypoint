@@ -1279,10 +1279,10 @@ def test_delete_events_for_older_than(tmp_path) -> None:
     assert storage.list_events("stale") == []
     assert [e.text for e in storage.list_events("fresh")] == ["y"]
 
-    # Actual run should delete
+    # A non-dry-run trim with no older_than now removes fresh's remaining event.
     count2 = storage.delete_events_for(transports=["tmux"], dry_run=False)
     assert count2 == 1
-    assert len(storage.list_events("sess-1")) == 0
+    assert storage.list_events("fresh") == []
 
 
 def test_vacuum_runs_without_error(tmp_path) -> None:

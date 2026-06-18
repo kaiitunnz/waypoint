@@ -2078,20 +2078,26 @@ class SessionRuntime:
         self.file_offsets[session_id] = new_offset
         if normalized is None:
             return
-        is_tmux = session.transport == TMUX_TRANSPORT_ID
+        # Heuristic (non-structured) transports — the generic tmux pane — emit
+        # raw terminal frames the UI never renders (it shows the live xterm, not
+        # a transcript), so persisting them is pure DB bloat. Gate on the
+        # transport capability, not a hardcoded id, per the dispatch-by-capability
+        # rule. _ingest_raw_output only runs for raw-log transports today, but the
+        # capability check keeps a future heuristic transport from regressing.
+        is_heuristic = not self.transport_for(session).is_structured
         for event in normalized.events:
-            if is_tmux and event.kind in TMUX_CONTENT_KINDS:
+            if is_heuristic and event.kind in TMUX_CONTENT_KINDS:
                 continue
             persisted = self.storage.append_event(event)
             self._append_structured_log(session_id, persisted)
             await self._publish_event(persisted)
-        # For tmux sessions, content events (agent_output / raw_terminal_chunk)
-        # are not persisted but their two side-effects must still be applied:
-        # (1) bump last_event_at, (2) advance the heuristic status. Use
-        # update_session when the last event in the chunk was a content event —
-        # if a non-content event came last, append_event already handled both.
+        # Content events (agent_output / raw_terminal_chunk) were not persisted
+        # but their two side-effects must still be applied: (1) bump
+        # last_event_at, (2) advance the heuristic status. Use update_session
+        # when the last event in the chunk was a content event — if a
+        # non-content event came last, append_event already handled both.
         if (
-            is_tmux
+            is_heuristic
             and normalized.events
             and normalized.events[-1].kind in TMUX_CONTENT_KINDS
         ):

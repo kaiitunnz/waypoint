@@ -1012,6 +1012,9 @@ class Storage:
 
         These mirror the SQLite events table (the source of truth) and are
         write-only, so they are safe to delete to reclaim space.
+
+        Filesystem-only — no ``@_synchronized`` because it never touches the
+        connection (the decorator only serializes DB access).
         """
         logs: list[Path] = []
         if not sessions_dir.exists():
@@ -1062,6 +1065,9 @@ class Storage:
 
     @_synchronized
     def vacuum(self) -> None:
+        # VACUUM cannot run inside a transaction; with isolation_level='' a
+        # pending DML would have opened one, so commit first to be safe.
+        self.connection.commit()
         self.connection.execute("VACUUM")
         self.connection.commit()
 

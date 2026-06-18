@@ -1258,6 +1258,27 @@ def test_delete_events_for_dry_run(tmp_path) -> None:
     assert count == 1
     assert len(storage.list_events("sess-1")) == 1
 
+
+def test_delete_events_for_older_than(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+
+    _make_session(storage, "stale", "Stale")
+    _append(storage, "stale", sequence=1, kind=EventKind.AGENT_OUTPUT, text="x", ts=now)
+    storage.update_session(
+        "stale", transport="tmux", last_event_at=now - timedelta(days=10)
+    )
+    _make_session(storage, "fresh", "Fresh")
+    _append(storage, "fresh", sequence=1, kind=EventKind.AGENT_OUTPUT, text="y", ts=now)
+    storage.update_session("fresh", transport="tmux", last_event_at=now)
+
+    count = storage.delete_events_for(
+        transports=["tmux"], older_than=now - timedelta(days=1)
+    )
+    assert count == 1
+    assert storage.list_events("stale") == []
+    assert [e.text for e in storage.list_events("fresh")] == ["y"]
+
     # Actual run should delete
     count2 = storage.delete_events_for(transports=["tmux"], dry_run=False)
     assert count2 == 1

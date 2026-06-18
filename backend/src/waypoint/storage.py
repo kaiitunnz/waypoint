@@ -329,8 +329,8 @@ class Storage:
 
     @_synchronized
     def update_session(self, session_id: str, **fields: Any) -> SessionRecord:
+        fields.setdefault("updated_at", datetime.now(UTC))
         with debug_timer(log, "Storage.update_session", fields=sorted(fields)):
-            fields.setdefault("updated_at", datetime.now(UTC))
             assignments = ", ".join(f"{name} = ?" for name in fields)
             values = [self._serialize_field(value) for value in fields.values()]
             values.append(session_id)

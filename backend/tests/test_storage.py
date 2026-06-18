@@ -1119,3 +1119,21 @@ def test_update_session_raises_keyerror_for_missing(tmp_path) -> None:
     storage = Storage(tmp_path / "waypoint.db")
     with pytest.raises(KeyError):
         storage.update_session("does-not-exist", title="x")
+
+
+def test_update_session_legacy_path_without_returning(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Exercise the fallback for SQLite < 3.35 that lacks UPDATE ... RETURNING.
+    monkeypatch.setattr("waypoint.storage._SUPPORTS_RETURNING", False)
+    storage = Storage(tmp_path / "waypoint.db")
+    _make_session(storage, "session-legacy", "before")
+
+    updated = storage.update_session("session-legacy", title="after")
+    assert updated.title == "after"
+    reloaded = storage.get_session("session-legacy")
+    assert reloaded is not None
+    assert reloaded.title == "after"
+
+    with pytest.raises(KeyError):
+        storage.update_session("missing-legacy", title="x")

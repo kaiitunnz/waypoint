@@ -298,6 +298,9 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         await self._register_rate_limit_probe(runtime, session.id, launch_target)
         # User asked for fresh data: drop any cached shared snapshot so the
         # forced probe below makes a real call instead of replaying the window.
+        # Best-effort — a concurrent periodic probe for the same account can
+        # repopulate the cache between here and the forced refresh, but that
+        # snapshot is itself just-fetched, so the served data is still fresh.
         if launch_target is None:
             invalidate_shared_probe_local()
         else:

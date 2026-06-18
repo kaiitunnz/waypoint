@@ -8,6 +8,8 @@ import os
 import platform
 import re
 import subprocess
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,6 +18,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from waypoint.launch_targets import SshLaunchTargetConfig
+from waypoint.perf import debug_timer
 from waypoint.schemas import SessionRateLimitUsage, UsageWindow
 
 log = logging.getLogger("waypoint.claude_code.rate_limits")
@@ -84,32 +87,33 @@ async def probe_claude_usage(
     env: dict[str, str] | None = None,
     timeout_seconds: float = 30.0,
 ) -> SessionRateLimitUsage | None:
-    resolved_env = env if env is not None else dict(os.environ)
-    credentials = _read_cli_credentials_for_env(resolved_env)
-    if credentials is None:
-        log.warning("claude rate-limit probe found no CLI credentials")
-        return None
-    access_token, expires_at, credential_note = credentials
-    if _is_access_token_expired(expires_at):
-        log.info(
-            "claude rate-limit probe: cached access token is expired; "
-            "skipping HTTP call and surfacing expiry"
+    with debug_timer(log, "probe_claude_usage"):
+        resolved_env = env if env is not None else dict(os.environ)
+        credentials = _read_cli_credentials_for_env(resolved_env)
+        if credentials is None:
+            log.warning("claude rate-limit probe found no CLI credentials")
+            return None
+        access_token, expires_at, credential_note = credentials
+        if _is_access_token_expired(expires_at):
+            log.info(
+                "claude rate-limit probe: cached access token is expired; "
+                "skipping HTTP call and surfacing expiry"
+            )
+            return _expired_credentials_snapshot(credential_note, resolved_env)
+        response = await asyncio.wait_for(
+            asyncio.to_thread(_fetch_claude_messages_usage, access_token),
+            timeout=timeout_seconds,
         )
-        return _expired_credentials_snapshot(credential_note, resolved_env)
-    response = await asyncio.wait_for(
-        asyncio.to_thread(_fetch_claude_messages_usage, access_token),
-        timeout=timeout_seconds,
-    )
-    if response is None:
-        log.warning("claude rate-limit request failed before receiving a response")
-        return None
-    return _build_messages_snapshot(
-        status=response.status,
-        headers=response.headers,
-        body=response.body,
-        credential_note=credential_note,
-        account_notes=_read_oauth_account_notes(resolved_env),
-    )
+        if response is None:
+            log.warning("claude rate-limit request failed before receiving a response")
+            return None
+        return _build_messages_snapshot(
+            status=response.status,
+            headers=response.headers,
+            body=response.body,
+            credential_note=credential_note,
+            account_notes=_read_oauth_account_notes(resolved_env),
+        )
 
 
 async def probe_claude_usage_remote(
@@ -156,6 +160,147 @@ async def probe_claude_usage_remote(
         credential_note=credential_note,
         account_notes=account_notes,
     )
+
+
+# Matched to the 300s per-session refresh cadence in plugin.py. The rate-limit
+# snapshot is account-wide, so one real probe per account per refresh window is
+# enough; every other session reuses the cached snapshot. A lone session still
+# refreshes each cycle (its probe age exceeds the TTL by the loop's sleep), so
+# liveness is unchanged while N concurrent sessions collapse to ~1 HTTP probe.
+_SHARED_PROBE_TTL_SECONDS = 300.0
+
+
+@dataclass
+class _ProbeCacheEntry:
+    stored_at: float
+    result: SessionRateLimitUsage | None
+
+
+class SharedRateLimitProbeCache:
+    """Process-wide TTL cache that coalesces account-wide rate-limit probes.
+
+    Claude rate limits are scoped to an account, not a session, yet every
+    Claude session runs its own refresh loop. Without sharing, N sessions make
+    N identical Anthropic probes per window. This cache serves one probe's
+    result to every session in the same account/TTL window and de-duplicates
+    concurrent in-flight probes behind a per-key lock. Only successful (non
+    ``None``) snapshots are cached, so a transient probe failure does not blank
+    the rate-limit UI for the whole window — the next session retries.
+    """
+
+    def __init__(
+        self,
+        *,
+        ttl_seconds: float = _SHARED_PROBE_TTL_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._ttl = ttl_seconds
+        self._clock = clock
+        self._entries: dict[str, _ProbeCacheEntry] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._guard = asyncio.Lock()
+
+    def _fresh(self, key: str) -> _ProbeCacheEntry | None:
+        entry = self._entries.get(key)
+        if entry is None:
+            return None
+        if self._clock() - entry.stored_at >= self._ttl:
+            return None
+        return entry
+
+    async def _lock_for(self, key: str) -> asyncio.Lock:
+        async with self._guard:
+            lock = self._locks.get(key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._locks[key] = lock
+            return lock
+
+    def invalidate(self, key: str) -> None:
+        self._entries.pop(key, None)
+
+    async def get_or_probe(
+        self,
+        key: str,
+        fetch: Callable[[], Awaitable[SessionRateLimitUsage | None]],
+        *,
+        force: bool = False,
+    ) -> SessionRateLimitUsage | None:
+        if not force:
+            entry = self._fresh(key)
+            if entry is not None:
+                return entry.result
+        lock = await self._lock_for(key)
+        async with lock:
+            # Re-check inside the lock: a concurrent probe for the same key may
+            # have populated the cache while we waited.
+            if not force:
+                entry = self._fresh(key)
+                if entry is not None:
+                    return entry.result
+            result = await fetch()
+            if result is not None:
+                self._entries[key] = _ProbeCacheEntry(
+                    stored_at=self._clock(), result=result
+                )
+            return result
+
+
+_SHARED_PROBE_CACHE = SharedRateLimitProbeCache()
+
+
+def _local_probe_cache_key(env: dict[str, str]) -> str:
+    return f"local:{env.get('CLAUDE_CONFIG_DIR') or '~'}"
+
+
+def _remote_probe_cache_key(launch_target: SshLaunchTargetConfig) -> str:
+    return f"remote:{launch_target.id}"
+
+
+async def probe_claude_usage_shared(
+    *,
+    env: dict[str, str] | None = None,
+    timeout_seconds: float = 30.0,
+    force: bool = False,
+) -> SessionRateLimitUsage | None:
+    """Account-shared variant of :func:`probe_claude_usage`.
+
+    Sessions sharing the same credentials (keyed by ``CLAUDE_CONFIG_DIR``)
+    reuse one probe per TTL window. Pass ``force=True`` to bypass a cache hit
+    for a user-driven refresh.
+    """
+    resolved_env = env if env is not None else dict(os.environ)
+    return await _SHARED_PROBE_CACHE.get_or_probe(
+        _local_probe_cache_key(resolved_env),
+        lambda: probe_claude_usage(env=resolved_env, timeout_seconds=timeout_seconds),
+        force=force,
+    )
+
+
+async def probe_claude_usage_remote_shared(
+    launch_target: SshLaunchTargetConfig,
+    *,
+    timeout_seconds: float = 30.0,
+    force: bool = False,
+) -> SessionRateLimitUsage | None:
+    """Account-shared variant of :func:`probe_claude_usage_remote`, keyed by
+    launch-target id."""
+    return await _SHARED_PROBE_CACHE.get_or_probe(
+        _remote_probe_cache_key(launch_target),
+        lambda: probe_claude_usage_remote(
+            launch_target, timeout_seconds=timeout_seconds
+        ),
+        force=force,
+    )
+
+
+def invalidate_shared_probe_local(env: dict[str, str] | None = None) -> None:
+    resolved_env = env if env is not None else dict(os.environ)
+    _SHARED_PROBE_CACHE.invalidate(_local_probe_cache_key(resolved_env))
+
+
+def invalidate_shared_probe_remote(launch_target: SshLaunchTargetConfig) -> None:
+    _SHARED_PROBE_CACHE.invalidate(_remote_probe_cache_key(launch_target))
 
 
 def _string_list(value: Any) -> list[str]:

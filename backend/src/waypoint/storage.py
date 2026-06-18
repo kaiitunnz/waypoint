@@ -1,5 +1,6 @@
 import functools
 import json
+import logging
 import sqlite3
 import threading
 from collections.abc import Callable
@@ -9,6 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from waypoint.perf import debug_timer
 from waypoint.schemas import (
     BoardChannel,
     BoardEntry,
@@ -19,6 +21,13 @@ from waypoint.schemas import (
     SessionRecord,
     SessionStatus,
 )
+
+log = logging.getLogger("waypoint.storage")
+
+# ``UPDATE ... RETURNING`` landed in SQLite 3.35 (2021). When present it lets
+# ``update_session`` fetch the post-update row in the same statement, avoiding
+# the extra existence-check and re-read round-trips on a hot path.
+_SUPPORTS_RETURNING = sqlite3.sqlite_version_info >= (3, 35, 0)
 
 # Event kinds that the chat view always renders as their own bubble. These
 # drive the page-size budget so a page of N reliably surfaces ~N visible
@@ -231,6 +240,17 @@ class Storage:
         self._ensure_column(
             "scheduled_sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
         )
+        # Indexes for columns filtered on by the runtime/scheduler. Created
+        # after the ALTER TABLE block above so ``spawner_session_id`` exists on
+        # databases that predate it.
+        self.connection.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_sessions_spawner
+                ON sessions(spawner_session_id);
+            CREATE INDEX IF NOT EXISTS idx_board_author
+                ON board_entries(author_session_id);
+            CREATE INDEX IF NOT EXISTS idx_scheduled_status
+                ON scheduled_sessions(status);
+            """)
         self.connection.commit()
 
     @_synchronized
@@ -309,21 +329,30 @@ class Storage:
 
     @_synchronized
     def update_session(self, session_id: str, **fields: Any) -> SessionRecord:
-        current = self.get_session(session_id)
-        if current is None:
-            raise KeyError(session_id)
-        fields.setdefault("updated_at", datetime.now(UTC))
-        assignments = ", ".join(f"{name} = ?" for name in fields)
-        values = [self._serialize_field(value) for value in fields.values()]
-        values.append(session_id)
-        self.connection.execute(
-            f"UPDATE sessions SET {assignments} WHERE id = ?",
-            values,
-        )
-        self.connection.commit()
-        updated = self.get_session(session_id)
-        assert updated is not None
-        return updated
+        with debug_timer(log, "Storage.update_session", fields=sorted(fields)):
+            fields.setdefault("updated_at", datetime.now(UTC))
+            assignments = ", ".join(f"{name} = ?" for name in fields)
+            values = [self._serialize_field(value) for value in fields.values()]
+            values.append(session_id)
+            if _SUPPORTS_RETURNING:
+                row = self.connection.execute(
+                    f"UPDATE sessions SET {assignments} WHERE id = ? RETURNING *",
+                    values,
+                ).fetchone()
+                self.connection.commit()
+                if row is None:
+                    raise KeyError(session_id)
+                return self._session_from_row(row)
+            if self.get_session(session_id) is None:
+                raise KeyError(session_id)
+            self.connection.execute(
+                f"UPDATE sessions SET {assignments} WHERE id = ?",
+                values,
+            )
+            self.connection.commit()
+            updated = self.get_session(session_id)
+            assert updated is not None
+            return updated
 
     @_synchronized
     def delete_session(self, session_id: str) -> bool:
@@ -615,38 +644,42 @@ class Storage:
             event = event.model_copy(
                 update={"metadata": {**event.metadata, "version": 1}}
             )
-        cursor = self.connection.execute(
-            """
-            INSERT INTO events (session_id, ts, kind, text, metadata, sequence)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                event.session_id,
-                event.ts.isoformat(),
-                event.kind,
-                event.text,
-                json.dumps(event.metadata),
-                event.sequence,
-            ),
-        )
-        self.connection.execute(
-            """
-            UPDATE sessions
-            SET last_event_at = ?, updated_at = ?, status = COALESCE(?, status)
-            WHERE id = ?
-            """,
-            (
-                event.ts.isoformat(),
-                event.ts.isoformat(),
-                event.metadata.get("status"),
-                event.session_id,
-            ),
-        )
-        self.connection.commit()
-        last_id = cursor.lastrowid
-        if last_id is None:
-            raise RuntimeError("sqlite did not assign a row id for the inserted event")
-        return event.model_copy(update={"id": int(last_id)})
+        with debug_timer(log, "Storage.append_event", session=event.session_id):
+            ts_iso = event.ts.isoformat()
+            cursor = self.connection.execute(
+                """
+                INSERT INTO events (session_id, ts, kind, text, metadata, sequence)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event.session_id,
+                    ts_iso,
+                    event.kind,
+                    event.text,
+                    json.dumps(event.metadata),
+                    event.sequence,
+                ),
+            )
+            self.connection.execute(
+                """
+                UPDATE sessions
+                SET last_event_at = ?, updated_at = ?, status = COALESCE(?, status)
+                WHERE id = ?
+                """,
+                (
+                    ts_iso,
+                    ts_iso,
+                    event.metadata.get("status"),
+                    event.session_id,
+                ),
+            )
+            self.connection.commit()
+            last_id = cursor.lastrowid
+            if last_id is None:
+                raise RuntimeError(
+                    "sqlite did not assign a row id for the inserted event"
+                )
+            return event.model_copy(update={"id": int(last_id)})
 
     @_synchronized
     def clone_events(self, source_session_id: str, target_session_id: str) -> int:

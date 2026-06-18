@@ -40,8 +40,10 @@ from waypoint.backends.claude_code.permission_modes import (
     claude_permission_mode_label,
 )
 from waypoint.backends.claude_code.rate_limits import (
-    probe_claude_usage,
-    probe_claude_usage_remote,
+    invalidate_shared_probe_local,
+    invalidate_shared_probe_remote,
+    probe_claude_usage_remote_shared,
+    probe_claude_usage_shared,
 )
 from waypoint.backends.claude_code.remote import build_remote_claude_launch_factory
 from waypoint.backends.claude_code.schemas import (
@@ -252,7 +254,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             return
 
         async def _probe() -> SessionRateLimitUsage | None:
-            return await probe_claude_usage()
+            return await probe_claude_usage_shared()
 
         await self.adapter.register_rate_limit_probe(
             session_id, _probe, refresh_interval_seconds=300.0
@@ -268,7 +270,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             return
 
         async def _probe() -> SessionRateLimitUsage | None:
-            return await probe_claude_usage_remote(launch_target)
+            return await probe_claude_usage_remote_shared(launch_target)
 
         await self.adapter.register_rate_limit_probe(
             session_id, _probe, refresh_interval_seconds=300.0
@@ -294,6 +296,12 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             else None
         )
         await self._register_rate_limit_probe(runtime, session.id, launch_target)
+        # User asked for fresh data: drop any cached shared snapshot so the
+        # forced probe below makes a real call instead of replaying the window.
+        if launch_target is None:
+            invalidate_shared_probe_local()
+        else:
+            invalidate_shared_probe_remote(launch_target)
         # Run the probe inline so the caller's HTTP response carries the
         # post-refresh snapshot — otherwise the response races the WS push
         # from the periodic loop and the UI sees stale data.
@@ -319,8 +327,8 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         """
         _ = cwd
         if launch_target is None:
-            return await probe_claude_usage()
-        return await probe_claude_usage_remote(launch_target)
+            return await probe_claude_usage_shared()
+        return await probe_claude_usage_remote_shared(launch_target)
 
     def rate_limit_account(
         self, snapshot: SessionRateLimitUsage

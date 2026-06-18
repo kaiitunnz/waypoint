@@ -1007,6 +1007,23 @@ class Storage:
                 orphans.append(session_dir)
         return orphans
 
+    def scan_structured_logs(self, sessions_dir: Path) -> list[Path]:
+        """Per-session ``events.jsonl`` audit logs present on disk.
+
+        These mirror the SQLite events table (the source of truth) and are
+        write-only, so they are safe to delete to reclaim space.
+        """
+        logs: list[Path] = []
+        if not sessions_dir.exists():
+            return logs
+        for session_dir in sessions_dir.iterdir():
+            if not session_dir.is_dir():
+                continue
+            log_path = session_dir / "events.jsonl"
+            if log_path.is_file():
+                logs.append(log_path)
+        return logs
+
     @_synchronized
     def delete_events_for(
         self,

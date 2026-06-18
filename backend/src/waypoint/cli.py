@@ -1890,6 +1890,44 @@ def maintenance_vacuum(ctx: typer.Context) -> None:
         storage.close()
 
 
+@maintenance_app.command("clear-structured-logs")
+def maintenance_clear_structured_logs(
+    ctx: typer.Context,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            help="Confirm deletion. Without this flag the command is a dry run.",
+        ),
+    ] = False,
+) -> None:
+    """Delete per-session events.jsonl audit logs (redundant with the DB)."""
+    settings = _settings_from_ctx(ctx)
+    storage = Storage(settings.database_path)
+    try:
+        logs = storage.scan_structured_logs(settings.sessions_dir)
+        if not logs:
+            typer.echo("No structured logs found.")
+            return
+        total = sum(p.stat().st_size for p in logs if p.exists())
+        if not yes:
+            typer.echo(
+                f"Found {len(logs)} events.jsonl files "
+                f"({total / 1e6:.1f} MB) (dry run). Run with --yes to delete."
+            )
+            return
+        removed = 0
+        for log_path in logs:
+            try:
+                log_path.unlink()
+                removed += 1
+            except OSError as exc:
+                typer.echo(f"skipped {log_path}: {exc}")
+        typer.echo(f"Deleted {removed} events.jsonl files ({total / 1e6:.1f} MB).")
+    finally:
+        storage.close()
+
+
 def run_reset(settings: Settings | None = None, *, confirmed: bool) -> None:
     settings = settings or load_settings()
     db_path = settings.database_path

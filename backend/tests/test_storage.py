@@ -1175,6 +1175,20 @@ def test_scan_orphan_session_dirs(tmp_path) -> None:
     assert orphan_names == {"orphan-1", "orphan-2"}
 
 
+def test_scan_structured_logs(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    sessions_dir = tmp_path / "sessions"
+    (sessions_dir / "s1").mkdir(parents=True)
+    (sessions_dir / "s1" / "events.jsonl").write_text("{}\n")
+    (sessions_dir / "s1" / "raw.log").write_text("ignored")
+    (sessions_dir / "s2").mkdir()  # no events.jsonl
+
+    logs = storage.scan_structured_logs(sessions_dir)
+    assert [p.name for p in logs] == ["events.jsonl"]
+    assert logs[0].parent.name == "s1"
+    assert storage.scan_structured_logs(tmp_path / "missing") == []
+
+
 def test_delete_events_for_filters(tmp_path) -> None:
     storage = Storage(tmp_path / "waypoint.db")
     now = datetime.now(UTC)

@@ -31,6 +31,7 @@ import { formatRelativeTime } from "@/lib/usage";
 
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 15000;
+const BOARD_REFRESH_DEBOUNCE_MS = 300;
 const LOG_LIMIT = 100;
 
 type LoadState = "loading" | "ready" | "error";
@@ -467,6 +468,26 @@ export default function BoardPage() {
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let attempt = 0;
+    // Coalesce bursts of board_update notifications into a single trailing
+    // refresh. `entriesDirty` records whether any update in the burst targeted
+    // the channel currently in view, so we only refetch entries when needed.
+    let boardRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+    let entriesDirty = false;
+    const scheduleBoardRefresh = () => {
+      if (boardRefreshTimer !== null) {
+        clearTimeout(boardRefreshTimer);
+      }
+      boardRefreshTimer = setTimeout(() => {
+        boardRefreshTimer = null;
+        if (!active) return;
+        void refreshChannels();
+        if (entriesDirty) {
+          entriesDirty = false;
+          const current = activeChannelRef.current;
+          if (current) void refreshEntries(current);
+        }
+      }, BOARD_REFRESH_DEBOUNCE_MS);
+    };
 
     function connect() {
       socket = connectSessionsSocket(
@@ -474,12 +495,12 @@ export default function BoardPage() {
         token,
         (message: SessionEnvelope) => {
           if (message.type === "board_update") {
-            void refreshChannels();
             const channel = message.payload.channel as string | null;
             const current = activeChannelRef.current;
             if (current && (channel === null || channel === current)) {
-              void refreshEntries(current);
+              entriesDirty = true;
             }
+            scheduleBoardRefresh();
           }
           if (message.type === "auth_revoked") {
             handleAuthFailure();
@@ -509,6 +530,7 @@ export default function BoardPage() {
     return () => {
       active = false;
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+      if (boardRefreshTimer !== null) clearTimeout(boardRefreshTimer);
       socket?.close();
     };
   }, [host, token, refreshChannels, refreshEntries, handleAuthFailure]);

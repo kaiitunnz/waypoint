@@ -9,6 +9,7 @@ import subprocess
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
@@ -25,6 +26,7 @@ from waypoint.backends.tmux.normalize import NormalizedChunk, TerminalNormalizer
 from waypoint.builtin_completions import waypoint_builtin_completions
 from waypoint.git_meta import resolve_git_meta
 from waypoint.launch_targets import SshLaunchTargetConfig
+from waypoint.perf import debug_timer
 from waypoint.scheduler import Scheduler
 from waypoint.schemas import (
     AssistantSummary,
@@ -61,9 +63,26 @@ COMPLETION_REFRESH_INTERVAL_SECONDS = 30.0
 # immediately, so this only adds at most this much latency to the live
 # list/status updates a fast stream produces.
 SESSION_BROADCAST_DEBOUNCE_SECONDS = 0.25
+# The per-session structured log (events.jsonl) is a write-only audit/debug
+# artifact; the SQLite store is the source of truth for replay. Flushing every
+# write turns the streaming path into a syscall per event, so we let the buffer
+# absorb a short run and flush once it crosses this many writes (and always on
+# close). A crash can lose at most the last few un-flushed lines, all of which
+# are still durable in SQLite.
+STRUCTURED_LOG_FLUSH_EVERY = 16
 
 
 log = logging.getLogger("waypoint.runtime")
+
+
+@dataclass
+class _StructuredLogHandle:
+    """Open append handle for a session's structured log plus its write count
+    since the last flush, so the streaming path can batch flushes."""
+
+    handle: TextIO
+    pending: int = 0
+
 
 SAFE_NAME = re.compile(r"[^a-zA-Z0-9_-]+")
 CompletionCacheKey = tuple[str, str]
@@ -176,7 +195,7 @@ class SessionRuntime:
         # Open append handles for per-session structured logs, kept around
         # so the streaming path doesn't reopen (and re-stat via get_session)
         # the file on every event. Closed on terminate/delete and at stop().
-        self._structured_log_handles: dict[str, TextIO] = {}
+        self._structured_log_handles: dict[str, _StructuredLogHandle] = {}
         # Coalesced session_state / session_list broadcasting. The
         # streaming event path marks sessions dirty and wakes the flusher
         # instead of re-serializing every session per event; the flusher
@@ -263,9 +282,9 @@ class SessionRuntime:
             with suppress(asyncio.CancelledError):
                 await self._broadcast_flusher
             self._broadcast_flusher = None
-        for handle in self._structured_log_handles.values():
+        for entry in self._structured_log_handles.values():
             with suppress(Exception):
-                handle.close()
+                entry.handle.close()
         self._structured_log_handles.clear()
         for plugin in self.registry.all():
             await plugin.shutdown(self)
@@ -1786,14 +1805,12 @@ class SessionRuntime:
         self._broadcast_wake.set()
 
     async def _broadcast_session_list(self) -> None:
+        with debug_timer(log, "_broadcast_session_list"):
+            sessions = [item.model_dump(mode="json") for item in self.list_sessions()]
         await self.broadcast.publish(
             SessionEnvelope(
                 type="session_list_update",
-                payload={
-                    "sessions": [
-                        item.model_dump(mode="json") for item in self.list_sessions()
-                    ]
-                },
+                payload={"sessions": sessions},
             )
         )
 
@@ -1829,19 +1846,24 @@ class SessionRuntime:
                 await self._broadcast_session_list()
 
     def _append_structured_log(self, session_id: str, event: EventRecord) -> None:
-        handle = self._structured_log_handles.get(session_id)
-        if handle is None:
-            session = self.get_session(session_id)
-            handle = Path(session.structured_log_path).open("a", encoding="utf-8")
-            self._structured_log_handles[session_id] = handle
-        handle.write(json.dumps(event.model_dump(mode="json")) + "\n")
-        handle.flush()
+        with debug_timer(log, "_append_structured_log", session=session_id):
+            entry = self._structured_log_handles.get(session_id)
+            if entry is None:
+                session = self.get_session(session_id)
+                handle = Path(session.structured_log_path).open("a", encoding="utf-8")
+                entry = _StructuredLogHandle(handle=handle)
+                self._structured_log_handles[session_id] = entry
+            entry.handle.write(json.dumps(event.model_dump(mode="json")) + "\n")
+            entry.pending += 1
+            if entry.pending >= STRUCTURED_LOG_FLUSH_EVERY:
+                entry.handle.flush()
+                entry.pending = 0
 
     def _close_structured_log(self, session_id: str) -> None:
-        handle = self._structured_log_handles.pop(session_id, None)
-        if handle is not None:
+        entry = self._structured_log_handles.pop(session_id, None)
+        if entry is not None:
             with suppress(Exception):
-                handle.close()
+                entry.handle.close()
 
     def _generate_session_id(self, backend: str) -> str:
         token = secrets.token_hex(4)

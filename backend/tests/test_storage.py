@@ -1,6 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from waypoint.schemas import (
     EventKind,
     EventRecord,
@@ -1086,3 +1088,34 @@ def test_board_regression_log_post_survives_session_delete_and_list(tmp_path) ->
     log_entries = [e for e in entries if e.key is None]
     assert len(log_entries) == 1
     assert log_entries[0].text == "task 1 done"
+
+
+def test_init_creates_performance_indexes(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    names = {
+        row["name"]
+        for row in storage.connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index'"
+        ).fetchall()
+    }
+    assert {
+        "idx_sessions_spawner",
+        "idx_board_author",
+        "idx_scheduled_status",
+    } <= names
+
+
+def test_update_session_returns_updated_record(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    _make_session(storage, "session-upd", "before")
+    updated = storage.update_session("session-upd", title="after")
+    assert updated.title == "after"
+    reloaded = storage.get_session("session-upd")
+    assert reloaded is not None
+    assert reloaded.title == "after"
+
+
+def test_update_session_raises_keyerror_for_missing(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    with pytest.raises(KeyError):
+        storage.update_session("does-not-exist", title="x")

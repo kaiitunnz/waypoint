@@ -17,7 +17,7 @@ from waypoint.backends.codex.permission_modes import (
 )
 from waypoint.backends.codex.schemas import CodexThreadImportRequest
 from waypoint.launch_targets import SshLaunchTargetConfig
-from waypoint.runtime import SessionRuntime
+from waypoint.runtime import STRUCTURED_LOG_FLUSH_EVERY, SessionRuntime
 from waypoint.schemas import (
     BoardEntryUpdateRequest,
     BoardPostRequest,
@@ -4756,3 +4756,64 @@ async def test_attach_assistant_disabled_409(tmp_path) -> None:
     with pytest.raises(HTTPException) as exc:
         await runtime.attach_assistant(backend="codex", thread_id="x")
     assert exc.value.status_code == 409
+
+
+def _seed_running_session(storage: Storage, session_id: str, log_path: Path) -> None:
+    now = datetime.now(UTC)
+    storage.create_session(
+        SessionRecord(
+            id=session_id,
+            backend="codex",
+            source=SessionSource.MANAGED,
+            title="streamer",
+            cwd="/tmp",
+            status=SessionStatus.RUNNING,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            raw_log_path="/tmp/raw.log",
+            structured_log_path=str(log_path),
+        )
+    )
+
+
+def _structured_event(session_id: str, sequence: int) -> EventRecord:
+    return EventRecord(
+        session_id=session_id,
+        ts=datetime.now(UTC),
+        kind=EventKind.AGENT_OUTPUT,
+        text=f"chunk-{sequence}",
+        metadata={},
+        sequence=sequence,
+    )
+
+
+def test_append_structured_log_batches_flush(tmp_path) -> None:
+    runtime, storage, _ = make_runtime(tmp_path)
+    log_path = tmp_path / "events.jsonl"
+    _seed_running_session(storage, "streamer", log_path)
+
+    for seq in range(STRUCTURED_LOG_FLUSH_EVERY - 1):
+        runtime._append_structured_log("streamer", _structured_event("streamer", seq))
+    # Buffered, not yet flushed: fewer than a full batch are visible on disk.
+    on_disk = log_path.read_text().splitlines() if log_path.exists() else []
+    assert len(on_disk) < STRUCTURED_LOG_FLUSH_EVERY
+
+    runtime._append_structured_log(
+        "streamer", _structured_event("streamer", STRUCTURED_LOG_FLUSH_EVERY - 1)
+    )
+    # Crossing the batch threshold flushes the whole run.
+    assert len(log_path.read_text().splitlines()) == STRUCTURED_LOG_FLUSH_EVERY
+
+    runtime._close_structured_log("streamer")
+
+
+def test_close_structured_log_flushes_pending_writes(tmp_path) -> None:
+    runtime, storage, _ = make_runtime(tmp_path)
+    log_path = tmp_path / "events.jsonl"
+    _seed_running_session(storage, "streamer", log_path)
+
+    runtime._append_structured_log("streamer", _structured_event("streamer", 0))
+    runtime._close_structured_log("streamer")
+
+    assert len(log_path.read_text().splitlines()) == 1

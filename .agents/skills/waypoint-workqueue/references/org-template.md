@@ -97,3 +97,15 @@ waypoint sessions send <worker-sid> \
 For risky changes, before the step-4 merge the lead asks the reviewer session (a
 different model) "does branch `wq/<job>-t<n>` do exactly `task:<n>`?" and
 merges only on a yes. One extra session; nothing else changes.
+
+**Durable reviewer vs. in-process review.** The lead can also review with its own
+harness's in-process subagent (Claude Code's Task tool, etc.), which is cheaper
+and needs no spawn — and for most checks that is the right call. Reach for a
+*durable* reviewer crew session specifically when you need something the
+in-process one cannot give: a **different model or backend** than your own (an
+independent second opinion, e.g. an `opus[1m]` reviewer over a `sonnet` crew), a
+review the **user can watch and steer** in the UI, or one that must **outlive the
+current turn**. High-blast-radius jobs usually want the independent-model durable
+reviewer; routine ones are fine with in-process review. This is the same
+three-way choice the `waypoint-subagents` skill draws — in-process subagent vs.
+durable crew session vs. doing it inline — applied to the review step.

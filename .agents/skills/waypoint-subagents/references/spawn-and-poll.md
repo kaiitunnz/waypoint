@@ -44,13 +44,14 @@ waypoint sessions send <session-id> "<task instructions>"
 
 ## Do not assume the child can load your skills
 
-A child does **not** automatically inherit the skills you are running. Skills are
-discovered per agent from that agent's own skill directories (Claude Code reads
-`~/.claude/skills` and a repo `.claude/skills`; Codex reads `.codex/skills` via a
-project config layer; OpenCode has its own), and a repo's `.agents/skills` only
-reaches them if installed/symlinked there (`scripts/install_skills.sh`, or
-`waypointctl skills install`). Discovery is silent when it misses — the agent
-just behaves as if the skill does not exist.
+A child does **not** automatically inherit the skills you are running. Each agent
+discovers skills from its **own** skill directories, and those roots differ per
+agent and shift over time (e.g. Claude Code reads `~/.claude/skills` and a repo
+`.claude/skills`; Codex reads `.codex/skills`; OpenCode has its own) — confirm the
+roots for the child's backend rather than trusting these examples. A repo's
+`.agents/skills` only reaches an agent if installed/symlinked into its roots
+(`scripts/install_skills.sh`, or `waypointctl skills install`). Discovery is
+silent when it misses — the agent just behaves as if the skill does not exist.
 
 So when the child's task depends on a skill — and **especially across backends**,
 where you cannot assume the same skills are installed — do not name the skill and

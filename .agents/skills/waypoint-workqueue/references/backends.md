@@ -26,6 +26,12 @@ whose live discovery is down is reported with an `error` entry instead of
 failing the sweep. Pass one (`waypoint models codex`) to query a single backend. The names below are
 illustrative (mid-2026) and will age — trust `waypoint models` over them.
 
+Watch for **context-window variants**: an agent may list the same model under
+distinct ids that differ only in context size (e.g. claude_code's `sonnet` vs
+the 1M-context `sonnet[1m]`). Workers do real implementation in their own tree,
+so route them to the large-context variant — the small-window id thrashes and
+auto-compacts on a non-trivial task.
+
 If you are unsure whether the harness or model you want is available, or whether
 it is the right fit for the job, **ask the user** (use the ask-question tool if
 your harness has one) rather than guessing. The user is the fallback — never pick

@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, cast
 
@@ -29,6 +30,7 @@ from waypoint.schemas import (
     SessionStatus,
 )
 from waypoint.settings import Settings, load_settings
+from waypoint.storage import Storage
 
 # Statuses that, by default, end a `sessions wait`: the session is idle,
 # blocked on the user, or finished. `starting`/`running`/`interrupted` are
@@ -121,11 +123,16 @@ schedule_app = typer.Typer(
     help="Manage scheduled session launches on a running Waypoint server.",
     no_args_is_help=True,
 )
+maintenance_app = typer.Typer(
+    help="Maintenance commands for the Waypoint server data.",
+    no_args_is_help=True,
+)
 app.add_typer(backends_app, name="backends")
 app.add_typer(session_app, name="session")
 app.add_typer(sessions_app, name="sessions")
 app.add_typer(board_app, name="board")
 app.add_typer(schedule_app, name="schedule")
+app.add_typer(maintenance_app, name="maintenance")
 
 
 @app.callback()
@@ -1772,6 +1779,115 @@ def schedule_delete(
 def schedule_clear_history(ctx: typer.Context) -> None:
     """Remove completed/cancelled schedule records."""
     _emit(_settings_from_ctx(ctx), lambda c: c.clear_schedule_history())
+
+
+@maintenance_app.command("stats")
+def maintenance_stats(ctx: typer.Context) -> None:
+    """Print DB table sizes and FS footprint."""
+    settings = _settings_from_ctx(ctx)
+    storage = Storage(settings.database_path)
+    try:
+        stats = storage.db_stats()
+        orphans = storage.scan_orphan_session_dirs(settings.sessions_dir)
+        stats["orphan_session_dirs"] = len(orphans)
+        typer.echo(json.dumps(stats, indent=2))
+    finally:
+        storage.close()
+
+
+@maintenance_app.command("prune-orphans")
+def maintenance_prune_orphans(
+    ctx: typer.Context,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            help="Confirm deletion. Without this flag the command is a dry run.",
+        ),
+    ] = False,
+) -> None:
+    """Delete orphaned session directories."""
+    settings = _settings_from_ctx(ctx)
+    storage = Storage(settings.database_path)
+    try:
+        orphans = storage.scan_orphan_session_dirs(settings.sessions_dir)
+        if not orphans:
+            typer.echo("No orphaned session directories found.")
+            return
+
+        if not yes:
+            typer.echo(f"Found {len(orphans)} orphaned session directories (dry run):")
+            for o in orphans:
+                typer.echo(f"  - {o}")
+            typer.echo("Run with --yes to remove them.")
+            return
+
+        for o in orphans:
+            shutil.rmtree(o, ignore_errors=True)
+            typer.echo(f"removed {o}")
+    finally:
+        storage.close()
+
+
+@maintenance_app.command("trim-events")
+def maintenance_trim_events(
+    ctx: typer.Context,
+    transport: Annotated[
+        list[str] | None,
+        typer.Option("--transport", help="Filter by transport. Repeatable."),
+    ] = None,
+    status: Annotated[
+        list[str] | None,
+        typer.Option("--status", help="Filter by session status. Repeatable."),
+    ] = None,
+    older_than: Annotated[
+        int | None,
+        typer.Option("--older-than", help="Filter by sessions older than X days."),
+    ] = None,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            help="Confirm deletion. Without this flag the command is a dry run.",
+        ),
+    ] = False,
+) -> None:
+    """Delete content events."""
+    settings = _settings_from_ctx(ctx)
+    cutoff = (
+        datetime.now(UTC) - timedelta(days=older_than)
+        if older_than is not None
+        else None
+    )
+
+    storage = Storage(settings.database_path)
+    try:
+        count = storage.delete_events_for(
+            transports=transport,
+            statuses=status,
+            older_than=cutoff,
+            dry_run=not yes,
+        )
+        if not yes:
+            typer.echo(
+                f"Would delete {count} events (dry run). Run with --yes to confirm."
+            )
+        else:
+            typer.echo(f"Deleted {count} events.")
+    finally:
+        storage.close()
+
+
+@maintenance_app.command("vacuum")
+def maintenance_vacuum(ctx: typer.Context) -> None:
+    """Run SQLite VACUUM."""
+    settings = _settings_from_ctx(ctx)
+    storage = Storage(settings.database_path)
+    try:
+        storage.vacuum()
+        typer.echo("Database vacuumed.")
+    finally:
+        storage.close()
 
 
 def run_reset(settings: Settings | None = None, *, confirmed: bool) -> None:

@@ -1137,3 +1137,119 @@ def test_update_session_legacy_path_without_returning(
 
     with pytest.raises(KeyError):
         storage.update_session("missing-legacy", title="x")
+
+
+# ── maintenance tests ───────────────────────────────────────────────────────
+
+
+def test_db_stats(tmp_path) -> None:
+    storage, now = _seed_session(tmp_path)
+    _append(
+        storage, "sess", sequence=1, kind=EventKind.AGENT_OUTPUT, text="hello", ts=now
+    )
+
+    stats = storage.db_stats()
+    assert "events" in stats
+    assert stats["events"]["row_count"] == 1
+    assert stats["events_by_kind"] == {EventKind.AGENT_OUTPUT: 1}
+    assert stats["events_by_session"] == {"sess": 1}
+    assert "fs_footprint" in stats
+    assert "db_size_bytes" in stats["fs_footprint"]
+
+
+def test_scan_orphan_session_dirs(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    sessions_dir = tmp_path / "sessions"
+    sessions_dir.mkdir()
+
+    # Live session
+    _make_session(storage, "live-1", "Live")
+    (sessions_dir / "live-1").mkdir()
+
+    # Orphan session
+    (sessions_dir / "orphan-1").mkdir()
+    (sessions_dir / "orphan-2").mkdir()
+
+    orphans = storage.scan_orphan_session_dirs(sessions_dir)
+    orphan_names = {p.name for p in orphans}
+    assert orphan_names == {"orphan-1", "orphan-2"}
+
+
+def test_delete_events_for_filters(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+
+    # Create two sessions with different transports/statuses
+    _make_session(storage, "sess-1", "Target")
+    storage.update_session("sess-1", transport="tmux", status=SessionStatus.EXITED)
+    _make_session(storage, "sess-2", "Keep")
+    storage.update_session(
+        "sess-2", transport="claude_tty", status=SessionStatus.RUNNING
+    )
+
+    # Append events
+    _append(
+        storage,
+        "sess-1",
+        sequence=1,
+        kind=EventKind.AGENT_OUTPUT,
+        text="delete-this",
+        ts=now,
+    )
+    _append(
+        storage,
+        "sess-1",
+        sequence=2,
+        kind=EventKind.USER_INPUT,
+        text="keep-this",
+        ts=now,
+    )
+    _append(
+        storage,
+        "sess-2",
+        sequence=1,
+        kind=EventKind.AGENT_OUTPUT,
+        text="keep-this-too",
+        ts=now,
+    )
+
+    count = storage.delete_events_for(
+        transports=["tmux"],
+        statuses=[SessionStatus.EXITED],
+    )
+    assert count == 1
+
+    remaining = [e.text for e in storage.list_events("sess-1")] + [
+        e.text for e in storage.list_events("sess-2")
+    ]
+    assert set(remaining) == {"keep-this", "keep-this-too"}
+
+
+def test_delete_events_for_dry_run(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+    _make_session(storage, "sess-1", "Target")
+    storage.update_session("sess-1", transport="tmux", status=SessionStatus.EXITED)
+    _append(
+        storage,
+        "sess-1",
+        sequence=1,
+        kind=EventKind.AGENT_OUTPUT,
+        text="target",
+        ts=now,
+    )
+
+    # Dry run should return count but not delete
+    count = storage.delete_events_for(transports=["tmux"], dry_run=True)
+    assert count == 1
+    assert len(storage.list_events("sess-1")) == 1
+
+    # Actual run should delete
+    count2 = storage.delete_events_for(transports=["tmux"], dry_run=False)
+    assert count2 == 1
+    assert len(storage.list_events("sess-1")) == 0
+
+
+def test_vacuum_runs_without_error(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    storage.vacuum()  # Should not raise

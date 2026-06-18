@@ -954,6 +954,100 @@ class Storage:
         ).fetchone()
         return int(row["max_sequence"]) + 1
 
+    @_synchronized
+    def db_stats(self) -> dict[str, Any]:
+        stats: dict[str, Any] = {}
+        for row in self.connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ):
+            table = row["name"]
+            count = self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[
+                0
+            ]
+            stats[table] = {"row_count": count}
+
+        events_by_kind = {}
+        for row in self.connection.execute(
+            "SELECT kind, COUNT(*) as count FROM events GROUP BY kind"
+        ):
+            events_by_kind[row["kind"]] = row["count"]
+        stats["events_by_kind"] = events_by_kind
+
+        events_by_session = {}
+        for row in self.connection.execute(
+            "SELECT session_id, COUNT(*) as count FROM events GROUP BY session_id"
+        ):
+            events_by_session[row["session_id"]] = row["count"]
+        stats["events_by_session"] = events_by_session
+
+        db_size = (
+            self.database_path.stat().st_size if self.database_path.exists() else 0
+        )
+        wal_path = self.database_path.parent / (self.database_path.name + "-wal")
+        wal_size = wal_path.stat().st_size if wal_path.exists() else 0
+        stats["fs_footprint"] = {
+            "db_size_bytes": db_size,
+            "wal_size_bytes": wal_size,
+        }
+
+        return stats
+
+    @_synchronized
+    def scan_orphan_session_dirs(self, sessions_dir: Path) -> list[Path]:
+        orphans: list[Path] = []
+        if not sessions_dir.exists():
+            return orphans
+
+        valid_ids = {
+            row["id"] for row in self.connection.execute("SELECT id FROM sessions")
+        }
+
+        for session_dir in sessions_dir.iterdir():
+            if session_dir.is_dir() and session_dir.name not in valid_ids:
+                orphans.append(session_dir)
+        return orphans
+
+    @_synchronized
+    def delete_events_for(
+        self,
+        transports: list[str] | None = None,
+        statuses: list[str] | None = None,
+        older_than: datetime | None = None,
+        dry_run: bool = False,
+    ) -> int:
+        action = "SELECT COUNT(*)" if dry_run else "DELETE"
+        query = f"""
+            {action} FROM events
+            WHERE kind IN ('agent_output', 'raw_terminal_chunk')
+        """
+        params: list[Any] = []
+
+        if transports or statuses or older_than:
+            query += " AND session_id IN (SELECT id FROM sessions WHERE 1=1"
+            if transports:
+                placeholders = ",".join(["?"] * len(transports))
+                query += f" AND transport IN ({placeholders})"
+                params.extend(transports)
+            if statuses:
+                placeholders = ",".join(["?"] * len(statuses))
+                query += f" AND status IN ({placeholders})"
+                params.extend(statuses)
+            if older_than:
+                query += " AND last_event_at < ?"
+                params.append(older_than.isoformat())
+            query += ")"
+
+        cursor = self.connection.execute(query, params)
+        if dry_run:
+            return cursor.fetchone()[0]
+        self.connection.commit()
+        return cursor.rowcount or 0
+
+    @_synchronized
+    def vacuum(self) -> None:
+        self.connection.execute("VACUUM")
+        self.connection.commit()
+
     def _session_from_row(self, row: sqlite3.Row) -> SessionRecord:
         payload = dict(row)
         for field_name in ("created_at", "updated_at", "last_event_at"):

@@ -737,11 +737,18 @@ class _InnerPluginStub:
 
     def __init__(self) -> None:
         self.calls = 0
+        self.forces: list[bool] = []
 
     async def probe_account_rate_limit(
-        self, _runtime: Any, _launch_target: Any, *, cwd: str | None = None
+        self,
+        _runtime: Any,
+        _launch_target: Any,
+        *,
+        cwd: str | None = None,
+        force: bool = False,
     ) -> Any:
         self.calls += 1
+        self.forces.append(force)
         from waypoint.schemas import SessionRateLimitUsage
 
         return SessionRateLimitUsage(
@@ -835,6 +842,8 @@ async def test_rate_limit_watcher_stops_on_natural_exit(
     for _ in range(5):
         await asyncio.sleep(0)
     assert inner.calls >= 1, "probe should have fired at least once"
+    # Background ticks coalesce through the shared cache, never forcing.
+    assert all(force is False for force in inner.forces)
 
     # Flip status to EXITED without invoking terminate_session.
     runtime.sessions_by_id[session.id] = _watcher_session(
@@ -843,6 +852,20 @@ async def test_rate_limit_watcher_stops_on_natural_exit(
     # The loop's next iteration should observe the EXITED status and exit.
     await asyncio.wait_for(task, timeout=1.0)
     assert session.id not in runtime._rate_limit_watchers
+
+
+async def test_user_refresh_forces_live_probe(plugin: TmuxPlugin) -> None:
+    """The user-driven refresh contract must bypass the shared probe cache so
+    a click makes a live call, unlike the background watcher's coalesced ticks.
+    """
+    inner = _InnerPluginStub()
+    runtime = _FakeRuntime(inner_plugin=inner)
+    session = _watcher_session("sess-user-refresh")
+    runtime.sessions_by_id[session.id] = session
+
+    await plugin.refresh_rate_limit_usage(cast(Any, runtime), session)
+
+    assert inner.forces == [True]
 
 
 def _ctx_session(backend: str) -> SessionRecord:

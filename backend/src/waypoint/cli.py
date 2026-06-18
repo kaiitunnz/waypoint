@@ -1852,7 +1852,14 @@ def maintenance_trim_events(
         ),
     ] = False,
 ) -> None:
-    """Delete content events."""
+    """Delete content events for the given transport(s)."""
+    if not transport:
+        raise typer.BadParameter(
+            "trim-events requires --transport (e.g. --transport tmux). "
+            "Refusing to delete content events across all transports: structured "
+            "sessions render their agent_output in the transcript, so an unscoped "
+            "delete would destroy real history."
+        )
     settings = _settings_from_ctx(ctx)
     cutoff = (
         datetime.now(UTC) - timedelta(days=older_than)
@@ -1905,9 +1912,19 @@ def maintenance_clear_structured_logs(
     settings = _settings_from_ctx(ctx)
     storage = Storage(settings.database_path)
     try:
-        logs = storage.scan_structured_logs(settings.sessions_dir)
+        # Skip RUNNING sessions: if structured logging is enabled the runtime
+        # holds an open append handle, and unlinking it would silently orphan
+        # the inode the runtime keeps writing to.
+        running = {
+            s.id for s in storage.list_sessions() if s.status == SessionStatus.RUNNING
+        }
+        logs = [
+            p
+            for p in storage.scan_structured_logs(settings.sessions_dir)
+            if p.parent.name not in running
+        ]
         if not logs:
-            typer.echo("No structured logs found.")
+            typer.echo("No structured logs to clear (RUNNING sessions skipped).")
             return
         total = sum(p.stat().st_size for p in logs if p.exists())
         if not yes:

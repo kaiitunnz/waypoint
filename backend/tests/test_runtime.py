@@ -4913,6 +4913,9 @@ async def test_ingest_raw_output_tmux_skips_content_events_updates_session(
     assert (
         refreshed.last_event_at > original_last_event_at
     ), "last_event_at must be bumped even when content events are skipped"
+    # The second preserved side-effect: heuristic status advances (IDLE ->
+    # RUNNING here) via update_session even though no content row was written.
+    assert refreshed.status == SessionStatus.RUNNING
 
 
 @pytest.mark.asyncio

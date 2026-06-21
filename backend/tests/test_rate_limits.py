@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -285,6 +286,10 @@ def test_probe_claude_usage_surfaces_rate_limit_state(
         lambda env: ["org: lumid", "user tier: default_claude_max_5x"],
     )
     monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._fetch_claude_oauth_usage",
+        lambda token: None,
+    )
+    monkeypatch.setattr(
         "waypoint.backends.claude_code.rate_limits._fetch_claude_messages_usage",
         lambda request: _ClaudeHTTPResponse(
             status=429,
@@ -319,6 +324,10 @@ def test_probe_claude_usage_parses_messages_api_headers(
     monkeypatch.setattr(
         "waypoint.backends.claude_code.rate_limits._read_oauth_account_notes",
         lambda env: ["org: lumid", "user tier: default_claude_max_5x"],
+    )
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._fetch_claude_oauth_usage",
+        lambda token: None,
     )
     monkeypatch.setattr(
         "waypoint.backends.claude_code.rate_limits._fetch_claude_messages_usage",
@@ -368,6 +377,10 @@ def test_probe_claude_usage_bails_when_token_expired(
         raise AssertionError("HTTP call must not happen when token is expired")
 
     monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._fetch_claude_oauth_usage",
+        _should_not_be_called,
+    )
+    monkeypatch.setattr(
         "waypoint.backends.claude_code.rate_limits._fetch_claude_messages_usage",
         _should_not_be_called,
     )
@@ -380,6 +393,132 @@ def test_probe_claude_usage_bails_when_token_expired(
         "credentials expired — run `claude` to refresh",
         "org: lumid",
     ]
+
+
+def test_probe_claude_usage_prefers_oauth_usage_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._read_cli_credentials_for_env",
+        lambda env: ("access-token", None, "CLI creds"),
+    )
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._claude_user_agent",
+        lambda: "claude-code/2.1.136",
+    )
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._read_oauth_account_notes",
+        lambda env: ["org: lumid"],
+    )
+    body = json.dumps(
+        {
+            "five_hour": {"utilization": 11.0, "resets_at": "2026-06-21T09:20:00Z"},
+            "seven_day": {"utilization": 2.0, "resets_at": "2026-06-23T12:00:00Z"},
+            # Armed once Sonnet usage accrues this week.
+            "seven_day_sonnet": {
+                "utilization": 3.0,
+                "resets_at": "2026-06-23T12:00:00Z",
+            },
+            # No Opus weekly limit on this plan — null entry must be skipped.
+            "seven_day_opus": None,
+        }
+    ).encode("utf-8")
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._fetch_claude_oauth_usage",
+        lambda token: _ClaudeHTTPResponse(status=200, headers={}, body=body),
+    )
+
+    def _messages_must_not_run(request: object) -> object:
+        raise AssertionError("Messages API must not be called when usage succeeds")
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._fetch_claude_messages_usage",
+        _messages_must_not_run,
+    )
+
+    snapshot = asyncio.run(probe_claude_usage(env={}))
+    assert snapshot is not None
+    assert snapshot.source == "claude_code"
+    assert [window.label for window in snapshot.windows] == ["5h", "Weekly", "Sonnet"]
+    assert snapshot.windows[2].used_percent == 3.0
+    assert snapshot.notes == ["CLI creds", "org: lumid"]
+
+
+def test_probe_claude_usage_falls_back_when_usage_endpoint_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._read_cli_credentials_for_env",
+        lambda env: ("access-token", None, "CLI creds"),
+    )
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._claude_user_agent",
+        lambda: "claude-code/2.1.136",
+    )
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._read_oauth_account_notes",
+        lambda env: [],
+    )
+    # The usage endpoint has historically been disabled and answers a 4xx.
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._fetch_claude_oauth_usage",
+        lambda token: _ClaudeHTTPResponse(status=404, headers={}, body=b"not found"),
+    )
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._fetch_claude_messages_usage",
+        lambda request: _ClaudeHTTPResponse(
+            status=200,
+            headers={
+                "anthropic-ratelimit-unified-5h-utilization": "0.25",
+                "anthropic-ratelimit-unified-5h-reset": str(
+                    (datetime.now(UTC) + timedelta(hours=4)).timestamp()
+                ),
+                "anthropic-ratelimit-unified-7d-utilization": "0.5",
+                "anthropic-ratelimit-unified-7d-reset": str(
+                    (datetime.now(UTC) + timedelta(days=6)).timestamp()
+                ),
+            },
+            body=b"{}",
+        ),
+    )
+
+    snapshot = asyncio.run(probe_claude_usage(env={}))
+    assert snapshot is not None
+    assert [window.label for window in snapshot.windows] == ["5h", "Weekly"]
+    assert snapshot.windows[0].used_percent == 25.0
+
+
+def test_parse_claude_usage_payload_skips_unarmed_per_model_window() -> None:
+    snapshot = parse_claude_usage_payload(
+        {
+            "five_hour": {"utilization": 0.04, "resets_at": "2026-06-21T09:20:00Z"},
+            "seven_day": {"utilization": 0.02, "resets_at": "2026-06-23T12:00:00Z"},
+            # Before any Sonnet usage: 0% utilization and no reset → skipped.
+            "seven_day_sonnet": {"utilization": 0.0, "resets_at": None},
+        },
+        now=datetime(2026, 6, 21, 8, 0, tzinfo=UTC),
+    )
+    assert snapshot is not None
+    assert [window.label for window in snapshot.windows] == ["5h", "Weekly"]
+
+
+def test_parse_claude_usage_payload_shows_armed_zero_per_model_window() -> None:
+    snapshot = parse_claude_usage_payload(
+        {
+            "five_hour": {"utilization": 0.04, "resets_at": "2026-06-21T09:20:00Z"},
+            "seven_day": {"utilization": 0.02, "resets_at": "2026-06-23T12:00:00Z"},
+            # Armed once Sonnet usage accrues: 0% but a reset is set → surfaced,
+            # so the row appears before weekly usage rounds above 0%.
+            "seven_day_sonnet": {
+                "utilization": 0.0,
+                "resets_at": "2026-06-23T12:00:00Z",
+            },
+        },
+        now=datetime(2026, 6, 21, 8, 0, tzinfo=UTC),
+    )
+    assert snapshot is not None
+    assert [window.label for window in snapshot.windows] == ["5h", "Weekly", "Sonnet"]
+    assert snapshot.windows[2].used_percent == 0.0
 
 
 def test_probe_claude_usage_surfaces_401_as_expired(
@@ -396,6 +535,10 @@ def test_probe_claude_usage_surfaces_401_as_expired(
     monkeypatch.setattr(
         "waypoint.backends.claude_code.rate_limits._read_oauth_account_notes",
         lambda env: [],
+    )
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._fetch_claude_oauth_usage",
+        lambda token: None,
     )
     monkeypatch.setattr(
         "waypoint.backends.claude_code.rate_limits._fetch_claude_messages_usage",
@@ -487,6 +630,53 @@ def test_probe_claude_usage_remote_parses_messages_headers(
         "org: lumid",
         "user tier: default_claude_max_5x",
     ]
+
+
+def test_probe_claude_usage_remote_parses_oauth_usage_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "usage": {
+            "five_hour": {"utilization": 11.0, "resets_at": "2026-06-21T09:20:00Z"},
+            "seven_day": {"utilization": 2.0, "resets_at": "2026-06-23T12:00:00Z"},
+            "seven_day_sonnet": {
+                "utilization": 3.0,
+                "resets_at": "2026-06-23T12:00:00Z",
+            },
+        },
+        "oauth_account_notes": ["org: lumid"],
+        "expires_at": None,
+    }
+
+    async def _fake_runner(launch_target, timeout_seconds):
+        return payload
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._run_remote_probe_script",
+        _fake_runner,
+    )
+    snapshot = asyncio.run(probe_claude_usage_remote(_ssh_target()))
+    assert snapshot is not None
+    assert snapshot.source == "claude_code"
+    assert [w.label for w in snapshot.windows] == ["5h", "Weekly", "Sonnet"]
+    assert snapshot.notes == ["remote CLI creds", "org: lumid"]
+
+
+def test_probe_claude_usage_remote_ignores_windowless_usage_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The remote script only emits the usage variant when it carries a window,
+    # but if a window-less usage payload ever arrives the backend returns None
+    # cleanly rather than misrouting into the malformed-payload branch.
+    async def _fake_runner(launch_target, timeout_seconds):
+        return {"usage": {}, "oauth_account_notes": ["org: lumid"], "expires_at": None}
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.rate_limits._run_remote_probe_script",
+        _fake_runner,
+    )
+    snapshot = asyncio.run(probe_claude_usage_remote(_ssh_target()))
+    assert snapshot is None
 
 
 def test_probe_claude_usage_remote_handles_expired_sentinel(

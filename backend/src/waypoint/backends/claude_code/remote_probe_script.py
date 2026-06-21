@@ -2,8 +2,9 @@
 
 Designed to be piped to ``python3 -`` over SSH on a remote launch
 target. Reads the locally-stored OAuth token (``~/.claude/.credentials.json``
-or the macOS keychain), calls the Anthropic Messages API, and prints a
-single JSON line to stdout describing the response (or an error
+or the macOS keychain), prefers the per-model OAuth usage endpoint, falls
+back to the Messages API rate-limit headers when it is unavailable, and
+prints a single JSON line to stdout describing the response (or an error
 sentinel) so the backend can build a ``SessionRateLimitUsage`` from it.
 
 Stdlib-only; targets Python 3.8+ so it runs on most pre-installed
@@ -11,6 +12,7 @@ remote interpreters without a virtualenv.
 
 Output schema (always one line of JSON on stdout, ``\\n``-terminated):
 
+    {"usage": {...}, "oauth_account_notes": [str], "expires_at": float | None}
     {"status": int, "headers": {str: str}, "body_preview": str,
      "oauth_account_notes": [str], "expires_at": float | None}
     {"error": "no_credentials" | "expired" | "network" | "internal", ...}
@@ -27,8 +29,16 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 CLAUDE_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
+CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CLAUDE_MESSAGES_MODEL = "claude-haiku-4-5-20251001"
 CLAUDE_MESSAGES_VERSION = "2023-06-01"
+USAGE_WINDOW_KEYS = (
+    "five_hour",
+    "seven_day",
+    "seven_day_opus",
+    "seven_day_sonnet",
+    "seven_day_fable",
+)
 EXPIRY_SKEW_SECONDS = 60
 HTTP_TIMEOUT = 25
 BODY_PREVIEW_BYTES = 240
@@ -172,6 +182,34 @@ def read_credentials():
     return None
 
 
+def usage_has_windows(payload):
+    return isinstance(payload, dict) and any(
+        isinstance(payload.get(key), dict) for key in USAGE_WINDOW_KEYS
+    )
+
+
+def fetch_usage(token):
+    request = Request(
+        CLAUDE_USAGE_URL,
+        method="GET",
+        headers={
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json",
+            "User-Agent": "claude-code/remote-probe",
+            "anthropic-beta": "oauth-2025-04-20",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urlopen(request, timeout=HTTP_TIMEOUT) as response:
+            status_code = getattr(response, "status", 200)
+            return status_code, response.read()
+    except HTTPError as exc:
+        return exc.code, None
+    except (URLError, OSError):
+        return None, None
+
+
 def fetch_messages(token):
     body = json.dumps(
         {
@@ -225,6 +263,24 @@ def main():
             }
         )
         return
+    # Prefer the OAuth usage endpoint (per-model windows incl. Sonnet/Opus);
+    # fall back to Messages API rate-limit headers when it is unavailable or
+    # answers with a body that carries no usable window.
+    usage_status, usage_body = fetch_usage(token)
+    if usage_status == 200 and usage_body:
+        try:
+            usage = json.loads(usage_body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            usage = None
+        if usage_has_windows(usage):
+            emit(
+                {
+                    "usage": usage,
+                    "oauth_account_notes": notes,
+                    "expires_at": expires_at,
+                }
+            )
+            return
     status_code, headers, body = fetch_messages(token)
     if status_code is None:
         emit(

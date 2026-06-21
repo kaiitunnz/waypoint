@@ -24,6 +24,7 @@ from waypoint.schemas import SessionRateLimitUsage, UsageWindow
 log = logging.getLogger("waypoint.claude_code.rate_limits")
 
 _CLAUDE_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
+_CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 _CLAUDE_MESSAGES_MODEL = "claude-haiku-4-5-20251001"
 _CLAUDE_MESSAGES_VERSION = "2023-06-01"
 _WINDOWS: tuple[tuple[str, str, int], ...] = (
@@ -33,6 +34,9 @@ _WINDOWS: tuple[tuple[str, str, int], ...] = (
     ("seven_day_sonnet", "Sonnet", 7 * 24 * 60),
     ("seven_day_fable", "Fable", 7 * 24 * 60),
 )
+# Windows the account-wide plan always carries; the per-model windows are
+# gated in parse_claude_usage_payload.
+_PRIMARY_WINDOW_KEYS = frozenset({"five_hour", "seven_day"})
 _CLAUDE_USER_AGENT: str | None = None
 _CLAUDE_USER_AGENT_RESOLVED = False
 
@@ -61,13 +65,19 @@ def parse_claude_usage_payload(
         percent = _parse_utilization(window.get("utilization"))
         if percent is None:
             continue
+        resets_at = _parse_iso_datetime(window.get("resets_at"))
+        # Skip a per-model scoped window (Opus/Sonnet/Fable) only while it is
+        # both un-armed (no reset) and at 0% — the API's "no usage yet this
+        # week" state. The 5h / weekly windows always surface.
+        if key not in _PRIMARY_WINDOW_KEYS and resets_at is None and percent <= 0.0:
+            continue
         windows.append(
             UsageWindow(
                 id=key,
                 label=label,
                 used_percent=percent,
                 window_minutes=minutes,
-                resets_at=_parse_iso_datetime(window.get("resets_at")),
+                resets_at=resets_at,
             )
         )
 
@@ -100,6 +110,22 @@ async def probe_claude_usage(
                 "skipping HTTP call and surfacing expiry"
             )
             return _expired_credentials_snapshot(credential_note, resolved_env)
+        account_notes = _read_oauth_account_notes(resolved_env)
+
+        # Prefer the OAuth usage endpoint: it carries per-model windows
+        # (Sonnet/Opus/Fable) that the Messages API rate-limit headers omit.
+        usage_response = await asyncio.wait_for(
+            asyncio.to_thread(_fetch_claude_oauth_usage, access_token),
+            timeout=timeout_seconds,
+        )
+        snapshot = _build_oauth_usage_snapshot(
+            usage_response, credential_note, account_notes
+        )
+        if snapshot is not None:
+            return snapshot
+
+        # Fall back to the Messages API rate-limit headers (5h + weekly only)
+        # when the usage endpoint is unavailable or returns no windows.
         response = await asyncio.wait_for(
             asyncio.to_thread(_fetch_claude_messages_usage, access_token),
             timeout=timeout_seconds,
@@ -112,7 +138,7 @@ async def probe_claude_usage(
             headers=response.headers,
             body=response.body,
             credential_note=credential_note,
-            account_notes=_read_oauth_account_notes(resolved_env),
+            account_notes=account_notes,
         )
 
 
@@ -147,6 +173,21 @@ async def probe_claude_usage_remote(
             f"claude remote rate-limit probe internal error: {payload.get('message')!r}"
         )
         return None
+    if "usage" in payload:
+        # The remote script emits the usage variant only when it carries a
+        # usable window; parse it and return whatever it yields rather than
+        # misrouting into the Messages-API header branch below.
+        usage = payload.get("usage")
+        snapshot = (
+            parse_claude_usage_payload(
+                usage, notes=_unique_notes([credential_note, *account_notes])
+            )
+            if isinstance(usage, dict)
+            else None
+        )
+        if snapshot is None:
+            log.info("claude remote usage payload carried no usable windows")
+        return snapshot
     status = payload.get("status")
     headers = payload.get("headers")
     body_preview = payload.get("body_preview", "")
@@ -370,6 +411,43 @@ async def _run_remote_probe_script(
     return decoded
 
 
+def _build_oauth_usage_snapshot(
+    response: _ClaudeHTTPResponse | None,
+    credential_note: str,
+    account_notes: list[str],
+) -> SessionRateLimitUsage | None:
+    """Build a snapshot from the OAuth usage endpoint, or ``None`` to fall back.
+
+    Returns ``None`` whenever the endpoint is unreachable, returns a non-200
+    (it has historically been disabled and answered 4xx), or yields no usable
+    windows — in every such case the caller drops back to the Messages API
+    rate-limit headers. A 401/expiry surfaces through that header path, which
+    already renders the "credentials expired" snapshot.
+    """
+    if response is None:
+        log.info(
+            "claude usage endpoint unreachable; falling back to rate-limit headers"
+        )
+        return None
+    if response.status != 200:
+        log.info(
+            "claude usage endpoint returned status %s; "
+            "falling back to rate-limit headers",
+            response.status,
+        )
+        return None
+    snapshot = parse_claude_usage_payload(
+        response.body,
+        notes=_unique_notes([credential_note, *account_notes]),
+    )
+    if snapshot is None:
+        log.info(
+            "claude usage endpoint returned no usable windows; "
+            "falling back to rate-limit headers"
+        )
+    return snapshot
+
+
 def _build_messages_snapshot(
     *,
     status: int,
@@ -527,6 +605,21 @@ def _claude_user_agent() -> str:
     )
     _CLAUDE_USER_AGENT = f"claude-code/{version}" if version else "claude-code/2.1.5"
     return _CLAUDE_USER_AGENT
+
+
+def _fetch_claude_oauth_usage(access_token: str) -> _ClaudeHTTPResponse | None:
+    request = Request(
+        _CLAUDE_USAGE_URL,
+        method="GET",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "User-Agent": _claude_user_agent(),
+            "anthropic-beta": "oauth-2025-04-20",
+            "Accept": "application/json",
+        },
+    )
+    return _fetch_url(request)
 
 
 def _fetch_claude_messages_usage(access_token: str) -> _ClaudeHTTPResponse | None:

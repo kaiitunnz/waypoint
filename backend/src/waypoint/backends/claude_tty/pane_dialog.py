@@ -143,10 +143,18 @@ class PlanDialog:
 
     @property
     def manual_option(self) -> DialogOption | None:
-        """The "Yes, manually approve edits" option → exits to ``default``."""
+        """The "Yes, manually approve edits" option → exits to ``default``.
+
+        Falls back to the first "Yes" that is not the auto option, so if the
+        manual label shifts in a future build a default-target approval still
+        never presses "use auto mode" (which would widen permissions).
+        """
         yes = [opt for opt in self.options if opt.label.lower().startswith("yes")]
         manual = next((opt for opt in yes if "manual" in opt.label.lower()), None)
-        return manual or (yes[0] if yes else None)
+        if manual is not None:
+            return manual
+        auto = self.auto_option
+        return next((opt for opt in yes if opt is not auto), None)
 
     @property
     def auto_option(self) -> DialogOption | None:

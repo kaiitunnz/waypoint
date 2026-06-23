@@ -58,6 +58,13 @@ _TRUST_MARKER = "Is this a project you created or one you trust?"
 _OPTION_RE = re.compile(r"^\s*(❯)?\s*(\d+)\.\s+(.*\S)\s*$")
 _TOOL_HEADER_RE = re.compile(r"^\s*●\s*([A-Za-z][\w-]*)\((.*)\)\s*$")
 _QUESTION_RE = re.compile(r"^\s*(Do you want to .*\?)\s*$", re.MULTILINE)
+# The live composer is a ``❯`` prompt at the start of the line (after any pad).
+# A ``❯`` embedded mid-line is content — a diff-preview row, a quoted glyph, a
+# command — not a prompt, and must not be read as one. A dialog's selected
+# option also leads with ``❯`` but as ``❯ 1.``; ``_OPTION_PROMPT_RE`` separates
+# those so option rows are not mistaken for the composer either.
+_COMPOSER_PROMPT_RE = re.compile(r"^\s*❯(?:\s|$)")
+_OPTION_PROMPT_RE = re.compile(r"^\s*❯\s*\d+\.")
 
 
 def _strip_ansi(text: str) -> str:
@@ -111,6 +118,45 @@ _COMPOSER_PROMPT = "❯"
 _COMPOSER_PLACEHOLDER_PREFIX = 'Try "'
 
 
+def _is_composer_line(line: str) -> bool:
+    """Whether a line is the live composer input prompt rather than a dialog row.
+
+    The composer is a leading ``❯`` prompt followed by free text — a typed
+    message, a slash command, the idle placeholder, or nothing. A ``❯`` embedded
+    mid-line is dialog body or transcript content and is not a prompt. A dialog's
+    selected option leads with the glyph but as ``❯ 1.`` (handled by
+    `_OPTION_PROMPT_RE`); option rows are excluded too.
+    """
+    return (
+        _COMPOSER_PROMPT_RE.match(line) is not None
+        and _OPTION_PROMPT_RE.match(line) is None
+    )
+
+
+def _active_region(lines: list[str]) -> list[str]:
+    """The bottom-most interactive block of the pane — a live dialog or composer.
+
+    A modal dialog is always the lowest block on screen: it either replaces the
+    composer (approval/question/trust — no free-text prompt remains, so the whole
+    pane is its region), or renders as a popup just below the composer's
+    slash-command echo (``/model``, ``/effort`` — the popup lives below the
+    bottom-most composer line). Either way, scoping to the text at and below the
+    bottom-most composer line drops settled transcript above it. That is what
+    stops a dialog-signature string an agent merely quoted, discussed, or pasted
+    into the conversation from reading as a live dialog: the live composer sits
+    below such text, so the quoted markers fall outside the region. A real
+    dialog's interactive rows are options (``❯ 1.``), not a leading free-text
+    prompt, and no composer is drawn below or inside it — so the boundary only
+    ever lands at the dialog's own slash-command echo (or above the dialog) and
+    never slices an actual dialog between its question and footer.
+    """
+    last_composer = next(
+        (i for i in range(len(lines) - 1, -1, -1) if _is_composer_line(lines[i])),
+        None,
+    )
+    return lines if last_composer is None else lines[last_composer:]
+
+
 def composer_ready(screen: str) -> bool:
     """Whether the Claude TUI composer prompt is drawn and able to take input.
 
@@ -144,22 +190,25 @@ def composer_is_empty(screen: str) -> bool:
 
 
 def classify(screen: str) -> PaneScreen:
-    screen = _strip_ansi(screen)
-    compact = _compact(screen)
-    if _contains(screen, compact, _APPROVAL_FOOTER) and _contains(
-        screen, compact, _APPROVAL_QUESTION_MARKER
+    # Match only within the active region (the bottom-most dialog/composer block),
+    # not the whole pane: substring/compact matching against scrollback would let
+    # a marker quoted in transcript content read as a live dialog.
+    region = "\n".join(_active_region(_strip_ansi(screen).splitlines()))
+    compact = _compact(region)
+    if _contains(region, compact, _APPROVAL_FOOTER) and _contains(
+        region, compact, _APPROVAL_QUESTION_MARKER
     ):
         return PaneScreen.APPROVAL
-    if all(_contains(screen, compact, marker) for marker in _QUESTION_MARKERS):
+    if all(_contains(region, compact, marker) for marker in _QUESTION_MARKERS):
         return PaneScreen.QUESTION
-    if _contains(screen, compact, _TRUST_MARKER):
+    if _contains(region, compact, _TRUST_MARKER):
         return PaneScreen.TRUST
-    if _contains(screen, compact, _MODEL_FOOTER) and _contains(
-        screen, compact, _MODEL_MARKER
+    if _contains(region, compact, _MODEL_FOOTER) and _contains(
+        region, compact, _MODEL_MARKER
     ):
         return PaneScreen.MODEL_SELECTOR
-    if _contains(screen, compact, _EFFORT_FOOTER) and _contains(
-        screen, compact, _EFFORT_MARKER
+    if _contains(region, compact, _EFFORT_FOOTER) and _contains(
+        region, compact, _EFFORT_MARKER
     ):
         return PaneScreen.EFFORT_POPUP
     return PaneScreen.OTHER

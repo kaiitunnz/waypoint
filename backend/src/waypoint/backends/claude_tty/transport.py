@@ -69,6 +69,14 @@ class ClaudeTtyTransport(TmuxTransport):
             await self.adapter.send_input(
                 target, str(pending.approve_number), submit=True
             )
+            if pending.is_plan:
+                # Approving exits plan mode in the TUI (the manual-approve option
+                # lands in "default"). Mirror that into the stored mode so the
+                # badge tracks the binary and a later restart does not relaunch
+                # back into plan mode.
+                await self._runtime.update_session_fields(
+                    session.id, permission_mode="default"
+                )
         else:
             # Decline: send the No-labelled option's digit, never position 2
             # ("allow all this session"). Fall back to Esc if no explicit No.

@@ -31,6 +31,7 @@ import re
 import uuid
 from typing import Any
 
+from waypoint.backends.claude_code.adapter import _apply_plan_edit, _is_plan_file_path
 from waypoint.backends.claude_code.normalize import (
     TASK_TOOL_NAMES,
     TaskListTracker,
@@ -93,6 +94,12 @@ class TranscriptNormalizer:
         # (which carries the applied diff in its toolUseResult) can attach a
         # diff preview. The TUI records the change on the result, not the call.
         self._file_edit_tool_use_ids: set[str] = set()
+        # Plan mode writes the plan to ~/.claude/plans/<slug>.md before raising
+        # the ExitPlanMode dialog (which is withheld from the transcript while it
+        # blocks). The dialog has no plan text on the wire, so the tailer reads
+        # the body captured here when it surfaces the plan-approval card.
+        self.last_plan_path: str | None = None
+        self.last_plan_content: str | None = None
 
     def arm_question_dismissal(self) -> None:
         self._expect_dismissed_question = True
@@ -241,8 +248,10 @@ class TranscriptNormalizer:
                         if tool_use_id:
                             self._suppressed_result_tool_use_ids.add(tool_use_id)
                     continue
-                if tool_name in FILE_EDIT_TOOL_NAMES and tool_use_id:
-                    self._file_edit_tool_use_ids.add(tool_use_id)
+                if tool_name in FILE_EDIT_TOOL_NAMES:
+                    self._maybe_capture_plan(tool_name, block.get("input") or {})
+                    if tool_use_id:
+                        self._file_edit_tool_use_ids.add(tool_use_id)
                 input_text = json.dumps(block.get("input") or {}, indent=2)
                 events.append(
                     NormalizedEvent(
@@ -311,6 +320,26 @@ class TranscriptNormalizer:
             )
 
         return events
+
+    def _maybe_capture_plan(self, tool_name: str, tool_input: dict[str, Any]) -> None:
+        """Track the plan body when a file-edit targets ~/.claude/plans/.
+
+        Mirrors the claude_code adapter: capture the written content (or apply an
+        Edit/MultiEdit patch to the running copy) so the body is in hand from the
+        transcript, never read off disk — which would fail for remote sessions.
+        """
+        path = str(tool_input.get("file_path") or "")
+        if not _is_plan_file_path(path):
+            return
+        self.last_plan_path = path
+        if tool_name == "Write":
+            content = tool_input.get("content")
+            if isinstance(content, str):
+                self.last_plan_content = content
+        elif isinstance(self.last_plan_content, str):
+            self.last_plan_content = _apply_plan_edit(
+                self.last_plan_content, tool_name, tool_input
+            )
 
     def _process_user(self, record: dict[str, Any]) -> list[NormalizedEvent]:
         message: dict[str, Any] = record.get("message") or {}

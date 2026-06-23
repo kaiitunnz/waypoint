@@ -1028,3 +1028,41 @@ def test_non_task_tool_use_in_same_record_still_emits_tool_call() -> None:
     tool_call_events = [e for e in events if e.kind == EventKind.TOOL_CALL]
     assert len(tool_call_events) == 1
     assert tool_call_events[0].metadata["tool_name"] == "Bash"
+
+
+def test_plan_file_write_captures_body_and_still_surfaces_tool_call() -> None:
+    # In plan mode Claude writes the plan to ~/.claude/plans/<slug>.md before the
+    # (withheld) ExitPlanMode dialog. The normalizer stashes the body for the
+    # tailer's plan-approval card, while still surfacing the Write as a tool card
+    # exactly as Chat does.
+    norm = TranscriptNormalizer()
+    plan = "# Plan\n\nAdd hello.py"
+    path = "/home/u/.claude/plans/make-a-plan-to-witty-hippo.md"
+    events = norm.process_record(
+        _assistant_record(
+            "msg1",
+            [_tool_use_block("w1", "Write", {"file_path": path, "content": plan})],
+            stop_reason="tool_use",
+        )
+    )
+    assert norm.last_plan_path == path
+    assert norm.last_plan_content == plan
+    tool_calls = [e for e in events if e.kind == EventKind.TOOL_CALL]
+    assert len(tool_calls) == 1 and tool_calls[0].metadata["tool_name"] == "Write"
+
+
+def test_non_plan_file_write_does_not_capture_plan() -> None:
+    norm = TranscriptNormalizer()
+    norm.process_record(
+        _assistant_record(
+            "msg1",
+            [
+                _tool_use_block(
+                    "w1", "Write", {"file_path": "/repo/hello.py", "content": "x"}
+                )
+            ],
+            stop_reason="tool_use",
+        )
+    )
+    assert norm.last_plan_path is None
+    assert norm.last_plan_content is None

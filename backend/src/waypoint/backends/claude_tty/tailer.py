@@ -241,6 +241,10 @@ class TranscriptTailer:
                 self._question_dismissed = True
             return
 
+        if screen_type is pane_dialog.PaneScreen.PLAN:
+            await self._surface_plan_dialog(snapshot)
+            return
+
         if screen_type is not pane_dialog.PaneScreen.APPROVAL:
             # Dialog gone — clear any pending approval for this session.
             self._plugin._pending_approvals.pop(self._session_id, None)
@@ -307,6 +311,65 @@ class TranscriptTailer:
             text,
             {
                 "tool_name": tool_name,
+                "tool_input": tool_input,
+                "approval_id": approval_id,
+                "method": "tty_permission",
+                "status": SessionStatus.WAITING_INPUT,
+            },
+            SessionStatus.WAITING_INPUT,
+        )
+
+    async def _surface_plan_dialog(self, snapshot: str) -> None:
+        """Surface the ExitPlanMode dialog as the same approval card Chat shows.
+
+        The dialog is the plan-mode analogue of a tool-permission prompt: the
+        binary withholds the ExitPlanMode tool_use from the transcript while the
+        dialog blocks, so it is read off the pane. The plan body comes from the
+        plan-file Write the normalizer already captured, matching the Chat card's
+        ``tool_input.plan``. Approve presses the manual-approve option; decline
+        falls through to Esc (``decline_number=None``), which keeps plan mode.
+        """
+        dialog = pane_dialog.parse_plan_dialog(snapshot)
+        if dialog is None or dialog.approve_option is None:
+            self._prev_dialog_sig = None
+            self._dialog_stable_count = 0
+            return
+
+        sig = f"ExitPlanMode:{dialog.plan_path}"
+        if sig == self._prev_dialog_sig:
+            self._dialog_stable_count += 1
+        else:
+            self._prev_dialog_sig = sig
+            self._dialog_stable_count = 1
+        if self._dialog_stable_count < _DIALOG_STABLE_TICKS:
+            return
+        if sig == self._surfaced_sig:
+            return
+
+        plan_path = self._normalizer.last_plan_path or dialog.plan_path
+        tool_input: dict[str, Any] = {"plan": self._normalizer.last_plan_content or ""}
+        if plan_path:
+            tool_input["planFilePath"] = plan_path
+
+        approval_id = str(uuid.uuid4())
+        self._plugin._pending_approvals[self._session_id] = PendingTtyApproval(
+            approval_id=approval_id,
+            tool_name="ExitPlanMode",
+            target=plan_path,
+            approve_number=dialog.approve_option.number,
+            decline_number=None,
+            signature=sig,
+            is_plan=True,
+        )
+        self._surfaced_sig = sig
+
+        payload = {"tool_name": "ExitPlanMode", "tool_input": tool_input}
+        await self._runtime._emit_adapter_event(
+            self._session_id,
+            EventKind.APPROVAL_REQUEST,
+            format_approval_text(payload),
+            {
+                "tool_name": "ExitPlanMode",
                 "tool_input": tool_input,
                 "approval_id": approval_id,
                 "method": "tty_permission",

@@ -12159,9 +12159,10 @@ html[data-theme="light"] .wp-code-toolbar {
 
   .wp-tree-pane {
     width: 100%;
+    flex: 1;
+    min-height: 0;
+    max-height: none;
     border-right: none;
-    border-bottom: 1px solid var(--line);
-    max-height: 45dvh;
   }
 
   .wp-mobile-hidden {

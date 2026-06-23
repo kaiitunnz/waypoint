@@ -181,6 +181,31 @@ async def test_plan_dialog_restores_auto_mode_via_auto_option() -> None:
     assert pending.restore_mode == "auto"
 
 
+async def test_plan_dialog_auto_pre_mode_without_auto_option_falls_back() -> None:
+    # A subscription whose plan dialog omits the "auto mode" option: a pre-plan
+    # auto session must fall back to manual → default, never widen.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session(permission_mode="plan")
+    session.transport_state["pre_plan_mode"] = "auto"
+    screen = "\n".join(
+        [
+            "Claude is ready to execute. Would you like to proceed?",
+            "  ❯ 1. Yes, manually approve edits",
+            "    2. No, keep planning",
+            "       shift+tab to approve with this feedback",
+        ]
+    )
+    runtime = _make_runtime(session, screen)
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()
+    await tailer._poll_dialog()
+
+    pending = plugin._pending_approvals["sess-1"]
+    assert pending.approve_number == 1  # the manual option (no auto option present)
+    assert pending.restore_mode == "default"
+
+
 async def test_plan_dialog_non_auto_pre_mode_falls_back_to_default() -> None:
     # acceptEdits has no plan-exit option, so it must not be approximated by the
     # broader "auto" option — fall back to manual → default (never widen).

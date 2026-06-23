@@ -168,6 +168,24 @@ def test_plan_dialog_options_selected_by_label_not_position() -> None:
     assert dialog.manual_option is not None and dialog.manual_option.number == 1
 
 
+def test_manual_option_never_falls_back_to_auto_option() -> None:
+    # No option says "manual" but an auto option exists: manual_option must skip
+    # it and pick the other "Yes", so a default-target approval can't press
+    # "use auto mode" and silently widen permissions.
+    screen = "\n".join(
+        [
+            "Claude is ready to execute. Would you like to proceed?",
+            "  ❯ 1. Yes, and use auto mode",
+            "    2. Yes, proceed",
+            "       shift+tab to approve with this feedback",
+        ]
+    )
+    dialog = parse_plan_dialog(screen)
+    assert dialog is not None
+    assert dialog.auto_option is not None and dialog.auto_option.number == 1
+    assert dialog.manual_option is not None and dialog.manual_option.number == 2
+
+
 def test_parse_plan_dialog_returns_none_off_screen() -> None:
     assert parse_plan_dialog(_load("approval_write.txt")) is None
     assert parse_plan_dialog(_load("ready.txt")) is None

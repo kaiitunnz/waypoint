@@ -12,6 +12,7 @@ import {
 import { formatBytes } from "@/components/AttachmentTray";
 import { FilePreview } from "@/components/FilePreview";
 import { WorkspaceTree } from "@/components/WorkspaceTree";
+import { copyText } from "@/lib/clipboard";
 
 interface WorkspaceFilesPanelProps {
   host: string;
@@ -102,12 +103,12 @@ export function WorkspaceFilesPanel({
 
   const copyPath = useCallback(() => {
     if (!openPath) return;
-    navigator.clipboard.writeText(openPath).catch(() => {});
+    void copyText(openPath);
   }, [openPath]);
 
   const copyContents = useCallback(() => {
     if (fileData?.content) {
-      navigator.clipboard.writeText(fileData.content).catch(() => {});
+      void copyText(fileData.content);
     }
   }, [fileData]);
 

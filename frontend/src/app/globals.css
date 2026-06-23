@@ -11534,13 +11534,17 @@ html[data-theme="light"]
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
-  padding: 16px;
+  /* Keep the modal clear of the notch/home indicator on mobile; the panel is
+     near-full-height, so without this the header slides under the status bar. */
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
 }
 
 .wp-panel-modal {
   width: 100%;
   max-width: min(960px, calc(100vw - 32px));
-  height: calc(100dvh - 64px);
+  height: 100%;
+  max-height: 100%;
   min-height: 0;
   background: rgba(14, 17, 24, 0.96);
   border: 1px solid var(--line-strong);
@@ -11833,9 +11837,9 @@ html[data-theme="light"] .wp-panel-modal {
   padding: 10px 14px;
   border-bottom: 1px solid var(--line);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 8px 12px;
   flex-shrink: 0;
   background: rgba(8, 11, 16, 0.2);
 }
@@ -11867,6 +11871,8 @@ html[data-theme="light"] .wp-preview-header {
   font-size: 0.64rem;
   color: var(--muted);
   letter-spacing: 0.03em;
+  white-space: nowrap;
+  margin-right: 4px;
 }
 
 .wp-preview-btn {
@@ -12099,6 +12105,7 @@ html[data-theme="light"] .wp-code-toolbar {
   user-select: none;
   font-family: inherit;
   font-size: inherit;
+  white-space: nowrap;
 }
 
 .wp-line-text {

@@ -855,6 +855,92 @@ export async function deleteAttachment(
   }
 }
 
+export interface WorkspaceTreeEntry {
+  name: string;
+  kind: "file" | "dir" | "symlink";
+  size: number;
+  mtime: number;
+}
+
+export interface WorkspaceTreePage {
+  root: { cwd: string; worktreePath: string | null };
+  path: string;
+  entries: WorkspaceTreeEntry[];
+  truncated: boolean;
+  overflow: number | null;
+}
+
+export interface WorkspaceFile {
+  path: string;
+  size: number;
+  mtime: number;
+  truncated: boolean;
+  binary: boolean;
+  content: string | null;
+  encoding?: string;
+}
+
+export async function fetchWorkspaceTree(
+  host: string,
+  token: string,
+  sessionId: string,
+  relPath = "",
+): Promise<WorkspaceTreePage> {
+  const params = new URLSearchParams();
+  if (relPath) params.set("path", relPath);
+  const suffix = params.size ? `?${params.toString()}` : "";
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/workspace/tree${suffix}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    },
+  );
+  await ensureOk(response, "failed to fetch workspace tree");
+  const payload = await response.json();
+  const rootRaw = payload.root ?? {};
+  return {
+    root: {
+      cwd: typeof rootRaw.cwd === "string" ? rootRaw.cwd : "",
+      worktreePath: typeof rootRaw.worktree_path === "string" ? rootRaw.worktree_path : null,
+    },
+    path: typeof payload.path === "string" ? payload.path : "",
+    entries: Array.isArray(payload.entries) ? (payload.entries as WorkspaceTreeEntry[]) : [],
+    truncated: Boolean(payload.truncated),
+    overflow: typeof payload.overflow === "number" ? payload.overflow : null,
+  };
+}
+
+export async function fetchWorkspaceFile(
+  host: string,
+  token: string,
+  sessionId: string,
+  relPath: string,
+): Promise<WorkspaceFile> {
+  const params = new URLSearchParams({ path: relPath });
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/workspace/file?${params.toString()}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    },
+  );
+  await ensureOk(response, "failed to fetch workspace file");
+  return (await response.json()) as WorkspaceFile;
+}
+
+// Authenticated URL for a workspace file served inline (used by <img> and
+// "Open raw" links). Token rides as a query param — same pattern as
+// attachmentUrl — because <img>/<a> cannot send an Authorization header.
+export function workspaceRawUrl(
+  host: string,
+  token: string,
+  sessionId: string,
+  relPath: string,
+): string {
+  return `${host}/api/sessions/${sessionId}/workspace/file?path=${encodeURIComponent(relPath)}&raw=1&token=${encodeURIComponent(token)}`;
+}
+
 // Authenticated URL for an uploaded attachment. The token rides as a query
 // param because <img>/<a> can't send an Authorization header (mirrors the
 // WebSocket endpoints).

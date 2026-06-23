@@ -6,7 +6,13 @@ const PHASE_LABEL: Record<EventDiffPreview["phase"], string> = {
   aggregate: "Turn changes",
 };
 
-export function DiffPreview({ preview }: { preview: EventDiffPreview }) {
+export function DiffPreview({
+  preview,
+  onOpenWorkspaceFile,
+}: {
+  preview: EventDiffPreview;
+  onOpenWorkspaceFile?: (path: string) => void;
+}) {
   return (
     <div className="diff-preview">
       <div className="diff-preview-header">
@@ -17,24 +23,49 @@ export function DiffPreview({ preview }: { preview: EventDiffPreview }) {
       </div>
       <div className="diff-preview-files">
         {preview.files.map((file, index) => (
-          <DiffPreviewFileView file={file} key={`${file.path}-${index}`} />
+          <DiffPreviewFileView
+            file={file}
+            key={`${file.path}-${index}`}
+            onOpenWorkspaceFile={onOpenWorkspaceFile}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function DiffPreviewFileView({ file }: { file: EventDiffPreviewFile }) {
+function DiffPreviewFileView({
+  file,
+  onOpenWorkspaceFile,
+}: {
+  file: EventDiffPreviewFile;
+  onOpenWorkspaceFile?: (path: string) => void;
+}) {
   const changeType = displayChangeType(file);
+  const pathLabel =
+    file.oldPath && file.oldPath !== file.path
+      ? `${file.oldPath} -> ${file.path}`
+      : file.path;
   return (
     <section className="diff-preview-file">
       <div className="diff-file-header">
         <span className={`diff-change-type ${changeType.className}`}>
           {changeType.label}
         </span>
-        <span className="diff-file-path" title={file.path}>
-          {file.oldPath && file.oldPath !== file.path ? `${file.oldPath} -> ${file.path}` : file.path}
-        </span>
+        {onOpenWorkspaceFile ? (
+          <button
+            type="button"
+            className="diff-file-path diff-file-path-btn"
+            title={`Open ${file.path}`}
+            onClick={() => onOpenWorkspaceFile(file.path)}
+          >
+            {pathLabel}
+          </button>
+        ) : (
+          <span className="diff-file-path" title={file.path}>
+            {pathLabel}
+          </span>
+        )}
         <span className="diff-file-stats">
           +{file.additions} -{file.deletions}
         </span>

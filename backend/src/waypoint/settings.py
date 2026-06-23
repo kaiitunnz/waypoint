@@ -113,6 +113,12 @@ class Settings(BaseModel):
     # message references them. Defaults to 24h; override with
     # ``WAYPOINT_ATTACHMENT_ORPHAN_TTL_SECONDS``.
     attachment_orphan_ttl_seconds: int = 60 * 60 * 24
+    workspace_preview_enabled: bool = True
+    workspace_max_file_bytes: int = 200_000
+    workspace_denylist: list[str] = Field(
+        default_factory=lambda: [".git", ".claude", ".env", ".ssh"]
+    )
+    workspace_follow_symlinks: bool = False
     database_name: str = "waypoint.db"
     token_ttl_seconds: int = 60 * 60 * 24 * 30
     stream_poll_interval: float = 1.0
@@ -260,6 +266,24 @@ def _env_overrides() -> dict[str, Any]:
         overrides["attachment_orphan_ttl_seconds"] = int(
             os.environ["WAYPOINT_ATTACHMENT_ORPHAN_TTL_SECONDS"]
         )
+    if "WAYPOINT_WORKSPACE_PREVIEW_ENABLED" in os.environ:
+        overrides["workspace_preview_enabled"] = os.environ[
+            "WAYPOINT_WORKSPACE_PREVIEW_ENABLED"
+        ].lower() not in {"0", "false", "no", ""}
+    if "WAYPOINT_WORKSPACE_MAX_FILE_BYTES" in os.environ:
+        overrides["workspace_max_file_bytes"] = int(
+            os.environ["WAYPOINT_WORKSPACE_MAX_FILE_BYTES"]
+        )
+    if "WAYPOINT_WORKSPACE_DENYLIST" in os.environ:
+        overrides["workspace_denylist"] = [
+            item.strip()
+            for item in os.environ["WAYPOINT_WORKSPACE_DENYLIST"].split(",")
+            if item.strip()
+        ]
+    if "WAYPOINT_WORKSPACE_FOLLOW_SYMLINKS" in os.environ:
+        overrides["workspace_follow_symlinks"] = os.environ[
+            "WAYPOINT_WORKSPACE_FOLLOW_SYMLINKS"
+        ].lower() not in {"0", "false", "no", ""}
     if "WAYPOINT_CORS_ORIGINS" in os.environ:
         overrides["cors_origins"] = parse_cors_origins(
             os.environ["WAYPOINT_CORS_ORIGINS"]

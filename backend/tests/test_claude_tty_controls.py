@@ -232,6 +232,46 @@ async def test_restart_rebuilds_resume_flags_preserving_custom_args() -> None:
     assert captured["start_at_end"] is True
 
 
+async def test_restart_into_plan_stashes_pre_plan_mode() -> None:
+    plugin = ClaudeTtyPlugin()
+    _stub_lifecycle(plugin)
+    session = _make_session(permission_mode="acceptEdits")
+    runtime, _ = _restart_runtime()
+
+    await plugin._restart_with_args(runtime, session, permission_mode="plan")
+
+    state = runtime.storage.update_session.call_args.kwargs["transport_state"]
+    assert state["pre_plan_mode"] == "acceptEdits"
+
+
+async def test_restart_leaving_plan_drops_pre_plan_mode() -> None:
+    plugin = ClaudeTtyPlugin()
+    _stub_lifecycle(plugin)
+    session = _make_session(permission_mode="plan")
+    session.transport_state["pre_plan_mode"] = "auto"
+    runtime, _ = _restart_runtime()
+
+    await plugin._restart_with_args(runtime, session, permission_mode="default")
+
+    state = runtime.storage.update_session.call_args.kwargs["transport_state"]
+    assert "pre_plan_mode" not in state
+
+
+async def test_restart_staying_in_plan_preserves_pre_plan_mode() -> None:
+    # A model/effort swap while in plan mode must carry the stashed pre-plan mode
+    # forward — new_state is rebuilt fresh, so it would otherwise be lost.
+    plugin = ClaudeTtyPlugin()
+    _stub_lifecycle(plugin)
+    session = _make_session(permission_mode="plan", model="opus")
+    session.transport_state["pre_plan_mode"] = "auto"
+    runtime, _ = _restart_runtime()
+
+    await plugin._restart_with_args(runtime, session, model="sonnet")
+
+    state = runtime.storage.update_session.call_args.kwargs["transport_state"]
+    assert state["pre_plan_mode"] == "auto"
+
+
 async def test_restart_before_first_turn_uses_session_id_not_resume() -> None:
     # A settings change made before the first message has no persisted thread to
     # resume; relaunching with --resume would make the CLI exit with "no

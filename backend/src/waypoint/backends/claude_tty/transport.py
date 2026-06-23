@@ -70,12 +70,13 @@ class ClaudeTtyTransport(TmuxTransport):
                 target, str(pending.approve_number), submit=True
             )
             if pending.is_plan:
-                # Approving exits plan mode in the TUI (the manual-approve option
-                # lands in "default"). Mirror that into the stored mode so the
+                # Approving exits plan mode in the TUI; the pressed option already
+                # lands the pane in ``restore_mode`` (the pre-plan mode the dialog
+                # can express, else default). Mirror it into the stored mode so the
                 # badge tracks the binary and a later restart does not relaunch
                 # back into plan mode.
                 await self._runtime.update_session_fields(
-                    session.id, permission_mode="default"
+                    session.id, permission_mode=pending.restore_mode or "default"
                 )
         else:
             # Decline: send the No-labelled option's digit, never position 2

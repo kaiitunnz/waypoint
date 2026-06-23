@@ -159,9 +159,43 @@ async def test_stable_plan_dialog_emits_exit_plan_approval() -> None:
 
     pending = plugin._pending_approvals["sess-1"]
     assert pending.tool_name == "ExitPlanMode"
+    # No recorded pre-plan mode (launched in plan) → manual option → default.
     assert pending.approve_number == 2  # "Yes, manually approve edits"
+    assert pending.restore_mode == "default"
     assert pending.decline_number is None  # decline → Esc keeps plan mode
     assert pending.is_plan is True
+
+
+async def test_plan_dialog_restores_auto_mode_via_auto_option() -> None:
+    plugin = ClaudeTtyPlugin()
+    session = _make_session(permission_mode="plan")
+    session.transport_state["pre_plan_mode"] = "auto"
+    runtime = _make_runtime(session, _load("plan_approval.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()
+    await tailer._poll_dialog()
+
+    pending = plugin._pending_approvals["sess-1"]
+    assert pending.approve_number == 1  # "Yes, and use auto mode"
+    assert pending.restore_mode == "auto"
+
+
+async def test_plan_dialog_non_auto_pre_mode_falls_back_to_default() -> None:
+    # acceptEdits has no plan-exit option, so it must not be approximated by the
+    # broader "auto" option — fall back to manual → default (never widen).
+    plugin = ClaudeTtyPlugin()
+    session = _make_session(permission_mode="plan")
+    session.transport_state["pre_plan_mode"] = "acceptEdits"
+    runtime = _make_runtime(session, _load("plan_approval.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()
+    await tailer._poll_dialog()
+
+    pending = plugin._pending_approvals["sess-1"]
+    assert pending.approve_number == 2
+    assert pending.restore_mode == "default"
 
 
 async def test_plan_dialog_surfaces_card_even_without_captured_body() -> None:
@@ -647,6 +681,7 @@ async def test_respond_approve_plan_presses_manual_digit_and_exits_plan_mode() -
         tool_name="ExitPlanMode", target=None, approve_number=2, decline_number=None
     )
     pending.is_plan = True
+    pending.restore_mode = "default"
     plugin._pending_approvals["sess-1"] = pending
 
     transport, runtime = _make_plan_transport(plugin)
@@ -656,6 +691,26 @@ async def test_respond_approve_plan_presses_manual_digit_and_exits_plan_mode() -
     runtime.tmux.send_input.assert_called_once_with("%0", "2", submit=True)
     runtime.update_session_fields.assert_awaited_once_with(
         "sess-1", permission_mode="default"
+    )
+
+
+async def test_respond_approve_plan_restores_auto_mode() -> None:
+    plugin = ClaudeTtyPlugin()
+    session = _make_session(permission_mode="plan")
+    pending = _pending(
+        tool_name="ExitPlanMode", target=None, approve_number=1, decline_number=None
+    )
+    pending.is_plan = True
+    pending.restore_mode = "auto"
+    plugin._pending_approvals["sess-1"] = pending
+
+    transport, runtime = _make_plan_transport(plugin)
+    result = await transport.respond_to_approval(session, "approve", None)
+
+    assert result is True
+    runtime.tmux.send_input.assert_called_once_with("%0", "1", submit=True)
+    runtime.update_session_fields.assert_awaited_once_with(
+        "sess-1", permission_mode="auto"
     )
 
 

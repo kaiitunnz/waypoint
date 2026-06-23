@@ -69,6 +69,7 @@ import { useFileMentions } from "@/lib/use-file-mentions";
 import {
   isPlanEvent,
   itemIdForEvent,
+  parseEvent,
   planForEvent,
   type PlanDecision,
   type PlanViewModel,
@@ -79,10 +80,12 @@ import {
   AttachmentContextProvider,
   AttachmentTray,
   filesFromDataTransfer,
+  FolderIcon,
   PaperclipIcon,
   useAttachments,
 } from "@/components/AttachmentTray";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
+import { WorkspaceFilesPanel } from "@/components/WorkspaceFilesPanel";
 import { SessionTerminalView } from "@/components/SessionTerminalView";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { CommandSuggestions } from "@/components/CommandSuggestions";
@@ -307,6 +310,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   );
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [events, setEvents] = useState<EventRecord[]>([]);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | undefined>(undefined);
   // The todo-event sequence the user last dismissed from the progress dock.
   // `undefined` means we haven't read the persisted value yet — the dock stays
   // hidden until then so a dismissed dock doesn't flash on load (and to avoid
@@ -1301,6 +1306,27 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     () => transcriptItems.some((item) => item.kind === "tool_run"),
     [transcriptItems],
   );
+  // Workspace preview: collect recently written file paths from applied diff
+  // previews, newest-first and deduplicated. Backend-agnostic: keyed off the
+  // diff_preview phase, not tool names.
+  const recentPaths = useMemo(() => {
+    const seen = new Set<string>();
+    const paths: string[] = [];
+    for (let i = events.length - 1; i >= 0; i--) {
+      const diff = parseEvent(events[i]).diffPreview;
+      if (!diff || diff.phase !== "applied") continue;
+      for (const file of diff.files) {
+        if (!seen.has(file.path)) {
+          seen.add(file.path);
+          paths.push(file.path);
+        }
+      }
+    }
+    return paths;
+  }, [events]);
+  // True for local sessions only; remote sessions return 400 from the workspace
+  // endpoints.
+  const workspacePreviewEnabled = Boolean(session && !session.launch_target_id);
   // Latest task group, read off the raw event stream so the dock reflects the
   // true current state regardless of the transcript's event filter.
   const currentTaskEvent = useMemo(() => {
@@ -1615,6 +1641,10 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const resumeSession = useCallback(() => {
     void runAction("resume");
   }, [runAction]);
+  const handleOpenWorkspaceFile = useCallback((path: string) => {
+    setWorkspaceInitialPath(path);
+    setWorkspaceOpen(true);
+  }, []);
 
   return (
     <section className="stack" ref={sectionRef}>
@@ -1751,6 +1781,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                             transport={session.transport}
                             catalog={catalog}
                             onAnswerAskQuestion={submitAskAnswer}
+                            onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                             key={`pair-${child.pair.itemId}`}
                           />
                         ) : (
@@ -1759,6 +1790,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                             transport={session.transport}
                             catalog={catalog}
                             onAnswerAskQuestion={submitAskAnswer}
+                            onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                             key={`${child.event.sequence}-${child.event.id ?? "local"}`}
                           />
                         ),
@@ -1773,6 +1805,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                     transport={session.transport}
                     catalog={catalog}
                     onAnswerAskQuestion={submitAskAnswer}
+                    onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                     key={`pair-${item.pair.itemId}`}
                   />
                 ) : (
@@ -1781,6 +1814,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                     transport={session.transport}
                     catalog={catalog}
                     onAnswerAskQuestion={submitAskAnswer}
+                    onOpenWorkspaceFile={workspacePreviewEnabled ? handleOpenWorkspaceFile : undefined}
                     key={`${item.event.sequence}-${item.event.id ?? "local"}`}
                   />
                 );
@@ -2137,6 +2171,22 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onError={setError}
           assistant={assistant}
           assistantControls={assistantControls}
+          workspacePreviewEnabled={workspacePreviewEnabled}
+          onBrowseWorkspace={() => {
+            setWorkspaceInitialPath(undefined);
+            setWorkspaceOpen(true);
+          }}
+        />
+      ) : null}
+      {workspacePreviewEnabled ? (
+        <WorkspaceFilesPanel
+          host={host}
+          token={token}
+          sessionId={sessionId}
+          open={workspaceOpen}
+          initialPath={workspaceInitialPath}
+          recentPaths={recentPaths}
+          onClose={() => setWorkspaceOpen(false)}
         />
       ) : null}
     </section>
@@ -2196,6 +2246,8 @@ interface ReplyComposerProps {
   onError: (message: string) => void;
   assistant: boolean;
   assistantControls: AssistantControls | null;
+  workspacePreviewEnabled: boolean;
+  onBrowseWorkspace: () => void;
 }
 
 const ReplyComposer = memo(function ReplyComposer({
@@ -2243,6 +2295,8 @@ const ReplyComposer = memo(function ReplyComposer({
   onError,
   assistant,
   assistantControls,
+  workspacePreviewEnabled,
+  onBrowseWorkspace,
 }: ReplyComposerProps) {
   const [draft, setDraft] = useState("");
   const [dragActive, setDragActive] = useState(false);
@@ -3108,6 +3162,20 @@ const ReplyComposer = memo(function ReplyComposer({
             tabIndex={-1}
           />
         ) : null}
+        {workspacePreviewEnabled ? (
+          <button
+            type="button"
+            className="composer-attach-btn"
+            onClick={onBrowseWorkspace}
+            disabled={disabled}
+            aria-label="Browse workspace files"
+            title="Browse workspace files"
+          >
+            <span className="glyph" aria-hidden>
+              <FolderIcon />
+            </span>
+          </button>
+        ) : null}
         {attachmentsEnabled ? (
           <button
             type="button"
@@ -3180,6 +3248,20 @@ const ReplyComposer = memo(function ReplyComposer({
                     <span className="glyph">⇄</span>
                     Switch session…
                   </button>
+                  {workspacePreviewEnabled ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="composer-overflow-item"
+                      onClick={() => {
+                        setOverflowOpen(false);
+                        onBrowseWorkspace();
+                      }}
+                    >
+                      <span className="glyph">◫</span>
+                      Browse workspace…
+                    </button>
+                  ) : null}
                   {attachmentsEnabled ? (
                     <button
                       type="button"

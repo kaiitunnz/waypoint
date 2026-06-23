@@ -119,6 +119,7 @@ interface TranscriptCardProps {
     toolUseId?: string,
     answers?: AskAnswerEntry[],
   ) => Promise<boolean> | void;
+  onOpenWorkspaceFile?: (path: string) => void;
 }
 
 export const TranscriptCard = memo(function TranscriptCard({
@@ -127,11 +128,16 @@ export const TranscriptCard = memo(function TranscriptCard({
   catalog,
   pair,
   onAnswerAskQuestion,
+  onOpenWorkspaceFile,
 }: TranscriptCardProps) {
   if (fidelityFor(transport, catalog) === "structured") {
     if (pair) {
       return (
-        <ToolPairCard pair={pair} onAnswerAskQuestion={onAnswerAskQuestion} />
+        <ToolPairCard
+          pair={pair}
+          onAnswerAskQuestion={onAnswerAskQuestion}
+          onOpenWorkspaceFile={onOpenWorkspaceFile}
+        />
       );
     }
     return (
@@ -140,6 +146,7 @@ export const TranscriptCard = memo(function TranscriptCard({
         transport={transport}
         catalog={catalog}
         onAnswerAskQuestion={onAnswerAskQuestion}
+        onOpenWorkspaceFile={onOpenWorkspaceFile}
       />
     );
   }
@@ -151,6 +158,7 @@ function StructuredCard({
   transport,
   catalog,
   onAnswerAskQuestion,
+  onOpenWorkspaceFile,
 }: {
   event: EventRecord;
   transport: SessionTransport;
@@ -159,6 +167,7 @@ function StructuredCard({
     text: string,
     toolUseId?: string,
   ) => Promise<boolean> | void;
+  onOpenWorkspaceFile?: (path: string) => void;
 }) {
   // Convention: the chat-bubble agent label is the first word of the agent
   // that owns this transport, lowercased ("Claude Code" → "claude", "Codex"
@@ -173,6 +182,7 @@ function StructuredCard({
       event={event}
       agentLabel={agentLabel}
       onAnswerAskQuestion={onAnswerAskQuestion}
+      onOpenWorkspaceFile={onOpenWorkspaceFile}
     />
   );
 }
@@ -181,6 +191,7 @@ function CodexCard({
   event,
   agentLabel = "codex",
   onAnswerAskQuestion,
+  onOpenWorkspaceFile,
 }: {
   event: EventRecord;
   agentLabel?: string;
@@ -188,6 +199,7 @@ function CodexCard({
     text: string,
     toolUseId?: string,
   ) => Promise<boolean> | void;
+  onOpenWorkspaceFile?: (path: string) => void;
 }) {
   switch (event.kind) {
     case "user_input": {
@@ -223,13 +235,25 @@ function CodexCard({
       if (isTodoToolEvent(event)) {
         return <TodoToolCard event={event} />;
       }
-      return <ToolDisclosure event={event} bodyClassName="shell" />;
+      return (
+        <ToolDisclosure
+          event={event}
+          bodyClassName="shell"
+          onOpenWorkspaceFile={onOpenWorkspaceFile}
+        />
+      );
     }
     case "tool_result":
       if (isTodoToolEvent(event)) {
         return <TodoToolCard event={event} />;
       }
-      return <ToolDisclosure event={event} bodyClassName="output" />;
+      return (
+        <ToolDisclosure
+          event={event}
+          bodyClassName="output"
+          onOpenWorkspaceFile={onOpenWorkspaceFile}
+        />
+      );
     case "approval_request":
       // The interactive ApprovalCard sits above the composer with the same
       // text and Approve/Decline buttons; rendering the event here too would
@@ -253,7 +277,7 @@ function CodexCard({
       if (event.metadata?.builtin_command === "/status") {
         return <CommandStatusCard event={event} agentLabel={agentLabel} />;
       }
-      return <SystemRule event={event} />;
+      return <SystemRule event={event} onOpenWorkspaceFile={onOpenWorkspaceFile} />;
     }
     default:
       return <HeuristicCard event={event} />;
@@ -323,7 +347,13 @@ function CommandStatusCard({
   );
 }
 
-function SystemRule({ event }: { event: EventRecord }) {
+function SystemRule({
+  event,
+  onOpenWorkspaceFile,
+}: {
+  event: EventRecord;
+  onOpenWorkspaceFile?: (path: string) => void;
+}) {
   const diffPreview = parseEvent(event).diffPreview;
   if (diffPreview) {
     return (
@@ -335,7 +365,7 @@ function SystemRule({ event }: { event: EventRecord }) {
           </div>
           <p className="transcript-preview">{event.text}</p>
         </summary>
-        <DiffPreview preview={diffPreview} />
+        <DiffPreview preview={diffPreview} onOpenWorkspaceFile={onOpenWorkspaceFile} />
       </details>
     );
   }
@@ -570,9 +600,11 @@ export function ToolCallRunGroup({
 function ToolDisclosure({
   event,
   bodyClassName,
+  onOpenWorkspaceFile,
 }: {
   event: EventRecord;
   bodyClassName: string;
+  onOpenWorkspaceFile?: (path: string) => void;
 }) {
   const tool = toolBadgeFor(readToolName(event));
   const preview = previewForToolEvent(event, tool.label);
@@ -597,7 +629,7 @@ function ToolDisclosure({
         {preview ? <p className="transcript-preview">{preview}</p> : null}
       </summary>
       {diffPreview ? (
-        <DiffPreview preview={diffPreview} />
+        <DiffPreview preview={diffPreview} onOpenWorkspaceFile={onOpenWorkspaceFile} />
       ) : (
         <pre className={bodyClassName}>{event.text}</pre>
       )}
@@ -608,12 +640,14 @@ function ToolDisclosure({
 function ToolPairCard({
   pair,
   onAnswerAskQuestion,
+  onOpenWorkspaceFile,
 }: {
   pair: ToolPair;
   onAnswerAskQuestion?: (
     text: string,
     toolUseId?: string,
   ) => Promise<boolean> | void;
+  onOpenWorkspaceFile?: (path: string) => void;
 }) {
   const { call, result } = pair;
   if (call) {
@@ -657,7 +691,7 @@ function ToolPairCard({
       </summary>
       <div className="tool-pair-body">
         {diffPreview ? (
-          <DiffPreview preview={diffPreview} />
+          <DiffPreview preview={diffPreview} onOpenWorkspaceFile={onOpenWorkspaceFile} />
         ) : (
           <>
             {call ? (

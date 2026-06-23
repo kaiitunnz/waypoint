@@ -355,6 +355,26 @@ export function FileIcon() {
   );
 }
 
+// Folder glyph for the workspace file-explorer button in the composer.
+export function FolderIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2 9a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z" />
+      <path d="M2 12h20" />
+    </svg>
+  );
+}
+
 // Folder glyph for the "session files" manager entry point.
 export function FilesIcon() {
   return (

@@ -80,7 +80,6 @@ import {
   AttachmentContextProvider,
   AttachmentTray,
   filesFromDataTransfer,
-  FolderIcon,
   PaperclipIcon,
   useAttachments,
 } from "@/components/AttachmentTray";
@@ -3161,20 +3160,6 @@ const ReplyComposer = memo(function ReplyComposer({
             aria-hidden="true"
             tabIndex={-1}
           />
-        ) : null}
-        {workspacePreviewEnabled ? (
-          <button
-            type="button"
-            className="composer-attach-btn"
-            onClick={onBrowseWorkspace}
-            disabled={disabled}
-            aria-label="Browse workspace files"
-            title="Browse workspace files"
-          >
-            <span className="glyph" aria-hidden>
-              <FolderIcon />
-            </span>
-          </button>
         ) : null}
         {attachmentsEnabled ? (
           <button

@@ -21,6 +21,7 @@ from waypoint.backends.pane_text import strip_ansi, strip_whitespace
 
 class PaneScreen(StrEnum):
     APPROVAL = "approval"
+    PLAN = "plan"
     QUESTION = "question"
     TRUST = "trust"
     MODEL_SELECTOR = "model_selector"
@@ -49,6 +50,13 @@ _APPROVAL_QUESTION_MARKER = "Do you want to"
 # an inline "Type something" option — so requiring "Type something" (as cctty
 # does for its form parsing) misses the preview/notes variant entirely.
 _QUESTION_MARKERS = ("Enter to select", "Esc to cancel")
+# The ExitPlanMode dialog the TUI raises in plan mode. It carries neither the
+# approval footer ("Tab to amend") nor the question footer ("Enter to select"),
+# so it falls through to OTHER unless recognized here. Two co-located substrings
+# of its prompt anchor it — "ready to execute" guards against a bare "Would you
+# like to proceed?" an agent merely quoted. Verified against
+# ``tests/fixtures/claude_tty_pane/plan_approval.txt`` (Claude Code 2.1.186).
+_PLAN_MARKERS = ("ready to execute", "Would you like to proceed")
 _MODEL_FOOTER = "Enter to set as default"
 _MODEL_MARKER = "Select model"
 _EFFORT_FOOTER = "←/→ to adjust · Enter to confirm"
@@ -58,6 +66,14 @@ _TRUST_MARKER = "Is this a project you created or one you trust?"
 _OPTION_RE = re.compile(r"^\s*(❯)?\s*(\d+)\.\s+(.*\S)\s*$")
 _TOOL_HEADER_RE = re.compile(r"^\s*●\s*([A-Za-z][\w-]*)\((.*)\)\s*$")
 _QUESTION_RE = re.compile(r"^\s*(Do you want to .*\?)\s*$", re.MULTILINE)
+_PLAN_QUESTION_RE = re.compile(r"Would you like to proceed\?")
+# The saved-plan path the dialog footer names ("… · ~/.claude/plans/<slug>.md").
+# Used only as a fallback source for the plan body; the canonical body comes from
+# the plan-file Write the transcript normalizer already captured.
+_PLAN_PATH_RE = re.compile(r"(\S*/\.claude/plans/\S+\.md)")
+# Sub-hint line that sits directly below the plan options; bounds the option
+# slice so it is not scanned past the interactive rows.
+_PLAN_FOOTER = "to approve with this feedback"
 # The live composer is a ``❯`` prompt at the start of the line (after any pad).
 # A ``❯`` embedded mid-line is content — a diff-preview row, a quoted glyph, a
 # command — not a prompt, and must not be read as one. A dialog's selected
@@ -108,6 +124,27 @@ class ApprovalDialog:
             if opt.label.lower().startswith("no"):
                 return opt
         return None
+
+
+@dataclass
+class PlanDialog:
+    """The ExitPlanMode "ready to proceed" dialog raised in plan mode."""
+
+    options: list[DialogOption]
+    plan_path: str | None
+
+    @property
+    def approve_option(self) -> DialogOption | None:
+        """The "Yes, manually approve edits" option.
+
+        Mirrors Chat, where approving a plan exits to the pre-plan mode (default)
+        and edits still prompt — i.e. the manual-approve variant, not the
+        "auto mode" one that would silently accept every later edit. Falls back to
+        the first "Yes" option if the manual wording shifts in a future build.
+        """
+        yes = [opt for opt in self.options if opt.label.lower().startswith("yes")]
+        manual = next((opt for opt in yes if "manual" in opt.label.lower()), None)
+        return manual or (yes[0] if yes else None)
 
 
 _COMPOSER_PROMPT = "❯"
@@ -190,6 +227,8 @@ def classify(screen: str) -> PaneScreen:
         region, compact, _APPROVAL_QUESTION_MARKER
     ):
         return PaneScreen.APPROVAL
+    if all(_contains(region, compact, marker) for marker in _PLAN_MARKERS):
+        return PaneScreen.PLAN
     if all(_contains(region, compact, marker) for marker in _QUESTION_MARKERS):
         return PaneScreen.QUESTION
     if _contains(region, compact, _TRUST_MARKER):
@@ -275,6 +314,44 @@ def parse_approval(screen: str) -> ApprovalDialog | None:
         question=question,
         options=options,
     )
+
+
+def parse_plan_dialog(screen: str) -> PlanDialog | None:
+    """Parse the ExitPlanMode dialog, or None if the screen is not one.
+
+    The interactive options follow the "Would you like to proceed?" question; the
+    saved-plan path is named in the footer. Both are scoped to the active region
+    and anchored to the bottom-most question so a plan an agent quoted earlier in
+    the transcript cannot be parsed in its place.
+    """
+    screen = _strip_ansi(screen)
+    if classify(screen) is not PaneScreen.PLAN:
+        return None
+    lines = _active_region(screen.splitlines())
+    question_idx: int | None = None
+    for i, line in enumerate(lines):
+        if _PLAN_QUESTION_RE.search(line):
+            question_idx = i
+    if question_idx is None:
+        return None
+
+    footer_idx = next(
+        (
+            i
+            for i, line in enumerate(lines[question_idx:], question_idx)
+            if _PLAN_FOOTER in line or _PLAN_PATH_RE.search(line)
+        ),
+        len(lines),
+    )
+    options = _parse_options(lines[question_idx + 1 : footer_idx])
+
+    plan_path: str | None = None
+    for line in lines[question_idx:]:
+        match = _PLAN_PATH_RE.search(line)
+        if match is not None:
+            plan_path = match.group(1)
+
+    return PlanDialog(options=options, plan_path=plan_path)
 
 
 # Dialog-body labels Claude renders above the question. These are the reliable

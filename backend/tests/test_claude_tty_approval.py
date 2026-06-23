@@ -132,6 +132,59 @@ async def test_stable_write_dialog_emits_approval_request() -> None:
     assert pending.decline_number == 3
 
 
+async def test_stable_plan_dialog_emits_exit_plan_approval() -> None:
+    plugin = ClaudeTtyPlugin()
+    session = _make_session(permission_mode="plan")
+    runtime = _make_runtime(session, _load("plan_approval.txt"))
+    tailer = _make_tailer(plugin, runtime)
+    # The plan-file Write the normalizer would have captured before the dialog.
+    tailer._normalizer.last_plan_content = "# Plan\n\nAdd hello.py"
+    tailer._normalizer.last_plan_path = "/home/u/.claude/plans/slug.md"
+
+    await tailer._poll_dialog()  # tick 1: debounce
+    runtime._emit_adapter_event.assert_not_called()
+
+    await tailer._poll_dialog()  # tick 2: stable → emit
+    runtime._emit_adapter_event.assert_called_once()
+
+    call = runtime._emit_adapter_event.call_args
+    assert call.args[1] is EventKind.APPROVAL_REQUEST
+    assert call.args[2] == "Approve plan and exit plan mode"
+    meta = call.args[3]
+    assert meta["tool_name"] == "ExitPlanMode"
+    assert meta["tool_input"]["plan"] == "# Plan\n\nAdd hello.py"
+    assert meta["tool_input"]["planFilePath"] == "/home/u/.claude/plans/slug.md"
+    assert meta["method"] == "tty_permission"
+    assert meta["status"] is SessionStatus.WAITING_INPUT
+
+    pending = plugin._pending_approvals["sess-1"]
+    assert pending.tool_name == "ExitPlanMode"
+    assert pending.approve_number == 2  # "Yes, manually approve edits"
+    assert pending.decline_number is None  # decline → Esc keeps plan mode
+    assert pending.is_plan is True
+
+
+async def test_plan_dialog_surfaces_card_even_without_captured_body() -> None:
+    # If the dialog is seen before the plan-file Write is normalized, the card
+    # still surfaces (empty body) rather than hanging the session.
+    plugin = ClaudeTtyPlugin()
+    session = _make_session(permission_mode="plan")
+    runtime = _make_runtime(session, _load("plan_approval.txt"))
+    tailer = _make_tailer(plugin, runtime)
+
+    await tailer._poll_dialog()
+    await tailer._poll_dialog()
+
+    runtime._emit_adapter_event.assert_called_once()
+    meta = runtime._emit_adapter_event.call_args.args[3]
+    assert meta["tool_name"] == "ExitPlanMode"
+    assert meta["tool_input"]["plan"] == ""
+    # Falls back to the path named in the dialog footer.
+    assert meta["tool_input"]["planFilePath"].endswith(
+        "make-a-plan-to-linear-hennessy.md"
+    )
+
+
 async def test_stable_bash_dialog_emits_approval_request() -> None:
     plugin = ClaudeTtyPlugin()
     session = _make_session()
@@ -497,7 +550,7 @@ async def test_reconnect_new_thread_tails_from_start() -> None:
 def _pending(
     approval_id: str = "aid-1",
     tool_name: str = "Write",
-    target: str = "probe_out.txt",
+    target: str | None = "probe_out.txt",
     approve_number: int = 1,
     decline_number: int | None = 3,
 ) -> PendingTtyApproval:
@@ -574,6 +627,54 @@ async def test_respond_decline_no_option_sends_esc() -> None:
     tmux.send_input.assert_not_called()
     tmux.send_bytes.assert_called_once_with("%0", b"\x1b")
     assert "sess-1" not in plugin._pending_approvals
+
+
+def _make_plan_transport(
+    plugin: ClaudeTtyPlugin,
+) -> tuple[ClaudeTtyTransport, MagicMock]:
+    runtime = MagicMock()
+    runtime.tmux = MagicMock()
+    runtime.tmux.send_input = AsyncMock()
+    runtime.tmux.send_bytes = AsyncMock()
+    runtime.update_session_fields = AsyncMock()
+    return ClaudeTtyTransport(runtime, plugin), runtime
+
+
+async def test_respond_approve_plan_presses_manual_digit_and_exits_plan_mode() -> None:
+    plugin = ClaudeTtyPlugin()
+    session = _make_session(permission_mode="plan")
+    pending = _pending(
+        tool_name="ExitPlanMode", target=None, approve_number=2, decline_number=None
+    )
+    pending.is_plan = True
+    plugin._pending_approvals["sess-1"] = pending
+
+    transport, runtime = _make_plan_transport(plugin)
+    result = await transport.respond_to_approval(session, "approve", None)
+
+    assert result is True
+    runtime.tmux.send_input.assert_called_once_with("%0", "2", submit=True)
+    runtime.update_session_fields.assert_awaited_once_with(
+        "sess-1", permission_mode="default"
+    )
+
+
+async def test_respond_decline_plan_sends_esc_and_keeps_plan_mode() -> None:
+    plugin = ClaudeTtyPlugin()
+    session = _make_session(permission_mode="plan")
+    pending = _pending(
+        tool_name="ExitPlanMode", target=None, approve_number=2, decline_number=None
+    )
+    pending.is_plan = True
+    plugin._pending_approvals["sess-1"] = pending
+
+    transport, runtime = _make_plan_transport(plugin)
+    result = await transport.respond_to_approval(session, "decline", None)
+
+    assert result is True
+    runtime.tmux.send_bytes.assert_called_once_with("%0", b"\x1b")
+    runtime.tmux.send_input.assert_not_called()
+    runtime.update_session_fields.assert_not_awaited()
 
 
 async def test_respond_no_pending_returns_false() -> None:

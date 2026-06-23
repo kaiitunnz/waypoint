@@ -15,6 +15,7 @@ from waypoint.backends.claude_tty.pane_dialog import (
     composer_ready,
     parse_approval,
     parse_model_selector,
+    parse_plan_dialog,
     shows_blocking_dialog,
 )
 
@@ -30,6 +31,7 @@ def _load(name: str) -> str:
     [
         ("approval_write.txt", PaneScreen.APPROVAL),
         ("approval_bash.txt", PaneScreen.APPROVAL),
+        ("plan_approval.txt", PaneScreen.PLAN),
         ("question_dialog.txt", PaneScreen.QUESTION),
         ("question_dialog_single.txt", PaneScreen.QUESTION),
         ("question_dialog_notes.txt", PaneScreen.QUESTION),
@@ -49,6 +51,7 @@ def test_classify(fixture: str, expected: PaneScreen) -> None:
     [
         ("approval_write.txt", True),
         ("approval_bash.txt", True),
+        ("plan_approval.txt", True),
         ("question_dialog.txt", True),
         ("trust_dialog.txt", True),
         ("model_selector.txt", True),
@@ -128,6 +131,46 @@ def test_parse_approval_returns_none_for_non_approval() -> None:
     assert parse_approval(_load("ready.txt")) is None
     assert parse_approval(_load("trust_dialog.txt")) is None
     assert parse_approval(_load("model_selector.txt")) is None
+    # The plan dialog is its own screen, not a tool-permission prompt.
+    assert parse_approval(_load("plan_approval.txt")) is None
+
+
+def test_parse_plan_dialog() -> None:
+    dialog = parse_plan_dialog(_load("plan_approval.txt"))
+    assert dialog is not None
+    assert [(o.number, o.label) for o in dialog.options] == [
+        (1, "Yes, and use auto mode"),
+        (2, "Yes, manually approve edits"),
+        (3, "No, refine with Ultraplan on Claude Code on the web"),
+        (4, "Tell Claude what to change"),
+    ]
+    # Approve maps to manual-approve (option 2), mirroring Chat's exit-to-default
+    # — never the "auto mode" option that would silently accept later edits.
+    assert dialog.approve_option is not None
+    assert dialog.approve_option.number == 2
+    assert dialog.plan_path == "~/.claude/plans/make-a-plan-to-linear-hennessy.md"
+
+
+def test_parse_plan_dialog_returns_none_off_screen() -> None:
+    assert parse_plan_dialog(_load("approval_write.txt")) is None
+    assert parse_plan_dialog(_load("ready.txt")) is None
+
+
+def test_plan_markers_quoted_above_live_composer_do_not_classify() -> None:
+    # The plan question quoted in settled transcript, with a live composer below.
+    # The active-region scope drops everything above the composer, so a session
+    # merely discussing a plan dialog is not read as having one open.
+    screen = "\n".join(
+        [
+            "I am ready to execute. Would you like to proceed? (from the docs)",
+            "  ❯ 1. Yes, and use auto mode",
+            "    2. Yes, manually approve edits",
+            "",
+            '❯ Try "edit a file"',
+        ]
+    )
+    assert classify(screen) is PaneScreen.OTHER
+    assert parse_plan_dialog(screen) is None
 
 
 def test_parse_approval_ignores_quoted_question_above_live_dialog() -> None:

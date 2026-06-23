@@ -193,6 +193,83 @@ def test_classify_robust_to_wrapped_footer() -> None:
     assert classify(screen) is PaneScreen.APPROVAL
 
 
+def test_quoted_dialog_markers_above_composer_do_not_block() -> None:
+    # Regression: a session reasoning about this very parser printed the approval
+    # markers into its transcript, then a live composer (with a typed reply) sat
+    # below them. Whole-pane matching read the quoted markers as a live dialog and
+    # refused every send, wedging the session. Detection must scope to the active
+    # region at/below the composer, so quoted markers above it are inert.
+    screen = _load("approval_quoted_in_transcript.txt")
+    assert "Do you want to" in screen and "Esc to cancel · Tab to amend" in screen
+    assert classify(screen) is PaneScreen.OTHER
+    assert shows_blocking_dialog(screen) is False
+    assert parse_approval(screen) is None
+
+
+def test_classify_scopes_to_region_below_live_composer() -> None:
+    # A constructed pane: approval markers quoted in the transcript, then the live
+    # composer below with the user's reply. The composer is the bottom-most prompt,
+    # so the quoted markers are settled transcript and must not classify.
+    screen = "\n".join(
+        [
+            "● Discussing the approval dialog parser:",
+            '  question marker is "Do you want to" and the footer is',
+            "  Esc to cancel · Tab to amend",
+            "────────────────────────────",
+            "❯ yes, go ahead and implement it",
+            "────────────────────────────",
+            "  ? for shortcuts",
+        ]
+    )
+    assert classify(screen) is PaneScreen.OTHER
+    assert shows_blocking_dialog(screen) is False
+
+
+def test_popup_below_slash_command_echo_still_classifies() -> None:
+    # The /model and /effort popups render below the composer's own slash-command
+    # echo (a free-text ❯ line). The active region must extend from that echo
+    # downward so the popup — which is below it — is still detected.
+    assert classify(_load("model_selector.txt")) is PaneScreen.MODEL_SELECTOR
+    assert classify(_load("effort_popup.txt")) is PaneScreen.EFFORT_POPUP
+
+
+def test_real_dialog_below_quoted_marker_still_classifies() -> None:
+    # A quoted marker on a composer-prompt line — and as the bottom-most such line
+    # above a genuine dialog that renders below it — must not suppress detection:
+    # the region runs from that line down and still contains the live dialog.
+    screen = "\n".join(
+        [
+            "● Earlier I explained the footer reads Esc to cancel · Tab to amend",
+            "❯ ok, now actually delete the file",
+            "",
+            " Do you want to delete probe_out.txt?",
+            " ❯ 1. Yes",
+            "   2. No",
+            "",
+            " Esc to cancel · Tab to amend",
+        ]
+    )
+    assert classify(screen) is PaneScreen.APPROVAL
+
+
+def test_glyph_in_dialog_body_does_not_truncate_region() -> None:
+    # Regression: a ❯ rendered *inside* the dialog (a diff-preview row, a command,
+    # an option label quoting the glyph) must not be read as a composer prompt.
+    # Treating a mid-line ❯ as a region boundary would slice the dialog between
+    # its question and footer, dropping a real approval to OTHER — a false
+    # negative that would let a send bulldoze a live prompt.
+    screen = _load("approval_write.txt").replace(
+        " Do you want to create probe_out.txt?",
+        ' Do you want to create probe_out.txt?\n   1 print("❯ prompt")',
+    )
+    assert classify(screen) is PaneScreen.APPROVAL
+    assert shows_blocking_dialog(screen) is True
+    dialog = parse_approval(screen)
+    assert (
+        dialog is not None and dialog.question == "Do you want to create probe_out.txt?"
+    )
+
+
 def test_composer_is_empty_for_bare_prompt() -> None:
     # After a real submit the composer clears to a bare ``❯`` above the footer.
     screen = "\n".join(

@@ -1,0 +1,50 @@
+  [1mopen[0m. The composer is live with text typed in it ([38;5;153m❯ yes, implement the fix[39m, auto mode on). The classifier is matching
+  transcript content, not a real dialog.                                                                               
+                                                                                                                     
+  Specifically, the APPROVAL check requires two markers anywhere on the pane:                                       
+  - [38;5;153m_APPROVAL_QUESTION_MARKER = "Do you want to"[39m                                                                       
+  - [38;5;153m_APPROVAL_FOOTER = "Esc to cancel · Tab to amend"[39m                                                                  
+                                                                                                                       
+  This session's [3mown conversation text[0m happens to quote both strings — it was investigating this very pane-dialog code 
+  and printed the marker constants into its output. The footer is line-wrapped on the pane ([38;5;153m…Esc to cancel · Tab to[39m /   
+  [38;5;153mamend[39m), so the literal match fails — but [38;5;153mclassify()[39m also matches a [1mwhitespace-stripped "compact" form[0m                
+  ([38;5;153mpane_dialog.py:71-72[39m), and [38;5;153mEsctocancel·Tabtoamend[39m [3mis[0m present once wraps are collapsed. Both markers match → [38;5;153mAPPROVAL
+[39m  → blocking → send refused.                                                                                           
+                                                                                                                       
+  question marker literal:        True                                                                                 
+  footer literal in screen:       False                                                                                
+  footer compact in compact:      True   ← the wrap-collapsing match                                                   
+                                                                                                                       
+  [1mThe underlying flaw[0m                                                                                                  
+                                                                                                                       
+  [38;5;153mclassify()[39m scans the [1mentire pane[0m, including scrollback/transcript, with substring matching. Any dialog-signature    
+  string that appears in conversation content (an agent quoting these constants, pasting a captured dialog, discussing  
+  the markers) is indistinguishable from a live dialog. The [38;5;153m_compact[39m whitespace-stripping widens the false-positive    
+  surface further by matching strings that span line wraps in the transcript.                                          
+                                                                                                                       
+  This is an edge case here (a session reasoning about its own dialog parser), but the same class of failure hits any  
+  session that pastes or discusses an approval/trust/question dialog's text.                                            
+                                                                                                                       
+  [1mFixes (in order of robustness)[0m                                                                                      
+                                                                                                                      
+  1. [1mAnchor detection to the live dialog region, not the whole pane.[0m A real dialog/composer is always the bottom-most   
+  block. Restrict marker matching to the last N lines below the final [38;5;153m❯[39m prompt, or require the footer to be on (or near)
+  the bottom of the pane — a quoted marker buried mid-transcript then can't trigger it.                                
+  2. [1mRequire markers to be co-located[0m, e.g. the question and footer within a small line window of each other, rather   
+  than anywhere on screen.                                                                                             
+  3. [1mDrop or tighten the [38;5;153m_compact[39m cross-line match[0m for the footer so a marker split across a wrap in transcript text    
+  doesn't match — at minimum don't let compact-matching bridge unrelated lines.                                         
+                                                                                                                       
+  The right fix is #1 — scope [38;5;153mclassify()[39m to the active (bottom) region of the pane. Want me to implement it? It needs a
+  captured fixture of this exact pane plus classifier tests so the regression is pinned.                                
+                                                                                                                     
+  Note: pane [38;5;153m%272[39m is itself a Waypoint session that was independently investigating a [3mdifferent but adjacent[0m bug (the   
+  plan-mode [38;5;153m"Would you like to proceed?"[39m dialog not being recognized — the inverse false-negative). That's a separate   
+  issue from this send-blocking false-positive.                                                                         
+
+[38;5;246m✻[39m [38;5;246mCogitated for 2m 20s[39m                                                                                                  
+
+[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m❯ [2mimplement the fix with a captured fixture and tests
+[0m[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m  [38;5;220m⏵⏵ auto mode on[38;5;246m (shift+tab to cycle) · ← for agents[39m                   

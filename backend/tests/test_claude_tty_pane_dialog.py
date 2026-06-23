@@ -130,6 +130,50 @@ def test_parse_approval_returns_none_for_non_approval() -> None:
     assert parse_approval(_load("model_selector.txt")) is None
 
 
+def test_parse_approval_ignores_quoted_question_above_live_dialog() -> None:
+    # A "Do you want to …?" quoted at line-start in the transcript, above a real
+    # approval. classify() is region-scoped, so the screen is APPROVAL; the parser
+    # must return the live dialog's question (the bottom-most), not the quote.
+    screen = "\n".join(
+        [
+            "Do you want to delete the_old_file.txt?",
+            "",
+            " Create file",
+            "   probe_out.txt",
+            " Do you want to create probe_out.txt?",
+            " ❯ 1. Yes",
+            "   2. No",
+            " Esc to cancel · Tab to amend",
+        ]
+    )
+    dialog = parse_approval(screen)
+    assert dialog is not None
+    assert dialog.question == "Do you want to create probe_out.txt?"
+    assert (dialog.tool_name, dialog.target) == ("Write", "probe_out.txt")
+
+
+def test_parse_model_selector_ignores_quoted_options_above_live_popup() -> None:
+    # A quoted "Select model" + option above the live /model popup must not pull
+    # spurious rows into the parse; anchor to the bottom-most "Select model".
+    screen = "\n".join(
+        [
+            "Select model",
+            "  ❯ 1. Fake Quoted Model    bogus",
+            "❯ /model",
+            "  Select model",
+            "  ❯ 1. Default (recommended) real",
+            "    2. Sonnet                real",
+            "  Enter to set as default · Esc to cancel",
+        ]
+    )
+    options = parse_model_selector(screen)
+    assert options is not None
+    assert [o.label for o in options] == [
+        "Default (recommended) real",
+        "Sonnet                real",
+    ]
+
+
 def test_parse_model_selector() -> None:
     options = parse_model_selector(_load("model_selector.txt"))
     assert options is not None
@@ -258,9 +302,12 @@ def test_glyph_in_dialog_body_does_not_truncate_region() -> None:
     # Treating a mid-line ❯ as a region boundary would slice the dialog between
     # its question and footer, dropping a real approval to OTHER — a false
     # negative that would let a send bulldoze a live prompt.
+    # The glyph is injected *below* the option rows so it would be the bottom-most
+    # ❯ under a naive "any ❯ is the composer" rule, slicing off the question above
+    # — the test fails without the leading-prompt anchor.
     screen = _load("approval_write.txt").replace(
-        " Do you want to create probe_out.txt?",
-        ' Do you want to create probe_out.txt?\n   1 print("❯ prompt")',
+        "   3. No",
+        '   3. No\n   1 print("❯ prompt")',
     )
     assert classify(screen) is PaneScreen.APPROVAL
     assert shows_blocking_dialog(screen) is True

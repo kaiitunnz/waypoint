@@ -134,21 +134,12 @@ def _is_composer_line(line: str) -> bool:
 
 
 def _active_region(lines: list[str]) -> list[str]:
-    """The bottom-most interactive block of the pane — a live dialog or composer.
+    """The pane text at and below the bottom-most live composer prompt.
 
-    A modal dialog is always the lowest block on screen: it either replaces the
-    composer (approval/question/trust — no free-text prompt remains, so the whole
-    pane is its region), or renders as a popup just below the composer's
-    slash-command echo (``/model``, ``/effort`` — the popup lives below the
-    bottom-most composer line). Either way, scoping to the text at and below the
-    bottom-most composer line drops settled transcript above it. That is what
-    stops a dialog-signature string an agent merely quoted, discussed, or pasted
-    into the conversation from reading as a live dialog: the live composer sits
-    below such text, so the quoted markers fall outside the region. A real
-    dialog's interactive rows are options (``❯ 1.``), not a leading free-text
-    prompt, and no composer is drawn below or inside it — so the boundary only
-    ever lands at the dialog's own slash-command echo (or above the dialog) and
-    never slices an actual dialog between its question and footer.
+    Settled transcript sits above the live composer, so scoping here drops a
+    dialog-signature string an agent merely quoted or pasted into the
+    conversation. A real dialog's interactive rows are options (``❯ 1.``), never
+    a leading free-text prompt, so the boundary never slices an actual dialog.
     """
     last_composer = next(
         (i for i in range(len(lines) - 1, -1, -1) if _is_composer_line(lines[i])),
@@ -251,14 +242,16 @@ def parse_approval(screen: str) -> ApprovalDialog | None:
     screen = _strip_ansi(screen)
     if classify(screen) is not PaneScreen.APPROVAL:
         return None
-    lines = screen.splitlines()
+    # Scope to the active region and take the bottom-most question: the live
+    # dialog is the lowest block, so a "Do you want to …?" an agent quoted higher
+    # in the transcript must not be parsed in place of the real prompt.
+    lines = _active_region(screen.splitlines())
     question_idx: int | None = None
     question = ""
     for i, line in enumerate(lines):
         match = _QUESTION_RE.match(line)
         if match is not None:
             question_idx, question = i, match.group(1)
-            break
     if question_idx is None:
         return None
 
@@ -338,7 +331,14 @@ def parse_model_selector(screen: str) -> list[DialogOption] | None:
     screen = _strip_ansi(screen)
     if classify(screen) is not PaneScreen.MODEL_SELECTOR:
         return None
-    lines = screen.splitlines()
-    start = next((i for i, line in enumerate(lines) if "Select model" in line), 0)
-    end = next((i for i, line in enumerate(lines) if _MODEL_FOOTER in line), len(lines))
+    # Scope to the active region and anchor to the bottom-most "Select model" so
+    # the live popup's options win over any the transcript quoted above it.
+    lines = _active_region(screen.splitlines())
+    start = next(
+        (i for i in range(len(lines) - 1, -1, -1) if "Select model" in lines[i]), 0
+    )
+    end = next(
+        (i for i, line in enumerate(lines[start:], start) if _MODEL_FOOTER in line),
+        len(lines),
+    )
     return _parse_options(lines[start:end])

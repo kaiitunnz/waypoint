@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import mimetypes
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -58,6 +59,13 @@ from waypoint.settings import Settings, load_settings
 from waypoint.storage import Storage
 from waypoint.tailnet import fetch_snapshot
 from waypoint.usage_dashboard import build_dashboard
+from waypoint.workspace_preview import (
+    WorkspacePathError,
+    is_denied,
+    list_dir,
+    read_text_capped,
+    resolve_in_base,
+)
 
 log = logging.getLogger("waypoint.api")
 
@@ -381,6 +389,126 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             filename=spec.filename,
             content_disposition_type="inline",
         )
+
+    @app.get("/api/sessions/{session_id}/workspace/tree")
+    async def workspace_tree(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+        path: Annotated[str, Query()] = "",
+    ) -> Any:
+        if not context.settings.workspace_preview_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="disabled"
+            )
+        session = context.runtime.get_session(session_id)
+        if session.launch_target_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="workspace preview unavailable for remote sessions",
+            )
+        base = Path(session.worktree_path or session.cwd)
+        try:
+            entries, truncated, overflow = list_dir(
+                base,
+                path,
+                500,
+                denylist=context.settings.workspace_denylist,
+                follow_symlinks=context.settings.workspace_follow_symlinks,
+            )
+            normalized_path = _workspace_rel(base, path)
+        except WorkspacePathError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="workspace path denied"
+            ) from exc
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="workspace path not found"
+            ) from exc
+        return {
+            "root": {"cwd": session.cwd, "worktree_path": session.worktree_path},
+            "path": normalized_path,
+            "entries": entries,
+            "truncated": truncated,
+            "overflow": overflow,
+        }
+
+    @app.get("/api/sessions/{session_id}/workspace/file")
+    async def workspace_file(
+        session_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+        path: Annotated[str, Query()] = "",
+        raw: Annotated[bool, Query()] = False,
+        token: Annotated[str, Query()] = "",
+    ) -> Any:
+        if raw:
+            # ``<img>`` tags cannot send an Authorization header.
+            if not context.tokens.validate(token):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token"
+                )
+        else:
+            require_token(authorization, context.tokens)
+        if not context.settings.workspace_preview_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="disabled"
+            )
+        session = context.runtime.get_session(session_id)
+        if session.launch_target_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="workspace preview unavailable for remote sessions",
+            )
+        base = Path(session.worktree_path or session.cwd)
+        try:
+            resolved = resolve_in_base(
+                base,
+                path,
+                follow_symlinks=context.settings.workspace_follow_symlinks,
+            )
+            if is_denied(path, context.settings.workspace_denylist):
+                raise WorkspacePathError("path is denied")
+            if not resolved.exists() or not resolved.is_file():
+                raise FileNotFoundError(resolved)
+            normalized_path = _workspace_rel(base, path)
+            if raw:
+                media_type = (
+                    mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+                )
+                return FileResponse(
+                    resolved,
+                    media_type=media_type,
+                    filename=resolved.name,
+                    content_disposition_type="inline",
+                )
+            content, truncated, binary, encoding = read_text_capped(
+                resolved, context.settings.workspace_max_file_bytes
+            )
+        except WorkspacePathError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="workspace path denied"
+            ) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="workspace path not found"
+            ) from exc
+        return {
+            "path": normalized_path,
+            "size": resolved.stat().st_size,
+            "mtime": resolved.stat().st_mtime,
+            "encoding": encoding,
+            "truncated": truncated,
+            "binary": binary,
+            "content": content,
+        }
+
+    def _workspace_rel(base: Path, rel: str) -> str:
+        resolved = resolve_in_base(
+            base,
+            rel,
+            follow_symlinks=context.settings.workspace_follow_symlinks,
+        )
+        relative = resolved.relative_to(base.expanduser().resolve())
+        return "" if relative == Path(".") else relative.as_posix()
 
     @app.delete("/api/sessions/{session_id}/attachments/{attachment_id}")
     async def delete_attachment(

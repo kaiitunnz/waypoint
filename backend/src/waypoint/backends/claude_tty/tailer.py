@@ -26,7 +26,7 @@ from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty._state import PendingTtyApproval, PendingTtyQuestion
 from waypoint.backends.claude_tty.normalize import TranscriptNormalizer
 from waypoint.backends.tmux.adapter import TmuxError
-from waypoint.schemas import EventKind, SessionStatus
+from waypoint.schemas import EventKind, SessionRecord, SessionStatus
 
 if TYPE_CHECKING:
     from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
@@ -242,7 +242,7 @@ class TranscriptTailer:
             return
 
         if screen_type is pane_dialog.PaneScreen.PLAN:
-            await self._surface_plan_dialog(snapshot)
+            await self._surface_plan_dialog(session, snapshot)
             return
 
         if screen_type is not pane_dialog.PaneScreen.APPROVAL:
@@ -319,18 +319,27 @@ class TranscriptTailer:
             SessionStatus.WAITING_INPUT,
         )
 
-    async def _surface_plan_dialog(self, snapshot: str) -> None:
+    async def _surface_plan_dialog(self, session: SessionRecord, snapshot: str) -> None:
         """Surface the ExitPlanMode dialog as the same approval card Chat shows.
 
         The dialog is the plan-mode analogue of a tool-permission prompt: the
         binary withholds the ExitPlanMode tool_use from the transcript while the
         dialog blocks, so it is read off the pane. The plan body comes from the
         plan-file Write the normalizer already captured, matching the Chat card's
-        ``tool_input.plan``. Approve presses the manual-approve option; decline
-        falls through to Esc (``decline_number=None``), which keeps plan mode.
+        ``tool_input.plan``. Decline falls through to Esc (``decline_number=None``),
+        which keeps plan mode.
+
+        Approve presses the option that restores the pre-plan mode, the way Chat
+        does — but only as far as the dialog can express it: the auto option exits
+        to ``auto`` and the manual option to ``default``. A pre-plan ``auto`` is
+        restored when that option is present; everything else (including
+        ``acceptEdits``/``bypassPermissions``/``dontAsk``, which no option maps to,
+        and a launched-in-plan session with no recorded prior mode) falls back to
+        the manual option → ``default``, which never widens permissions.
         """
         dialog = pane_dialog.parse_plan_dialog(snapshot)
-        if dialog is None or dialog.approve_option is None:
+        manual_option = dialog.manual_option if dialog is not None else None
+        if dialog is None or manual_option is None:
             self._prev_dialog_sig = None
             self._dialog_stable_count = 0
             return
@@ -346,6 +355,13 @@ class TranscriptTailer:
         if sig == self._surfaced_sig:
             return
 
+        pre_plan = session.transport_state.get("pre_plan_mode")
+        target_mode = pre_plan if isinstance(pre_plan, str) and pre_plan else "default"
+        if target_mode == "auto" and dialog.auto_option is not None:
+            approve_option, restore_mode = dialog.auto_option, "auto"
+        else:
+            approve_option, restore_mode = manual_option, "default"
+
         plan_path = self._normalizer.last_plan_path or dialog.plan_path
         tool_input: dict[str, Any] = {"plan": self._normalizer.last_plan_content or ""}
         if plan_path:
@@ -356,10 +372,11 @@ class TranscriptTailer:
             approval_id=approval_id,
             tool_name="ExitPlanMode",
             target=plan_path,
-            approve_number=dialog.approve_option.number,
+            approve_number=approve_option.number,
             decline_number=None,
             signature=sig,
             is_plan=True,
+            restore_mode=restore_mode,
         )
         self._surfaced_sig = sig
 

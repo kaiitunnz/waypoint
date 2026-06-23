@@ -68,8 +68,10 @@ _TOOL_HEADER_RE = re.compile(r"^\s*●\s*([A-Za-z][\w-]*)\((.*)\)\s*$")
 _QUESTION_RE = re.compile(r"^\s*(Do you want to .*\?)\s*$", re.MULTILINE)
 _PLAN_QUESTION_RE = re.compile(r"Would you like to proceed\?")
 # The saved-plan path the dialog footer names ("… · ~/.claude/plans/<slug>.md").
-# Used only as a fallback source for the plan body; the canonical body comes from
-# the plan-file Write the transcript normalizer already captured.
+# Only a fallback for the ``planFilePath`` echoed on the approval card; the
+# canonical (absolute) path and body come from the plan-file Write the transcript
+# normalizer captured. The footer renders it tilde-unexpanded, so this yields
+# the literal "~/…" form — display/echo only, not a path to open on disk.
 _PLAN_PATH_RE = re.compile(r"(\S*/\.claude/plans/\S+\.md)")
 # Sub-hint line that sits directly below the plan options; bounds the option
 # slice so it is not scanned past the interactive rows.
@@ -128,23 +130,35 @@ class ApprovalDialog:
 
 @dataclass
 class PlanDialog:
-    """The ExitPlanMode "ready to proceed" dialog raised in plan mode."""
+    """The ExitPlanMode "ready to proceed" dialog raised in plan mode.
+
+    The accept options vary by Claude subscription plan, so they are selected by
+    label, never by position: ``manual_option`` exits to ``default`` (edits still
+    prompt) and ``auto_option`` exits to the ``auto`` permission mode. The auto
+    option is absent on some plans, hence optional.
+    """
 
     options: list[DialogOption]
     plan_path: str | None
 
     @property
-    def approve_option(self) -> DialogOption | None:
-        """The "Yes, manually approve edits" option.
-
-        Mirrors Chat, where approving a plan exits to the pre-plan mode (default)
-        and edits still prompt — i.e. the manual-approve variant, not the
-        "auto mode" one that would silently accept every later edit. Falls back to
-        the first "Yes" option if the manual wording shifts in a future build.
-        """
+    def manual_option(self) -> DialogOption | None:
+        """The "Yes, manually approve edits" option → exits to ``default``."""
         yes = [opt for opt in self.options if opt.label.lower().startswith("yes")]
         manual = next((opt for opt in yes if "manual" in opt.label.lower()), None)
         return manual or (yes[0] if yes else None)
+
+    @property
+    def auto_option(self) -> DialogOption | None:
+        """The "Yes, and use auto mode" option → exits to ``auto`` (may be absent)."""
+        return next(
+            (
+                opt
+                for opt in self.options
+                if opt.label.lower().startswith("yes") and "auto" in opt.label.lower()
+            ),
+            None,
+        )
 
 
 _COMPOSER_PROMPT = "❯"
@@ -335,11 +349,15 @@ def parse_plan_dialog(screen: str) -> PlanDialog | None:
     if question_idx is None:
         return None
 
+    # Bound the option slice on the sub-hint that sits directly below the
+    # options, not on the plan-path line: the path is collected in its own pass
+    # below, and keying the bound on it would slice the options away if a future
+    # build rendered the path above them.
     footer_idx = next(
         (
             i
             for i, line in enumerate(lines[question_idx:], question_idx)
-            if _PLAN_FOOTER in line or _PLAN_PATH_RE.search(line)
+            if _PLAN_FOOTER in line
         ),
         len(lines),
     )

@@ -144,11 +144,28 @@ def test_parse_plan_dialog() -> None:
         (3, "No, refine with Ultraplan on Claude Code on the web"),
         (4, "Tell Claude what to change"),
     ]
-    # Approve maps to manual-approve (option 2), mirroring Chat's exit-to-default
-    # — never the "auto mode" option that would silently accept later edits.
-    assert dialog.approve_option is not None
-    assert dialog.approve_option.number == 2
+    # Options are selected by label, not position: manual exits to default,
+    # auto exits to the "auto" permission mode.
+    assert dialog.manual_option is not None and dialog.manual_option.number == 2
+    assert dialog.auto_option is not None and dialog.auto_option.number == 1
     assert dialog.plan_path == "~/.claude/plans/make-a-plan-to-linear-hennessy.md"
+
+
+def test_plan_dialog_options_selected_by_label_not_position() -> None:
+    # A plan whose subscription omits the "auto mode" option: manual must still
+    # resolve (by label, here at position 1) and auto must be absent.
+    screen = "\n".join(
+        [
+            "Claude is ready to execute. Would you like to proceed?",
+            "  ❯ 1. Yes, manually approve edits",
+            "    2. No, keep planning",
+            "       shift+tab to approve with this feedback",
+        ]
+    )
+    dialog = parse_plan_dialog(screen)
+    assert dialog is not None
+    assert dialog.auto_option is None
+    assert dialog.manual_option is not None and dialog.manual_option.number == 1
 
 
 def test_parse_plan_dialog_returns_none_off_screen() -> None:

@@ -2732,6 +2732,11 @@ html[data-theme="light"] .transcript.codex.tool_pair {
   overflow-wrap: anywhere;
 }
 
+.todo-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .todo-detail {
   min-width: 0;
   font-size: 0.85em;

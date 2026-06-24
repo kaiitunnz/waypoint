@@ -42,7 +42,8 @@ Types: feat, fix, docs, refactor, perf, test, build, ci, chore
 <details>
 <summary>Pre-submission Checklist</summary>
 
-- [ ] I have read the contribution guidelines in `AGENTS.md`.
+- [ ] I have read the contribution guidelines in `CONTRIBUTING.md`.
+- [ ] My PR title is a Conventional Commit and all my commits are signed off (`git commit -s`).
 - [ ] I have run `cd backend && uv run pre-commit run --all-files` and fixed any issues.
 - [ ] I have added or updated tests covering my changes (if applicable).
 - [ ] I have verified the relevant suites pass locally (`cd backend && uv run pytest`, and `cd waypointctl && uv run pytest` if I touched `waypointctl`).

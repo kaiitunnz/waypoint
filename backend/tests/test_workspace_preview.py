@@ -18,7 +18,7 @@ def test_list_dir_orders_dirs_first_and_skips_denied(tmp_path: Path) -> None:
     (tmp_path / "zeta.txt").write_text("z", encoding="utf-8")
     (tmp_path / "alpha").mkdir()
     (tmp_path / "beta.txt").write_text("b", encoding="utf-8")
-    (tmp_path / ".env").write_text("secret", encoding="utf-8")
+    (tmp_path / ".git").mkdir()  # denied by the default denylist
 
     entries, truncated, overflow, resolved_dir = list_dir(
         tmp_path,
@@ -64,8 +64,19 @@ def test_resolve_in_base_rejects_symlink_escape(tmp_path: Path) -> None:
 
 
 def test_denied_dotfile_and_custom_glob(tmp_path: Path) -> None:
-    assert is_denied(".ssh/config", ["*.pem"])
+    # The default denylist hides .git and .ssh but leaves other dotfiles
+    # (e.g. .env) previewable.
+    assert is_denied(".git/config")
+    assert is_denied("nested/.ssh/id_rsa")
+    assert not is_denied(".env")
+    assert not is_denied("nested/.env")
+    # Custom globs match case-insensitively; ".*" hides every dotfile.
     assert is_denied("certs/private.pem", ["*.pem"])
+    assert is_denied("certs/PRIVATE.PEM", ["*.pem"])
+    assert is_denied(".env", [".*"])
+    # An explicit empty denylist disables all filtering.
+    assert not is_denied(".git/config", [])
+    assert not is_denied(".env", [])
 
     (tmp_path / "visible.txt").write_text("ok", encoding="utf-8")
     (tmp_path / "private.pem").write_text("secret", encoding="utf-8")

@@ -3,7 +3,11 @@ import os
 from pathlib import Path
 from typing import Literal, TypedDict
 
-DEFAULT_WORKSPACE_DENYLIST = [".git", ".claude", ".env", ".ssh"]
+# The denylist is the single filter knob. By default only VCS internals and
+# SSH key material are hidden; ordinary dotfiles (.env, .gitignore, …) preview
+# fine. Add globs like ".*" to hide all dotfiles, or set the denylist to an
+# explicit empty list to disable filtering entirely.
+DEFAULT_WORKSPACE_DENYLIST = [".git", ".ssh"]
 
 WorkspaceEntryKind = Literal["file", "dir", "symlink"]
 
@@ -36,15 +40,18 @@ def is_denied(
     name_or_path: str | Path,
     denylist: list[str] | None = None,
 ) -> bool:
-    deny_patterns = denylist or DEFAULT_WORKSPACE_DENYLIST
+    patterns = DEFAULT_WORKSPACE_DENYLIST if denylist is None else denylist
+    deny_patterns = [pattern.lower() for pattern in patterns]
+    if not deny_patterns:
+        return False
     path = Path(name_or_path)
     parts = [part for part in path.parts if part not in {"", "."}]
+    if not parts:
+        return False
     for part in parts:
-        if part.startswith("."):
+        if any(fnmatch.fnmatch(part.lower(), pattern) for pattern in deny_patterns):
             return True
-        if any(fnmatch.fnmatch(part, pattern) for pattern in deny_patterns):
-            return True
-    normalized = path.as_posix()
+    normalized = path.as_posix().lower()
     return any(fnmatch.fnmatch(normalized, pattern) for pattern in deny_patterns)
 
 

@@ -13,6 +13,20 @@ cors_origins: []
                           # tool_call+tool_result pair) into one unit so
                           # a page of N reliably surfaces N bubbles.
 
+# Workspace file preview (the file explorer in the chat window). Reads files
+# under each *local* session's working dir; remote (SSH) sessions are excluded.
+# workspace_preview_enabled: true
+# workspace_denylist:            # globs hidden from the tree/preview, matched
+#   - .git                       #   per path component, case-insensitively.
+#   - .ssh                       # Default hides VCS internals and SSH keys only,
+#                                #   so ordinary dotfiles like .env preview. Use
+#                                #   [".*"] to hide all dotfiles, or [] to disable
+#                                #   filtering entirely. Env: WAYPOINT_WORKSPACE_DENYLIST
+#                                #   (comma-separated).
+# workspace_max_file_bytes: 200000   # larger files preview as a placeholder
+# workspace_follow_symlinks: false   # if true, allow paths through symlinks that
+#                                    #   still resolve inside the working dir
+
 # Per-plugin config blocks keyed by plugin id. Each block is validated
 # against the plugin's `config_schema` (see `backends/<id>/plugin.py`).
 # Keys here must match a registered plugin; unknown ids fail

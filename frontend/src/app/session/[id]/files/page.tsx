@@ -33,9 +33,12 @@ export default function SessionFilesPage() {
     setHost(h);
     setToken(t);
 
+    let cancelled = false;
     if (h && t && id) {
       fetchSession(h, t, id)
-        .then((s) => setSession(s))
+        .then((s) => {
+          if (!cancelled) setSession(s);
+        })
         .catch(() => {
           // Title is decorative here; ignore failures.
         });
@@ -45,6 +48,7 @@ export default function SessionFilesPage() {
     if (rawPath && h && t && id) {
       resolveWorkspacePath(h, t, id, rawPath)
         .then((resolved) => {
+          if (cancelled) return;
           if (resolved.kind === "file") {
             setInitialPath(resolved.path);
           } else {
@@ -55,6 +59,9 @@ export default function SessionFilesPage() {
           // If resolve fails, open without a seeded path.
         });
     }
+    return () => {
+      cancelled = true;
+    };
   }, [params, searchParams]);
 
   // Match the session page's tab-title format (`<backend> · <title>`), with a

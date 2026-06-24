@@ -112,6 +112,9 @@ export function WorkspaceFilesPanel({
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize files panel"
+        aria-valuenow={Math.round(width)}
+        aria-valuemin={300}
+        aria-valuemax={Math.round(window.innerWidth * 0.6)}
         tabIndex={0}
         onPointerDown={startResize}
         onKeyDown={onResizeKey}

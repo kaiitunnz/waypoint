@@ -139,7 +139,9 @@ export function WorkspaceExplorer({
       setMobileView("tree");
     } else {
       // No specific target (e.g. "Browse workspace"): keep the preserved open
-      // file and tree expansion; just surface the tree pane.
+      // file and tree expansion, but clear any stale directory reveal so the
+      // tree doesn't re-expand/scroll to a previously-clicked directory.
+      setRevealDir(null);
       setMobileView("tree");
     }
     // revealSeq is the retrigger knob: it bumps on every open request so an

@@ -1,10 +1,11 @@
 "use client";
 
-import { type CSSProperties, useState } from "react";
+import { type CSSProperties, Fragment, useEffect, useMemo, useState } from "react";
 
 import { formatBytes } from "@/components/AttachmentTray";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import type { WorkspaceFile } from "@/lib/api";
+import { highlightToLines, type HighlightToken } from "@/lib/highlight";
 
 const IMAGE_EXTS = new Set([
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
@@ -140,7 +141,26 @@ function FileCodeView({
   softWrap: boolean;
   setSoftWrap: (v: boolean) => void;
 }) {
-  const lines = content.split("\n");
+  // Render raw lines synchronously, then upgrade to highlighted token lines once
+  // the lazy highlighter resolves. Each "line" is an array of tokens; a raw line
+  // is a single classless token (empty array for a blank line).
+  const plain = useMemo<HighlightToken[][]>(
+    () => content.split("\n").map((line) => (line ? [{ text: line, className: "" }] : [])),
+    [content],
+  );
+  const [lines, setLines] = useState<HighlightToken[][]>(plain);
+
+  useEffect(() => {
+    setLines(plain);
+    let cancelled = false;
+    void highlightToLines(content, path).then((highlighted) => {
+      if (!cancelled && highlighted) setLines(highlighted);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [content, path, plain]);
+
   const lnw = `${String(lines.length).length}ch`;
   return (
     <div className="wp-code-wrap">
@@ -160,10 +180,22 @@ function FileCodeView({
         style={{ "--lnw": lnw } as CSSProperties}
         aria-label={`Contents of ${path}`}
       >
-        {lines.map((line, idx) => (
+        {lines.map((tokens, idx) => (
           <span key={idx} className="wp-code-line">
             <span className="wp-line-num">{idx + 1}</span>
-            <span className="wp-line-text">{line || " "}</span>
+            <span className="wp-line-text">
+              {tokens.length === 0
+                ? " "
+                : tokens.map((token, i) =>
+                    token.className ? (
+                      <span key={i} className={token.className}>
+                        {token.text}
+                      </span>
+                    ) : (
+                      <Fragment key={i}>{token.text}</Fragment>
+                    ),
+                  )}
+            </span>
           </span>
         ))}
       </pre>

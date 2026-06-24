@@ -31,6 +31,7 @@ interface WorkspaceTreeProps {
   selectedPath: string | null;
   revealPath?: string | null;
   revealSeq?: number;
+  refreshSeq?: number;
   onSelectFile: (path: string) => void;
   onRootLoaded?: (root: WorkspaceTreePage["root"]) => void;
 }
@@ -42,6 +43,7 @@ export function WorkspaceTree({
   selectedPath,
   revealPath,
   revealSeq,
+  refreshSeq,
   onSelectFile,
   onRootLoaded,
 }: WorkspaceTreeProps) {
@@ -65,7 +67,15 @@ export function WorkspaceTree({
     async (dirPath: string) => {
       setDirCache((prev) => {
         const next = new Map(prev);
-        next.set(dirPath, { entries: [], overflow: null, loading: true, error: null });
+        // Preserve any already-loaded entries while reloading so a refresh
+        // updates in place instead of blanking the tree to "Loading…".
+        const existing = prev.get(dirPath);
+        next.set(dirPath, {
+          entries: existing?.entries ?? [],
+          overflow: existing?.overflow ?? null,
+          loading: true,
+          error: null,
+        });
         return next;
       });
       try {
@@ -136,6 +146,15 @@ export function WorkspaceTree({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealPath, revealSeq]);
 
+  // Refresh: re-fetch every currently-expanded directory (root included),
+  // preserving the expansion set and selection. Skipped on first mount
+  // (refreshSeq starts undefined/0) so it only fires on an explicit bump.
+  useEffect(() => {
+    if (!refreshSeq) return;
+    for (const dir of expanded) void fetchDir(dir);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshSeq]);
+
   const toggleDir = useCallback(
     (dirPath: string) => {
       setActiveReveal(null);
@@ -156,7 +175,7 @@ export function WorkspaceTree({
   );
 
   const rootState = dirCache.get("");
-  if (!rootState || rootState.loading) {
+  if (!rootState || (rootState.loading && rootState.entries.length === 0)) {
     return <div className="wp-tree-loading">Loading…</div>;
   }
   if (rootState.error) {
@@ -256,21 +275,7 @@ function TreeNode({
       </button>
       {isDir && isExpanded ? (
         <ul role="group">
-          {dirState?.loading ? (
-            <li
-              className="wp-tree-loading-child"
-              style={{ "--depth": depth + 1 } as CSSProperties}
-            >
-              Loading…
-            </li>
-          ) : dirState?.error ? (
-            <li
-              className="wp-tree-error-child"
-              style={{ "--depth": depth + 1 } as CSSProperties}
-            >
-              {dirState.error}
-            </li>
-          ) : dirState ? (
+          {dirState && dirState.entries.length > 0 ? (
             <>
               {dirState.entries.map((child) => (
                 <TreeNode
@@ -296,6 +301,20 @@ function TreeNode({
                 </li>
               ) : null}
             </>
+          ) : dirState?.loading ? (
+            <li
+              className="wp-tree-loading-child"
+              style={{ "--depth": depth + 1 } as CSSProperties}
+            >
+              Loading…
+            </li>
+          ) : dirState?.error ? (
+            <li
+              className="wp-tree-error-child"
+              style={{ "--depth": depth + 1 } as CSSProperties}
+            >
+              {dirState.error}
+            </li>
           ) : null}
         </ul>
       ) : null}

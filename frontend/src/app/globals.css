@@ -11727,6 +11727,60 @@ html[data-theme="light"] .wp-panel-modal {
   text-overflow: ellipsis;
 }
 
+.wp-tree-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.wp-tree-toolbar-label {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.wp-tree-toolbar .wp-refresh-btn {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-pill);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.wp-tree-toolbar .wp-refresh-btn:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.wp-refresh-icon {
+  display: inline-block;
+  font-size: 0.92rem;
+  line-height: 1;
+}
+
+.wp-refresh-btn.spinning .wp-refresh-icon {
+  animation: wp-spin 0.6s linear infinite;
+}
+
+@keyframes wp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .wp-tree-scroll {
   flex: 1;
   min-height: 0;
@@ -12122,6 +12176,108 @@ html[data-theme="light"] .wp-code-toolbar {
 .wp-code-pre.soft-wrap .wp-line-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* ─── Syntax highlighting (file preview) ─── */
+/* highlight.js token classes, recolored to the app's warm-gold / cool-blue
+   palette rather than a stock theme. Tokens are scoped to .wp-code-pre so the
+   highlighter never bleeds into the transcript. */
+.wp-code-pre {
+  --hl-comment: #6f7a8c;
+  --hl-keyword: #cf98b1;
+  --hl-string: #9cc7a6;
+  --hl-number: #d9a86a;
+  --hl-function: #8fb3d6;
+  --hl-type: #7fbac0;
+  --hl-attr: #bca7d4;
+  --hl-variable: #d7dde6;
+  --hl-meta: #7f8a9c;
+  --hl-symbol: #8fb3d6;
+  --hl-punct: #97a2b3;
+}
+
+html[data-theme="light"] .wp-code-pre {
+  --hl-comment: #857a66;
+  --hl-keyword: #9c3f6e;
+  --hl-string: #2f7d4f;
+  --hl-number: #8a5410;
+  --hl-function: #2f6f9e;
+  --hl-type: #1f7a82;
+  --hl-attr: #6b4fa0;
+  --hl-variable: #2a261f;
+  --hl-meta: #7a6e59;
+  --hl-symbol: #2f6f9e;
+  --hl-punct: #6e6356;
+}
+
+.wp-code-pre .hljs-comment,
+.wp-code-pre .hljs-quote {
+  color: var(--hl-comment);
+  font-style: italic;
+}
+.wp-code-pre .hljs-keyword,
+.wp-code-pre .hljs-selector-tag,
+.wp-code-pre .hljs-subst {
+  color: var(--hl-keyword);
+}
+.wp-code-pre .hljs-string,
+.wp-code-pre .hljs-regexp,
+.wp-code-pre .hljs-meta .hljs-string {
+  color: var(--hl-string);
+}
+.wp-code-pre .hljs-number,
+.wp-code-pre .hljs-literal,
+.wp-code-pre .hljs-bullet {
+  color: var(--hl-number);
+}
+.wp-code-pre .hljs-title,
+.wp-code-pre .hljs-title.function_,
+.wp-code-pre .hljs-section,
+.wp-code-pre .hljs-name {
+  color: var(--hl-function);
+}
+.wp-code-pre .hljs-type,
+.wp-code-pre .hljs-built_in,
+.wp-code-pre .hljs-title.class_ {
+  color: var(--hl-type);
+}
+.wp-code-pre .hljs-attr,
+.wp-code-pre .hljs-attribute,
+.wp-code-pre .hljs-property,
+.wp-code-pre .hljs-selector-attr,
+.wp-code-pre .hljs-selector-class,
+.wp-code-pre .hljs-selector-id {
+  color: var(--hl-attr);
+}
+.wp-code-pre .hljs-variable,
+.wp-code-pre .hljs-template-variable {
+  color: var(--hl-variable);
+}
+.wp-code-pre .hljs-meta,
+.wp-code-pre .hljs-doctag {
+  color: var(--hl-meta);
+}
+.wp-code-pre .hljs-symbol,
+.wp-code-pre .hljs-link,
+.wp-code-pre .hljs-params {
+  color: var(--hl-symbol);
+}
+.wp-code-pre .hljs-tag,
+.wp-code-pre .hljs-punctuation,
+.wp-code-pre .hljs-operator {
+  color: var(--hl-punct);
+}
+.wp-code-pre .hljs-emphasis {
+  font-style: italic;
+}
+.wp-code-pre .hljs-strong {
+  font-weight: 600;
+}
+.wp-code-pre .hljs-deletion {
+  color: var(--danger);
+}
+.wp-code-pre .hljs-addition {
+  color: var(--success);
 }
 
 .diff-file-path-btn {

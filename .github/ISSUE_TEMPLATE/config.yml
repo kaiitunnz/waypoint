@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Open Bugs
+    url: https://github.com/kaiitunnz/waypoint/issues/4
+    about: See the pinned tracking issue for open bugs
+  - name: Open Feature Requests
+    url: https://github.com/kaiitunnz/waypoint/issues/5
+    about: See the pinned tracking issue for open feature requests

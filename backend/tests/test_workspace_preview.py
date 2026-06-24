@@ -20,7 +20,7 @@ def test_list_dir_orders_dirs_first_and_skips_denied(tmp_path: Path) -> None:
     (tmp_path / "beta.txt").write_text("b", encoding="utf-8")
     (tmp_path / ".env").write_text("secret", encoding="utf-8")
 
-    entries, truncated, overflow = list_dir(
+    entries, truncated, overflow, resolved_dir = list_dir(
         tmp_path,
         "",
         10,
@@ -28,6 +28,7 @@ def test_list_dir_orders_dirs_first_and_skips_denied(tmp_path: Path) -> None:
         follow_symlinks=settings.workspace_follow_symlinks,
     )
 
+    assert resolved_dir == tmp_path.resolve()
     assert [entry["name"] for entry in entries] == ["alpha", "beta.txt", "zeta.txt"]
     assert [entry["kind"] for entry in entries] == ["dir", "file", "file"]
     assert all(entry["size"] >= 0 for entry in entries)
@@ -40,7 +41,7 @@ def test_list_dir_reports_overflow(tmp_path: Path) -> None:
     for index in range(4):
         (tmp_path / f"file-{index}.txt").write_text(str(index), encoding="utf-8")
 
-    entries, truncated, overflow = list_dir(tmp_path, "", 2)
+    entries, truncated, overflow, _ = list_dir(tmp_path, "", 2)
 
     assert [entry["name"] for entry in entries] == ["file-0.txt", "file-1.txt"]
     assert truncated is True
@@ -69,7 +70,7 @@ def test_denied_dotfile_and_custom_glob(tmp_path: Path) -> None:
     (tmp_path / "visible.txt").write_text("ok", encoding="utf-8")
     (tmp_path / "private.pem").write_text("secret", encoding="utf-8")
 
-    entries, _, _ = list_dir(tmp_path, "", 10, denylist=["*.pem"])
+    entries, _, _, _ = list_dir(tmp_path, "", 10, denylist=["*.pem"])
 
     assert [entry["name"] for entry in entries] == ["visible.txt"]
 

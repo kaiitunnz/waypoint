@@ -48,6 +48,11 @@ def is_denied(
     return any(fnmatch.fnmatch(normalized, pattern) for pattern in deny_patterns)
 
 
+def relative_to_base(base: Path, resolved: Path) -> str:
+    relative = resolved.relative_to(base.expanduser().resolve())
+    return "" if relative == Path(".") else relative.as_posix()
+
+
 def sniff_text(data: bytes) -> bool:
     if b"\x00" in data:
         return False
@@ -74,18 +79,19 @@ def list_dir(
     cap: int,
     denylist: list[str] | None = None,
     follow_symlinks: bool = False,
-) -> tuple[list[WorkspaceEntry], bool, int | None]:
-    directory = resolve_in_base(base, rel, follow_symlinks=follow_symlinks)
+) -> tuple[list[WorkspaceEntry], bool, int | None, Path]:
     if is_denied(rel, denylist):
         raise WorkspacePathError("path is denied")
+    directory = resolve_in_base(base, rel, follow_symlinks=follow_symlinks)
     if not directory.exists():
         raise FileNotFoundError(directory)
     if not directory.is_dir():
         raise NotADirectoryError(directory)
 
+    base_resolved = base.expanduser().resolve()
     allowed: list[WorkspaceEntry] = []
     for child in directory.iterdir():
-        child_rel = child.relative_to(base.expanduser().resolve())
+        child_rel = child.relative_to(base_resolved)
         if is_denied(child_rel, denylist):
             continue
         stat = child.lstat()
@@ -101,7 +107,7 @@ def list_dir(
     if cap < 0:
         cap = 0
     overflow = max(len(allowed) - cap, 0)
-    return allowed[:cap], overflow > 0, overflow or None
+    return allowed[:cap], overflow > 0, overflow or None, directory
 
 
 def _entry_kind(path: Path) -> WorkspaceEntryKind:

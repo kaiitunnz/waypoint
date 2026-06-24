@@ -9,6 +9,7 @@ from waypoint.backends.plugin_config import PluginConfig
 from waypoint.backends.registry import get_registry
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import BackendId, SessionTransportId
+from waypoint.workspace_preview import DEFAULT_WORKSPACE_DENYLIST
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -116,7 +117,7 @@ class Settings(BaseModel):
     workspace_preview_enabled: bool = True
     workspace_max_file_bytes: int = 200_000
     workspace_denylist: list[str] = Field(
-        default_factory=lambda: [".git", ".claude", ".env", ".ssh"]
+        default_factory=lambda: list(DEFAULT_WORKSPACE_DENYLIST)
     )
     workspace_follow_symlinks: bool = False
     database_name: str = "waypoint.db"

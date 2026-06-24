@@ -12197,7 +12197,7 @@ html[data-theme="light"] .wp-code-toolbar {
 }
 
 html[data-theme="light"] .wp-code-pre {
-  --hl-comment: #9a8d78;
+  --hl-comment: #857a66;
   --hl-keyword: #9c3f6e;
   --hl-string: #2f7d4f;
   --hl-number: #8a5410;
@@ -12205,7 +12205,7 @@ html[data-theme="light"] .wp-code-pre {
   --hl-type: #1f7a82;
   --hl-attr: #6b4fa0;
   --hl-variable: #2a261f;
-  --hl-meta: #8a7d68;
+  --hl-meta: #7a6e59;
   --hl-symbol: #2f6f9e;
   --hl-punct: #6e6356;
 }

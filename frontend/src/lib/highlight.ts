@@ -37,7 +37,6 @@ const EXTENSION_LANGUAGE: Record<string, string> = {
   php: "php",
   swift: "swift",
   kt: "kotlin",
-  scala: "scala",
   sh: "bash",
   bash: "bash",
   zsh: "bash",

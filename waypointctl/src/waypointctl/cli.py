@@ -1,7 +1,9 @@
+import importlib.metadata
 import json
 import os
 import signal
 import subprocess
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from typing import Annotated, Any, cast
 
@@ -60,9 +62,28 @@ def _ctx_home(ctx: typer.Context) -> Path:
     return home
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        try:
+            ver = importlib.metadata.version("waypointctl")
+        except PackageNotFoundError:
+            ver = "0.0.0"
+        typer.echo(ver)
+        raise typer.Exit()
+
+
 @app.callback()
 def bootstrap(
     ctx: typer.Context,
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=_version_callback,
+            is_eager=True,
+            help="Show version and exit.",
+        ),
+    ] = False,
     home: Path | None = typer.Option(
         None,
         "--home",

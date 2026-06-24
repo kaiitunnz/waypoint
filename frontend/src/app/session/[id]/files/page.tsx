@@ -54,6 +54,13 @@ export default function SessionFilesPage() {
     }
   }, [params, searchParams]);
 
+  // Reflect the session in the browser tab/window title, not just the in-page
+  // header (the root metadata title is the generic "Waypoint").
+  useEffect(() => {
+    const label = sessionTitle ? `${sessionTitle} · Files` : "Workspace files";
+    document.title = `${label} — Waypoint`;
+  }, [sessionTitle]);
+
   return (
     <div className="wp-page">
       <header className="app-bar">

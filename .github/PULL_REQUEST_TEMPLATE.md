@@ -31,7 +31,7 @@ Types: feat, fix, docs, refactor, perf, test, build, ci, chore
 
 ## Test Plan
 
-<!-- How were these changes validated? Provide commands, sample workflows, or screenshots (required for frontend changes). -->
+<!-- How were these changes validated? Provide commands, sample workflows, or screenshots. -->
 
 ## Test Result
 
@@ -47,7 +47,7 @@ Types: feat, fix, docs, refactor, perf, test, build, ci, chore
 - [ ] I have added or updated tests covering my changes (if applicable).
 - [ ] I have verified the relevant suites pass locally (`cd backend && uv run pytest`, and `cd waypointctl && uv run pytest` if I touched `waypointctl`).
 - [ ] If I touched the coding-agent plugin/transport contract or code that dispatches by plugin id, I checked the affected backends (claude_code, codex, opencode) still work.
-- [ ] If I changed the frontend, I ran `cd frontend && npm run lint && npm run build`, kept dark/light theme parity, and attached screenshots.
+- [ ] If I changed the frontend, I ran `cd frontend && npm run lint && npm run build` and kept dark/light theme parity (screenshots optional).
 - [ ] If this is a breaking change, I marked the title (`type!:` or a `BREAKING CHANGE:` footer) and described migration steps above.
 - [ ] I have updated documentation or config examples (`.env.example`, `backend/waypoint.example.yaml`, `docs/`) if user-facing behavior changed.
 

@@ -9,6 +9,16 @@ INSTALL_DIR="${WAYPOINT_HOME:-${HOME}/.waypoint/app}"
 die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$2"; }
 
+gen_password() {
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 16
+    elif [[ -r /dev/urandom ]]; then
+        od -An -tx1 -N16 /dev/urandom | tr -d ' \n'
+    else
+        return 1
+    fi
+}
+
 # ── argument parsing ────────────────────────────────────────────────────────
 TARGET_REF="${WAYPOINT_VERSION:-}"
 while [[ $# -gt 0 ]]; do
@@ -80,11 +90,13 @@ fi
 
 if [[ ! -f "${INSTALL_DIR}/.env" ]]; then
     cp "${INSTALL_DIR}/.env.example" "${INSTALL_DIR}/.env"
-    RANDOM_PW="$(openssl rand -hex 16 2>/dev/null || printf 'change-me-please')"
+    chmod 600 "${INSTALL_DIR}/.env"
+    RANDOM_PW="$(gen_password)" || die "no entropy source (openssl or /dev/urandom) to generate a password; set WAYPOINT_PASSWORD manually in ${INSTALL_DIR}/.env"
     awk -v pw="${RANDOM_PW}" \
         '/^# WAYPOINT_PASSWORD=/{print "WAYPOINT_PASSWORD=" pw; next} {print}' \
         "${INSTALL_DIR}/.env" > "${INSTALL_DIR}/.env.tmp"
     mv "${INSTALL_DIR}/.env.tmp" "${INSTALL_DIR}/.env"
+    chmod 600 "${INSTALL_DIR}/.env"
     printf 'Seeded .env with a random WAYPOINT_PASSWORD\n'
 fi
 

@@ -4,6 +4,9 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
+import { useWorkspaceFileLink } from "@/components/WorkspaceFileLinkContext";
+import { isWorkspacePathHref, remarkLinkifyPaths } from "@/lib/workspacePaths";
+
 interface MarkdownMessageProps {
   text: string;
 }
@@ -11,16 +14,48 @@ interface MarkdownMessageProps {
 // Hoisted to module scope so the plugin array and component overrides keep a
 // stable identity across renders — combined with the memo() below, an
 // unchanged `text` skips the remark parse entirely during streaming.
-const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
+const REMARK_PLUGINS = [remarkGfm, remarkBreaks, remarkLinkifyPaths];
 
-const COMPONENTS: Components = {
-  a({ href, children, ...props }) {
+function MarkdownAnchor({
+  href,
+  children,
+  ...props
+}: ComponentPropsWithoutRef<"a">) {
+  const link = useWorkspaceFileLink();
+  const fromBareText = props["data-wp-bare" as keyof typeof props] === "true";
+  if (link && isWorkspacePathHref(href)) {
     return (
-      <a href={href} rel="noreferrer" target="_blank" {...props}>
+      <a
+        href={href}
+        onClick={(e) => {
+          // Leave modified clicks (new tab/window) and non-primary buttons to
+          // the browser; intercept only a plain left click.
+          if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+            return;
+          }
+          e.preventDefault();
+          link.openWorkspacePath(href as string, { fromBareText });
+        }}
+        {...props}
+      >
         {children}
       </a>
     );
-  },
+  }
+  // A path we synthesized from prose but have nowhere to open (no session
+  // context): render plain text rather than a dead navigation.
+  if (fromBareText && isWorkspacePathHref(href)) {
+    return <span>{children}</span>;
+  }
+  return (
+    <a href={href} rel="noreferrer" target="_blank" {...props}>
+      {children}
+    </a>
+  );
+}
+
+const COMPONENTS: Components = {
+  a: MarkdownAnchor,
   code({
     inline,
     className,

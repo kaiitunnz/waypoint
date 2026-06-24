@@ -159,6 +159,88 @@ async def test_raw_validates_query_token(tmp_path: Path) -> None:
     assert good.text == "hello"
 
 
+async def test_resolve_relative_file(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        resp = await client.get(
+            "/api/sessions/s1/workspace/resolve",
+            params={"path": "notes.md"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 200
+    assert resp.json() == {"path": "notes.md", "kind": "file"}
+
+
+async def test_resolve_absolute_path_within_base(tmp_path: Path) -> None:
+    # The transcript hands the backend the agent-printed absolute path verbatim;
+    # it must resolve to the same canonical relative path as the bare name.
+    app, token = _build(tmp_path)
+    absolute = str(tmp_path / "ws" / "notes.md")
+    async with _client(app) as client:
+        resp = await client.get(
+            "/api/sessions/s1/workspace/resolve",
+            params={"path": absolute},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 200
+    assert resp.json() == {"path": "notes.md", "kind": "file"}
+
+
+async def test_resolve_directory(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    (tmp_path / "ws" / "docs").mkdir()
+    headers = {"Authorization": f"Bearer {token}"}
+    async with _client(app) as client:
+        rel = await client.get(
+            "/api/sessions/s1/workspace/resolve",
+            params={"path": "docs"},
+            headers=headers,
+        )
+        absolute = await client.get(
+            "/api/sessions/s1/workspace/resolve",
+            params={"path": str(tmp_path / "ws" / "docs")},
+            headers=headers,
+        )
+    assert rel.json() == {"path": "docs", "kind": "dir"}
+    assert absolute.json() == {"path": "docs", "kind": "dir"}
+
+
+async def test_resolve_outside_base_is_rejected(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    headers = {"Authorization": f"Bearer {token}"}
+    async with _client(app) as client:
+        absolute = await client.get(
+            "/api/sessions/s1/workspace/resolve",
+            params={"path": "/etc/passwd"},
+            headers=headers,
+        )
+        relative = await client.get(
+            "/api/sessions/s1/workspace/resolve",
+            params={"path": "../../../../etc/passwd"},
+            headers=headers,
+        )
+        denied = await client.get(
+            "/api/sessions/s1/workspace/resolve",
+            params={"path": ".git/config"},
+            headers=headers,
+        )
+        denied_absolute = await client.get(
+            "/api/sessions/s1/workspace/resolve",
+            params={"path": str(tmp_path / "ws" / ".git" / "config")},
+            headers=headers,
+        )
+        missing = await client.get(
+            "/api/sessions/s1/workspace/resolve",
+            params={"path": "nope.txt"},
+            headers=headers,
+        )
+    assert absolute.status_code == 403
+    assert relative.status_code == 403
+    assert denied.status_code == 403
+    assert denied_absolute.status_code == 403  # denylist runs on the raw absolute path
+    assert missing.status_code == 404
+
+
 async def test_empty_denylist_disables_filtering(tmp_path: Path) -> None:
     app, token = _build(tmp_path, settings_kw={"workspace_denylist": []})
     async with _client(app) as client:

@@ -29,6 +29,8 @@ interface WorkspaceTreeProps {
   token: string;
   sessionId: string;
   selectedPath: string | null;
+  revealPath?: string | null;
+  revealSeq?: number;
   onSelectFile: (path: string) => void;
   onRootLoaded?: (root: WorkspaceTreePage["root"]) => void;
 }
@@ -38,13 +40,26 @@ export function WorkspaceTree({
   token,
   sessionId,
   selectedPath,
+  revealPath,
+  revealSeq,
   onSelectFile,
   onRootLoaded,
 }: WorkspaceTreeProps) {
   const [dirCache, setDirCache] = useState<Map<string, DirState>>(new Map());
   const [expanded, setExpanded] = useState<Set<string>>(new Set([""]));
+  // The directory currently highlighted by a reveal. Cleared on the next user
+  // interaction so the highlight doesn't outlive its purpose.
+  const [activeReveal, setActiveReveal] = useState<string | null>(null);
   const onRootLoadedRef = useRef(onRootLoaded);
   onRootLoadedRef.current = onRootLoaded;
+
+  const selectFile = useCallback(
+    (path: string) => {
+      setActiveReveal(null);
+      onSelectFile(path);
+    },
+    [onSelectFile],
+  );
 
   const fetchDir = useCallback(
     async (dirPath: string) => {
@@ -91,8 +106,39 @@ export function WorkspaceTree({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [host, token, sessionId]);
 
+  // Reveal a directory: expand its full ancestor chain (lazy-fetching any dir
+  // not yet cached) so the target node renders, then it scrolls itself into
+  // view (see TreeNode).
+  useEffect(() => {
+    if (revealPath == null || revealPath === "") {
+      setActiveReveal(null);
+      return;
+    }
+    const parts = revealPath.split("/").filter(Boolean);
+    // Ancestor dirs to expand, plus the target itself. The root ("") is always
+    // fetched by the session-reset effect, so it's excluded from the chain.
+    const chain: string[] = [];
+    let acc = "";
+    for (const part of parts) {
+      acc = acc ? `${acc}/${part}` : part;
+      chain.push(acc);
+    }
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      for (const dir of chain) next.add(dir);
+      return next;
+    });
+    for (const dir of chain) {
+      if (!dirCache.has(dir)) void fetchDir(dir);
+    }
+    setActiveReveal(revealPath);
+    // revealSeq lets an unchanged revealPath re-trigger a reveal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealPath, revealSeq]);
+
   const toggleDir = useCallback(
     (dirPath: string) => {
+      setActiveReveal(null);
       setExpanded((prev) => {
         const next = new Set(prev);
         if (next.has(dirPath)) {
@@ -128,7 +174,9 @@ export function WorkspaceTree({
           dirCache={dirCache}
           expanded={expanded}
           selectedPath={selectedPath}
-          onSelectFile={onSelectFile}
+          revealTarget={activeReveal}
+          revealSeq={revealSeq}
+          onSelectFile={selectFile}
           onToggleDir={toggleDir}
         />
       ))}
@@ -146,6 +194,8 @@ function TreeNode({
   dirCache,
   expanded,
   selectedPath,
+  revealTarget,
+  revealSeq,
   onSelectFile,
   onToggleDir,
 }: {
@@ -155,6 +205,8 @@ function TreeNode({
   dirCache: Map<string, DirState>;
   expanded: Set<string>;
   selectedPath: string | null;
+  revealTarget: string | null;
+  revealSeq?: number;
   onSelectFile: (path: string) => void;
   onToggleDir: (dirPath: string) => void;
 }) {
@@ -163,6 +215,16 @@ function TreeNode({
   const isExpanded = expanded.has(fullPath);
   const dirState = isDir ? dirCache.get(fullPath) : undefined;
   const isSelected = !isDir && selectedPath === fullPath;
+  const isRevealed = revealTarget != null && revealTarget === fullPath;
+  const nodeRef = useRef<HTMLButtonElement>(null);
+
+  // revealSeq is in the deps so a repeat reveal of the same (already-revealed)
+  // node re-scrolls it into view even though `isRevealed` stays true.
+  useEffect(() => {
+    if (isRevealed) {
+      nodeRef.current?.scrollIntoView({ block: "center" });
+    }
+  }, [isRevealed, revealSeq]);
 
   return (
     <li
@@ -172,8 +234,9 @@ function TreeNode({
       style={{ "--depth": depth } as CSSProperties}
     >
       <button
+        ref={nodeRef}
         type="button"
-        className={`wp-tree-node${isSelected ? " selected" : ""}${isDir ? " is-dir" : ""}`}
+        className={`wp-tree-node${isSelected || isRevealed ? " selected" : ""}${isDir ? " is-dir" : ""}`}
         onClick={() => {
           if (isDir) {
             onToggleDir(fullPath);
@@ -218,6 +281,8 @@ function TreeNode({
                   dirCache={dirCache}
                   expanded={expanded}
                   selectedPath={selectedPath}
+                  revealTarget={revealTarget}
+                  revealSeq={revealSeq}
                   onSelectFile={onSelectFile}
                   onToggleDir={onToggleDir}
                 />

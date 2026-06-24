@@ -497,6 +497,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "content": content,
         }
 
+    @app.get("/api/sessions/{session_id}/workspace/resolve")
+    async def workspace_resolve(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+        path: Annotated[str, Query()] = "",
+    ) -> Any:
+        # ``path`` may be absolute or base-relative; both must resolve inside the
+        # workspace. Used by the transcript to turn an agent-printed filesystem
+        # path into a canonical relative path plus its kind, so the frontend can
+        # open a file preview or reveal a directory in the tree.
+        session = _workspace_session(session_id)
+        base = Path(session.worktree_path or session.cwd)
+        try:
+            if is_denied(path, context.settings.workspace_denylist):
+                raise WorkspacePathError("path is denied")
+            resolved = resolve_in_base(
+                base,
+                path,
+                follow_symlinks=context.settings.workspace_follow_symlinks,
+            )
+            if not resolved.exists():
+                raise FileNotFoundError(resolved)
+        except WorkspacePathError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="workspace path denied"
+            ) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="workspace path not found"
+            ) from exc
+        return {
+            "path": relative_to_base(base, resolved),
+            "kind": "dir" if resolved.is_dir() else "file",
+        }
+
     @app.delete("/api/sessions/{session_id}/attachments/{attachment_id}")
     async def delete_attachment(
         session_id: str,

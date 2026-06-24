@@ -2,85 +2,161 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import typer
 
-from waypointctl import selfupdate
+from waypointctl import update
 
 
-def test_explicit_ref_used_directly(tmp_path: Path) -> None:
+def _fake_run(*, dirty: str = "", tags: str = "v1.0.0\n", remote_has=lambda ref: False):
+    """A subprocess.run stub that dispatches on the git subcommand."""
+
+    def run(argv, **kwargs):
+        if "status" in argv:
+            return MagicMock(returncode=0, stdout=dirty)
+        if "tag" in argv and "--list" in argv:
+            return MagicMock(returncode=0, stdout=tags)
+        if "rev-parse" in argv:
+            ref = argv[-1].rsplit("/", 1)[-1]
+            return MagicMock(returncode=0 if remote_has(ref) else 1, stdout="")
+        return MagicMock(returncode=0, stdout="")
+
+    return run
+
+
+def _argvs(mock_run) -> list[list[str]]:
+    return [c.args[0] for c in mock_run.call_args_list]
+
+
+def _checkout_cmd(argvs: list[list[str]]) -> list[str]:
+    return next(a for a in argvs if "checkout" in a)
+
+
+def test_explicit_ref_checks_out_a_tag(tmp_path: Path) -> None:
     with (
-        patch("waypointctl.selfupdate.resolve_waypoint_home", return_value=tmp_path),
-        patch("waypointctl.selfupdate.subprocess.run") as mock_run,
+        patch("waypointctl.update.resolve_waypoint_home", return_value=tmp_path),
+        patch("waypointctl.update.subprocess.run", side_effect=_fake_run()) as mock_run,
     ):
-        selfupdate.run(tmp_path, ref="v1.2.3")
+        update.run(tmp_path, ref="v1.2.3")
 
-    cmds = [c.args[0] for c in mock_run.call_args_list]
-    assert ["git", "-C", str(tmp_path), "fetch", "--tags"] in cmds
-    assert ["git", "-C", str(tmp_path), "checkout", "v1.2.3"] in cmds
-    assert not any("describe" in " ".join(cmd) for cmd in cmds)
-
-
-def test_latest_tag_resolved_when_no_ref(tmp_path: Path) -> None:
-    # Simulate newest-first sorted output: v3.0.0 is newer than v2.0.0
-    side_effects = [
-        MagicMock(),  # git fetch
-        MagicMock(stdout="v3.0.0\nv2.0.0\nv1.0.0\n"),  # git tag --sort=-version:refname
-        MagicMock(),  # git checkout
-        MagicMock(),  # uv tool install
-        MagicMock(),  # waypointctl restart
+    argvs = _argvs(mock_run)
+    assert ["git", "-C", str(tmp_path), "fetch", "--force", "--tags", "origin"] in argvs
+    assert not any(
+        "--list" in a for a in argvs
+    )  # no latest-tag lookup with explicit ref
+    assert _checkout_cmd(argvs) == [
+        "git",
+        "-C",
+        str(tmp_path),
+        "checkout",
+        "--detach",
+        "v1.2.3",
     ]
+
+
+def test_latest_tag_resolves_newest(tmp_path: Path) -> None:
     with (
-        patch("waypointctl.selfupdate.resolve_waypoint_home", return_value=tmp_path),
+        patch("waypointctl.update.resolve_waypoint_home", return_value=tmp_path),
         patch(
-            "waypointctl.selfupdate.subprocess.run", side_effect=side_effects
+            "waypointctl.update.subprocess.run",
+            side_effect=_fake_run(tags="v3.0.0\nv2.0.0\nv1.0.0\n"),
         ) as mock_run,
     ):
-        selfupdate.run(tmp_path)
+        update.run(tmp_path)
 
-    cmds = [c.args[0] for c in mock_run.call_args_list]
-    tag_cmd = next(cmd for cmd in cmds if "tag" in cmd)
+    argvs = _argvs(mock_run)
+    tag_cmd = next(a for a in argvs if "--list" in a)
     assert "--sort=-version:refname" in tag_cmd
-    # Must check out the first (newest) tag, not a nearest ancestor
-    assert ["git", "-C", str(tmp_path), "checkout", "v3.0.0"] in cmds
+    assert _checkout_cmd(argvs)[-1] == "v3.0.0"  # newest, not nearest ancestor
 
 
-def test_command_sequence_with_explicit_ref(tmp_path: Path) -> None:
+def test_nightly_tracks_remote_main(tmp_path: Path) -> None:
     with (
-        patch("waypointctl.selfupdate.resolve_waypoint_home", return_value=tmp_path),
-        patch("waypointctl.selfupdate.subprocess.run") as mock_run,
+        patch("waypointctl.update.resolve_waypoint_home", return_value=tmp_path),
+        patch(
+            "waypointctl.update.subprocess.run",
+            side_effect=_fake_run(remote_has=lambda ref: ref == "main"),
+        ) as mock_run,
     ):
-        selfupdate.run(tmp_path, ref="v3.0.0")
+        update.run(tmp_path, nightly=True)
 
-    expected = [
-        ["git", "-C", str(tmp_path), "fetch", "--tags"],
-        ["git", "-C", str(tmp_path), "checkout", "v3.0.0"],
-        ["uv", "tool", "install", "--force", str(tmp_path / "waypointctl")],
-        ["waypointctl", "--home", str(tmp_path), "restart"],
+    argvs = _argvs(mock_run)
+    assert not any("--list" in a for a in argvs)
+    # a branch ref must check out the remote tip, not the stale local ref
+    assert _checkout_cmd(argvs) == [
+        "git",
+        "-C",
+        str(tmp_path),
+        "checkout",
+        "--detach",
+        "origin/main",
     ]
-    assert [c.args[0] for c in mock_run.call_args_list] == expected
 
 
-def test_uv_install_uses_force_flag(tmp_path: Path) -> None:
+def test_branch_ref_tracks_remote_tip(tmp_path: Path) -> None:
     with (
-        patch("waypointctl.selfupdate.resolve_waypoint_home", return_value=tmp_path),
-        patch("waypointctl.selfupdate.subprocess.run") as mock_run,
+        patch("waypointctl.update.resolve_waypoint_home", return_value=tmp_path),
+        patch(
+            "waypointctl.update.subprocess.run",
+            side_effect=_fake_run(remote_has=lambda ref: ref == "feature"),
+        ) as mock_run,
     ):
-        selfupdate.run(tmp_path, ref="v1.0.0")
+        update.run(tmp_path, ref="feature")
 
-    cmds = [c.args[0] for c in mock_run.call_args_list]
-    uv_cmd = next(cmd for cmd in cmds if cmd[0] == "uv")
+    assert _checkout_cmd(_argvs(mock_run))[-1] == "origin/feature"
+
+
+def test_dirty_tree_refuses(tmp_path: Path) -> None:
+    with (
+        patch("waypointctl.update.resolve_waypoint_home", return_value=tmp_path),
+        patch(
+            "waypointctl.update.subprocess.run", side_effect=_fake_run(dirty=" M f.py")
+        ) as mock_run,
+    ):
+        with pytest.raises(RuntimeError, match="uncommitted changes"):
+            update.run(tmp_path, ref="v1.0.0")
+
+    argvs = _argvs(mock_run)
+    assert any("status" in a for a in argvs)
+    assert not any("checkout" in a for a in argvs)  # bailed before mutating anything
+    assert not any(a and a[0] == "uv" for a in argvs)
+
+
+def test_nightly_with_ref_is_rejected(tmp_path: Path) -> None:
+    with (
+        patch("waypointctl.update.resolve_waypoint_home", return_value=tmp_path),
+        patch("waypointctl.update.subprocess.run", side_effect=_fake_run()) as mock_run,
+    ):
+        with pytest.raises(typer.BadParameter):
+            update.run(tmp_path, ref="v1.0.0", nightly=True)
+
+    assert mock_run.call_args_list == []  # rejected before touching git
+
+
+def test_uv_force_and_restart_env(tmp_path: Path) -> None:
+    with (
+        patch("waypointctl.update.resolve_waypoint_home", return_value=tmp_path),
+        patch("waypointctl.update.subprocess.run", side_effect=_fake_run()) as mock_run,
+    ):
+        update.run(tmp_path, ref="v1.0.0")
+
+    argvs = _argvs(mock_run)
+    uv_cmd = next(a for a in argvs if a and a[0] == "uv")
     assert "--force" in uv_cmd
-
-
-def test_restart_sets_force_frontend_build_env(tmp_path: Path) -> None:
-    with (
-        patch("waypointctl.selfupdate.resolve_waypoint_home", return_value=tmp_path),
-        patch("waypointctl.selfupdate.subprocess.run") as mock_run,
-    ):
-        selfupdate.run(tmp_path, ref="v1.0.0")
-
     restart_call = next(c for c in mock_run.call_args_list if "restart" in c.args[0])
-    env = restart_call.kwargs.get("env") or {}
-    assert env.get("WAYPOINT_STACK_FORCE_FRONTEND_BUILD") == "1"
+    assert (
+        restart_call.kwargs.get("env", {}).get("WAYPOINT_STACK_FORCE_FRONTEND_BUILD")
+        == "1"
+    )
+
+
+def test_resolve_home_uses_provided_path(tmp_path: Path) -> None:
+    with patch(
+        "waypointctl.update.resolve_waypoint_home", return_value=tmp_path
+    ) as mock_resolve:
+        result = update._resolve_home(tmp_path)
+
+    mock_resolve.assert_called_once_with(tmp_path)
+    assert result == tmp_path
 
 
 def test_resolve_home_fallback_when_default_is_a_repo(tmp_path: Path) -> None:
@@ -89,61 +165,21 @@ def test_resolve_home_fallback_when_default_is_a_repo(tmp_path: Path) -> None:
     (app / "frontend").mkdir(parents=True)
     with (
         patch(
-            "waypointctl.selfupdate.resolve_waypoint_home",
+            "waypointctl.update.resolve_waypoint_home",
             side_effect=RuntimeError("no WAYPOINT_HOME"),
         ),
-        patch("waypointctl.selfupdate.Path.home", return_value=tmp_path),
+        patch("waypointctl.update.Path.home", return_value=tmp_path),
     ):
-        result = selfupdate._resolve_home(None)
-
-    assert result == app
+        assert update._resolve_home(None) == app
 
 
 def test_resolve_home_reraises_when_default_missing(tmp_path: Path) -> None:
     with (
         patch(
-            "waypointctl.selfupdate.resolve_waypoint_home",
+            "waypointctl.update.resolve_waypoint_home",
             side_effect=RuntimeError("no WAYPOINT_HOME"),
         ),
-        patch("waypointctl.selfupdate.Path.home", return_value=tmp_path),
+        patch("waypointctl.update.Path.home", return_value=tmp_path),
         pytest.raises(RuntimeError),
     ):
-        selfupdate._resolve_home(None)
-
-
-def test_resolve_home_uses_provided_path(tmp_path: Path) -> None:
-    with patch(
-        "waypointctl.selfupdate.resolve_waypoint_home", return_value=tmp_path
-    ) as mock_resolve:
-        result = selfupdate._resolve_home(tmp_path)
-
-    mock_resolve.assert_called_once_with(tmp_path)
-    assert result == tmp_path
-
-
-def test_run_fallback_home_used_in_commands(tmp_path: Path) -> None:
-    app = tmp_path / ".waypoint" / "app"
-    (app / "backend").mkdir(parents=True)
-    (app / "frontend").mkdir(parents=True)
-    side_effects = [
-        MagicMock(),  # git fetch
-        MagicMock(stdout="v1.0.0\n"),  # git tag --sort=-version:refname
-        MagicMock(),  # git checkout
-        MagicMock(),  # uv tool install
-        MagicMock(),  # waypointctl restart
-    ]
-    with (
-        patch(
-            "waypointctl.selfupdate.resolve_waypoint_home",
-            side_effect=RuntimeError("no home"),
-        ),
-        patch("waypointctl.selfupdate.Path.home", return_value=tmp_path),
-        patch(
-            "waypointctl.selfupdate.subprocess.run", side_effect=side_effects
-        ) as mock_run,
-    ):
-        selfupdate.run(None)
-
-    cmds = [c.args[0] for c in mock_run.call_args_list]
-    fetch_cmd = next(cmd for cmd in cmds if "fetch" in cmd)
-    assert str(app) in fetch_cmd
+        update._resolve_home(None)

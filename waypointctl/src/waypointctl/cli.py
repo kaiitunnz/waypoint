@@ -27,10 +27,10 @@ from waypointctl.paths import (
 )
 from waypointctl.process import is_pid_running, read_pid_file, running_pid
 from waypointctl.protocol import DaemonResult
-from waypointctl.selfupdate import run as run_selfupdate
 from waypointctl.skills import run_skills_helper
 from waypointctl.stack import WaypointStack
 from waypointctl.tailscale import preflight_tailscale_command, run_tailscale_helper
+from waypointctl.update import run as run_update
 
 app = typer.Typer(
     add_completion=False, no_args_is_help=True, help="Waypoint control plane"
@@ -280,8 +280,8 @@ def doctor(ctx: typer.Context) -> None:
     typer.echo(f"daemon for this home={'yes' if daemon_available(home) else 'no'}")
 
 
-@app.command("self-update")
-def self_update(
+@app.command("update")
+def update(
     ctx: typer.Context,
     ref: Annotated[
         str | None,
@@ -289,9 +289,15 @@ def self_update(
             "--ref", help="Tag or ref to update to. Defaults to the latest release tag."
         ),
     ] = None,
+    nightly: Annotated[
+        bool,
+        typer.Option(
+            "--nightly", help="Update to the tip of main instead of a release."
+        ),
+    ] = False,
 ) -> None:
-    """Fetch the latest release and restart the stack."""
-    run_selfupdate(_ctx_home(ctx), ref=ref)
+    """Update Waypoint to the latest release and restart the stack."""
+    run_update(_ctx_home(ctx), ref=ref, nightly=nightly)
 
 
 @tailscale_app.command("up")

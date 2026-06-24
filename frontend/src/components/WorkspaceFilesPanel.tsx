@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import {
@@ -31,25 +31,33 @@ function useWorkspacePreview(host: string, token: string, sessionId: string) {
   const [fileError, setFileError] = useState<string | null>(null);
   const [root, setRoot] = useState<WorkspaceTreePage["root"] | null>(null);
 
+  // Tracks the most recent request so a slow fetch for a previously-selected
+  // file can't overwrite the content of the file the user switched to.
+  const latestRequest = useRef<string | null>(null);
+
   const openFile = useCallback(
     async (path: string) => {
+      latestRequest.current = path;
       setOpenPathState(path);
       setFileData(null);
       setFileError(null);
       setFileLoading(true);
       try {
         const data = await fetchWorkspaceFile(host, token, sessionId, path);
+        if (latestRequest.current !== path) return;
         setFileData(data);
       } catch (e) {
+        if (latestRequest.current !== path) return;
         setFileError(e instanceof Error ? e.message : "Failed to load file");
       } finally {
-        setFileLoading(false);
+        if (latestRequest.current === path) setFileLoading(false);
       }
     },
     [host, token, sessionId],
   );
 
   const reset = useCallback(() => {
+    latestRequest.current = null;
     setOpenPathState(null);
     setFileData(null);
     setFileError(null);
@@ -249,7 +257,11 @@ export function WorkspaceFilesPanel({
                   ) : fileError ? (
                     <div className="wp-preview-error">{fileError}</div>
                   ) : fileData ? (
-                    <FilePreview file={fileData} rawUrl={rawUrl ?? ""} />
+                    <FilePreview
+                      key={fileData.path}
+                      file={fileData}
+                      rawUrl={rawUrl ?? ""}
+                    />
                   ) : null}
                 </div>
               </>

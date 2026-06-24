@@ -30,6 +30,7 @@ interface FilePreviewProps {
 export function FilePreview({ file, rawUrl }: FilePreviewProps) {
   const [softWrap, setSoftWrap] = useState(false);
   const [mdView, setMdView] = useState<"rendered" | "source">("rendered");
+  const [imageError, setImageError] = useState(false);
 
   if (file.binary || file.content === null) {
     return (
@@ -51,11 +52,34 @@ export function FilePreview({ file, rawUrl }: FilePreviewProps) {
     );
   }
 
-  if (isImagePath(file.path)) {
+  if (isImagePath(file.path) && !imageError) {
     return (
       <div className="wp-file-image">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={rawUrl} alt={file.path} className="wp-file-img" />
+        <img
+          src={rawUrl}
+          alt={file.path}
+          className="wp-file-img"
+          onError={() => setImageError(true)}
+        />
+      </div>
+    );
+  }
+
+  if (isImagePath(file.path)) {
+    return (
+      <div className="wp-file-binary">
+        <span className="wp-file-binary-icon" aria-hidden="true">⬜</span>
+        <p className="wp-file-binary-label">Could not load image</p>
+        <p className="wp-file-binary-size">{formatBytes(file.size)}</p>
+        <a
+          href={rawUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="secondary wp-file-binary-open"
+        >
+          Open raw ↗
+        </a>
       </div>
     );
   }

@@ -2,12 +2,11 @@
 
 FastAPI daemon for managing and observing Claude Code, Codex, and OpenCode sessions.
 
-Managed Codex sessions use the local Codex App Server SDK from `../3rdparty/codex/sdk/python`. Claude and OpenCode sessions use their native APIs.
+Managed Codex sessions use the `openai-codex` Python SDK (from PyPI). Claude and OpenCode sessions use their native APIs.
 
 ## Development
 
 ```bash
-git submodule update --init --recursive
 cp waypoint.example.yaml waypoint.yaml
 # edit waypoint.yaml and set a real password
 uv sync --group dev

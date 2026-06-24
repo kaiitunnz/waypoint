@@ -24,7 +24,6 @@ Use GitHub Issues directly for active bugs and feature requests.
 - `backend/src/waypoint/backends/` — one package per coding agent (`claude_code/`, `codex/`, `opencode/`) plus the transport packages (`claude_tty/` for the tty-tail Emulated transport, `tmux/` for the raw Terminal transport); see [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the plugin contract and extension recipe
 - `waypointctl/` — standalone control-plane package and daemon (`uv tool install ./waypointctl`, `pipx install ./waypointctl`)
 - `frontend/` — Next.js PWA client
-- `3rdparty/codex/` — pinned Codex submodule used for the local app-server SDK
 
 A single long-lived **personal assistant** thread — which answers host questions, grounds itself in your running sessions, and manages them via the `waypoint sessions` CLI — can be enabled in `waypoint.yaml`. Its coding backend, model, and permission mode are switchable on the fly, and the thread can be terminated, reattached, or context-cleared from the assistant page; see [`docs/personal_assistant.md`](docs/personal_assistant.md).
 
@@ -35,8 +34,8 @@ Waypoint speaks to Claude Code, Codex, and OpenCode through wire formats that ch
 | Agent       | Tested versions   | Wire entry point                                                     | Notes                                                                                       |
 | ----------- | ----------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | Claude Code | `2.1.178` | `claude -p --input-format=stream-json --output-format=stream-json --permission-prompt-tool stdio` | Approvals ride the `can_use_tool` control protocol; `CLAUDE_CODE_WORKFLOWS=1` enables the Workflow tool. Also relies on `--include-hook-events`, the `system/status`/`compact_boundary` events, and `--session-id`/`--resume`. |
-| Codex CLI   | `0.139.0` | `codex app-server --listen stdio://`                                 | Driven via the vendored Python SDK in `3rdparty/codex/sdk/python` (`thread_*` / `turn_*` RPCs). |
-| Codex SDK   | `python-v0.1.0b2` | `3rdparty/codex/` submodule pin                                      | Bumped together with Codex CLI; track via `git submodule update --remote 3rdparty/codex`.   |
+| Codex CLI   | `0.139.0` | `codex app-server --listen stdio://`                                 | Driven via the `openai-codex` Python SDK (`thread_*` / `turn_*` RPCs). Managed local sessions run the bundled `openai-codex-cli-bin` binary, currently `0.136.0` — the PyPI cli-bin channel lags the npm `@openai/codex` channel, so it trails the tested `0.139.0`. |
+| Codex SDK   | `0.1.0b3` | `openai-codex` on PyPI (pre-release)                                | Pinned in `backend/pyproject.toml`; `backend/pyproject.toml` overrides the bundled `openai-codex-cli-bin` to the latest stable (`0.136.0`). |
 | OpenCode   | `1.17.4`        | `opencode serve` with REST + SSE API                             | HTTP-based; discovers models from `/provider`. |
 
 To extend this matrix:
@@ -52,12 +51,6 @@ Adding a brand-new coding agent (Aider, …) is its own flow — the runtime, AP
 
 ## Quick start
 
-Initialize the Codex submodule before syncing backend dependencies:
-
-```bash
-git submodule update --init --recursive
-```
-
 ### Backend
 
 ```bash
@@ -69,7 +62,7 @@ uv run pre-commit install
 uv run waypoint serve
 ```
 
-Waypoint uses the Python SDK from `../3rdparty/codex/sdk/python` for managed Codex app-server sessions.
+Waypoint uses the `openai-codex` Python SDK (pulled from PyPI) for managed Codex app-server sessions; the matching Codex binary ships with it via `openai-codex-cli-bin`.
 
 For a full backend quality pass before committing, run:
 

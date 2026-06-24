@@ -12,9 +12,9 @@ from waypoint.backends.codex.permission_modes import (
     codex_turn_params_for,
 )
 
-# Top-level keys the v2 TurnStartParams wire format accepts. Mirrors
-# the JSON schema in
-# ``3rdparty/codex/codex-rs/app-server-protocol/schema/json/v2/TurnStartParams.json``.
+# Top-level keys the v2 TurnStartParams wire format accepts. Mirrors the JSON
+# schema at ``codex-rs/app-server-protocol/schema/json/v2/TurnStartParams.json``
+# in the upstream openai/codex repo.
 _V2_TURN_START_KEYS = frozenset(
     {
         "approvalPolicy",

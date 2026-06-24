@@ -140,6 +140,7 @@ async def test_disabled_returns_404(tmp_path: Path) -> None:
             headers={"Authorization": f"Bearer {token}"},
         )
     assert resp.status_code == 404
+    assert resp.json()["detail"] == "disabled"  # the gated branch, not a routing miss
 
 
 async def test_raw_validates_query_token(tmp_path: Path) -> None:

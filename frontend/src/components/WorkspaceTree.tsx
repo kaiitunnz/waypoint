@@ -175,6 +175,7 @@ export function WorkspaceTree({
           expanded={expanded}
           selectedPath={selectedPath}
           revealTarget={activeReveal}
+          revealSeq={revealSeq}
           onSelectFile={selectFile}
           onToggleDir={toggleDir}
         />
@@ -194,6 +195,7 @@ function TreeNode({
   expanded,
   selectedPath,
   revealTarget,
+  revealSeq,
   onSelectFile,
   onToggleDir,
 }: {
@@ -204,6 +206,7 @@ function TreeNode({
   expanded: Set<string>;
   selectedPath: string | null;
   revealTarget: string | null;
+  revealSeq?: number;
   onSelectFile: (path: string) => void;
   onToggleDir: (dirPath: string) => void;
 }) {
@@ -215,11 +218,13 @@ function TreeNode({
   const isRevealed = revealTarget != null && revealTarget === fullPath;
   const nodeRef = useRef<HTMLButtonElement>(null);
 
+  // revealSeq is in the deps so a repeat reveal of the same (already-revealed)
+  // node re-scrolls it into view even though `isRevealed` stays true.
   useEffect(() => {
     if (isRevealed) {
       nodeRef.current?.scrollIntoView({ block: "center" });
     }
-  }, [isRevealed]);
+  }, [isRevealed, revealSeq]);
 
   return (
     <li
@@ -277,6 +282,7 @@ function TreeNode({
                   expanded={expanded}
                   selectedPath={selectedPath}
                   revealTarget={revealTarget}
+                  revealSeq={revealSeq}
                   onSelectFile={onSelectFile}
                   onToggleDir={onToggleDir}
                 />

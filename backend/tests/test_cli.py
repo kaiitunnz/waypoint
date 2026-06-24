@@ -1524,6 +1524,152 @@ def test_sessions_send_reports_unknown_on_timeout_idle(
     assert out["session"]["send"] == "unknown"
 
 
+# ── sessions upload / sessions send --attachment-id ───────────────────────────
+
+
+def test_sessions_upload_emits_attachment_specs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+    f1 = tmp_path / "img.png"
+    f2 = tmp_path / "doc.txt"
+    f1.write_bytes(b"\x89PNG")
+    f2.write_text("hello")
+    uploads: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if (
+            request.url.path == "/api/sessions/s1/attachments"
+            and request.method == "POST"
+        ):
+            n = len(uploads) + 1
+            att_id = f"att{n:032x}"
+            uploads.append(att_id)
+            return httpx.Response(
+                200,
+                json={
+                    "id": att_id,
+                    "filename": f"file{n}",
+                    "mime": "application/octet-stream",
+                    "size": 4,
+                    "kind": "file",
+                },
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "upload",
+            "s1",
+            str(f1),
+            str(f2),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    out = json.loads(result.stdout)
+    assert "attachments" in out
+    assert len(out["attachments"]) == 2
+    assert [a["id"] for a in out["attachments"]] == uploads
+
+
+def test_sessions_send_attachment_id_passes_ids_to_send_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+    state: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions/s1/input":
+            state["input_body"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "s1"}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "send",
+            "s1",
+            "hello",
+            "--attachment-id",
+            "id-aaa",
+            "--attachment-id",
+            "id-bbb",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert state["input_body"]["attachments"] == ["id-aaa", "id-bbb"]
+
+
+def test_sessions_send_attach_and_attachment_id_combined(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+    f = tmp_path / "a.txt"
+    f.write_text("x")
+    state: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if (
+            request.url.path == "/api/sessions/s1/attachments"
+            and request.method == "POST"
+        ):
+            return httpx.Response(
+                200,
+                json={
+                    "id": "uploaded-id",
+                    "filename": "a.txt",
+                    "mime": "text/plain",
+                    "size": 1,
+                    "kind": "file",
+                },
+            )
+        if request.url.path == "/api/sessions/s1/input":
+            state["input_body"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "s1"}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "send",
+            "s1",
+            "hello",
+            "--attach",
+            str(f),
+            "--attachment-id",
+            "preexisting-id",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    # uploaded files come first, then explicit IDs
+    assert state["input_body"]["attachments"] == ["uploaded-id", "preexisting-id"]
+
+
 # ── usage command ─────────────────────────────────────────────────────────────
 
 

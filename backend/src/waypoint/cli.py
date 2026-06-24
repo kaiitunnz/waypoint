@@ -1157,6 +1157,15 @@ def sessions_send(
             "by host path or inline depending on the backend.",
         ),
     ] = None,
+    attachment_id: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--attachment-id",
+            help="ID of an already-uploaded attachment to include (repeatable). "
+            "Use `sessions upload` to obtain IDs. Files from --attach are "
+            "uploaded first; --attachment-id values follow in order.",
+        ),
+    ] = None,
 ) -> None:
     """Send a message to a session.
 
@@ -1167,13 +1176,39 @@ def sessions_send(
     """
 
     def _run(c: WaypointClient) -> dict[str, Any]:
-        ids = [c.upload_attachment(session_id, path)["id"] for path in attach or []]
-        return {"session": c.send_input(session_id, text, attachments=ids or None)}
+        uploaded = [
+            c.upload_attachment(session_id, path)["id"] for path in attach or []
+        ]
+        combined = uploaded + list(attachment_id or [])
+        return {"session": c.send_input(session_id, text, attachments=combined or None)}
 
     result = _run_client(_settings_from_ctx(ctx), _run)
     typer.echo(json.dumps(result, indent=2))
     if result.get("session", {}).get("send") == "unknown":
         raise typer.Exit(code=1)
+
+
+@sessions_app.command("upload")
+def sessions_upload(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    files: Annotated[
+        list[Path],
+        typer.Argument(
+            exists=True,
+            dir_okay=False,
+            readable=True,
+            help="File(s) to upload.",
+        ),
+    ],
+) -> None:
+    """Upload file attachment(s) to a session without sending a message."""
+
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        specs = [c.upload_attachment(session_id, path) for path in files]
+        return {"attachments": specs}
+
+    _emit(_settings_from_ctx(ctx), _run)
 
 
 def _validate_permission_mode(

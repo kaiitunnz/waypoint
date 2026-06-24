@@ -111,6 +111,7 @@ export function WorkspaceFilesPanel({
   const [revealDir, setRevealDir] = useState<string | null>(null);
   const [treeRefreshSeq, setTreeRefreshSeq] = useState(0);
   const [treeRefreshing, setTreeRefreshing] = useState(false);
+  const [fileRefreshing, setFileRefreshing] = useState(false);
   const {
     openPath,
     openFile,
@@ -157,8 +158,11 @@ export function WorkspaceFilesPanel({
     window.setTimeout(() => setTreeRefreshing(false), 600);
   }, []);
   const refreshFile = useCallback(() => {
-    if (openPath) void openFile(openPath);
-  }, [openPath, openFile]);
+    if (!openPath) return;
+    void silentRefreshFile();
+    setFileRefreshing(true);
+    window.setTimeout(() => setFileRefreshing(false), 600);
+  }, [openPath, silentRefreshFile]);
 
   // Auto-refresh when the tab regains focus — the common case is the user
   // switching to the terminal, the agent editing files, then switching back.
@@ -318,7 +322,7 @@ export function WorkspaceFilesPanel({
                     ) : null}
                     <button
                       type="button"
-                      className={`wp-preview-btn wp-refresh-btn${fileLoading ? " spinning" : ""}`}
+                      className={`wp-preview-btn wp-refresh-btn${fileLoading || fileRefreshing ? " spinning" : ""}`}
                       onClick={refreshFile}
                       title="Refresh file"
                       aria-label="Refresh file"

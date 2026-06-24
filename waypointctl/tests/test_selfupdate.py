@@ -48,10 +48,34 @@ def test_command_sequence_with_explicit_ref(tmp_path: Path) -> None:
     expected = [
         ["git", "-C", str(tmp_path), "fetch", "--tags"],
         ["git", "-C", str(tmp_path), "checkout", "v3.0.0"],
-        ["uv", "tool", "install", str(tmp_path / "waypointctl")],
+        ["uv", "tool", "install", "--force", str(tmp_path / "waypointctl")],
         ["waypointctl", "--home", str(tmp_path), "restart"],
     ]
     assert [c.args[0] for c in mock_run.call_args_list] == expected
+
+
+def test_uv_install_uses_force_flag(tmp_path: Path) -> None:
+    with (
+        patch("waypointctl.selfupdate.resolve_waypoint_home", return_value=tmp_path),
+        patch("waypointctl.selfupdate.subprocess.run") as mock_run,
+    ):
+        selfupdate.run(tmp_path, ref="v1.0.0")
+
+    cmds = [c.args[0] for c in mock_run.call_args_list]
+    uv_cmd = next(cmd for cmd in cmds if cmd[0] == "uv")
+    assert "--force" in uv_cmd
+
+
+def test_restart_sets_force_frontend_build_env(tmp_path: Path) -> None:
+    with (
+        patch("waypointctl.selfupdate.resolve_waypoint_home", return_value=tmp_path),
+        patch("waypointctl.selfupdate.subprocess.run") as mock_run,
+    ):
+        selfupdate.run(tmp_path, ref="v1.0.0")
+
+    restart_call = next(c for c in mock_run.call_args_list if "restart" in c.args[0])
+    env = restart_call.kwargs.get("env") or {}
+    assert env.get("WAYPOINT_STACK_FORCE_FRONTEND_BUILD") == "1"
 
 
 def test_resolve_home_fallback_to_default_install_dir() -> None:

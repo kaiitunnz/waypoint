@@ -95,7 +95,14 @@ def bootstrap(
     try:
         home_path = resolve_waypoint_home(home)
     except RuntimeError:
-        home_path = Path.home() / ".waypoint" / "app"
+        # Fall back to the default install location only when it already exists
+        # and looks like a real repo; otherwise re-raise so the user sees the
+        # actionable "set WAYPOINT_HOME" error.
+        cand = Path.home() / ".waypoint" / "app"
+        if (cand / "backend").exists() and (cand / "frontend").exists():
+            home_path = cand
+        else:
+            raise
     apply_dotenv(home_path)
     ctx.obj = {"home": home_path}
 

@@ -1,3 +1,4 @@
+import os
 import subprocess
 from pathlib import Path
 
@@ -34,7 +35,14 @@ def run(home: Path | None = None, ref: str | None = None) -> None:
     typer.echo(f"Checking out {target}")
     subprocess.run(["git", "-C", str(resolved), "checkout", target], check=True)
 
-    subprocess.run(["uv", "tool", "install", str(resolved / "waypointctl")], check=True)
+    subprocess.run(
+        ["uv", "tool", "install", "--force", str(resolved / "waypointctl")], check=True
+    )
 
-    subprocess.run(["waypointctl", "--home", str(resolved), "restart"], check=True)
+    restart_env = {**os.environ, "WAYPOINT_STACK_FORCE_FRONTEND_BUILD": "1"}
+    subprocess.run(
+        ["waypointctl", "--home", str(resolved), "restart"],
+        check=True,
+        env=restart_env,
+    )
     typer.echo(f"Updated to {target}")

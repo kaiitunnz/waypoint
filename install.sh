@@ -90,7 +90,7 @@ fi
 
 # ── install waypointctl ─────────────────────────────────────────────────────
 printf 'Installing waypointctl...\n'
-uv tool install "${INSTALL_DIR}/waypointctl"
+uv tool install --force "${INSTALL_DIR}/waypointctl"
 
 # ── start stack ─────────────────────────────────────────────────────────────
 printf 'Starting Waypoint...\n'

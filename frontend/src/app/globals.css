@@ -11756,10 +11756,6 @@ body.wp-dock-resizing {
   min-height: 0;
 }
 
-html[data-theme="light"] .wp-page {
-  background: var(--bg);
-}
-
 .wp-panel-body {
   display: flex;
   flex: 1;

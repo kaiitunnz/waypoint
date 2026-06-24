@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
@@ -66,13 +66,22 @@ export function WorkspaceFilesPanel({
     [clampWidth, onResize, width],
   );
 
-  if (!open || typeof document === "undefined") return null;
+  // Mount the dock lazily on first open (no eager tree fetch before then), and
+  // keep it mounted afterwards — hidden via CSS when closed — so its tree
+  // expansion and open file survive a close/reopen.
+  const [hasOpened, setHasOpened] = useState(false);
+  useEffect(() => {
+    if (open) setHasOpened(true);
+  }, [open]);
+
+  if (typeof document === "undefined" || !hasOpened) return null;
 
   return createPortal(
     <aside
-      className="wp-dock"
+      className={`wp-dock${open ? "" : " wp-dock-closed"}`}
       role="complementary"
       aria-label="Workspace files"
+      aria-hidden={!open}
       onKeyDown={(e) => {
         if (e.key === "Escape") onClose();
       }}
@@ -85,6 +94,7 @@ export function WorkspaceFilesPanel({
         initialPath={initialPath}
         initialDir={initialDir}
         revealSeq={revealSeq}
+        active={open}
         showFullPageLink
         headerActions={
           <button

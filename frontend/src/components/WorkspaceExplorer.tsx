@@ -24,6 +24,9 @@ interface WorkspaceExplorerProps {
   revealSeq?: number;
   headerActions?: ReactNode;
   showFullPageLink?: boolean;
+  // When false (e.g. the dock is closed but kept mounted to preserve state),
+  // the focus auto-refresh is suspended.
+  active?: boolean;
 }
 
 function useWorkspacePreview(host: string, token: string, sessionId: string) {
@@ -106,6 +109,7 @@ export function WorkspaceExplorer({
   revealSeq,
   headerActions,
   showFullPageLink = false,
+  active = true,
 }: WorkspaceExplorerProps) {
   const [mobileView, setMobileView] = useState<"tree" | "preview">("tree");
   const [revealDir, setRevealDir] = useState<string | null>(null);
@@ -125,8 +129,8 @@ export function WorkspaceExplorer({
   } = useWorkspacePreview(host, token, sessionId);
 
   useEffect(() => {
-    reset();
     if (initialPath) {
+      reset();
       void openFile(initialPath);
       setRevealDir(null);
       setMobileView("preview");
@@ -134,7 +138,8 @@ export function WorkspaceExplorer({
       setRevealDir(initialDir);
       setMobileView("tree");
     } else {
-      setRevealDir(null);
+      // No specific target (e.g. "Browse workspace"): keep the preserved open
+      // file and tree expansion; just surface the tree pane.
       setMobileView("tree");
     }
     // revealSeq is the retrigger knob: it bumps on every open request so an
@@ -159,6 +164,7 @@ export function WorkspaceExplorer({
   // Throttled so visibilitychange + focus firing together only refresh once.
   const lastFocusRefresh = useRef(0);
   useEffect(() => {
+    if (!active) return;
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
       const now = Date.now();
@@ -173,7 +179,7 @@ export function WorkspaceExplorer({
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, [silentRefreshFile]);
+  }, [silentRefreshFile, active]);
 
   const handleSelectFile = useCallback(
     async (path: string) => {

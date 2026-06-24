@@ -18,9 +18,10 @@ def test_explicit_ref_used_directly(tmp_path: Path) -> None:
 
 
 def test_latest_tag_resolved_when_no_ref(tmp_path: Path) -> None:
+    # Simulate newest-first sorted output: v3.0.0 is newer than v2.0.0
     side_effects = [
         MagicMock(),  # git fetch
-        MagicMock(stdout="v2.0.0\n"),  # git describe
+        MagicMock(stdout="v3.0.0\nv2.0.0\nv1.0.0\n"),  # git tag --sort=-version:refname
         MagicMock(),  # git checkout
         MagicMock(),  # uv tool install
         MagicMock(),  # waypointctl restart
@@ -34,8 +35,10 @@ def test_latest_tag_resolved_when_no_ref(tmp_path: Path) -> None:
         selfupdate.run(tmp_path)
 
     cmds = [c.args[0] for c in mock_run.call_args_list]
-    assert any("describe" in " ".join(cmd) for cmd in cmds)
-    assert ["git", "-C", str(tmp_path), "checkout", "v2.0.0"] in cmds
+    tag_cmd = next(cmd for cmd in cmds if "tag" in cmd)
+    assert "--sort=-version:refname" in tag_cmd
+    # Must check out the first (newest) tag, not a nearest ancestor
+    assert ["git", "-C", str(tmp_path), "checkout", "v3.0.0"] in cmds
 
 
 def test_command_sequence_with_explicit_ref(tmp_path: Path) -> None:

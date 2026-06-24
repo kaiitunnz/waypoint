@@ -16,12 +16,16 @@ def _resolve_home(home: Path | None) -> Path:
 
 def _latest_tag(home: Path) -> str:
     result = subprocess.run(
-        ["git", "-C", str(home), "describe", "--tags", "--abbrev=0"],
+        ["git", "-C", str(home), "tag", "--list", "--sort=-version:refname"],
         check=True,
         capture_output=True,
         text=True,
     )
-    return result.stdout.strip()
+    for line in result.stdout.splitlines():
+        tag = line.strip()
+        if tag:
+            return tag
+    raise RuntimeError(f"no tags found in {home}")
 
 
 def run(home: Path | None = None, ref: str | None = None) -> None:

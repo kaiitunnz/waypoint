@@ -584,14 +584,26 @@ def test_helper_rejects_degenerate_profile_names(
     assert "invalid profile name: ---" in completed.stderr
 
 
-def _path_without_docker() -> str:
-    real_docker = shutil.which("docker")
-    skip = str(Path(real_docker).parent) if real_docker else None
-    return os.pathsep.join(
-        entry
-        for entry in os.environ["PATH"].split(os.pathsep)
-        if entry and entry != skip
-    )
+def _path_without_docker(sandbox: Path) -> str:
+    # On usr-merged systems (e.g. ubuntu-latest) `docker` lives in the same dir
+    # as coreutils, so dropping a PATH entry would also hide dirname/sed and the
+    # script would fail before its docker check. Instead, mirror every command
+    # on PATH except `docker` into a sandbox dir and use it as the sole PATH.
+    sandbox.mkdir(parents=True, exist_ok=True)
+    seen: set[str] = set()
+    for directory in os.environ["PATH"].split(os.pathsep):
+        d = Path(directory)
+        if not d.is_dir():
+            continue
+        for entry in d.iterdir():
+            if entry.name == "docker" or entry.name in seen:
+                continue
+            try:
+                (sandbox / entry.name).symlink_to(entry)
+            except OSError:
+                continue
+            seen.add(entry.name)
+    return str(sandbox)
 
 
 def test_helper_requires_docker_when_binary_is_missing(
@@ -609,7 +621,7 @@ def test_helper_requires_docker_when_binary_is_missing(
         cwd=repo,
         env={
             **os.environ,
-            "PATH": _path_without_docker(),
+            "PATH": _path_without_docker(tmp_path / "nodocker-bin"),
             "WAYPOINTCTL_STATE_DIR": str(tmp_path / "state"),
         },
         capture_output=True,

@@ -52,6 +52,7 @@ from waypoint.schemas import (
     SessionModelRequest,
     SessionPermissionModeRequest,
     SessionPlanApprovalRequest,
+    SessionRecord,
     SessionStatus,
     SessionTitleRequest,
 )
@@ -64,6 +65,7 @@ from waypoint.workspace_preview import (
     is_denied,
     list_dir,
     read_text_capped,
+    relative_to_base,
     resolve_in_base,
 )
 
@@ -390,12 +392,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content_disposition_type="inline",
         )
 
-    @app.get("/api/sessions/{session_id}/workspace/tree")
-    async def workspace_tree(
-        session_id: str,
-        _: Annotated[str, Depends(token_dependency())],
-        path: Annotated[str, Query()] = "",
-    ) -> Any:
+    def _workspace_session(session_id: str) -> SessionRecord:
         if not context.settings.workspace_preview_enabled:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="disabled"
@@ -406,16 +403,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="workspace preview unavailable for remote sessions",
             )
+        return session
+
+    @app.get("/api/sessions/{session_id}/workspace/tree")
+    async def workspace_tree(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+        path: Annotated[str, Query()] = "",
+    ) -> Any:
+        session = _workspace_session(session_id)
         base = Path(session.worktree_path or session.cwd)
         try:
-            entries, truncated, overflow = list_dir(
+            entries, truncated, overflow, resolved_dir = list_dir(
                 base,
                 path,
                 500,
                 denylist=context.settings.workspace_denylist,
                 follow_symlinks=context.settings.workspace_follow_symlinks,
             )
-            normalized_path = _workspace_rel(base, path)
         except WorkspacePathError as exc:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="workspace path denied"
@@ -426,7 +431,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ) from exc
         return {
             "root": {"cwd": session.cwd, "worktree_path": session.worktree_path},
-            "path": normalized_path,
+            "path": relative_to_base(base, resolved_dir),
             "entries": entries,
             "truncated": truncated,
             "overflow": overflow,
@@ -448,28 +453,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
         else:
             require_token(authorization, context.tokens)
-        if not context.settings.workspace_preview_enabled:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="disabled"
-            )
-        session = context.runtime.get_session(session_id)
-        if session.launch_target_id is not None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="workspace preview unavailable for remote sessions",
-            )
+        session = _workspace_session(session_id)
         base = Path(session.worktree_path or session.cwd)
         try:
+            if is_denied(path, context.settings.workspace_denylist):
+                raise WorkspacePathError("path is denied")
             resolved = resolve_in_base(
                 base,
                 path,
                 follow_symlinks=context.settings.workspace_follow_symlinks,
             )
-            if is_denied(path, context.settings.workspace_denylist):
-                raise WorkspacePathError("path is denied")
             if not resolved.exists() or not resolved.is_file():
                 raise FileNotFoundError(resolved)
-            normalized_path = _workspace_rel(base, path)
             if raw:
                 media_type = (
                     mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
@@ -480,6 +475,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     filename=resolved.name,
                     content_disposition_type="inline",
                 )
+            stat = resolved.stat()
             content, truncated, binary, encoding = read_text_capped(
                 resolved, context.settings.workspace_max_file_bytes
             )
@@ -492,23 +488,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=status.HTTP_404_NOT_FOUND, detail="workspace path not found"
             ) from exc
         return {
-            "path": normalized_path,
-            "size": resolved.stat().st_size,
-            "mtime": resolved.stat().st_mtime,
+            "path": relative_to_base(base, resolved),
+            "size": stat.st_size,
+            "mtime": stat.st_mtime,
             "encoding": encoding,
             "truncated": truncated,
             "binary": binary,
             "content": content,
         }
-
-    def _workspace_rel(base: Path, rel: str) -> str:
-        resolved = resolve_in_base(
-            base,
-            rel,
-            follow_symlinks=context.settings.workspace_follow_symlinks,
-        )
-        relative = resolved.relative_to(base.expanduser().resolve())
-        return "" if relative == Path(".") else relative.as_posix()
 
     @app.delete("/api/sessions/{session_id}/attachments/{attachment_id}")
     async def delete_attachment(

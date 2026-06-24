@@ -130,7 +130,6 @@ export function WorkspaceTree({
           selectedPath={selectedPath}
           onSelectFile={onSelectFile}
           onToggleDir={toggleDir}
-          onFetchDir={fetchDir}
         />
       ))}
       {rootState.overflow ? (
@@ -158,7 +157,6 @@ function TreeNode({
   selectedPath: string | null;
   onSelectFile: (path: string) => void;
   onToggleDir: (dirPath: string) => void;
-  onFetchDir: (dirPath: string) => void;
 }) {
   const fullPath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
   const isDir = entry.kind === "dir";
@@ -222,7 +220,6 @@ function TreeNode({
                   selectedPath={selectedPath}
                   onSelectFile={onSelectFile}
                   onToggleDir={onToggleDir}
-                  onFetchDir={() => {}}
                 />
               ))}
               {dirState.overflow ? (

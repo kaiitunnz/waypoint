@@ -23,6 +23,8 @@ interface WorkspaceFilesPanelProps {
   initialDir?: string;
   revealSeq?: number;
   recentPaths: string[];
+  width: number;
+  onResize: (width: number) => void;
   onClose: () => void;
 }
 
@@ -105,6 +107,8 @@ export function WorkspaceFilesPanel({
   initialDir,
   revealSeq,
   recentPaths,
+  width,
+  onResize,
   onClose,
 }: WorkspaceFilesPanelProps) {
   const [mobileView, setMobileView] = useState<"tree" | "preview">("tree");
@@ -143,14 +147,41 @@ export function WorkspaceFilesPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialPath, initialDir, revealSeq]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  // Drag the right-edge seam to resize the dock. The dock is non-modal, so the
+  // width lives in the parent and is persisted there; this only reports deltas.
+  const clampWidth = useCallback(
+    (w: number) => Math.max(300, Math.min(w, Math.round(window.innerWidth * 0.6))),
+    [],
+  );
+  const startResize = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = width;
+      const onMove = (ev: PointerEvent) => onResize(clampWidth(startWidth + (ev.clientX - startX)));
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        document.body.classList.remove("wp-dock-resizing");
+      };
+      document.body.classList.add("wp-dock-resizing");
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+    [clampWidth, onResize, width],
+  );
+  const onResizeKey = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        onResize(clampWidth(width + 24));
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        onResize(clampWidth(width - 24));
+      }
+    },
+    [clampWidth, onResize, width],
+  );
 
   const refreshTree = useCallback(() => {
     setTreeRefreshSeq((s) => s + 1);
@@ -211,18 +242,14 @@ export function WorkspaceFilesPanel({
   if (!open || typeof document === "undefined") return null;
 
   return createPortal(
-    <div
-      className="wp-panel-backdrop"
-      onPointerDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+    <aside
+      className="wp-dock"
+      role="complementary"
+      aria-label="Workspace files"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
       }}
     >
-      <div
-        className="wp-panel-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Workspace files"
-      >
         <div className="wp-panel-header">
           <div className="wp-panel-title">
             <span>Workspace files</span>
@@ -379,8 +406,16 @@ export function WorkspaceFilesPanel({
             )}
           </div>
         </div>
-      </div>
-    </div>,
+        <div
+          className="wp-dock-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize files panel"
+          tabIndex={0}
+          onPointerDown={startResize}
+          onKeyDown={onResizeKey}
+        />
+    </aside>,
     document.body,
   );
 }

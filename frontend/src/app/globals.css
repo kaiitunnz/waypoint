@@ -11528,44 +11528,98 @@ html[data-theme="light"]
 }
 
 /* ─── Workspace preview ─── */
-.wp-panel-backdrop {
+/* The workspace dock is a non-modal left side-panel that coexists with the
+   live session (transcript + composer stay interactive). Three regimes: push
+   (wide, the column slides clear), overlay (mid), and full-screen sheet
+   (mobile). */
+.wp-dock {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
   height: 100dvh;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
-  /* Keep the modal clear of the notch/home indicator on mobile; the panel is
-     near-full-height, so without this the header slides under the status bar. */
-  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
-    max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
-}
-
-.wp-panel-modal {
-  width: 100%;
-  max-width: min(960px, calc(100vw - 32px));
-  height: 100%;
-  max-height: 100%;
-  min-height: 0;
-  background: rgba(14, 17, 24, 0.96);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.48);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  width: var(--wp-dock-width, 400px);
+  z-index: 60;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: session-files-in 200ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  background: rgba(14, 17, 24, 0.98);
+  border-right: 1px solid var(--line-strong);
+  box-shadow: 4px 0 32px rgba(0, 0, 0, 0.36);
+  /* Inner tree/preview split keys off the dock's own width, not the viewport. */
+  container-type: inline-size;
+  padding-left: env(safe-area-inset-left);
+  animation: wp-dock-in 200ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
-html[data-theme="light"] .wp-panel-modal {
-  background: rgba(252, 249, 242, 0.98);
-  box-shadow: 0 16px 48px rgba(60, 45, 20, 0.2);
+html[data-theme="light"] .wp-dock {
+  background: rgba(252, 249, 242, 0.99);
+  box-shadow: 4px 0 28px rgba(60, 45, 20, 0.16);
+}
+
+@keyframes wp-dock-in {
+  from {
+    transform: translateX(-100%);
+    opacity: 0.4;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Push regime: on wide viewports, inset the containing block (body) by the dock
+   width so the centered .page-shell re-centers in the space beside the dock
+   instead of being padded into a squished, off-center strip. The fixed dock and
+   the fixed body::before background both ignore body padding. */
+body {
+  transition: padding-left 160ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+@media (min-width: 1180px) {
+  html[data-wp-dock="open"] body {
+    padding-left: var(--wp-dock-width, 400px);
+  }
+}
+
+/* Resize seam on the dock's right edge (VS Code-style). */
+.wp-dock-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 7px;
+  height: 100%;
+  z-index: 2;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.wp-dock-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 1px;
+  height: 100%;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+
+.wp-dock-resizer:hover::after,
+.wp-dock-resizer:focus-visible::after,
+body.wp-dock-resizing .wp-dock-resizer::after {
+  background: var(--accent-cool);
+}
+
+.wp-dock-resizer:focus-visible {
+  outline: none;
+}
+
+body.wp-dock-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .wp-panel-header {
@@ -12304,7 +12358,11 @@ html[data-theme="light"] .wp-code-pre {
   color: var(--accent-cool);
 }
 
-@media (max-width: 640px) {
+/* When the dock itself is too narrow for a side-by-side tree+preview, collapse
+   to a single pane with the Tree/Preview toggle. Keyed on the dock width (a
+   container query), so this fires both for a narrow desktop dock and the
+   mobile full-screen sheet. */
+@container (max-width: 700px) {
   .wp-panel-mobile-toggle {
     display: flex;
   }
@@ -12322,6 +12380,22 @@ html[data-theme="light"] .wp-code-pre {
   }
 
   .wp-mobile-hidden {
+    display: none;
+  }
+}
+
+/* Full-screen sheet on phones: the dock fills the viewport (no push, no resize
+   seam) and clears the notch/home indicator. */
+@media (max-width: 640px) {
+  .wp-dock {
+    width: 100%;
+    border-right: none;
+    box-shadow: none;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+      env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  .wp-dock-resizer {
     display: none;
   }
 

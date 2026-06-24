@@ -13,9 +13,10 @@ from waypoint.backends.capabilities import PermissionModeSpec
 
 CODEX_PLAN_MODE = "plan"
 
-# Source-of-truth Codex collaboration-mode templates ship in the vendored
-# codex submodule. The TUI bundles `plan.md`/`default.md` into its
-# `builtin_collaboration_mode_presets` and ships them as the per-mode
+# Source-of-truth Codex collaboration-mode templates, vendored from the Codex
+# CLI source tree (see ``collaboration_mode_templates/README.md`` for the
+# pinned commit and update steps). The TUI bundles `plan.md`/`default.md` into
+# its `builtin_collaboration_mode_presets` and ships them as the per-mode
 # ``developer_instructions``. Sending ``null`` from an app-server client
 # instead suppresses Codex's `build_collaboration_mode_update_item`
 # emit (see ``codex-rs/core/src/context_manager/updates.rs``), so the
@@ -25,12 +26,7 @@ CODEX_PLAN_MODE = "plan"
 # same templates here so a Waypoint mode switch carries the same
 # instruction body the TUI would.
 _CODEX_MODE_TEMPLATES_DIR = (
-    Path(__file__).resolve().parents[5]
-    / "3rdparty"
-    / "codex"
-    / "codex-rs"
-    / "collaboration-mode-templates"
-    / "templates"
+    Path(__file__).resolve().parent / "collaboration_mode_templates"
 )
 # Mirrors `format_mode_names(&TUI_VISIBLE_COLLABORATION_MODES)` in
 # `models-manager/src/collaboration_mode_presets.rs`. The TUI lists Plan
@@ -70,8 +66,9 @@ def _load_mode_template(name: str) -> str | None:
     try:
         return path.read_text(encoding="utf-8")
     except OSError:
-        # Submodule is optional at install time; fall back to ``None``
-        # so we still send something rather than crash on every turn.
+        # Templates are vendored and should always be present; fall back to
+        # ``None`` so a missing file degrades to explicit instructions rather
+        # than crashing on every turn.
         return None
 
 

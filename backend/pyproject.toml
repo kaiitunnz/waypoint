@@ -11,7 +11,7 @@ requires-python = ">=3.12"
 dependencies = [
   "aiohttp>=3.10.0",
   "fastapi>=0.116.0",
-  "openai-codex",
+  "openai-codex==0.1.0b3",
   "pydantic>=2.11.0",
   "pyte>=0.8.2",
   "python-multipart>=0.0.9",
@@ -43,14 +43,19 @@ asyncio_mode = "auto"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.uv]
-# The vendored Codex SDK pins openai-codex-cli-bin==0.132.0, which has no glibc
-# wheel; 0.133.0 is the first release with manylinux wheels. Override so Linux
-# deploys resolve.
-override-dependencies = ["openai-codex-cli-bin==0.133.0"]
+[tool.setuptools.package-data]
+"waypoint.backends.codex" = [
+  "collaboration_mode_templates/plan.md",
+  "collaboration_mode_templates/default.md",
+]
 
-[tool.uv.sources]
-openai-codex = { path = "../3rdparty/codex/sdk/python" }
+[tool.uv]
+# openai-codex 0.1.0b3 hard-pins the pre-release CLI binary 0.137.0a4. Override
+# it to the latest stable cli-bin (0.136.0, which has a manylinux/glibc wheel).
+# Managed local sessions run this bundled binary; the PyPI cli-bin channel lags
+# the npm @openai/codex channel, so 0.136.0 is the closest stable to the tested
+# codex-cli 0.139.0.
+override-dependencies = ["openai-codex-cli-bin==0.136.0"]
 
 [tool.black]
 target-version = ["py312"]

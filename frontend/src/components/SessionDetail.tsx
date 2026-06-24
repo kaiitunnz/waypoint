@@ -322,6 +322,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // results of out-of-order resolve() calls.
   const [workspaceRevealSeq, setWorkspaceRevealSeq] = useState(0);
   const workspaceRequestRef = useRef(0);
+  // Persisted width of the docked workspace panel (px). The dock is a left
+  // side-panel that coexists with the session rather than a blocking modal.
+  const [dockWidth, setDockWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return 400;
+    const stored = Number(window.localStorage.getItem("waypoint.workspaceDockWidth"));
+    return Number.isFinite(stored) && stored >= 300 ? stored : 400;
+  });
   // The todo-event sequence the user last dismissed from the progress dock.
   // `undefined` means we haven't read the persisted value yet — the dock stays
   // hidden until then so a dismissed dock doesn't flash on load (and to avoid
@@ -1695,6 +1702,27 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     [workspacePreviewEnabled, openWorkspacePath],
   );
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("waypoint.workspaceDockWidth", String(dockWidth));
+  }, [dockWidth]);
+
+  // Drive the layout from the document root: when the dock is open on a wide
+  // viewport, `.page-shell` pads left by --wp-dock-width so the session column
+  // slides clear of the dock instead of sitting under it.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (workspacePreviewEnabled && workspaceOpen) {
+      root.style.setProperty("--wp-dock-width", `${dockWidth}px`);
+      root.setAttribute("data-wp-dock", "open");
+    } else {
+      root.removeAttribute("data-wp-dock");
+    }
+    return () => {
+      root.removeAttribute("data-wp-dock");
+    };
+  }, [workspacePreviewEnabled, workspaceOpen, dockWidth]);
+
   return (
     <WorkspaceFileLinkProvider value={workspaceLink}>
     <section className="stack" ref={sectionRef}>
@@ -2240,6 +2268,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           initialDir={workspaceInitialDir}
           revealSeq={workspaceRevealSeq}
           recentPaths={recentPaths}
+          width={dockWidth}
+          onResize={setDockWidth}
           onClose={() => setWorkspaceOpen(false)}
         />
       ) : null}

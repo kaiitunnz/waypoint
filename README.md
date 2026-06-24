@@ -1,5 +1,7 @@
 # Waypoint
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Waypoint is a personal remote-control companion for Claude Code, Codex, and OpenCode sessions running on your machine. It provides a private, phone-first interface over Tailscale with:
 
 - a unified session list
@@ -49,9 +51,29 @@ To extend this matrix:
 
 Adding a brand-new coding agent (Aider, …) is its own flow — the runtime, API, and frontend dispatch by plugin id, so a new agent is "implement an agent plugin that satisfies the [`BackendPlugin`](backend/src/waypoint/backends/base.py) protocol, declare its supported transports, and register it." See [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md) for the contract, capability descriptor, and a step-by-step recipe.
 
-## Quick start
+## Install
 
-### Backend
+### Bootstrap installer
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kaiitunnz/waypoint/main/scripts/install.sh | bash
+```
+
+The installer fetches the latest tagged release, clones the repo to `~/.waypoint/app` (or `$WAYPOINT_HOME` if set — use a dedicated directory, not an existing development clone), seeds default config files with a random password, and starts the stack. To pin a specific version, pass `--ref` through the pipe:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kaiitunnz/waypoint/main/scripts/install.sh | bash -s -- --ref v0.1.0
+```
+
+or set `WAYPOINT_VERSION=v0.1.0` in the environment before running. To track the bleeding edge instead of a release, pass `--nightly` (the tip of `main`). Prerequisites: git and Node.js ≥ 20 (npm included); `uv` is installed automatically if absent.
+
+The stack starts automatically after installation. Use `waypointctl update` to upgrade to the latest release, `waypointctl update --ref vX.Y.Z` to pin a specific version, or `waypointctl update --nightly` to track `main`.
+
+**OpenCode** — the `opencode` CLI must be installed separately and present on your PATH; Waypoint does not bundle it.
+
+### Install from source / development
+
+#### Backend
 
 ```bash
 cd backend
@@ -91,7 +113,7 @@ The frontend launch form also reads `default_backend` and `default_cwd` from bac
 
 When an SSH target is selected, the launch form uses that target's `default_cwd` as the default remote path and lets you override it per launch. Managed sessions now use the same `cwd` value for UI display and the actual SSH-side working directory.
 
-### Frontend
+#### Frontend
 
 ```bash
 cd frontend

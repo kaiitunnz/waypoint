@@ -1,4 +1,5 @@
 import asyncio
+import importlib.metadata
 import json
 import os
 import shutil
@@ -6,6 +7,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from typing import Annotated, Any, cast
 
@@ -135,9 +137,28 @@ app.add_typer(schedule_app, name="schedule")
 app.add_typer(maintenance_app, name="maintenance")
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        try:
+            ver = importlib.metadata.version("waypoint")
+        except PackageNotFoundError:
+            ver = "0.0.0"
+        typer.echo(ver)
+        raise typer.Exit()
+
+
 @app.callback()
 def _root(
     ctx: typer.Context,
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=_version_callback,
+            is_eager=True,
+            help="Show version and exit.",
+        ),
+    ] = False,
     config: Annotated[
         str | None,
         typer.Option("--config", help="Path to waypoint.yaml.", metavar="PATH"),

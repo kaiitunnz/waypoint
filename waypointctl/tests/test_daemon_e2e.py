@@ -44,6 +44,24 @@ def _wait_until(predicate, timeout: float = 5.0) -> bool:
     return predicate()
 
 
+# Daemon startup (subprocess spawn + import + socket bind) can be slow on a
+# loaded CI runner, so allow generous headroom; the wait returns as soon as the
+# daemon is up.
+_DAEMON_START_TIMEOUT = 20.0
+
+
+def _terminate(proc: subprocess.Popen) -> None:
+    try:
+        os.kill(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=10)
+
+
 def test_daemon_stop_waits_when_wait_flag_set(state_dir: Path) -> None:
     home = _make_home(state_dir)
     env = {**os.environ, "WAYPOINTCTL_STATE_DIR": str(state_dir)}
@@ -53,7 +71,7 @@ def test_daemon_stop_waits_when_wait_flag_set(state_dir: Path) -> None:
         start_new_session=True,
     )
     try:
-        assert _wait_until(daemon_available, timeout=5.0)
+        assert _wait_until(daemon_available, timeout=_DAEMON_START_TIMEOUT)
         client = DaemonClient(home)
 
         logs: list[tuple[str, str]] = []
@@ -69,11 +87,7 @@ def test_daemon_stop_waits_when_wait_flag_set(state_dir: Path) -> None:
         text = "\n".join(line for _, line in logs)
         assert "stopped" in text or "stopping" in text.lower() or logs
     finally:
-        try:
-            os.kill(proc.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        proc.wait(timeout=5)
+        _terminate(proc)
 
 
 def test_daemon_restart_returns_result_before_doing_work(state_dir: Path) -> None:
@@ -85,7 +99,7 @@ def test_daemon_restart_returns_result_before_doing_work(state_dir: Path) -> Non
         start_new_session=True,
     )
     try:
-        assert _wait_until(daemon_available, timeout=5.0)
+        assert _wait_until(daemon_available, timeout=_DAEMON_START_TIMEOUT)
         client = DaemonClient(home)
         # restart is deferred: the daemon should answer immediately with ok=true
         # even though there's no managed backend/frontend to actually restart.
@@ -94,15 +108,11 @@ def test_daemon_restart_returns_result_before_doing_work(state_dir: Path) -> Non
         elapsed = time.monotonic() - start
         assert result.ok is True
         # If the daemon were doing the work synchronously it would also try to
-        # spawn `uv run waypoint serve` and wait for health — far slower than
-        # this. A loose bound is enough to catch a regression.
-        assert elapsed < 2.0
+        # spawn `uv run waypoint serve` and wait for health — many seconds.
+        # A loose bound catches that regression without flaking under CI load.
+        assert elapsed < 5.0
     finally:
-        try:
-            os.kill(proc.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        proc.wait(timeout=5)
+        _terminate(proc)
 
 
 def test_daemon_rejects_request_for_different_home(state_dir: Path) -> None:
@@ -119,7 +129,7 @@ def test_daemon_rejects_request_for_different_home(state_dir: Path) -> None:
         start_new_session=True,
     )
     try:
-        assert _wait_until(daemon_available, timeout=5.0)
+        assert _wait_until(daemon_available, timeout=_DAEMON_START_TIMEOUT)
 
         wrong_client = DaemonClient(other_home)
         result = wrong_client.request("status", [], log=lambda *_: None)
@@ -129,11 +139,7 @@ def test_daemon_rejects_request_for_different_home(state_dir: Path) -> None:
         right_client = DaemonClient(home_a)
         assert right_client.request("status", [], log=lambda *_: None).ok is True
     finally:
-        try:
-            os.kill(proc.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        proc.wait(timeout=5)
+        _terminate(proc)
 
 
 def test_daemon_status_e2e(state_dir: Path) -> None:
@@ -145,7 +151,7 @@ def test_daemon_status_e2e(state_dir: Path) -> None:
         start_new_session=True,
     )
     try:
-        assert _wait_until(daemon_available, timeout=5.0)
+        assert _wait_until(daemon_available, timeout=_DAEMON_START_TIMEOUT)
 
         pid = read_pid_file(waypoint_pid_path())
         assert pid == proc.pid
@@ -163,8 +169,4 @@ def test_daemon_status_e2e(state_dir: Path) -> None:
         assert "backend:" in text
         assert "frontend:" in text
     finally:
-        try:
-            os.kill(proc.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        proc.wait(timeout=5)
+        _terminate(proc)

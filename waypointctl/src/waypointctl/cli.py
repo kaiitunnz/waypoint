@@ -1,7 +1,9 @@
+import importlib.metadata
 import json
 import os
 import signal
 import subprocess
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from typing import Annotated, Any, cast
 
@@ -28,6 +30,7 @@ from waypointctl.protocol import DaemonResult
 from waypointctl.skills import run_skills_helper
 from waypointctl.stack import WaypointStack
 from waypointctl.tailscale import preflight_tailscale_command, run_tailscale_helper
+from waypointctl.update import run as run_update
 
 app = typer.Typer(
     add_completion=False, no_args_is_help=True, help="Waypoint control plane"
@@ -60,9 +63,28 @@ def _ctx_home(ctx: typer.Context) -> Path:
     return home
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        try:
+            ver = importlib.metadata.version("waypointctl")
+        except PackageNotFoundError:
+            ver = "0.0.0"
+        typer.echo(ver)
+        raise typer.Exit()
+
+
 @app.callback()
 def bootstrap(
     ctx: typer.Context,
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=_version_callback,
+            is_eager=True,
+            help="Show version and exit.",
+        ),
+    ] = False,
     home: Path | None = typer.Option(
         None,
         "--home",
@@ -70,7 +92,17 @@ def bootstrap(
         help="Waypoint repository root.",
     ),
 ) -> None:
-    home_path = resolve_waypoint_home(home)
+    try:
+        home_path = resolve_waypoint_home(home)
+    except RuntimeError:
+        # Fall back to the default install location only when it already exists
+        # and looks like a real repo; otherwise re-raise so the user sees the
+        # actionable "set WAYPOINT_HOME" error.
+        cand = Path.home() / ".waypoint" / "app"
+        if (cand / "backend").exists() and (cand / "frontend").exists():
+            home_path = cand
+        else:
+            raise
     apply_dotenv(home_path)
     ctx.obj = {"home": home_path}
 
@@ -246,6 +278,26 @@ def doctor(ctx: typer.Context) -> None:
     typer.echo(f"WAYPOINTCTL_STATE_DIR={resolve_state_dir()}")
     typer.echo(f"daemon socket={waypoint_socket_path()}")
     typer.echo(f"daemon for this home={'yes' if daemon_available(home) else 'no'}")
+
+
+@app.command("update")
+def update(
+    ctx: typer.Context,
+    ref: Annotated[
+        str | None,
+        typer.Option(
+            "--ref", help="Tag or ref to update to. Defaults to the latest release tag."
+        ),
+    ] = None,
+    nightly: Annotated[
+        bool,
+        typer.Option(
+            "--nightly", help="Update to the tip of main instead of a release."
+        ),
+    ] = False,
+) -> None:
+    """Update Waypoint to the latest release and restart the stack."""
+    run_update(_ctx_home(ctx), ref=ref, nightly=nightly)
 
 
 @tailscale_app.command("up")

@@ -1,0 +1,18 @@
+{
+  "release-type": "simple",
+  "package-name": "waypoint",
+  "bump-minor-pre-major": true,
+  "changelog-path": "CHANGELOG.md",
+  "extra-files": [
+    {
+      "type": "json",
+      "path": "frontend/package.json",
+      "jsonpath": "$.version"
+    }
+  ],
+  "packages": {
+    ".": {
+      "include-component-in-tag": false
+    }
+  }
+}

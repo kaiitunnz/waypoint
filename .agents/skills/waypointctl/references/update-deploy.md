@@ -2,6 +2,22 @@
 
 The repository is usually at `$WAYPOINT_HOME`.
 
+## Preferred: `waypointctl update`
+
+```bash
+waypointctl update                 # latest release tag
+waypointctl update --ref vX.Y.Z    # a specific tag
+waypointctl update --nightly       # tip of main
+```
+
+`update` refuses to run if the checkout has uncommitted changes, then fetches,
+checks out the target (release tags detach; branches like `main` track the
+remote tip), reinstalls `waypointctl` via `uv tool install --force`, and
+restarts the stack with a forced frontend rebuild. Because it restarts, treat it
+like a restart: get the user's permission first and follow `restart-safety.md`.
+
+## Manual flow (when you need step-by-step control)
+
 Before pulling:
 
 ```bash

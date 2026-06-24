@@ -1,12 +1,13 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "waypoint"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Remote-control daemon for Claude Code and Codex sessions"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
   "aiohttp>=3.10.0",
@@ -39,6 +40,10 @@ waypoint = "waypoint.cli:main"
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+
+[tool.setuptools_scm]
+root = ".."
+fallback_version = "0.1.0"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -43,7 +43,7 @@ if ! command -v uv >/dev/null 2>&1; then
     curl -LsSf https://astral.sh/uv/install.sh | sh
     # shellcheck source=/dev/null
     [[ -f "${HOME}/.local/bin/env" ]] && . "${HOME}/.local/bin/env"
-    export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
+    export PATH="${HOME}/.local/bin:${PATH}"
 fi
 need uv  "uv installation failed; see https://docs.astral.sh/uv/getting-started/installation/"
 need git "git is required — install via your package manager (e.g. apt install git or brew install git)"

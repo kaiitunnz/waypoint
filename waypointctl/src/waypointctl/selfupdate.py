@@ -11,7 +11,12 @@ def _resolve_home(home: Path | None) -> Path:
     try:
         return resolve_waypoint_home(home)
     except RuntimeError:
-        return Path.home() / ".waypoint" / "app"
+        # Fall back to the default install location only when it already exists
+        # and looks like a real repo; otherwise re-raise the actionable error.
+        cand = Path.home() / ".waypoint" / "app"
+        if (cand / "backend").exists() and (cand / "frontend").exists():
+            return cand
+        raise
 
 
 def _latest_tag(home: Path) -> str:

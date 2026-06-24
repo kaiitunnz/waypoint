@@ -1,6 +1,8 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from waypointctl import selfupdate
 
 
@@ -81,15 +83,32 @@ def test_restart_sets_force_frontend_build_env(tmp_path: Path) -> None:
     assert env.get("WAYPOINT_STACK_FORCE_FRONTEND_BUILD") == "1"
 
 
-def test_resolve_home_fallback_to_default_install_dir() -> None:
-    expected = Path.home() / ".waypoint" / "app"
-    with patch(
-        "waypointctl.selfupdate.resolve_waypoint_home",
-        side_effect=RuntimeError("no WAYPOINT_HOME"),
+def test_resolve_home_fallback_when_default_is_a_repo(tmp_path: Path) -> None:
+    app = tmp_path / ".waypoint" / "app"
+    (app / "backend").mkdir(parents=True)
+    (app / "frontend").mkdir(parents=True)
+    with (
+        patch(
+            "waypointctl.selfupdate.resolve_waypoint_home",
+            side_effect=RuntimeError("no WAYPOINT_HOME"),
+        ),
+        patch("waypointctl.selfupdate.Path.home", return_value=tmp_path),
     ):
         result = selfupdate._resolve_home(None)
 
-    assert result == expected
+    assert result == app
+
+
+def test_resolve_home_reraises_when_default_missing(tmp_path: Path) -> None:
+    with (
+        patch(
+            "waypointctl.selfupdate.resolve_waypoint_home",
+            side_effect=RuntimeError("no WAYPOINT_HOME"),
+        ),
+        patch("waypointctl.selfupdate.Path.home", return_value=tmp_path),
+        pytest.raises(RuntimeError),
+    ):
+        selfupdate._resolve_home(None)
 
 
 def test_resolve_home_uses_provided_path(tmp_path: Path) -> None:
@@ -102,11 +121,13 @@ def test_resolve_home_uses_provided_path(tmp_path: Path) -> None:
     assert result == tmp_path
 
 
-def test_run_fallback_home_used_in_commands() -> None:
-    expected_home = Path.home() / ".waypoint" / "app"
+def test_run_fallback_home_used_in_commands(tmp_path: Path) -> None:
+    app = tmp_path / ".waypoint" / "app"
+    (app / "backend").mkdir(parents=True)
+    (app / "frontend").mkdir(parents=True)
     side_effects = [
         MagicMock(),  # git fetch
-        MagicMock(stdout="v1.0.0\n"),  # git describe
+        MagicMock(stdout="v1.0.0\n"),  # git tag --sort=-version:refname
         MagicMock(),  # git checkout
         MagicMock(),  # uv tool install
         MagicMock(),  # waypointctl restart
@@ -116,6 +137,7 @@ def test_run_fallback_home_used_in_commands() -> None:
             "waypointctl.selfupdate.resolve_waypoint_home",
             side_effect=RuntimeError("no home"),
         ),
+        patch("waypointctl.selfupdate.Path.home", return_value=tmp_path),
         patch(
             "waypointctl.selfupdate.subprocess.run", side_effect=side_effects
         ) as mock_run,
@@ -124,4 +146,4 @@ def test_run_fallback_home_used_in_commands() -> None:
 
     cmds = [c.args[0] for c in mock_run.call_args_list]
     fetch_cmd = next(cmd for cmd in cmds if "fetch" in cmd)
-    assert str(expected_home) in fetch_cmd
+    assert str(app) in fetch_cmd

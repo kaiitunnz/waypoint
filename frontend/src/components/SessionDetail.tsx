@@ -1677,14 +1677,18 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         }
         setWorkspaceRevealSeq(seq);
         setWorkspaceOpen(true);
-      } catch {
+      } catch (e) {
         if (workspaceRequestRef.current !== seq) return;
+        if (isAuthError(e)) {
+          handleAuthFailure();
+          return;
+        }
         if (!opts?.fromBareText) {
           window.open(href, "_blank", "noopener,noreferrer");
         }
       }
     },
-    [host, token, sessionId],
+    [host, token, sessionId, handleAuthFailure],
   );
   const workspaceLink = useMemo<WorkspaceLinkHandler | null>(
     () => (workspacePreviewEnabled ? { openWorkspacePath } : null),

@@ -56,18 +56,18 @@ Adding a brand-new coding agent (Aider, …) is its own flow — the runtime, AP
 ### Bootstrap installer
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kaiitunnz/waypoint/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kaiitunnz/waypoint/main/scripts/install.sh | bash
 ```
 
-The installer fetches the latest tagged release, clones the repo to `~/.waypoint/app` (or `$WAYPOINT_HOME` if set), seeds default config files with a random password, and starts the stack. To pin a specific version, pass `--ref` through the pipe:
+The installer fetches the latest tagged release, clones the repo to `~/.waypoint/app` (or `$WAYPOINT_HOME` if set — use a dedicated directory, not an existing development clone), seeds default config files with a random password, and starts the stack. To pin a specific version, pass `--ref` through the pipe:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kaiitunnz/waypoint/main/install.sh | bash -s -- --ref v0.1.0
+curl -fsSL https://raw.githubusercontent.com/kaiitunnz/waypoint/main/scripts/install.sh | bash -s -- --ref v0.1.0
 ```
 
-or set `WAYPOINT_VERSION=v0.1.0` in the environment before running. Prerequisites: git and Node.js ≥ 20 (npm included); `uv` is installed automatically if absent.
+or set `WAYPOINT_VERSION=v0.1.0` in the environment before running. To track the bleeding edge instead of a release, pass `--nightly` (the tip of `main`). Prerequisites: git and Node.js ≥ 20 (npm included); `uv` is installed automatically if absent.
 
-The stack starts automatically after installation. Use `waypointctl self-update` to upgrade to the latest release, or `waypointctl self-update --ref vX.Y.Z` to pin a specific version.
+The stack starts automatically after installation. Use `waypointctl update` to upgrade to the latest release, `waypointctl update --ref vX.Y.Z` to pin a specific version, or `waypointctl update --nightly` to track `main`.
 
 **OpenCode** — the `opencode` CLI must be installed separately and present on your PATH; Waypoint does not bundle it.
 

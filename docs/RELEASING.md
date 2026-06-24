@@ -37,8 +37,9 @@ The tag format is `vX.Y.Z` with no component prefix (`include-component-in-tag: 
 ## Upgrading existing installations
 
 ```bash
-waypointctl self-update                   # upgrade to the latest tag
-waypointctl self-update --ref vX.Y.Z      # pin to a specific tag
+waypointctl update                   # upgrade to the latest release tag
+waypointctl update --ref vX.Y.Z      # pin to a specific tag
+waypointctl update --nightly         # track the tip of main
 ```
 
-`self-update` fetches new tags, checks out the target ref, reinstalls `waypointctl` via `uv tool install --force`, sets `WAYPOINT_STACK_FORCE_FRONTEND_BUILD=1`, and restarts the stack.
+`update` refuses to run on a checkout with uncommitted changes, then fetches, checks out the target (release tags detach; branches like `main` track the remote tip), reinstalls `waypointctl` via `uv tool install --force`, sets `WAYPOINT_STACK_FORCE_FRONTEND_BUILD=1`, and restarts the stack.

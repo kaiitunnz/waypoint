@@ -8,8 +8,10 @@ import { useEffect, useState } from "react";
 import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { fetchSession, resolveWorkspacePath } from "@/lib/api";
+import { humaniseBackend, useBackendCatalog } from "@/lib/backends";
 import { readHost, readToken } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
+import type { SessionRecord } from "@/lib/types";
 
 export default function SessionFilesPage() {
   const params = useParams<{ id: string }>();
@@ -20,7 +22,8 @@ export default function SessionFilesPage() {
   const [sessionId, setSessionId] = useState("");
   const [initialPath, setInitialPath] = useState<string | undefined>(undefined);
   const [initialDir, setInitialDir] = useState<string | undefined>(undefined);
-  const [sessionTitle, setSessionTitle] = useState("");
+  const [session, setSession] = useState<SessionRecord | null>(null);
+  const catalog = useBackendCatalog(host || null, token || null, null);
 
   useEffect(() => {
     const id = params.id;
@@ -32,7 +35,7 @@ export default function SessionFilesPage() {
 
     if (h && t && id) {
       fetchSession(h, t, id)
-        .then((s) => setSessionTitle(s.title))
+        .then((s) => setSession(s))
         .catch(() => {
           // Title is decorative here; ignore failures.
         });
@@ -54,12 +57,17 @@ export default function SessionFilesPage() {
     }
   }, [params, searchParams]);
 
-  // Reflect the session in the browser tab/window title, not just the in-page
-  // header (the root metadata title is the generic "Waypoint").
+  // Match the session page's tab-title format (`<backend> · <title>`), with a
+  // "· Files" marker so the two tabs stay distinguishable. Restore the previous
+  // title on unmount, as SessionDetail does.
   useEffect(() => {
-    const label = sessionTitle ? `${sessionTitle} · Files` : "Workspace files";
-    document.title = `${label} — Waypoint`;
-  }, [sessionTitle]);
+    if (!session) return;
+    const prev = document.title;
+    document.title = `${humaniseBackend(session.backend, catalog)} · ${session.title} · Files`;
+    return () => {
+      document.title = prev;
+    };
+  }, [session, catalog]);
 
   return (
     <div className="wp-page">
@@ -76,7 +84,7 @@ export default function SessionFilesPage() {
           </Link>
           <div className="app-bar-titles">
             <p className="app-bar-eyebrow">Waypoint · files</p>
-            <h1 className="app-bar-title">{sessionTitle || "Workspace files"}</h1>
+            <h1 className="app-bar-title">{session?.title || "Workspace files"}</h1>
           </div>
         </div>
         <div className="app-bar-meta">

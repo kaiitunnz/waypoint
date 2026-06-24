@@ -11532,6 +11532,16 @@ html[data-theme="light"]
    live session (transcript + composer stay interactive). Three regimes: push
    (wide, the column slides clear), overlay (mid), and full-screen sheet
    (mobile). */
+/* Explorer fills whatever container mounts it (dock or full page).
+   container-type lives here so the @container tree/preview toggle works in both. */
+.wp-explorer {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  container-type: inline-size;
+}
+
 .wp-dock {
   position: fixed;
   top: 0;
@@ -11545,8 +11555,6 @@ html[data-theme="light"]
   background: rgba(14, 17, 24, 0.98);
   border-right: 1px solid var(--line-strong);
   box-shadow: 4px 0 32px rgba(0, 0, 0, 0.36);
-  /* Inner tree/preview split keys off the dock's own width, not the viewport. */
-  container-type: inline-size;
   padding-left: env(safe-area-inset-left);
   animation: wp-dock-in 200ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
@@ -11705,6 +11713,51 @@ body.wp-dock-resizing {
 .wp-panel-close:hover {
   background: color-mix(in srgb, var(--text) 12%, transparent);
   color: var(--text-strong);
+}
+
+.wp-panel-fullpage-link {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  transition:
+    color 120ms ease,
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.wp-panel-fullpage-link:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+/* Full-page workspace file browser layout. */
+.wp-page {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.wp-page > .app-bar {
+  flex-shrink: 0;
+  margin: 12px 16px;
+}
+
+.wp-page > .wp-explorer {
+  flex: 1;
+  min-height: 0;
+}
+
+html[data-theme="light"] .wp-page {
+  background: var(--bg);
 }
 
 .wp-panel-body {

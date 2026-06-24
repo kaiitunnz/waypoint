@@ -11727,6 +11727,60 @@ html[data-theme="light"] .wp-panel-modal {
   text-overflow: ellipsis;
 }
 
+.wp-tree-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.wp-tree-toolbar-label {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.wp-tree-toolbar .wp-refresh-btn {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-pill);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.wp-tree-toolbar .wp-refresh-btn:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.wp-refresh-icon {
+  display: inline-block;
+  font-size: 0.92rem;
+  line-height: 1;
+}
+
+.wp-refresh-btn.spinning .wp-refresh-icon {
+  animation: wp-spin 0.6s linear infinite;
+}
+
+@keyframes wp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .wp-tree-scroll {
   flex: 1;
   min-height: 0;

@@ -58,6 +58,23 @@ function useWorkspacePreview(host: string, token: string, sessionId: string) {
     [host, token, sessionId],
   );
 
+  // Background re-fetch of the open file with no loading flash; swaps content
+  // only when mtime/size actually changed, so an auto-refresh that finds nothing
+  // new never disturbs the reader's scroll position.
+  const silentRefreshFile = useCallback(async () => {
+    const path = latestRequest.current;
+    if (!path) return;
+    try {
+      const data = await fetchWorkspaceFile(host, token, sessionId, path);
+      if (latestRequest.current !== path) return;
+      setFileData((prev) =>
+        prev && prev.mtime === data.mtime && prev.size === data.size ? prev : data,
+      );
+    } catch {
+      // Silent: leave the current content in place on a transient failure.
+    }
+  }, [host, token, sessionId]);
+
   const reset = useCallback(() => {
     latestRequest.current = null;
     setOpenPathState(null);
@@ -66,7 +83,17 @@ function useWorkspacePreview(host: string, token: string, sessionId: string) {
     setFileLoading(false);
   }, []);
 
-  return { openPath, openFile, fileData, fileLoading, fileError, root, setRoot, reset };
+  return {
+    openPath,
+    openFile,
+    silentRefreshFile,
+    fileData,
+    fileLoading,
+    fileError,
+    root,
+    setRoot,
+    reset,
+  };
 }
 
 export function WorkspaceFilesPanel({
@@ -82,8 +109,19 @@ export function WorkspaceFilesPanel({
 }: WorkspaceFilesPanelProps) {
   const [mobileView, setMobileView] = useState<"tree" | "preview">("tree");
   const [revealDir, setRevealDir] = useState<string | null>(null);
-  const { openPath, openFile, fileData, fileLoading, fileError, root, setRoot, reset } =
-    useWorkspacePreview(host, token, sessionId);
+  const [treeRefreshSeq, setTreeRefreshSeq] = useState(0);
+  const [treeRefreshing, setTreeRefreshing] = useState(false);
+  const {
+    openPath,
+    openFile,
+    silentRefreshFile,
+    fileData,
+    fileLoading,
+    fileError,
+    root,
+    setRoot,
+    reset,
+  } = useWorkspacePreview(host, token, sessionId);
 
   useEffect(() => {
     if (!open) return;
@@ -112,6 +150,37 @@ export function WorkspaceFilesPanel({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  const refreshTree = useCallback(() => {
+    setTreeRefreshSeq((s) => s + 1);
+    setTreeRefreshing(true);
+    window.setTimeout(() => setTreeRefreshing(false), 600);
+  }, []);
+  const refreshFile = useCallback(() => {
+    if (openPath) void openFile(openPath);
+  }, [openPath, openFile]);
+
+  // Auto-refresh when the tab regains focus — the common case is the user
+  // switching to the terminal, the agent editing files, then switching back.
+  // Throttled so visibilitychange + focus firing together only refresh once.
+  const lastFocusRefresh = useRef(0);
+  useEffect(() => {
+    if (!open) return;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastFocusRefresh.current < 1000) return;
+      lastFocusRefresh.current = now;
+      void silentRefreshFile();
+      setTreeRefreshSeq((s) => s + 1);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [open, silentRefreshFile]);
 
   const handleSelectFile = useCallback(
     async (path: string) => {
@@ -187,6 +256,18 @@ export function WorkspaceFilesPanel({
 
         <div className="wp-panel-body">
           <div className={`wp-tree-pane${mobileView === "preview" ? " wp-mobile-hidden" : ""}`}>
+            <div className="wp-tree-toolbar">
+              <span className="wp-tree-toolbar-label">Files</span>
+              <button
+                type="button"
+                className={`wp-refresh-btn${treeRefreshing ? " spinning" : ""}`}
+                onClick={refreshTree}
+                title="Refresh files"
+                aria-label="Refresh files"
+              >
+                <span className="wp-refresh-icon" aria-hidden="true">⟳</span>
+              </button>
+            </div>
             {recentPaths.length > 0 ? (
               <div className="wp-recent">
                 <p className="wp-recent-label">Recently written</p>
@@ -215,6 +296,7 @@ export function WorkspaceFilesPanel({
                 selectedPath={openPath}
                 revealPath={revealDir}
                 revealSeq={revealSeq}
+                refreshSeq={treeRefreshSeq}
                 onSelectFile={handleSelectFile}
                 onRootLoaded={setRoot}
               />
@@ -234,6 +316,15 @@ export function WorkspaceFilesPanel({
                         {formatBytes(fileData.size)} · {mtime}
                       </span>
                     ) : null}
+                    <button
+                      type="button"
+                      className={`wp-preview-btn wp-refresh-btn${fileLoading ? " spinning" : ""}`}
+                      onClick={refreshFile}
+                      title="Refresh file"
+                      aria-label="Refresh file"
+                    >
+                      <span className="wp-refresh-icon" aria-hidden="true">⟳</span>
+                    </button>
                     <button
                       type="button"
                       className="wp-preview-btn"

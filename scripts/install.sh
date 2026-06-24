@@ -20,7 +20,10 @@ gen_password() {
 }
 
 # ── argument parsing ────────────────────────────────────────────────────────
+DEFAULT_BRANCH="main"
 TARGET_REF="${WAYPOINT_VERSION:-}"
+NIGHTLY=0
+FORCE=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --ref)
@@ -28,14 +31,26 @@ while [[ $# -gt 0 ]]; do
             TARGET_REF="$2"
             shift 2
             ;;
+        --nightly)
+            NIGHTLY=1
+            shift
+            ;;
+        --force)
+            FORCE=1
+            shift
+            ;;
         *)
-            die "unknown argument: $1"
+            die "unknown argument: $1 (supported: --ref <tag>, --nightly, --force)"
             ;;
     esac
 done
 
 # ── resolve target ref ──────────────────────────────────────────────────────
-if [[ -z "${TARGET_REF}" ]]; then
+if [[ "${NIGHTLY}" -eq 1 ]]; then
+    [[ -z "${TARGET_REF}" ]] || die "--nightly cannot be combined with --ref/WAYPOINT_VERSION"
+    TARGET_REF="${DEFAULT_BRANCH}"
+    printf 'Installing the nightly build (tip of %s)\n' "${DEFAULT_BRANCH}"
+elif [[ -z "${TARGET_REF}" ]]; then
     printf 'Fetching latest release tag...\n'
     TARGET_REF="$(
         curl -fsSL 'https://api.github.com/repos/kaiitunnz/waypoint/releases/latest' \
@@ -71,14 +86,37 @@ fi
 need npm "npm is required — it should ship with Node.js"
 
 # ── clone or update repo ────────────────────────────────────────────────────
+# Branch refs track the remote tip (so nightly/--ref main actually advance);
+# tags and SHAs detach. Either way we land in a detached HEAD at the target.
+checkout_target() {
+    local dir="$1" ref="$2"
+    git -C "${dir}" fetch --force --tags origin
+    if git -C "${dir}" rev-parse --verify --quiet "refs/remotes/origin/${ref}" >/dev/null; then
+        git -C "${dir}" checkout --detach "origin/${ref}"
+    else
+        git -C "${dir}" checkout --detach "${ref}"
+    fi
+}
+
 if [[ -d "${INSTALL_DIR}/.git" ]]; then
-    printf 'Updating existing checkout in %s...\n' "${INSTALL_DIR}"
-    git -C "${INSTALL_DIR}" fetch --tags
-    git -C "${INSTALL_DIR}" checkout "${TARGET_REF}"
+    # Only touch a checkout this installer created, and never one with local
+    # work — so pointing WAYPOINT_HOME at a development clone can't clobber it.
+    managed="$(git -C "${INSTALL_DIR}" config --get waypoint.managed 2>/dev/null || true)"
+    if [[ "${managed}" != "true" && "${FORCE}" -ne 1 ]]; then
+        die "refusing to update ${INSTALL_DIR}: not an installer-managed checkout (it looks like your own clone). Point WAYPOINT_HOME at a dedicated directory, or re-run with --force to repoint this one."
+    fi
+    if [[ -n "$(git -C "${INSTALL_DIR}" status --porcelain)" ]]; then
+        die "refusing to update ${INSTALL_DIR}: it has uncommitted changes. Commit or stash them first."
+    fi
+    [[ "${managed}" = "true" ]] || printf 'warning: repointing a non-managed checkout (--force)\n' >&2
+    printf 'Updating %s to %s...\n' "${INSTALL_DIR}" "${TARGET_REF}"
+    checkout_target "${INSTALL_DIR}" "${TARGET_REF}"
+    git -C "${INSTALL_DIR}" config waypoint.managed true
 else
     printf 'Cloning to %s...\n' "${INSTALL_DIR}"
     mkdir -p "$(dirname "${INSTALL_DIR}")"
     git clone --branch "${TARGET_REF}" "${REPO}" "${INSTALL_DIR}"
+    git -C "${INSTALL_DIR}" config waypoint.managed true
 fi
 
 # ── seed config files (idempotent) ──────────────────────────────────────────

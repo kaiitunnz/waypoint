@@ -911,6 +911,37 @@ export async function fetchWorkspaceTree(
   };
 }
 
+export interface WorkspaceResolve {
+  path: string;
+  kind: "file" | "dir";
+}
+
+// Resolve an absolute or base-relative path to its canonical workspace-relative
+// path and kind. Used to turn an agent-printed filesystem path in the transcript
+// into something the preview/tree can open. Rejects (throws) paths outside the
+// workspace or on the denylist.
+export async function resolveWorkspacePath(
+  host: string,
+  token: string,
+  sessionId: string,
+  path: string,
+): Promise<WorkspaceResolve> {
+  const params = new URLSearchParams({ path });
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/workspace/resolve?${params.toString()}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    },
+  );
+  await ensureOk(response, "failed to resolve workspace path");
+  const payload = await response.json();
+  return {
+    path: typeof payload.path === "string" ? payload.path : "",
+    kind: payload.kind === "dir" ? "dir" : "file",
+  };
+}
+
 export async function fetchWorkspaceFile(
   host: string,
   token: string,

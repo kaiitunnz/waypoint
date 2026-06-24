@@ -31,6 +31,7 @@ import {
   isAuthError,
   postAction,
   refreshSessionRateLimitUsage,
+  resolveWorkspacePath,
   sendInput,
   setSessionEffort,
   setSessionModel,
@@ -85,6 +86,10 @@ import {
 } from "@/components/AttachmentTray";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
 import { WorkspaceFilesPanel } from "@/components/WorkspaceFilesPanel";
+import {
+  WorkspaceFileLinkProvider,
+  type WorkspaceLinkHandler,
+} from "@/components/WorkspaceFileLinkContext";
 import { SessionTerminalView } from "@/components/SessionTerminalView";
 import { SessionUsagePill } from "@/components/SessionUsagePill";
 import { CommandSuggestions } from "@/components/CommandSuggestions";
@@ -311,6 +316,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | undefined>(undefined);
+  const [workspaceInitialDir, setWorkspaceInitialDir] = useState<string | undefined>(undefined);
+  // Bumped on every open request so the panel re-reveals even when the target
+  // path is unchanged; the ref is the source of truth for discarding the
+  // results of out-of-order resolve() calls.
+  const [workspaceRevealSeq, setWorkspaceRevealSeq] = useState(0);
+  const workspaceRequestRef = useRef(0);
   // The todo-event sequence the user last dismissed from the progress dock.
   // `undefined` means we haven't read the persisted value yet — the dock stays
   // hidden until then so a dismissed dock doesn't flash on load (and to avoid
@@ -1641,11 +1652,47 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     void runAction("resume");
   }, [runAction]);
   const handleOpenWorkspaceFile = useCallback((path: string) => {
+    const seq = ++workspaceRequestRef.current;
+    setWorkspaceInitialDir(undefined);
     setWorkspaceInitialPath(path);
+    setWorkspaceRevealSeq(seq);
     setWorkspaceOpen(true);
   }, []);
+  // Route a clicked transcript path (absolute or ~/-relative) through the
+  // backend resolver: files open the preview, directories reveal the tree. If
+  // it resolves to nothing in the workspace, explicit links degrade to opening
+  // in a new tab while synthesized bare-path links stay inert.
+  const openWorkspacePath = useCallback(
+    async (href: string, opts?: { fromBareText?: boolean }) => {
+      const seq = ++workspaceRequestRef.current;
+      try {
+        const resolved = await resolveWorkspacePath(host, token, sessionId, href);
+        if (workspaceRequestRef.current !== seq) return; // superseded by a newer click
+        if (resolved.kind === "dir") {
+          setWorkspaceInitialPath(undefined);
+          setWorkspaceInitialDir(resolved.path);
+        } else {
+          setWorkspaceInitialDir(undefined);
+          setWorkspaceInitialPath(resolved.path);
+        }
+        setWorkspaceRevealSeq(seq);
+        setWorkspaceOpen(true);
+      } catch {
+        if (workspaceRequestRef.current !== seq) return;
+        if (!opts?.fromBareText) {
+          window.open(href, "_blank", "noopener,noreferrer");
+        }
+      }
+    },
+    [host, token, sessionId],
+  );
+  const workspaceLink = useMemo<WorkspaceLinkHandler | null>(
+    () => (workspacePreviewEnabled ? { openWorkspacePath } : null),
+    [workspacePreviewEnabled, openWorkspacePath],
+  );
 
   return (
+    <WorkspaceFileLinkProvider value={workspaceLink}>
     <section className="stack" ref={sectionRef}>
       {!terminalOnly && activeView === "chat" && showScrollToTop ? (
         <div className="scroll-top-floater" aria-hidden={false}>
@@ -2173,6 +2220,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           workspacePreviewEnabled={workspacePreviewEnabled}
           onBrowseWorkspace={() => {
             setWorkspaceInitialPath(undefined);
+            setWorkspaceInitialDir(undefined);
+            setWorkspaceRevealSeq(++workspaceRequestRef.current);
             setWorkspaceOpen(true);
           }}
         />
@@ -2184,11 +2233,14 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           sessionId={sessionId}
           open={workspaceOpen}
           initialPath={workspaceInitialPath}
+          initialDir={workspaceInitialDir}
+          revealSeq={workspaceRevealSeq}
           recentPaths={recentPaths}
           onClose={() => setWorkspaceOpen(false)}
         />
       ) : null}
     </section>
+    </WorkspaceFileLinkProvider>
   );
 }
 

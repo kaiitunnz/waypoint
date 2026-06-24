@@ -20,6 +20,8 @@ interface WorkspaceFilesPanelProps {
   sessionId: string;
   open: boolean;
   initialPath?: string;
+  initialDir?: string;
+  revealSeq?: number;
   recentPaths: string[];
   onClose: () => void;
 }
@@ -73,10 +75,13 @@ export function WorkspaceFilesPanel({
   sessionId,
   open,
   initialPath,
+  initialDir,
+  revealSeq,
   recentPaths,
   onClose,
 }: WorkspaceFilesPanelProps) {
   const [mobileView, setMobileView] = useState<"tree" | "preview">("tree");
+  const [revealDir, setRevealDir] = useState<string | null>(null);
   const { openPath, openFile, fileData, fileLoading, fileError, root, setRoot, reset } =
     useWorkspacePreview(host, token, sessionId);
 
@@ -85,12 +90,19 @@ export function WorkspaceFilesPanel({
     reset();
     if (initialPath) {
       void openFile(initialPath);
+      setRevealDir(null);
       setMobileView("preview");
+    } else if (initialDir != null) {
+      setRevealDir(initialDir);
+      setMobileView("tree");
     } else {
+      setRevealDir(null);
       setMobileView("tree");
     }
+    // revealSeq is the retrigger knob: it bumps on every open request so an
+    // identical path still re-reveals.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, initialPath]);
+  }, [open, initialPath, initialDir, revealSeq]);
 
   useEffect(() => {
     if (!open) return;
@@ -201,6 +213,8 @@ export function WorkspaceFilesPanel({
                 token={token}
                 sessionId={sessionId}
                 selectedPath={openPath}
+                revealPath={revealDir}
+                revealSeq={revealSeq}
                 onSelectFile={handleSelectFile}
                 onRootLoaded={setRoot}
               />

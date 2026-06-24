@@ -1,0 +1,44 @@
+name: Check DCO Sign-off
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-signoff:
+    name: Check DCO sign-off
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify all commits are signed off
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          FAILED=0
+          for SHA in $(git rev-list "$BASE".."$HEAD"); do
+            # Skip merge commits (2+ parents).
+            if [ "$(git rev-list --parents -n1 "$SHA" | wc -w)" -gt 2 ]; then
+              continue
+            fi
+            if ! git log -1 --format='%B' "$SHA" | grep -qE '^Signed-off-by: .+ <.+>'; then
+              echo "::error::Missing sign-off: $(git log -1 --oneline "$SHA")"
+              FAILED=1
+            fi
+          done
+          if [ "$FAILED" -eq 1 ]; then
+            echo "All commits must include a DCO sign-off (git commit -s)."
+            echo "Fix with: git rebase --signoff HEAD~N  (N = number of commits)"
+            exit 1
+          fi
+          echo "All commits are signed off."

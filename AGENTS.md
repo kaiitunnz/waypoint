@@ -1,12 +1,11 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`backend/` contains the FastAPI service. Core code lives in `backend/src/waypoint/`, with API, runtime, auth, storage, and CLI modules split by concern. Backend tests live in `backend/tests/`. `frontend/` contains the Next.js 15 PWA; routes live in `frontend/src/app/`, shared UI in `frontend/src/components/`, and client helpers in `frontend/src/lib/`. `3rdparty/codex/` is a pinned submodule for the local Codex SDK; avoid edits unless you are intentionally updating the dependency.
+`backend/` contains the FastAPI service. Core code lives in `backend/src/waypoint/`, with API, runtime, auth, storage, and CLI modules split by concern. Backend tests live in `backend/tests/`. `frontend/` contains the Next.js 15 PWA; routes live in `frontend/src/app/`, shared UI in `frontend/src/components/`, and client helpers in `frontend/src/lib/`. The Codex backend uses the `openai-codex` Python SDK from PyPI (pinned in `backend/pyproject.toml`); the Codex collaboration-mode templates it needs are vendored under `backend/src/waypoint/backends/codex/collaboration_mode_templates/` since the wheel does not ship them.
 
 Coding-agent backends live in `backend/src/waypoint/backends/<id>/` (currently `claude_code/`, `codex/`, `opencode/`). A session is an (agent, transport) pair: the AgentPlugin (claude_code, codex, opencode) owns the protocol, discovery, normalizer, and the AgentLaunchContract, while Transports (like the native structured adapter per agent, generic tmux, or tty-tail aka claude_tty) own send, interrupt, approval, lifecycle, and flags like is_structured and supports_resume. Each package owns its plugin descriptor, transport adapter, protocol driver, event normalizer, and backend-specific helpers — there are **no** claude/codex/opencode/tmux modules at the top level of `waypoint/`. The runtime, API, scheduler, and frontend dispatch by plugin id; never add a per-backend `if` branch in those files or the transports. The contract, capability descriptor, and a full extension recipe live in [`docs/coding_agent_plugins.md`](docs/coding_agent_plugins.md). Read it before touching anything that mentions Claude, Codex, or OpenCode by name, and before adding a new backend.
 
 ## Build, Test, and Development Commands
-- `git submodule update --init --recursive` initializes the vendored Codex SDK.
 - `cd backend && uv sync --group dev` installs backend runtime and test dependencies.
 - `cd backend && uv run pre-commit install` installs the backend git hooks for `black`, `isort`, `ruff`, `codespell`, and `mypy`.
 - `cd backend && uv run waypoint serve` starts the API on port `8787` by default.

@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 
 import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { resolveWorkspacePath } from "@/lib/api";
+import { fetchSession, resolveWorkspacePath } from "@/lib/api";
 import { readHost, readToken } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
 
@@ -20,6 +20,7 @@ export default function SessionFilesPage() {
   const [sessionId, setSessionId] = useState("");
   const [initialPath, setInitialPath] = useState<string | undefined>(undefined);
   const [initialDir, setInitialDir] = useState<string | undefined>(undefined);
+  const [sessionTitle, setSessionTitle] = useState("");
 
   useEffect(() => {
     const id = params.id;
@@ -28,6 +29,14 @@ export default function SessionFilesPage() {
     setSessionId(id);
     setHost(h);
     setToken(t);
+
+    if (h && t && id) {
+      fetchSession(h, t, id)
+        .then((s) => setSessionTitle(s.title))
+        .catch(() => {
+          // Title is decorative here; ignore failures.
+        });
+    }
 
     const rawPath = searchParams.get("path");
     if (rawPath && h && t && id) {
@@ -58,6 +67,10 @@ export default function SessionFilesPage() {
               priority
             />
           </Link>
+          <div className="app-bar-titles">
+            <p className="app-bar-eyebrow">Waypoint · files</p>
+            <h1 className="app-bar-title">{sessionTitle || "Workspace files"}</h1>
+          </div>
         </div>
         <div className="app-bar-meta">
           {sessionId ? (

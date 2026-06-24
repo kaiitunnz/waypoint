@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from waypoint.settings import Settings
+from waypoint.settings import Settings, _env_overrides
 from waypoint.workspace_preview import (
     WorkspacePathError,
     is_denied,
@@ -116,3 +116,19 @@ def test_read_text_capped_returns_placeholder_for_binary(tmp_path: Path) -> None
 def test_sniff_text_rejects_invalid_utf8() -> None:
     assert sniff_text(b"hello") is True
     assert sniff_text(b"\xff") is False
+
+
+def test_env_overrides_parse_workspace_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WAYPOINT_WORKSPACE_PREVIEW_ENABLED", "false")
+    monkeypatch.setenv("WAYPOINT_WORKSPACE_MAX_FILE_BYTES", "1024")
+    monkeypatch.setenv("WAYPOINT_WORKSPACE_DENYLIST", ".git, *.pem ,")
+    monkeypatch.setenv("WAYPOINT_WORKSPACE_FOLLOW_SYMLINKS", "1")
+
+    overrides = _env_overrides()
+
+    assert overrides["workspace_preview_enabled"] is False
+    assert overrides["workspace_max_file_bytes"] == 1024
+    assert overrides["workspace_denylist"] == [".git", "*.pem"]
+    assert overrides["workspace_follow_symlinks"] is True

@@ -31,6 +31,11 @@ jobs:
             if [ "$(git rev-list --parents -n1 "$SHA" | wc -w)" -gt 2 ]; then
               continue
             fi
+            # Skip bot authors (release-please via github-actions, dependabot) —
+            # automated commits can't carry a meaningful DCO sign-off.
+            case "$(git log -1 --format='%an' "$SHA")" in
+              'github-actions[bot]'|'dependabot[bot]') continue ;;
+            esac
             if ! git log -1 --format='%B' "$SHA" | grep -qE '^Signed-off-by: .+ <.+>'; then
               echo "::error::Missing sign-off: $(git log -1 --oneline "$SHA")"
               FAILED=1

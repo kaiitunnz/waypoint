@@ -2,7 +2,6 @@
   "release-type": "simple",
   "package-name": "waypoint",
   "bump-minor-pre-major": true,
-  "bump-patch-for-minor-pre-major": true,
   "changelog-path": "CHANGELOG.md",
   "extra-files": [
     {

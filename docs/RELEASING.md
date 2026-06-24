@@ -12,10 +12,10 @@ Commit subjects drive version bumps and `CHANGELOG.md` entries:
 | --- | --- |
 | `fix:` | patch bump |
 | `feat:` | minor bump |
-| `feat!:` or any type with `BREAKING CHANGE:` in the footer | major bump |
+| `feat!:` or any type with `BREAKING CHANGE:` in the footer | major bump (minor while < 1.0.0) |
 | `chore:`, `docs:`, `refactor:`, `test:`, `ci:`, etc. | no version bump |
 
-While the project is pre-1.0, `bump-minor-pre-major: true` and `bump-patch-for-minor-pre-major: true` are set in `release-please-config.json` — `feat:` bumps the minor and `fix:` bumps the patch on 0.x, which matches normal semver expectations.
+While the project is pre-1.0, `bump-minor-pre-major: true` is set in `release-please-config.json`, so a breaking change bumps the **minor** (e.g. `0.2.0`) instead of jumping to `1.0.0`; `feat:` still bumps the minor and `fix:` the patch.
 
 ## Release flow
 

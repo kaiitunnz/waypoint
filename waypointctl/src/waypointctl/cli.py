@@ -27,6 +27,7 @@ from waypointctl.paths import (
 )
 from waypointctl.process import is_pid_running, read_pid_file, running_pid
 from waypointctl.protocol import DaemonResult
+from waypointctl.selfupdate import run as run_selfupdate
 from waypointctl.skills import run_skills_helper
 from waypointctl.stack import WaypointStack
 from waypointctl.tailscale import preflight_tailscale_command, run_tailscale_helper
@@ -91,7 +92,10 @@ def bootstrap(
         help="Waypoint repository root.",
     ),
 ) -> None:
-    home_path = resolve_waypoint_home(home)
+    try:
+        home_path = resolve_waypoint_home(home)
+    except RuntimeError:
+        home_path = Path.home() / ".waypoint" / "app"
     apply_dotenv(home_path)
     ctx.obj = {"home": home_path}
 
@@ -267,6 +271,20 @@ def doctor(ctx: typer.Context) -> None:
     typer.echo(f"WAYPOINTCTL_STATE_DIR={resolve_state_dir()}")
     typer.echo(f"daemon socket={waypoint_socket_path()}")
     typer.echo(f"daemon for this home={'yes' if daemon_available(home) else 'no'}")
+
+
+@app.command("self-update")
+def self_update(
+    ctx: typer.Context,
+    ref: Annotated[
+        str | None,
+        typer.Option(
+            "--ref", help="Tag or ref to update to. Defaults to the latest release tag."
+        ),
+    ] = None,
+) -> None:
+    """Fetch the latest release and restart the stack."""
+    run_selfupdate(_ctx_home(ctx), ref=ref)
 
 
 @tailscale_app.command("up")

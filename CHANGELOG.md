@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.2](https://github.com/kaiitunnz/waypoint/compare/v0.1.1...v0.1.2) (2026-06-25)
+
+
+### Bug Fixes
+
+* add a clean uninstall path (waypointctl uninstall + uninstall.sh) ([#171](https://github.com/kaiitunnz/waypoint/issues/171)) ([2f7b851](https://github.com/kaiitunnz/waypoint/commit/2f7b851917e8c21307a62cca1a3865cc6073b0e3))
+* don't start or restart the stack during install and update ([#169](https://github.com/kaiitunnz/waypoint/issues/169)) ([507dd98](https://github.com/kaiitunnz/waypoint/commit/507dd98deea436c08e841a71c5949c0f44f19bb6))
+* persist WAYPOINT_HOME only to the primary shell profile ([#170](https://github.com/kaiitunnz/waypoint/issues/170)) ([6cc2e87](https://github.com/kaiitunnz/waypoint/commit/6cc2e87f2bfb0617e613ec62545c8aec7b5d7a4e))
+
 ## [0.1.1](https://github.com/kaiitunnz/waypoint/compare/v0.1.0...v0.1.1) (2026-06-25)
 
 

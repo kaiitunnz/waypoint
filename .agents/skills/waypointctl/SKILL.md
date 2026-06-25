@@ -21,6 +21,7 @@ trusting any list reproduced in this skill.
 - Start, stop, or restart services: see `references/lifecycle.md`.
 - Handle backend/full-stack restart safely: see `references/restart-safety.md`.
 - Pull/update/redeploy the app: see `references/update-deploy.md`.
+- Uninstall the app: see `references/uninstall.md`.
 - Manage `waypointd`: see `references/daemon.md`.
 - Manage Docker-backed tailnet profiles: see `references/tailscale.md`.
 - Understand env vars and state paths: see `references/env-state.md`.

@@ -30,6 +30,7 @@ from waypointctl.protocol import DaemonResult
 from waypointctl.skills import run_skills_helper
 from waypointctl.stack import WaypointStack
 from waypointctl.tailscale import preflight_tailscale_command, run_tailscale_helper
+from waypointctl.uninstall import run as run_uninstall
 from waypointctl.update import run as run_update
 
 app = typer.Typer(
@@ -298,6 +299,38 @@ def update(
 ) -> None:
     """Update Waypoint to the latest release; run `waypointctl restart` to apply."""
     run_update(_ctx_home(ctx), ref=ref, nightly=nightly)
+
+
+@app.command("uninstall")
+def uninstall(
+    ctx: typer.Context,
+    purge: Annotated[
+        bool,
+        typer.Option(
+            "--purge", help="Also remove the state and backend data directories."
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force", help="Remove the checkout even if it is not installer-managed."
+        ),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Skip the confirmation prompt."),
+    ] = False,
+) -> None:
+    """Stop the stack, remove the managed checkout, and uninstall waypointctl."""
+    home = _ctx_home(ctx)
+    if not yes:
+        extra = " and wipe the state and data directories" if purge else ""
+        typer.confirm(
+            f"This stops the stack, removes {home}{extra}, and uninstalls "
+            "waypointctl. Continue?",
+            abort=True,
+        )
+    run_uninstall(home, purge=purge, force=force)
 
 
 @tailscale_app.command("up")

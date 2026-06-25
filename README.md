@@ -69,6 +69,8 @@ or set `WAYPOINT_VERSION=v0.1.0` in the environment before running. To track the
 
 Bring the stack up with `waypointctl start`. Use `waypointctl update` to upgrade to the latest release, `waypointctl update --ref vX.Y.Z` to pin a specific version, or `waypointctl update --nightly` to track `main`; `update` leaves the stack untouched, so run `waypointctl restart` afterward to apply the new code.
 
+To remove Waypoint, run `waypointctl uninstall` (add `--purge` to also delete the state and data directories). It stops the stack, strips the `WAYPOINT_HOME` shell-profile entry, removes the managed checkout, and uninstalls `waypointctl`; `curl`-based installs can instead run `scripts/uninstall.sh` directly.
+
 **OpenCode** — the `opencode` CLI must be installed separately and present on your PATH; Waypoint does not bundle it.
 
 ### Install from source / development

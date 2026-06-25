@@ -43,3 +43,12 @@ waypointctl update --nightly         # track the tip of main
 ```
 
 `update` refuses to run on a checkout with uncommitted changes, then fetches, checks out the target (release tags detach; branches like `main` track the remote tip), and reinstalls `waypointctl` via `uv tool install --force`. It leaves the running stack untouched; run `waypointctl restart` afterward to apply the new code (the frontend rebuilds automatically because the checked-out ref changed).
+
+## Uninstalling
+
+```bash
+waypointctl uninstall                 # stop, remove the checkout + tool, keep data
+waypointctl uninstall --purge         # also wipe the state and data directories
+```
+
+`uninstall` stops the stack and daemon, strips the `WAYPOINT_HOME` block from your shell profiles, removes the installer-managed checkout (it refuses a non-managed clone unless `--force`, and keeps the checkout if your data dir lives inside it), and uninstalls the `waypointctl` tool. Data under the state dir is preserved unless you pass `--purge`. The command runs `scripts/uninstall.sh` from a temporary copy so deleting the checkout can't interrupt it; `curl`-based installs can run that script directly instead.

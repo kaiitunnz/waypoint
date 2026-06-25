@@ -7,10 +7,18 @@ import typer
 from waypointctl import update
 
 
-def _fake_run(*, dirty: str = "", tags: str = "v1.0.0\n", remote_has=lambda ref: False):
+def _fake_run(
+    *,
+    dirty: str = "",
+    tags: str = "v1.0.0\n",
+    remote_has=lambda ref: False,
+    managed: bool = False,
+):
     """A subprocess.run stub that dispatches on the git subcommand."""
 
     def run(argv, **kwargs):
+        if "config" in argv and "waypoint.managed" in argv:
+            return MagicMock(returncode=0, stdout="true\n" if managed else "")
         if "status" in argv:
             return MagicMock(returncode=0, stdout=dirty)
         if "tag" in argv and "--list" in argv:
@@ -28,7 +36,7 @@ def _argvs(mock_run) -> list[list[str]]:
 
 
 def _checkout_cmd(argvs: list[list[str]]) -> list[str]:
-    return next(a for a in argvs if "checkout" in a)
+    return next(a for a in argvs if "checkout" in a and "--detach" in a)
 
 
 def test_explicit_ref_checks_out_a_tag(tmp_path: Path) -> None:
@@ -147,6 +155,40 @@ def test_uv_force_and_restart_env(tmp_path: Path) -> None:
         restart_call.kwargs.get("env", {}).get("WAYPOINT_STACK_FORCE_FRONTEND_BUILD")
         == "1"
     )
+
+
+def test_managed_update_discards_generated_files(tmp_path: Path) -> None:
+    with (
+        patch("waypointctl.update.resolve_waypoint_home", return_value=tmp_path),
+        patch(
+            "waypointctl.update.subprocess.run", side_effect=_fake_run(managed=True)
+        ) as mock_run,
+    ):
+        update.run(tmp_path, ref="v1.0.0")
+
+    argvs = _argvs(mock_run)
+    for rel in ("frontend/next-env.d.ts", "frontend/tsconfig.json"):
+        assert ["git", "-C", str(tmp_path), "checkout", "--", rel] in argvs
+    # the discard doesn't abort the update
+    assert any(a and a[0] == "uv" and "--force" in a for a in argvs)
+
+
+def test_unmanaged_update_skips_discard(tmp_path: Path) -> None:
+    with (
+        patch("waypointctl.update.resolve_waypoint_home", return_value=tmp_path),
+        patch(
+            "waypointctl.update.subprocess.run", side_effect=_fake_run(managed=False)
+        ) as mock_run,
+    ):
+        update.run(tmp_path, ref="v1.0.0")
+
+    argvs = _argvs(mock_run)
+    discards = [
+        a
+        for a in argvs
+        if "checkout" in a and "--" in a and any("frontend/" in x for x in a)
+    ]
+    assert discards == []
 
 
 def test_resolve_home_uses_provided_path(tmp_path: Path) -> None:

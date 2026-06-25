@@ -67,6 +67,7 @@ import { clearToken } from "@/lib/store";
 import { type TerminalSubmitResult } from "@/lib/composer";
 import { useCommandCompletions } from "@/lib/composer-completions";
 import { useFileMentions } from "@/lib/use-file-mentions";
+import { useCopied } from "@/lib/use-copied";
 import {
   isPlanEvent,
   itemIdForEvent,
@@ -178,7 +179,7 @@ function copyTextSync(text: string): boolean {
 // occasionally needs the raw id for a `waypoint sessions …` call or to hand to
 // an agent). Copies the full id even though the display truncates it.
 function SessionIdCopy({ id }: { id: string }) {
-  const [copied, setCopied] = useState(false);
+  const { copied, markCopied } = useCopied();
   return (
     <button
       type="button"
@@ -187,10 +188,7 @@ function SessionIdCopy({ id }: { id: string }) {
       aria-label={copied ? "Session id copied" : `Copy session id ${id}`}
       onClick={(event) => {
         event.stopPropagation();
-        if (copyTextSync(id)) {
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1500);
-        }
+        if (copyTextSync(id)) markCopied();
       }}
     >
       <span className="session-id-copy-key">id</span>

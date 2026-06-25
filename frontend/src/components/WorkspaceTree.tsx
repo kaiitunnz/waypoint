@@ -142,9 +142,9 @@ export function WorkspaceTree({
     [host, token, sessionId],
   );
 
-  // Append the next page of a capped directory. Server pages are disjoint by
-  // offset and share the tree's sort, so concatenating the slice yields no
-  // duplicates; we re-sort for display only.
+  // Append the next page of a capped directory. Pages are deduped by name (so a
+  // refresh landing mid-request can't leave duplicates) and re-sorted for
+  // display.
   const loadMore = useCallback(
     async (dirPath: string, offset: number) => {
       let skip = false;
@@ -164,8 +164,12 @@ export function WorkspaceTree({
         setDirCache((prev) => {
           const next = new Map(prev);
           const existing = prev.get(dirPath);
+          const byName = new Map<string, WorkspaceTreeEntry>();
+          for (const entry of [...(existing?.entries ?? []), ...page.entries]) {
+            if (!byName.has(entry.name)) byName.set(entry.name, entry);
+          }
           next.set(dirPath, {
-            entries: sortEntries([...(existing?.entries ?? []), ...page.entries]),
+            entries: sortEntries([...byName.values()]),
             overflow: page.overflow,
             loading: false,
             error: null,
@@ -236,7 +240,9 @@ export function WorkspaceTree({
     // so a refresh doesn't snap an expanded directory back to its first page.
     for (const dir of expanded) {
       const loaded = dirCache.get(dir)?.entries.length ?? 0;
-      void fetchDir(dir, loaded > 0 ? Math.max(500, loaded) : undefined);
+      // Clamped to the endpoint's max limit; a directory paged past the cap
+      // re-collapses to it on refresh rather than 422-ing.
+      void fetchDir(dir, loaded > 0 ? Math.min(2000, Math.max(500, loaded)) : undefined);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshSeq]);

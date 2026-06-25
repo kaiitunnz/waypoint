@@ -12109,6 +12109,146 @@ body.wp-dock-resizing {
   color: var(--muted);
 }
 
+/* ─── File finder ("Go to file") ─── */
+.wp-tree-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.wp-tree-filter-icon {
+  flex-shrink: 0;
+  color: var(--muted-soft);
+}
+
+.wp-tree-filter.active .wp-tree-filter-icon {
+  color: var(--accent-cool);
+}
+
+.wp-tree-filter-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  padding: 2px 0;
+}
+
+.wp-tree-filter-input::placeholder {
+  color: var(--muted-soft);
+}
+
+.wp-tree-filter-input:focus {
+  outline: none;
+}
+
+.wp-tree-filter-clear {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.wp-tree-filter-clear:hover {
+  color: var(--text);
+}
+
+.wp-find-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.wp-find-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 0.8rem;
+  transition: background-color 120ms ease;
+}
+
+.wp-find-item:hover,
+.wp-find-item.active {
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+}
+
+.wp-find-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+}
+
+.wp-find-name {
+  flex-shrink: 0;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wp-find-dir {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--muted);
+}
+
+.wp-find-item .wp-git-badge {
+  margin-left: auto;
+}
+
+.wp-find-hl {
+  background: transparent;
+  color: var(--accent-cool);
+  font-weight: 600;
+}
+
+.wp-find-item.active .wp-find-hl {
+  color: var(--text);
+}
+
+.wp-find-status {
+  padding: 10px 12px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.wp-find-status.error {
+  color: var(--danger);
+}
+
+.wp-find-more {
+  list-style: none;
+  padding: 6px 8px 2px;
+  font-size: 0.68rem;
+  color: var(--muted-soft);
+}
+
 /* Segmented toggles (Content/Diff and Inline/Split): a single bordered group
  * with joined cells. */
 .wp-preview-modetoggle,
@@ -12415,6 +12555,42 @@ html[data-theme="light"] .wp-diff-split .wp-diff-ln.del {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted-soft);
+  flex-shrink: 0;
+}
+
+/* Current-branch chip: hugs the FILES label, truncates before the refresh
+   button (pushed to the far right by margin-right:auto). */
+.wp-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  margin-left: 10px;
+  margin-right: auto;
+  padding: 2px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.2;
+}
+
+.wp-branch-icon {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  line-height: 1;
+  color: var(--accent-cool);
+}
+
+.wp-branch.detached .wp-branch-icon {
+  color: var(--accent);
+}
+
+.wp-branch-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
 }
 
 .wp-tree-toolbar .wp-refresh-btn {
@@ -12556,6 +12732,27 @@ html[data-theme="light"] .wp-diff-split .wp-diff-ln.del {
 
 .wp-tree-error-child {
   color: var(--danger);
+}
+
+.wp-tree-loadmore {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.wp-tree-loadmore:hover:not(:disabled) {
+  color: var(--accent-cool);
+  text-decoration: underline;
+}
+
+.wp-tree-loadmore:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .wp-preview-pane {

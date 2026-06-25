@@ -12,15 +12,17 @@ import {
 
 import {
   fetchWorkspaceFile,
+  fetchWorkspaceFind,
   fetchWorkspaceGitDiff,
   fetchWorkspaceGitStatus,
   workspaceRawUrl,
   type WorkspaceFile,
+  type WorkspaceFindMatch,
   type WorkspaceGitFileStatus,
   type WorkspaceGitStatus,
   type WorkspaceTreePage,
 } from "@/lib/api";
-import { formatBytes } from "@/components/AttachmentTray";
+import { FileIcon, formatBytes } from "@/components/AttachmentTray";
 import { FilePreview } from "@/components/FilePreview";
 import { WorkspaceDiff } from "@/components/WorkspaceDiff";
 import { WorkspaceTree } from "@/components/WorkspaceTree";
@@ -106,6 +108,108 @@ function GitChangeGroup({
         })}
       </ul>
     </div>
+  );
+}
+
+// Bold the greedy subsequence of `query` within `text` so finder results show
+// which characters matched. Non-matching spans render plain.
+function highlightSubsequence(text: string, query: string): ReactNode {
+  if (!query) return text;
+  const needle = query.toLowerCase();
+  const lowered = text.toLowerCase();
+  const out: ReactNode[] = [];
+  let qi = 0;
+  let plain = "";
+  let hit = "";
+  const flushPlain = () => {
+    if (plain) {
+      out.push(plain);
+      plain = "";
+    }
+  };
+  const flushHit = () => {
+    if (hit) {
+      out.push(
+        <mark key={out.length} className="wp-find-hl">
+          {hit}
+        </mark>,
+      );
+      hit = "";
+    }
+  };
+  for (let i = 0; i < text.length; i += 1) {
+    if (qi < needle.length && lowered[i] === needle[qi]) {
+      flushPlain();
+      hit += text[i];
+      qi += 1;
+    } else {
+      flushHit();
+      plain += text[i];
+    }
+  }
+  flushPlain();
+  flushHit();
+  return out;
+}
+
+function WorkspaceFindResults({
+  matches,
+  truncated,
+  loading,
+  error,
+  query,
+  activeIndex,
+  gitFileMap,
+  onPick,
+}: {
+  matches: WorkspaceFindMatch[];
+  truncated: boolean;
+  loading: boolean;
+  error: string | null;
+  query: string;
+  activeIndex: number;
+  gitFileMap: Map<string, WorkspaceGitFileStatus>;
+  onPick: (path: string) => void;
+}) {
+  if (error) return <div className="wp-find-status error">{error}</div>;
+  if (loading && matches.length === 0)
+    return <div className="wp-find-status">Searching…</div>;
+  if (matches.length === 0)
+    return <div className="wp-find-status">No files match “{query}”.</div>;
+  return (
+    <ul className="wp-find-list" role="listbox" aria-label="File search results">
+      {matches.map((match, index) => {
+        const slash = match.path.lastIndexOf("/");
+        const name = slash >= 0 ? match.path.slice(slash + 1) : match.path;
+        const dir = slash >= 0 ? match.path.slice(0, slash) : "";
+        const status = gitFileMap.get(match.path);
+        const badge = status ? gitChangeLabel(status) : null;
+        return (
+          <li key={match.path} role="option" aria-selected={index === activeIndex}>
+            <button
+              type="button"
+              className={`wp-find-item${index === activeIndex ? " active" : ""}`}
+              title={match.path}
+              onClick={() => onPick(match.path)}
+            >
+              <span className="wp-find-icon" aria-hidden="true">
+                <FileIcon />
+              </span>
+              <span className="wp-find-name">{highlightSubsequence(name, query)}</span>
+              {dir ? <span className="wp-find-dir">{dir}</span> : null}
+              {badge ? (
+                <span className={`wp-git-badge ${badge.kind}`} aria-hidden="true">
+                  {badge.letter}
+                </span>
+              ) : null}
+            </button>
+          </li>
+        );
+      })}
+      {truncated ? (
+        <li className="wp-find-more">More matches — refine the search.</li>
+      ) : null}
+    </ul>
   );
 }
 
@@ -223,6 +327,13 @@ export function WorkspaceExplorer({
   } = useWorkspacePreview(host, token, sessionId);
 
   const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus | null>(null);
+  const [filterQuery, setFilterQuery] = useState("");
+  const [findMatches, setFindMatches] = useState<WorkspaceFindMatch[]>([]);
+  const [findTruncated, setFindTruncated] = useState(false);
+  const [findLoading, setFindLoading] = useState(false);
+  const [findError, setFindError] = useState<string | null>(null);
+  const [findActive, setFindActive] = useState(0);
+  const filtering = filterQuery.trim().length > 0;
   const [previewMode, setPreviewMode] = useState<"content" | "diff">("content");
   const [diffStaged, setDiffStaged] = useState(false);
   const [diffData, setDiffData] = useState<EventDiffPreview | null>(null);
@@ -270,6 +381,43 @@ export function WorkspaceExplorer({
       cancelled = true;
     };
   }, [host, token, sessionId, treeRefreshSeq, active]);
+
+  // Debounced fuzzy file search. Re-runs when the file set may have changed
+  // (treeRefreshSeq) so results stay fresh after an agent edit.
+  useEffect(() => {
+    const q = filterQuery.trim();
+    if (!q) {
+      setFindMatches([]);
+      setFindTruncated(false);
+      setFindError(null);
+      setFindLoading(false);
+      return;
+    }
+    setFindLoading(true);
+    let cancelled = false;
+    const handle = window.setTimeout(() => {
+      void fetchWorkspaceFind(host, token, sessionId, q)
+        .then((res) => {
+          if (cancelled) return;
+          setFindMatches(res.matches);
+          setFindTruncated(res.truncated);
+          setFindError(null);
+          setFindActive(0);
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          setFindMatches([]);
+          setFindError(e instanceof Error ? e.message : "Search failed");
+        })
+        .finally(() => {
+          if (!cancelled) setFindLoading(false);
+        });
+    }, 150);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [filterQuery, host, token, sessionId, treeRefreshSeq]);
 
   // Fetch the diff when the diff view is showing. Keyed on the open file's mtime
   // so a silent content refresh (agent edited it) re-pulls the diff too.
@@ -374,6 +522,38 @@ export function WorkspaceExplorer({
     [openFile],
   );
 
+  // Selecting a finder result opens it and reveals its directory in the tree,
+  // then clears the query so the tree returns with the file selected.
+  const pickFindResult = useCallback(
+    (path: string) => {
+      const slash = path.lastIndexOf("/");
+      setRevealDir(slash >= 0 ? path.slice(0, slash) : "");
+      setFilterQuery("");
+      void handleSelectFile(path);
+    },
+    [handleSelectFile],
+  );
+
+  const onFilterKey = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setFindActive((i) => Math.min(i + 1, findMatches.length - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setFindActive((i) => Math.max(i - 1, 0));
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const match = findMatches[findActive];
+        if (match) pickFindResult(match.path);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        setFilterQuery("");
+      }
+    },
+    [findMatches, findActive, pickFindResult],
+  );
+
   const copyPath = useCallback(() => {
     if (!openPath) return;
     void copyText(openPath);
@@ -436,6 +616,21 @@ export function WorkspaceExplorer({
         <div className={`wp-tree-pane${mobileView === "preview" ? " wp-mobile-hidden" : ""}`}>
           <div className="wp-tree-toolbar">
             <span className="wp-tree-toolbar-label">Files</span>
+            {gitStatus?.enabled && gitStatus.branch ? (
+              <span
+                className={`wp-branch${gitStatus.detached ? " detached" : ""}`}
+                title={
+                  gitStatus.detached
+                    ? `Detached HEAD at ${gitStatus.branch}`
+                    : `On branch ${gitStatus.branch}`
+                }
+              >
+                <span className="wp-branch-icon" aria-hidden="true">
+                  {gitStatus.detached ? "➤" : "⎇"}
+                </span>
+                <span className="wp-branch-name">{gitStatus.branch}</span>
+              </span>
+            ) : null}
             <button
               type="button"
               className={`wp-refresh-btn${treeRefreshing ? " spinning" : ""}`}
@@ -446,6 +641,69 @@ export function WorkspaceExplorer({
               <span className="wp-refresh-icon" aria-hidden="true">⟳</span>
             </button>
           </div>
+          <div className={`wp-tree-filter${filtering ? " active" : ""}`}>
+            <svg
+              className="wp-tree-filter-icon"
+              viewBox="0 0 16 16"
+              width="13"
+              height="13"
+              aria-hidden="true"
+            >
+              <circle
+                cx="6.5"
+                cy="6.5"
+                r="4.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+              />
+              <line
+                x1="10"
+                y1="10"
+                x2="14"
+                y2="14"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
+            </svg>
+            <input
+              className="wp-tree-filter-input"
+              type="text"
+              placeholder="Go to file…"
+              value={filterQuery}
+              onChange={(e) => setFilterQuery(e.target.value)}
+              onKeyDown={onFilterKey}
+              aria-label="Filter files"
+              spellCheck={false}
+              autoComplete="off"
+            />
+            {filterQuery ? (
+              <button
+                type="button"
+                className="wp-tree-filter-clear"
+                onClick={() => setFilterQuery("")}
+                aria-label="Clear filter"
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
+          {filtering ? (
+            <div className="wp-tree-scroll">
+              <WorkspaceFindResults
+                matches={findMatches}
+                truncated={findTruncated}
+                loading={findLoading}
+                error={findError}
+                query={filterQuery.trim()}
+                activeIndex={findActive}
+                gitFileMap={gitFileMap}
+                onPick={pickFindResult}
+              />
+            </div>
+          ) : (
+            <>
           {stagedFiles.length > 0 || unstagedFiles.length > 0 ? (
             <div className={`wp-changes${changesCollapsed ? " collapsed" : ""}`}>
               <button
@@ -503,6 +761,8 @@ export function WorkspaceExplorer({
               onRootLoaded={setRoot}
             />
           </div>
+            </>
+          )}
         </div>
 
         <div className={`wp-preview-pane${mobileView === "tree" ? " wp-mobile-hidden" : ""}`}>

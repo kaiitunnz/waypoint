@@ -81,8 +81,11 @@ class ControlServer(ThreadingHTTPServer):
                 self._login_failures.append(time.monotonic())
                 return None
             self._login_failures.clear()
+            now = time.monotonic()
+            # Drop lapsed tokens so a long-lived daemon doesn't accumulate them.
+            self._tokens = {t: exp for t, exp in self._tokens.items() if exp > now}
             token = secrets.token_urlsafe(32)
-            self._tokens[token] = time.monotonic() + TOKEN_TTL_SECONDS
+            self._tokens[token] = now + TOKEN_TTL_SECONDS
             return token
 
     def token_valid(self, header: str | None) -> bool:

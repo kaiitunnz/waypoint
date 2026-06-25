@@ -153,7 +153,7 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
             tag = "stderr" if stream == "stderr" else "stdout"
             print(f"[{command}] {tag}: {line}", flush=True)
 
-        if command in ("restart", "stop"):
+        if command in DEFERRED_COMMANDS:
             target = request.args[0] if request.args else "all"
 
             def worker() -> None:

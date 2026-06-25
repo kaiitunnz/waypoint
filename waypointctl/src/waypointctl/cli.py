@@ -310,6 +310,12 @@ def uninstall(
             "--purge", help="Also remove the state and backend data directories."
         ),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force", help="Remove the checkout even if it is not installer-managed."
+        ),
+    ] = False,
     yes: Annotated[
         bool,
         typer.Option("--yes", "-y", help="Skip the confirmation prompt."),
@@ -324,7 +330,7 @@ def uninstall(
             "waypointctl. Continue?",
             abort=True,
         )
-    run_uninstall(home, purge=purge)
+    run_uninstall(home, purge=purge, force=force)
 
 
 @tailscale_app.command("up")

@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 
 
-def run(home: Path, purge: bool = False) -> None:
+def run(home: Path, purge: bool = False, force: bool = False) -> None:
     """Uninstall Waypoint by running scripts/uninstall.sh from a temp copy.
 
     The script deletes the checkout it lives in, so it is staged outside the
@@ -21,4 +21,6 @@ def run(home: Path, purge: bool = False) -> None:
         argv = ["bash", str(staged), "--home", str(home)]
         if purge:
             argv.append("--purge")
+        if force:
+            argv.append("--force")
         subprocess.run(argv, check=True)

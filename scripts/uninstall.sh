@@ -15,6 +15,16 @@ WP_END="# <<< waypoint <<<"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
+# Expand a leading ~ like config.py's Path.expanduser(), so a tilde in
+# WAYPOINT_HOME/.env matches the resolution the backend used.
+expand_tilde() {
+    case "$1" in
+        "~")   printf '%s' "${HOME}" ;;
+        "~/"*) printf '%s' "${HOME}/${1#\~/}" ;;
+        *)     printf '%s' "$1" ;;
+    esac
+}
+
 # ── argument parsing ────────────────────────────────────────────────────────
 HOME_DIR="${WAYPOINT_HOME:-${HOME}/.waypoint/app}"
 PURGE=0
@@ -41,7 +51,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── resolve paths ───────────────────────────────────────────────────────────
-STATE_DIR="${WAYPOINTCTL_STATE_DIR:-${HOME}/.waypoint}"
+HOME_DIR="$(expand_tilde "${HOME_DIR}")"
+STATE_DIR="$(expand_tilde "${WAYPOINTCTL_STATE_DIR:-${HOME}/.waypoint}")"
 
 # Read a KEY=value from a dotenv file (last assignment wins, quotes stripped).
 read_dotenv() {
@@ -52,9 +63,10 @@ read_dotenv() {
 }
 
 # backend_data_dir mirrors config.py: WAYPOINT_STACK_BACKEND_DATA_DIR (from .env,
-# else the environment), relative paths resolved under home, default under state.
+# else the environment), ~ expanded, relative paths under home, default in state.
 DATA_RAW="$(read_dotenv WAYPOINT_STACK_BACKEND_DATA_DIR "${HOME_DIR}/.env")"
 [[ -n "${DATA_RAW}" ]] || DATA_RAW="${WAYPOINT_STACK_BACKEND_DATA_DIR:-}"
+DATA_RAW="$(expand_tilde "${DATA_RAW}")"
 if [[ -z "${DATA_RAW}" ]]; then
     DATA_DIR="${STATE_DIR}/backend-data"
 elif [[ "${DATA_RAW}" = /* ]]; then
@@ -79,10 +91,14 @@ strip_block() {
     grep -qF "${WP_BEGIN}" "${rc}" 2>/dev/null || return 0
     local tmp
     tmp="$(mktemp)"
+    # Drop the marker block inclusive, plus the blank line install.sh prepends
+    # (buffer blank lines and discard them when they immediately precede a block).
     awk -v b="${WP_BEGIN}" -v e="${WP_END}" '
-        $0==b {skip=1}
-        skip==0 {print}
-        $0==e {skip=0}
+        $0==b {skip=1; blank=0; next}
+        skip {if ($0==e) skip=0; next}
+        /^$/ {blank++; next}
+        {for (; blank>0; blank--) print ""; print}
+        END {for (; blank>0; blank--) print ""}
     ' "${rc}" > "${tmp}"
     cat "${tmp}" > "${rc}"
     rm -f "${tmp}"

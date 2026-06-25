@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/kaiitunnz/waypoint/compare/v0.1.0...v0.1.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* don't let build-generated files block waypointctl update ([#167](https://github.com/kaiitunnz/waypoint/issues/167)) ([a11530f](https://github.com/kaiitunnz/waypoint/commit/a11530f686b0bd5b5e0bc5b3fee7a8df1c585acd))
+
 ## 0.1.0 (2026-06-24)
 
 

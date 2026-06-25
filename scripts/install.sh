@@ -105,6 +105,11 @@ if [[ -d "${INSTALL_DIR}/.git" ]]; then
     if [[ "${managed}" != "true" && "${FORCE}" -ne 1 ]]; then
         die "refusing to update ${INSTALL_DIR}: not an installer-managed checkout (it looks like your own clone). Point WAYPOINT_HOME at a dedicated directory, or re-run with --force to repoint this one."
     fi
+    # In a managed checkout, clear build-generated drift (start/restart rewrites
+    # these tracked files) so it doesn't trip the dirty-tree guard below.
+    if [[ "${managed}" = "true" ]]; then
+        git -C "${INSTALL_DIR}" checkout -- frontend/next-env.d.ts frontend/tsconfig.json 2>/dev/null || true
+    fi
     if [[ -n "$(git -C "${INSTALL_DIR}" status --porcelain)" ]]; then
         die "refusing to update ${INSTALL_DIR}: it has uncommitted changes. Commit or stash them first."
     fi

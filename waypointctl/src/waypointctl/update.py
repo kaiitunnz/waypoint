@@ -8,6 +8,11 @@ from waypointctl.paths import resolve_waypoint_home
 
 DEFAULT_BRANCH = "main"
 
+# Tracked files the frontend build regenerates; a prior `start`/`restart` leaves
+# them modified, which would otherwise trip the dirty-tree guard. They are
+# rewritten by the post-checkout build, so discarding the drift is safe.
+_GENERATED_FILES = ("frontend/next-env.d.ts", "frontend/tsconfig.json")
+
 
 def _resolve_home(home: Path | None) -> Path:
     try:
@@ -29,6 +34,25 @@ def _is_dirty(home: Path) -> bool:
         text=True,
     )
     return bool(result.stdout.strip())
+
+
+def _is_managed(home: Path) -> bool:
+    result = subprocess.run(
+        ["git", "-C", str(home), "config", "--get", "waypoint.managed"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() == "true"
+
+
+def _discard_generated(home: Path) -> None:
+    for rel in _GENERATED_FILES:
+        subprocess.run(
+            ["git", "-C", str(home), "checkout", "--", rel],
+            check=False,
+            capture_output=True,
+        )
 
 
 def _latest_tag(home: Path) -> str:
@@ -74,6 +98,10 @@ def run(
         raise typer.BadParameter("--nightly cannot be combined with --ref")
 
     resolved = _resolve_home(home)
+    # In an installer-managed checkout, clear build-generated drift first so a
+    # prior start/restart doesn't block the update on "uncommitted changes".
+    if _is_managed(resolved):
+        _discard_generated(resolved)
     if _is_dirty(resolved):
         raise RuntimeError(
             f"refusing to update {resolved}: it has uncommitted changes; "

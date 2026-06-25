@@ -140,7 +140,7 @@ def test_nightly_with_ref_is_rejected(tmp_path: Path) -> None:
     assert mock_run.call_args_list == []  # rejected before touching git
 
 
-def test_uv_force_and_restart_env(tmp_path: Path) -> None:
+def test_uv_force_and_no_restart(tmp_path: Path) -> None:
     with (
         patch("waypointctl.update.resolve_waypoint_home", return_value=tmp_path),
         patch("waypointctl.update.subprocess.run", side_effect=_fake_run()) as mock_run,
@@ -150,11 +150,9 @@ def test_uv_force_and_restart_env(tmp_path: Path) -> None:
     argvs = _argvs(mock_run)
     uv_cmd = next(a for a in argvs if a and a[0] == "uv")
     assert "--force" in uv_cmd
-    restart_call = next(c for c in mock_run.call_args_list if "restart" in c.args[0])
-    assert (
-        restart_call.kwargs.get("env", {}).get("WAYPOINT_STACK_FORCE_FRONTEND_BUILD")
-        == "1"
-    )
+    # update reinstalls the tool but leaves the stack alone
+    assert not any("restart" in a for a in argvs)
+    assert not any(a and a[0] == "waypointctl" for a in argvs)
 
 
 def test_managed_update_discards_generated_files(tmp_path: Path) -> None:

@@ -147,11 +147,6 @@ fi
 printf 'Installing waypointctl...\n'
 uv tool install --force "${INSTALL_DIR}/waypointctl"
 
-# ── start stack ─────────────────────────────────────────────────────────────
-printf 'Starting Waypoint...\n'
-export WAYPOINT_HOME="${INSTALL_DIR}"
-waypointctl start
-
 # ── persist WAYPOINT_HOME in shell profiles ─────────────────────────────────
 EXPORT_LINE="export WAYPOINT_HOME=\"${INSTALL_DIR}\""
 FISH_LINE="set -gx WAYPOINT_HOME \"${INSTALL_DIR}\""
@@ -198,4 +193,6 @@ printf '\nWaypoint %s installed to %s\n' "${TARGET_REF}" "${INSTALL_DIR}"
 printf 'To load waypointctl in this shell:\n'
 printf '  source %s\n' "${PRIMARY_RC}"
 printf '  # or open a new terminal\n\n'
-printf 'Then run: waypointctl status\n'
+printf 'Then start the stack:\n'
+printf '  waypointctl start           # backend + frontend\n'
+printf '  waypointctl start backend   # backend only\n'

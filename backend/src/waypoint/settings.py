@@ -120,6 +120,7 @@ class Settings(BaseModel):
         default_factory=lambda: list(DEFAULT_WORKSPACE_DENYLIST)
     )
     workspace_follow_symlinks: bool = False
+    workspace_git_enabled: bool = True
     database_name: str = "waypoint.db"
     token_ttl_seconds: int = 60 * 60 * 24 * 30
     stream_poll_interval: float = 1.0
@@ -284,6 +285,10 @@ def _env_overrides() -> dict[str, Any]:
     if "WAYPOINT_WORKSPACE_FOLLOW_SYMLINKS" in os.environ:
         overrides["workspace_follow_symlinks"] = os.environ[
             "WAYPOINT_WORKSPACE_FOLLOW_SYMLINKS"
+        ].lower() not in {"0", "false", "no", ""}
+    if "WAYPOINT_WORKSPACE_GIT_ENABLED" in os.environ:
+        overrides["workspace_git_enabled"] = os.environ[
+            "WAYPOINT_WORKSPACE_GIT_ENABLED"
         ].lower() not in {"0", "false", "no", ""}
     if "WAYPOINT_CORS_ORIGINS" in os.environ:
         overrides["cors_origins"] = parse_cors_origins(

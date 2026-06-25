@@ -60,6 +60,7 @@ from waypoint.settings import Settings, load_settings
 from waypoint.storage import Storage
 from waypoint.tailnet import fetch_snapshot
 from waypoint.usage_dashboard import build_dashboard
+from waypoint.workspace_git import git_file_diff, git_status
 from waypoint.workspace_preview import (
     WorkspacePathError,
     is_denied,
@@ -531,6 +532,65 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "path": relative_to_base(base, resolved),
             "kind": "dir" if resolved.is_dir() else "file",
         }
+
+    @app.get("/api/sessions/{session_id}/workspace/git/status")
+    async def workspace_git_status(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = _workspace_session(session_id)
+        disabled: dict[str, Any] = {"enabled": False, "branch": None, "files": []}
+        if not context.settings.workspace_git_enabled:
+            return disabled
+        base = Path(session.worktree_path or session.cwd)
+        result = await git_status(base)
+        if result is None:
+            return disabled
+        return {"enabled": True, **result.model_dump(mode="json")}
+
+    @app.get("/api/sessions/{session_id}/workspace/git/diff")
+    async def workspace_git_diff(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+        path: Annotated[str, Query()] = "",
+        staged: Annotated[bool, Query()] = False,
+    ) -> Any:
+        session = _workspace_session(session_id)
+        if not context.settings.workspace_git_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="disabled"
+            )
+        base = Path(session.worktree_path or session.cwd)
+        try:
+            if not path or is_denied(path, context.settings.workspace_denylist):
+                raise WorkspacePathError("path is denied")
+            # Validate the path stays inside the workspace without requiring it to
+            # exist on disk — a deleted file still has a diff against HEAD.
+            resolve_in_base(
+                base,
+                path,
+                follow_symlinks=context.settings.workspace_follow_symlinks,
+            )
+        except WorkspacePathError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="workspace path denied"
+            ) from exc
+        preview = await git_file_diff(
+            base,
+            path,
+            staged=staged,
+            max_file_bytes=context.settings.workspace_max_file_bytes,
+        )
+        if preview is None:
+            return {
+                "schema_version": 1,
+                "phase": "aggregate",
+                "files": [],
+                "total_additions": 0,
+                "total_deletions": 0,
+                "truncated": False,
+            }
+        return preview.model_dump(mode="json")
 
     @app.delete("/api/sessions/{session_id}/attachments/{attachment_id}")
     async def delete_attachment(

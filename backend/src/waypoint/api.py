@@ -546,6 +546,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         result = await git_status(base)
         if result is None:
             return disabled
+        # Hide denied paths so the Changes list matches what the tree, file, and
+        # diff endpoints will serve.
+        denylist = context.settings.workspace_denylist
+        result = result.model_copy(
+            update={
+                "files": [
+                    entry
+                    for entry in result.files
+                    if not is_denied(entry.path, denylist)
+                ]
+            }
+        )
         return {"enabled": True, **result.model_dump(mode="json")}
 
     @app.get("/api/sessions/{session_id}/workspace/git/diff")

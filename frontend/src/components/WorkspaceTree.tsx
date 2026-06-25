@@ -4,10 +4,39 @@ import { type CSSProperties, useCallback, useEffect, useRef, useState } from "re
 
 import {
   fetchWorkspaceTree,
+  type WorkspaceGitFileStatus,
   type WorkspaceTreeEntry,
   type WorkspaceTreePage,
 } from "@/lib/api";
 import { FileIcon, FolderIcon } from "@/components/AttachmentTray";
+
+type GitDecorationKind =
+  | "modified"
+  | "added"
+  | "deleted"
+  | "renamed"
+  | "untracked";
+
+function gitDecoration(
+  status: WorkspaceGitFileStatus | undefined,
+): { letter: string; kind: GitDecorationKind } | null {
+  if (!status) return null;
+  if (status.untracked) return { letter: "U", kind: "untracked" };
+  // Prefer the staged (index) column, falling back to the worktree column.
+  const code = status.indexStatus !== " " ? status.indexStatus : status.worktreeStatus;
+  switch (code) {
+    case "A":
+      return { letter: "A", kind: "added" };
+    case "D":
+      return { letter: "D", kind: "deleted" };
+    case "R":
+      return { letter: "R", kind: "renamed" };
+    case "C":
+      return { letter: "C", kind: "added" };
+    default:
+      return { letter: "M", kind: "modified" };
+  }
+}
 
 interface DirState {
   entries: WorkspaceTreeEntry[];
@@ -32,6 +61,8 @@ interface WorkspaceTreeProps {
   revealPath?: string | null;
   revealSeq?: number;
   refreshSeq?: number;
+  gitStatus?: Map<string, WorkspaceGitFileStatus>;
+  dirtyDirs?: Set<string>;
   onSelectFile: (path: string) => void;
   onRootLoaded?: (root: WorkspaceTreePage["root"]) => void;
 }
@@ -44,6 +75,8 @@ export function WorkspaceTree({
   revealPath,
   revealSeq,
   refreshSeq,
+  gitStatus,
+  dirtyDirs,
   onSelectFile,
   onRootLoaded,
 }: WorkspaceTreeProps) {
@@ -195,6 +228,8 @@ export function WorkspaceTree({
           selectedPath={selectedPath}
           revealTarget={activeReveal}
           revealSeq={revealSeq}
+          gitStatus={gitStatus}
+          dirtyDirs={dirtyDirs}
           onSelectFile={selectFile}
           onToggleDir={toggleDir}
         />
@@ -215,6 +250,8 @@ function TreeNode({
   selectedPath,
   revealTarget,
   revealSeq,
+  gitStatus,
+  dirtyDirs,
   onSelectFile,
   onToggleDir,
 }: {
@@ -226,6 +263,8 @@ function TreeNode({
   selectedPath: string | null;
   revealTarget: string | null;
   revealSeq?: number;
+  gitStatus?: Map<string, WorkspaceGitFileStatus>;
+  dirtyDirs?: Set<string>;
   onSelectFile: (path: string) => void;
   onToggleDir: (dirPath: string) => void;
 }) {
@@ -236,6 +275,8 @@ function TreeNode({
   const isSelected = !isDir && selectedPath === fullPath;
   const isRevealed = revealTarget != null && revealTarget === fullPath;
   const nodeRef = useRef<HTMLButtonElement>(null);
+  const decoration = isDir ? null : gitDecoration(gitStatus?.get(fullPath));
+  const isDirtyDir = isDir && (dirtyDirs?.has(fullPath) ?? false);
 
   // revealSeq is in the deps so a repeat reveal of the same (already-revealed)
   // node re-scrolls it into view even though `isRevealed` stays true.
@@ -255,7 +296,7 @@ function TreeNode({
       <button
         ref={nodeRef}
         type="button"
-        className={`wp-tree-node${isSelected || isRevealed ? " selected" : ""}${isDir ? " is-dir" : ""}`}
+        className={`wp-tree-node${isSelected || isRevealed ? " selected" : ""}${isDir ? " is-dir" : ""}${decoration ? ` git-${decoration.kind}` : ""}${isDirtyDir ? " git-dirty" : ""}`}
         onClick={() => {
           if (isDir) {
             onToggleDir(fullPath);
@@ -272,6 +313,13 @@ function TreeNode({
           {isDir ? <FolderIcon /> : <FileIcon />}
         </span>
         <span className="wp-tree-name">{entry.name}</span>
+        {decoration ? (
+          <span className={`wp-git-badge ${decoration.kind}`} aria-hidden="true">
+            {decoration.letter}
+          </span>
+        ) : isDirtyDir ? (
+          <span className="wp-git-dot" aria-hidden="true" />
+        ) : null}
       </button>
       {isDir && isExpanded ? (
         <ul role="group">
@@ -288,6 +336,8 @@ function TreeNode({
                   selectedPath={selectedPath}
                   revealTarget={revealTarget}
                   revealSeq={revealSeq}
+                  gitStatus={gitStatus}
+                  dirtyDirs={dirtyDirs}
                   onSelectFile={onSelectFile}
                   onToggleDir={onToggleDir}
                 />

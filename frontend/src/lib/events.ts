@@ -101,7 +101,15 @@ function readBoolean(metadata: Record<string, unknown>, key: string): boolean {
 }
 
 function readDiffPreview(metadata: Record<string, unknown>): EventDiffPreview | null {
-  const raw = readRecord(metadata, "diff_preview");
+  return parseDiffPreviewPayload(readRecord(metadata, "diff_preview"));
+}
+
+// Parse a raw DiffPreviewPayload (snake_case, as emitted by the backend) into
+// the camelCase event shape. Shared by transcript event metadata and the
+// workspace git-diff endpoint.
+export function parseDiffPreviewPayload(
+  raw: Record<string, unknown> | null,
+): EventDiffPreview | null {
   if (!raw) return null;
   const filesRaw = raw.files;
   if (!Array.isArray(filesRaw)) return null;

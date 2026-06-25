@@ -71,7 +71,6 @@ import { useCopied } from "@/lib/use-copied";
 import {
   isPlanEvent,
   itemIdForEvent,
-  parseEvent,
   planForEvent,
   type PlanDecision,
   type PlanViewModel,
@@ -1321,24 +1320,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     () => transcriptItems.some((item) => item.kind === "tool_run"),
     [transcriptItems],
   );
-  // Workspace preview: collect recently written file paths from applied diff
-  // previews, newest-first and deduplicated. Backend-agnostic: keyed off the
-  // diff_preview phase, not tool names.
-  const recentPaths = useMemo(() => {
-    const seen = new Set<string>();
-    const paths: string[] = [];
-    for (let i = events.length - 1; i >= 0; i--) {
-      const diff = parseEvent(events[i]).diffPreview;
-      if (!diff || diff.phase !== "applied") continue;
-      for (const file of diff.files) {
-        if (!seen.has(file.path)) {
-          seen.add(file.path);
-          paths.push(file.path);
-        }
-      }
-    }
-    return paths;
-  }, [events]);
   // True for local sessions only; remote sessions return 400 from the workspace
   // endpoints.
   const workspacePreviewEnabled = Boolean(session && !session.launch_target_id);
@@ -2265,7 +2246,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           initialPath={workspaceInitialPath}
           initialDir={workspaceInitialDir}
           revealSeq={workspaceRevealSeq}
-          recentPaths={recentPaths}
           width={dockWidth}
           onResize={setDockWidth}
           onClose={() => setWorkspaceOpen(false)}

@@ -1,24 +1,118 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import {
   fetchWorkspaceFile,
+  fetchWorkspaceGitDiff,
+  fetchWorkspaceGitStatus,
   workspaceRawUrl,
   type WorkspaceFile,
+  type WorkspaceGitFileStatus,
+  type WorkspaceGitStatus,
   type WorkspaceTreePage,
 } from "@/lib/api";
 import { formatBytes } from "@/components/AttachmentTray";
 import { FilePreview } from "@/components/FilePreview";
+import { WorkspaceDiff } from "@/components/WorkspaceDiff";
 import { WorkspaceTree } from "@/components/WorkspaceTree";
+import type { EventDiffPreview } from "@/lib/events";
 import { copyText } from "@/lib/clipboard";
+
+function gitChangeLabel(status: WorkspaceGitFileStatus): {
+  letter: string;
+  kind: string;
+} {
+  if (status.untracked) return { letter: "U", kind: "untracked" };
+  const code = status.indexStatus !== " " ? status.indexStatus : status.worktreeStatus;
+  switch (code) {
+    case "A":
+      return { letter: "A", kind: "added" };
+    case "D":
+      return { letter: "D", kind: "deleted" };
+    case "R":
+      return { letter: "R", kind: "renamed" };
+    case "C":
+      return { letter: "C", kind: "added" };
+    default:
+      return { letter: "M", kind: "modified" };
+  }
+}
+
+function isStaged(status: WorkspaceGitFileStatus): boolean {
+  return !status.untracked && status.indexStatus !== " ";
+}
+
+function isUnstaged(status: WorkspaceGitFileStatus): boolean {
+  return status.untracked || status.worktreeStatus !== " ";
+}
+
+function GitChangeGroup({
+  label,
+  files,
+  staged,
+  openPath,
+  active,
+  showLabel,
+  onOpen,
+}: {
+  label: string;
+  files: WorkspaceGitFileStatus[];
+  staged: boolean;
+  openPath: string | null;
+  active: boolean;
+  showLabel: boolean;
+  onOpen: (status: WorkspaceGitFileStatus, staged: boolean) => void;
+}) {
+  return (
+    <div className="wp-changes-group">
+      {showLabel ? (
+        <p className="wp-changes-label">
+          {label}
+          <span className="wp-changes-count">{files.length}</span>
+        </p>
+      ) : null}
+      <ul className="wp-changes-list">
+        {files.map((file) => {
+          const { letter, kind } = gitChangeLabel(file);
+          const selected = active && openPath === file.path;
+          const slash = file.path.lastIndexOf("/");
+          const name = slash >= 0 ? file.path.slice(slash + 1) : file.path;
+          const dir = slash >= 0 ? file.path.slice(0, slash) : "";
+          return (
+            <li key={file.path}>
+              <button
+                type="button"
+                className={`wp-changes-item${selected ? " selected" : ""}`}
+                title={file.path}
+                onClick={() => onOpen(file, staged)}
+              >
+                <span className={`wp-git-badge ${kind}`} aria-hidden="true">
+                  {letter}
+                </span>
+                <span className="wp-changes-name">{name}</span>
+                {dir ? <span className="wp-changes-dir">{dir}</span> : null}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
 
 interface WorkspaceExplorerProps {
   host: string;
   token: string;
   sessionId: string;
-  recentPaths: string[];
   initialPath?: string;
   initialDir?: string;
   revealSeq?: number;
@@ -103,7 +197,6 @@ export function WorkspaceExplorer({
   host,
   token,
   sessionId,
-  recentPaths,
   initialPath,
   initialDir,
   revealSeq,
@@ -113,6 +206,7 @@ export function WorkspaceExplorer({
 }: WorkspaceExplorerProps) {
   const [mobileView, setMobileView] = useState<"tree" | "preview">("tree");
   const [revealDir, setRevealDir] = useState<string | null>(null);
+  const [changesCollapsed, setChangesCollapsed] = useState(false);
   const [treeRefreshSeq, setTreeRefreshSeq] = useState(0);
   const [treeRefreshing, setTreeRefreshing] = useState(false);
   const [fileRefreshing, setFileRefreshing] = useState(false);
@@ -128,9 +222,83 @@ export function WorkspaceExplorer({
     reset,
   } = useWorkspacePreview(host, token, sessionId);
 
+  const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus | null>(null);
+  const [previewMode, setPreviewMode] = useState<"content" | "diff">("content");
+  const [diffStaged, setDiffStaged] = useState(false);
+  const [diffData, setDiffData] = useState<EventDiffPreview | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffError, setDiffError] = useState<string | null>(null);
+
+  const gitFiles = gitStatus?.enabled ? gitStatus.files : null;
+  const gitFileMap = useMemo(() => {
+    const map = new Map<string, WorkspaceGitFileStatus>();
+    for (const file of gitFiles ?? []) map.set(file.path, file);
+    return map;
+  }, [gitFiles]);
+  const dirtyDirs = useMemo(() => {
+    const dirs = new Set<string>();
+    for (const file of gitFiles ?? []) {
+      const parts = file.path.split("/");
+      parts.pop();
+      let acc = "";
+      for (const part of parts) {
+        acc = acc ? `${acc}/${part}` : part;
+        dirs.add(acc);
+      }
+    }
+    return dirs;
+  }, [gitFiles]);
+  const stagedFiles = useMemo(() => (gitFiles ?? []).filter(isStaged), [gitFiles]);
+  const unstagedFiles = useMemo(() => (gitFiles ?? []).filter(isUnstaged), [gitFiles]);
+  const changedCount = useMemo(
+    () => new Set((gitFiles ?? []).map((file) => file.path)).size,
+    [gitFiles],
+  );
+
+  // Refresh git status alongside the tree (mount, refresh button, tab focus).
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    void fetchWorkspaceGitStatus(host, token, sessionId)
+      .then((status) => {
+        if (!cancelled) setGitStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) setGitStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [host, token, sessionId, treeRefreshSeq, active]);
+
+  // Fetch the diff when the diff view is showing. Keyed on the open file's mtime
+  // so a silent content refresh (agent edited it) re-pulls the diff too.
+  const openMtime = fileData?.mtime ?? null;
+  useEffect(() => {
+    if (previewMode !== "diff" || !openPath) return;
+    let cancelled = false;
+    setDiffData(null);
+    setDiffError(null);
+    setDiffLoading(true);
+    void fetchWorkspaceGitDiff(host, token, sessionId, openPath, diffStaged)
+      .then((data) => {
+        if (!cancelled) setDiffData(data);
+      })
+      .catch((e) => {
+        if (!cancelled) setDiffError(e instanceof Error ? e.message : "Failed to load diff");
+      })
+      .finally(() => {
+        if (!cancelled) setDiffLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [previewMode, openPath, diffStaged, host, token, sessionId, treeRefreshSeq, openMtime]);
+
   useEffect(() => {
     if (initialPath) {
       reset();
+      setPreviewMode("content");
       void openFile(initialPath);
       setRevealDir(null);
       setMobileView("preview");
@@ -185,8 +353,23 @@ export function WorkspaceExplorer({
 
   const handleSelectFile = useCallback(
     async (path: string) => {
-      await openFile(path);
+      setPreviewMode("content");
       setMobileView("preview");
+      await openFile(path);
+    },
+    [openFile],
+  );
+
+  // Opening from the Changes list jumps straight to the diff view. The staged
+  // group shows the index-vs-HEAD slice; the unstaged group shows the combined
+  // working-tree-vs-HEAD diff. openFile still runs to populate the path/meta and
+  // back the "Content" tab (it no-ops visibly for a deleted file).
+  const openFromChanges = useCallback(
+    (status: WorkspaceGitFileStatus, staged: boolean) => {
+      setDiffStaged(staged);
+      setPreviewMode("diff");
+      setMobileView("preview");
+      void openFile(status.path);
     },
     [openFile],
   );
@@ -263,24 +446,46 @@ export function WorkspaceExplorer({
               <span className="wp-refresh-icon" aria-hidden="true">⟳</span>
             </button>
           </div>
-          {recentPaths.length > 0 ? (
-            <div className="wp-recent">
-              <p className="wp-recent-label">Recently written</p>
-              <ul className="wp-recent-list">
-                {recentPaths.slice(0, 10).map((p) => (
-                  <li key={p}>
-                    <button
-                      type="button"
-                      className={`wp-recent-item${openPath === p ? " selected" : ""}`}
-                      title={p}
-                      onClick={() => void handleSelectFile(p)}
-                    >
-                      {p.split("/").pop() ?? p}
-                      <span className="wp-recent-full">{p}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+          {stagedFiles.length > 0 || unstagedFiles.length > 0 ? (
+            <div className={`wp-changes${changesCollapsed ? " collapsed" : ""}`}>
+              <button
+                type="button"
+                className="wp-changes-header"
+                onClick={() => setChangesCollapsed((c) => !c)}
+                aria-expanded={!changesCollapsed}
+              >
+                <span className="wp-changes-chevron" aria-hidden="true">
+                  {changesCollapsed ? "▸" : "▾"}
+                </span>
+                <span>Changes</span>
+                <span className="wp-changes-total">{changedCount}</span>
+              </button>
+              {!changesCollapsed ? (
+                <div className="wp-changes-groups">
+                  {stagedFiles.length > 0 ? (
+                    <GitChangeGroup
+                      label="Staged"
+                      files={stagedFiles}
+                      staged
+                      openPath={openPath}
+                      active={previewMode === "diff" && diffStaged}
+                      showLabel={stagedFiles.length > 0 && unstagedFiles.length > 0}
+                      onOpen={openFromChanges}
+                    />
+                  ) : null}
+                  {unstagedFiles.length > 0 ? (
+                    <GitChangeGroup
+                      label="Unstaged"
+                      files={unstagedFiles}
+                      staged={false}
+                      openPath={openPath}
+                      active={previewMode === "diff" && !diffStaged}
+                      showLabel={stagedFiles.length > 0 && unstagedFiles.length > 0}
+                      onOpen={openFromChanges}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
           <div className="wp-tree-scroll">
@@ -292,6 +497,8 @@ export function WorkspaceExplorer({
               revealPath={revealDir}
               revealSeq={revealSeq}
               refreshSeq={treeRefreshSeq}
+              gitStatus={gitFileMap}
+              dirtyDirs={dirtyDirs}
               onSelectFile={handleSelectFile}
               onRootLoaded={setRoot}
             />
@@ -306,7 +513,25 @@ export function WorkspaceExplorer({
                   {openPath}
                 </span>
                 <div className="wp-preview-actions">
-                  {fileData ? (
+                  {gitFileMap.has(openPath) ? (
+                    <div className="wp-preview-modetoggle">
+                      <button
+                        type="button"
+                        className={`wp-mode-btn${previewMode === "content" ? " active" : ""}`}
+                        onClick={() => setPreviewMode("content")}
+                      >
+                        Content
+                      </button>
+                      <button
+                        type="button"
+                        className={`wp-mode-btn${previewMode === "diff" ? " active" : ""}`}
+                        onClick={() => setPreviewMode("diff")}
+                      >
+                        Diff
+                      </button>
+                    </div>
+                  ) : null}
+                  {previewMode === "content" && fileData ? (
                     <span className="wp-preview-meta">
                       {formatBytes(fileData.size)} · {mtime}
                     </span>
@@ -328,7 +553,7 @@ export function WorkspaceExplorer({
                   >
                     Copy path
                   </button>
-                  {fileData?.content ? (
+                  {previewMode === "content" && fileData?.content ? (
                     <button
                       type="button"
                       className="wp-preview-btn"
@@ -338,7 +563,7 @@ export function WorkspaceExplorer({
                       Copy contents
                     </button>
                   ) : null}
-                  {rawUrl ? (
+                  {previewMode === "content" && rawUrl ? (
                     <a
                       href={rawUrl}
                       target="_blank"
@@ -352,7 +577,17 @@ export function WorkspaceExplorer({
                 </div>
               </div>
               <div className="wp-preview-body">
-                {fileLoading ? (
+                {previewMode === "diff" ? (
+                  diffLoading ? (
+                    <div className="wp-preview-loading">Loading…</div>
+                  ) : diffError ? (
+                    <div className="wp-preview-error">{diffError}</div>
+                  ) : diffData && diffData.files.length > 0 ? (
+                    <WorkspaceDiff preview={diffData} path={openPath} />
+                  ) : (
+                    <div className="wp-preview-empty">No changes against HEAD</div>
+                  )
+                ) : fileLoading ? (
                   <div className="wp-preview-loading">Loading…</div>
                 ) : fileError ? (
                   <div className="wp-preview-error">{fileError}</div>

@@ -149,6 +149,8 @@ def test_uv_force_and_no_restart(tmp_path: Path) -> None:
 
     argvs = _argvs(mock_run)
     uv_cmd = next(a for a in argvs if a and a[0] == "uv")
+    # --reinstall is required so a tag-only version bump isn't masked by uv's cache
+    assert "--reinstall" in uv_cmd
     assert "--force" in uv_cmd
     # update reinstalls the tool but leaves the stack alone
     assert not any("restart" in a for a in argvs)

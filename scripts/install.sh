@@ -147,8 +147,11 @@ if [[ ! -f "${INSTALL_DIR}/.env" ]]; then
 fi
 
 # ── install waypointctl ─────────────────────────────────────────────────────
+# --reinstall (not just --force): the version comes from the git tag via
+# setuptools-scm, which isn't in uv's build-cache key, so re-running the
+# installer to update would otherwise reuse the previous wheel.
 printf 'Installing waypointctl...\n'
-uv tool install --force "${INSTALL_DIR}/waypointctl"
+uv tool install --reinstall --force "${INSTALL_DIR}/waypointctl"
 
 # ── persist WAYPOINT_HOME in the primary shell profile ──────────────────────
 # Write to the current shell's rc only, and skip entirely when WAYPOINT_HOME is

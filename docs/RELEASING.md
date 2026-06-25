@@ -42,7 +42,7 @@ waypointctl update --ref vX.Y.Z      # pin to a specific tag
 waypointctl update --nightly         # track the tip of main
 ```
 
-`update` refuses to run on a checkout with uncommitted changes, then fetches, checks out the target (release tags detach; branches like `main` track the remote tip), and reinstalls `waypointctl` via `uv tool install --force`. It leaves the running stack untouched; run `waypointctl restart` afterward to apply the new code (the frontend rebuilds automatically because the checked-out ref changed).
+`update` refuses to run on a checkout with uncommitted changes, then fetches, checks out the target (release tags detach; branches like `main` track the remote tip), and reinstalls `waypointctl` via `uv tool install --reinstall --force`. It leaves the running stack untouched; run `waypointctl restart` afterward to apply the new code (the frontend rebuilds automatically because the checked-out ref changed).
 
 ## Uninstalling
 

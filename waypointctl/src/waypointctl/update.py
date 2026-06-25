@@ -125,8 +125,19 @@ def run(
     typer.echo(f"Checking out {target}")
     _checkout(resolved, target)
 
+    # --reinstall (not just --force): waypointctl's version comes from the git
+    # tag via setuptools-scm, and a tag-only change isn't in uv's build-cache
+    # key, so --force alone reuses the previous wheel and reports a stale version.
     subprocess.run(
-        ["uv", "tool", "install", "--force", str(resolved / "waypointctl")], check=True
+        [
+            "uv",
+            "tool",
+            "install",
+            "--reinstall",
+            "--force",
+            str(resolved / "waypointctl"),
+        ],
+        check=True,
     )
 
     typer.echo(f"Updated to {target}. Run 'waypointctl restart' to apply.")

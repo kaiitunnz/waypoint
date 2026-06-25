@@ -7,9 +7,11 @@ from waypoint.workspace_preview import (
     WorkspacePathError,
     is_denied,
     list_dir,
+    rank_files,
     read_text_capped,
     resolve_in_base,
     sniff_text,
+    walk_files,
 )
 
 
@@ -46,6 +48,72 @@ def test_list_dir_reports_overflow(tmp_path: Path) -> None:
     assert [entry["name"] for entry in entries] == ["file-0.txt", "file-1.txt"]
     assert truncated is True
     assert overflow == 2
+
+
+def test_list_dir_pages_with_offset(tmp_path: Path) -> None:
+    for index in range(5):
+        (tmp_path / f"file-{index}.txt").write_text(str(index), encoding="utf-8")
+
+    # The stable sort makes offset paging deterministic across requests.
+    first, first_trunc, first_overflow, _ = list_dir(tmp_path, "", 2, offset=0)
+    second, _, second_overflow, _ = list_dir(tmp_path, "", 2, offset=2)
+    last, last_trunc, last_overflow, _ = list_dir(tmp_path, "", 2, offset=4)
+
+    assert [entry["name"] for entry in first] == ["file-0.txt", "file-1.txt"]
+    assert [entry["name"] for entry in second] == ["file-2.txt", "file-3.txt"]
+    assert [entry["name"] for entry in last] == ["file-4.txt"]
+    assert first_trunc is True and first_overflow == 3
+    assert second_overflow == 1
+    assert last_trunc is False and last_overflow is None
+
+
+def test_rank_files_matches_subsequence_and_ranks_basename() -> None:
+    paths = [
+        "src/components/WorkspaceExplorer.tsx",
+        "src/lib/explorer-helpers.ts",
+        "docs/explore.md",
+        "README.md",
+    ]
+    matches, truncated = rank_files("explorer", paths, limit=10)
+
+    # "README.md" and "docs/explore.md" lack an "explorer" subsequence (no
+    # trailing "r") and are dropped.
+    assert matches == [
+        "src/lib/explorer-helpers.ts",  # query leads the basename → top
+        "src/components/WorkspaceExplorer.tsx",
+    ]
+    assert truncated is False
+
+
+def test_rank_files_empty_query_matches_nothing() -> None:
+    assert rank_files("", ["a.py", "b.py"]) == ([], False)
+
+
+def test_rank_files_reports_truncation() -> None:
+    paths = [f"file-{i}-match.txt" for i in range(5)]
+    matches, truncated = rank_files("match", paths, limit=2)
+    assert len(matches) == 2
+    assert truncated is True
+
+
+def test_walk_files_prunes_denied_dirs(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("x", encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("x", encoding="utf-8")
+
+    found, truncated = walk_files(tmp_path, denylist=[".git"])
+    assert "src/app.py" in found
+    assert all(".git" not in path for path in found)
+    assert truncated is False
+
+
+def test_walk_files_honors_visit_cap(tmp_path: Path) -> None:
+    for index in range(10):
+        (tmp_path / f"f{index}.txt").write_text("x", encoding="utf-8")
+    found, truncated = walk_files(tmp_path, visit_cap=4)
+    assert truncated is True
+    assert len(found) <= 4
 
 
 def test_resolve_in_base_rejects_parent_traversal(tmp_path: Path) -> None:

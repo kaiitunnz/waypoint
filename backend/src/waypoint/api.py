@@ -60,14 +60,16 @@ from waypoint.settings import Settings, load_settings
 from waypoint.storage import Storage
 from waypoint.tailnet import fetch_snapshot
 from waypoint.usage_dashboard import build_dashboard
-from waypoint.workspace_git import git_file_diff, git_status
+from waypoint.workspace_git import git_file_diff, git_list_files, git_status
 from waypoint.workspace_preview import (
     WorkspacePathError,
     is_denied,
     list_dir,
+    rank_files,
     read_text_capped,
     relative_to_base,
     resolve_in_base,
+    walk_files,
 )
 
 log = logging.getLogger("waypoint.api")
@@ -411,6 +413,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session_id: str,
         _: Annotated[str, Depends(token_dependency())],
         path: Annotated[str, Query()] = "",
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=2000)] = 500,
     ) -> Any:
         session = _workspace_session(session_id)
         base = Path(session.worktree_path or session.cwd)
@@ -418,9 +422,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             entries, truncated, overflow, resolved_dir = list_dir(
                 base,
                 path,
-                500,
+                limit,
                 denylist=context.settings.workspace_denylist,
                 follow_symlinks=context.settings.workspace_follow_symlinks,
+                offset=offset,
             )
         except WorkspacePathError as exc:
             raise HTTPException(
@@ -434,8 +439,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "root": {"cwd": session.cwd, "worktree_path": session.worktree_path},
             "path": relative_to_base(base, resolved_dir),
             "entries": entries,
+            "offset": offset,
             "truncated": truncated,
             "overflow": overflow,
+        }
+
+    @app.get("/api/sessions/{session_id}/workspace/find")
+    async def workspace_find(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+        q: Annotated[str, Query()] = "",
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ) -> Any:
+        session = _workspace_session(session_id)
+        query = q.strip()
+        if not query:
+            return {"matches": [], "truncated": False}
+        base = Path(session.worktree_path or session.cwd)
+        denylist = context.settings.workspace_denylist
+        # Prefer git's index (fast, .gitignore-aware); fall back to a capped walk
+        # for non-repo workspaces.
+        listed = await git_list_files(base)
+        walk_truncated = False
+        if listed is None:
+            candidates, walk_truncated = await asyncio.to_thread(
+                walk_files,
+                base,
+                denylist,
+                context.settings.workspace_follow_symlinks,
+            )
+        else:
+            candidates = listed
+        matches, rank_truncated = rank_files(query, candidates, denylist, limit)
+        return {
+            "matches": [{"path": path, "kind": "file"} for path in matches],
+            "truncated": walk_truncated or rank_truncated,
         }
 
     @app.get("/api/sessions/{session_id}/workspace/file")
@@ -539,7 +577,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         session = _workspace_session(session_id)
-        disabled: dict[str, Any] = {"enabled": False, "branch": None, "files": []}
+        disabled: dict[str, Any] = {
+            "enabled": False,
+            "branch": None,
+            "detached": False,
+            "files": [],
+        }
         if not context.settings.workspace_git_enabled:
             return disabled
         base = Path(session.worktree_path or session.cwd)

@@ -886,9 +886,12 @@ export async function fetchWorkspaceTree(
   token: string,
   sessionId: string,
   relPath = "",
+  opts: { offset?: number; limit?: number } = {},
 ): Promise<WorkspaceTreePage> {
   const params = new URLSearchParams();
   if (relPath) params.set("path", relPath);
+  if (opts.offset) params.set("offset", String(opts.offset));
+  if (opts.limit) params.set("limit", String(opts.limit));
   const suffix = params.size ? `?${params.toString()}` : "";
   const response = await fetch(
     `${host}/api/sessions/${sessionId}/workspace/tree${suffix}`,
@@ -985,6 +988,7 @@ export interface WorkspaceGitFileStatus {
 export interface WorkspaceGitStatus {
   enabled: boolean;
   branch: string | null;
+  detached: boolean;
   files: WorkspaceGitFileStatus[];
 }
 
@@ -1006,6 +1010,7 @@ export async function fetchWorkspaceGitStatus(
   return {
     enabled: Boolean(payload.enabled),
     branch: typeof payload.branch === "string" ? payload.branch : null,
+    detached: payload.detached === true,
     files: filesRaw.map(
       (entry: Record<string, unknown>): WorkspaceGitFileStatus => ({
         path: typeof entry.path === "string" ? entry.path : "",
@@ -1037,6 +1042,51 @@ export async function fetchWorkspaceGitDiff(
   );
   await ensureOk(response, "failed to fetch git diff");
   return parseDiffPreviewPayload(await response.json());
+}
+
+export interface WorkspaceFindMatch {
+  path: string;
+  kind: "file" | "dir";
+}
+
+export interface WorkspaceFindResult {
+  matches: WorkspaceFindMatch[];
+  truncated: boolean;
+}
+
+// Fuzzy file finder ("Go to file"). The backend lists candidates via git (or a
+// capped filesystem walk outside a repo), subsequence-matches `q`, and returns
+// the top-ranked paths.
+export async function fetchWorkspaceFind(
+  host: string,
+  token: string,
+  sessionId: string,
+  q: string,
+  limit?: number,
+): Promise<WorkspaceFindResult> {
+  const params = new URLSearchParams({ q });
+  if (limit) params.set("limit", String(limit));
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/workspace/find?${params.toString()}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    },
+  );
+  await ensureOk(response, "failed to search workspace");
+  const payload = await response.json();
+  const matchesRaw = Array.isArray(payload.matches) ? payload.matches : [];
+  return {
+    matches: matchesRaw
+      .map(
+        (entry: Record<string, unknown>): WorkspaceFindMatch => ({
+          path: typeof entry.path === "string" ? entry.path : "",
+          kind: entry.kind === "dir" ? "dir" : "file",
+        }),
+      )
+      .filter((match: WorkspaceFindMatch) => match.path),
+    truncated: Boolean(payload.truncated),
+  };
 }
 
 // Authenticated URL for an uploaded attachment. The token rides as a query

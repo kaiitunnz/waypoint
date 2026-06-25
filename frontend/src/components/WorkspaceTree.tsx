@@ -97,7 +97,7 @@ export function WorkspaceTree({
   );
 
   const fetchDir = useCallback(
-    async (dirPath: string) => {
+    async (dirPath: string, limit?: number) => {
       setDirCache((prev) => {
         const next = new Map(prev);
         // Preserve any already-loaded entries while reloading so a refresh
@@ -112,7 +112,7 @@ export function WorkspaceTree({
         return next;
       });
       try {
-        const page = await fetchWorkspaceTree(host, token, sessionId, dirPath);
+        const page = await fetchWorkspaceTree(host, token, sessionId, dirPath, { limit });
         if (dirPath === "") {
           onRootLoadedRef.current?.(page.root);
         }
@@ -135,6 +135,58 @@ export function WorkspaceTree({
             loading: false,
             error: e instanceof Error ? e.message : "Failed to load",
           });
+          return next;
+        });
+      }
+    },
+    [host, token, sessionId],
+  );
+
+  // Append the next page of a capped directory. Pages are deduped by name (so a
+  // refresh landing mid-request can't leave duplicates) and re-sorted for
+  // display.
+  const loadMore = useCallback(
+    async (dirPath: string, offset: number) => {
+      let skip = false;
+      setDirCache((prev) => {
+        const existing = prev.get(dirPath);
+        if (existing?.loading) {
+          skip = true;
+          return prev;
+        }
+        const next = new Map(prev);
+        if (existing) next.set(dirPath, { ...existing, loading: true, error: null });
+        return next;
+      });
+      if (skip) return;
+      try {
+        const page = await fetchWorkspaceTree(host, token, sessionId, dirPath, { offset });
+        setDirCache((prev) => {
+          const next = new Map(prev);
+          const existing = prev.get(dirPath);
+          const byName = new Map<string, WorkspaceTreeEntry>();
+          for (const entry of [...(existing?.entries ?? []), ...page.entries]) {
+            if (!byName.has(entry.name)) byName.set(entry.name, entry);
+          }
+          next.set(dirPath, {
+            entries: sortEntries([...byName.values()]),
+            overflow: page.overflow,
+            loading: false,
+            error: null,
+          });
+          return next;
+        });
+      } catch (e) {
+        setDirCache((prev) => {
+          const next = new Map(prev);
+          const existing = prev.get(dirPath);
+          if (existing) {
+            next.set(dirPath, {
+              ...existing,
+              loading: false,
+              error: e instanceof Error ? e.message : "Failed to load",
+            });
+          }
           return next;
         });
       }
@@ -184,7 +236,14 @@ export function WorkspaceTree({
   // (refreshSeq starts undefined/0) so it only fires on an explicit bump.
   useEffect(() => {
     if (!refreshSeq) return;
-    for (const dir of expanded) void fetchDir(dir);
+    // Re-fetch enough rows to cover any pages the user loaded via "Load more"
+    // so a refresh doesn't snap an expanded directory back to its first page.
+    for (const dir of expanded) {
+      const loaded = dirCache.get(dir)?.entries.length ?? 0;
+      // Clamped to the endpoint's max limit; a directory paged past the cap
+      // re-collapses to it on refresh rather than 422-ing.
+      void fetchDir(dir, loaded > 0 ? Math.min(2000, Math.max(500, loaded)) : undefined);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshSeq]);
 
@@ -232,10 +291,20 @@ export function WorkspaceTree({
           dirtyDirs={dirtyDirs}
           onSelectFile={selectFile}
           onToggleDir={toggleDir}
+          onLoadMore={loadMore}
         />
       ))}
       {rootState.overflow ? (
-        <li className="wp-tree-overflow">+{rootState.overflow} more</li>
+        <li className="wp-tree-overflow">
+          <button
+            type="button"
+            className="wp-tree-loadmore"
+            disabled={rootState.loading}
+            onClick={() => loadMore("", rootState.entries.length)}
+          >
+            Show {rootState.overflow} more
+          </button>
+        </li>
       ) : null}
     </ul>
   );
@@ -254,6 +323,7 @@ function TreeNode({
   dirtyDirs,
   onSelectFile,
   onToggleDir,
+  onLoadMore,
 }: {
   entry: WorkspaceTreeEntry;
   parentPath: string;
@@ -267,6 +337,7 @@ function TreeNode({
   dirtyDirs?: Set<string>;
   onSelectFile: (path: string) => void;
   onToggleDir: (dirPath: string) => void;
+  onLoadMore: (dirPath: string, offset: number) => void;
 }) {
   const fullPath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
   const isDir = entry.kind === "dir";
@@ -340,6 +411,7 @@ function TreeNode({
                   dirtyDirs={dirtyDirs}
                   onSelectFile={onSelectFile}
                   onToggleDir={onToggleDir}
+                  onLoadMore={onLoadMore}
                 />
               ))}
               {dirState.overflow ? (
@@ -347,7 +419,14 @@ function TreeNode({
                   className="wp-tree-overflow"
                   style={{ "--depth": depth + 1 } as CSSProperties}
                 >
-                  +{dirState.overflow} more
+                  <button
+                    type="button"
+                    className="wp-tree-loadmore"
+                    disabled={dirState.loading}
+                    onClick={() => onLoadMore(fullPath, dirState.entries.length)}
+                  >
+                    Show {dirState.overflow} more
+                  </button>
                 </li>
               ) : null}
             </>

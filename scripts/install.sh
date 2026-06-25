@@ -169,6 +169,7 @@ fi
 
 if [[ -n "${WAYPOINT_HOME_PRESET}" ]]; then
     printf 'WAYPOINT_HOME already set in your environment; leaving shell profiles untouched\n'
+    printf '  (persist %s in your shell profile yourself if you want it permanent)\n' "${INSTALL_DIR}"
 elif grep -qF "${WP_BEGIN}" "${PRIMARY_RC}" 2>/dev/null; then
     printf 'WAYPOINT_HOME already configured in %s\n' "${PRIMARY_RC}"
 else

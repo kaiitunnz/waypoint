@@ -40,6 +40,8 @@ def _build_config(tmp_path: Path, state_dir: Path, **overrides: object) -> Stack
         uv_cache_dir=state_dir / "uv-cache",
         force_frontend_build=False,
         caffeinate=False,
+        control_host="127.0.0.1",
+        control_port=0,
         child_env={},
     )
     defaults.update(overrides)

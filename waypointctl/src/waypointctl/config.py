@@ -21,6 +21,8 @@ class StackConfig:
     uv_cache_dir: Path
     force_frontend_build: bool
     caffeinate: bool
+    control_host: str
+    control_port: int
     child_env: dict[str, str]
 
 
@@ -75,6 +77,8 @@ def load_stack_config(home: Path, env: dict[str, str] | None = None) -> StackCon
             env.get("WAYPOINT_STACK_FORCE_FRONTEND_BUILD"), default=False
         ),
         caffeinate=_parse_bool(env.get("WAYPOINT_STACK_CAFFEINATE"), default=True),
+        control_host=env.get("WAYPOINT_STACK_CONTROL_HOST", "0.0.0.0"),
+        control_port=int(env.get("WAYPOINT_STACK_CONTROL_PORT", "8799")),
         child_env=env,
     )
 

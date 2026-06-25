@@ -74,6 +74,18 @@ function languageForPath(path: string): string | null {
   return EXTENSION_LANGUAGE[name.slice(dot + 1).toLowerCase()] ?? null;
 }
 
+// Resolve a markdown fence info string (the token after the opening ```) to an
+// hljs language name. Many fence tokens are already hljs names (python, go,
+// rust); the rest are the same aliases we map for file extensions (ts, py,
+// yml, sh). The token itself is the last resort — `registered()` downstream
+// rejects anything lowlight doesn't know, so a bad guess just falls back to
+// raw rendering.
+function languageForFence(info: string): string | null {
+  const token = info.trim().toLowerCase().split(/\s+/)[0];
+  if (!token) return null;
+  return EXTENSION_LANGUAGE[token] ?? token;
+}
+
 interface HastNode {
   type: string;
   value?: string;
@@ -123,13 +135,12 @@ function splitIntoLines(tokens: HighlightToken[]): HighlightToken[][] {
 }
 
 // Returns per-line token arrays, or null when highlighting is unavailable
-// (unknown language, oversized content, unregistered grammar, or a parse
-// error) — callers fall back to rendering the raw lines.
-export async function highlightToLines(
+// (oversized content, unregistered grammar, or a parse error) — callers fall
+// back to rendering the raw lines.
+async function highlightCodeToLines(
   code: string,
-  path: string,
+  language: string | null,
 ): Promise<HighlightToken[][] | null> {
-  const language = languageForPath(path);
   if (!language || code.length > MAX_HIGHLIGHT_CHARS) return null;
   const lowlight = await getLowlight();
   if (!lowlight.registered(language)) return null;
@@ -141,4 +152,21 @@ export async function highlightToLines(
   } catch {
     return null;
   }
+}
+
+// Highlight a workspace file, inferring the language from its path/extension.
+export function highlightToLines(
+  code: string,
+  path: string,
+): Promise<HighlightToken[][] | null> {
+  return highlightCodeToLines(code, languageForPath(path));
+}
+
+// Highlight a markdown fenced code block, using its info string as the
+// language hint. Returns null (raw fallback) for unlabeled fences.
+export function highlightFenceToLines(
+  code: string,
+  info: string,
+): Promise<HighlightToken[][] | null> {
+  return highlightCodeToLines(code, languageForFence(info));
 }

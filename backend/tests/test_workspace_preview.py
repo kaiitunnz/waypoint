@@ -85,6 +85,10 @@ def test_rank_files_matches_subsequence_and_ranks_basename() -> None:
     assert truncated is False
 
 
+def test_rank_files_empty_query_matches_nothing() -> None:
+    assert rank_files("", ["a.py", "b.py"]) == ([], False)
+
+
 def test_rank_files_reports_truncation() -> None:
     paths = [f"file-{i}-match.txt" for i in range(5)]
     matches, truncated = rank_files("match", paths, limit=2)

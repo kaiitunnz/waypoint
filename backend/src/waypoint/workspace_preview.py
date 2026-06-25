@@ -225,7 +225,10 @@ def rank_files(
     limit: int = 50,
 ) -> tuple[list[str], bool]:
     # Score, filter, and order candidate paths for the finder. Returns the top
-    # ``limit`` matches and whether more matched than were returned.
+    # ``limit`` matches and whether more matched than were returned. An empty
+    # query matches nothing (callers should not search on a blank input).
+    if not query:
+        return [], False
     scored: list[tuple[int, int, str]] = []
     for path in paths:
         if is_denied(path, denylist):

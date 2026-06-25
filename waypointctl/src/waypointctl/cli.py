@@ -296,7 +296,7 @@ def update(
         ),
     ] = False,
 ) -> None:
-    """Update Waypoint to the latest release and restart the stack."""
+    """Update Waypoint to the latest release; run `waypointctl restart` to apply."""
     run_update(_ctx_home(ctx), ref=ref, nightly=nightly)
 
 

@@ -12,9 +12,12 @@ waypointctl update --nightly       # tip of main
 
 `update` refuses to run if the checkout has uncommitted changes, then fetches,
 checks out the target (release tags detach; branches like `main` track the
-remote tip), reinstalls `waypointctl` via `uv tool install --force`, and
-restarts the stack with a forced frontend rebuild. Because it restarts, treat it
-like a restart: get the user's permission first and follow `restart-safety.md`.
+remote tip), and reinstalls `waypointctl` via `uv tool install --force`. It does
+**not** touch the running stack — apply the new code yourself with
+`waypointctl restart` (or `restart backend` / `restart frontend`), getting the
+user's permission and following `restart-safety.md` for backend or full-stack
+restarts. The frontend rebuilds automatically on the next restart because the
+checked-out ref changed.
 
 ## Manual flow (when you need step-by-step control)
 

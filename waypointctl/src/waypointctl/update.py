@@ -1,4 +1,3 @@
-import os
 import subprocess
 from pathlib import Path
 
@@ -93,7 +92,10 @@ def _checkout(home: Path, ref: str) -> None:
 def run(
     home: Path | None = None, ref: str | None = None, nightly: bool = False
 ) -> None:
-    """Update Waypoint to the latest release (or --ref / --nightly) and restart."""
+    """Update Waypoint to the latest release (or --ref / --nightly).
+
+    The stack is left untouched; run `waypointctl restart` afterward to apply.
+    """
     if nightly and ref is not None:
         raise typer.BadParameter("--nightly cannot be combined with --ref")
 
@@ -127,10 +129,4 @@ def run(
         ["uv", "tool", "install", "--force", str(resolved / "waypointctl")], check=True
     )
 
-    restart_env = {**os.environ, "WAYPOINT_STACK_FORCE_FRONTEND_BUILD": "1"}
-    subprocess.run(
-        ["waypointctl", "--home", str(resolved), "restart"],
-        check=True,
-        env=restart_env,
-    )
-    typer.echo(f"Updated to {target}")
+    typer.echo(f"Updated to {target}. Run 'waypointctl restart' to apply.")

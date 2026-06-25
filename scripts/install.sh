@@ -4,6 +4,9 @@ set -euo pipefail
 REPO="https://github.com/kaiitunnz/waypoint"
 WP_BEGIN="# >>> waypoint >>>"
 WP_END="# <<< waypoint <<<"
+# Snapshot before the script exports its own value: a WAYPOINT_HOME already in
+# the environment means the user manages it, so we leave shell profiles alone.
+WAYPOINT_HOME_PRESET="${WAYPOINT_HOME:-}"
 INSTALL_DIR="${WAYPOINT_HOME:-${HOME}/.waypoint/app}"
 
 die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -147,24 +150,10 @@ fi
 printf 'Installing waypointctl...\n'
 uv tool install --force "${INSTALL_DIR}/waypointctl"
 
-# ── persist WAYPOINT_HOME in shell profiles ─────────────────────────────────
-EXPORT_LINE="export WAYPOINT_HOME=\"${INSTALL_DIR}\""
-FISH_LINE="set -gx WAYPOINT_HOME \"${INSTALL_DIR}\""
-
-inject_export() {
-    local rc_file="$1"
-    local line="$2"
-    grep -qF "${WP_BEGIN}" "${rc_file}" 2>/dev/null && return 0
-    printf '\n%s\n%s\n%s\n' "${WP_BEGIN}" "${line}" "${WP_END}" >> "${rc_file}"
-    printf 'Added WAYPOINT_HOME to %s\n' "${rc_file}"
-}
-
-inject_if_exists() {
-    if [[ -f "$1" ]]; then
-        inject_export "$1" "$2"
-    fi
-}
-
+# ── persist WAYPOINT_HOME in the primary shell profile ──────────────────────
+# Write to the current shell's rc only, and skip entirely when WAYPOINT_HOME is
+# already set (user-managed) or the block is already present, so re-runs don't
+# pile up duplicate edits across profiles.
 SHELL_NAME="$(basename "${SHELL:-bash}")"
 case "${SHELL_NAME}" in
     zsh)  PRIMARY_RC="${HOME}/.zshrc" ;;
@@ -173,19 +162,19 @@ case "${SHELL_NAME}" in
 esac
 
 if [[ "${SHELL_NAME}" = "fish" ]]; then
-    mkdir -p "$(dirname "${PRIMARY_RC}")"
-    inject_export "${PRIMARY_RC}" "${FISH_LINE}"
+    EXPORT_LINE="set -gx WAYPOINT_HOME \"${INSTALL_DIR}\""
 else
-    inject_export "${PRIMARY_RC}" "${EXPORT_LINE}"
+    EXPORT_LINE="export WAYPOINT_HOME=\"${INSTALL_DIR}\""
 fi
 
-for extra_rc in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile"; do
-    [[ "${extra_rc}" = "${PRIMARY_RC}" ]] && continue
-    inject_if_exists "${extra_rc}" "${EXPORT_LINE}"
-done
-
-if [[ "${SHELL_NAME}" != "fish" ]]; then
-    inject_if_exists "${HOME}/.config/fish/config.fish" "${FISH_LINE}"
+if [[ -n "${WAYPOINT_HOME_PRESET}" ]]; then
+    printf 'WAYPOINT_HOME already set in your environment; leaving shell profiles untouched\n'
+elif grep -qF "${WP_BEGIN}" "${PRIMARY_RC}" 2>/dev/null; then
+    printf 'WAYPOINT_HOME already configured in %s\n' "${PRIMARY_RC}"
+else
+    mkdir -p "$(dirname "${PRIMARY_RC}")"
+    printf '\n%s\n%s\n%s\n' "${WP_BEGIN}" "${EXPORT_LINE}" "${WP_END}" >> "${PRIMARY_RC}"
+    printf 'Added WAYPOINT_HOME to %s\n' "${PRIMARY_RC}"
 fi
 
 # ── done ────────────────────────────────────────────────────────────────────

@@ -26,6 +26,9 @@ cors_origins: []
 # workspace_max_file_bytes: 200000   # larger files preview as a placeholder
 # workspace_follow_symlinks: false   # if true, allow paths through symlinks that
 #                                    #   still resolve inside the working dir
+# workspace_git_enabled: true        # show git status + per-file diffs in the
+#                                    #   explorer (no-op outside a git repo).
+#                                    #   Env: WAYPOINT_WORKSPACE_GIT_ENABLED
 
 # Per-plugin config blocks keyed by plugin id. Each block is validated
 # against the plugin's `config_schema` (see `backends/<id>/plugin.py`).

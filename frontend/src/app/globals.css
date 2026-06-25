@@ -11626,6 +11626,10 @@ html[data-theme="light"]
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* Make the dock a scroll-chaining boundary: gestures over a non-scrollable or
+     already-at-edge pane stay inside the dock instead of scrolling the
+     transcript behind it (notably when the dock is a full-screen sheet). */
+  overscroll-behavior: contain;
   background: rgba(14, 17, 24, 0.98);
   border-right: 1px solid var(--line-strong);
   box-shadow: 4px 0 32px rgba(0, 0, 0, 0.36);
@@ -11714,9 +11718,12 @@ body.wp-dock-resizing {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 16px;
+  /* Right padding reserves space for the absolutely-pinned close button so
+     wrapping header content never runs under it. */
+  padding: 14px 56px 14px 16px;
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
+  position: relative;
 }
 
 .wp-panel-title {
@@ -11731,6 +11738,7 @@ body.wp-dock-resizing {
   font-family: var(--font-display);
   font-size: 1.02rem;
   color: var(--text-strong);
+  white-space: nowrap;
 }
 
 .wp-panel-cwd {
@@ -11772,6 +11780,9 @@ body.wp-dock-resizing {
 }
 
 .wp-panel-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -11910,6 +11921,485 @@ body.wp-dock-resizing {
   text-overflow: ellipsis;
 }
 
+/* ─── Workspace git status ─── */
+/* All colors resolve from semantic tokens (--success/--danger/--accent/
+ * --accent-cool), which already carry per-theme values, so these rules need no
+ * separate light-mode overrides. */
+.wp-git-badge {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  line-height: 1;
+  width: 13px;
+  text-align: center;
+}
+
+.wp-tree-node .wp-git-badge {
+  margin-left: auto;
+}
+
+.wp-git-badge.modified {
+  color: var(--accent);
+}
+
+.wp-git-badge.added,
+.wp-git-badge.untracked {
+  color: var(--success);
+}
+
+.wp-git-badge.deleted {
+  color: var(--danger);
+}
+
+.wp-git-badge.renamed {
+  color: var(--accent-cool);
+}
+
+.wp-git-dot {
+  flex-shrink: 0;
+  margin-left: auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.65;
+}
+
+.wp-tree-node.git-modified .wp-tree-name {
+  color: var(--accent);
+}
+
+.wp-tree-node.git-added .wp-tree-name,
+.wp-tree-node.git-untracked .wp-tree-name {
+  color: var(--success);
+}
+
+.wp-tree-node.git-renamed .wp-tree-name {
+  color: var(--accent-cool);
+}
+
+.wp-tree-node.git-deleted .wp-tree-name {
+  color: var(--danger);
+  text-decoration: line-through;
+}
+
+.wp-changes {
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 30%;
+}
+
+.wp-changes.collapsed {
+  max-height: none;
+}
+
+.wp-changes-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 8px 10px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.wp-changes-chevron {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.wp-changes-total {
+  color: var(--muted-soft);
+  background: var(--bg-card-soft);
+  border-radius: var(--radius-pill);
+  padding: 0 6px;
+  font-size: 0.6rem;
+}
+
+.wp-changes-groups {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 8px 8px;
+  min-height: 0;
+}
+
+.wp-changes-group + .wp-changes-group {
+  margin-top: 6px;
+}
+
+.wp-changes-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 4px 4px;
+  margin: 0;
+}
+
+.wp-changes-count {
+  color: var(--muted-soft);
+  background: var(--bg-card-soft);
+  border-radius: var(--radius-pill);
+  padding: 0 6px;
+  font-size: 0.6rem;
+  text-transform: none;
+}
+
+.wp-changes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.wp-changes-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 0.8rem;
+  transition: background-color 120ms ease;
+}
+
+.wp-changes-item:hover,
+.wp-changes-item.selected {
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+}
+
+.wp-changes-name {
+  flex-shrink: 0;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wp-changes-dir {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--muted);
+}
+
+/* Segmented toggles (Content/Diff and Inline/Split): a single bordered group
+ * with joined cells. */
+.wp-preview-modetoggle,
+.wp-diff-layout {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.wp-mode-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 11px;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.wp-mode-btn + .wp-mode-btn {
+  border-left: 1px solid var(--line);
+}
+
+.wp-mode-btn.active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent-cool) 16%, transparent);
+}
+
+/* ─── Workspace diff (dedicated full-file viewer) ─── */
+.wp-diff {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  flex: 1;
+}
+
+.wp-diff-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.wp-diff-stat {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.wp-diff-stat.add {
+  color: var(--success);
+}
+
+.wp-diff-stat.del {
+  color: var(--danger);
+}
+
+.wp-diff-note {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--accent);
+}
+
+.wp-diff-layout {
+  margin-left: auto;
+}
+
+.wp-diff-empty {
+  padding: 16px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.wp-diff-inline,
+.wp-diff-split {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+
+/* Inline (unified) full-file view: dual line-number gutters + sign + code. */
+.wp-diff-row {
+  display: flex;
+  align-items: flex-start;
+  min-width: max-content;
+  white-space: pre;
+}
+
+.wp-diff-row.add {
+  background: rgba(108, 201, 154, 0.13);
+}
+
+html[data-theme="light"] .wp-diff-row.add {
+  background: rgba(37, 122, 80, 0.1);
+}
+
+.wp-diff-row.del {
+  background: rgba(226, 108, 112, 0.13);
+}
+
+html[data-theme="light"] .wp-diff-row.del {
+  background: rgba(184, 48, 56, 0.09);
+}
+
+.wp-diff-ln {
+  flex: none;
+  min-width: calc(var(--lnw, 2ch) + 14px);
+  padding: 0 7px;
+  text-align: right;
+  color: var(--muted-soft);
+  user-select: none;
+}
+
+.wp-diff-sign {
+  flex: none;
+  width: 2ch;
+  text-align: center;
+  color: var(--muted);
+  user-select: none;
+}
+
+.wp-diff-row.add .wp-diff-sign {
+  color: var(--success);
+}
+
+.wp-diff-row.del .wp-diff-sign {
+  color: var(--danger);
+}
+
+.wp-diff-code {
+  flex: 1;
+  padding-right: 12px;
+}
+
+/* Split (side-by-side) view: a 4-column grid (gutter|code|gutter|code) whose
+ * rows are display:contents so the columns align across the whole file. */
+.wp-diff-split {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
+}
+
+.wp-diff-srow {
+  display: contents;
+}
+
+.wp-diff-scode {
+  padding: 0 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.wp-diff-split .wp-diff-ln.new {
+  border-left: 1px solid var(--line);
+}
+
+.wp-diff-scode.add,
+.wp-diff-split .wp-diff-ln.add {
+  background: rgba(108, 201, 154, 0.13);
+}
+
+html[data-theme="light"] .wp-diff-scode.add,
+html[data-theme="light"] .wp-diff-split .wp-diff-ln.add {
+  background: rgba(37, 122, 80, 0.1);
+}
+
+.wp-diff-scode.del,
+.wp-diff-split .wp-diff-ln.del {
+  background: rgba(226, 108, 112, 0.13);
+}
+
+html[data-theme="light"] .wp-diff-scode.del,
+html[data-theme="light"] .wp-diff-split .wp-diff-ln.del {
+  background: rgba(184, 48, 56, 0.09);
+}
+
+.wp-diff-scode.blank,
+.wp-diff-split .wp-diff-ln.blank {
+  background: rgba(127, 138, 156, 0.06);
+}
+
+/* GitHub-style fold: a collapsed run of unchanged lines with capped two-way
+ * expanders (⌃ up / ⌄ down) and an explicit expand-all. */
+/* A quiet seam between hunks: a soft accent-tinted bar with borderless chevron
+   wells on the left (aligned to the line-number gutter) and a plain text link on
+   the right — no boxed buttons. */
+.wp-diff-fold {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  min-height: 30px;
+  background: color-mix(in srgb, var(--accent-cool) 6%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--accent-cool) 20%, var(--line));
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-cool) 20%, var(--line));
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.wp-diff-fold.split {
+  grid-column: 1 / -1;
+}
+
+.wp-diff-fold-steps {
+  display: flex;
+  flex-shrink: 0;
+  /* Span exactly the diff's twin line-number gutters and divide from the text
+     with the same hairline the code rows use; the chevrons fill it edge to
+     edge (one per gutter column). */
+  width: calc((var(--lnw, 2ch) + 14px) * 2);
+  border-right: 1px solid color-mix(in srgb, var(--accent-cool) 16%, var(--line));
+  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+}
+
+.wp-diff-fold-step {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--accent-cool);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 120ms ease;
+}
+
+.wp-diff-fold-step:hover {
+  background: color-mix(in srgb, var(--accent-cool) 22%, transparent);
+}
+
+.wp-diff-fold-label {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+}
+
+.wp-diff-fold-all {
+  background: transparent;
+  border: none;
+  color: var(--accent-cool);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0 12px;
+  flex-shrink: 0;
+}
+
+.wp-diff-fold-all:hover {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Short gap: a single quiet expand affordance spanning the bar. */
+.wp-diff-fold-solo {
+  background: transparent;
+  border: none;
+  color: var(--accent-cool);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  width: 100%;
+}
+
+.wp-diff-fold-solo:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+}
+
+.wp-diff-fold-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
 .wp-tree-toolbar {
   display: flex;
   align-items: center;
@@ -11968,6 +12458,7 @@ body.wp-dock-resizing {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 4px;
 }
 
@@ -12094,8 +12585,11 @@ html[data-theme="light"] .wp-preview-header {
   font-family: var(--font-mono);
   font-size: 0.78rem;
   color: var(--text);
-  flex: 1;
-  min-width: 0;
+  /* A min-width floor keeps the filename readable: when it plus the actions no
+     longer fit, the actions wrap to the next row instead of starving the path
+     down to an ellipsis. */
+  flex: 1 1 16ch;
+  min-width: 16ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -12145,6 +12639,7 @@ html[data-theme="light"] .wp-preview-header {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
 }
@@ -12493,6 +12988,17 @@ html[data-theme="light"] .wp-hl {
    container query), so this fires both for a narrow desktop dock and the
    mobile full-screen sheet. */
 @container (max-width: 700px) {
+  /* The header controls (Tree/Preview toggle, full-page link, close) no longer
+     fit beside the title, so let the title claim its own row and the controls
+     wrap beneath it. */
+  .wp-panel-header {
+    flex-wrap: wrap;
+  }
+
+  .wp-panel-title {
+    flex: 1 1 100%;
+  }
+
   .wp-panel-mobile-toggle {
     display: flex;
   }
@@ -12511,6 +13017,22 @@ html[data-theme="light"] .wp-hl {
 
   .wp-mobile-hidden {
     display: none;
+  }
+
+  /* Wrap inline diff lines instead of horizontal-scrolling them, matching the
+     transcript diff's narrow-viewport behavior (see .diff-line @media). */
+  .wp-diff-inline {
+    overflow-x: visible;
+  }
+
+  .wp-diff-row {
+    min-width: 0;
+    white-space: normal;
+  }
+
+  .wp-diff-code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 }
 

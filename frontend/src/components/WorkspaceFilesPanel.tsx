@@ -13,7 +13,6 @@ interface WorkspaceFilesPanelProps {
   initialPath?: string;
   initialDir?: string;
   revealSeq?: number;
-  recentPaths: string[];
   width: number;
   onResize: (width: number) => void;
   onClose: () => void;
@@ -27,7 +26,6 @@ export function WorkspaceFilesPanel({
   initialPath,
   initialDir,
   revealSeq,
-  recentPaths,
   width,
   onResize,
   onClose,
@@ -90,7 +88,6 @@ export function WorkspaceFilesPanel({
         host={host}
         token={token}
         sessionId={sessionId}
-        recentPaths={recentPaths}
         initialPath={initialPath}
         initialDir={initialDir}
         revealSeq={revealSeq}

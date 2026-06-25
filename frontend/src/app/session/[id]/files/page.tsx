@@ -108,7 +108,6 @@ export default function SessionFilesPage() {
           host={host}
           token={token}
           sessionId={sessionId}
-          recentPaths={[]}
           initialPath={initialPath}
           initialDir={initialDir}
         />

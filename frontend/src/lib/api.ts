@@ -22,6 +22,7 @@ import {
   SessionRecord,
   UsageDashboardResponse,
 } from "@/lib/types";
+import { parseDiffPreviewPayload, type EventDiffPreview } from "@/lib/events";
 
 export class AuthError extends Error {
   constructor(message = "session expired") {
@@ -970,6 +971,72 @@ export function workspaceRawUrl(
   relPath: string,
 ): string {
   return `${host}/api/sessions/${sessionId}/workspace/file?path=${encodeURIComponent(relPath)}&raw=1&token=${encodeURIComponent(token)}`;
+}
+
+export interface WorkspaceGitFileStatus {
+  path: string;
+  oldPath: string | null;
+  // The two porcelain columns. A space means unmodified in that area.
+  indexStatus: string;
+  worktreeStatus: string;
+  untracked: boolean;
+}
+
+export interface WorkspaceGitStatus {
+  enabled: boolean;
+  branch: string | null;
+  files: WorkspaceGitFileStatus[];
+}
+
+export async function fetchWorkspaceGitStatus(
+  host: string,
+  token: string,
+  sessionId: string,
+): Promise<WorkspaceGitStatus> {
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/workspace/git/status`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    },
+  );
+  await ensureOk(response, "failed to fetch git status");
+  const payload = await response.json();
+  const filesRaw = Array.isArray(payload.files) ? payload.files : [];
+  return {
+    enabled: Boolean(payload.enabled),
+    branch: typeof payload.branch === "string" ? payload.branch : null,
+    files: filesRaw.map(
+      (entry: Record<string, unknown>): WorkspaceGitFileStatus => ({
+        path: typeof entry.path === "string" ? entry.path : "",
+        oldPath: typeof entry.old_path === "string" ? entry.old_path : null,
+        indexStatus: typeof entry.index_status === "string" ? entry.index_status : " ",
+        worktreeStatus:
+          typeof entry.worktree_status === "string" ? entry.worktree_status : " ",
+        untracked: entry.untracked === true,
+      }),
+    ),
+  };
+}
+
+export async function fetchWorkspaceGitDiff(
+  host: string,
+  token: string,
+  sessionId: string,
+  relPath: string,
+  staged = false,
+): Promise<EventDiffPreview | null> {
+  const params = new URLSearchParams({ path: relPath });
+  if (staged) params.set("staged", "1");
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/workspace/git/diff?${params.toString()}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    },
+  );
+  await ensureOk(response, "failed to fetch git diff");
+  return parseDiffPreviewPayload(await response.json());
 }
 
 // Authenticated URL for an uploaded attachment. The token rides as a query

@@ -1,4 +1,12 @@
+import { Fragment, useEffect, useMemo, useState } from "react";
+
 import type { EventDiffPreview, EventDiffPreviewFile } from "@/lib/events";
+import {
+  buildPlainDiffLines,
+  DIFF_MARKER,
+  highlightDiffToLines,
+  type DiffLine,
+} from "@/lib/highlight";
 
 const PHASE_LABEL: Record<EventDiffPreview["phase"], string> = {
   proposed: "Proposed changes",
@@ -73,13 +81,7 @@ function DiffPreviewFileView({
       {file.unavailableReason ? (
         <p className="diff-unavailable">{file.unavailableReason}</p>
       ) : file.diff ? (
-        <pre className="diff-code" aria-label={`Diff for ${file.path}`}>
-          {file.diff.split("\n").map((line, index) => (
-            <span className={`diff-line ${classForDiffLine(line)}`} key={index}>
-              {line || " "}
-            </span>
-          ))}
-        </pre>
+        <DiffCode diff={file.diff} path={file.path} />
       ) : (
         <p className="diff-unavailable">No diff content available.</p>
       )}
@@ -124,12 +126,40 @@ function cleanDiffPath(path: string): string {
     : withoutTimestamp;
 }
 
-function classForDiffLine(line: string): string {
-  if (line.startsWith("@@")) return "hunk";
-  if (line.startsWith("diff --git") || line.startsWith("---") || line.startsWith("+++")) {
-    return "meta";
-  }
-  if (line.startsWith("+")) return "add";
-  if (line.startsWith("-")) return "del";
-  return "context";
+// Renders a unified diff with syntax-highlighted content. Starts from the plain
+// classified lines, then swaps in highlighted tokens once the lazy highlighter
+// resolves (falling back to plain when the language is unknown or too large).
+function DiffCode({ diff, path }: { diff: string; path: string }) {
+  const plain = useMemo(() => buildPlainDiffLines(diff), [diff]);
+  const [lines, setLines] = useState<DiffLine[]>(plain);
+
+  useEffect(() => {
+    setLines(plain);
+    let cancelled = false;
+    void highlightDiffToLines(diff, path).then((highlighted) => {
+      if (!cancelled && highlighted) setLines(highlighted);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [diff, path, plain]);
+
+  return (
+    <pre className="diff-code wp-hl" aria-label={`Diff for ${path}`}>
+      {lines.map((line, index) => (
+        <span className={`diff-line ${line.kind}`} key={index}>
+          {DIFF_MARKER[line.kind]}
+          {line.tokens.map((token, i) =>
+            token.className ? (
+              <span key={i} className={token.className}>
+                {token.text}
+              </span>
+            ) : (
+              <Fragment key={i}>{token.text}</Fragment>
+            ),
+          )}
+        </span>
+      ))}
+    </pre>
+  );
 }

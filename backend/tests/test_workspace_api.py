@@ -5,6 +5,7 @@ FastAPI app (over an in-process ASGI transport) rather than the helper layer.
 The routes only read storage/tokens, so the runtime lifespan is not started.
 """
 
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -251,3 +252,56 @@ async def test_empty_denylist_disables_filtering(tmp_path: Path) -> None:
         )
     assert resp.status_code == 200
     assert resp.json()["content"] == "[core]\n"
+
+
+async def test_git_status_hides_denied_paths(tmp_path: Path) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+
+    def _git(*args: str) -> None:
+        subprocess.run(
+            ["git", "-C", str(workspace), *args], check=True, capture_output=True
+        )
+
+    _git("init", "-q")
+    _git("config", "user.email", "t@example.com")
+    _git("config", "user.name", "T")
+    _git("config", "commit.gpgsign", "false")
+    (workspace / "app.py").write_text("x = 1\n", encoding="utf-8")
+    _git("add", "-A")
+    _git("commit", "-q", "-m", "init")
+    (workspace / "app.py").write_text("x = 2\n", encoding="utf-8")  # changed, shown
+    (workspace / "secret.pem").write_text("KEY\n", encoding="utf-8")  # denied, hidden
+
+    settings = Settings(data_dir=tmp_path / "data", workspace_denylist=["*.pem"])
+    app = create_app(settings)
+    context = app.state.context
+    now = datetime.now(UTC)
+    context.storage.create_session(
+        SessionRecord(
+            id="s1",
+            backend="codex",
+            source=SessionSource.MANAGED,
+            title="t",
+            cwd=str(workspace),
+            status=SessionStatus.IDLE,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            raw_log_path=str(tmp_path / "raw.log"),
+            structured_log_path=str(tmp_path / "events.jsonl"),
+        )
+    )
+    token = context.tokens.issue().token
+    async with _client(app) as client:
+        resp = await client.get(
+            "/api/sessions/s1/workspace/git/status",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["enabled"] is True
+    paths = [entry["path"] for entry in body["files"]]
+    assert "app.py" in paths
+    assert "secret.pem" not in paths

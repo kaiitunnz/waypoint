@@ -1,6 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 
 import { copyText } from "@/lib/clipboard";
+import { useCopied } from "@/lib/use-copied";
 
 export function CopyMessageButton({
   text,
@@ -9,13 +10,10 @@ export function CopyMessageButton({
   text: string;
   label?: string;
 }) {
-  const [copied, setCopied] = useState(false);
+  const { copied, markCopied } = useCopied();
   const onCopy = useCallback(async () => {
-    const ok = await copyText(text);
-    if (!ok) return;
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
-  }, [text]);
+    if (await copyText(text)) markCopied();
+  }, [text, markCopied]);
   return (
     <button
       type="button"

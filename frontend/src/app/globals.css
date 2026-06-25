@@ -3419,6 +3419,10 @@ html[data-theme="light"] .inline-code {
   color: var(--text-strong);
 }
 
+.markdown-codeblock {
+  position: relative;
+}
+
 .markdown-pre {
   background: var(--bg-input);
   border: 1px solid var(--line);
@@ -3428,6 +3432,76 @@ html[data-theme="light"] .inline-code {
   min-width: 0;
   max-width: 100%;
   word-break: break-word;
+}
+
+/* Floats top-right inside the block, anchored to the wrapper (not the scrolling
+ * pre) so it stays put as code scrolls horizontally; a translucent backdrop
+ * keeps it legible over the first line. */
+.code-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: rgba(8, 11, 16, 0.55);
+  border: 1px solid var(--line-soft);
+  color: var(--text-soft);
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: 0;
+  transform: translateY(-2px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.markdown-codeblock:hover .code-copy,
+.markdown-codeblock:focus-within .code-copy,
+.code-copy:focus-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.code-copy:hover {
+  background: var(--surface-2);
+  border-color: var(--line-strong);
+  color: var(--text-strong);
+}
+
+/* Note: no opacity/transform pin here, so on desktop the confirmed button
+ * still fades out once the pointer leaves the block; touch keeps it visible
+ * via the hover:none rule below. */
+.code-copy.copied {
+  color: var(--accent-cool);
+  border-color: rgba(143, 179, 214, 0.32);
+  background: rgba(143, 179, 214, 0.12);
+}
+
+html[data-theme="light"] .code-copy {
+  background: rgba(255, 252, 245, 0.72);
+}
+
+html[data-theme="light"] .code-copy.copied {
+  border-color: rgba(47, 111, 158, 0.3);
+  background: rgba(47, 111, 158, 0.1);
+}
+
+@media (hover: none) {
+  /* No hover on touch — reveal it permanently so it stays discoverable. */
+  .code-copy {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* ─── Scroll controls & floaters ─── */
@@ -12287,11 +12361,12 @@ html[data-theme="light"] .wp-code-toolbar {
   overflow-wrap: anywhere;
 }
 
-/* ─── Syntax highlighting (file preview) ─── */
+/* ─── Syntax highlighting (file preview + transcript code blocks) ─── */
 /* highlight.js token classes, recolored to the app's warm-gold / cool-blue
-   palette rather than a stock theme. Tokens are scoped to .wp-code-pre so the
-   highlighter never bleeds into the transcript. */
-.wp-code-pre {
+   palette rather than a stock theme. Both the file preview (.wp-code-pre) and
+   transcript fenced blocks (.markdown-pre) opt in via the shared .wp-hl class,
+   which also carries the palette variables the token rules below resolve. */
+.wp-hl {
   --hl-comment: #6f7a8c;
   --hl-keyword: #cf98b1;
   --hl-string: #9cc7a6;
@@ -12305,7 +12380,7 @@ html[data-theme="light"] .wp-code-toolbar {
   --hl-punct: #97a2b3;
 }
 
-html[data-theme="light"] .wp-code-pre {
+html[data-theme="light"] .wp-hl {
   --hl-comment: #857a66;
   --hl-keyword: #9c3f6e;
   --hl-string: #2f7d4f;
@@ -12319,73 +12394,73 @@ html[data-theme="light"] .wp-code-pre {
   --hl-punct: #6e6356;
 }
 
-.wp-code-pre .hljs-comment,
-.wp-code-pre .hljs-quote {
+.wp-hl .hljs-comment,
+.wp-hl .hljs-quote {
   color: var(--hl-comment);
   font-style: italic;
 }
-.wp-code-pre .hljs-keyword,
-.wp-code-pre .hljs-selector-tag,
-.wp-code-pre .hljs-subst {
+.wp-hl .hljs-keyword,
+.wp-hl .hljs-selector-tag,
+.wp-hl .hljs-subst {
   color: var(--hl-keyword);
 }
-.wp-code-pre .hljs-string,
-.wp-code-pre .hljs-regexp,
-.wp-code-pre .hljs-meta .hljs-string {
+.wp-hl .hljs-string,
+.wp-hl .hljs-regexp,
+.wp-hl .hljs-meta .hljs-string {
   color: var(--hl-string);
 }
-.wp-code-pre .hljs-number,
-.wp-code-pre .hljs-literal,
-.wp-code-pre .hljs-bullet {
+.wp-hl .hljs-number,
+.wp-hl .hljs-literal,
+.wp-hl .hljs-bullet {
   color: var(--hl-number);
 }
-.wp-code-pre .hljs-title,
-.wp-code-pre .hljs-title.function_,
-.wp-code-pre .hljs-section,
-.wp-code-pre .hljs-name {
+.wp-hl .hljs-title,
+.wp-hl .hljs-title.function_,
+.wp-hl .hljs-section,
+.wp-hl .hljs-name {
   color: var(--hl-function);
 }
-.wp-code-pre .hljs-type,
-.wp-code-pre .hljs-built_in,
-.wp-code-pre .hljs-title.class_ {
+.wp-hl .hljs-type,
+.wp-hl .hljs-built_in,
+.wp-hl .hljs-title.class_ {
   color: var(--hl-type);
 }
-.wp-code-pre .hljs-attr,
-.wp-code-pre .hljs-attribute,
-.wp-code-pre .hljs-property,
-.wp-code-pre .hljs-selector-attr,
-.wp-code-pre .hljs-selector-class,
-.wp-code-pre .hljs-selector-id {
+.wp-hl .hljs-attr,
+.wp-hl .hljs-attribute,
+.wp-hl .hljs-property,
+.wp-hl .hljs-selector-attr,
+.wp-hl .hljs-selector-class,
+.wp-hl .hljs-selector-id {
   color: var(--hl-attr);
 }
-.wp-code-pre .hljs-variable,
-.wp-code-pre .hljs-template-variable {
+.wp-hl .hljs-variable,
+.wp-hl .hljs-template-variable {
   color: var(--hl-variable);
 }
-.wp-code-pre .hljs-meta,
-.wp-code-pre .hljs-doctag {
+.wp-hl .hljs-meta,
+.wp-hl .hljs-doctag {
   color: var(--hl-meta);
 }
-.wp-code-pre .hljs-symbol,
-.wp-code-pre .hljs-link,
-.wp-code-pre .hljs-params {
+.wp-hl .hljs-symbol,
+.wp-hl .hljs-link,
+.wp-hl .hljs-params {
   color: var(--hl-symbol);
 }
-.wp-code-pre .hljs-tag,
-.wp-code-pre .hljs-punctuation,
-.wp-code-pre .hljs-operator {
+.wp-hl .hljs-tag,
+.wp-hl .hljs-punctuation,
+.wp-hl .hljs-operator {
   color: var(--hl-punct);
 }
-.wp-code-pre .hljs-emphasis {
+.wp-hl .hljs-emphasis {
   font-style: italic;
 }
-.wp-code-pre .hljs-strong {
+.wp-hl .hljs-strong {
   font-weight: 600;
 }
-.wp-code-pre .hljs-deletion {
+.wp-hl .hljs-deletion {
   color: var(--danger);
 }
-.wp-code-pre .hljs-addition {
+.wp-hl .hljs-addition {
   color: var(--success);
 }
 

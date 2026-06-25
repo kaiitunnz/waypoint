@@ -18,6 +18,7 @@ import {
 } from "@/lib/api";
 import { buildCatalog, humaniseBackend, transportPresentation } from "@/lib/backends";
 import { copyText } from "@/lib/clipboard";
+import { useCopied } from "@/lib/use-copied";
 import { clearToken, readHost, readToken } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
 import {
@@ -52,14 +53,12 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
 };
 
 function CopyField({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false);
+  const { copied, markCopied } = useCopied();
   const copy = useCallback(() => {
     void copyText(value).then((ok) => {
-      if (!ok) return;
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
+      if (ok) markCopied();
     });
-  }, [value]);
+  }, [value, markCopied]);
   return (
     <div className="assistant-id">
       <span className="assistant-id-label">{label}</span>

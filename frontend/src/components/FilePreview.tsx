@@ -176,7 +176,7 @@ function FileCodeView({
         </button>
       </div>
       <pre
-        className={`diff-code wp-code-pre${softWrap ? " soft-wrap" : ""}`}
+        className={`diff-code wp-code-pre wp-hl${softWrap ? " soft-wrap" : ""}`}
         style={{ "--lnw": lnw } as CSSProperties}
         aria-label={`Contents of ${path}`}
       >

@@ -86,6 +86,7 @@ def list_dir(
     cap: int,
     denylist: list[str] | None = None,
     follow_symlinks: bool = False,
+    offset: int = 0,
 ) -> tuple[list[WorkspaceEntry], bool, int | None, Path]:
     if is_denied(rel, denylist):
         raise WorkspacePathError("path is denied")
@@ -113,8 +114,14 @@ def list_dir(
     allowed.sort(key=lambda entry: (entry["kind"] != "dir", entry["name"].lower()))
     if cap < 0:
         cap = 0
-    overflow = max(len(allowed) - cap, 0)
-    return allowed[:cap], overflow > 0, overflow or None, directory
+    if offset < 0:
+        offset = 0
+    # The sort is stable, so paging by offset over an unchanged directory is
+    # deterministic; ``overflow`` counts entries past this page so the caller can
+    # request the next one.
+    page = allowed[offset : offset + cap]
+    overflow = max(len(allowed) - (offset + cap), 0)
+    return page, overflow > 0, overflow or None, directory
 
 
 def _entry_kind(path: Path) -> WorkspaceEntryKind:
@@ -136,3 +143,97 @@ def _has_symlink_component(base_resolved: Path, target: Path) -> bool:
         if current.is_symlink():
             return True
     return False
+
+
+# Hard cap on entries visited by the fallback walk so a query never traverses an
+# unbounded tree (e.g. a non-repo workspace with a huge node_modules).
+WALK_VISIT_CAP = 20000
+
+
+def walk_files(
+    base: Path,
+    denylist: list[str] | None = None,
+    follow_symlinks: bool = False,
+    visit_cap: int = WALK_VISIT_CAP,
+) -> tuple[list[str], bool]:
+    # Filesystem fallback for the file finder outside a git repo. Returns
+    # ``base``-relative file paths and whether the visit cap was hit. Denied
+    # directories are pruned so their subtrees are never descended.
+    base_resolved = base.expanduser().resolve()
+    out: list[str] = []
+    visited = 0
+    for root, dirs, files in os.walk(base_resolved, followlinks=follow_symlinks):
+        root_path = Path(root)
+        kept: list[str] = []
+        for name in dirs:
+            child = root_path / name
+            rel = child.relative_to(base_resolved)
+            if is_denied(rel, denylist):
+                continue
+            if not follow_symlinks and child.is_symlink():
+                continue
+            kept.append(name)
+        dirs[:] = kept
+        for name in files:
+            visited += 1
+            if visited > visit_cap:
+                return out, True
+            child = root_path / name
+            if not follow_symlinks and child.is_symlink():
+                continue
+            rel = child.relative_to(base_resolved)
+            if is_denied(rel, denylist):
+                continue
+            out.append(rel.as_posix())
+    return out, False
+
+
+def _subsequence_score(query: str, path: str) -> int | None:
+    # Case-insensitive subsequence match with bonuses for word-boundary and
+    # consecutive hits, and for matches landing in the basename. Returns ``None``
+    # when ``query`` is not a subsequence of ``path``.
+    if not query:
+        return 0
+    lowered = path.lower()
+    needle = query.lower()
+    score = 0
+    qi = 0
+    prev = -2
+    for pi, ch in enumerate(lowered):
+        if qi >= len(needle) or ch != needle[qi]:
+            continue
+        score += 1
+        if pi == 0 or not lowered[pi - 1].isalnum():
+            score += 10
+        if pi == prev + 1:
+            score += 5
+        prev = pi
+        qi += 1
+    if qi != len(needle):
+        return None
+    basename = lowered.rsplit("/", 1)[-1]
+    if needle in basename:
+        score += 15
+    score -= len(lowered) // 40  # shorter paths edge ahead on ties
+    return score
+
+
+def rank_files(
+    query: str,
+    paths: list[str],
+    denylist: list[str] | None = None,
+    limit: int = 50,
+) -> tuple[list[str], bool]:
+    # Score, filter, and order candidate paths for the finder. Returns the top
+    # ``limit`` matches and whether more matched than were returned.
+    scored: list[tuple[int, int, str]] = []
+    for path in paths:
+        if is_denied(path, denylist):
+            continue
+        result = _subsequence_score(query, path)
+        if result is None:
+            continue
+        scored.append((result, len(path), path))
+    scored.sort(key=lambda item: (-item[0], item[1], item[2]))
+    truncated = len(scored) > limit
+    return [path for _, _, path in scored[:limit]], truncated

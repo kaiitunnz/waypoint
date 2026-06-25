@@ -27,7 +27,10 @@ class GitFileStatus(BaseModel):
 
 
 class GitStatus(BaseModel):
+    # ``branch`` is the display label for HEAD: a branch name when on a branch,
+    # otherwise (detached) the exact tag, ``git describe`` output, or short SHA.
     branch: str | None
+    detached: bool = False
     files: list[GitFileStatus]
 
 
@@ -59,10 +62,31 @@ async def is_git_repo(base: Path) -> bool:
     return code == 0 and out.decode("utf-8", errors="replace").strip() == "true"
 
 
+async def _head_label(base: Path) -> tuple[str | None, bool]:
+    # On a branch, ``--abbrev-ref HEAD`` is the branch name. A detached HEAD
+    # (``git checkout`` of a tag or commit) reports the literal ``HEAD``; resolve
+    # a friendlier label so the UI never shows the bare word "HEAD".
+    branch = await _git_text(base, "rev-parse", "--abbrev-ref", "HEAD")
+    if branch and branch != "HEAD":
+        return branch, False
+    exact = await _git_text(base, "describe", "--tags", "--exact-match", "HEAD")
+    if exact:
+        return exact, True
+    described = await _git_text(base, "describe", "--tags", "--always", "HEAD")
+    if described:
+        return described, True
+    # Unborn branch (repo with no commits yet): no commit to describe, but the
+    # symbolic target still names the branch HEAD will create on first commit.
+    symbolic = await _git_text(base, "symbolic-ref", "--short", "HEAD")
+    if symbolic:
+        return symbolic, False
+    return None, False
+
+
 async def git_status(base: Path) -> GitStatus | None:
     if not await is_git_repo(base):
         return None
-    branch = await _git_text(base, "rev-parse", "--abbrev-ref", "HEAD")
+    branch, detached = await _head_label(base)
     # ``base`` may be a subdirectory of the repo; porcelain paths are always
     # repo-root-relative, so translate them to ``base``-relative and drop
     # entries living outside the browsed subtree.
@@ -79,7 +103,30 @@ async def git_status(base: Path) -> GitStatus | None:
             continue
         old_rel = _strip_prefix(entry.old_path, prefix) if entry.old_path else None
         scoped.append(entry.model_copy(update={"path": rel, "old_path": old_rel}))
-    return GitStatus(branch=branch, files=scoped)
+    return GitStatus(branch=branch, detached=detached, files=scoped)
+
+
+async def git_list_files(base: Path) -> list[str] | None:
+    # Tracked plus untracked-but-not-ignored files, ``base``-relative. ``git
+    # ls-files`` scopes to the cwd subtree and respects ``.gitignore``, so this
+    # skips ``node_modules``/build dirs for free. Returns ``None`` outside a repo
+    # so the caller can fall back to a filesystem walk.
+    if not await is_git_repo(base):
+        return None
+    code_tracked, tracked = await _run_git(base, "ls-files", "-z")
+    code_others, others = await _run_git(
+        base, "ls-files", "-z", "--others", "--exclude-standard"
+    )
+    paths: list[str] = []
+    seen: set[str] = set()
+    for code, raw in ((code_tracked, tracked), (code_others, others)):
+        if code != 0:
+            continue
+        for token in raw.decode("utf-8", errors="replace").split("\0"):
+            if token and token not in seen:
+                seen.add(token)
+                paths.append(token)
+    return paths
 
 
 async def git_file_diff(

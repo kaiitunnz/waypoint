@@ -305,3 +305,53 @@ async def test_git_status_hides_denied_paths(tmp_path: Path) -> None:
     paths = [entry["path"] for entry in body["files"]]
     assert "app.py" in paths
     assert "secret.pem" not in paths
+
+
+async def test_find_returns_ranked_matches(tmp_path: Path) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+
+    def _git(*args: str) -> None:
+        subprocess.run(
+            ["git", "-C", str(workspace), *args], check=True, capture_output=True
+        )
+
+    _git("init", "-q")
+    _git("config", "user.email", "t@example.com")
+    _git("config", "user.name", "T")
+    (workspace / "explorer.py").write_text("x\n", encoding="utf-8")
+    (workspace / "secret.pem").write_text("KEY\n", encoding="utf-8")  # denied
+    (workspace / "readme.md").write_text("x\n", encoding="utf-8")  # no match
+
+    settings = Settings(data_dir=tmp_path / "data", workspace_denylist=["*.pem"])
+    app = create_app(settings)
+    context = app.state.context
+    now = datetime.now(UTC)
+    context.storage.create_session(
+        SessionRecord(
+            id="s1",
+            backend="codex",
+            source=SessionSource.MANAGED,
+            title="t",
+            cwd=str(workspace),
+            status=SessionStatus.IDLE,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            raw_log_path=str(tmp_path / "raw.log"),
+            structured_log_path=str(tmp_path / "events.jsonl"),
+        )
+    )
+    token = context.tokens.issue().token
+    async with _client(app) as client:
+        resp = await client.get(
+            "/api/sessions/s1/workspace/find",
+            params={"q": "explorer"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 200
+    matches = [entry["path"] for entry in resp.json()["matches"]]
+    assert "explorer.py" in matches
+    assert "secret.pem" not in matches  # denied paths never surface
+    assert "readme.md" not in matches  # non-matching paths are dropped

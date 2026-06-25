@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/kaiitunnz/waypoint/compare/v0.1.2...v0.1.3) (2026-06-25)
+
+
+### Bug Fixes
+
+* reinstall waypointctl on update so the version isn't masked by uv's cache ([#173](https://github.com/kaiitunnz/waypoint/issues/173)) ([6d4b811](https://github.com/kaiitunnz/waypoint/commit/6d4b81164ba7755a9aa8b0e1dfd68036f9c42c35))
+
 ## [0.1.2](https://github.com/kaiitunnz/waypoint/compare/v0.1.1...v0.1.2) (2026-06-25)
 
 

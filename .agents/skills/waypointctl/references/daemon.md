@@ -10,15 +10,13 @@ waypointctl daemon stop
 waypointctl daemon restart
 ```
 
-`waypointctl daemon stop` stops only the daemon, not backend/frontend services.
-Use `waypointctl stop` for services.
+`waypointctl daemon stop` stops only the daemon, not backend/frontend services
+(use `waypointctl stop` for those), and waits for it to fully exit before
+returning, so `daemon stop && daemon start` reliably replaces it. To roll the
+daemon onto new code, use `waypointctl daemon restart`.
 
-`daemon stop` waits for the daemon to fully exit before returning, so
-`daemon stop && daemon start` reliably replaces it. To apply a code change to
-the daemon itself, use `waypointctl daemon restart`.
-
-When daemon mode is active, stop/restart may return before work finishes. Check
-`waypointctl status` and logs afterward.
+In daemon mode, service `stop`/`restart` may return before the work finishes;
+check `waypointctl status` and the logs afterward.
 
 ## Out-of-band remote control
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.0](https://github.com/kaiitunnz/waypoint/compare/v0.1.3...v0.2.0) (2026-06-26)
+
+
+### Features
+
+* add a branch chip, paginated tree, and file finder to the explorer ([#178](https://github.com/kaiitunnz/waypoint/issues/178)) ([da3681d](https://github.com/kaiitunnz/waypoint/commit/da3681d3620fd3fdef029e8169e4a2a1e2934e1f))
+* add a copy button and syntax highlighting to transcript code blocks ([#175](https://github.com/kaiitunnz/waypoint/issues/175)) ([c8af340](https://github.com/kaiitunnz/waypoint/commit/c8af3402bac803b1229321d5a7502837ece58871))
+* add a waypointd out-of-band remote-control console ([#179](https://github.com/kaiitunnz/waypoint/issues/179)) ([5a309d6](https://github.com/kaiitunnz/waypoint/commit/5a309d65260c1412218cca1fdb6278cdd3e96d35))
+* add git status and a full-file diff viewer to the file explorer ([#177](https://github.com/kaiitunnz/waypoint/issues/177)) ([6b85d90](https://github.com/kaiitunnz/waypoint/commit/6b85d90e2f9bc22c63e0e343a8e84541d0b20306))
+
+
+### Bug Fixes
+
+* rework the control console for robust, concurrent ops ([#180](https://github.com/kaiitunnz/waypoint/issues/180)) ([c37e5d2](https://github.com/kaiitunnz/waypoint/commit/c37e5d22508f5dfd540efe116fb8ceb78af66672))
+
 ## [0.1.3](https://github.com/kaiitunnz/waypoint/compare/v0.1.2...v0.1.3) (2026-06-25)
 
 

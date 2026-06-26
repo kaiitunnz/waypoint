@@ -72,8 +72,8 @@ are not supported.
 | `WAYPOINT_STACK_UV_CACHE_DIR` | `<state-dir>/uv-cache` | Backend `UV_CACHE_DIR`. |
 | `WAYPOINT_STACK_FORCE_FRONTEND_BUILD` | `0` | When `1`, always rebuild the frontend before `npm run start`. |
 | `WAYPOINT_STACK_CAFFEINATE` | `1` | macOS only: hold a `caffeinate -i -s` for the lifetime of the stack. |
-| `WAYPOINT_STACK_CONTROL_HOST` | `0.0.0.0` | Bind host for the daemon's restart control plane. |
-| `WAYPOINT_STACK_CONTROL_PORT` | `8799` | Port for the daemon's restart control plane; `0` disables it. |
+| `WAYPOINT_STACK_CONTROL_HOST` | `0.0.0.0` | Bind host for the daemon's remote-control console. |
+| `WAYPOINT_STACK_CONTROL_PORT` | `8799` | Port for the daemon's remote-control console; `0` disables it. |
 
 ## Multiple tailnets per host
 
@@ -146,63 +146,57 @@ behaves. When `--wait` is set, the agent-restart safety check applies
 even in daemon mode — the CLI can't be inside the target's process tree
 because it stays on the wire across the kill.
 
-`waypointctl daemon stop` only stops the daemon. Backend/frontend
-processes survive it intentionally (they were spawned in their own
-sessions), so a daemon restart doesn't bounce running services. If
-any are still up the CLI prints a hint pointing at `waypointctl stop`.
-
-`daemon stop` **waits for the daemon to fully exit** before returning
-(graceful shutdown joins in-flight workers, up to 30s). This is what
-makes `daemon stop && daemon start` reliable: the daemon clears its
-socket and pid only at the end of shutdown, so a `start` that didn't
-wait would see the dying daemon as "already running" and decline to
-spawn a replacement, leaving nothing up. Pass `--no-wait` for the old
-fire-and-forget behavior. To apply a code change to the daemon itself,
-prefer `waypointctl daemon restart`, which stops-and-waits then starts a
-fresh daemon in one step.
+`waypointctl daemon stop` stops only the daemon; backend and frontend were
+spawned in their own sessions and keep running, so it doesn't bounce the
+stack (the CLI hints at `waypointctl stop` if you meant to bring those down
+too). It waits for the daemon to fully exit before returning — graceful
+shutdown can take up to 30s while in-flight workers drain — so that
+`daemon stop && daemon start` reliably replaces the daemon instead of racing
+a half-exited one; pass `--no-wait` to skip the wait. To roll the daemon
+onto new code, use `waypointctl daemon restart`.
 
 ### Out-of-band remote control
 
 While the daemon runs it also serves an HTTP control console on
-`WAYPOINT_STACK_CONTROL_PORT` (default `8799`). Because it lives in
-`waypointd` — the supervisor that owns both services and isn't itself
-redeployed mid-session — it stays reachable when a frontend build is
-corrupt *or* the backend has crashed, the two cases that make the normal
-app unusable. It's the break-glass console for when you're AFK on a phone
-and the agent that was editing Waypoint left the app unloadable.
+`WAYPOINT_STACK_CONTROL_PORT` (default `8799`, exposed over Tailscale beside
+the backend and frontend ports). It lives in the supervisor rather than a
+managed service, so it stays reachable when a corrupt frontend build or a
+crashed backend has made the normal app unloadable — the break-glass path
+for when the only thing to hand is a phone. It drives the same stack/process
+layer `waypointctl` does and never touches the app's session data.
 
-It is deliberately a *stack/process* console, not a reimplementation of
-the app's session UI — its blast radius is exactly what `waypointctl`
-itself can do. Open `http://<host>:8799/` (exposed over Tailscale
-alongside the frontend/backend ports), enter `WAYPOINT_PASSWORD`, and you
+Open `http://<host>:8799/`, authenticate with `WAYPOINT_PASSWORD`, and you
 get:
 
-- **Status** — live health/pid/port of backend and frontend, polled every
-  few seconds, so you can watch a restart come back up.
-- **Logs** — the tail of `backend.log` / `frontend.log`, to diagnose *why*
-  a build broke before acting.
-- **Lifecycle** — `restart` / `stop` / `start` per service or all, run the
-  same way as `waypointctl <action> <target>`.
+- **Status** — live health, pid, and port for backend and frontend, polled
+  every few seconds so you can watch a restart come back up.
+- **Logs** — the tail of `backend.log` / `frontend.log`, to see why a build
+  broke before acting.
+- **Lifecycle** — `restart` / `stop` / `start` a service or the whole stack,
+  the same as `waypointctl <action> <target>`.
 - **Redeploy** — restart the whole stack on one of three channels:
-  - **stable** — check out the latest release tag, then restart the stack.
+  - **stable** — check out the latest release tag, then restart.
   - **nightly** — check out the tip of `main`, then restart.
   - **current** — restart the checked-out tree with no git update; the only
     channel that works on a dirty or unmanaged checkout. Stable and nightly
-    fail safe on such a checkout, surfacing git's refusal and leaving the
-    stack untouched.
+    fail safe there, surfacing git's refusal and leaving the stack untouched.
 
-#### How it works
+Login exchanges the password for a short-lived bearer token, held only in
+memory — a daemon restart drops it and you log in again. It issues one only
+when a real `WAYPOINT_PASSWORD` is set (a blank or `change-me` value returns
+`503`) and locks out after five failed attempts in a minute, so it can't
+become an open surface on the tailnet. Mutating operations run on a worker
+thread and return `202` at once; the page polls `/api/status` for the
+outcome, so a 30–60s rebuild never holds a connection open, and one
+operation runs at a time. Restarting from here is safe where the same
+restart from inside a session is not, because the supervisor is the parent
+of the service process groups, not a descendant. The action set is a fixed
+allowlist with no arbitrary command execution, and every operation is logged
+to `<state-dir>/logs/waypointd.log`.
 
-Login exchanges `WAYPOINT_PASSWORD` for a short-lived bearer token (in
-memory only — lost on a daemon restart, just log in again). Mutating
-operations run asynchronously on a worker thread: the POST returns `202`
-immediately and the page polls `/api/status` to watch the result land in
-`last_op`, so a 30–60s frontend rebuild can't hit a connection timeout.
-Only one operation runs at a time (others get `409`). Restarting from the
-supervisor never hits the self-kill problem, since `waypointd` is the
-*parent* of the service process groups, not a descendant. The CLI, the
-daemon socket, and this console all dispatch through the same
-`commands.run_action`, so they can't drift apart.
+The console exists only while `waypointd` runs. Expose it over Tailscale
+only, never publicly; set `WAYPOINT_STACK_CONTROL_PORT=0` to disable it; and
+run `waypointctl doctor` to print its URL and confirm it responds.
 
 #### API
 
@@ -215,20 +209,6 @@ daemon socket, and this console all dispatch through the same
 | `GET /api/logs?target=&n=` | token | Tail of a service log. |
 | `POST /api/action` | token | `{action, target}` → `202`; async. |
 | `POST /api/redeploy` | token | `{channel: stable\|nightly\|current}` → `202`; async. |
-
-#### Safety
-
-The console refuses to act unless a real `WAYPOINT_PASSWORD` is set (a
-blank or `change-me` value returns `503`), and locks out after five failed
-logins in a minute, so it can't become an open control surface on the
-tailnet. The action set is a fixed allowlist — there is no arbitrary
-command execution — and every operation is logged to
-`<state-dir>/logs/waypointd.log`. Expose it only over Tailscale, never
-publicly. Set `WAYPOINT_STACK_CONTROL_PORT=0` to disable it. The console
-only exists while `waypointd` is running — it is **not** available in the
-default in-process mode, so start the daemon (or set
-`WAYPOINTCTL_DAEMON=1`) to rely on it. `waypointctl doctor` prints the
-control URL and whether it currently responds.
 
 ## Logs
 

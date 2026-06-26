@@ -24,7 +24,7 @@ Coding-agent backends live in `backend/src/waypoint/backends/<id>/` (currently `
 - Check state during testing: `waypointctl status` for health, `waypointctl logs [backend|frontend]` for output. Restart before re-testing if you have changed code since the last `start`.
 Override ports or paths inline with `WAYPOINT_STACK_BACKEND_PORT`, `WAYPOINT_STACK_FRONTEND_PORT`, `WAYPOINT_STACK_CONFIG`, or `WAYPOINT_STACK_BACKEND_DATA_DIR` rather than editing config files; values may also live in `.env` at the repo root.
 
-When the `waypointd` daemon is running it also serves an out-of-band remote-control console on `WAYPOINT_STACK_CONTROL_PORT` (default `8799`, exposed over Tailscale next to the backend/frontend ports). After authenticating with `WAYPOINT_PASSWORD` it drives the stack/process layer — status, logs, lifecycle, redeploy — from a phone, even when a corrupt frontend build or a crashed backend has made the normal app unloadable. It exists only in daemon mode (`waypointctl daemon start` or `WAYPOINTCTL_DAEMON=1`); see [`waypointctl/README.md`](waypointctl/README.md).
+When the `waypointd` daemon is running it also serves an out-of-band remote-control console for driving the stack from a phone — status, logs, lifecycle, redeploy — when a broken frontend build or backend has made the normal app unreachable. It needs `WAYPOINT_PASSWORD` and exists only in daemon mode; see [`waypointctl/README.md`](waypointctl/README.md).
 
 `scripts/waypoint.sh` is the legacy supervisor and is slated for deprecation; prefer `waypointctl` for new work and only fall back to the script if the user explicitly asks for it.
 

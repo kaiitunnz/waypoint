@@ -168,8 +168,8 @@ layer `waypointctl` does and never touches the app's session data.
 Open `http://<host>:8799/`, authenticate with `WAYPOINT_PASSWORD`, and you
 get:
 
-- **Status** — live health, pid, and port for backend and frontend, polled
-  every few seconds so you can watch a restart come back up.
+- **Status** — health, pid, and port for backend and frontend, so you can
+  watch a restart come back up.
 - **Logs** — the tail of `backend.log` / `frontend.log`, to see why a build
   broke before acting.
 - **Lifecycle** — `restart` / `stop` / `start` a service or the whole stack,
@@ -181,18 +181,10 @@ get:
     channel that works on a dirty or unmanaged checkout. Stable and nightly
     fail safe there, surfacing git's refusal and leaving the stack untouched.
 
-Login exchanges the password for a short-lived bearer token, held only in
-memory — a daemon restart drops it and you log in again. It issues one only
-when a real `WAYPOINT_PASSWORD` is set (a blank or `change-me` value returns
-`503`) and locks out after five failed attempts in a minute, so it can't
-become an open surface on the tailnet. Mutating operations run on a worker
-thread and return `202` at once; the page polls `/api/status` for the
-outcome, so a 30–60s rebuild never holds a connection open, and one
-operation runs at a time. Restarting from here is safe where the same
-restart from inside a session is not, because the supervisor is the parent
-of the service process groups, not a descendant. The action set is a fixed
-allowlist with no arbitrary command execution, and every operation is logged
-to `<state-dir>/logs/waypointd.log`.
+It refuses to run unless a real `WAYPOINT_PASSWORD` is set, locking out after
+repeated failed logins, so it can't become an open control surface on the
+tailnet. It can only do what `waypointctl` itself can — a fixed set of
+actions, no arbitrary commands — and logs each one.
 
 The console exists only while `waypointd` runs. Expose it over Tailscale
 only, never publicly; set `WAYPOINT_STACK_CONTROL_PORT=0` to disable it; and
@@ -200,15 +192,30 @@ run `waypointctl doctor` to print its URL and confirm it responds.
 
 #### API
 
-| Method · path | Auth | Purpose |
+The page is backed by a token-authenticated JSON API, so an agent can drive
+it with `curl`: `POST /api/login` with the password for a bearer token, then
+pass it as `Authorization: Bearer <token>` on the rest.
+
+| Method · path | Auth | Body / query → result |
 | --- | --- | --- |
 | `GET /` | — | The console page. |
 | `GET /health` | — | Liveness of the control plane itself. |
 | `POST /api/login` | password | `{password}` → `{token, expires_in}`. |
-| `GET /api/status` | token | Service status + `last_op`. |
-| `GET /api/logs?target=&n=` | token | Tail of a service log. |
-| `POST /api/action` | token | `{action, target}` → `202`; async. |
+| `GET /api/status` | token | → service status + `last_op`. |
+| `GET /api/logs?target=&n=` | token | `target` = `backend`\|`frontend`, `n` lines → `{lines}`. |
+| `POST /api/action` | token | `{action: start\|stop\|restart, target: backend\|frontend\|all}` → `202`; async. |
 | `POST /api/redeploy` | token | `{channel: stable\|nightly\|current}` → `202`; async. |
+
+```bash
+host=http://<host>:8799
+token=$(curl -s "$host/api/login" -d '{"password":"…"}' | jq -r .token)
+curl -s "$host/api/status" -H "Authorization: Bearer $token"
+curl -s "$host/api/action" -H "Authorization: Bearer $token" \
+  -d '{"action":"restart","target":"frontend"}'
+```
+
+Mutating calls return `202` and run in the background; poll `GET /api/status`
+and read `last_op` for the outcome.
 
 ## Logs
 

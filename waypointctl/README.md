@@ -201,7 +201,7 @@ pass it as `Authorization: Bearer <token>` on the rest.
 | `GET /` | — | The console page. |
 | `GET /health` | — | Liveness of the control plane itself. |
 | `POST /api/login` | password | `{password}` → `{token, expires_in}`. |
-| `GET /api/status` | token | → service status + `last_op`. |
+| `GET /api/status` | token | → service status + in-flight/last `ops` per target. |
 | `GET /api/logs?target=&n=` | token | `target` = `backend`\|`frontend`, `n` lines → `{lines}`. |
 | `POST /api/action` | token | `{action: start\|stop\|restart, target: backend\|frontend\|all}` → `202`; async. |
 | `POST /api/redeploy` | token | `{channel: stable\|nightly\|current}` → `202`; async. |
@@ -215,7 +215,9 @@ curl -s "$host/api/action" -H "Authorization: Bearer $token" \
 ```
 
 Mutating calls return `202` and run in the background; poll `GET /api/status`
-and read `last_op` for the outcome.
+and read the matching entry in `ops` for the outcome. `backend` and `frontend`
+run on independent lanes (so they can proceed at once); an `all` action or a
+redeploy holds both, and a busy lane rejects a conflicting call with `409`.
 
 ## Logs
 

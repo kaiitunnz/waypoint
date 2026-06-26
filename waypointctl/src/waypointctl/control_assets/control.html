@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex" />
+<meta name="color-scheme" content="dark" />
+<title>WAYPOINT · stack control</title>
+<style>
+/*__CONTROL_CSS__*/
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="mark">WAY<b>·</b>POINT</span>
+    <span class="tag">stack&nbsp;control</span>
+    <span class="beat" id="beat"><span class="dot"></span><span id="beatTxt">offline</span></span>
+  </header>
+
+  <section id="login">
+    <div class="card">
+      <h1>AUTHENTICATE</h1>
+      <p>Out-of-band control plane. Enter the Waypoint password.</p>
+      <input id="pw" type="password" autocomplete="current-password"
+             placeholder="WAYPOINT_PASSWORD" />
+      <div class="err-line" id="loginErr" role="alert"></div>
+      <button class="amber block" id="loginBtn">Unlock</button>
+    </div>
+  </section>
+
+  <main id="console" class="hidden stagger">
+    <div class="label">Services</div>
+    <div id="services"></div>
+
+    <div class="label">Logs</div>
+    <div class="logs">
+      <div class="bar">
+        <div class="seg" id="logSeg">
+          <button data-log="backend" class="on">backend</button>
+          <button data-log="frontend">frontend</button>
+        </div>
+        <span class="grow"></span>
+        <button id="logRefresh" class="ghost">refresh</button>
+      </div>
+      <pre id="log"></pre>
+    </div>
+
+    <div class="label">Danger zone</div>
+    <div class="danger-zone">
+      <div class="hd">Redeploy</div>
+      <p>Each restarts the whole stack and interrupts every running session.
+         <b>Stable</b> / <b>Nightly</b> update first (fail safe on a dirty or
+         unmanaged checkout); <b>Current</b> just restarts the checked-out tree.</p>
+      <div class="redeploy">
+        <button class="danger" data-channel="stable">Stable</button>
+        <button class="danger" data-channel="nightly">Nightly</button>
+        <button class="danger" data-channel="current">Current</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+<script>
+//__CONTROL_JS__
+</script>
+</body>
+</html>

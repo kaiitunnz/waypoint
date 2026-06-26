@@ -31,6 +31,9 @@ fallback_version = "0.1.0"
 where = ["src"]
 include = ["waypointctl*"]
 
+[tool.setuptools.package-data]
+waypointctl = ["control_assets/*.html", "control_assets/*.css", "control_assets/*.js"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

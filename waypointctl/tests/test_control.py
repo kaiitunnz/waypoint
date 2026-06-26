@@ -201,7 +201,7 @@ def test_status_reports_services(control: tuple[ControlServer, int, str]) -> Non
     assert status == 200
     names = {s["name"] for s in body["services"]}
     assert {"backend", "frontend"} <= names
-    assert body["last_op"] is None
+    assert body["ops"] == []
 
 
 def test_logs_unknown_target_rejected(
@@ -237,7 +237,7 @@ def test_action_invalid_inputs_rejected(
     assert status == 400
 
 
-def test_action_restart_runs_async_and_records_last_op(
+def test_action_restart_runs_async_and_records_op(
     control: tuple[ControlServer, int, str],
 ) -> None:
     server, port, password = control
@@ -253,21 +253,53 @@ def test_action_restart_runs_async_and_records_last_op(
 
     server.join_op(timeout=5)
     status, body = _request(port, "/api/status", token=token)
-    last = body["last_op"]
-    assert last["action"] == "restart" and last["target"] == "frontend"
-    assert last["state"] == "ok"
+    ops = {op["key"]: op for op in body["ops"]}
+    assert ops["frontend"]["action"] == "restart"
+    assert ops["frontend"]["target"] == "frontend" and ops["frontend"]["state"] == "ok"
     assert server.stack.frontend.calls == ["stop", "start"]  # type: ignore[attr-defined]
 
 
-def test_action_conflict_when_op_running(
+def test_same_lane_conflicts_but_other_lane_runs(
     control: tuple[ControlServer, int, str],
 ) -> None:
     server, port, password = control
     token = _login(port, password)
-    # Hold the op lock to simulate an in-flight operation.
-    assert server._op_lock.acquire(blocking=False)
+    # Hold the backend lane to simulate a backend op already in flight.
+    assert server._lane_locks["backend"].acquire(blocking=False)
     try:
-        status, body = _request(
+        # Same lane is refused...
+        status, _ = _request(
+            port,
+            "/api/action",
+            "POST",
+            token=token,
+            body={"action": "restart", "target": "backend"},
+        )
+        assert status == 409
+        # ...while the independent frontend lane still runs.
+        status, _ = _request(
+            port,
+            "/api/action",
+            "POST",
+            token=token,
+            body={"action": "restart", "target": "frontend"},
+        )
+        assert status == 202
+        server.join_op(timeout=5)
+        assert server.stack.frontend.calls == ["stop", "start"]  # type: ignore[attr-defined]
+    finally:
+        server._lane_locks["backend"].release()
+
+
+def test_all_conflicts_with_a_held_lane(
+    control: tuple[ControlServer, int, str],
+) -> None:
+    server, port, password = control
+    token = _login(port, password)
+    # An `all`/redeploy op needs both lanes, so a single held lane blocks it.
+    assert server._lane_locks["frontend"].acquire(blocking=False)
+    try:
+        status, _ = _request(
             port,
             "/api/action",
             "POST",
@@ -275,9 +307,12 @@ def test_action_conflict_when_op_running(
             body={"action": "restart", "target": "all"},
         )
         assert status == 409
-        assert "already running" in body["error"]
+        status, _ = _request(
+            port, "/api/redeploy", "POST", token=token, body={"channel": "current"}
+        )
+        assert status == 409
     finally:
-        server._op_lock.release()
+        server._lane_locks["frontend"].release()
 
 
 # ── redeploy ─────────────────────────────────────────────────────────────
@@ -306,9 +341,9 @@ def test_redeploy_current_restarts_without_git(
 
     server.join_op(timeout=5)
     _, body = _request(port, "/api/status", token=token)
-    last = body["last_op"]
-    assert last["action"] == "redeploy" and last["target"] == "current"
-    assert last["state"] == "ok"
+    ops = {op["key"]: op for op in body["ops"]}
+    assert ops["all"]["action"] == "redeploy" and ops["all"]["target"] == "current"
+    assert ops["all"]["state"] == "ok"
     # `current` restarts the checked-out tree, no git update involved.
     assert server.stack.frontend.calls == ["stop", "start"]  # type: ignore[attr-defined]
 
@@ -326,9 +361,9 @@ def test_redeploy_update_channel_fails_safe_outside_git(
 
     server.join_op(timeout=10)
     _, body = _request(port, "/api/status", token=token)
-    last = body["last_op"]
+    ops = {op["key"]: op for op in body["ops"]}
     # The stub home is not a git checkout, so the update step fails cleanly
     # and the stack is left untouched.
-    assert last["action"] == "redeploy" and last["target"] == channel
-    assert last["state"] == "failed"
+    assert ops["all"]["action"] == "redeploy" and ops["all"]["target"] == channel
+    assert ops["all"]["state"] == "failed"
     assert server.stack.frontend.calls == []  # type: ignore[attr-defined]

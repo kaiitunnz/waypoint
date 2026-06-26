@@ -51,6 +51,8 @@ def test_load_stack_config_defaults(
     assert config.uv_cache_dir == (tmp_path / "state").resolve() / "uv-cache"
     assert config.force_frontend_build is False
     assert config.caffeinate is True
+    assert config.control_host == "0.0.0.0"
+    assert config.control_port == 8799
 
 
 def test_load_stack_config_env_overrides(
@@ -67,6 +69,8 @@ def test_load_stack_config_env_overrides(
         "WAYPOINT_STACK_START_TIMEOUT": "60",
         "WAYPOINT_STACK_FORCE_FRONTEND_BUILD": "true",
         "WAYPOINT_STACK_CAFFEINATE": "0",
+        "WAYPOINT_STACK_CONTROL_HOST": "127.0.0.1",
+        "WAYPOINT_STACK_CONTROL_PORT": "9099",
     }
 
     config = load_stack_config(home, env=env)
@@ -78,6 +82,8 @@ def test_load_stack_config_env_overrides(
     assert config.start_timeout == 60
     assert config.force_frontend_build is True
     assert config.caffeinate is False
+    assert config.control_host == "127.0.0.1"
+    assert config.control_port == 9099
 
 
 def test_load_stack_config_relative_path_resolves_under_home(

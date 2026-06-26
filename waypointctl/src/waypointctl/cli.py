@@ -3,6 +3,7 @@ import json
 import os
 import signal
 import subprocess
+import time
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from typing import Annotated, Any, cast
@@ -10,6 +11,7 @@ from typing import Annotated, Any, cast
 import click
 import typer
 
+from waypointctl import commands
 from waypointctl.ancestry import is_descendant_of
 from waypointctl.client import (
     DaemonClient,
@@ -18,6 +20,7 @@ from waypointctl.client import (
     ensure_daemon,
 )
 from waypointctl.config import apply_dotenv, load_stack_config
+from waypointctl.health import http_ok
 from waypointctl.paths import (
     pid_file_for,
     resolve_state_dir,
@@ -280,6 +283,16 @@ def doctor(ctx: typer.Context) -> None:
     typer.echo(f"daemon socket={waypoint_socket_path()}")
     typer.echo(f"daemon for this home={'yes' if daemon_available(home) else 'no'}")
 
+    config = load_stack_config(home)
+    if config.control_port:
+        reachable = http_ok(f"http://127.0.0.1:{config.control_port}/health")
+        typer.echo(
+            f"control plane=http://{config.control_host}:{config.control_port}/ "
+            f"reachable={'yes' if reachable else 'no'}"
+        )
+    else:
+        typer.echo("control plane=disabled (WAYPOINT_STACK_CONTROL_PORT=0)")
+
 
 @app.command("update")
 def update(
@@ -379,8 +392,39 @@ def daemon_start(ctx: typer.Context) -> None:
     typer.echo("waypointd started")
 
 
+# Graceful shutdown joins deferred workers (up to WORKER_SHUTDOWN_GRACE_SECONDS
+# = 30s) before unlinking its socket/pid, so allow comfortably more than that.
+_DAEMON_STOP_TIMEOUT_SECONDS = 35.0
+
+
+def _daemon_gone(home: Path) -> bool:
+    # The exact condition a fresh `start` needs: the socket no longer answers
+    # and the pid file points at nothing live. Both are cleared together at the
+    # end of shutdown, so this flips true only once a restart can safely proceed.
+    return not daemon_available(home) and running_pid(waypoint_pid_path()) is None
+
+
+def _wait_for_daemon_stop(
+    home: Path, timeout: float = _DAEMON_STOP_TIMEOUT_SECONDS
+) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _daemon_gone(home):
+            return True
+        time.sleep(0.1)
+    return _daemon_gone(home)
+
+
 @daemon_app.command("stop")
-def daemon_stop(ctx: typer.Context) -> None:
+def daemon_stop(
+    ctx: typer.Context,
+    wait: bool = typer.Option(
+        True,
+        "--wait/--no-wait",
+        help="Block until the daemon has fully exited (default).",
+    ),
+) -> None:
+    home = _ctx_home(ctx)
     pid_path = waypoint_pid_path()
     pid = read_pid_file(pid_path)
     if pid is None or not is_pid_running(pid):
@@ -390,8 +434,37 @@ def daemon_stop(ctx: typer.Context) -> None:
         _warn_if_services_running()
         return
     os.kill(pid, signal.SIGTERM)
+    if wait and not _wait_for_daemon_stop(home):
+        typer.echo(
+            f"waypointd (pid {pid}) did not exit within "
+            f"{int(_DAEMON_STOP_TIMEOUT_SECONDS)}s; check `waypointctl daemon status`",
+            err=True,
+        )
+        raise typer.Exit(code=1)
     typer.echo(f"waypointd stopped (pid {pid})")
     _warn_if_services_running()
+
+
+@daemon_app.command("restart")
+def daemon_restart(ctx: typer.Context) -> None:
+    """Stop the daemon (waiting for full exit) and start a fresh one."""
+    home = _ctx_home(ctx)
+    pid = read_pid_file(waypoint_pid_path())
+    if pid is not None and is_pid_running(pid):
+        os.kill(pid, signal.SIGTERM)
+        if not _wait_for_daemon_stop(home):
+            typer.echo(
+                f"waypointd (pid {pid}) did not exit within "
+                f"{int(_DAEMON_STOP_TIMEOUT_SECONDS)}s; not restarting",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+    try:
+        ensure_daemon(home)
+    except DaemonUnavailableError as exc:
+        typer.echo(f"failed to start waypointd: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo("waypointd restarted")
 
 
 def _warn_if_services_running() -> None:
@@ -470,15 +543,9 @@ def _run_in_process(home: Path, command: str, args: list[str]) -> None:
     def log(stream: str, line: str) -> None:
         typer.echo(line, err=(stream == "stderr"))
 
-    if command == "start":
+    if command in commands.ACTIONS:
         target = args[0] if args else "all"
-        result = stack.start(log, target)
-    elif command == "stop":
-        target = args[0] if args else "all"
-        result = stack.stop(log, target)
-    elif command == "restart":
-        target = args[0] if args else "all"
-        result = stack.restart(target, log)
+        result = commands.run_action(stack, command, target, log)
     elif command == "status":
         result = stack.status(log)
     else:

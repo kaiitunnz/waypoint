@@ -315,6 +315,11 @@ def test_helper_up_uses_repo_dotenv_and_exposes_ports(
     monkeypatch.setenv("TS_AUTHKEY", "from-shell")
     monkeypatch.setenv("TS_HOSTNAME", "shell-host")
     monkeypatch.setenv("TS_IMAGE", "shell-image")
+    # The dev's gitignored repo-root .env can export these into the process
+    # env; clear them so the helper falls back to defaults deterministically.
+    monkeypatch.delenv("WAYPOINT_STACK_FRONTEND_PORT", raising=False)
+    monkeypatch.delenv("WAYPOINT_STACK_BACKEND_PORT", raising=False)
+    monkeypatch.delenv("WAYPOINT_STACK_CONTROL_PORT", raising=False)
 
     bash = shutil.which("bash") or "/bin/bash"
     completed = subprocess.run(
@@ -352,6 +357,10 @@ def test_helper_up_uses_repo_dotenv_and_exposes_ports(
     )
     assert (
         "tailscale serve --bg --yes --http=8787 http://host.docker.internal:8787"
+        in text
+    )
+    assert (
+        "tailscale serve --bg --yes --http=8799 http://host.docker.internal:8799"
         in text
     )
     assert "tailscale container ready: waypoint-tailscale-profile-a" in completed.stdout

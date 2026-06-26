@@ -9,10 +9,12 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
+from waypointctl.cli import app
 from waypointctl.client import DaemonClient, daemon_available
 from waypointctl.paths import waypoint_pid_path, waypoint_socket_path
-from waypointctl.process import read_pid_file
+from waypointctl.process import read_pid_file, running_pid
 
 
 @pytest.fixture
@@ -60,6 +62,65 @@ def _terminate(proc: subprocess.Popen) -> None:
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait(timeout=10)
+
+
+def _reap_remaining(timeout: float = 10.0) -> None:
+    # `daemon restart` spawns its replacement via subprocess in-process, so the
+    # test owns that child too. Reap any exited children so they don't linger.
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            reaped, _ = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            return
+        if reaped == 0:
+            time.sleep(0.05)
+
+
+def test_cli_daemon_stop_waits_for_full_exit(state_dir: Path) -> None:
+    home = _make_home(state_dir)
+    env = {**os.environ, "WAYPOINTCTL_STATE_DIR": str(state_dir)}
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "waypointctl.daemon", "--home", str(home)],
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        assert _wait_until(daemon_available, timeout=_DAEMON_START_TIMEOUT)
+        result = CliRunner().invoke(app, ["--home", str(home), "daemon", "stop"])
+        assert result.exit_code == 0, result.output
+        # The race fix: once `stop` returns, a fresh `start` must see nothing —
+        # socket no longer answers and no live pid remains.
+        assert not daemon_available(home)
+        assert running_pid(waypoint_pid_path()) is None
+    finally:
+        _terminate(proc)
+
+
+def test_cli_daemon_restart_replaces_daemon(state_dir: Path) -> None:
+    home = _make_home(state_dir)
+    env = {**os.environ, "WAYPOINTCTL_STATE_DIR": str(state_dir)}
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "waypointctl.daemon", "--home", str(home)],
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        assert _wait_until(daemon_available, timeout=_DAEMON_START_TIMEOUT)
+        old_pid = read_pid_file(waypoint_pid_path())
+
+        result = CliRunner().invoke(app, ["--home", str(home), "daemon", "restart"])
+        assert result.exit_code == 0, result.output
+
+        # ensure_daemon already waited for readiness, so a fresh daemon is live
+        # under a new pid.
+        assert daemon_available(home)
+        new_pid = read_pid_file(waypoint_pid_path())
+        assert new_pid is not None and new_pid != old_pid
+    finally:
+        CliRunner().invoke(app, ["--home", str(home), "daemon", "stop"])
+        _terminate(proc)
+        _reap_remaining()
 
 
 def test_daemon_stop_waits_when_wait_flag_set(state_dir: Path) -> None:

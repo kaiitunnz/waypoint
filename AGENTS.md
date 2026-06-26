@@ -24,6 +24,8 @@ Coding-agent backends live in `backend/src/waypoint/backends/<id>/` (currently `
 - Check state during testing: `waypointctl status` for health, `waypointctl logs [backend|frontend]` for output. Restart before re-testing if you have changed code since the last `start`.
 Override ports or paths inline with `WAYPOINT_STACK_BACKEND_PORT`, `WAYPOINT_STACK_FRONTEND_PORT`, `WAYPOINT_STACK_CONFIG`, or `WAYPOINT_STACK_BACKEND_DATA_DIR` rather than editing config files; values may also live in `.env` at the repo root.
 
+When the `waypointd` daemon is running it also serves an out-of-band remote-control console for driving the stack from a phone — status, logs, lifecycle, redeploy — when a broken frontend build or backend has made the normal app unreachable. It needs `WAYPOINT_PASSWORD` and exists only in daemon mode; see [`waypointctl/README.md`](waypointctl/README.md).
+
 `scripts/waypoint.sh` is the legacy supervisor and is slated for deprecation; prefer `waypointctl` for new work and only fall back to the script if the user explicitly asks for it.
 
 ## Distributing Coding-Agent Skills

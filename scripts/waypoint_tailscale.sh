@@ -9,6 +9,7 @@ STATE_ROOT="${WAYPOINTCTL_STATE_DIR:-${HOME}/.waypoint}/tailscale"
 ACTIVE_PROFILE_FILE="${STATE_ROOT}/active-profile"
 BACKEND_PORT="${WAYPOINT_STACK_BACKEND_PORT:-8787}"
 FRONTEND_PORT="${WAYPOINT_STACK_FRONTEND_PORT:-3000}"
+CONTROL_PORT="${WAYPOINT_STACK_CONTROL_PORT:-8799}"
 HOST_ALIAS="${TS_HOST_ALIAS:-host.docker.internal}"
 
 usage() {
@@ -19,6 +20,7 @@ Environment:
   WAYPOINTCTL_STATE_DIR              Root of Waypoint control-plane state
   WAYPOINT_STACK_BACKEND_PORT        Backend HTTP port to expose through Tailscale
   WAYPOINT_STACK_FRONTEND_PORT       Frontend HTTP port to expose through Tailscale
+  WAYPOINT_STACK_CONTROL_PORT        waypointd restart control port (0 to skip exposing)
   WAYPOINT_TAILSCALE_READY_ATTEMPTS  Seconds to wait for BackendState=Running (default: 60)
   TS_AUTHKEY                         Required for `up`; read from the repo-root `.env`
   TS_HOSTNAME                        Optional node name; defaults to waypoint-<profile>
@@ -140,8 +142,15 @@ configure_serves() {
   local name="$1"
   local frontend_port="$2"
   local backend_port="$3"
+  local control_port="$4"
   docker exec "${name}" tailscale serve --bg --yes --http="${frontend_port}" "http://${HOST_ALIAS}:${frontend_port}" \
-    && docker exec "${name}" tailscale serve --bg --yes --http="${backend_port}" "http://${HOST_ALIAS}:${backend_port}"
+    && docker exec "${name}" tailscale serve --bg --yes --http="${backend_port}" "http://${HOST_ALIAS}:${backend_port}" \
+    || return 1
+  # The control port is opt-in (only served by waypointd); skip it when disabled.
+  if [[ "${control_port}" != "0" ]]; then
+    docker exec "${name}" tailscale serve --bg --yes --http="${control_port}" "http://${HOST_ALIAS}:${control_port}" \
+      || return 1
+  fi
 }
 
 cmd_up() {
@@ -177,7 +186,7 @@ cmd_up() {
     die "Timed out waiting for ${name} to join the tailnet."
   fi
 
-  if ! configure_serves "${name}" "${FRONTEND_PORT}" "${BACKEND_PORT}"; then
+  if ! configure_serves "${name}" "${FRONTEND_PORT}" "${BACKEND_PORT}" "${CONTROL_PORT}"; then
     [[ "${started_now}" -eq 1 ]] && rollback_container "${name}"
     die "Failed to configure Tailscale Serve for ${name}."
   fi
@@ -188,6 +197,7 @@ cmd_up() {
   echo "profile: ${slug}"
   echo "frontend: https://${node_name}:${FRONTEND_PORT}"
   echo "backend: https://${node_name}:${BACKEND_PORT}"
+  [[ "${CONTROL_PORT}" != "0" ]] && echo "control: https://${node_name}:${CONTROL_PORT}"
 }
 
 cmd_down() {

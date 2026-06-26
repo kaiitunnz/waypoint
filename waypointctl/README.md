@@ -23,7 +23,7 @@ waypointctl --home <repo> stop  [backend|frontend|all]
 waypointctl --home <repo> restart [backend|frontend|all]
 waypointctl --home <repo> status
 waypointctl --home <repo> logs  [backend|frontend|all]
-waypointctl daemon start | stop | status
+waypointctl daemon start | stop | restart | status
 waypointctl doctor
 ```
 
@@ -72,6 +72,8 @@ are not supported.
 | `WAYPOINT_STACK_UV_CACHE_DIR` | `<state-dir>/uv-cache` | Backend `UV_CACHE_DIR`. |
 | `WAYPOINT_STACK_FORCE_FRONTEND_BUILD` | `0` | When `1`, always rebuild the frontend before `npm run start`. |
 | `WAYPOINT_STACK_CAFFEINATE` | `1` | macOS only: hold a `caffeinate -i -s` for the lifetime of the stack. |
+| `WAYPOINT_STACK_CONTROL_HOST` | `0.0.0.0` | Bind host for the daemon's remote-control console. |
+| `WAYPOINT_STACK_CONTROL_PORT` | `8799` | Port for the daemon's remote-control console; `0` disables it. |
 
 ## Multiple tailnets per host
 
@@ -144,10 +146,76 @@ behaves. When `--wait` is set, the agent-restart safety check applies
 even in daemon mode — the CLI can't be inside the target's process tree
 because it stays on the wire across the kill.
 
-`waypointctl daemon stop` only stops the daemon. Backend/frontend
-processes survive it intentionally (they were spawned in their own
-sessions), so a daemon restart doesn't bounce running services. If
-any are still up the CLI prints a hint pointing at `waypointctl stop`.
+`waypointctl daemon stop` stops only the daemon; backend and frontend were
+spawned in their own sessions and keep running, so it doesn't bounce the
+stack (the CLI hints at `waypointctl stop` if you meant to bring those down
+too). It waits for the daemon to fully exit before returning — graceful
+shutdown can take up to 30s while in-flight workers drain — so that
+`daemon stop && daemon start` reliably replaces the daemon instead of racing
+a half-exited one; pass `--no-wait` to skip the wait. To roll the daemon
+onto new code, use `waypointctl daemon restart`.
+
+### Out-of-band remote control
+
+While the daemon runs it also serves an HTTP control console on
+`WAYPOINT_STACK_CONTROL_PORT` (default `8799`, exposed over Tailscale beside
+the backend and frontend ports). It lives in the supervisor rather than a
+managed service, so it stays reachable when a corrupt frontend build or a
+crashed backend has made the normal app unloadable — the break-glass path
+for when the only thing to hand is a phone. It drives the same stack/process
+layer `waypointctl` does and never touches the app's session data.
+
+Open `http://<host>:8799/`, authenticate with `WAYPOINT_PASSWORD`, and you
+get:
+
+- **Status** — health, pid, and port for backend and frontend, so you can
+  watch a restart come back up.
+- **Logs** — the tail of `backend.log` / `frontend.log`, to see why a build
+  broke before acting.
+- **Lifecycle** — `restart` / `stop` / `start` a service or the whole stack,
+  the same as `waypointctl <action> <target>`.
+- **Redeploy** — restart the whole stack on one of three channels:
+  - **stable** — check out the latest release tag, then restart.
+  - **nightly** — check out the tip of `main`, then restart.
+  - **current** — restart the checked-out tree with no git update; the only
+    channel that works on a dirty or unmanaged checkout. Stable and nightly
+    fail safe there, surfacing git's refusal and leaving the stack untouched.
+
+It refuses to run unless a real `WAYPOINT_PASSWORD` is set, locking out after
+repeated failed logins, so it can't become an open control surface on the
+tailnet. It can only do what `waypointctl` itself can — a fixed set of
+actions, no arbitrary commands — and logs each one.
+
+The console exists only while `waypointd` runs. Expose it over Tailscale
+only, never publicly; set `WAYPOINT_STACK_CONTROL_PORT=0` to disable it; and
+run `waypointctl doctor` to print its URL and confirm it responds.
+
+#### API
+
+The page is backed by a token-authenticated JSON API, so an agent can drive
+it with `curl`: `POST /api/login` with the password for a bearer token, then
+pass it as `Authorization: Bearer <token>` on the rest.
+
+| Method · path | Auth | Body / query → result |
+| --- | --- | --- |
+| `GET /` | — | The console page. |
+| `GET /health` | — | Liveness of the control plane itself. |
+| `POST /api/login` | password | `{password}` → `{token, expires_in}`. |
+| `GET /api/status` | token | → service status + `last_op`. |
+| `GET /api/logs?target=&n=` | token | `target` = `backend`\|`frontend`, `n` lines → `{lines}`. |
+| `POST /api/action` | token | `{action: start\|stop\|restart, target: backend\|frontend\|all}` → `202`; async. |
+| `POST /api/redeploy` | token | `{channel: stable\|nightly\|current}` → `202`; async. |
+
+```bash
+host=http://<host>:8799
+token=$(curl -s "$host/api/login" -d '{"password":"…"}' | jq -r .token)
+curl -s "$host/api/status" -H "Authorization: Bearer $token"
+curl -s "$host/api/action" -H "Authorization: Bearer $token" \
+  -d '{"action":"restart","target":"frontend"}'
+```
+
+Mutating calls return `202` and run in the background; poll `GET /api/status`
+and read `last_op` for the outcome.
 
 ## Logs
 

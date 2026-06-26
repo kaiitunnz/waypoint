@@ -10,7 +10,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
+from waypointctl import commands
 from waypointctl.config import apply_dotenv, load_stack_config
+from waypointctl.control import ControlServer
 from waypointctl.paths import (
     resolve_waypoint_home,
     state_log_dir,
@@ -116,17 +118,11 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
             with write_lock:
                 self._send_log(DaemonLog(stream=stream, line=line))
 
-        if request.command == "start":
+        if request.command in commands.ACTIONS:
             target = request.args[0] if request.args else "all"
-            result = stack.start(log, target)
+            result = commands.run_action(stack, request.command, target, log)
         elif request.command == "status":
             result = stack.status(log)
-        elif request.command == "stop":
-            target = request.args[0] if request.args else "all"
-            result = stack.stop(log, target)
-        elif request.command == "restart":
-            target = request.args[0] if request.args else "all"
-            result = stack.restart(target, log)
         else:
             self._send_result(
                 DaemonResult(
@@ -157,17 +153,11 @@ class WaypointDaemonHandler(socketserver.StreamRequestHandler):
             tag = "stderr" if stream == "stderr" else "stdout"
             print(f"[{command}] {tag}: {line}", flush=True)
 
-        if command == "restart":
+        if command in DEFERRED_COMMANDS:
             target = request.args[0] if request.args else "all"
 
             def worker() -> None:
-                stack.restart(target, file_log)
-
-        elif command == "stop":
-            target = request.args[0] if request.args else "all"
-
-            def worker() -> None:
-                stack.stop(file_log, target)
+                commands.run_action(stack, command, target, file_log)
 
         else:
             self._send_result(
@@ -214,6 +204,8 @@ def serve(home: Path) -> None:
     server = WaypointDaemonServer(socket_path, home)
     write_pid_file(pid_path, os.getpid())
 
+    control_server, control_thread = _start_control_server(server)
+
     shutdown_event = threading.Event()
 
     def _shutdown(_signum: int, _frame: object) -> None:
@@ -229,12 +221,55 @@ def serve(home: Path) -> None:
     try:
         shutdown_event.wait()
     finally:
+        if control_server is not None:
+            control_server.shutdown()
         server.shutdown()
         server_thread.join(timeout=2.0)
+        if control_thread is not None:
+            control_thread.join(timeout=2.0)
+        if control_server is not None:
+            control_server.server_close()
         server.join_workers(timeout=WORKER_SHUTDOWN_GRACE_SECONDS)
         server.server_close()
         socket_path.unlink(missing_ok=True)
         pid_path.unlink(missing_ok=True)
+
+
+def _start_control_server(
+    server: WaypointDaemonServer,
+) -> tuple[ControlServer | None, threading.Thread | None]:
+    config = server.stack.config
+    if not config.control_port:
+        return None, None
+    password = config.child_env.get("WAYPOINT_PASSWORD")
+    try:
+        # Share the daemon's WaypointStack so restarts hit the same managed
+        # process group the socket commands do.
+        control_server = ControlServer(
+            (config.control_host, config.control_port), server.stack, password
+        )
+    except OSError as exc:
+        # A control-port conflict must not take down the supervisor; the
+        # socket commands still work without the HTTP switch.
+        print(
+            f"control plane disabled: cannot bind "
+            f"{config.control_host}:{config.control_port} ({exc})",
+            file=sys.stderr,
+            flush=True,
+        )
+        return None, None
+    thread = threading.Thread(
+        target=control_server.serve_forever,
+        args=(0.5,),
+        daemon=True,
+        name="waypointd-control",
+    )
+    thread.start()
+    print(
+        f"control plane on http://{config.control_host}:{config.control_port}",
+        flush=True,
+    )
+    return control_server, thread
 
 
 def main() -> None:

@@ -3948,9 +3948,14 @@ html[data-theme="light"] .sq-dock-scrim {
 }
 
 .sq-dock-panel {
-  position: relative;
+  /* Absolute (not in flow) so expanding it overlays the transcript instead of
+     growing the sticky dock's box and reflowing content upward — mobile sits
+     flush atop the strip as a full-width sheet; desktop re-anchors below. */
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
   z-index: 7;
-  margin-bottom: 8px;
   max-height: 50vh;
   overflow-y: auto;
   display: grid;
@@ -4028,11 +4033,10 @@ html[data-theme="light"] .sq-dock-panel {
   }
 
   .sq-dock-panel {
-    position: absolute;
+    left: auto;
     right: 0;
     bottom: calc(100% + 8px);
     width: min(440px, 92vw);
-    margin-bottom: 0;
   }
 
   .sq-dock.expanded .sq-dock-panel {

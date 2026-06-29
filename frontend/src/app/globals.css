@@ -4273,7 +4273,11 @@ html[data-theme="light"] .sq-dock-panel {
     color-mix(in srgb, var(--muted) 16%, transparent) 75%
   );
   background-size: 220% 100%;
-  animation: sq-sweep 1.5s linear infinite;
+  /* `alternate` + `ease-in-out` ping-pongs the sweep instead of snapping from
+     the end position back to the start — the gradient's ends aren't identical,
+     so a one-way loop showed a visible discontinuity at the reset. Easing the
+     turn keeps the band's motion continuous. */
+  animation: sq-sweep 1.2s ease-in-out infinite alternate;
 }
 
 @keyframes sq-sweep {

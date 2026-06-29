@@ -3808,6 +3808,543 @@ html[data-theme="light"] .task-dock-panel {
 }
 
 /* ────────────────────────────────────────────────────────────────────────
+ * Side-question dock — /btw answers, unified with the task-progress dock: a
+ * collapsed strip above the composer that expands into a panel (a bottom sheet
+ * on mobile, a floating popover on desktop) listing the aside cards. Mirrors
+ * the .task-dock-* structure and surface so the two docks read as one family.
+ * ──────────────────────────────────────────────────────────────────────── */
+.sq-dock {
+  position: sticky;
+  bottom: calc(var(--composer-height, 220px) + 12px);
+  z-index: 5;
+  margin-top: -8px;
+  pointer-events: none;
+  /* The parent `.stack` is a grid with an `auto` column, which sizes to its
+     widest child's max-content. Every other `.stack` child sets this; without
+     it the dock's answer paragraph (max-content = the whole answer on one line)
+     blew the grid — and the page — wider than the viewport. */
+  min-width: 0;
+}
+
+.sq-dock.expanded {
+  z-index: 50;
+}
+
+.sq-dock-strip {
+  pointer-events: auto;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(20, 24, 33, 0.92), rgba(12, 15, 22, 0.96));
+  box-shadow:
+    0 12px 30px rgba(0, 0, 0, 0.36),
+    0 0 0 1px rgba(200, 169, 106, 0.05) inset;
+  backdrop-filter: blur(22px) saturate(1.2);
+}
+
+html[data-theme="light"] .sq-dock-strip {
+  background: linear-gradient(180deg, rgba(248, 245, 238, 0.96), rgba(240, 236, 226, 0.98));
+  box-shadow:
+    0 12px 30px rgba(60, 50, 30, 0.14),
+    0 0 0 1px rgba(200, 169, 106, 0.12) inset;
+}
+
+.sq-dock-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+}
+
+.sq-dock-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 2px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sq-dock-glyph {
+  flex: none;
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.sq-dock.active .sq-dock-glyph {
+  animation: sq-dock-pulse 2.8s ease-in-out infinite;
+}
+
+@keyframes sq-dock-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.sq-dock-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sq-dock-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+.sq-dock-chevron {
+  flex: none;
+  display: inline-flex;
+  color: var(--muted-soft);
+  transition: transform 160ms ease;
+}
+
+.sq-dock-toggle[aria-expanded="true"] .sq-dock-chevron {
+  transform: rotate(180deg);
+}
+
+.sq-dock-dismiss {
+  flex: none;
+  padding: 4px 6px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--muted-soft);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sq-dock-dismiss:hover {
+  color: var(--text);
+}
+
+.sq-dock-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  border: none;
+  background: rgba(0, 0, 0, 0.4);
+  cursor: default;
+  pointer-events: auto;
+}
+
+html[data-theme="light"] .sq-dock-scrim {
+  background: rgba(20, 16, 8, 0.22);
+}
+
+.sq-dock-panel {
+  /* Absolute (not in flow) so expanding it overlays the transcript instead of
+     growing the sticky dock's box and reflowing content upward — mobile sits
+     flush atop the strip as a full-width sheet; desktop re-anchors below. */
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  z-index: 7;
+  max-height: 50vh;
+  overflow-y: auto;
+  display: grid;
+  /* minmax(0, 1fr) — NOT a default `auto` column, which sizes to the answer
+     paragraph's max-content (the whole answer on one line) and blows the dock
+     wider than the viewport, scrolling the page sideways. The 0 floor lets the
+     column shrink so text wraps. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(20, 24, 33, 0.96), rgba(12, 15, 22, 0.98));
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(22px) saturate(1.2);
+  pointer-events: auto;
+}
+
+html[data-theme="light"] .sq-dock-panel {
+  background: linear-gradient(180deg, rgba(248, 245, 238, 0.98), rgba(240, 236, 226, 0.99));
+  box-shadow: 0 -10px 30px rgba(60, 50, 30, 0.16);
+}
+
+/* Mobile: join the panel to the strip into one surface. */
+.sq-dock.expanded .sq-dock-panel {
+  margin-bottom: 0;
+  border-bottom: none;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  box-shadow: none;
+}
+
+.sq-dock.expanded .sq-dock-strip {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.sq-dock-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sq-dock-panel-title {
+  flex: 1;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.sq-dock-collapse {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 6px;
+  background: none;
+  border: none;
+  color: var(--muted-soft);
+  cursor: pointer;
+}
+
+/* The collapse control always points down ("close"). */
+.sq-dock-collapse svg {
+  transform: rotate(180deg);
+}
+
+.sq-dock-cards {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 768px) {
+  .sq-dock-scrim,
+  html[data-theme="light"] .sq-dock-scrim {
+    background: transparent;
+  }
+
+  .sq-dock-panel {
+    left: auto;
+    right: 0;
+    bottom: calc(100% + 8px);
+    width: min(440px, 92vw);
+  }
+
+  .sq-dock.expanded .sq-dock-panel {
+    border-bottom: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  }
+
+  html[data-theme="light"] .sq-dock.expanded .sq-dock-panel {
+    box-shadow: 0 12px 30px rgba(60, 50, 30, 0.16);
+  }
+
+  .sq-dock.expanded .sq-dock-strip {
+    border-top-left-radius: var(--radius);
+    border-top-right-radius: var(--radius);
+  }
+}
+
+/* Clear-all (panel head) */
+.sq-clear-all {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 3px 9px;
+  cursor: pointer;
+  transition: color 0.14s, border-color 0.14s;
+}
+
+.sq-clear-all:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ── Aside card: a marginalia list item inside the panel ── */
+.sq-card {
+  position: relative;
+  min-width: 0;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 10px 4px 12px 14px;
+}
+
+.sq-card + .sq-card {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.sq-card.sq-error {
+  border-left-color: var(--danger);
+}
+
+.sq-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 9px;
+  flex-wrap: nowrap;
+}
+
+.sq-card-mark {
+  white-space: nowrap;
+}
+
+.sq-card.sq-error .sq-card-meta {
+  color: var(--danger);
+}
+
+.sq-card-asking {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.sq-card-pulse {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: sq-pulse 1.3s ease-in-out infinite;
+}
+
+@keyframes sq-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
+.sq-chip-resumed {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 45%, transparent);
+  color: var(--accent-cool);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  text-transform: none;
+}
+
+.sq-card-ts {
+  margin-left: auto;
+  color: var(--muted-soft);
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+}
+
+.sq-card-dismiss {
+  flex: none;
+  color: var(--muted-soft);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 6px;
+  margin: -2px -4px -2px 2px;
+  background: none;
+  border: none;
+}
+
+.sq-card-dismiss:hover {
+  color: var(--text-strong);
+  background: var(--bg-card-soft);
+}
+
+.sq-card-dismiss:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.sq-card-q {
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  line-height: 1.32;
+  color: var(--text-strong);
+  margin: 0 0 8px;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sq-card-q::before {
+  content: "\201C";
+  color: var(--accent);
+  margin-right: 1px;
+}
+
+.sq-card-q::after {
+  content: "\201D";
+  color: var(--accent);
+}
+
+.sq-card-a {
+  font-family: var(--font-display);
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--text);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.sq-card-a-clamped {
+  max-height: 9em;
+  overflow: hidden;
+}
+
+.sq-card-a-fade {
+  -webkit-mask-image: linear-gradient(180deg, #000 72%, transparent);
+  mask-image: linear-gradient(180deg, #000 72%, transparent);
+}
+
+.sq-card-a-expanded {
+  max-height: 34vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.sq-card.sq-error .sq-card-a {
+  font-family: var(--font-sans);
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.sq-card-more {
+  display: block;
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  color: var(--accent-cool);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.sq-card-more:hover {
+  color: var(--text-strong);
+}
+
+.sq-shimmer-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 2px;
+}
+
+.sq-shimmer {
+  height: 9px;
+  border-radius: 5px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--muted) 16%, transparent) 25%,
+    color-mix(in srgb, var(--accent) 22%, transparent) 50%,
+    color-mix(in srgb, var(--muted) 16%, transparent) 75%
+  );
+  background-size: 220% 100%;
+  /* `alternate` + `ease-in-out` ping-pongs the sweep instead of snapping from
+     the end position back to the start — the gradient's ends aren't identical,
+     so a one-way loop showed a visible discontinuity at the reset. Easing the
+     turn keeps the band's motion continuous. */
+  animation: sq-sweep 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes sq-sweep {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+
+.sq-shimmer-full {
+  width: 100%;
+}
+.sq-shimmer-wide {
+  width: 86%;
+}
+.sq-shimmer-mid {
+  width: 62%;
+}
+
+.sq-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.sq-card-fork {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  color: var(--accent-cool);
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 40%, transparent);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: color 0.14s, border-color 0.14s;
+}
+
+.sq-card-fork:hover {
+  color: var(--text-strong);
+  border-color: var(--accent-cool);
+}
+
+.sq-card-fork:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sq-dock.active .sq-dock-glyph,
+  .sq-card-pulse,
+  .sq-shimmer {
+    animation: none;
+  }
+}
+
+
+/* ────────────────────────────────────────────────────────────────────────
  * Composer — sticky reply deck pinned to the viewport bottom so the user
  * never has to scroll to find the input. The transcript section reserves
  * `--composer-height` worth of bottom padding so the last message can scroll

@@ -105,6 +105,7 @@ import {
   type ToolPair,
 } from "@/components/TranscriptCard";
 import { TaskProgressDock } from "@/components/TaskProgressDock";
+import { SideQuestionDock } from "@/components/SideQuestionDock";
 import { readTodoEntries, summarizeTodos } from "@/lib/todos";
 import { useSwitcher } from "@/components/SwitcherProvider";
 import {
@@ -117,6 +118,7 @@ import {
   SessionEnvelope,
   SessionRecord,
   SessionTransport,
+  SideQuestion,
 } from "@/lib/types";
 
 // iOS Safari rejects ``navigator.clipboard.writeText`` even from inside a
@@ -350,6 +352,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       setDismissedTaskSequence(null);
     }
   }, [sessionId]);
+  useEffect(() => {
+    setSideQuestions(new Map());
+    sqLiveSeenRef.current = new Set();
+    setSqExpandSignal(0);
+  }, [sessionId]);
   const [view, setView] = useState<ViewMode>("chat");
   const [filterMode, setFilterMode] = useState<FilterMode>("important");
   const [toolRunsExpanded, setToolRunsExpanded] = useState(false);
@@ -375,6 +382,13 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // the pill and send straight through.
   const [pendingPaste, setPendingPaste] = useState<string | null>(null);
   const [pasteSeq, setPasteSeq] = useState(0);
+  const [sideQuestions, setSideQuestions] = useState<Map<string, SideQuestion>>(new Map());
+  // Bumped when a *live* (non-hydrated) side-question first arrives, so the dock
+  // auto-expands a just-sent /btw but not asides replayed on page load. The ref
+  // tracks ids already accounted for — including hydrated ones, so a later live
+  // update to a rehydrated aside doesn't pop the dock open.
+  const [sqExpandSignal, setSqExpandSignal] = useState(0);
+  const sqLiveSeenRef = useRef<Set<string>>(new Set());
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
@@ -806,6 +820,28 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
               } else {
                 setPendingClipboard(text);
               }
+            }
+          }
+          if (message.type === "side_question") {
+            const payload = message.payload as {
+              side_question?: SideQuestion;
+              removed_id?: string;
+              hydrated?: boolean;
+            };
+            if (payload.side_question) {
+              const sq = payload.side_question;
+              setSideQuestions((prev) => new Map(prev).set(sq.id, sq));
+              if (!sqLiveSeenRef.current.has(sq.id)) {
+                sqLiveSeenRef.current.add(sq.id);
+                // Live (non-hydrated) first appearance → ask the dock to open.
+                if (!payload.hydrated) setSqExpandSignal((n) => n + 1);
+              }
+            } else if (payload.removed_id) {
+              setSideQuestions((prev) => {
+                const next = new Map(prev);
+                next.delete(payload.removed_id as string);
+                return next;
+              });
             }
           }
           if (message.type === "auth_revoked") {
@@ -2142,6 +2178,15 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
             ×
           </button>
         </div>
+      ) : null}
+      {sideQuestions.size > 0 ? (
+        <SideQuestionDock
+          questions={[...sideQuestions.values()]}
+          host={host}
+          token={token}
+          sessionId={sessionId}
+          expandSignal={sqExpandSignal}
+        />
       ) : null}
       {showTaskDock && taskProgress ? (
         <TaskProgressDock

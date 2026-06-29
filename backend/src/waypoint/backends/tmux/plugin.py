@@ -260,6 +260,27 @@ class TmuxPlugin:
     ) -> SessionRecord | None:
         return None
 
+    async def fork_side_question(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        side_question_id: str,
+        *,
+        new_session_id: str,
+        title: str,
+        raw_log: Path,
+        structured_log: Path,
+    ) -> SessionRecord:
+        _unsupported("side-questions")
+
+    async def dismiss_side_question(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        side_question_id: str,
+    ) -> None:
+        _unsupported("side-questions")
+
     async def answer_question(
         self,
         runtime: "SessionRuntime",

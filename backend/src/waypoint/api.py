@@ -925,6 +925,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session = await context.runtime.set_effort(session_id, body.effort)
         return {"session": session.model_dump(mode="json")}
 
+    @app.post("/api/sessions/{session_id}/side-questions/{sqid}/fork")
+    async def fork_side_question(
+        session_id: str,
+        sqid: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        new_session = await context.runtime.fork_side_question(session_id, sqid)
+        return {"session": new_session.model_dump(mode="json")}
+
+    @app.delete("/api/sessions/{session_id}/side-questions/{sqid}")
+    async def dismiss_side_question(
+        session_id: str,
+        sqid: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Response:
+        session = context.runtime.get_session(session_id)
+        plugin = context.runtime.registry.plugin_for(session)
+        await plugin.dismiss_side_question(context.runtime, session, sqid)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     @app.get("/api/backends/{backend}/models")
     async def list_backend_models(
         backend: str,
@@ -1077,6 +1097,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     payload={"session": session.model_dump(mode="json")},
                 ).model_dump(mode="json")
             )
+            # Hydrate pending side-questions so a fresh-load client sees open
+            # cards. Tag them ``hydrated`` so the client can tell a replay-on-
+            # connect from a live push and avoid auto-expanding old asides.
+            for sq in session.transport_state.get("pending_side_questions", []):
+                if isinstance(sq, dict):
+                    await websocket.send_json(
+                        SessionEnvelope(
+                            type="side_question",
+                            payload={"side_question": sq, "hydrated": True},
+                        ).model_dump(mode="json")
+                    )
             while True:
                 message = await queue.get()
                 await websocket.send_json(message)

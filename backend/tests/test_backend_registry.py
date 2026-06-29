@@ -119,6 +119,24 @@ class _StubPlugin:
     async def post_approval(self, runtime: Any, session: Any) -> None:
         return None
 
+    async def fork_side_question(
+        self,
+        runtime: Any,
+        session: Any,
+        side_question_id: str,
+        *,
+        new_session_id: str,
+        title: str,
+        raw_log: Any,
+        structured_log: Any,
+    ) -> Any:
+        raise NotImplementedError
+
+    async def dismiss_side_question(
+        self, runtime: Any, session: Any, side_question_id: str
+    ) -> None:
+        raise NotImplementedError
+
     def setup(self, runtime: Any) -> None:
         return None
 

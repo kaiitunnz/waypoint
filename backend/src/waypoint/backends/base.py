@@ -301,6 +301,37 @@ class BackendPlugin(Protocol):
         """
         ...
 
+    async def fork_side_question(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        side_question_id: str,
+        *,
+        new_session_id: str,
+        title: str,
+        raw_log: Path,
+        structured_log: Path,
+    ) -> SessionRecord:
+        """Promote an open ``/btw`` side-question into a real session.
+
+        Adopts the aside's forked thread as a new managed session (handing off
+        the thread, not deleting it) and drops the side-question record.
+        Backends without side-question support raise ``HTTPException(400)``.
+        """
+        ...
+
+    async def dismiss_side_question(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        side_question_id: str,
+    ) -> None:
+        """Resolve a ``/btw`` side-question: drop its record, delete its forked
+        thread, and broadcast the removal. Backends without side-question
+        support raise ``HTTPException(400)``.
+        """
+        ...
+
     def setup(self, runtime: "SessionRuntime") -> None:
         """One-shot initialisation hook called from ``SessionRuntime.__init__``.
 

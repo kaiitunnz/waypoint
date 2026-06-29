@@ -1209,6 +1209,40 @@ export function isAuthError(error: unknown): error is AuthError {
   return error instanceof AuthError;
 }
 
+export async function forkSideQuestion(
+  host: string,
+  token: string,
+  sessionId: string,
+  sqid: string,
+): Promise<SessionRecord> {
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/side-questions/${sqid}/fork`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  await ensureOk(response, "failed to fork side question");
+  const body = await response.json();
+  return body.session as SessionRecord;
+}
+
+export async function dismissSideQuestion(
+  host: string,
+  token: string,
+  sessionId: string,
+  sqid: string,
+): Promise<void> {
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/side-questions/${sqid}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  await ensureOk(response, "failed to dismiss side question");
+}
+
 async function ensureOk(response: Response, fallbackMessage: string): Promise<void> {
   if (response.ok) {
     return;

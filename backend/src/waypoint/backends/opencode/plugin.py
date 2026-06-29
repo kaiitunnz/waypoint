@@ -1143,6 +1143,33 @@ class OpenCodePlugin(DefaultLaunchContract):
 
         return None
 
+    async def fork_side_question(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        side_question_id: str,
+        *,
+        new_session_id: str,
+        title: str,
+        raw_log: Path,
+        structured_log: Path,
+    ) -> SessionRecord:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="side-questions are only supported for Claude sessions",
+        )
+
+    async def dismiss_side_question(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        side_question_id: str,
+    ) -> None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="side-questions are only supported for Claude sessions",
+        )
+
     async def answer_question(
         self,
         runtime: "SessionRuntime",

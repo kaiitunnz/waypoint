@@ -35,6 +35,7 @@ from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
+from waypoint.backends.claude_code import side_question as _sq
 from waypoint.backends.claude_code.commands import list_claude_command_completions
 from waypoint.backends.claude_code.models import (
     DEFAULT_CLAUDE_MODELS,
@@ -62,6 +63,7 @@ from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
     BackendModelOption,
     CommandCompletion,
+    CompletionDispatch,
     EventKind,
     SessionCreateRequest,
     SessionRateLimitUsage,
@@ -175,6 +177,14 @@ class ClaudeTtyPlugin:
     def setup(self, runtime: "SessionRuntime") -> None:
         return None
 
+    async def start_background_tasks(self, runtime: "SessionRuntime") -> None:
+        # claude_code's recovery sweep only covers its own backend id, so legacy
+        # backend=claude_tty rows (this alias) would be skipped. Recover ours via
+        # the shared Claude one-shot machinery, scoped to this backend id.
+        await _sq.recover_pending_side_questions(
+            runtime, self._claude, backend_ids={self.id}
+        )
+
     async def shutdown(self, runtime: "SessionRuntime") -> None:
         return None
 
@@ -211,6 +221,12 @@ class ClaudeTtyPlugin:
     async def maybe_handle_input(
         self, runtime: "SessionRuntime", session: SessionRecord, request: Any
     ) -> SessionRecord | None:
+        text = request.text.strip()
+        if text == "/btw" or text.startswith("/btw "):
+            question = text[len("/btw") :].strip()
+            if question:
+                await _sq.start_side_question(runtime, self._claude, session, question)
+            return runtime.get_session(session.id)
         return None
 
     async def approve_plan(
@@ -322,6 +338,24 @@ class ClaudeTtyPlugin:
         completions = static_slash_completions(
             self.id, self.capabilities, prefix=prefix
         )
+        # /btw is a Waypoint-owned command; always add it
+        norm_prefix = (
+            prefix if prefix.startswith("/") else f"/{prefix}" if prefix else "/"
+        )
+        if "/btw".startswith(norm_prefix) or norm_prefix == "/":
+            completions.append(
+                CommandCompletion(
+                    id="claude_tty:waypoint:btw",
+                    trigger="/",
+                    replacement="/btw ",
+                    name="btw",
+                    description="Ask a side-question without interrupting the session",
+                    kind="command",
+                    source="waypoint",
+                    dispatch=CompletionDispatch.PLAIN_TEXT,
+                    metadata={"builtin_command": "/btw"},
+                )
+            )
         # Custom commands and skills come from the same on-disk discovery
         # claude_code uses; both wrap the ``claude`` binary in the same cwd.
         launch_target = (
@@ -900,6 +934,124 @@ class ClaudeTtyPlugin:
         return True
 
     # ── AskUserQuestion ──────────────────────────────────────────────────────
+
+    async def cleanup_side_questions_on_delete(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        # No stale-snapshot guard: the helper re-reads fresh state under the
+        # per-session lock (and returns cheaply when there is nothing to clean),
+        # so a /btw persisted after this snapshot is still cleaned up.
+        await _sq.delete_session_side_questions(runtime, self._claude, session)
+
+    async def fork_side_question(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        side_question_id: str,
+        *,
+        new_session_id: str,
+        title: str,
+        raw_log: Path,
+        structured_log: Path,
+    ) -> SessionRecord:
+        async def _bring_up(new_session: SessionRecord, fork_thread_id: str) -> None:
+            await self._launch_resumed_pane(
+                runtime, session, new_session, fork_thread_id
+            )
+
+        return await _sq.fork_aside(
+            runtime,
+            session,
+            side_question_id,
+            new_session_id=new_session_id,
+            transport_id=self.transport_id,
+            title=title,
+            raw_log=raw_log,
+            structured_log=structured_log,
+            bring_up=_bring_up,
+        )
+
+    async def _launch_resumed_pane(
+        self,
+        runtime: "SessionRuntime",
+        parent: SessionRecord,
+        new_session: SessionRecord,
+        thread_id: str,
+    ) -> None:
+        """Bring up a managed tmux pane resuming ``thread_id`` for a forked aside.
+
+        The aside already forked a self-contained thread off the parent, so we
+        resume it directly (no second ``--fork-session``); the new session owns
+        it. Launch flags are inherited from ``parent`` so model/permission carry
+        over, mirroring :meth:`fork_session` minus the re-fork.
+        """
+        launch_target = (
+            runtime._find_launch_target(parent.launch_target_id)
+            if parent.launch_target_id
+            else None
+        )
+        stored_args = parent.transport_state.get("launch_args")
+        base_args = _scrub_session_args(
+            stored_args if isinstance(stored_args, list) else []
+        )
+        launch_args = ["--resume", thread_id, *base_args]
+        command = runtime._command_for_backend(
+            self.id,
+            launch_args,
+            launch_target,
+            new_session.cwd,
+            allocate_tty=True,
+            session_id=new_session.id,
+        )
+        raw_log = Path(new_session.raw_log_path)
+        raw_log.parent.mkdir(parents=True, exist_ok=True)
+        raw_log.touch(exist_ok=True)
+        target = await runtime.tmux.start_managed_session(
+            new_session.id, new_session.cwd, command
+        )
+        # Once the pane (a live `claude --resume`) exists, any later failure must
+        # kill it before re-raising — otherwise fork_aside's rollback restores the
+        # source aside while an unmanaged process still holds the same fork thread.
+        try:
+            await runtime.tmux.pipe_output(target.pane, raw_log)
+            with suppress(TmuxError):
+                await runtime.tmux.resize_window(target.session, 120, 50)
+            runtime.storage.update_session(
+                new_session.id,
+                transport_state={
+                    "tmux_session": target.session,
+                    "tmux_window": target.window,
+                    "tmux_pane": target.pane,
+                    "pid": target.pane_pid,
+                    "thread_id": thread_id,
+                    "launch_args": launch_args,
+                },
+                status=SessionStatus.STARTING,
+            )
+            await runtime._record_system_event(
+                new_session.id,
+                f"Promoted side question to a session (resumed thread {thread_id})",
+                status=SessionStatus.IDLE,
+            )
+            # The transcript (parent + aside Q&A) is already seeded in the event
+            # DB by fork_aside, so tail from the end and only pick up turns added
+            # from here.
+            self._start_tailer(
+                runtime, new_session.id, thread_id, new_session.cwd, start_at_end=True
+            )
+            self._spawn_rate_limit_watcher(runtime, new_session)
+        except Exception:
+            with suppress(TmuxError):
+                await runtime.tmux.kill_session(target.session)
+            raise
+
+    async def dismiss_side_question(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        side_question_id: str,
+    ) -> None:
+        await _sq.dismiss_aside(runtime, self._claude, session, side_question_id)
 
     async def answer_question(
         self,

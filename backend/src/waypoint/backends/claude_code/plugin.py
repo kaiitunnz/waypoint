@@ -737,15 +737,29 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         raw_log: Path,
         structured_log: Path,
     ) -> SessionRecord:
+        adapter = self._require_adapter()
+
+        async def _bring_up(new_session: SessionRecord, fork_thread_id: str) -> None:
+            await adapter.restore_session(
+                new_session.id,
+                session.cwd,
+                fork_thread_id,
+                self.launch_factory(runtime, session.launch_target_id),
+                permission_mode=session.permission_mode,
+                model=session.model,
+                effort=session.effort,
+            )
+
         return await _sq.fork_aside(
             runtime,
-            self,
             session,
             side_question_id,
             new_session_id=new_session_id,
+            transport_id=self.transport_id,
             title=title,
             raw_log=raw_log,
             structured_log=structured_log,
+            bring_up=_bring_up,
         )
 
     async def dismiss_side_question(

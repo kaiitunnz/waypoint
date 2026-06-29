@@ -336,9 +336,12 @@ async def test_dismiss_aside_noop_for_unknown_id(
 # ---------------------------------------------------------------------------
 
 
+async def _noop_bring_up(new_session: SessionRecord, fork_thread_id: str) -> None:
+    return None
+
+
 async def test_fork_aside_raises_404_for_unknown_question(
     runtime: Any,
-    plugin: Any,
     tmp_path: Path,
 ) -> None:
     from fastapi import HTTPException
@@ -350,20 +353,20 @@ async def test_fork_aside_raises_404_for_unknown_question(
     with pytest.raises(HTTPException) as exc_info:
         await fork_aside(
             runtime,
-            plugin,
             session,
             "nonexistent",
             new_session_id="new-sess",
+            transport_id="claude_cli",
             title="Fork",
             raw_log=session_dir / "raw.log",
             structured_log=session_dir / "events.jsonl",
+            bring_up=_noop_bring_up,
         )
     assert exc_info.value.status_code == 404
 
 
 async def test_fork_aside_raises_400_when_no_fork_thread(
     runtime: Any,
-    plugin: Any,
     tmp_path: Path,
 ) -> None:
     from fastapi import HTTPException
@@ -384,20 +387,20 @@ async def test_fork_aside_raises_400_when_no_fork_thread(
     with pytest.raises(HTTPException) as exc_info:
         await fork_aside(
             runtime,
-            plugin,
             session,
             "sq-pending",
             new_session_id="new-sess",
+            transport_id="claude_cli",
             title="Fork",
             raw_log=session_dir / "raw.log",
             structured_log=session_dir / "events.jsonl",
+            bring_up=_noop_bring_up,
         )
     assert exc_info.value.status_code == 400
 
 
-async def test_fork_aside_drops_record_and_creates_new_session(
+async def test_fork_aside_drops_record_and_brings_up_new_session(
     runtime: Any,
-    plugin: Any,
     tmp_path: Path,
 ) -> None:
     session = _make_session(runtime.storage, thread_id="thread-abc")
@@ -414,18 +417,21 @@ async def test_fork_aside_drops_record_and_creates_new_session(
 
     session_dir = tmp_path / "new-sess"
     session_dir.mkdir()
-    adapter = plugin.adapter
-    assert adapter is not None
+    bring_up_calls: list[tuple[str, str]] = []
+
+    async def _record(new_session: SessionRecord, fork_thread_id: str) -> None:
+        bring_up_calls.append((new_session.id, fork_thread_id))
 
     new_sess = await fork_aside(
         runtime,
-        plugin,
         session,
         "sq-ready",
         new_session_id="new-sess",
+        transport_id="claude_cli",
         title="Forked question",
         raw_log=session_dir / "raw.log",
         structured_log=session_dir / "events.jsonl",
+        bring_up=_record,
     )
 
     # Original record was dropped.
@@ -433,21 +439,21 @@ async def test_fork_aside_drops_record_and_creates_new_session(
     assert fresh is not None
     assert _read_side_questions(fresh) == []
 
-    # New session was created resuming fork-uuid-xyz.
+    # New session was created on the requested transport, resuming fork-uuid-xyz.
     assert new_sess.id == "new-sess"
+    assert new_sess.transport == "claude_cli"
     assert new_sess.transport_state.get("thread_id") == "fork-uuid-xyz"
 
-    # Adapter received restore call with the fork thread id.
-    assert adapter.restore_calls[0][2] == "fork-uuid-xyz"
+    # bring_up received the new record and the fork thread id.
+    assert bring_up_calls == [("new-sess", "fork-uuid-xyz")]
 
     # Removal broadcast was sent.
     msgs = [m for m, _ in runtime.broadcast.published]
     assert any("removed_id" in m.payload for m in msgs if m.type == "side_question")
 
 
-async def test_fork_aside_raises_503_when_adapter_none(
+async def test_fork_aside_marks_error_and_raises_400_when_bring_up_fails(
     runtime: Any,
-    plugin: Any,
     tmp_path: Path,
 ) -> None:
     from fastapi import HTTPException
@@ -463,22 +469,29 @@ async def test_fork_aside_raises_503_when_adapter_none(
         created_at=datetime.now(UTC),
     )
     _write_side_questions(runtime, session.id, [sq])
-    plugin.adapter = None
     session_dir = tmp_path / "new"
     session_dir.mkdir()
+
+    async def _boom(new_session: SessionRecord, fork_thread_id: str) -> None:
+        raise RuntimeError("launch failed")
 
     with pytest.raises(HTTPException) as exc_info:
         await fork_aside(
             runtime,
-            plugin,
             session,
             "sq-ready",
             new_session_id="new-sess",
+            transport_id="claude_cli",
             title="F",
             raw_log=session_dir / "raw.log",
             structured_log=session_dir / "events.jsonl",
+            bring_up=_boom,
         )
-    assert exc_info.value.status_code == 503
+    assert exc_info.value.status_code == 400
+
+    errored = runtime.storage.get_session("new-sess")
+    assert errored is not None
+    assert errored.status == SessionStatus.ERROR
 
 
 # ---------------------------------------------------------------------------

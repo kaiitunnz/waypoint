@@ -944,16 +944,87 @@ class ClaudeTtyPlugin:
         raw_log: Path,
         structured_log: Path,
     ) -> SessionRecord:
+        async def _bring_up(new_session: SessionRecord, fork_thread_id: str) -> None:
+            await self._launch_resumed_pane(
+                runtime, session, new_session, fork_thread_id
+            )
+
         return await _sq.fork_aside(
             runtime,
-            self._claude,
             session,
             side_question_id,
             new_session_id=new_session_id,
+            transport_id=self.transport_id,
             title=title,
             raw_log=raw_log,
             structured_log=structured_log,
+            bring_up=_bring_up,
         )
+
+    async def _launch_resumed_pane(
+        self,
+        runtime: "SessionRuntime",
+        parent: SessionRecord,
+        new_session: SessionRecord,
+        thread_id: str,
+    ) -> None:
+        """Bring up a managed tmux pane resuming ``thread_id`` for a forked aside.
+
+        The aside already forked a self-contained thread off the parent, so we
+        resume it directly (no second ``--fork-session``); the new session owns
+        it. Launch flags are inherited from ``parent`` so model/permission carry
+        over, mirroring :meth:`fork_session` minus the re-fork.
+        """
+        launch_target = (
+            runtime._find_launch_target(parent.launch_target_id)
+            if parent.launch_target_id
+            else None
+        )
+        stored_args = parent.transport_state.get("launch_args")
+        base_args = _scrub_session_args(
+            stored_args if isinstance(stored_args, list) else []
+        )
+        launch_args = ["--resume", thread_id, *base_args]
+        command = runtime._command_for_backend(
+            self.id,
+            launch_args,
+            launch_target,
+            new_session.cwd,
+            allocate_tty=True,
+            session_id=new_session.id,
+        )
+        raw_log = Path(new_session.raw_log_path)
+        raw_log.parent.mkdir(parents=True, exist_ok=True)
+        raw_log.touch(exist_ok=True)
+        target = await runtime.tmux.start_managed_session(
+            new_session.id, new_session.cwd, command
+        )
+        await runtime.tmux.pipe_output(target.pane, raw_log)
+        with suppress(TmuxError):
+            await runtime.tmux.resize_window(target.session, 120, 50)
+        runtime.storage.update_session(
+            new_session.id,
+            transport_state={
+                "tmux_session": target.session,
+                "tmux_window": target.window,
+                "tmux_pane": target.pane,
+                "pid": target.pane_pid,
+                "thread_id": thread_id,
+                "launch_args": launch_args,
+            },
+            status=SessionStatus.STARTING,
+        )
+        await runtime._record_system_event(
+            new_session.id,
+            f"Promoted side question to a session (resumed thread {thread_id})",
+            status=SessionStatus.IDLE,
+        )
+        # The resumed thread's transcript is already cloned into the event DB, so
+        # tail from the end to avoid replaying it.
+        self._start_tailer(
+            runtime, new_session.id, thread_id, new_session.cwd, start_at_end=True
+        )
+        self._spawn_rate_limit_watcher(runtime, new_session)
 
     async def dismiss_side_question(
         self,

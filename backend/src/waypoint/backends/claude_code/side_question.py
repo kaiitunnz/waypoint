@@ -38,6 +38,7 @@ import json
 import logging
 import shlex
 import shutil
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -493,31 +494,18 @@ async def start_side_question(
     _schedule_bg_task(runtime, plugin, session.id, sq.id)
 
 
-async def fork_aside(
+async def claim_fork_thread(
     runtime: "SessionRuntime",
-    plugin: "ClaudeCodePlugin",
     session: SessionRecord,
     side_question_id: str,
-    *,
-    new_session_id: str,
-    title: str,
-    raw_log: Path,
-    structured_log: Path,
-) -> SessionRecord:
-    """Adopt the aside's forked thread as a new managed Claude session.
+) -> str:
+    """Hand an answered aside's forked thread off to a new owner.
 
-    Hands off ``fork_thread_id`` (does **not** delete it), drops the record,
-    and broadcasts the removal. Raises if the side-question is unknown or has no
-    retained thread.
+    Drops the record **without** deleting ``<E>.jsonl`` (the new session adopts
+    it — the one exception to the cleanup invariant) and broadcasts the removal.
+    Returns the forked ``thread_id``. Raises if the id is unknown or the aside
+    has no retained thread yet.
     """
-    if plugin.adapter is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="claude adapter is not initialized",
-        )
-
-    fork_thread_id: str = ""
-
     async with _lock_for(session.id):
         fresh = runtime.storage.get_session(session.id)
         if fresh is None:
@@ -537,20 +525,43 @@ async def fork_aside(
                 detail="side question has no retained thread; wait for an answer first",
             )
         fork_thread_id = sq.fork_thread_id
-        # Drop the record WITHOUT deleting the thread — the new session owns it.
         qs = [q for q in qs if q.id != side_question_id]
         _write_side_questions(runtime, session.id, qs)
 
     await _broadcast_remove(runtime, session.id, side_question_id)
+    return fork_thread_id
 
-    # Build the new session record resuming the fork thread directly.
+
+async def fork_aside(
+    runtime: "SessionRuntime",
+    session: SessionRecord,
+    side_question_id: str,
+    *,
+    new_session_id: str,
+    transport_id: str,
+    title: str,
+    raw_log: Path,
+    structured_log: Path,
+    bring_up: Callable[[SessionRecord, str], Awaitable[None]],
+) -> SessionRecord:
+    """Promote an answered aside into a managed session on ``transport_id``.
+
+    Claims the aside's forked thread (see :func:`claim_fork_thread`), persists a
+    new session record that resumes it, clones the parent transcript, then hands
+    the actual launch to ``bring_up`` — the transport-specific step (a structured
+    adapter restore for ``claude_cli``, a resumed tmux pane for ``claude_tty``).
+    Transport-agnostic on purpose: it never touches the structured adapter, so it
+    works for any transport that can resume a thread.
+    """
+    fork_thread_id = await claim_fork_thread(runtime, session, side_question_id)
+
     now = datetime.now(UTC)
     raw_log.touch(exist_ok=True)
     new_session = SessionRecord(
         id=new_session_id,
         backend=session.backend,
         source=SessionSource.MANAGED,
-        transport=plugin.transport_id,
+        transport=transport_id,
         title=title,
         cwd=session.cwd,
         launch_target_id=session.launch_target_id,
@@ -573,20 +584,12 @@ async def fork_aside(
     runtime.storage.clone_events(session.id, new_session_id)
 
     try:
-        await plugin.adapter.restore_session(
-            new_session_id,
-            session.cwd,
-            fork_thread_id,
-            plugin.launch_factory(runtime, session.launch_target_id),
-            permission_mode=session.permission_mode,
-            model=session.model,
-            effort=session.effort,
-        )
+        await bring_up(new_session, fork_thread_id)
     except Exception as exc:  # noqa: BLE001
         runtime.storage.update_session(new_session_id, status=SessionStatus.ERROR)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"failed to restore forked session: {exc}",
+            detail=f"failed to bring up forked session: {exc}",
         ) from exc
 
     return runtime.get_session(new_session_id)

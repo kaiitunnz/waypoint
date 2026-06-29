@@ -3808,6 +3808,494 @@ html[data-theme="light"] .task-dock-panel {
 }
 
 /* ────────────────────────────────────────────────────────────────────────
+ * Side-question dock — marginalia overlay that surfaces /btw answers above
+ * the composer. Desktop: a right-anchored floating card stack. Mobile: a
+ * slim bar that opens a bottom sheet.
+ * ──────────────────────────────────────────────────────────────────────── */
+.sq-dock {
+  position: sticky;
+  bottom: calc(var(--composer-height, 220px) + 12px);
+  z-index: 5;
+  margin-top: -8px;
+  pointer-events: none;
+}
+
+.sq-dock.sq-dock-expanded {
+  z-index: 50;
+}
+
+/* ── Mobile slim bar ── */
+.sq-bar {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 14px;
+  background: linear-gradient(180deg, rgba(20, 24, 33, 0.92), rgba(12, 15, 22, 0.96));
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow:
+    0 12px 30px rgba(0, 0, 0, 0.36),
+    0 0 0 1px rgba(200, 169, 106, 0.05) inset;
+  backdrop-filter: blur(22px) saturate(1.2);
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+html[data-theme="light"] .sq-bar {
+  background: linear-gradient(180deg, rgba(248, 245, 238, 0.96), rgba(240, 236, 226, 0.98));
+  box-shadow:
+    0 12px 30px rgba(60, 50, 30, 0.14),
+    0 0 0 1px rgba(200, 169, 106, 0.12) inset;
+}
+
+.sq-bar-icon {
+  flex: none;
+  color: var(--accent);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.sq-bar-label {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+
+.sq-bar-chevron {
+  flex: none;
+  color: var(--muted-soft);
+  font-size: 0.9rem;
+  transition: transform 160ms ease;
+}
+
+.sq-dock-expanded .sq-bar .sq-bar-chevron {
+  transform: rotate(180deg);
+}
+
+/* ── Mobile scrim ── */
+.sq-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  border: none;
+  background: rgba(0, 0, 0, 0.4);
+  cursor: default;
+  pointer-events: auto;
+}
+
+html[data-theme="light"] .sq-scrim {
+  background: rgba(20, 16, 8, 0.22);
+}
+
+/* ── Mobile bottom sheet ── */
+.sq-sheet {
+  position: relative;
+  z-index: 7;
+  margin-bottom: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--line-strong);
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: linear-gradient(180deg, rgba(20, 24, 33, 0.96), rgba(12, 15, 22, 0.98));
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(22px) saturate(1.2);
+  pointer-events: auto;
+}
+
+html[data-theme="light"] .sq-sheet {
+  background: linear-gradient(180deg, rgba(248, 245, 238, 0.98), rgba(240, 236, 226, 0.99));
+  box-shadow: 0 -10px 30px rgba(60, 50, 30, 0.16);
+}
+
+.sq-sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: inherit;
+  z-index: 1;
+}
+
+.sq-sheet-title {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+  font-weight: 600;
+}
+
+.sq-sheet-close {
+  flex: none;
+  padding: 4px 7px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--muted-soft);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sq-sheet-close:hover {
+  color: var(--text);
+}
+
+.sq-sheet-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+}
+
+/* ── Desktop floating panel ── */
+.sq-panel {
+  display: none;
+}
+
+/* ── Clear-all button (shared mobile sheet + desktop panel) ── */
+.sq-clear-all {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 3px 9px;
+  cursor: pointer;
+  transition: color 0.14s, border-color 0.14s;
+}
+
+.sq-clear-all:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ── Side-question card ── */
+.sq-card {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 13px 15px 13px 16px;
+  box-shadow: 0 18px 44px -30px rgba(0, 0, 0, 0.85);
+  animation: sq-slidein 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+html[data-theme="light"] .sq-card {
+  box-shadow: 0 8px 24px -16px rgba(60, 45, 20, 0.3);
+}
+
+.sq-card.sq-error {
+  border-left-color: var(--danger);
+}
+
+@keyframes sq-slidein {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Card meta row */
+.sq-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 9px;
+}
+
+.sq-card.sq-error .sq-card-meta {
+  color: var(--danger);
+}
+
+.sq-card-asking {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.sq-card-pulse {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: sq-pulse 1.3s ease-in-out infinite;
+}
+
+@keyframes sq-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
+.sq-chip-resumed {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 45%, transparent);
+  color: var(--accent-cool);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  text-transform: none;
+}
+
+.sq-card-ts {
+  margin-left: auto;
+  color: var(--muted-soft);
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+}
+
+.sq-card-dismiss {
+  flex: none;
+  color: var(--muted-soft);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 6px;
+  margin: -2px -4px -2px 2px;
+  background: none;
+  border: none;
+}
+
+.sq-card-dismiss:hover {
+  color: var(--text-strong);
+  background: var(--bg-card-soft);
+}
+
+.sq-card-dismiss:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Question text in serif with curly quotes */
+.sq-card-q {
+  font-family: var(--font-display);
+  font-size: 1.04rem;
+  line-height: 1.32;
+  color: var(--text-strong);
+  margin: 0 0 8px;
+  text-wrap: pretty;
+}
+
+.sq-card-q::before {
+  content: "\201C";
+  color: var(--accent);
+  margin-right: 1px;
+}
+
+.sq-card-q::after {
+  content: "\201D";
+  color: var(--accent);
+}
+
+/* Answer text */
+.sq-card-a {
+  font-family: var(--font-display);
+  font-size: 0.94rem;
+  line-height: 1.46;
+  color: var(--text);
+  margin: 0;
+}
+
+.sq-card.sq-error .sq-card-a {
+  font-family: var(--font-sans);
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+/* Shimmer skeleton while asking */
+.sq-shimmer-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 2px;
+}
+
+.sq-shimmer {
+  height: 9px;
+  border-radius: 5px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--muted) 16%, transparent) 25%,
+    color-mix(in srgb, var(--accent) 22%, transparent) 50%,
+    color-mix(in srgb, var(--muted) 16%, transparent) 75%
+  );
+  background-size: 220% 100%;
+  animation: sq-sweep 1.5s linear infinite;
+}
+
+@keyframes sq-sweep {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+
+.sq-shimmer-full {
+  width: 100%;
+}
+.sq-shimmer-wide {
+  width: 86%;
+}
+.sq-shimmer-mid {
+  width: 62%;
+}
+
+/* Card footer */
+.sq-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 11px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--line);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  color: var(--muted-soft);
+}
+
+.sq-card-foot-state {
+  color: var(--success);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.sq-card-foot-state.sq-foot-pending {
+  color: var(--accent);
+}
+
+.sq-card-foot-state.sq-foot-error {
+  color: var(--danger);
+}
+
+.sq-card-fork {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  color: var(--accent-cool);
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 40%, transparent);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: color 0.14s, border-color 0.14s;
+}
+
+.sq-card-fork:hover {
+  color: var(--text-strong);
+  border-color: var(--accent-cool);
+}
+
+.sq-card-fork:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── Desktop layout: right-anchored floating column ── */
+@media (min-width: 768px) {
+  .sq-bar {
+    display: none;
+  }
+
+  .sq-scrim,
+  .sq-sheet {
+    display: none;
+  }
+
+  .sq-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: min(360px, 78%);
+    pointer-events: auto;
+  }
+
+  .sq-panel-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted-soft);
+    padding: 0 4px 4px;
+  }
+
+  .sq-panel-label {
+    flex: 1;
+  }
+
+  .sq-panel-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sq-card {
+    animation: none;
+  }
+
+  .sq-card-pulse {
+    animation: none;
+  }
+
+  .sq-shimmer {
+    animation: none;
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────
  * Composer — sticky reply deck pinned to the viewport bottom so the user
  * never has to scroll to find the input. The transcript section reserves
  * `--composer-height` worth of bottom padding so the last message can scroll

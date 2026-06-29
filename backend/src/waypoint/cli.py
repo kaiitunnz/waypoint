@@ -848,6 +848,14 @@ def sessions_events(
             "(e.g. approval_request, agent_output).",
         ),
     ] = None,
+    coalesce: Annotated[
+        bool,
+        typer.Option(
+            "--coalesce",
+            "-c",
+            help="(--no-follow only) Coalesce streaming deltas into logical events.",
+        ),
+    ] = False,
 ) -> None:
     """Show a session's transcript, or stream live events with --follow.
 
@@ -876,11 +884,20 @@ def sessions_events(
         )
         raise typer.Exit(code=1)
     session_id = session_ids[0]
+
+    def _get_and_process(c: WaypointClient) -> dict[str, Any]:
+        page = c.get_events(
+            session_id, messages=messages, before_sequence=before_sequence
+        )
+        if coalesce:
+            from waypoint.events import coalesce_events
+
+            page["events"] = coalesce_events(page["events"])
+        return page
+
     _emit(
         _settings_from_ctx(ctx),
-        lambda c: c.get_events(
-            session_id, messages=messages, before_sequence=before_sequence
-        ),
+        _get_and_process,
     )
 
 
@@ -1460,6 +1477,13 @@ def sessions_output(
             help="Print only the concatenated agent output text for shell piping.",
         ),
     ] = False,
+    raw: Annotated[
+        bool,
+        typer.Option(
+            "--raw",
+            help="Return all raw event deltas without coalescing.",
+        ),
+    ] = False,
 ) -> None:
     """Show just the conversational transcript from a session."""
     if text:
@@ -1467,18 +1491,30 @@ def sessions_output(
             _settings_from_ctx(ctx),
             lambda c: c.get_events(session_id, messages=messages),
         )
-        agent_text = "".join(
+        if not raw:
+            from waypoint.events import coalesce_events
+
+            page["events"] = coalesce_events(page["events"])
+
+        agent_text = ("\n\n" if not raw else "").join(
             event["text"]
             for event in _conversation_events(page)
             if event.get("kind") == "agent_output"
         )
         typer.echo(agent_text, nl=False)
         return
+
+    def _get_and_process(c: WaypointClient) -> dict[str, Any]:
+        page = c.get_events(session_id, messages=messages)
+        if not raw:
+            from waypoint.events import coalesce_events
+
+            page["events"] = coalesce_events(page["events"])
+        return {"events": _conversation_events(page)}
+
     _emit(
         _settings_from_ctx(ctx),
-        lambda c: {
-            "events": _conversation_events(c.get_events(session_id, messages=messages))
-        },
+        _get_and_process,
     )
 
 

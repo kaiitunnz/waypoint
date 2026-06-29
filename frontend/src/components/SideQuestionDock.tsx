@@ -156,19 +156,24 @@ export function SideQuestionDock({
   const [dismissingIds, setDismissingIds] = useState<Set<string>>(new Set());
   const seenIdsRef = useRef<Set<string>>(new Set());
 
-  // Auto-expand when a new side-question appears — e.g. right after the user
-  // sends /btw — so the asked question and its "asking…" shimmer are visible
-  // immediately (the newest sorts to the top). A manual collapse sticks until
-  // the next new question, since this only fires on a previously-unseen id.
+  // Auto-expand when the user sends a /btw, so the asked question and its
+  // "asking…" shimmer show immediately (the newest sorts to the top). We key
+  // off freshness, not just a new id: a just-sent aside is created ~now, while
+  // ones replayed on page load/refresh are older — so a reload no longer
+  // re-expands old asides. A manual collapse sticks (this only fires once per
+  // previously-unseen, freshly-created id).
   useEffect(() => {
-    let added = false;
+    const now = Date.now();
+    let openFor = false;
     for (const q of questions) {
-      if (!seenIdsRef.current.has(q.id)) {
-        seenIdsRef.current.add(q.id);
-        added = true;
+      if (seenIdsRef.current.has(q.id)) continue;
+      seenIdsRef.current.add(q.id);
+      const created = new Date(q.created_at).getTime();
+      if (Number.isFinite(created) && now - created < 8000) {
+        openFor = true;
       }
     }
-    if (added) setExpanded(true);
+    if (openFor) setExpanded(true);
   }, [questions]);
 
   useEffect(() => {

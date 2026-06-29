@@ -397,6 +397,24 @@ export interface SessionEnvelope {
     | "auth_revoked"
     | "schedule_list_update"
     | "board_update"
-    | "clipboard_copy";
+    | "clipboard_copy"
+    | "side_question";
   payload: Record<string, unknown>;
+}
+
+export type SideQuestionStatus = "pending" | "answered" | "error";
+
+// An ephemeral /btw side-question. Mirrors backend schemas.SideQuestion. The
+// `side_question` envelope carries either an upsert ({ side_question })
+// or a removal ({ removed_id }).
+export interface SideQuestion {
+  id: string;
+  question: string;
+  status: SideQuestionStatus;
+  answer?: string | null;
+  error?: string | null;
+  fork_thread_id?: string | null;
+  attempts: number;
+  resumed: boolean;
+  created_at: string;
 }

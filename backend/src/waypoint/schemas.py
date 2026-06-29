@@ -501,3 +501,34 @@ class ScheduleCreateRequest(BaseModel):
 class SessionEnvelope(BaseModel):
     type: str
     payload: Mapping[str, Any]
+
+
+class SideQuestionStatus(StrEnum):
+    PENDING = "pending"
+    ANSWERED = "answered"
+    ERROR = "error"
+
+
+class SideQuestion(BaseModel):
+    """An ephemeral ``/btw`` side-question on a Claude session.
+
+    Answered from the current conversation with no tools, never written to the
+    transcript, session-scoped. The same shape is the durable record persisted
+    under ``SessionRecord.transport_state["pending_side_questions"]`` and the
+    body of the ``side_question`` broadcast envelope.
+
+    ``fork_thread_id`` is the forked Claude thread retained while the card is
+    open so the aside can be promoted into a real session; it is ``None`` once
+    the thread has been cleaned up. ``resumed`` is set when a pending aside was
+    re-issued by the post-restart recovery sweep.
+    """
+
+    id: str
+    question: str
+    status: SideQuestionStatus
+    answer: str | None = None
+    error: str | None = None
+    fork_thread_id: str | None = None
+    attempts: int = 1
+    resumed: bool = False
+    created_at: datetime

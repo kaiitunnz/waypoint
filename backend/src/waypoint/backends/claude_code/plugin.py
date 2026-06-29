@@ -698,6 +698,37 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             return runtime.get_session(session.id)
         return None
 
+    async def fork_side_question(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        side_question_id: str,
+        *,
+        new_session_id: str,
+        title: str,
+        raw_log: Path,
+        structured_log: Path,
+    ) -> SessionRecord:
+        # T0 placeholder — implemented in the backend-wiring task (W2),
+        # delegating to side_question.fork_aside.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="side-questions are not yet wired",
+        )
+
+    async def dismiss_side_question(
+        self,
+        runtime: "SessionRuntime",
+        session: SessionRecord,
+        side_question_id: str,
+    ) -> None:
+        # T0 placeholder — implemented in the backend-wiring task (W2),
+        # delegating to side_question.dismiss_aside.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="side-questions are not yet wired",
+        )
+
     async def answer_question(
         self,
         runtime: "SessionRuntime",

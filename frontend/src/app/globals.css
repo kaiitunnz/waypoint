@@ -4115,6 +4115,11 @@ html[data-theme="light"] .sq-card {
   color: var(--text-strong);
   margin: 0 0 8px;
   text-wrap: pretty;
+  /* Clamp a long question — it's the user's own text, so a few lines suffice. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .sq-card-q::before {
@@ -4128,13 +4133,17 @@ html[data-theme="light"] .sq-card {
   color: var(--accent);
 }
 
-/* Answer text */
+/* Answer text — capped with internal scroll so a long answer never grows the
+ * card to fill the viewport. */
 .sq-card-a {
   font-family: var(--font-display);
   font-size: 0.94rem;
   line-height: 1.46;
   color: var(--text);
   margin: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .sq-card.sq-error .sq-card-a {
@@ -4196,20 +4205,6 @@ html[data-theme="light"] .sq-card {
   font-size: 0.62rem;
   letter-spacing: 0.08em;
   color: var(--muted-soft);
-}
-
-.sq-card-foot-state {
-  color: var(--success);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.sq-card-foot-state.sq-foot-pending {
-  color: var(--accent);
-}
-
-.sq-card-foot-state.sq-foot-error {
-  color: var(--danger);
 }
 
 .sq-card-fork {
@@ -4278,6 +4273,10 @@ html[data-theme="light"] .sq-card {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    /* Never let the stack climb the whole viewport; scroll past the cap. */
+    max-height: min(60vh, calc(100dvh - var(--composer-height, 220px) - 120px));
+    overflow-y: auto;
+    padding-right: 2px;
   }
 }
 

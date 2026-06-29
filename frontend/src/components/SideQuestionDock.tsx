@@ -71,31 +71,19 @@ function SideQuestionCard({
         <p className="sq-card-a">{sq.answer ?? sq.error}</p>
       )}
 
-      <div className="sq-card-foot">
-        <span
-          className={`sq-card-foot-state${isPending ? " sq-foot-pending" : isError ? " sq-foot-error" : ""}`}
-        >
-          {isPending ? "running independently" : isError ? "couldn't answer" : "answered"}
-        </span>
-        {isPending ? (
-          <span className="sq-card-foot-note">no tools</span>
-        ) : (
-          <>
-            <span className="sq-card-foot-note">won&apos;t be saved</span>
-            {!isError ? (
-              <button
-                type="button"
-                className="sq-card-fork"
-                aria-label="Open side question as a new session"
-                disabled={forking}
-                onClick={onFork}
-              >
-                {forking ? "opening…" : "Open as session →"}
-              </button>
-            ) : null}
-          </>
-        )}
-      </div>
+      {!isPending && !isError ? (
+        <div className="sq-card-foot">
+          <button
+            type="button"
+            className="sq-card-fork"
+            aria-label="Open side question as a new session"
+            disabled={forking}
+            onClick={onFork}
+          >
+            {forking ? "opening…" : "Open as session →"}
+          </button>
+        </div>
+      ) : null}
     </article>
   );
 }

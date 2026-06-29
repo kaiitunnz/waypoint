@@ -768,3 +768,262 @@ async def test_recover_skips_non_claude_sessions(
 
     # Nothing touched.
     assert cleanup_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: --tools "" disables tools in one-shot argv
+# ---------------------------------------------------------------------------
+
+
+async def test_one_shot_local_argv_disables_tools(
+    runtime: Any,
+    plugin: Any,
+) -> None:
+    """The local one-shot must pass --tools "" so Claude cannot call any tool."""
+    session = _make_session(runtime.storage, thread_id="thread-abc")
+    _write_side_questions(
+        runtime,
+        session.id,
+        [
+            SideQuestion(
+                id="sq-tools",
+                question="What is 2+2?",
+                status=SideQuestionStatus.PENDING,
+                attempts=1,
+                created_at=datetime.now(UTC),
+            )
+        ],
+    )
+
+    captured_args: list[list[str]] = []
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
+        captured_args.append(list(args))
+
+        class _FakeProc:
+            returncode = 0
+
+            async def communicate(self) -> tuple[bytes, bytes]:
+                import json as _json
+
+                return (
+                    _json.dumps(
+                        {"is_error": False, "result": "4", "subtype": "success"}
+                    ).encode(),
+                    b"",
+                )
+
+        return _FakeProc()
+
+    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+        await sq_module._run_side_question_bg(runtime, plugin, session.id, "sq-tools")
+
+    assert captured_args, "subprocess was never called"
+    argv = captured_args[0]
+    # --tools must appear in the argv and the next element must be the empty string.
+    assert "--tools" in argv, f"--tools not in argv: {argv}"
+    tools_idx = argv.index("--tools")
+    assert (
+        argv[tools_idx + 1] == ""
+    ), f"--tools value is not empty: {argv[tools_idx + 1]!r}"
+
+
+async def test_one_shot_remote_argv_disables_tools() -> None:
+    """The remote one-shot command string must include --tools ''."""
+    from waypoint.launch_targets import SshLaunchTargetConfig
+
+    target = SshLaunchTargetConfig(id="box", name="Box", ssh_destination="user@host")
+    captured_args: list[list[str]] = []
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
+        captured_args.append(list(args))
+
+        class _FakeProc:
+            returncode = 0
+
+            async def communicate(self) -> tuple[bytes, bytes]:
+                import json as _json
+
+                return (
+                    _json.dumps(
+                        {"is_error": False, "result": "ok", "subtype": "success"}
+                    ).encode(),
+                    b"",
+                )
+
+        return _FakeProc()
+
+    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+        await sq_module._run_one_shot_remote(
+            "What branch?", "thread-1", "fork-1", "~/project", target, "claude"
+        )
+
+    assert captured_args, "subprocess was never called"
+    # The remote command is the last arg passed to ssh; the claude args are
+    # embedded in it.  Check the full command string contains --tools.
+    full_cmd = " ".join(captured_args[0])
+    assert "--tools" in full_cmd, f"--tools not in remote command: {full_cmd!r}"
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: recovery does not clobber a completion that lands mid-sweep
+# ---------------------------------------------------------------------------
+
+
+async def test_recover_does_not_clobber_mid_sweep_completion(
+    runtime: Any,
+    plugin: Any,
+) -> None:
+    """A bg-task completion that lands while recover_pending_side_questions is
+    running (between the stale snapshot and the lock) must not be overwritten,
+    and the completed fork file must not be deleted."""
+    session = _make_session(runtime.storage, thread_id="thread-abc")
+    sq = SideQuestion(
+        id="sq-race",
+        question="Will race?",
+        status=SideQuestionStatus.PENDING,
+        fork_thread_id="stale-E",
+        attempts=1,
+        created_at=datetime.now(UTC),
+    )
+    _write_side_questions(runtime, session.id, [sq])
+
+    deleted_files: list[str] = []
+
+    async def fake_delete(fid: str, *args: Any, **kwargs: Any) -> None:
+        # Simulate the bg task completing sq-race to ANSWERED just before
+        # the recovery writes its update.
+        if fid == "stale-E":
+            completed = sq.model_copy(
+                update={
+                    "status": SideQuestionStatus.ANSWERED,
+                    "answer": "Race answer.",
+                    "fork_thread_id": "live-E",
+                }
+            )
+            _write_side_questions(runtime, session.id, [completed])
+        deleted_files.append(fid)
+
+    with (
+        patch.object(
+            sq_module, "_delete_fork_file", new=AsyncMock(side_effect=fake_delete)
+        ),
+        patch.object(sq_module, "_schedule_bg_task"),
+    ):
+        await recover_pending_side_questions(runtime, plugin)
+
+    fresh = runtime.storage.get_session(session.id)
+    assert fresh is not None
+    qs = _read_side_questions(fresh)
+    assert len(qs) == 1, "record was dropped"
+    # The record must remain ANSWERED — NOT overwritten with pending/error.
+    assert (
+        qs[0].status == SideQuestionStatus.ANSWERED
+    ), f"record was clobbered: {qs[0].status}"
+    assert qs[0].fork_thread_id == "live-E", "live fork thread id was lost"
+    # The live fork file must NOT have been deleted.
+    assert "live-E" not in deleted_files, "live fork file was wrongly deleted"
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: delete_session_side_questions
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_session_side_questions_clears_records_and_fork_files(
+    runtime: Any,
+    plugin: Any,
+) -> None:
+    """delete_session_side_questions must delete every fork file and clear the
+    pending_side_questions list from storage."""
+    from waypoint.backends.claude_code.side_question import (
+        delete_session_side_questions,
+    )
+
+    session = _make_session(runtime.storage, thread_id="thread-abc")
+    qs_init = [
+        SideQuestion(
+            id="sq-a",
+            question="A?",
+            status=SideQuestionStatus.ANSWERED,
+            fork_thread_id="fork-A",
+            attempts=1,
+            created_at=datetime.now(UTC),
+        ),
+        SideQuestion(
+            id="sq-b",
+            question="B?",
+            status=SideQuestionStatus.PENDING,
+            fork_thread_id="fork-B",
+            attempts=1,
+            created_at=datetime.now(UTC),
+        ),
+        SideQuestion(
+            id="sq-c",
+            question="C?",
+            status=SideQuestionStatus.ERROR,
+            fork_thread_id=None,
+            attempts=1,
+            created_at=datetime.now(UTC),
+        ),
+    ]
+    _write_side_questions(runtime, session.id, qs_init)
+    # Re-read so the snapshot passed to the function has the questions embedded.
+    session_with_qs = runtime.storage.get_session(session.id)
+    assert session_with_qs is not None
+
+    deleted_files: list[str] = []
+    with patch.object(
+        sq_module,
+        "_delete_fork_file",
+        new=AsyncMock(side_effect=lambda fid, *a, **kw: deleted_files.append(fid)),
+    ):
+        await delete_session_side_questions(runtime, plugin, session_with_qs)
+
+    # Both fork files must be deleted; sq-c had no fork file.
+    assert set(deleted_files) == {"fork-A", "fork-B"}
+
+    # Storage must have an empty pending_side_questions list.
+    fresh = runtime.storage.get_session(session.id)
+    assert fresh is not None
+    assert _read_side_questions(fresh) == []
+
+
+async def test_delete_session_side_questions_uses_passed_snapshot(
+    runtime: Any,
+    plugin: Any,
+) -> None:
+    """Fork ids must be read from the passed session snapshot, not re-fetched
+    from storage (storage may already be gone when called)."""
+    from waypoint.backends.claude_code.side_question import (
+        delete_session_side_questions,
+    )
+
+    session = _make_session(runtime.storage, thread_id="thread-abc")
+    sq_snap = SideQuestion(
+        id="sq-snap",
+        question="Snap?",
+        status=SideQuestionStatus.ANSWERED,
+        fork_thread_id="fork-snap",
+        attempts=1,
+        created_at=datetime.now(UTC),
+    )
+    # Write to storage so the session exists there.
+    _write_side_questions(runtime, session.id, [sq_snap])
+    # Re-read the session snapshot with the fork id embedded.
+    session_with_fork = runtime.storage.get_session(session.id)
+    assert session_with_fork is not None
+
+    # Now remove the session from storage (simulating post-delete call).
+    runtime.storage.delete_session(session.id)
+
+    deleted_files: list[str] = []
+    with patch.object(
+        sq_module,
+        "_delete_fork_file",
+        new=AsyncMock(side_effect=lambda fid, *a, **kw: deleted_files.append(fid)),
+    ):
+        # The session row is already gone; must still clean up the fork file.
+        await delete_session_side_questions(runtime, plugin, session_with_fork)
+
+    assert "fork-snap" in deleted_files

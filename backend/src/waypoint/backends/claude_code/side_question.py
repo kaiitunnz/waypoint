@@ -213,6 +213,8 @@ async def _run_one_shot_local(
         fork_id,
         "--output-format",
         "json",
+        "--tools",
+        "",
     ]
     cwd_path = Path(cwd).expanduser()
     proc = await asyncio.create_subprocess_exec(
@@ -254,6 +256,8 @@ async def _run_one_shot_remote(
         fork_id,
         "--output-format",
         "json",
+        "--tools",
+        "",
     ]
     remote_parts = [
         f"cd {quote_remote_path(cwd)}",
@@ -654,51 +658,101 @@ async def recover_pending_side_questions(
 
         for sq in questions:
             if sq.status == SideQuestionStatus.ANSWERED:
-                # Thread survived the restart; re-broadcast so the overlay reappears.
-                await _broadcast_upsert(runtime, session.id, sq)
+                # Thread survived the restart.  Re-read under lock to get the
+                # current state before broadcasting (dismiss may have raced us).
+                sq_current: SideQuestion | None = None
+                async with _lock_for(session.id):
+                    fresh = runtime.storage.get_session(session.id)
+                    if fresh is None:
+                        continue
+                    qs_fresh = _read_side_questions(fresh)
+                    sq_current = next((q for q in qs_fresh if q.id == sq.id), None)
+                if (
+                    sq_current is not None
+                    and sq_current.status == SideQuestionStatus.ANSWERED
+                ):
+                    await _broadcast_upsert(runtime, session.id, sq_current)
 
             elif sq.status == SideQuestionStatus.PENDING:
-                # The in-flight one-shot was killed by the restart.
-                # Delete the stale fork file (it may be corrupt/incomplete).
-                if sq.fork_thread_id:
-                    await _delete_fork_file(
-                        sq.fork_thread_id, session.launch_target_id, runtime
-                    )
+                # Re-read the record list FRESH inside the lock so a completion
+                # that landed during recovery (between the stale snapshot and
+                # the lock) is never clobbered and its fork file never orphaned.
+                stale_fork_id: str | None = None
+                to_broadcast: SideQuestion | None = None
+                schedule_task = False
 
-                if sq.attempts >= MAX_ATTEMPTS:
-                    # Attempt cap: mark error, keep record visible for the user to dismiss.
-                    updated = sq.model_copy(
-                        update={
-                            "status": SideQuestionStatus.ERROR,
-                            "error": "Max attempts reached after backend restart.",
-                            "fork_thread_id": None,
-                        }
+                async with _lock_for(session.id):
+                    fresh = runtime.storage.get_session(session.id)
+                    if fresh is None:
+                        continue
+                    qs_fresh = _read_side_questions(fresh)
+                    sq_fresh = next((q for q in qs_fresh if q.id == sq.id), None)
+                    if (
+                        sq_fresh is None
+                        or sq_fresh.status != SideQuestionStatus.PENDING
+                    ):
+                        # Completed or dismissed while we were iterating — leave it alone.
+                        continue
+                    stale_fork_id = sq_fresh.fork_thread_id
+                    if sq_fresh.attempts >= MAX_ATTEMPTS:
+                        to_broadcast = sq_fresh.model_copy(
+                            update={
+                                "status": SideQuestionStatus.ERROR,
+                                "error": "Max attempts reached after backend restart.",
+                                "fork_thread_id": None,
+                            }
+                        )
+                    else:
+                        to_broadcast = sq_fresh.model_copy(
+                            update={
+                                "attempts": sq_fresh.attempts + 1,
+                                "resumed": True,
+                                "fork_thread_id": None,
+                            }
+                        )
+                        schedule_task = True
+                    qs_fresh = [to_broadcast if q.id == sq.id else q for q in qs_fresh]
+                    _write_side_questions(runtime, session.id, qs_fresh)
+
+                # Async I/O and task scheduling outside the lock.
+                if stale_fork_id:
+                    await _delete_fork_file(
+                        stale_fork_id, session.launch_target_id, runtime
                     )
-                    async with _lock_for(session.id):
-                        fresh = runtime.storage.get_session(session.id)
-                        if fresh is None:
-                            continue
-                        qs = _read_side_questions(fresh)
-                        qs = [updated if q.id == sq.id else q for q in qs]
-                        _write_side_questions(runtime, session.id, qs)
-                    await _broadcast_upsert(runtime, session.id, updated)
-                else:
-                    # Re-issue with a fresh fork id and bumped attempt counter.
-                    resumed = sq.model_copy(
-                        update={
-                            "attempts": sq.attempts + 1,
-                            "resumed": True,
-                            "fork_thread_id": None,
-                        }
-                    )
-                    async with _lock_for(session.id):
-                        fresh = runtime.storage.get_session(session.id)
-                        if fresh is None:
-                            continue
-                        qs = _read_side_questions(fresh)
-                        qs = [resumed if q.id == sq.id else q for q in qs]
-                        _write_side_questions(runtime, session.id, qs)
-                    await _broadcast_upsert(runtime, session.id, resumed)
+                if to_broadcast is not None:
+                    await _broadcast_upsert(runtime, session.id, to_broadcast)
+                if schedule_task:
                     _schedule_bg_task(runtime, plugin, session.id, sq.id)
 
             # ERROR records: leave as-is; user can dismiss them.
+
+
+async def delete_session_side_questions(
+    runtime: "SessionRuntime",
+    plugin: "ClaudeCodePlugin",
+    session: SessionRecord,
+) -> None:
+    """Clean up all side-question fork files when a session is being deleted.
+
+    Reads fork ids from the passed ``session`` snapshot (storage may already be
+    gone by the time this is called). Clears ``pending_side_questions`` from
+    storage if the row is still present, then deletes every ``<E>.jsonl`` fork
+    file.  Called from ``plugin.on_session_deleted`` before the session row is
+    removed.
+    """
+    questions = _read_side_questions(session)
+    if not questions:
+        return
+
+    # Collect fork ids from the passed snapshot before touching storage so we
+    # can clean up files even if the storage row is already gone.
+    fork_ids = [sq.fork_thread_id for sq in questions if sq.fork_thread_id]
+
+    async with _lock_for(session.id):
+        fresh = runtime.storage.get_session(session.id)
+        if fresh is not None:
+            state = {**fresh.transport_state, "pending_side_questions": []}
+            runtime.storage.update_session(session.id, transport_state=state)
+
+    for fork_thread_id in fork_ids:
+        await _delete_fork_file(fork_thread_id, session.launch_target_id, runtime)

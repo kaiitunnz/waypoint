@@ -3819,6 +3819,11 @@ html[data-theme="light"] .task-dock-panel {
   z-index: 5;
   margin-top: -8px;
   pointer-events: none;
+  /* The parent `.stack` is a grid with an `auto` column, which sizes to its
+     widest child's max-content. Every other `.stack` child sets this; without
+     it the dock's answer paragraph (max-content = the whole answer on one line)
+     blew the grid — and the page — wider than the viewport. */
+  min-width: 0;
 }
 
 .sq-dock.expanded {
@@ -3949,6 +3954,11 @@ html[data-theme="light"] .sq-dock-scrim {
   max-height: 50vh;
   overflow-y: auto;
   display: grid;
+  /* minmax(0, 1fr) — NOT a default `auto` column, which sizes to the answer
+     paragraph's max-content (the whole answer on one line) and blows the dock
+     wider than the viewport, scrolling the page sideways. The 0 floor lets the
+     column shrink so text wraps. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   padding: 12px 14px;
   border: 1px solid var(--line-strong);
@@ -4006,6 +4016,7 @@ html[data-theme="light"] .sq-dock-panel {
 }
 
 .sq-dock-cards {
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
@@ -4064,6 +4075,7 @@ html[data-theme="light"] .sq-dock-panel {
 /* ── Aside card: a marginalia list item inside the panel ── */
 .sq-card {
   position: relative;
+  min-width: 0;
   border-left: 3px solid var(--accent);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   padding: 10px 4px 12px 14px;
@@ -4178,6 +4190,7 @@ html[data-theme="light"] .sq-dock-panel {
   color: var(--text-strong);
   margin: 0 0 8px;
   text-wrap: pretty;
+  overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
@@ -4201,6 +4214,7 @@ html[data-theme="light"] .sq-dock-panel {
   line-height: 1.5;
   color: var(--text);
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .sq-card-a-clamped {

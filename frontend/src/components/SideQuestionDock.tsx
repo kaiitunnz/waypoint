@@ -6,6 +6,26 @@ import { useRouter } from "next/navigation";
 import { dismissSideQuestion, forkSideQuestion } from "@/lib/api";
 import { type SideQuestion } from "@/lib/types";
 
+// Single up-chevron; orientation handled with a CSS rotation, matching the
+// task-progress dock so the two docks read as one family.
+function ChevronIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M4 10l4-4 4 4" />
+    </svg>
+  );
+}
+
 function fmtTime(iso: string): string {
   try {
     const d = new Date(iso);
@@ -35,8 +55,7 @@ function SideQuestionCard({
   const answerRef = useRef<HTMLParagraphElement>(null);
 
   // A long answer is clamped to a few lines with a fade; only then do we offer
-  // "Read full aside". Measure against the clamped box (collapsed only) so a
-  // short answer never shows a needless toggle or a fade over its last line.
+  // "Read full aside". Measure against the clamped box (collapsed only).
   useLayoutEffect(() => {
     const el = answerRef.current;
     if (!el || isPending || expanded) return;
@@ -132,19 +151,18 @@ export function SideQuestionDock({
   sessionId: string;
 }) {
   const router = useRouter();
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [showOlder, setShowOlder] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [forkingId, setForkingId] = useState<string | null>(null);
   const [dismissingIds, setDismissingIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!sheetOpen) return;
+    if (!expanded) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSheetOpen(false);
+      if (e.key === "Escape") setExpanded(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sheetOpen]);
+  }, [expanded]);
 
   const handleDismiss = useCallback(
     async (sqid: string) => {
@@ -176,7 +194,7 @@ export function SideQuestionDock({
     [forkingId, host, token, sessionId, router],
   );
 
-  const handleClearAll = useCallback(async () => {
+  const handleClearAll = useCallback(() => {
     for (const sq of questions) {
       void handleDismiss(sq.id);
     }
@@ -187,120 +205,84 @@ export function SideQuestionDock({
   const sorted = [...questions].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
-
-  const renderCard = (sq: SideQuestion) => (
-    <SideQuestionCard
-      key={sq.id}
-      sq={sq}
-      onDismiss={() => handleDismiss(sq.id)}
-      onFork={() => handleFork(sq.id)}
-      forking={forkingId === sq.id}
-      dismissing={dismissingIds.has(sq.id)}
-    />
-  );
-
-  // Desktop keeps a small footprint: the most recent aside is expanded, older
-  // ones fold behind a one-line summary so the stack never climbs the page.
-  const [newest, ...older] = sorted;
-  const desktopStack = (
-    <>
-      {renderCard(newest)}
-      {older.length > 0 ? (
-        showOlder ? (
-          <>
-            {older.map(renderCard)}
-            <button
-              type="button"
-              className="sq-older-toggle"
-              onClick={() => setShowOlder(false)}
-            >
-              Show fewer
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            className="sq-older-toggle"
-            onClick={() => setShowOlder(true)}
-          >
-            ¶ {older.length} earlier aside{older.length !== 1 ? "s" : ""}
-          </button>
-        )
-      ) : null}
-    </>
-  );
+  const pendingCount = sorted.filter((s) => s.status === "pending").length;
+  const count = questions.length;
+  const label = pendingCount > 0 ? "Asking…" : sorted[0].question;
 
   return (
-    <div className={`sq-dock${sheetOpen ? " sq-dock-expanded" : ""}`}>
-      {/* Mobile bottom sheet (expanded) */}
-      {sheetOpen ? (
+    <div className={`sq-dock${pendingCount > 0 ? " active" : ""}${expanded ? " expanded" : ""}`}>
+      {expanded ? (
         <>
           <button
             type="button"
-            className="sq-scrim"
+            className="sq-dock-scrim"
             aria-label="Close side questions"
-            onClick={() => setSheetOpen(false)}
+            onClick={() => setExpanded(false)}
           />
-          <div className="sq-sheet" role="dialog" aria-label="Side questions">
-            <div className="sq-sheet-head">
-              <span className="sq-sheet-title">Side questions</span>
-              {questions.length >= 2 ? (
-                <button
-                  type="button"
-                  className="sq-clear-all"
-                  onClick={() => {
-                    void handleClearAll();
-                    setSheetOpen(false);
-                  }}
-                >
+          <div className="sq-dock-panel" role="dialog" aria-label="Side questions">
+            <div className="sq-dock-panel-head">
+              <span className="sq-dock-panel-title">Side questions</span>
+              <span className="sq-dock-count">{count}</span>
+              {count >= 2 ? (
+                <button type="button" className="sq-clear-all" onClick={handleClearAll}>
                   Clear all
                 </button>
               ) : null}
               <button
                 type="button"
-                className="sq-sheet-close"
-                aria-label="Close"
-                onClick={() => setSheetOpen(false)}
+                className="sq-dock-collapse"
+                aria-label="Collapse side questions"
+                onClick={() => setExpanded(false)}
               >
-                ×
+                <ChevronIcon />
               </button>
             </div>
-            <div className="sq-sheet-cards">{sorted.map(renderCard)}</div>
+            <div className="sq-dock-cards">
+              {sorted.map((sq) => (
+                <SideQuestionCard
+                  key={sq.id}
+                  sq={sq}
+                  onDismiss={() => handleDismiss(sq.id)}
+                  onFork={() => handleFork(sq.id)}
+                  forking={forkingId === sq.id}
+                  dismissing={dismissingIds.has(sq.id)}
+                />
+              ))}
+            </div>
           </div>
         </>
       ) : null}
 
-      {/* Mobile slim bar */}
-      <button
-        type="button"
-        className="sq-bar"
-        onClick={() => setSheetOpen(true)}
-        aria-label={`${questions.length} side question${questions.length !== 1 ? "s" : ""} — tap to view`}
-        aria-expanded={sheetOpen}
-      >
-        <span className="sq-bar-icon" aria-hidden="true">
-          ¶
-        </span>
-        <span className="sq-bar-label">
-          {questions.length} side question{questions.length !== 1 ? "s" : ""}
-        </span>
-        <span className="sq-bar-chevron" aria-hidden="true">
-          ↑
-        </span>
-      </button>
-
-      {/* Desktop in-flow panel, right-aligned above the composer */}
-      <div className="sq-panel" aria-label="Side questions">
-        <div className="sq-panel-head">
-          <span className="sq-panel-label">Side questions</span>
-          {questions.length >= 2 ? (
-            <button type="button" className="sq-clear-all" onClick={() => void handleClearAll()}>
-              Clear all
-            </button>
-          ) : null}
+      <div className="sq-dock-strip">
+        <div className="sq-dock-row">
+          <button
+            type="button"
+            className="sq-dock-toggle"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((v) => !v)}
+          >
+            <span className="sq-dock-glyph" aria-hidden>
+              ¶
+            </span>
+            <span className="sq-dock-label">{label}</span>
+            <span className="sq-dock-count">{count}</span>
+            <span className="sq-dock-chevron" aria-hidden>
+              <ChevronIcon />
+            </span>
+          </button>
+          <button
+            type="button"
+            className="sq-dock-dismiss"
+            aria-label="Clear side questions"
+            onClick={handleClearAll}
+          >
+            ×
+          </button>
         </div>
-        <div className="sq-panel-cards">{desktopStack}</div>
       </div>
+      <span className="sr-only" aria-live="polite">
+        {label}
+      </span>
     </div>
   );
 }

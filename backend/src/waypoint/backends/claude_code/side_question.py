@@ -33,14 +33,404 @@ wiring (``/btw`` interception, the runtime-dispatched fork/dismiss methods, and
 scheduling :func:`recover_pending_side_questions` from ``setup``).
 """
 
+import asyncio
+import json
+import logging
+import shlex
+import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from waypoint.schemas import SessionRecord
+from fastapi import HTTPException, status
+
+from waypoint.launch_targets import (
+    SshLaunchTargetConfig,
+    _resolve_local_binary,
+    quote_remote_path,
+)
+from waypoint.schemas import (
+    SessionEnvelope,
+    SessionRecord,
+    SessionSource,
+    SessionStatus,
+    SideQuestion,
+    SideQuestionStatus,
+)
 
 if TYPE_CHECKING:
     from waypoint.backends.claude_code.plugin import ClaudeCodePlugin
     from waypoint.runtime import SessionRuntime
+
+log = logging.getLogger("waypoint.backends.claude_code.side_question")
+
+MAX_ATTEMPTS = 3
+_ONE_SHOT_TIMEOUT = 120.0
+
+# Per-session asyncio locks for transport_state["pending_side_questions"] mutations.
+_session_locks: dict[str, asyncio.Lock] = {}
+
+# Live background tasks kept in a set to prevent GC before completion.
+_background_tasks: set[asyncio.Task[None]] = set()
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _lock_for(session_id: str) -> asyncio.Lock:
+    lock = _session_locks.get(session_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _session_locks[session_id] = lock
+    return lock
+
+
+def _read_side_questions(session: SessionRecord) -> list[SideQuestion]:
+    raw = session.transport_state.get("pending_side_questions")
+    if not isinstance(raw, list):
+        return []
+    out: list[SideQuestion] = []
+    for item in raw:
+        if isinstance(item, dict):
+            try:
+                out.append(SideQuestion.model_validate(item))
+            except Exception:  # noqa: BLE001
+                pass
+    return out
+
+
+def _write_side_questions(
+    runtime: "SessionRuntime",
+    session_id: str,
+    questions: list[SideQuestion],
+) -> SessionRecord:
+    session = runtime.storage.get_session(session_id)
+    if session is None:
+        raise KeyError(session_id)
+    state = {
+        **session.transport_state,
+        "pending_side_questions": [q.model_dump(mode="json") for q in questions],
+    }
+    return runtime.storage.update_session(session_id, transport_state=state)
+
+
+async def _broadcast_upsert(
+    runtime: "SessionRuntime",
+    session_id: str,
+    sq: SideQuestion,
+) -> None:
+    await runtime.broadcast.publish(
+        SessionEnvelope(
+            type="side_question",
+            payload={"side_question": sq.model_dump(mode="json")},
+        ),
+        session_id=session_id,
+    )
+
+
+async def _broadcast_remove(
+    runtime: "SessionRuntime",
+    session_id: str,
+    sqid: str,
+) -> None:
+    await runtime.broadcast.publish(
+        SessionEnvelope(
+            type="side_question",
+            payload={"removed_id": sqid},
+        ),
+        session_id=session_id,
+    )
+
+
+def _delete_fork_file_local(fork_thread_id: str) -> None:
+    """Delete ``<fork_thread_id>.jsonl`` from ``~/.claude/projects/``."""
+    projects = Path.home() / ".claude" / "projects"
+    if not projects.is_dir():
+        return
+    for p in projects.glob(f"*/{fork_thread_id}.jsonl"):
+        try:
+            p.unlink(missing_ok=True)
+        except OSError:
+            log.warning("could not delete fork thread file %s", p)
+        return  # UUID is unique; stop after the first match
+
+
+async def _delete_fork_file(
+    fork_thread_id: str,
+    launch_target_id: str | None,
+    runtime: "SessionRuntime",
+) -> None:
+    """Delete the forked thread file locally or via SSH."""
+    if launch_target_id is None:
+        await asyncio.to_thread(_delete_fork_file_local, fork_thread_id)
+        return
+    launch_target = runtime._find_launch_target(launch_target_id)
+    if launch_target is None:
+        return
+    needle = shlex.quote(f"{fork_thread_id}.jsonl")
+    # ssh_capture runs the command in the remote shell; glob and find both work.
+    await launch_target.ssh_capture(
+        f"find $HOME/.claude/projects -maxdepth 2 -name {needle}"
+        f" -exec rm -f {{}} \\; 2>/dev/null || true"
+    )
+
+
+def _parse_one_shot_output(raw: bytes) -> str:
+    """Parse ``--output-format json`` stdout and return the result text."""
+    text = raw.decode("utf-8", errors="replace").strip()
+    try:
+        data: dict = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"claude output is not valid JSON: {text[:200]!r}") from exc
+    if data.get("is_error"):
+        raise RuntimeError(f"claude error: {data.get('subtype', 'unknown')}")
+    result = data.get("result")
+    if not isinstance(result, str):
+        raise RuntimeError(f"claude result missing or not a string: {text[:200]!r}")
+    return result
+
+
+async def _run_one_shot_local(
+    question: str,
+    thread_id: str,
+    fork_id: str,
+    cwd: str,
+) -> str:
+    """Run a one-shot fork-query locally and return the answer text."""
+    binary = shutil.which("claude")
+    if binary is None:
+        raise RuntimeError("claude binary not found on PATH")
+    args = [
+        binary,
+        "-p",
+        question,
+        "--resume",
+        thread_id,
+        "--fork-session",
+        "--session-id",
+        fork_id,
+        "--output-format",
+        "json",
+    ]
+    cwd_path = Path(cwd).expanduser()
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        cwd=str(cwd_path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, _ = await asyncio.wait_for(
+            proc.communicate(), timeout=_ONE_SHOT_TIMEOUT
+        )
+    except TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        raise RuntimeError("side-question one-shot timed out") from None
+    if proc.returncode != 0:
+        raise RuntimeError(f"claude exited with rc={proc.returncode}")
+    return _parse_one_shot_output(stdout)
+
+
+async def _run_one_shot_remote(
+    question: str,
+    thread_id: str,
+    fork_id: str,
+    cwd: str,
+    launch_target: SshLaunchTargetConfig,
+    claude_bin: str,
+) -> str:
+    """Run a one-shot fork-query on a remote SSH host and return the answer."""
+    claude_args = [
+        claude_bin,
+        "-p",
+        question,
+        "--resume",
+        thread_id,
+        "--fork-session",
+        "--session-id",
+        fork_id,
+        "--output-format",
+        "json",
+    ]
+    remote_parts = [
+        f"cd {quote_remote_path(cwd)}",
+        "&&",
+        "exec",
+        shlex.join(claude_args),
+    ]
+    remote_cmd = " ".join(remote_parts)
+    wrapped = launch_target.wrap_remote_command(remote_cmd)
+    ssh_args = [
+        _resolve_local_binary(launch_target.ssh_bin),
+        *launch_target.ssh_args,
+        launch_target.ssh_destination,
+        wrapped,
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *ssh_args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, _ = await asyncio.wait_for(
+            proc.communicate(), timeout=_ONE_SHOT_TIMEOUT
+        )
+    except TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        raise RuntimeError("side-question one-shot timed out (remote)") from None
+    if proc.returncode != 0:
+        raise RuntimeError(f"claude (remote) exited with rc={proc.returncode}")
+    return _parse_one_shot_output(stdout)
+
+
+async def _mark_error(
+    runtime: "SessionRuntime",
+    session_id: str,
+    sqid: str,
+    error_msg: str,
+) -> None:
+    """Update a side-question to ``error`` status and broadcast the change."""
+    updated: SideQuestion | None = None
+    async with _lock_for(session_id):
+        fresh = runtime.storage.get_session(session_id)
+        if fresh is None:
+            return
+        questions = _read_side_questions(fresh)
+        sq = next((q for q in questions if q.id == sqid), None)
+        if sq is None:
+            return
+        updated = sq.model_copy(
+            update={
+                "status": SideQuestionStatus.ERROR,
+                "error": error_msg,
+                "fork_thread_id": None,
+            }
+        )
+        questions = [updated if q.id == sqid else q for q in questions]
+        _write_side_questions(runtime, session_id, questions)
+    if updated is not None:
+        await _broadcast_upsert(runtime, session_id, updated)
+
+
+def _schedule_bg_task(
+    runtime: "SessionRuntime",
+    plugin: "ClaudeCodePlugin",
+    session_id: str,
+    sqid: str,
+) -> None:
+    task = asyncio.create_task(
+        _run_side_question_bg(runtime, plugin, session_id, sqid),
+        name=f"side-question-{sqid}",
+    )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+async def _run_side_question_bg(
+    runtime: "SessionRuntime",
+    plugin: "ClaudeCodePlugin",
+    session_id: str,
+    sqid: str,
+) -> None:
+    """Background worker: run the one-shot and update the side-question record."""
+    try:
+        session = runtime.storage.get_session(session_id)
+        if session is None:
+            return
+
+        thread_id = session.transport_state.get("thread_id")
+        if not isinstance(thread_id, str) or not thread_id:
+            await _mark_error(
+                runtime, session_id, sqid, "Session has no conversation thread."
+            )
+            return
+
+        # Read the question from the persisted record.
+        questions_now = _read_side_questions(session)
+        sq_now = next((q for q in questions_now if q.id == sqid), None)
+        if sq_now is None:
+            return  # dismissed before we started
+        question = sq_now.question
+
+        launch_target_id = session.launch_target_id
+        launch_target = (
+            runtime._find_launch_target(launch_target_id) if launch_target_id else None
+        )
+        fork_id = plugin.generate_session_id()
+
+        try:
+            if launch_target is None:
+                answer = await _run_one_shot_local(
+                    question, thread_id, fork_id, session.cwd
+                )
+            else:
+                claude_bin = plugin.remote_executable(launch_target) or "claude"
+                answer = await _run_one_shot_remote(
+                    question,
+                    thread_id,
+                    fork_id,
+                    session.cwd,
+                    launch_target,
+                    claude_bin,
+                )
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "side-question one-shot failed: %s",
+                exc,
+                extra={"session_id": session_id, "sqid": sqid},
+            )
+            # The one-shot may have created <E>.jsonl before failing; clean it up.
+            await _delete_fork_file(fork_id, launch_target_id, runtime)
+            await _mark_error(runtime, session_id, sqid, str(exc))
+            return
+
+        # Persist the answer under the per-session lock.
+        fork_file_to_cleanup: str | None = None
+        updated: SideQuestion | None = None
+
+        async with _lock_for(session_id):
+            fresh = runtime.storage.get_session(session_id)
+            if fresh is None:
+                # Session deleted while running; abandon, clean up the fork file.
+                fork_file_to_cleanup = fork_id
+            else:
+                qs = _read_side_questions(fresh)
+                sq = next((q for q in qs if q.id == sqid), None)
+                if sq is None:
+                    # Dismissed while running; clean up the fork file.
+                    fork_file_to_cleanup = fork_id
+                else:
+                    updated = sq.model_copy(
+                        update={
+                            "status": SideQuestionStatus.ANSWERED,
+                            "answer": answer,
+                            "fork_thread_id": fork_id,
+                        }
+                    )
+                    qs = [updated if q.id == sqid else q for q in qs]
+                    _write_side_questions(runtime, session_id, qs)
+
+        if fork_file_to_cleanup is not None:
+            await _delete_fork_file(fork_file_to_cleanup, launch_target_id, runtime)
+            return
+
+        if updated is not None:
+            await _broadcast_upsert(runtime, session_id, updated)
+
+    except Exception:  # noqa: BLE001
+        log.exception(
+            "side-question bg task crashed",
+            extra={"session_id": session_id, "sqid": sqid},
+        )
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 
 async def start_side_question(
@@ -59,7 +449,44 @@ async def start_side_question(
     spawned. Registered against ``plugin`` so the task can be cancelled on
     shutdown.
     """
-    raise NotImplementedError
+    thread_id = session.transport_state.get("thread_id")
+    now = datetime.now(UTC)
+
+    if not isinstance(thread_id, str) or not thread_id:
+        sq = SideQuestion(
+            id=plugin.generate_session_id(),
+            question=question,
+            status=SideQuestionStatus.ERROR,
+            error="Send a message first — there is no conversation to read.",
+            attempts=1,
+            created_at=now,
+        )
+        async with _lock_for(session.id):
+            fresh = runtime.storage.get_session(session.id)
+            if fresh is None:
+                return
+            qs = _read_side_questions(fresh)
+            qs.append(sq)
+            _write_side_questions(runtime, session.id, qs)
+        await _broadcast_upsert(runtime, session.id, sq)
+        return
+
+    sq = SideQuestion(
+        id=plugin.generate_session_id(),
+        question=question,
+        status=SideQuestionStatus.PENDING,
+        attempts=1,
+        created_at=now,
+    )
+    async with _lock_for(session.id):
+        fresh = runtime.storage.get_session(session.id)
+        if fresh is None:
+            return
+        qs = _read_side_questions(fresh)
+        qs.append(sq)
+        _write_side_questions(runtime, session.id, qs)
+    await _broadcast_upsert(runtime, session.id, sq)
+    _schedule_bg_task(runtime, plugin, session.id, sq.id)
 
 
 async def fork_aside(
@@ -79,7 +506,86 @@ async def fork_aside(
     and broadcasts the removal. Raises if the side-question is unknown or has no
     retained thread.
     """
-    raise NotImplementedError
+    if plugin.adapter is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="claude adapter is not initialized",
+        )
+
+    fork_thread_id: str = ""
+
+    async with _lock_for(session.id):
+        fresh = runtime.storage.get_session(session.id)
+        if fresh is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="session not found"
+            )
+        qs = _read_side_questions(fresh)
+        sq = next((q for q in qs if q.id == side_question_id), None)
+        if sq is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="side question not found",
+            )
+        if not sq.fork_thread_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="side question has no retained thread; wait for an answer first",
+            )
+        fork_thread_id = sq.fork_thread_id
+        # Drop the record WITHOUT deleting the thread — the new session owns it.
+        qs = [q for q in qs if q.id != side_question_id]
+        _write_side_questions(runtime, session.id, qs)
+
+    await _broadcast_remove(runtime, session.id, side_question_id)
+
+    # Build the new session record resuming the fork thread directly.
+    now = datetime.now(UTC)
+    raw_log.touch(exist_ok=True)
+    new_session = SessionRecord(
+        id=new_session_id,
+        backend=session.backend,
+        source=SessionSource.MANAGED,
+        transport=plugin.transport_id,
+        title=title,
+        cwd=session.cwd,
+        launch_target_id=session.launch_target_id,
+        repo_name=session.repo_name,
+        branch=session.branch,
+        status=SessionStatus.IDLE,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path=str(raw_log),
+        structured_log_path=str(structured_log),
+        transport_state={"thread_id": fork_thread_id},
+        permission_mode=session.permission_mode,
+        model=session.model,
+        effort=session.effort,
+        args=session.args,
+        config_overrides=session.config_overrides,
+    )
+    runtime.storage.create_session(new_session)
+    runtime.storage.clone_events(session.id, new_session_id)
+
+    try:
+        await plugin.adapter.restore_session(
+            new_session_id,
+            session.cwd,
+            fork_thread_id,
+            plugin.launch_factory(runtime, session.launch_target_id),
+            permission_mode=session.permission_mode,
+            model=session.model,
+            effort=session.effort,
+        )
+    except Exception as exc:  # noqa: BLE001
+        runtime.storage.update_session(new_session_id, status=SessionStatus.ERROR)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"failed to restore forked session: {exc}",
+        ) from exc
+
+    return runtime.get_session(new_session_id)
 
 
 async def dismiss_aside(
@@ -90,7 +596,23 @@ async def dismiss_aside(
 ) -> None:
     """Resolve a side-question: drop its record, delete its forked thread, and
     broadcast the removal. No-op if the id is unknown."""
-    raise NotImplementedError
+    fork_thread_id: str | None = None
+
+    async with _lock_for(session.id):
+        fresh = runtime.storage.get_session(session.id)
+        if fresh is None:
+            return
+        qs = _read_side_questions(fresh)
+        sq = next((q for q in qs if q.id == side_question_id), None)
+        if sq is None:
+            return  # no-op
+        fork_thread_id = sq.fork_thread_id
+        qs = [q for q in qs if q.id != side_question_id]
+        _write_side_questions(runtime, session.id, qs)
+
+    if fork_thread_id:
+        await _delete_fork_file(fork_thread_id, session.launch_target_id, runtime)
+    await _broadcast_remove(runtime, session.id, side_question_id)
 
 
 async def recover_pending_side_questions(
@@ -106,4 +628,77 @@ async def recover_pending_side_questions(
     are simply re-broadcast so the overlay reappears. Records on dead/exited
     sessions are cleaned up (thread deleted, record dropped) so nothing leaks.
     """
-    raise NotImplementedError
+    for session in runtime.storage.list_sessions():
+        if session.backend != plugin.id:
+            continue
+        questions = _read_side_questions(session)
+        if not questions:
+            continue
+
+        # Dead/exited sessions: clean up all fork files and drop all records.
+        if session.status in (SessionStatus.EXITED, SessionStatus.ERROR):
+            for sq in questions:
+                if sq.fork_thread_id:
+                    await _delete_fork_file(
+                        sq.fork_thread_id, session.launch_target_id, runtime
+                    )
+            async with _lock_for(session.id):
+                fresh = runtime.storage.get_session(session.id)
+                if fresh is not None:
+                    state = {
+                        **fresh.transport_state,
+                        "pending_side_questions": [],
+                    }
+                    runtime.storage.update_session(session.id, transport_state=state)
+            continue
+
+        for sq in questions:
+            if sq.status == SideQuestionStatus.ANSWERED:
+                # Thread survived the restart; re-broadcast so the overlay reappears.
+                await _broadcast_upsert(runtime, session.id, sq)
+
+            elif sq.status == SideQuestionStatus.PENDING:
+                # The in-flight one-shot was killed by the restart.
+                # Delete the stale fork file (it may be corrupt/incomplete).
+                if sq.fork_thread_id:
+                    await _delete_fork_file(
+                        sq.fork_thread_id, session.launch_target_id, runtime
+                    )
+
+                if sq.attempts >= MAX_ATTEMPTS:
+                    # Attempt cap: mark error, keep record visible for the user to dismiss.
+                    updated = sq.model_copy(
+                        update={
+                            "status": SideQuestionStatus.ERROR,
+                            "error": "Max attempts reached after backend restart.",
+                            "fork_thread_id": None,
+                        }
+                    )
+                    async with _lock_for(session.id):
+                        fresh = runtime.storage.get_session(session.id)
+                        if fresh is None:
+                            continue
+                        qs = _read_side_questions(fresh)
+                        qs = [updated if q.id == sq.id else q for q in qs]
+                        _write_side_questions(runtime, session.id, qs)
+                    await _broadcast_upsert(runtime, session.id, updated)
+                else:
+                    # Re-issue with a fresh fork id and bumped attempt counter.
+                    resumed = sq.model_copy(
+                        update={
+                            "attempts": sq.attempts + 1,
+                            "resumed": True,
+                            "fork_thread_id": None,
+                        }
+                    )
+                    async with _lock_for(session.id):
+                        fresh = runtime.storage.get_session(session.id)
+                        if fresh is None:
+                            continue
+                        qs = _read_side_questions(fresh)
+                        qs = [resumed if q.id == sq.id else q for q in qs]
+                        _write_side_questions(runtime, session.id, qs)
+                    await _broadcast_upsert(runtime, session.id, resumed)
+                    _schedule_bg_task(runtime, plugin, session.id, sq.id)
+
+            # ERROR records: leave as-is; user can dismiss them.

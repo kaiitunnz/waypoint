@@ -927,6 +927,12 @@ class ClaudeTtyPlugin:
 
     # ── AskUserQuestion ──────────────────────────────────────────────────────
 
+    async def cleanup_side_questions_on_delete(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        if session.transport_state.get("pending_side_questions"):
+            await _sq.delete_session_side_questions(runtime, self._claude, session)
+
     async def fork_side_question(
         self,
         runtime: "SessionRuntime",

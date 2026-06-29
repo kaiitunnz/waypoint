@@ -254,6 +254,12 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         )
         self._sq_tasks["__recovery__"] = task
 
+    async def cleanup_side_questions_on_delete(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        if session.transport_state.get("pending_side_questions"):
+            await _sq.delete_session_side_questions(runtime, self, session)
+
     def _require_adapter(self) -> ClaudeCliAdapter:
         if self.adapter is None:
             raise HTTPException(

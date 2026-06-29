@@ -394,6 +394,47 @@ async def test_claude_code_start_background_tasks_schedules_recovery(
     mock_recover.assert_called_once_with(runtime, plugin)
 
 
+async def test_delete_session_calls_cleanup_side_questions(tmp_path: Path) -> None:
+    """Deleting a session with pending side-questions awaits the cleanup hook."""
+    sq = {
+        "id": "sq-del-001",
+        "question": "Will this be cleaned up?",
+        "status": "pending",
+        "answer": None,
+        "error": None,
+        "fork_thread_id": "fork-thread-abc",
+        "attempts": 1,
+        "resumed": False,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    session, _, _ = _make_session(
+        tmp_path,
+        transport_state={"pending_side_questions": [sq]},
+    )
+    app, token = _make_app(tmp_path, session)
+    context = app.state.context
+    # Mark session as already EXITED so delete skips terminate()
+    context.storage.update_session(session.id, status=SessionStatus.EXITED)
+
+    mock_cleanup = AsyncMock()
+    with patch(
+        "waypoint.backends.claude_code.side_question.delete_session_side_questions",
+        mock_cleanup,
+        create=True,
+    ):
+        async with _client(app) as client:
+            resp = await client.delete(
+                f"/api/sessions/{session.id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+    assert resp.status_code == 200
+    mock_cleanup.assert_called_once()
+    call_args = mock_cleanup.call_args
+    # (runtime, plugin, session) positional args
+    assert call_args.args[2].id == session.id
+
+
 async def test_claude_code_shutdown_cancels_sq_tasks(tmp_path: Path) -> None:
     runtime, storage, _ = _make_runtime(tmp_path)
     plugin = ClaudeCodePlugin()

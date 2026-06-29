@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { dismissSideQuestion, forkSideQuestion } from "@/lib/api";
@@ -30,6 +30,20 @@ function SideQuestionCard({
 }) {
   const isPending = sq.status === "pending";
   const isError = sq.status === "error";
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  const answerRef = useRef<HTMLParagraphElement>(null);
+
+  // A long answer is clamped to a few lines with a fade; only then do we offer
+  // "Read full aside". Measure against the clamped box (collapsed only) so a
+  // short answer never shows a needless toggle or a fade over its last line.
+  useLayoutEffect(() => {
+    const el = answerRef.current;
+    if (!el || isPending || expanded) return;
+    setOverflowing(el.scrollHeight - el.clientHeight > 4);
+  }, [sq.answer, sq.error, isPending, expanded]);
+
+  const answerText = sq.answer ?? sq.error ?? "";
 
   return (
     <article className={`sq-card${isError ? " sq-error" : ""}`}>
@@ -40,13 +54,11 @@ function SideQuestionCard({
             asking…
           </span>
         ) : isError ? (
-          <span>✕ Aside</span>
+          <span className="sq-card-mark">✕ Aside</span>
         ) : (
-          <span>¶ Aside</span>
+          <span className="sq-card-mark">¶ Aside</span>
         )}
-        {sq.resumed ? (
-          <span className="sq-chip-resumed">↻ resumed</span>
-        ) : null}
+        {sq.resumed ? <span className="sq-chip-resumed">↻ resumed</span> : null}
         <span className="sq-card-ts">{fmtTime(sq.created_at)}</span>
         <button
           type="button"
@@ -68,8 +80,28 @@ function SideQuestionCard({
           <span className="sq-shimmer sq-shimmer-mid" />
         </div>
       ) : (
-        <p className="sq-card-a">{sq.answer ?? sq.error}</p>
+        <p
+          ref={answerRef}
+          className={`sq-card-a${
+            expanded
+              ? " sq-card-a-expanded"
+              : ` sq-card-a-clamped${overflowing ? " sq-card-a-fade" : ""}`
+          }`}
+        >
+          {answerText}
+        </p>
       )}
+
+      {!isPending && !isError && (overflowing || expanded) ? (
+        <button
+          type="button"
+          className="sq-card-more"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "Show less" : "Read full aside"}
+        </button>
+      ) : null}
 
       {!isPending && !isError ? (
         <div className="sq-card-foot">
@@ -101,6 +133,7 @@ export function SideQuestionDock({
 }) {
   const router = useRouter();
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [showOlder, setShowOlder] = useState(false);
   const [forkingId, setForkingId] = useState<string | null>(null);
   const [dismissingIds, setDismissingIds] = useState<Set<string>>(new Set());
 
@@ -155,7 +188,7 @@ export function SideQuestionDock({
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
 
-  const cards = sorted.map((sq) => (
+  const renderCard = (sq: SideQuestion) => (
     <SideQuestionCard
       key={sq.id}
       sq={sq}
@@ -164,7 +197,38 @@ export function SideQuestionDock({
       forking={forkingId === sq.id}
       dismissing={dismissingIds.has(sq.id)}
     />
-  ));
+  );
+
+  // Desktop keeps a small footprint: the most recent aside is expanded, older
+  // ones fold behind a one-line summary so the stack never climbs the page.
+  const [newest, ...older] = sorted;
+  const desktopStack = (
+    <>
+      {renderCard(newest)}
+      {older.length > 0 ? (
+        showOlder ? (
+          <>
+            {older.map(renderCard)}
+            <button
+              type="button"
+              className="sq-older-toggle"
+              onClick={() => setShowOlder(false)}
+            >
+              Show fewer
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="sq-older-toggle"
+            onClick={() => setShowOlder(true)}
+          >
+            ¶ {older.length} earlier aside{older.length !== 1 ? "s" : ""}
+          </button>
+        )
+      ) : null}
+    </>
+  );
 
   return (
     <div className={`sq-dock${sheetOpen ? " sq-dock-expanded" : ""}`}>
@@ -201,7 +265,7 @@ export function SideQuestionDock({
                 ×
               </button>
             </div>
-            <div className="sq-sheet-cards">{cards}</div>
+            <div className="sq-sheet-cards">{sorted.map(renderCard)}</div>
           </div>
         </>
       ) : null}
@@ -225,7 +289,7 @@ export function SideQuestionDock({
         </span>
       </button>
 
-      {/* Desktop floating card panel */}
+      {/* Desktop in-flow panel, right-aligned above the composer */}
       <div className="sq-panel" aria-label="Side questions">
         <div className="sq-panel-head">
           <span className="sq-panel-label">Side questions</span>
@@ -235,7 +299,7 @@ export function SideQuestionDock({
             </button>
           ) : null}
         </div>
-        <div className="sq-panel-cards">{cards}</div>
+        <div className="sq-panel-cards">{desktopStack}</div>
       </div>
     </div>
   );

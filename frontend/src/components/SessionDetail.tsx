@@ -354,6 +354,8 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   }, [sessionId]);
   useEffect(() => {
     setSideQuestions(new Map());
+    sqLiveSeenRef.current = new Set();
+    setSqExpandSignal(0);
   }, [sessionId]);
   const [view, setView] = useState<ViewMode>("chat");
   const [filterMode, setFilterMode] = useState<FilterMode>("important");
@@ -381,6 +383,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const [pendingPaste, setPendingPaste] = useState<string | null>(null);
   const [pasteSeq, setPasteSeq] = useState(0);
   const [sideQuestions, setSideQuestions] = useState<Map<string, SideQuestion>>(new Map());
+  // Bumped when a *live* (non-hydrated) side-question first arrives, so the dock
+  // auto-expands a just-sent /btw but not asides replayed on page load. The ref
+  // tracks ids already accounted for — including hydrated ones, so a later live
+  // update to a rehydrated aside doesn't pop the dock open.
+  const [sqExpandSignal, setSqExpandSignal] = useState(0);
+  const sqLiveSeenRef = useRef<Set<string>>(new Set());
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
@@ -815,10 +823,19 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
             }
           }
           if (message.type === "side_question") {
-            const payload = message.payload as { side_question?: SideQuestion; removed_id?: string };
+            const payload = message.payload as {
+              side_question?: SideQuestion;
+              removed_id?: string;
+              hydrated?: boolean;
+            };
             if (payload.side_question) {
               const sq = payload.side_question;
               setSideQuestions((prev) => new Map(prev).set(sq.id, sq));
+              if (!sqLiveSeenRef.current.has(sq.id)) {
+                sqLiveSeenRef.current.add(sq.id);
+                // Live (non-hydrated) first appearance → ask the dock to open.
+                if (!payload.hydrated) setSqExpandSignal((n) => n + 1);
+              }
             } else if (payload.removed_id) {
               setSideQuestions((prev) => {
                 const next = new Map(prev);
@@ -2168,6 +2185,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           host={host}
           token={token}
           sessionId={sessionId}
+          expandSignal={sqExpandSignal}
         />
       ) : null}
       {showTaskDock && taskProgress ? (

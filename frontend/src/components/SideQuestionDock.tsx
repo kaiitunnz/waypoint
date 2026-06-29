@@ -144,37 +144,30 @@ export function SideQuestionDock({
   host,
   token,
   sessionId,
+  expandSignal,
 }: {
   questions: SideQuestion[];
   host: string;
   token: string;
   sessionId: string;
+  expandSignal: number;
 }) {
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
   const [forkingId, setForkingId] = useState<string | null>(null);
   const [dismissingIds, setDismissingIds] = useState<Set<string>>(new Set());
-  const seenIdsRef = useRef<Set<string>>(new Set());
+  const lastExpandSignalRef = useRef(0);
 
-  // Auto-expand when the user sends a /btw, so the asked question and its
-  // "asking…" shimmer show immediately (the newest sorts to the top). We key
-  // off freshness, not just a new id: a just-sent aside is created ~now, while
-  // ones replayed on page load/refresh are older — so a reload no longer
-  // re-expands old asides. A manual collapse sticks (this only fires once per
-  // previously-unseen, freshly-created id).
+  // Auto-expand when the parent reports a *live* /btw (a non-hydrated aside) by
+  // advancing expandSignal — so a just-sent question opens immediately, but
+  // asides replayed on page load/refresh (which never advance the signal) stay
+  // collapsed. A manual collapse sticks until the next live /btw.
   useEffect(() => {
-    const now = Date.now();
-    let openFor = false;
-    for (const q of questions) {
-      if (seenIdsRef.current.has(q.id)) continue;
-      seenIdsRef.current.add(q.id);
-      const created = new Date(q.created_at).getTime();
-      if (Number.isFinite(created) && now - created < 8000) {
-        openFor = true;
-      }
+    if (expandSignal > lastExpandSignalRef.current) {
+      lastExpandSignalRef.current = expandSignal;
+      setExpanded(true);
     }
-    if (openFor) setExpanded(true);
-  }, [questions]);
+  }, [expandSignal]);
 
   useEffect(() => {
     if (!expanded) return;

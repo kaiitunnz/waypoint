@@ -1097,13 +1097,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     payload={"session": session.model_dump(mode="json")},
                 ).model_dump(mode="json")
             )
-            # Hydrate pending side-questions so a fresh-load client sees open cards
+            # Hydrate pending side-questions so a fresh-load client sees open
+            # cards. Tag them ``hydrated`` so the client can tell a replay-on-
+            # connect from a live push and avoid auto-expanding old asides.
             for sq in session.transport_state.get("pending_side_questions", []):
                 if isinstance(sq, dict):
                     await websocket.send_json(
                         SessionEnvelope(
                             type="side_question",
-                            payload={"side_question": sq},
+                            payload={"side_question": sq, "hydrated": True},
                         ).model_dump(mode="json")
                     )
             while True:

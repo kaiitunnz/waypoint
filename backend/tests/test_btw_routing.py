@@ -13,6 +13,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import httpx
+from starlette.testclient import TestClient
 
 from waypoint.api import create_app
 from waypoint.backends.claude_code.plugin import (
@@ -344,8 +345,6 @@ async def test_dismiss_side_question_404_unknown_session(tmp_path: Path) -> None
 
 def test_ws_session_hydrates_pending_side_questions(tmp_path: Path) -> None:
     """WS handler sends a side_question envelope for each pending side-question."""
-    from starlette.testclient import TestClient
-
     sq = {
         "id": "sq-hydrate-001",
         "question": "Are we done yet?",
@@ -363,15 +362,24 @@ def test_ws_session_hydrates_pending_side_questions(tmp_path: Path) -> None:
     )
     app, token = _make_app(tmp_path, session)
 
-    with TestClient(app) as client:
-        with client.websocket_connect(f"/ws/sessions/{session.id}?token={token}") as ws:
-            # First message: session_state
-            first = ws.receive_json()
-            assert first["type"] == "session_state"
-            # Second message: side_question hydration envelope
-            second = ws.receive_json()
-            assert second["type"] == "side_question"
-            assert second["payload"]["side_question"]["id"] == "sq-hydrate-001"
+    # Hydration is what's under test; mock the startup recovery sweep so it
+    # doesn't race in and re-issue/mutate the pending record (it runs as a
+    # background task on the TestClient lifespan startup).
+    with patch(
+        "waypoint.backends.claude_code.side_question.recover_pending_side_questions",
+        new=AsyncMock(return_value=None),
+    ):
+        with TestClient(app) as client:
+            with client.websocket_connect(
+                f"/ws/sessions/{session.id}?token={token}"
+            ) as ws:
+                # First message: session_state
+                first = ws.receive_json()
+                assert first["type"] == "session_state"
+                # Second message: side_question hydration envelope
+                second = ws.receive_json()
+                assert second["type"] == "side_question"
+                assert second["payload"]["side_question"]["id"] == "sq-hydrate-001"
 
 
 # ── Recovery task scheduling ──────────────────────────────────────────────────

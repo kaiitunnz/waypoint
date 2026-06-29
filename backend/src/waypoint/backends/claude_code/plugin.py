@@ -740,9 +740,6 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         adapter = self._require_adapter()
 
         async def _bring_up(new_session: SessionRecord, fork_thread_id: str) -> None:
-            # The structured adapter resumes the thread without replaying its
-            # transcript, so seed the new session from the parent's events.
-            runtime.storage.clone_events(session.id, new_session.id)
             await adapter.restore_session(
                 new_session.id,
                 session.cwd,

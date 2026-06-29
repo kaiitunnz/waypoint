@@ -51,6 +51,7 @@ from waypoint.launch_targets import (
     quote_remote_path,
 )
 from waypoint.schemas import (
+    EventKind,
     SessionEnvelope,
     SessionRecord,
     SessionSource,
@@ -498,13 +499,13 @@ async def claim_fork_thread(
     runtime: "SessionRuntime",
     session: SessionRecord,
     side_question_id: str,
-) -> str:
+) -> SideQuestion:
     """Hand an answered aside's forked thread off to a new owner.
 
     Drops the record **without** deleting ``<E>.jsonl`` (the new session adopts
     it — the one exception to the cleanup invariant) and broadcasts the removal.
-    Returns the forked ``thread_id``. Raises if the id is unknown or the aside
-    has no retained thread yet.
+    Returns the claimed record (its ``fork_thread_id`` is guaranteed set). Raises
+    if the id is unknown or the aside has no retained thread yet.
     """
     async with _lock_for(session.id):
         fresh = runtime.storage.get_session(session.id)
@@ -524,12 +525,11 @@ async def claim_fork_thread(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="side question has no retained thread; wait for an answer first",
             )
-        fork_thread_id = sq.fork_thread_id
         qs = [q for q in qs if q.id != side_question_id]
         _write_side_questions(runtime, session.id, qs)
 
     await _broadcast_remove(runtime, session.id, side_question_id)
-    return fork_thread_id
+    return sq
 
 
 async def fork_aside(
@@ -547,15 +547,18 @@ async def fork_aside(
     """Promote an answered aside into a managed session on ``transport_id``.
 
     Claims the aside's forked thread (see :func:`claim_fork_thread`), persists a
-    new session record that resumes it, then hands the actual launch to
-    ``bring_up`` — the transport-specific step (a structured adapter restore for
-    ``claude_cli``, a resumed tmux pane for ``claude_tty``). ``bring_up`` also
-    owns populating the new session's transcript, since how the aside's Q&A is
-    surfaced differs by transport. Transport-agnostic on purpose: it never
-    touches the structured adapter, so it works for any transport that can resume
-    a thread.
+    new session record that resumes it, seeds the transcript, then hands the
+    launch to ``bring_up`` — the transport-specific step (a structured adapter
+    restore for ``claude_cli``, a resumed tmux pane for ``claude_tty``).
+
+    Transcript seeding is length-independent: the parent's events are bulk-cloned
+    and the aside's question/answer are injected from the (durable) record, rather
+    than re-reading and re-emitting the whole forked thread. Transport-agnostic on
+    purpose — it never touches the structured adapter — so it works for any
+    transport that can resume a thread.
     """
-    fork_thread_id = await claim_fork_thread(runtime, session, side_question_id)
+    sq = await claim_fork_thread(runtime, session, side_question_id)
+    fork_thread_id = sq.fork_thread_id or ""
 
     now = datetime.now(UTC)
     raw_log.touch(exist_ok=True)
@@ -583,6 +586,8 @@ async def fork_aside(
         config_overrides=session.config_overrides,
     )
     runtime.storage.create_session(new_session)
+    runtime.storage.clone_events(session.id, new_session_id)
+    await _ingest_aside_qa(runtime, new_session_id, sq)
 
     try:
         await bring_up(new_session, fork_thread_id)
@@ -594,6 +599,29 @@ async def fork_aside(
         ) from exc
 
     return runtime.get_session(new_session_id)
+
+
+async def _ingest_aside_qa(
+    runtime: "SessionRuntime", session_id: str, sq: SideQuestion
+) -> None:
+    """Append the aside's question and answer to the promoted session.
+
+    The forked thread already holds these turns, but the new session's event DB
+    only carries the cloned parent transcript. Injecting the stored text appends
+    them after the parent without re-reading the thread — O(1) regardless of how
+    long the conversation is.
+    """
+    await runtime._record_user_event(
+        session_id, sq.question, True, status=SessionStatus.IDLE
+    )
+    if sq.answer:
+        await runtime._emit_adapter_event(
+            session_id,
+            EventKind.AGENT_OUTPUT,
+            sq.answer,
+            {"method": "assistant.text"},
+            SessionStatus.IDLE,
+        )
 
 
 async def dismiss_aside(

@@ -58,6 +58,8 @@ class _FakeRuntime:
         self.storage = storage
         self.broadcast = _FakeBroadcast()
         self._launch_targets: dict[str, Any] = {}
+        # (session_id, kind, text) for events emitted via the runtime hooks.
+        self.emitted: list[tuple[str, str, str]] = []
 
     def get_session(self, session_id: str) -> SessionRecord:
         session = self.storage.get_session(session_id)
@@ -69,6 +71,27 @@ class _FakeRuntime:
         if not launch_target_id:
             return None
         return self._launch_targets.get(launch_target_id)
+
+    async def _record_user_event(
+        self,
+        session_id: str,
+        text: str,
+        submit: bool,
+        status: SessionStatus = SessionStatus.RUNNING,
+        extra_metadata: dict | None = None,
+        attachments: Any = None,
+    ) -> None:
+        self.emitted.append((session_id, "user_input", text))
+
+    async def _emit_adapter_event(
+        self,
+        session_id: str,
+        kind: Any,
+        text: str,
+        metadata: dict,
+        status: SessionStatus,
+    ) -> None:
+        self.emitted.append((session_id, str(kind), text))
 
 
 class _FakeAdapter:
@@ -446,6 +469,13 @@ async def test_fork_aside_drops_record_and_brings_up_new_session(
 
     # bring_up received the new record and the fork thread id.
     assert bring_up_calls == [("new-sess", "fork-uuid-xyz")]
+
+    # The aside's question and answer were injected into the new transcript.
+    injected = [
+        (kind, text) for sid, kind, text in runtime.emitted if sid == "new-sess"
+    ]
+    assert ("user_input", "What files changed?") in injected
+    assert ("agent_output", "Only foo.py.") in injected
 
     # Removal broadcast was sent.
     msgs = [m for m, _ in runtime.broadcast.published]

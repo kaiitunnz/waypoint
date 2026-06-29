@@ -547,11 +547,13 @@ async def fork_aside(
     """Promote an answered aside into a managed session on ``transport_id``.
 
     Claims the aside's forked thread (see :func:`claim_fork_thread`), persists a
-    new session record that resumes it, clones the parent transcript, then hands
-    the actual launch to ``bring_up`` — the transport-specific step (a structured
-    adapter restore for ``claude_cli``, a resumed tmux pane for ``claude_tty``).
-    Transport-agnostic on purpose: it never touches the structured adapter, so it
-    works for any transport that can resume a thread.
+    new session record that resumes it, then hands the actual launch to
+    ``bring_up`` — the transport-specific step (a structured adapter restore for
+    ``claude_cli``, a resumed tmux pane for ``claude_tty``). ``bring_up`` also
+    owns populating the new session's transcript, since how the aside's Q&A is
+    surfaced differs by transport. Transport-agnostic on purpose: it never
+    touches the structured adapter, so it works for any transport that can resume
+    a thread.
     """
     fork_thread_id = await claim_fork_thread(runtime, session, side_question_id)
 
@@ -581,7 +583,6 @@ async def fork_aside(
         config_overrides=session.config_overrides,
     )
     runtime.storage.create_session(new_session)
-    runtime.storage.clone_events(session.id, new_session_id)
 
     try:
         await bring_up(new_session, fork_thread_id)

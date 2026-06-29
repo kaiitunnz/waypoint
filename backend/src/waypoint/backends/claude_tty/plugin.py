@@ -1019,10 +1019,11 @@ class ClaudeTtyPlugin:
             f"Promoted side question to a session (resumed thread {thread_id})",
             status=SessionStatus.IDLE,
         )
-        # The resumed thread's transcript is already cloned into the event DB, so
-        # tail from the end to avoid replaying it.
+        # The forked thread file already holds the whole conversation up to and
+        # including the aside's Q&A, and none of it is in this new session's
+        # event DB yet, so tail from byte 0 to ingest the full transcript.
         self._start_tailer(
-            runtime, new_session.id, thread_id, new_session.cwd, start_at_end=True
+            runtime, new_session.id, thread_id, new_session.cwd, start_at_end=False
         )
         self._spawn_rate_limit_watcher(runtime, new_session)
 

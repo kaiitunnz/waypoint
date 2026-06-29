@@ -35,6 +35,7 @@ from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
+from waypoint.backends.claude_code import side_question as _sq
 from waypoint.backends.claude_code.commands import list_claude_command_completions
 from waypoint.backends.claude_code.models import (
     DEFAULT_CLAUDE_MODELS,
@@ -62,6 +63,7 @@ from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
     BackendModelOption,
     CommandCompletion,
+    CompletionDispatch,
     EventKind,
     SessionCreateRequest,
     SessionRateLimitUsage,
@@ -211,6 +213,12 @@ class ClaudeTtyPlugin:
     async def maybe_handle_input(
         self, runtime: "SessionRuntime", session: SessionRecord, request: Any
     ) -> SessionRecord | None:
+        text = request.text.strip()
+        if text == "/btw" or text.startswith("/btw "):
+            question = text[len("/btw") :].strip()
+            if question:
+                await _sq.start_side_question(runtime, self._claude, session, question)
+            return runtime.get_session(session.id)
         return None
 
     async def approve_plan(
@@ -322,6 +330,24 @@ class ClaudeTtyPlugin:
         completions = static_slash_completions(
             self.id, self.capabilities, prefix=prefix
         )
+        # /btw is a Waypoint-owned command; always add it
+        norm_prefix = (
+            prefix if prefix.startswith("/") else f"/{prefix}" if prefix else "/"
+        )
+        if "/btw".startswith(norm_prefix) or norm_prefix == "/":
+            completions.append(
+                CommandCompletion(
+                    id="claude_tty:waypoint:btw",
+                    trigger="/",
+                    replacement="/btw ",
+                    name="btw",
+                    description="Ask a side-question without interrupting the session",
+                    kind="command",
+                    source="waypoint",
+                    dispatch=CompletionDispatch.PLAIN_TEXT,
+                    metadata={"builtin_command": "/btw"},
+                )
+            )
         # Custom commands and skills come from the same on-disk discovery
         # claude_code uses; both wrap the ``claude`` binary in the same cwd.
         launch_target = (
@@ -912,11 +938,15 @@ class ClaudeTtyPlugin:
         raw_log: Path,
         structured_log: Path,
     ) -> SessionRecord:
-        # T0 placeholder — implemented in the backend-wiring task (W2),
-        # delegating to self._claude / side_question.fork_aside.
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="side-questions are not yet wired",
+        return await _sq.fork_aside(
+            runtime,
+            self._claude,
+            session,
+            side_question_id,
+            new_session_id=new_session_id,
+            title=title,
+            raw_log=raw_log,
+            structured_log=structured_log,
         )
 
     async def dismiss_side_question(
@@ -925,12 +955,7 @@ class ClaudeTtyPlugin:
         session: SessionRecord,
         side_question_id: str,
     ) -> None:
-        # T0 placeholder — implemented in the backend-wiring task (W2),
-        # delegating to self._claude / side_question.dismiss_aside.
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="side-questions are not yet wired",
-        )
+        await _sq.dismiss_aside(runtime, self._claude, session, side_question_id)
 
     async def answer_question(
         self,

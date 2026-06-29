@@ -12,6 +12,7 @@ import asyncio
 import logging
 import shlex
 import uuid
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -24,6 +25,7 @@ from waypoint.backends.capabilities import (
     BackendCapabilities,
     ModelSource,
 )
+from waypoint.backends.claude_code import side_question as _sq
 from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeCliError
 from waypoint.backends.claude_code.commands import (
     CLAUDE_BUILTIN_SLASH_COMMANDS,
@@ -183,6 +185,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         self.adapter: ClaudeCliAdapter | None = None
         self.support: ClaudeSupportBundle | None = None
         self.thread_enumerator: RemoteClaudeThreadEnumerator | None = None
+        self._sq_tasks: dict[str, asyncio.Task[None]] = {}
 
     def transport_view(self, runtime: "SessionRuntime") -> TransportAdapter:
         # Imported lazily to avoid the cycle: transport → adapter →
@@ -233,11 +236,23 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         )
 
     async def shutdown(self, runtime: "SessionRuntime") -> None:
+        for task in list(self._sq_tasks.values()):
+            task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await task
+        self._sq_tasks.clear()
         if self.adapter is not None:
             await self.adapter.shutdown()
             self.adapter = None
         self.support = None
         self.thread_enumerator = None
+
+    async def start_background_tasks(self, runtime: "SessionRuntime") -> None:
+        task = asyncio.create_task(
+            _sq.recover_pending_side_questions(runtime, self),
+            name="claude-sq-recovery",
+        )
+        self._sq_tasks["__recovery__"] = task
 
     def _require_adapter(self) -> ClaudeCliAdapter:
         if self.adapter is None:
@@ -584,11 +599,13 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         runtime_commands = _session_slash_commands(
             self.adapter, session.id
         ) or _session_transport_slash_commands(session)
-        completions = (
-            []
-            if _commands_include_name(runtime_commands, "status")
-            else _claude_waypoint_completions(prefix)
-        )
+        waypoint_completions = _claude_waypoint_completions(prefix)
+        # /status: drop our version when Claude has it natively; /btw is always ours
+        if _commands_include_name(runtime_commands, "status"):
+            waypoint_completions = [
+                c for c in waypoint_completions if c.name != "status"
+            ]
+        completions = waypoint_completions
         completions.extend(_claude_runtime_slash_completions(runtime_commands, prefix))
         # Curated built-ins as a baseline for sessions with no live slash-command
         # stream (tmux transport), deduped against anything the runtime reported.
@@ -641,6 +658,11 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         request: SessionInputRequest,
     ) -> SessionRecord | None:
         command = _first_slash_command(request.text)
+        if command == "/btw":
+            question = request.text.strip()[len("/btw") :].strip()
+            if question:
+                await _sq.start_side_question(runtime, self, session, question)
+            return runtime.get_session(session.id)
         runtime_commands = _session_slash_commands(
             self.adapter, session.id
         ) or _session_transport_slash_commands(session)
@@ -709,11 +731,15 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         raw_log: Path,
         structured_log: Path,
     ) -> SessionRecord:
-        # T0 placeholder — implemented in the backend-wiring task (W2),
-        # delegating to side_question.fork_aside.
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="side-questions are not yet wired",
+        return await _sq.fork_aside(
+            runtime,
+            self,
+            session,
+            side_question_id,
+            new_session_id=new_session_id,
+            title=title,
+            raw_log=raw_log,
+            structured_log=structured_log,
         )
 
     async def dismiss_side_question(
@@ -722,12 +748,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         session: SessionRecord,
         side_question_id: str,
     ) -> None:
-        # T0 placeholder — implemented in the backend-wiring task (W2),
-        # delegating to side_question.dismiss_aside.
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="side-questions are not yet wired",
-        )
+        await _sq.dismiss_aside(runtime, self, session, side_question_id)
 
     async def answer_question(
         self,
@@ -1398,21 +1419,34 @@ def _claude_effort_swap_message(effort: str | None) -> str:
 
 
 def _claude_waypoint_completions(prefix: str) -> list[CommandCompletion]:
-    command = "/status"
-    if not _slash_prefix_matches(command, prefix):
-        return []
+    specs = [
+        (
+            "/status",
+            "status",
+            "Show Waypoint session status",
+            "claude_code:waypoint:status",
+        ),
+        (
+            "/btw",
+            "btw",
+            "Ask a side-question without interrupting the session",
+            "claude_code:waypoint:btw",
+        ),
+    ]
     return [
         CommandCompletion(
-            id="claude_code:waypoint:status",
+            id=cid,
             trigger="/",
-            replacement="/status ",
-            name="status",
-            description="Show Waypoint session status",
+            replacement=f"{command} ",
+            name=name,
+            description=description,
             kind="command",
             source="waypoint",
             dispatch=CompletionDispatch.PLAIN_TEXT,
-            metadata={"builtin_command": "/status"},
+            metadata={"builtin_command": command},
         )
+        for command, name, description, cid in specs
+        if _slash_prefix_matches(command, prefix)
     ]
 
 

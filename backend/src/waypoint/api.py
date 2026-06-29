@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import mimetypes
+import shutil
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -925,6 +926,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session = await context.runtime.set_effort(session_id, body.effort)
         return {"session": session.model_dump(mode="json")}
 
+    @app.post("/api/sessions/{session_id}/side-questions/{sqid}/fork")
+    async def fork_side_question(
+        session_id: str,
+        sqid: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = context.runtime.get_session(session_id)
+        plugin = context.runtime.registry.plugin_for(session)
+        new_session_id = context.runtime._generate_session_id(session.backend)
+        session_dir = context.runtime._session_dir(new_session_id)
+        raw_log = session_dir / "raw.log"
+        structured_log = session_dir / "events.jsonl"
+        for src, dst in [
+            (Path(session.raw_log_path), raw_log),
+            (Path(session.structured_log_path), structured_log),
+        ]:
+            if src.exists():
+                shutil.copy2(src, dst)
+        title = f"{session.title or session.id} (btw)"
+        new_session = await plugin.fork_side_question(
+            context.runtime,
+            session,
+            sqid,
+            new_session_id=new_session_id,
+            title=title,
+            raw_log=raw_log,
+            structured_log=structured_log,
+        )
+        await context.runtime._broadcast_session_list()
+        return {"session": new_session.model_dump(mode="json")}
+
+    @app.delete("/api/sessions/{session_id}/side-questions/{sqid}")
+    async def dismiss_side_question(
+        session_id: str,
+        sqid: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Response:
+        session = context.runtime.get_session(session_id)
+        plugin = context.runtime.registry.plugin_for(session)
+        await plugin.dismiss_side_question(context.runtime, session, sqid)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     @app.get("/api/backends/{backend}/models")
     async def list_backend_models(
         backend: str,
@@ -1077,6 +1120,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     payload={"session": session.model_dump(mode="json")},
                 ).model_dump(mode="json")
             )
+            # Hydrate pending side-questions so a fresh-load client sees open cards
+            for sq in session.transport_state.get("pending_side_questions", []):
+                if isinstance(sq, dict):
+                    await websocket.send_json(
+                        SessionEnvelope(
+                            type="side_question",
+                            payload={"side_question": sq},
+                        ).model_dump(mode="json")
+                    )
             while True:
                 message = await queue.get()
                 await websocket.send_json(message)

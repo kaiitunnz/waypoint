@@ -251,6 +251,13 @@ class SessionRuntime:
             await self._ensure_assistant_session()
         except Exception:
             log.exception("failed to ensure the assistant session")
+        for plugin in self.registry.all():
+            hook = getattr(plugin, "start_background_tasks", None)
+            if callable(hook):
+                asyncio.create_task(
+                    hook(self),
+                    name=f"plugin-bg-{plugin.id}",
+                )
         await self.scheduler.start()
 
     async def stop(self) -> None:

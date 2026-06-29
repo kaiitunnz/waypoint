@@ -154,6 +154,22 @@ export function SideQuestionDock({
   const [expanded, setExpanded] = useState(false);
   const [forkingId, setForkingId] = useState<string | null>(null);
   const [dismissingIds, setDismissingIds] = useState<Set<string>>(new Set());
+  const seenIdsRef = useRef<Set<string>>(new Set());
+
+  // Auto-expand when a new side-question appears — e.g. right after the user
+  // sends /btw — so the asked question and its "asking…" shimmer are visible
+  // immediately (the newest sorts to the top). A manual collapse sticks until
+  // the next new question, since this only fires on a previously-unseen id.
+  useEffect(() => {
+    let added = false;
+    for (const q of questions) {
+      if (!seenIdsRef.current.has(q.id)) {
+        seenIdsRef.current.add(q.id);
+        added = true;
+      }
+    }
+    if (added) setExpanded(true);
+  }, [questions]);
 
   useEffect(() => {
     if (!expanded) return;

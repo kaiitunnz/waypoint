@@ -177,6 +177,14 @@ class ClaudeTtyPlugin:
     def setup(self, runtime: "SessionRuntime") -> None:
         return None
 
+    async def start_background_tasks(self, runtime: "SessionRuntime") -> None:
+        # claude_code's recovery sweep only covers its own backend id, so legacy
+        # backend=claude_tty rows (this alias) would be skipped. Recover ours via
+        # the shared Claude one-shot machinery, scoped to this backend id.
+        await _sq.recover_pending_side_questions(
+            runtime, self._claude, backend_ids={self.id}
+        )
+
     async def shutdown(self, runtime: "SessionRuntime") -> None:
         return None
 
@@ -930,8 +938,10 @@ class ClaudeTtyPlugin:
     async def cleanup_side_questions_on_delete(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        if session.transport_state.get("pending_side_questions"):
-            await _sq.delete_session_side_questions(runtime, self._claude, session)
+        # No stale-snapshot guard: the helper re-reads fresh state under the
+        # per-session lock (and returns cheaply when there is nothing to clean),
+        # so a /btw persisted after this snapshot is still cleaned up.
+        await _sq.delete_session_side_questions(runtime, self._claude, session)
 
     async def fork_side_question(
         self,
@@ -999,32 +1009,41 @@ class ClaudeTtyPlugin:
         target = await runtime.tmux.start_managed_session(
             new_session.id, new_session.cwd, command
         )
-        await runtime.tmux.pipe_output(target.pane, raw_log)
-        with suppress(TmuxError):
-            await runtime.tmux.resize_window(target.session, 120, 50)
-        runtime.storage.update_session(
-            new_session.id,
-            transport_state={
-                "tmux_session": target.session,
-                "tmux_window": target.window,
-                "tmux_pane": target.pane,
-                "pid": target.pane_pid,
-                "thread_id": thread_id,
-                "launch_args": launch_args,
-            },
-            status=SessionStatus.STARTING,
-        )
-        await runtime._record_system_event(
-            new_session.id,
-            f"Promoted side question to a session (resumed thread {thread_id})",
-            status=SessionStatus.IDLE,
-        )
-        # The transcript (parent + aside Q&A) is already seeded in the event DB by
-        # fork_aside, so tail from the end and only pick up turns added from here.
-        self._start_tailer(
-            runtime, new_session.id, thread_id, new_session.cwd, start_at_end=True
-        )
-        self._spawn_rate_limit_watcher(runtime, new_session)
+        # Once the pane (a live `claude --resume`) exists, any later failure must
+        # kill it before re-raising — otherwise fork_aside's rollback restores the
+        # source aside while an unmanaged process still holds the same fork thread.
+        try:
+            await runtime.tmux.pipe_output(target.pane, raw_log)
+            with suppress(TmuxError):
+                await runtime.tmux.resize_window(target.session, 120, 50)
+            runtime.storage.update_session(
+                new_session.id,
+                transport_state={
+                    "tmux_session": target.session,
+                    "tmux_window": target.window,
+                    "tmux_pane": target.pane,
+                    "pid": target.pane_pid,
+                    "thread_id": thread_id,
+                    "launch_args": launch_args,
+                },
+                status=SessionStatus.STARTING,
+            )
+            await runtime._record_system_event(
+                new_session.id,
+                f"Promoted side question to a session (resumed thread {thread_id})",
+                status=SessionStatus.IDLE,
+            )
+            # The transcript (parent + aside Q&A) is already seeded in the event
+            # DB by fork_aside, so tail from the end and only pick up turns added
+            # from here.
+            self._start_tailer(
+                runtime, new_session.id, thread_id, new_session.cwd, start_at_end=True
+            )
+            self._spawn_rate_limit_watcher(runtime, new_session)
+        except Exception:
+            with suppress(TmuxError):
+                await runtime.tmux.kill_session(target.session)
+            raise
 
     async def dismiss_side_question(
         self,

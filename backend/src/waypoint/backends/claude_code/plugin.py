@@ -257,8 +257,10 @@ class ClaudeCodePlugin(DefaultLaunchContract):
     async def cleanup_side_questions_on_delete(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
-        if session.transport_state.get("pending_side_questions"):
-            await _sq.delete_session_side_questions(runtime, self, session)
+        # No stale-snapshot guard: the helper re-reads fresh state under the
+        # per-session lock (and returns cheaply when there is nothing to clean),
+        # so a /btw persisted after this snapshot is still cleaned up.
+        await _sq.delete_session_side_questions(runtime, self, session)
 
     def _require_adapter(self) -> ClaudeCliAdapter:
         if self.adapter is None:

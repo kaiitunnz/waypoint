@@ -482,7 +482,7 @@ async def test_fork_aside_drops_record_and_brings_up_new_session(
     assert any("removed_id" in m.payload for m in msgs if m.type == "side_question")
 
 
-async def test_fork_aside_marks_error_and_raises_400_when_bring_up_fails(
+async def test_fork_aside_rolls_back_when_bring_up_fails(
     runtime: Any,
     tmp_path: Path,
 ) -> None:
@@ -519,9 +519,128 @@ async def test_fork_aside_marks_error_and_raises_400_when_bring_up_fails(
         )
     assert exc_info.value.status_code == 400
 
-    errored = runtime.storage.get_session("new-sess")
-    assert errored is not None
-    assert errored.status == SessionStatus.ERROR
+    # The half-created target is deleted, not left behind as an ERROR row.
+    assert runtime.storage.get_session("new-sess") is None
+
+    # The source aside is restored so the card returns and can be retried.
+    fresh = runtime.storage.get_session(session.id)
+    assert fresh is not None
+    restored = _read_side_questions(fresh)
+    assert [q.id for q in restored] == ["sq-ready"]
+    assert restored[0].fork_thread_id == "fork-uuid"
+
+    # The card was broadcast removed (claim) then re-broadcast (rollback).
+    sq_msgs = [m for m, _ in runtime.broadcast.published if m.type == "side_question"]
+    assert any("removed_id" in m.payload for m in sq_msgs)
+    assert any(m.payload.get("side_question") for m in sq_msgs)
+
+
+async def test_fork_aside_deletes_orphan_fork_when_source_gone_on_rollback(
+    runtime: Any,
+    tmp_path: Path,
+) -> None:
+    """If the source session is deleted mid-promotion and the launch then fails,
+    the fork thread has no owner to return to, so rollback must delete it."""
+    from fastapi import HTTPException
+
+    session = _make_session(runtime.storage, thread_id="thread-abc")
+    sq = SideQuestion(
+        id="sq-ready",
+        question="x?",
+        status=SideQuestionStatus.ANSWERED,
+        answer="y.",
+        fork_thread_id="fork-uuid",
+        attempts=1,
+        created_at=datetime.now(UTC),
+    )
+    _write_side_questions(runtime, session.id, [sq])
+    session_dir = tmp_path / "new"
+    session_dir.mkdir()
+
+    async def _boom(new_session: SessionRecord, fork_thread_id: str) -> None:
+        # The source session vanishes while the launch is in flight.
+        runtime.storage.delete_session(session.id)
+        raise RuntimeError("launch failed")
+
+    deleted_forks: list[str] = []
+    with (
+        pytest.raises(HTTPException),
+        patch.object(
+            sq_module,
+            "_delete_fork_file",
+            new=AsyncMock(side_effect=lambda fid, *a, **kw: deleted_forks.append(fid)),
+        ),
+    ):
+        await fork_aside(
+            runtime,
+            session,
+            "sq-ready",
+            new_session_id="new-sess",
+            transport_id="claude_cli",
+            title="F",
+            raw_log=session_dir / "raw.log",
+            structured_log=session_dir / "events.jsonl",
+            bring_up=_boom,
+        )
+
+    # Orphaned fork thread was deleted; neither session row survives.
+    assert "fork-uuid" in deleted_forks
+    assert runtime.storage.get_session(session.id) is None
+    assert runtime.storage.get_session("new-sess") is None
+
+
+async def test_fork_aside_rolls_back_on_pre_launch_failure(
+    runtime: Any,
+    tmp_path: Path,
+) -> None:
+    """A failure in post-claim setup (before bring_up) rolls back too: the target
+    is deleted and the source aside restored, and bring_up never runs."""
+    from fastapi import HTTPException
+
+    session = _make_session(runtime.storage, thread_id="thread-abc")
+    sq = SideQuestion(
+        id="sq-ready",
+        question="x?",
+        status=SideQuestionStatus.ANSWERED,
+        answer="y.",
+        fork_thread_id="fork-uuid",
+        attempts=1,
+        created_at=datetime.now(UTC),
+    )
+    _write_side_questions(runtime, session.id, [sq])
+    session_dir = tmp_path / "new"
+    session_dir.mkdir()
+
+    bring_up_called: list[bool] = []
+
+    async def _bring_up(new_session: SessionRecord, fork_thread_id: str) -> None:
+        bring_up_called.append(True)
+
+    with (
+        pytest.raises(HTTPException),
+        patch.object(
+            sq_module,
+            "_ingest_aside_qa",
+            new=AsyncMock(side_effect=RuntimeError("seed failed")),
+        ),
+    ):
+        await fork_aside(
+            runtime,
+            session,
+            "sq-ready",
+            new_session_id="new-sess",
+            transport_id="claude_cli",
+            title="F",
+            raw_log=session_dir / "raw.log",
+            structured_log=session_dir / "events.jsonl",
+            bring_up=_bring_up,
+        )
+
+    assert bring_up_called == []  # failed before launch
+    assert runtime.storage.get_session("new-sess") is None  # target rolled back
+    fresh = runtime.storage.get_session(session.id)
+    assert fresh is not None
+    assert [q.id for q in _read_side_questions(fresh)] == ["sq-ready"]
 
 
 # ---------------------------------------------------------------------------
@@ -557,6 +676,42 @@ async def test_bg_task_success_updates_record(
     assert qs[0].status == SideQuestionStatus.ANSWERED
     assert qs[0].answer == "All green!"
     assert qs[0].fork_thread_id is not None
+
+
+async def test_bg_task_persists_fork_id_before_one_shot(
+    runtime: Any,
+    plugin: Any,
+) -> None:
+    """The fork id is recorded before the one-shot runs, so a restart mid-flight
+    can find and delete the orphaned <E>.jsonl rather than leaking it."""
+    session = _make_session(runtime.storage, thread_id="thread-abc")
+    sq = SideQuestion(
+        id="sq-pre",
+        question="q?",
+        status=SideQuestionStatus.PENDING,
+        attempts=1,
+        created_at=datetime.now(UTC),
+    )
+    _write_side_questions(runtime, session.id, [sq])
+
+    seen: dict[str, Any] = {}
+
+    async def fake_one_shot(
+        question: str, thread_id: str, fork_id: str, cwd: str, *a: Any, **kw: Any
+    ) -> str:
+        fresh = runtime.storage.get_session(session.id)
+        seen["recorded"] = _read_side_questions(fresh)[0].fork_thread_id
+        seen["arg"] = fork_id
+        return "answer"
+
+    with patch.object(
+        sq_module, "_run_one_shot_local", new=AsyncMock(side_effect=fake_one_shot)
+    ):
+        await sq_module._run_side_question_bg(runtime, plugin, session.id, "sq-pre")
+
+    # While the one-shot was still running, the record already carried the fork id.
+    assert seen["recorded"] is not None
+    assert seen["recorded"] == seen["arg"]
 
 
 async def test_bg_task_marks_error_on_failure(
@@ -811,6 +966,57 @@ async def test_recover_skips_non_claude_sessions(
 
     # Nothing touched.
     assert cleanup_calls == []
+
+
+async def test_recover_covers_extra_backend_ids(
+    runtime: Any,
+    plugin: Any,
+) -> None:
+    """Legacy backend=claude_tty rows are skipped by the default claude_code
+    sweep but recovered when their id is passed in ``backend_ids``."""
+    session = _make_session(
+        runtime.storage,
+        session_id="claude_tty-x",
+        backend="claude_tty",
+        thread_id="t1",
+    )
+    sq = SideQuestion(
+        id="sq-tty",
+        question="q?",
+        status=SideQuestionStatus.PENDING,
+        fork_thread_id="fork-tty",
+        attempts=1,
+        created_at=datetime.now(UTC),
+    )
+    state = {
+        **session.transport_state,
+        "pending_side_questions": [sq.model_dump(mode="json")],
+    }
+    runtime.storage.update_session(session.id, transport_state=state)
+
+    # Default sweep (claude_code only) ignores the claude_tty row.
+    with (
+        patch.object(sq_module, "_schedule_bg_task") as sched_default,
+        patch.object(sq_module, "_delete_fork_file", new=AsyncMock()),
+    ):
+        await recover_pending_side_questions(runtime, plugin)
+    sched_default.assert_not_called()
+
+    # Scoped to claude_tty it re-issues: deletes the stale fork and reschedules.
+    cleanup: list[str] = []
+    with (
+        patch.object(sq_module, "_schedule_bg_task") as sched_tty,
+        patch.object(
+            sq_module,
+            "_delete_fork_file",
+            new=AsyncMock(side_effect=lambda fid, *a, **kw: cleanup.append(fid)),
+        ),
+    ):
+        await recover_pending_side_questions(
+            runtime, plugin, backend_ids={"claude_tty"}
+        )
+    sched_tty.assert_called_once()
+    assert "fork-tty" in cleanup
 
 
 # ---------------------------------------------------------------------------
@@ -1070,3 +1276,81 @@ async def test_delete_session_side_questions_uses_passed_snapshot(
         await delete_session_side_questions(runtime, plugin, session_with_fork)
 
     assert "fork-snap" in deleted_files
+
+
+async def test_delete_session_side_questions_prefers_fresh_state(
+    runtime: Any,
+    plugin: Any,
+) -> None:
+    """If an aside was claimed by a concurrent fork-promotion (so the live row no
+    longer lists it) the delete sweep must NOT delete its handed-off fork file,
+    even though the passed snapshot still has it."""
+    from waypoint.backends.claude_code.side_question import (
+        delete_session_side_questions,
+    )
+
+    session = _make_session(runtime.storage, thread_id="thread-abc")
+    sq = SideQuestion(
+        id="sq-claimed",
+        question="Q?",
+        status=SideQuestionStatus.ANSWERED,
+        fork_thread_id="fork-handed-off",
+        attempts=1,
+        created_at=datetime.now(UTC),
+    )
+    _write_side_questions(runtime, session.id, [sq])
+    # Snapshot still lists the aside...
+    stale_snapshot = runtime.storage.get_session(session.id)
+    assert stale_snapshot is not None
+    # ...but a concurrent fork-promotion has since claimed it (row now empty).
+    _write_side_questions(runtime, session.id, [])
+
+    deleted_files: list[str] = []
+    with patch.object(
+        sq_module,
+        "_delete_fork_file",
+        new=AsyncMock(side_effect=lambda fid, *a, **kw: deleted_files.append(fid)),
+    ):
+        await delete_session_side_questions(runtime, plugin, stale_snapshot)
+
+    # The handed-off fork file must survive — the promoted session owns it now.
+    assert deleted_files == []
+
+
+async def test_delete_session_side_questions_cleans_aside_absent_from_snapshot(
+    runtime: Any,
+    plugin: Any,
+) -> None:
+    """A /btw persisted after the delete-time snapshot (snapshot empty, live row
+    has it) is still cleaned up — cleanup keys off fresh state, not the snapshot,
+    so the plugin hook can safely call it unconditionally."""
+    from waypoint.backends.claude_code.side_question import (
+        delete_session_side_questions,
+    )
+
+    session = _make_session(runtime.storage, thread_id="thread-abc")
+    empty_snapshot = runtime.storage.get_session(session.id)  # no asides yet
+    assert empty_snapshot is not None
+    # A /btw lands after the snapshot was captured.
+    sq = SideQuestion(
+        id="sq-late",
+        question="late?",
+        status=SideQuestionStatus.ANSWERED,
+        fork_thread_id="fork-late",
+        attempts=1,
+        created_at=datetime.now(UTC),
+    )
+    _write_side_questions(runtime, session.id, [sq])
+
+    deleted_files: list[str] = []
+    with patch.object(
+        sq_module,
+        "_delete_fork_file",
+        new=AsyncMock(side_effect=lambda fid, *a, **kw: deleted_files.append(fid)),
+    ):
+        await delete_session_side_questions(runtime, plugin, empty_snapshot)
+
+    assert "fork-late" in deleted_files
+    fresh = runtime.storage.get_session(session.id)
+    assert fresh is not None
+    assert _read_side_questions(fresh) == []

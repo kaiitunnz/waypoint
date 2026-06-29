@@ -309,6 +309,27 @@ async def test_restart_clears_pending_approval_and_tailer() -> None:
     assert "sess-1" not in plugin._pending_approvals
 
 
+# ── _launch_resumed_pane (fork promotion) ─────────────────────────────────────
+
+
+async def test_launch_resumed_pane_kills_pane_on_post_start_failure() -> None:
+    """A failure after the pane is started must kill it, so fork_aside's rollback
+    doesn't leave an unmanaged claude process holding the fork thread."""
+    plugin = ClaudeTtyPlugin()
+    _stub_lifecycle(plugin)
+    runtime, target = _restart_runtime()
+    # A step after start_managed_session raises.
+    runtime.tmux.pipe_output = AsyncMock(side_effect=TmuxError("pipe failed"))
+    parent = _make_session(session_id="parent-1")
+    new_session = _make_session(session_id="new-1", thread_id=None)
+
+    with pytest.raises(TmuxError):
+        await plugin._launch_resumed_pane(runtime, parent, new_session, "fork-thread")
+
+    runtime.tmux.start_managed_session.assert_awaited_once()
+    runtime.tmux.kill_session.assert_awaited_once_with(target.session)
+
+
 # ── apply_effort return contract ──────────────────────────────────────────────
 
 

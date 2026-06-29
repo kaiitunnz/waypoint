@@ -1377,6 +1377,14 @@ class SessionRuntime:
         # case (natural exit never called terminate()) here.
         await self._cancel_context_usage_source(session_id)
         self._close_structured_log(session_id)
+        plugin = self.registry.plugin_for(session)
+        # Optional async cleanup hook; not part of the BackendPlugin protocol.
+        # Run it BEFORE deleting the row so it can read fresh side-question state
+        # under lock and honor a concurrent fork-promotion that claimed an aside
+        # (and now owns its fork thread) rather than deleting that fork file.
+        cleanup = getattr(plugin, "cleanup_side_questions_on_delete", None)
+        if cleanup is not None and asyncio.iscoroutinefunction(cleanup):
+            await cleanup(self, session)
         self.storage.delete_session(session_id)
         if session.worktree_path is not None:
             self._remove_worktree(session.worktree_path, prune_branches=prune_branches)
@@ -1384,11 +1392,6 @@ class SessionRuntime:
         self.attachments.discard(session_id)
         # Drop this session's blackboard posts along with its record.
         pruned = self.storage.prune_board_for_session(session_id)
-        plugin = self.registry.plugin_for(session)
-        # Optional async cleanup hook; not part of the BackendPlugin protocol.
-        cleanup = getattr(plugin, "cleanup_side_questions_on_delete", None)
-        if cleanup is not None and asyncio.iscoroutinefunction(cleanup):
-            await cleanup(self, session)
         plugin.on_session_deleted(self, session)
         await self._broadcast_session_list()
         if pruned:

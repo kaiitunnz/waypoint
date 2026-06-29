@@ -7,7 +7,6 @@ tests are decoupled from the W1 implementation.
 """
 
 import asyncio
-from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -343,7 +342,10 @@ async def test_dismiss_side_question_404_unknown_session(tmp_path: Path) -> None
 # ── WebSocket hydration ───────────────────────────────────────────────────────
 
 
-async def test_ws_session_hydrates_pending_side_questions(tmp_path: Path) -> None:
+def test_ws_session_hydrates_pending_side_questions(tmp_path: Path) -> None:
+    """WS handler sends a side_question envelope for each pending side-question."""
+    from starlette.testclient import TestClient
+
     sq = {
         "id": "sq-hydrate-001",
         "question": "Are we done yet?",
@@ -361,30 +363,15 @@ async def test_ws_session_hydrates_pending_side_questions(tmp_path: Path) -> Non
     )
     app, token = _make_app(tmp_path, session)
 
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        async with client.stream(
-            "GET",
-            f"/ws/sessions/{session.id}?token={token}",
-            headers={"upgrade": "websocket", "connection": "upgrade"},
-        ) as resp:
-            # WebSocket upgrade; collect initial messages
-            with suppress(Exception):
-                async for _chunk in resp.aiter_bytes():
-                    pass
-
-    # Since httpx doesn't natively handle WS frames, use a websockets client
-    # approach via the ASGI transport indirectly. Instead, verify the hydration
-    # logic directly by inspecting the broadcast hub after a subscribe.
-    context = app.state.context
-    queue = context.runtime.broadcast.subscribe_session(session.id)
-    # Simulate what the WS handler does: get session and check transport_state
-    reloaded = context.runtime.get_session(session.id)
-    pending = reloaded.transport_state.get("pending_side_questions", [])
-    assert len(pending) == 1
-    assert pending[0]["id"] == "sq-hydrate-001"
-    context.runtime.broadcast.unsubscribe_session(session.id, queue)
+    with TestClient(app) as client:
+        with client.websocket_connect(f"/ws/sessions/{session.id}?token={token}") as ws:
+            # First message: session_state
+            first = ws.receive_json()
+            assert first["type"] == "session_state"
+            # Second message: side_question hydration envelope
+            second = ws.receive_json()
+            assert second["type"] == "side_question"
+            assert second["payload"]["side_question"]["id"] == "sq-hydrate-001"
 
 
 # ── Recovery task scheduling ──────────────────────────────────────────────────

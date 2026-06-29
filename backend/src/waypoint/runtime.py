@@ -252,6 +252,7 @@ class SessionRuntime:
         except Exception:
             log.exception("failed to ensure the assistant session")
         for plugin in self.registry.all():
+            # Optional lifecycle hook; not part of the BackendPlugin protocol.
             hook = getattr(plugin, "start_background_tasks", None)
             if callable(hook):
                 asyncio.create_task(
@@ -825,6 +826,37 @@ class SessionRuntime:
             )
         await self.reattach(session_id)
         return self._require_assistant_summary()
+
+    async def fork_side_question(
+        self, session_id: str, side_question_id: str
+    ) -> SessionRecord:
+        session = self.get_session(session_id)
+        plugin = self.registry.plugin_for(session)
+
+        new_session_id = self._generate_session_id(session.backend)
+        session_dir = self._session_dir(new_session_id)
+        raw_log = session_dir / "raw.log"
+        structured_log = session_dir / "events.jsonl"
+
+        for src, dst in [
+            (Path(session.raw_log_path), raw_log),
+            (Path(session.structured_log_path), structured_log),
+        ]:
+            if src.exists():
+                shutil.copy2(src, dst)
+
+        title = f"{session.title or session.id} (btw)"
+        new_session = await plugin.fork_side_question(
+            self,
+            session,
+            side_question_id,
+            new_session_id=new_session_id,
+            title=title,
+            raw_log=raw_log,
+            structured_log=structured_log,
+        )
+        await self._broadcast_session_list()
+        return new_session
 
     async def fork_session(self, session_id: str) -> SessionRecord:
         session = self.get_session(session_id)

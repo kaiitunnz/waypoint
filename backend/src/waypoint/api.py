@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import mimetypes
-import shutil
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -932,29 +931,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         sqid: str,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        session = context.runtime.get_session(session_id)
-        plugin = context.runtime.registry.plugin_for(session)
-        new_session_id = context.runtime._generate_session_id(session.backend)
-        session_dir = context.runtime._session_dir(new_session_id)
-        raw_log = session_dir / "raw.log"
-        structured_log = session_dir / "events.jsonl"
-        for src, dst in [
-            (Path(session.raw_log_path), raw_log),
-            (Path(session.structured_log_path), structured_log),
-        ]:
-            if src.exists():
-                shutil.copy2(src, dst)
-        title = f"{session.title or session.id} (btw)"
-        new_session = await plugin.fork_side_question(
-            context.runtime,
-            session,
-            sqid,
-            new_session_id=new_session_id,
-            title=title,
-            raw_log=raw_log,
-            structured_log=structured_log,
-        )
-        await context.runtime._broadcast_session_list()
+        new_session = await context.runtime.fork_side_question(session_id, sqid)
         return {"session": new_session.model_dump(mode="json")}
 
     @app.delete("/api/sessions/{session_id}/side-questions/{sqid}")

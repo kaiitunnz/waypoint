@@ -1064,7 +1064,12 @@ async def test_one_shot_local_argv_disables_tools(
 
         return _FakeProc()
 
-    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+    # Patch the binary lookup so the test does not depend on `claude` being
+    # installed on PATH (it isn't on CI runners), only on the argv we build.
+    with (
+        patch("shutil.which", return_value="/usr/bin/claude"),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+    ):
         await sq_module._run_side_question_bg(runtime, plugin, session.id, "sq-tools")
 
     assert captured_args, "subprocess was never called"

@@ -28,23 +28,24 @@ log = logging.getLogger(__name__)
 
 _ASKPASS_HELPER_PATH = Path(__file__).with_name("ssh_askpass.py")
 
-# Options layered on top of ``target.ssh_args`` only when seeding the master.
-# ``ControlMaster=yes`` overrides the ``auto`` already in ssh_args (OpenSSH
-# last-value-wins) so this invocation owns the socket; ``ControlPersist=yes``
-# keeps it alive after the backgrounded ``-f -N`` process exits.
+# Mandatory seed options. OpenSSH uses the *first* value obtained for each
+# parameter, so these are spliced ahead of ``target.ssh_args`` (see ``connect``)
+# to guarantee they win even if the user set a conflicting value: ``BatchMode=no``
+# keeps interactive auth — and thus SSH_ASKPASS — enabled (a ``BatchMode=yes`` in
+# ssh_args would otherwise silently disable the password prompt), ``ControlMaster=yes``
+# makes this invocation own the socket, ``NumberOfPasswordPrompts=1`` fails a wrong
+# password fast, and ``ConnectTimeout`` bounds the seed. ``ControlPath`` and
+# ``ControlPersist`` are taken from the user's ssh_args (the validator requires
+# them) rather than overridden here, so the master's lifetime stays user-configured.
 #
 # Auth methods are intentionally NOT forced. The prompted password is supplied
 # via SSH_ASKPASS, and each hop negotiates whatever it accepts: a ProxyJump can
 # use a password (askpass-fed) while the destination uses a key, or vice versa.
 # Pinning ``PreferredAuthentications=password`` here would whitelist away
-# publickey and break any key-authenticated hop in the chain. ``BatchMode=no``
-# keeps interactive auth (and thus askpass) enabled; ``NumberOfPasswordPrompts=1``
-# makes a wrong password fail fast instead of retrying.
+# publickey and break any key-authenticated hop in the chain.
 _SEED_OPTIONS: tuple[str, ...] = (
     "-o",
     "ControlMaster=yes",
-    "-o",
-    "ControlPersist=yes",
     "-o",
     "BatchMode=no",
     "-o",
@@ -117,8 +118,8 @@ class SshMasterManager:
                 return self._status(target, True)
             argv = (
                 _resolve_local_binary(target.ssh_bin),
-                *target.ssh_args,
                 *_SEED_OPTIONS,
+                *target.ssh_args,
                 "-f",
                 "-N",
                 target.ssh_destination,

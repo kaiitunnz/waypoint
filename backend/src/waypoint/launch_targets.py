@@ -254,14 +254,15 @@ class SshLaunchTargetConfig(BaseModel):
 
         ``ConnectTimeout`` bounds the call so a probe against an unreachable
         host (or a password-auth target whose ControlMaster has dropped) fails
-        within seconds instead of stalling the caller; ssh first-value-wins, so
-        an explicit ``ssh_args`` value still takes precedence.
+        within seconds instead of stalling the caller. The default is spliced
+        *after* ``ssh_args`` so an explicit ``ConnectTimeout`` there wins
+        (ssh first-value-wins); absent one, this 15s default applies.
         """
         proc = await asyncio.create_subprocess_exec(
             self.ssh_bin,
+            *self.ssh_args,
             "-o",
             "ConnectTimeout=15",
-            *self.ssh_args,
             self.ssh_destination,
             remote_cmd,
             stdout=asyncio.subprocess.PIPE,

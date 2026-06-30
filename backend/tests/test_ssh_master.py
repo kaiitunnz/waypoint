@@ -87,6 +87,11 @@ async def test_connect_builds_seed_argv_and_env(monkeypatch) -> None:
         assert token in argv
     assert "-N" in argv and "-f" in argv
     assert argv[-1] == "host"
+    # Seed options must precede ssh_args so they win under OpenSSH's
+    # first-value-wins rule (e.g. seed BatchMode=no can't be defeated by a
+    # BatchMode=yes in ssh_args).
+    assert argv.index("ControlMaster=yes") < argv.index("ControlMaster=auto")
+    assert "BatchMode=no" in argv
     # Auth methods must NOT be whitelisted, or a key-authenticated hop (e.g. a
     # key dest behind a password ProxyJump) would be unable to offer its key.
     assert not any("PreferredAuthentications" in token for token in argv)

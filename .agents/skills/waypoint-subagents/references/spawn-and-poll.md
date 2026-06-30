@@ -87,7 +87,7 @@ Statuses that mean keep waiting: `starting`, `running`, `interrupted`.
 
 It maps the outcome to a process exit code so it composes in `&&` chains:
 `error` → 1, timeout → 124, everything else → 0. Narrow the set with `--until`
-(comma-separated), e.g. wait only for the process to end, then dump events:
+(comma-separated), e.g. wait only for the process to end, then dump its output:
 
 ```bash
 waypoint sessions wait "$sid" --until exited,error --timeout 600 \

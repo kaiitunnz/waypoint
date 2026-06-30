@@ -540,6 +540,35 @@ If your agent needs SSH-launched sessions, three pieces are involved:
    The plugin's `remote_executable(launch_target)` reads
    `launch_target.remote_bin_for(self.id, self.capabilities.cli_binary)`.
 
+### Password-based SSH targets
+
+By default an SSH target authenticates with whatever the local `ssh` binary
+discovers (keys / agent). A target can instead opt into UI-prompted password
+auth with `ssh_auth: password`. Because the agent protocol streams over a
+non-interactive `ssh` subprocess, the password is never handed to those calls;
+instead it seeds a single multiplexed **ControlMaster** connection once, and
+every later call (the agent launch, the Codex SDK's own `ssh`, OpenCode's serve
+tunnel, all background probes) reuses that authenticated socket with no
+password — they already splice `*target.ssh_args`, which carry the shared
+`ControlPath`.
+
+- A `password` target **must** configure `ControlMaster`/`ControlPath`/
+  `ControlPersist` in `ssh_args`; config load fails loudly otherwise.
+- The host needs **OpenSSH >= 8.4** (for `SSH_ASKPASS_REQUIRE=force`). The
+  password is fed to the one-time master seed via the committed, secret-free
+  [`ssh_askpass.py`](../backend/src/waypoint/ssh_askpass.py) helper and is never
+  stored, logged, or persisted to a session record.
+- Flow: the frontend prompts when a `password` target is selected (or on a `409
+  ssh-master-required` from a launch), `POST /api/launch-targets/{id}/connect`
+  seeds the master via [`SshMasterManager`](../backend/src/waypoint/ssh_master.py),
+  and the launch retries. `GET .../status` reports liveness; `POST .../disconnect`
+  closes the socket.
+- **Drop / reconnect:** when the master dies (`ControlPersist` timeout, network
+  drop, backend `stop()`), its multiplexed sessions drop and background probes
+  go stale rather than hang (`ssh_capture` is bounded by `ConnectTimeout`).
+  Boot restore skips `password` targets with no live master. The user
+  reconnects (re-entering the password) and uses `/reattach` to revive sessions.
+
 ## Adding a new transport
 
 A transport is "how an agent is driven". There are two shapes.

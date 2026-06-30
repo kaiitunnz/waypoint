@@ -604,8 +604,19 @@ def test_sessions_output_filters_events_and_passes_messages(
                         {"kind": "status_update", "text": "busy", "sequence": 1},
                         {"kind": "user_input", "text": "question", "sequence": 2},
                         {"kind": "tool_call", "text": "ignored", "sequence": 3},
-                        {"kind": "agent_output", "text": "answer", "sequence": 4},
-                        {"kind": "system_note", "text": "ignored", "sequence": 5},
+                        {
+                            "kind": "agent_output",
+                            "text": "answ",
+                            "sequence": 4,
+                            "metadata": {"item_id": "1"},
+                        },
+                        {
+                            "kind": "agent_output",
+                            "text": "er",
+                            "sequence": 5,
+                            "metadata": {"item_id": "1"},
+                        },
+                        {"kind": "system_note", "text": "ignored", "sequence": 6},
                     ],
                     "has_more": True,
                 },
@@ -630,10 +641,22 @@ def test_sessions_output_filters_events_and_passes_messages(
         ],
     )
     assert result.exit_code == 0
-    assert json.loads(result.stdout) == {
+
+    def dict_without_none(d):
+        return {k: v for k, v in d.items() if v is not None}
+
+    actual = json.loads(result.stdout)
+    actual["events"] = [dict_without_none(e) for e in actual["events"]]
+
+    assert actual == {
         "events": [
             {"kind": "user_input", "text": "question", "sequence": 2},
-            {"kind": "agent_output", "text": "answer", "sequence": 4},
+            {
+                "kind": "agent_output",
+                "text": "answer",
+                "sequence": 5,
+                "metadata": {"item_id": "1"},
+            },
         ]
     }
     assert state["events_params"] == {"messages": "7"}
@@ -649,9 +672,19 @@ def test_sessions_output_text_prints_only_agent_output(
                 json={
                     "events": [
                         {"kind": "user_input", "text": "question", "sequence": 1},
-                        {"kind": "agent_output", "text": "hello", "sequence": 2},
+                        {
+                            "kind": "agent_output",
+                            "text": "hello",
+                            "sequence": 2,
+                            "metadata": {"item_id": "1"},
+                        },
                         {"kind": "tool_result", "text": "ignored", "sequence": 3},
-                        {"kind": "agent_output", "text": " world", "sequence": 4},
+                        {
+                            "kind": "agent_output",
+                            "text": " world",
+                            "sequence": 4,
+                            "metadata": {"item_id": "2"},
+                        },
                     ],
                     "has_more": False,
                 },
@@ -675,7 +708,7 @@ def test_sessions_output_text_prints_only_agent_output(
         ],
     )
     assert result.exit_code == 0
-    assert result.stdout == "hello world"
+    assert result.stdout == "hello\n\n world"
 
 
 def test_answer_question_rejects_malformed_answers_json(tmp_path: Path) -> None:

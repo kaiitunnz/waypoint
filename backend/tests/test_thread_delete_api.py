@@ -54,10 +54,10 @@ async def test_delete_unsupported_backend_is_400(tmp_path: Path) -> None:
     app, token = _build(tmp_path)
     async with _client(app) as client:
         resp = await client.delete(
-            f"/api/backends/opencode/threads/{_UID}",
+            f"/api/backends/tmux/threads/{_UID}",
             headers={"Authorization": f"Bearer {token}"},
         )
-    assert resp.status_code == 400  # opencode doesn't advertise the capability
+    assert resp.status_code == 400  # tmux doesn't advertise the capability
 
 
 async def test_delete_in_use_thread_is_409(tmp_path: Path) -> None:

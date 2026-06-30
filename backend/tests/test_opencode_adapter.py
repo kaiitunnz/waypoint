@@ -579,3 +579,62 @@ async def test_context_window_lookup_failure_retries_after_ttl() -> None:
     assert len(calls) == 1
     assert calls[0][2] is True
     assert state.context_window_by_model[key] == 4096
+
+
+@pytest.mark.asyncio
+async def test_delete_session_deletes_via_server_endpoint() -> None:
+    adapter = _build_adapter()
+    adapter._started = True
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def delete(self, path: str, params: Any = None) -> Any:
+            self.calls.append(path)
+            return True
+
+    client = _FakeClient()
+    adapter._client = cast(Any, client)
+
+    assert await adapter.delete_session("ses_1") is True
+    assert client.calls == ["/session/ses_1"]
+
+
+@pytest.mark.asyncio
+async def test_delete_session_treats_false_body_as_failure() -> None:
+    adapter = _build_adapter()
+    adapter._started = True
+
+    class _FakeClient:
+        async def delete(self, path: str, params: Any = None) -> Any:
+            return False
+
+    adapter._client = cast(Any, _FakeClient())
+    assert await adapter.delete_session("ses_missing") is False
+
+
+@pytest.mark.asyncio
+async def test_delete_session_treats_empty_204_as_success() -> None:
+    adapter = _build_adapter()
+    adapter._started = True
+
+    class _FakeClient:
+        async def delete(self, path: str, params: Any = None) -> Any:
+            return {}
+
+    adapter._client = cast(Any, _FakeClient())
+    assert await adapter.delete_session("ses_1") is True
+
+
+@pytest.mark.asyncio
+async def test_delete_session_swallows_http_error_as_failure() -> None:
+    adapter = _build_adapter()
+    adapter._started = True
+
+    class _FakeClient:
+        async def delete(self, path: str, params: Any = None) -> Any:
+            raise RuntimeError("HTTP 404")
+
+    adapter._client = cast(Any, _FakeClient())
+    assert await adapter.delete_session("ses_404") is False

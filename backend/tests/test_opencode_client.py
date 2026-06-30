@@ -152,3 +152,32 @@ async def test_stream_events_raises_on_nonzero_exit(
     with pytest.raises(RuntimeError, match="sse stream ended with code 1"):
         async for _ in client.stream_events("/event"):
             pass
+
+
+@pytest.mark.asyncio
+async def test_remote_client_delete_issues_delete_and_parses_boolean(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[tuple[Any, ...]] = []
+    fake_process = _FakeProcessFor(b"true\n200")
+
+    def _spawn(*args: Any, **kwargs: Any) -> Any:
+        captured.append(args)
+        return _coro(fake_process)
+
+    monkeypatch.setattr(
+        "waypoint.backends.opencode.client.asyncio.create_subprocess_exec", _spawn
+    )
+    monkeypatch.setattr(
+        "waypoint.launch_targets._resolve_local_binary", lambda binary: binary
+    )
+
+    target = SshLaunchTargetConfig(
+        id="ssh-1", name="Remote", ssh_destination="user@example.com"
+    )
+    client = RemoteOpenCodeClient(target, 4096)
+
+    assert await client.delete("/session/ses_1") is True
+    flat = " ".join(str(arg) for arg in captured[0])
+    assert "DELETE" in flat
+    assert "/session/ses_1" in flat

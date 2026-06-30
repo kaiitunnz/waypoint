@@ -283,6 +283,19 @@ class LaunchTargetSummary(BaseModel):
     supported_backends: list[BackendId] = Field(default_factory=list)
     default_backend: BackendId = "codex"
     default_cwd: str | None = None
+    auth: Literal["key", "password"] = "key"
+    # Live ControlMaster state; only meaningful when ``auth == "password"``.
+    connected: bool = False
+
+
+class LaunchTargetConnectRequest(BaseModel):
+    password: str
+
+
+class LaunchTargetConnectResponse(BaseModel):
+    target_id: str
+    connected: bool
+    detail: str | None = None
 
 
 class AssistantSummary(BaseModel):

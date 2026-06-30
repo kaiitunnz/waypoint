@@ -117,3 +117,10 @@ ssh_targets:
     remote_shell: bash -ilc
     remote_env:
       OPENAI_API_KEY: sk-your-key
+    # SSH authentication. `key` (the default) delegates to the local ssh
+    # binary's key/agent discovery. Set to `password` to have Waypoint prompt
+    # for the SSH password in the UI when connecting; the password seeds the
+    # ControlMaster connection above and is never stored or written to disk.
+    # Password auth REQUIRES the ControlMaster/ControlPath/ControlPersist args
+    # above (config load fails otherwise) and OpenSSH >= 8.4 on the host.
+    # ssh_auth: password

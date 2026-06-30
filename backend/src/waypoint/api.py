@@ -38,6 +38,8 @@ from waypoint.schemas import (
     AssistantSummary,
     BoardEntryUpdateRequest,
     BoardPostRequest,
+    LaunchTargetConnectRequest,
+    LaunchTargetConnectResponse,
     LoginRequest,
     MeResponse,
     ScheduleCreateRequest,
@@ -173,6 +175,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             assistant=context.runtime.assistant_summary(),
         )
 
+    @app.post(
+        "/api/launch-targets/{target_id}/connect",
+        response_model=LaunchTargetConnectResponse,
+    )
+    async def connect_launch_target(
+        target_id: str,
+        body: LaunchTargetConnectRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> LaunchTargetConnectResponse:
+        # The password is used once to seed the ControlMaster socket and is
+        # never logged or persisted; do not echo ``body`` anywhere.
+        result = await context.runtime.connect_launch_target(target_id, body.password)
+        return LaunchTargetConnectResponse(
+            target_id=result.target_id,
+            connected=result.connected,
+            detail=result.detail,
+        )
+
+    @app.get(
+        "/api/launch-targets/{target_id}/status",
+        response_model=LaunchTargetConnectResponse,
+    )
+    async def launch_target_status(
+        target_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> LaunchTargetConnectResponse:
+        result = await context.runtime.launch_target_status(target_id)
+        return LaunchTargetConnectResponse(
+            target_id=result.target_id,
+            connected=result.connected,
+            detail=result.detail,
+        )
+
+    @app.post(
+        "/api/launch-targets/{target_id}/disconnect",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def disconnect_launch_target(
+        target_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> None:
+        await context.runtime.disconnect_launch_target(target_id)
+
     @app.post("/api/assistant/reset", response_model=AssistantSummary)
     async def assistant_reset(
         body: AssistantResetRequest,
@@ -260,6 +305,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"thread discovery is not supported for {backend}",
             )
+        # A password-auth target with no live master can't be reached; skip the
+        # remote enumeration instead of letting it fail/stall the picker.
+        if context.runtime.remote_probe_blocked(launch_target_id):
+            return {"threads": []}
         threads = [
             thread.model_dump(mode="json")
             for thread in await plugin.list_threads(context.runtime, launch_target_id)
@@ -957,6 +1006,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"unknown backend: {backend}",
             )
+        # Fall back to the local catalogue when the password-auth target isn't
+        # connected, rather than SSHing to an unreachable host for model probes.
+        if context.runtime.remote_probe_blocked(launch_target_id):
+            launch_target_id = None
         return await context.runtime.list_backend_models(
             backend,
             launch_target_id=launch_target_id,

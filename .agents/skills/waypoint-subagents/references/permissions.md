@@ -89,9 +89,8 @@ waypoint sessions events <child-id> --messages 20 --coalesce   # find the approv
 waypoint sessions approve <child-id> <decision> [--approval-id <id>]
 ```
 
-Coalescing preserves `approval_request` records and keeps surrounding
-assistant/tool output readable. Use raw `events` only if you need exact event
-ordering, duplicate diagnosis, or per-chunk metadata.
+Use raw `events` only if you need exact event ordering, duplicate diagnosis, or
+per-chunk metadata.
 
 The `approval_request` event metadata tells you the kind:
 

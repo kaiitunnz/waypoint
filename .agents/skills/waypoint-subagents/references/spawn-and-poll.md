@@ -95,11 +95,9 @@ waypoint sessions wait "$sid" --until exited,error --timeout 600 \
 ```
 
 After `wait`, use `sessions output` for the child's normal answer. If the child
-stopped in `waiting_input`, inspect `sessions events "$sid" --coalesce` for the
-pending `approval_request` or question `tool_call`; coalescing keeps those
-records intact while making assistant/tool result output readable. Use raw
-`events` only when diagnosing exact event-stream mechanics, missing output,
-transport/TUI artifacts, paging, or duplicates.
+stopped in `waiting_input`, inspect `sessions events "$sid" --coalesce` for a
+pending approval or question. Use raw `events` only for exact stream debugging,
+missing output, or transport/TUI artifacts.
 
 To watch a child's transcript live instead of blocking silently, stream events
 as NDJSON (one compact JSON object per line) until a terminal status or Ctrl+C:

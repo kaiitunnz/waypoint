@@ -44,17 +44,12 @@ waypoint sessions show <target-id>     # poll until idle / waiting_input / exite
 waypoint sessions output <target-id> --messages 20 --text
 ```
 
-Use `sessions output` for normal replies because it coalesces streaming deltas
-into readable assistant text. If the reply seems missing, or the target is
-blocked on an approval/question, inspect
-`waypoint sessions events <target-id> --messages 20 --coalesce`; this preserves
-`approval_request` and `tool_call` records while making long assistant/tool
-result output readable. Drop to raw `events` only when you need exact event
-mechanics such as delta boundaries, overwritten metadata, paging/duplicate
-diagnosis, or transport/TUI artifacts. For sessions on the `tmux` (Terminal)
-transport, event kinds are inferred heuristically — also check
-`raw_terminal_chunk` if structured output is incomplete. This path does not
-disturb your own turn: you choose when to look.
+Use `sessions output` for normal replies. If the reply seems missing, or the
+target is blocked on an approval/question, inspect
+`waypoint sessions events <target-id> --messages 20 --coalesce`. Use raw
+`events` only for exact stream debugging or transport/TUI artifacts such as
+`raw_terminal_chunk`. This path does not disturb your own turn: you choose when
+to look.
 
 ## Push: the answer arrives in your input (you set `reply-to`)
 

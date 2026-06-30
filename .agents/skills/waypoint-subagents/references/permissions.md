@@ -82,12 +82,16 @@ for those, reap and respawn remains the only path.
 ## Service a child's approvals
 
 When a child sits in `waiting_input`, it may be blocked on an approval. Read it
-from the child's events, then decide:
+from the child's coalesced events, then decide:
 
 ```bash
-waypoint sessions events <child-id> --messages 10   # find the approval_request
+waypoint sessions events <child-id> --messages 20 --coalesce   # find the approval_request
 waypoint sessions approve <child-id> <decision> [--approval-id <id>]
 ```
+
+Coalescing preserves `approval_request` records and keeps surrounding
+assistant/tool output readable. Use raw `events` only if you need exact event
+ordering, duplicate diagnosis, or per-chunk metadata.
 
 The `approval_request` event metadata tells you the kind:
 
@@ -116,7 +120,7 @@ surfaces in the child's events as a `tool_call` whose metadata has
 will not release it.
 
 ```bash
-waypoint sessions events <child-id> --messages 10   # find the AskUserQuestion tool_call
+waypoint sessions events <child-id> --messages 20 --coalesce   # find the AskUserQuestion tool_call
 waypoint sessions answer-question <child-id> --answer "<your answer>"
 ```
 

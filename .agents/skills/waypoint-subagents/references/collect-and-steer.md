@@ -14,11 +14,14 @@ waypoint sessions events <session-id> --before-sequence <sequence>   # page back
 
 Use `sessions output` for the child's normal answer; it coalesces streaming
 deltas into readable assistant messages. Use `--text` when you only need the
-concatenated assistant text. Use `events --coalesce` for structured JSON
-transcript inspection, and raw `events` for approvals, tool calls/results,
-questions, or debugging missing output. For sessions on the `tmux` (Terminal)
-transport, event kinds are inferred heuristically — also check
-`raw_terminal_chunk` if structured output is incomplete.
+concatenated assistant text. Use `events --coalesce` for settled structured JSON
+inspection, including normal tool-call/result context and pending
+approvals/questions: coalescing leaves `approval_request`, `tool_call`, and
+question records intact. Drop to raw `events` only for exact stream debugging,
+such as delta boundaries, per-chunk sequence/timestamp checks, overwritten
+metadata, paging/duplicate diagnosis, or transport/TUI artifacts. For sessions
+on the `tmux` (Terminal) transport, event kinds are inferred heuristically —
+also check `raw_terminal_chunk` if structured output is incomplete.
 
 Quote only the minimum transcript text needed to justify your conclusion;
 summarize the rest. Distinguish the reported `status` from your interpretation of

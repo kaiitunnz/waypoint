@@ -94,10 +94,12 @@ waypoint sessions wait "$sid" --until exited,error --timeout 600 \
   && waypoint sessions output "$sid" --messages 40
 ```
 
-After `wait`, use `sessions output` for the child's normal answer. Use
-`sessions events "$sid" --coalesce` when you need structured JSON, and raw
-`events` when diagnosing approvals, tool calls/results, questions, or missing
-output.
+After `wait`, use `sessions output` for the child's normal answer. If the child
+stopped in `waiting_input`, inspect `sessions events "$sid" --coalesce` for the
+pending `approval_request` or question `tool_call`; coalescing keeps those
+records intact while making assistant/tool result output readable. Use raw
+`events` only when diagnosing exact event-stream mechanics, missing output,
+transport/TUI artifacts, paging, or duplicates.
 
 To watch a child's transcript live instead of blocking silently, stream events
 as NDJSON (one compact JSON object per line) until a terminal status or Ctrl+C:

@@ -70,7 +70,7 @@ def _latest_tag(home: Path) -> str:
 
 def _target_ref(home: Path, ref: str) -> str:
     # Branch refs track the remote tip (so nightly / --ref main actually
-    # advance); tags and SHAs resolve as-is. Either way the caller detaches.
+    # advance); tags and SHAs resolve as-is.
     remote = subprocess.run(
         [
             "git",
@@ -119,6 +119,15 @@ def _checkout(home: Path, ref: str) -> None:
     )
 
 
+def _apply_command(ref: str | None, nightly: bool) -> str:
+    """The command that would apply this check's target, matching its mode."""
+    if nightly:
+        return "waypointctl update --nightly"
+    if ref is not None:
+        return f"waypointctl update --ref {ref}"
+    return "waypointctl update"
+
+
 def _check(home: Path, ref: str | None, nightly: bool) -> None:
     """Report whether a newer revision is available, without changing anything."""
     _fetch(home)
@@ -128,7 +137,10 @@ def _check(home: Path, ref: str | None, nightly: bool) -> None:
     if _rev(home, "HEAD") == _rev(home, f"{_target_ref(home, target)}^{{commit}}"):
         typer.echo(f"Up to date ({target}).")
     else:
-        typer.echo(f"Update available ({target}). Run 'waypointctl update' to apply.")
+        typer.echo(
+            f"Update available ({target}). "
+            f"Run '{_apply_command(ref, nightly)}' to apply."
+        )
 
 
 def run(

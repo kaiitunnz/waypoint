@@ -285,9 +285,37 @@ def test_check_reports_update_available(tmp_path: Path, capsys) -> None:
     out = capsys.readouterr().out
     assert "Update available" in out
     assert "v1.0.0" in out  # the resolved target tag
+    # default mode suggests the bare apply command
+    assert "Run 'waypointctl update' to apply." in out
     argvs = _argvs(mock_run)
     assert not any("checkout" in a for a in argvs)
     assert not any(a and a[0] == "uv" for a in argvs)
+
+
+def test_check_apply_command_matches_nightly_mode(tmp_path: Path, capsys) -> None:
+    with (
+        patch("waypointctl.update.resolve_waypoint_home", return_value=tmp_path),
+        patch(
+            "waypointctl.update.subprocess.run",
+            side_effect=_fake_check_run(head="abc123", target="def456"),
+        ),
+    ):
+        update.run(tmp_path, check=True, nightly=True)
+
+    assert "Run 'waypointctl update --nightly' to apply." in capsys.readouterr().out
+
+
+def test_check_apply_command_matches_ref_mode(tmp_path: Path, capsys) -> None:
+    with (
+        patch("waypointctl.update.resolve_waypoint_home", return_value=tmp_path),
+        patch(
+            "waypointctl.update.subprocess.run",
+            side_effect=_fake_check_run(head="abc123", target="def456"),
+        ),
+    ):
+        update.run(tmp_path, check=True, ref="v2.0.0")
+
+    assert "Run 'waypointctl update --ref v2.0.0' to apply." in capsys.readouterr().out
 
 
 def test_check_skips_dirty_guard(tmp_path: Path) -> None:

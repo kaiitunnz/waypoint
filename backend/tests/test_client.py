@@ -191,6 +191,32 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
         ):
             schedule_id = request.url.path.rsplit("/", 1)[-1]
             return httpx.Response(200, json={"schedule": {"id": schedule_id}})
+        if request.url.path == "/api/message-schedules" and request.method == "GET":
+            state["msg_schedule_params"] = dict(request.url.params)
+            return httpx.Response(
+                200, json={"message_schedules": [{"id": "ms1", "session_id": "s1"}]}
+            )
+        if (
+            request.url.path == "/api/message-schedules/clear-history"
+            and request.method == "POST"
+        ):
+            state["msg_clear_params"] = dict(request.url.params)
+            return httpx.Response(200, json={"removed": 2})
+        if (
+            request.url.path.startswith("/api/message-schedules/")
+            and request.method == "DELETE"
+        ):
+            schedule_id = request.url.path.rsplit("/", 1)[-1]
+            return httpx.Response(200, json={"message_schedule": {"id": schedule_id}})
+        if (
+            request.url.path == "/api/sessions/s1/message-schedules"
+            and request.method == "POST"
+        ):
+            payload = json.loads(request.content)
+            state["msg_schedule_create"] = payload
+            return httpx.Response(
+                200, json={"message_schedule": {"id": "ms1", **payload}}
+            )
         if request.url.path == "/api/sessions/missing":
             return httpx.Response(404, json={"detail": "session not found"})
         return httpx.Response(200, json={"session": {"id": "ok"}})
@@ -793,3 +819,115 @@ def test_clear_board_no_keep_last_omits_param(
     with _client(_settings(tmp_path), state) as client:
         client.clear_board("topic:x")
     assert state.get("clear_params", {}).get("keep_last") is None
+
+
+def test_list_message_schedules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        schedules = client.list_message_schedules()
+    assert schedules == [{"id": "ms1", "session_id": "s1"}]
+
+
+def test_list_message_schedules_passes_session_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.list_message_schedules(session_id="s1")
+    assert state["msg_schedule_params"]["session_id"] == "s1"
+
+
+def test_list_message_schedules_omits_session_id_when_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.list_message_schedules()
+    assert "session_id" not in state.get("msg_schedule_params", {})
+
+
+def test_create_message_schedule_posts_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        schedule = client.create_message_schedule(
+            "s1",
+            "hello",
+            delay_seconds=30,
+        )
+    assert schedule["id"] == "ms1"
+    assert state["msg_schedule_create"]["text"] == "hello"
+    assert state["msg_schedule_create"]["submit"] is True
+    assert state["msg_schedule_create"]["delay_seconds"] == 30
+
+
+def test_create_message_schedule_scheduled_at(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        schedule = client.create_message_schedule(
+            "s1",
+            "hello",
+            scheduled_at="2026-07-01T12:00:00Z",
+        )
+    assert schedule["id"] == "ms1"
+    assert state["msg_schedule_create"]["scheduled_at"] == "2026-07-01T12:00:00Z"
+
+
+def test_create_message_schedule_with_submit_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.create_message_schedule("s1", "hello", submit=False)
+    assert state["msg_schedule_create"]["submit"] is False
+
+
+def test_create_message_schedule_with_attachments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.create_message_schedule("s1", "hello", attachments=["att1", "att2"])
+    assert state["msg_schedule_create"]["attachments"] == ["att1", "att2"]
+
+
+def test_delete_message_schedule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        schedule = client.delete_message_schedule("ms1")
+    assert schedule == {"id": "ms1"}
+
+
+def test_clear_message_schedule_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        result = client.clear_message_schedule_history()
+    assert result == {"removed": 2}
+
+
+def test_clear_message_schedule_history_passes_session_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.clear_message_schedule_history(session_id="s1")
+    assert state["msg_clear_params"]["session_id"] == "s1"

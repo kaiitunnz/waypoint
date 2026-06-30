@@ -1,12 +1,15 @@
-def test_sessions_output_raw(tmp_path, monkeypatch):
-    from pathlib import Path
+import json
+from pathlib import Path
 
-    import httpx
-    from typer.testing import CliRunner
+import httpx
+import pytest
+from typer.testing import CliRunner
 
-    from waypoint.cli import WaypointClient, app
-    from waypoint.settings import Settings
+from waypoint.cli import WaypointClient, app
+from waypoint.settings import Settings
 
+
+def test_sessions_output_raw(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     runner = CliRunner()
 
     def _config(p: Path) -> Path:
@@ -47,7 +50,6 @@ def test_sessions_output_raw(tmp_path, monkeypatch):
         app, ["--config", str(_config(tmp_path)), "sessions", "output", "s1", "--raw"]
     )
     assert result.exit_code == 0
-    import json
 
     data = json.loads(result.stdout)
     assert len(data["events"]) == 2
@@ -55,15 +57,9 @@ def test_sessions_output_raw(tmp_path, monkeypatch):
     assert data["events"][1]["text"] == "er"
 
 
-def test_sessions_events_coalesce(tmp_path, monkeypatch):
-    from pathlib import Path
-
-    import httpx
-    from typer.testing import CliRunner
-
-    from waypoint.cli import WaypointClient, app
-    from waypoint.settings import Settings
-
+def test_sessions_events_coalesce(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     runner = CliRunner()
 
     def _config(p: Path) -> Path:
@@ -105,7 +101,6 @@ def test_sessions_events_coalesce(tmp_path, monkeypatch):
         ["--config", str(_config(tmp_path)), "sessions", "events", "s1", "--coalesce"],
     )
     assert result.exit_code == 0
-    import json
 
     data = json.loads(result.stdout)
     assert len(data["events"]) == 1

@@ -93,7 +93,7 @@ def test_merge_event_text():
         == "Line 1Line 2"
     )
 
-    # tool_result delta superseded by final replaces
+    # a final non-delta tool result keeps streamed delta text
     assert (
         merge_event_text(
             {
@@ -104,15 +104,6 @@ def test_merge_event_text():
             {"kind": "tool_result", "text": "Final"},
         )
         == "Delta"
-        or merge_event_text(
-            {
-                "kind": "tool_result",
-                "text": "Delta",
-                "metadata": {"method": "item/commandExecution/outputDelta"},
-            },
-            {"kind": "tool_result", "text": "Final"},
-        )
-        == "Final"
     )
 
 

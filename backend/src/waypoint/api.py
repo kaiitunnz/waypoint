@@ -335,6 +335,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session = await context.runtime.import_thread(backend, body)
         return {"session": session.model_dump(mode="json")}
 
+    @app.delete("/api/backends/{backend}/threads/{thread_id}")
+    async def delete_backend_thread(
+        backend: str,
+        thread_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+        launch_target_id: Annotated[str | None, Query()] = None,
+    ) -> Any:
+        if not context.runtime.registry.has_backend(backend):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"unknown backend: {backend}",
+            )
+        plugin = context.runtime.registry.get(backend)
+        if not plugin.capabilities.supports_thread_delete:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"thread deletion is not supported for {backend}",
+            )
+        deleted = await plugin.delete_thread(
+            context.runtime, thread_id, launch_target_id
+        )
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no resumable thread {thread_id} for {backend}",
+            )
+        return {"deleted": thread_id}
+
     @app.get("/api/sessions/{session_id}")
     async def get_session(
         session_id: str, _: Annotated[str, Depends(token_dependency())]

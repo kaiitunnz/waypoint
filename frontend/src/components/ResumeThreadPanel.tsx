@@ -40,6 +40,11 @@ interface ResumeThreadPanelProps {
     cwd: string,
     transport: SessionTransport | null,
   ) => Promise<void>;
+  onDeleteThread?: (
+    backend: Backend,
+    threadId: string,
+    launchTargetId?: string,
+  ) => Promise<void>;
   catalog: BackendCatalog;
 }
 
@@ -72,6 +77,7 @@ export function ResumeThreadPanel({
   supportedBackends,
   preferredBackend,
   onImportThread,
+  onDeleteThread,
   catalog,
 }: ResumeThreadPanelProps) {
   const multiAgent = supportedBackends.length >= 2;
@@ -106,6 +112,7 @@ export function ResumeThreadPanel({
   const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(1);
   const [importingId, setImportingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
   // The transport picker only applies to a single-agent view. Feed the hook a
@@ -188,6 +195,25 @@ export function ResumeThreadPanel({
     }
   }
 
+  async function handleDelete(thread: UnifiedThread) {
+    if (!onDeleteThread) {
+      return;
+    }
+    const confirmed = window.confirm(
+      `Delete "${thread.title}"?\n\nThis removes the on-disk transcript permanently. ` +
+        "`claude --resume`/codex resume will no longer see it. This cannot be undone.",
+    );
+    if (!confirmed) {
+      return;
+    }
+    setDeletingId(thread.id);
+    try {
+      await onDeleteThread(thread.backend, thread.id);
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   function chooseFilter(next: Filter) {
     setFilter(next);
     setExpanded(false);
@@ -262,6 +288,12 @@ export function ResumeThreadPanel({
         <div className="import-thread-list resume-thread-list">
           {visibleThreads.map((thread) => {
             const isImporting = importingId === thread.id;
+            const isDeleting = deletingId === thread.id;
+            const canDelete =
+              !!onDeleteThread &&
+              !!catalog.byId(thread.backend)?.agent_capabilities
+                ?.supports_thread_delete;
+            const busy = importingId !== null || deletingId !== null;
             const backendLabel =
               catalog.byId(thread.backend)?.label ??
               humaniseBackend(thread.backend);
@@ -308,9 +340,21 @@ export function ResumeThreadPanel({
                       </span>
                     </div>
                     <div className="import-thread-cta">
+                      {canDelete ? (
+                        <button
+                          className="secondary danger import-thread-delete"
+                          disabled={busy}
+                          type="button"
+                          aria-label={`Delete ${thread.title}`}
+                          title="Delete stored thread"
+                          onClick={() => void handleDelete(thread)}
+                        >
+                          {isDeleting ? "deleting…" : "🗑"}
+                        </button>
+                      ) : null}
                       <button
                         className="secondary"
-                        disabled={importingId !== null}
+                        disabled={busy}
                         type="button"
                         onClick={() => void handleImport(thread)}
                       >

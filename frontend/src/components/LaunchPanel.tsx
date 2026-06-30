@@ -69,6 +69,11 @@ interface LaunchPanelProps {
     cwd: string,
     transport: SessionTransport | null,
   ) => Promise<void>;
+  onDeleteThread?: (
+    backend: Backend,
+    threadId: string,
+    launchTargetId?: string,
+  ) => Promise<void>;
   onCreateSchedule: (payload: ScheduleCreateRequest) => Promise<void>;
   onAuthFailure?: () => void;
 }
@@ -88,6 +93,7 @@ export function LaunchPanel({
   onCreate,
   onAttach,
   onImportThread,
+  onDeleteThread,
   onCreateSchedule,
   onAuthFailure,
 }: LaunchPanelProps) {
@@ -294,6 +300,7 @@ export function LaunchPanel({
           supportedBackends={supportedBackends}
           preferredBackend={form.backend}
           onImportThread={onImportThread}
+          onDeleteThread={onDeleteThread}
           catalog={catalog}
         />
       ) : null}

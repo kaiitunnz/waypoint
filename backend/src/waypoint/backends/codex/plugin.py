@@ -79,6 +79,11 @@ log = logging.getLogger("waypoint.backends.codex")
 _PLAN_PREFIX = "plan: "
 _DEFAULT_SEED_NOTES = {"CLI OAuth", "remote OAuth"}
 
+_UUID_PATTERN = (
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-" r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+_UUID_RE = re.compile(r"^" + _UUID_PATTERN + r"$")
+
 
 def _find_prefixed(notes: list[str], prefix: str) -> str | None:
     for note in notes:
@@ -144,6 +149,7 @@ class CodexPlugin(DefaultLaunchContract):
         supports_set_permission_mode_inline=True,
         supports_thread_discovery=True,
         supports_thread_import=True,
+        supports_thread_delete=True,
         supports_fork=True,
         supports_plan_approval=True,
         supports_slash_compact=True,
@@ -394,6 +400,40 @@ class CodexPlugin(DefaultLaunchContract):
             "2>/dev/null | head -n 1",
         )
         return bool(stdout.strip())
+
+    async def delete_thread(
+        self,
+        runtime: "SessionRuntime",
+        thread_id: str,
+        launch_target_id: str | None = None,
+    ) -> bool:
+        # Guard against malformed ids: a non-UUID can't match a rollout file
+        # and must never be interpolated into the remote shell command.
+        if not _UUID_RE.match(thread_id):
+            return False
+        needle = f"-{thread_id}.jsonl"
+        if launch_target_id is None:
+            home = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
+            sessions_dir = home / "sessions"
+            if not sessions_dir.is_dir():
+                return False
+            for entry in sessions_dir.glob("*/*/*/rollout-*.jsonl"):
+                if entry.name.endswith(needle):
+                    try:
+                        entry.unlink()
+                    except OSError as exc:
+                        log.warning("failed to delete codex rollout %s: %s", entry, exc)
+                        return False
+                    return True
+            return False
+        target = runtime._resolve_launch_target(launch_target_id, self.id)
+        if target is None:
+            return False
+        stdout = await target.ssh_capture(
+            f'f=$(ls "${{CODEX_HOME:-$HOME/.codex}}/sessions/"*/*/*/rollout-*{needle} '
+            '2>/dev/null | head -n 1); [ -n "$f" ] && rm -f "$f" && echo deleted',
+        )
+        return "deleted" in stdout
 
     async def terminate_session(
         self, runtime: "SessionRuntime", session: SessionRecord
@@ -985,8 +1025,7 @@ class CodexPlugin(DefaultLaunchContract):
     # ``rollout-YYYY-MM-DDThh-mm-ss-<UUID>.jsonl``.
     _ROLLOUT_UUID_RE = re.compile(
         r"rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-"
-        r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-        r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$"
+        r"(" + _UUID_PATTERN + r")\.jsonl$"
     )
 
     async def capture_thread_id(

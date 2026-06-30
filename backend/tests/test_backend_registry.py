@@ -161,6 +161,14 @@ class _StubPlugin:
     ) -> Any:
         raise NotImplementedError
 
+    async def delete_thread(
+        self,
+        runtime: Any,
+        thread_id: str,
+        launch_target_id: str | None = None,
+    ) -> bool:
+        return False
+
     async def fork_session(
         self,
         runtime: Any,

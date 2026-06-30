@@ -7,6 +7,7 @@ import pytest
 
 from waypoint.backends.claude_code.threads import (
     claude_projects_root,
+    delete_local_claude_thread,
     encode_project_dir,
     find_local_claude_thread,
     list_local_claude_threads,
@@ -194,3 +195,33 @@ def test_find_local_claude_thread_locates_by_session_id(claude_root) -> None:
 def test_find_local_claude_thread_rejects_invalid_uuid(claude_root) -> None:
     assert find_local_claude_thread("../etc/passwd") is None
     assert find_local_claude_thread("not-a-uuid") is None
+
+
+def test_delete_local_claude_thread_removes_file(claude_root) -> None:
+    project = claude_root / "-tmp-d"
+    target_id = "77777777-7777-4777-8777-777777777777"
+    transcript = project / f"{target_id}.jsonl"
+    _write_transcript(transcript, [_make_user_record(cwd="/tmp/d", text="bye")])
+
+    assert delete_local_claude_thread(target_id) is True
+    assert not transcript.exists()
+
+
+def test_delete_local_claude_thread_missing_returns_false(claude_root) -> None:
+    project = claude_root / "-tmp-d"
+    keep_id = "88888888-8888-4888-8888-888888888888"
+    keep = project / f"{keep_id}.jsonl"
+    _write_transcript(keep, [_make_user_record(cwd="/tmp/d", text="keep")])
+
+    assert delete_local_claude_thread("99999999-9999-4999-8999-999999999999") is False
+    assert keep.exists()
+
+
+def test_delete_local_claude_thread_rejects_invalid_uuid(claude_root) -> None:
+    project = claude_root / "-tmp-d"
+    other = project / "11111111-1111-4111-8111-111111111111.jsonl"
+    _write_transcript(other, [_make_user_record(cwd="/tmp/d", text="keep")])
+
+    assert delete_local_claude_thread("../etc/passwd") is False
+    assert delete_local_claude_thread("not-a-uuid") is False
+    assert other.exists()

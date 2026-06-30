@@ -117,6 +117,30 @@ def find_local_claude_thread(thread_id: str) -> ClaudeThreadInfo | None:
     return None
 
 
+def delete_local_claude_thread(thread_id: str) -> bool:
+    """Remove a single transcript by its session UUID, regardless of which
+    encoded-cwd directory it landed in. The UUID check also guards against
+    path/shell injection. Returns True iff a file was removed."""
+    if not UUID_RE.match(thread_id):
+        return False
+    root = claude_projects_root()
+    if not root.is_dir():
+        return False
+    for project_dir in root.iterdir():
+        if not project_dir.is_dir():
+            continue
+        candidate = project_dir / f"{thread_id}.jsonl"
+        if not candidate.is_file():
+            continue
+        try:
+            candidate.unlink()
+        except OSError as exc:
+            log.warning("failed to delete claude transcript %s: %s", candidate, exc)
+            return False
+        return True
+    return False
+
+
 def _read_thread_info(path: Path) -> ClaudeThreadInfo | None:
     try:
         stat = path.stat()

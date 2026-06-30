@@ -537,6 +537,15 @@ html[data-theme="light"] .import-thread-chip {
 
 .import-thread-cta {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.import-thread-cta button.import-thread-delete {
+  min-width: 32px;
+  padding: 0 10px;
+  text-transform: none;
 }
 
 .import-thread-cta button.secondary {
@@ -548,7 +557,9 @@ html[data-theme="light"] .import-thread-chip {
   text-transform: lowercase;
 }
 
-.import-thread-row:hover .import-thread-cta button.secondary:not(:disabled) {
+.import-thread-row:hover
+  .import-thread-cta
+  button.secondary:not(.import-thread-delete):not(:disabled) {
   border-color: rgba(200, 169, 106, 0.5);
   color: var(--accent-strong);
 }

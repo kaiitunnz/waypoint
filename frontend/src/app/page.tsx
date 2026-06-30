@@ -24,6 +24,7 @@ import {
   createSchedule as createScheduleRequest,
   createSession,
   deleteSession as deleteSessionRequest,
+  deleteThread,
   disconnectLaunchTarget,
   fetchLaunchTargetStatus,
   fetchBackendThreads,
@@ -654,6 +655,38 @@ export default function HomePage() {
     }
   }
 
+  async function handleDeleteThread(
+    backend: Backend,
+    threadId: string,
+    launchTargetId?: string,
+  ) {
+    try {
+      await deleteThread(
+        host,
+        token,
+        backend,
+        threadId,
+        launchTargetId ?? activeLaunchTargetId ?? null,
+      );
+      setThreadsByBackend((current) => ({
+        ...current,
+        [backend]: (current[backend] ?? []).filter(
+          (thread) => thread.id !== threadId,
+        ),
+      }));
+    } catch (deleteError) {
+      if (isAuthError(deleteError)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : `failed to delete ${backend} thread`,
+      );
+    }
+  }
+
   async function handleCreateSchedule(payload: ScheduleCreateRequest) {
     try {
       const created = await createScheduleRequest(host, token, {
@@ -900,6 +933,7 @@ export default function HomePage() {
           catalog={catalog}
           threadsByBackend={threadsByBackend}
           loadingByBackend={loadingByBackend}
+          onDeleteThread={handleDeleteThread}
           onAttach={handleAttach}
           onCreate={handleCreate}
           onImportThread={handleImportThread}

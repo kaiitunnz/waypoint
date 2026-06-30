@@ -309,9 +309,16 @@ def update(
             "--nightly", help="Update to the tip of main instead of a release."
         ),
     ] = False,
+    check: Annotated[
+        bool,
+        typer.Option(
+            "--check",
+            help="Report whether an update is available without applying it.",
+        ),
+    ] = False,
 ) -> None:
     """Update Waypoint to the latest release; run `waypointctl restart` to apply."""
-    run_update(_ctx_home(ctx), ref=ref, nightly=nightly)
+    run_update(_ctx_home(ctx), ref=ref, nightly=nightly, check=check)
 
 
 @app.command("uninstall")

@@ -68,9 +68,9 @@ def _latest_tag(home: Path) -> str:
     raise RuntimeError(f"no tags found in {home}")
 
 
-def _checkout(home: Path, ref: str) -> None:
+def _target_ref(home: Path, ref: str) -> str:
     # Branch refs track the remote tip (so nightly / --ref main actually
-    # advance); tags and SHAs detach. Either way we land in a detached HEAD.
+    # advance); tags and SHAs resolve as-is.
     remote = subprocess.run(
         [
             "git",
@@ -85,21 +85,86 @@ def _checkout(home: Path, ref: str) -> None:
         capture_output=True,
         text=True,
     )
-    target = f"origin/{ref}" if remote.returncode == 0 else ref
-    subprocess.run(["git", "-C", str(home), "checkout", "--detach", target], check=True)
+    return f"origin/{ref}" if remote.returncode == 0 else ref
+
+
+def _rev(home: Path, rev: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(home), "rev-parse", rev],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def _select_target(home: Path, ref: str | None, nightly: bool) -> str:
+    if nightly:
+        return DEFAULT_BRANCH
+    if ref is not None:
+        return ref
+    return _latest_tag(home)
+
+
+def _fetch(home: Path) -> None:
+    subprocess.run(
+        ["git", "-C", str(home), "fetch", "--force", "--tags", "origin"], check=True
+    )
+
+
+def _checkout(home: Path, ref: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(home), "checkout", "--detach", _target_ref(home, ref)],
+        check=True,
+    )
+
+
+def _apply_command(ref: str | None, nightly: bool) -> str:
+    """The command that would apply this check's target, matching its mode."""
+    if nightly:
+        return "waypointctl update --nightly"
+    if ref is not None:
+        return f"waypointctl update --ref {ref}"
+    return "waypointctl update"
+
+
+def _check(home: Path, ref: str | None, nightly: bool) -> None:
+    """Report whether a newer revision is available, without changing anything."""
+    _fetch(home)
+    target = _select_target(home, ref, nightly)
+    # `^{commit}` dereferences annotated tags to the commit they point at, so
+    # the comparison matches HEAD (always a commit) regardless of tag kind.
+    if _rev(home, "HEAD") == _rev(home, f"{_target_ref(home, target)}^{{commit}}"):
+        typer.echo(f"Up to date ({target}).")
+    else:
+        typer.echo(
+            f"Update available ({target}). "
+            f"Run '{_apply_command(ref, nightly)}' to apply."
+        )
 
 
 def run(
-    home: Path | None = None, ref: str | None = None, nightly: bool = False
+    home: Path | None = None,
+    ref: str | None = None,
+    nightly: bool = False,
+    check: bool = False,
 ) -> None:
     """Update Waypoint to the latest release (or --ref / --nightly).
 
     The stack is left untouched; run `waypointctl restart` afterward to apply.
+    With check=True, only report whether an update is available and return.
     """
     if nightly and ref is not None:
         raise typer.BadParameter("--nightly cannot be combined with --ref")
 
     resolved = _resolve_home(home)
+
+    # A check is read-only, so it runs before the managed-drift and dirty-tree
+    # guards that only matter when we are about to rewrite the working tree.
+    if check:
+        _check(resolved, ref, nightly)
+        return
+
     # In an installer-managed checkout, clear build-generated drift first so a
     # prior start/restart doesn't block the update on "uncommitted changes".
     if _is_managed(resolved):
@@ -111,16 +176,9 @@ def run(
         )
 
     typer.echo(f"Updating {resolved}")
-    subprocess.run(
-        ["git", "-C", str(resolved), "fetch", "--force", "--tags", "origin"], check=True
-    )
+    _fetch(resolved)
 
-    if nightly:
-        target = DEFAULT_BRANCH
-    elif ref is not None:
-        target = ref
-    else:
-        target = _latest_tag(resolved)
+    target = _select_target(resolved, ref, nightly)
 
     typer.echo(f"Checking out {target}")
     _checkout(resolved, target)

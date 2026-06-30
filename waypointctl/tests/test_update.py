@@ -31,6 +31,33 @@ def _fake_run(
     return run
 
 
+def _fake_check_run(
+    *,
+    head: str,
+    target: str,
+    tags: str = "v1.0.0\n",
+    remote_has=lambda ref: False,
+):
+    """A subprocess.run stub for the read-only `--check` path.
+
+    A `--verify` rev-parse probes existence (returncode); a plain rev-parse
+    resolves a SHA (stdout): HEAD -> head, anything else -> target.
+    """
+
+    def run(argv, **kwargs):
+        if "tag" in argv and "--list" in argv:
+            return MagicMock(returncode=0, stdout=tags)
+        if "rev-parse" in argv and "--verify" in argv:
+            ref = argv[-1].rsplit("/", 1)[-1]
+            return MagicMock(returncode=0 if remote_has(ref) else 1, stdout="")
+        if "rev-parse" in argv:
+            sha = head if argv[-1] == "HEAD" else target
+            return MagicMock(returncode=0, stdout=f"{sha}\n")
+        return MagicMock(returncode=0, stdout="")
+
+    return run
+
+
 def _argvs(mock_run) -> list[list[str]]:
     return [c.args[0] for c in mock_run.call_args_list]
 
@@ -225,3 +252,53 @@ def test_resolve_home_reraises_when_default_missing(tmp_path: Path) -> None:
         pytest.raises(RuntimeError),
     ):
         update._resolve_home(None)
+
+
+def test_check_reports_up_to_date(tmp_path: Path, capsys) -> None:
+    with (
+        patch("waypointctl.update.resolve_waypoint_home", return_value=tmp_path),
+        patch(
+            "waypointctl.update.subprocess.run",
+            side_effect=_fake_check_run(head="abc123", target="abc123"),
+        ) as mock_run,
+    ):
+        update.run(tmp_path, check=True)
+
+    assert "Up to date" in capsys.readouterr().out
+    argvs = _argvs(mock_run)
+    assert ["git", "-C", str(tmp_path), "fetch", "--force", "--tags", "origin"] in argvs
+    # a check never rewrites the working tree or reinstalls the tool
+    assert not any("checkout" in a for a in argvs)
+    assert not any(a and a[0] == "uv" for a in argvs)
+
+
+def test_check_reports_update_available(tmp_path: Path, capsys) -> None:
+    with (
+        patch("waypointctl.update.resolve_waypoint_home", return_value=tmp_path),
+        patch(
+            "waypointctl.update.subprocess.run",
+            side_effect=_fake_check_run(head="abc123", target="def456"),
+        ) as mock_run,
+    ):
+        update.run(tmp_path, check=True)
+
+    out = capsys.readouterr().out
+    assert "Update available" in out
+    assert "v1.0.0" in out  # the resolved target tag
+    argvs = _argvs(mock_run)
+    assert not any("checkout" in a for a in argvs)
+    assert not any(a and a[0] == "uv" for a in argvs)
+
+
+def test_check_skips_dirty_guard(tmp_path: Path) -> None:
+    # A check is read-only, so a dirty working tree must not block it.
+    with (
+        patch("waypointctl.update.resolve_waypoint_home", return_value=tmp_path),
+        patch(
+            "waypointctl.update.subprocess.run",
+            side_effect=_fake_check_run(head="abc123", target="abc123"),
+        ) as mock_run,
+    ):
+        update.run(tmp_path, check=True)
+
+    assert not any("status" in a and "--porcelain" in a for a in _argvs(mock_run))

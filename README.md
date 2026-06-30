@@ -67,7 +67,7 @@ curl -fsSL https://raw.githubusercontent.com/kaiitunnz/waypoint/main/scripts/ins
 
 or set `WAYPOINT_VERSION=v0.1.0` in the environment before running. To track the bleeding edge instead of a release, pass `--nightly` (the tip of `main`). Prerequisites: git and Node.js ≥ 20 (npm included); `uv` is installed automatically if absent.
 
-Bring the stack up with `waypointctl start`. Use `waypointctl update` to upgrade to the latest release, `waypointctl update --ref vX.Y.Z` to pin a specific version, or `waypointctl update --nightly` to track `main`; `update` leaves the stack untouched, so run `waypointctl restart` afterward to apply the new code.
+Bring the stack up with `waypointctl start`. Use `waypointctl update` to upgrade to the latest release, `waypointctl update --ref vX.Y.Z` to pin a specific version, or `waypointctl update --nightly` to track `main`; `update` leaves the stack untouched, so run `waypointctl restart` afterward to apply the new code. Add `--check` to any of these to report whether an update is available without applying it (handy on a schedule).
 
 To remove Waypoint, run `waypointctl uninstall` (add `--purge` to also delete the state and data directories). It stops the stack, strips the `WAYPOINT_HOME` shell-profile entry, removes the managed checkout, and uninstalls `waypointctl`; `curl`-based installs can instead run `scripts/uninstall.sh` directly.
 

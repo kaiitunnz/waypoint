@@ -405,6 +405,9 @@ export interface MessageSchedule {
   session_id: string;
   text: string;
   submit: boolean;
+  command?: SessionCommandInvocation | null;
+  items?: unknown[] | null;
+  attachments?: string[] | null;
   delay_seconds?: number | null;
   scheduled_at?: string | null;
   status: MessageScheduleStatus;
@@ -420,7 +423,6 @@ export interface SessionEnvelope {
     | "session_state"
     | "auth_revoked"
     | "schedule_list_update"
-    | "message_schedule_list_update"
     | "board_update"
     | "clipboard_copy"
     | "side_question";

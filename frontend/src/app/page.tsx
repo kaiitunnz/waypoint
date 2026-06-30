@@ -318,11 +318,11 @@ export default function HomePage() {
           }
           if (message.type === "schedule_list_update") {
             setSchedules(message.payload.schedules as ScheduledSession[]);
-          }
-          if (message.type === "message_schedule_list_update") {
-            setMessageSchedules(
-              message.payload.message_schedules as MessageSchedule[],
-            );
+            if ("message_schedules" in message.payload) {
+              setMessageSchedules(
+                message.payload.message_schedules as MessageSchedule[],
+              );
+            }
           }
           if (message.type === "board_update") {
             scheduleBoardRefresh();

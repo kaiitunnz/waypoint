@@ -2385,7 +2385,11 @@ const ReplyComposer = memo(function ReplyComposer({
   const [filesOpen, setFilesOpen] = useState(false);
   const [scheduleMsgOpen, setScheduleMsgOpen] = useState(false);
   const [scheduleMsgDraft, setScheduleMsgDraft] = useState("");
-  const [scheduleMsgDelay, setScheduleMsgDelay] = useState("");
+  const [scheduleMsgTiming, setScheduleMsgTiming] =
+    useState<"delay" | "datetime">("delay");
+  const [scheduleMsgDelay, setScheduleMsgDelay] = useState("15");
+  const [scheduleMsgAt, setScheduleMsgAt] = useState(defaultMessageScheduledAt());
+  const [scheduleMsgError, setScheduleMsgError] = useState("");
   const [scheduleMsgSending, setScheduleMsgSending] = useState(false);
   const [sending, setSending] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -2579,22 +2583,44 @@ const ReplyComposer = memo(function ReplyComposer({
     if (!text || !session || scheduleMsgSending) {
       return;
     }
+    setScheduleMsgError("");
+    const timing: {
+      delaySeconds?: number | null;
+      scheduledAt?: string | null;
+    } = {};
+    if (scheduleMsgTiming === "delay") {
+      const minutes = Number.parseFloat(scheduleMsgDelay);
+      if (!Number.isFinite(minutes) || minutes < 0) {
+        setScheduleMsgError("Enter a non-negative delay in minutes.");
+        return;
+      }
+      timing.delaySeconds = Math.round(minutes * 60);
+    } else {
+      const local = new Date(scheduleMsgAt);
+      if (Number.isNaN(local.getTime())) {
+        setScheduleMsgError("Enter a valid scheduled time.");
+        return;
+      }
+      timing.scheduledAt = local.toISOString();
+    }
     setScheduleMsgSending(true);
     try {
-      const delaySeconds = scheduleMsgDelay
-        ? Math.max(0, parseInt(scheduleMsgDelay, 10) * 60)
-        : undefined;
-      await createMessageSchedule(host, token, sessionId, text, {
-        delaySeconds: delaySeconds || null,
-      });
-      setScheduleMsgOpen(false);
-      setScheduleMsgDraft("");
-      setScheduleMsgDelay("");
+      await createMessageSchedule(host, token, sessionId, text, timing);
+      closeScheduleMessageDialog();
     } catch (err) {
       onError(err instanceof Error ? err.message : "failed to schedule message");
     } finally {
       setScheduleMsgSending(false);
     }
+  }
+
+  function closeScheduleMessageDialog() {
+    setScheduleMsgOpen(false);
+    setScheduleMsgDraft("");
+    setScheduleMsgTiming("delay");
+    setScheduleMsgDelay("15");
+    setScheduleMsgAt(defaultMessageScheduledAt());
+    setScheduleMsgError("");
   }
 
   const addFilesFromInput = (event: ChangeEvent<HTMLInputElement>) => {
@@ -3345,6 +3371,7 @@ const ReplyComposer = memo(function ReplyComposer({
                     className="composer-overflow-item"
                     onClick={() => {
                       setOverflowOpen(false);
+                      setScheduleMsgDraft((current) => current || draft);
                       setScheduleMsgOpen(true);
                     }}
                   >
@@ -3504,14 +3531,14 @@ const ReplyComposer = memo(function ReplyComposer({
         />
       ) : null}
       {scheduleMsgOpen ? (
-        <div className="schedule-msg-dialog-overlay" onClick={() => setScheduleMsgOpen(false)}>
+        <div className="schedule-msg-dialog-overlay" onClick={closeScheduleMessageDialog}>
           <div className="schedule-msg-dialog" onClick={(e) => e.stopPropagation()}>
             <div className="schedule-msg-dialog-header">
               <span className="schedule-msg-dialog-title">Schedule message</span>
               <button
                 type="button"
                 className="schedule-msg-dialog-close"
-                onClick={() => { setScheduleMsgOpen(false); setScheduleMsgDraft(""); setScheduleMsgDelay(""); }}
+                onClick={closeScheduleMessageDialog}
                 aria-label="Close"
               >
                 ×
@@ -3525,25 +3552,60 @@ const ReplyComposer = memo(function ReplyComposer({
               placeholder="Message text…"
               aria-label="Message text"
             />
-            <div className="schedule-msg-dialog-options">
-              <label className="schedule-msg-dialog-field">
-                <span>Delay (minutes)</span>
-                <input
-                  type="number"
-                  className="schedule-msg-dialog-number"
-                  min={0}
-                  value={scheduleMsgDelay}
-                  onChange={(e) => setScheduleMsgDelay(e.target.value)}
-                  placeholder="0"
-                  aria-label="Delay in minutes"
-                />
-              </label>
+            <div className="schedule-mode-row">
+              <button
+                type="button"
+                className={
+                  scheduleMsgTiming === "delay" ? "primary" : "secondary"
+                }
+                onClick={() => setScheduleMsgTiming("delay")}
+              >
+                After delay
+              </button>
+              <button
+                type="button"
+                className={
+                  scheduleMsgTiming === "datetime" ? "primary" : "secondary"
+                }
+                onClick={() => setScheduleMsgTiming("datetime")}
+              >
+                At specific time
+              </button>
             </div>
+            <div className="schedule-msg-dialog-options">
+              {scheduleMsgTiming === "delay" ? (
+                <label className="schedule-msg-dialog-field">
+                  <span>Delay (minutes)</span>
+                  <input
+                    type="number"
+                    className="schedule-msg-dialog-number"
+                    min={0}
+                    step={1}
+                    value={scheduleMsgDelay}
+                    onChange={(e) => setScheduleMsgDelay(e.target.value)}
+                    placeholder="15"
+                    aria-label="Delay in minutes"
+                  />
+                </label>
+              ) : (
+                <label className="schedule-msg-dialog-field">
+                  <span>Local time</span>
+                  <input
+                    type="datetime-local"
+                    className="schedule-msg-dialog-number"
+                    value={scheduleMsgAt}
+                    onChange={(e) => setScheduleMsgAt(e.target.value)}
+                    aria-label="Scheduled local time"
+                  />
+                </label>
+              )}
+            </div>
+            {scheduleMsgError ? <p className="error">{scheduleMsgError}</p> : null}
             <div className="schedule-msg-dialog-actions">
               <button
                 type="button"
                 className="secondary"
-                onClick={() => { setScheduleMsgOpen(false); setScheduleMsgDraft(""); setScheduleMsgDelay(""); }}
+                onClick={closeScheduleMessageDialog}
               >
                 Cancel
               </button>
@@ -4306,4 +4368,14 @@ function stripAnsi(text: string): string {
     .replace(/\u001B\][\s\S]*?(?:\u0007|\u001B\\)/g, "")
     .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
     .replace(/\u001B[@-_]/g, "");
+}
+
+function defaultMessageScheduledAt(): string {
+  const date = new Date();
+  date.setMinutes(date.getMinutes() + 15);
+  const pad = (value: number) => value.toString().padStart(2, "0");
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
+  );
 }

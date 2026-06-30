@@ -309,6 +309,8 @@ export interface LaunchTargetSummary {
   supported_backends: Backend[];
   default_backend: Backend;
   default_cwd?: string | null;
+  auth?: "key" | "password";
+  connected?: boolean;
 }
 
 export type ScheduleStatus = "pending" | "launched" | "cancelled" | "failed";

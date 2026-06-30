@@ -254,6 +254,68 @@ export async function createSession(
   return body.session as SessionRecord;
 }
 
+// Detail token the backend returns (HTTP 409) when a launch targets a
+// password-auth SSH host whose ControlMaster is not connected yet.
+export const SSH_MASTER_REQUIRED_DETAIL = "ssh-master-required";
+
+export interface LaunchTargetConnectResult {
+  target_id: string;
+  connected: boolean;
+  detail?: string | null;
+}
+
+export async function connectLaunchTarget(
+  host: string,
+  token: string,
+  targetId: string,
+  password: string,
+): Promise<LaunchTargetConnectResult> {
+  const response = await fetch(
+    `${host}/api/launch-targets/${encodeURIComponent(targetId)}/connect`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ password }),
+    },
+  );
+  await ensureOk(response, "failed to connect launch target");
+  return (await response.json()) as LaunchTargetConnectResult;
+}
+
+export async function fetchLaunchTargetStatus(
+  host: string,
+  token: string,
+  targetId: string,
+): Promise<LaunchTargetConnectResult> {
+  const response = await fetch(
+    `${host}/api/launch-targets/${encodeURIComponent(targetId)}/status`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    },
+  );
+  await ensureOk(response, "failed to fetch launch target status");
+  return (await response.json()) as LaunchTargetConnectResult;
+}
+
+export async function disconnectLaunchTarget(
+  host: string,
+  token: string,
+  targetId: string,
+): Promise<void> {
+  const response = await fetch(
+    `${host}/api/launch-targets/${encodeURIComponent(targetId)}/disconnect`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  await ensureOk(response, "failed to disconnect launch target");
+}
+
 export async function forkSession(
   host: string,
   token: string,

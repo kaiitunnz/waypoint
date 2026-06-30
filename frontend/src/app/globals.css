@@ -13745,3 +13745,155 @@ html[data-theme="light"] .wp-hl {
     height: 38px;
   }
 }
+
+/* ─── SSH password-auth connect control + modal ─── */
+/* Inline auth control, rendered inside the backend selector (collapsed pill
+   and expanded panel) so it stays attached to where the SSH target is chosen. */
+.ssh-auth-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.ssh-auth-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warn);
+  flex: none;
+}
+
+.ssh-auth-row.is-connected .ssh-auth-dot {
+  background: var(--success);
+}
+
+.ssh-auth-label {
+  white-space: nowrap;
+}
+
+.ssh-auth-connect {
+  min-height: 28px;
+  padding: 0 12px;
+  font-size: 0.82rem;
+}
+
+/* In the collapsed pill the control sits after the "change" link; nudge it
+   apart so the two concerns (host vs. SSH auth) read as distinct. */
+.backend-pill .ssh-auth-row {
+  margin-left: auto;
+}
+
+.ssh-connect-backdrop {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  padding: 16px;
+}
+
+.ssh-connect-modal {
+  width: 100%;
+  max-width: min(28rem, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1.4rem;
+  background: rgba(14, 17, 24, 0.96);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  animation: ssh-connect-in 200ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+html[data-theme="light"] .ssh-connect-modal {
+  background: rgba(252, 249, 242, 0.98);
+  box-shadow: 0 16px 48px rgba(60, 45, 20, 0.2);
+}
+
+@keyframes ssh-connect-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ssh-connect-modal {
+    animation: none;
+  }
+}
+
+.ssh-connect-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.ssh-connect-head strong {
+  font-size: 1.05rem;
+  color: var(--text-strong);
+}
+
+/* iOS Safari zooms the viewport for inputs under 16px; keep it at 16px. */
+.ssh-connect-modal .field input {
+  font-size: 16px;
+}
+
+/* Password field with a trailing show/hide toggle. */
+.input-reveal {
+  position: relative;
+  display: flex;
+}
+
+.input-reveal input {
+  flex: 1;
+  padding-right: 44px;
+}
+
+.input-reveal-toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.input-reveal-toggle:hover,
+.input-reveal-toggle:focus-visible {
+  color: var(--text);
+}
+
+.ssh-connect-error {
+  font-size: 0.82rem;
+  color: var(--danger);
+}
+
+.ssh-connect-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}

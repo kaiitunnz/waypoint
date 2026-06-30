@@ -335,6 +335,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session = await context.runtime.import_thread(backend, body)
         return {"session": session.model_dump(mode="json")}
 
+    @app.delete("/api/backends/{backend}/threads/{thread_id}")
+    async def delete_backend_thread(
+        backend: str,
+        thread_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+        launch_target_id: Annotated[str | None, Query()] = None,
+    ) -> Any:
+        if not context.runtime.registry.has_backend(backend):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"unknown backend: {backend}",
+            )
+        plugin = context.runtime.registry.get(backend)
+        if not plugin.capabilities.supports_thread_delete:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"thread deletion is not supported for {backend}",
+            )
+        # Refuse to delete a transcript still backing a Waypoint session — its
+        # adapter resumes from that file, so removing it would break the live
+        # session. (Discovery already hides imported threads from the list.)
+        for session in context.runtime.storage.list_sessions():
+            if session.backend == backend and plugin.native_thread_id(session) == (
+                thread_id
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"thread {thread_id} is in use by session {session.id}; "
+                        "delete that session first"
+                    ),
+                )
+        deleted = await plugin.delete_thread(
+            context.runtime, thread_id, launch_target_id
+        )
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no resumable thread {thread_id} for {backend}",
+            )
+        return {"deleted": thread_id}
+
     @app.get("/api/sessions/{session_id}")
     async def get_session(
         session_id: str, _: Annotated[str, Depends(token_dependency())]

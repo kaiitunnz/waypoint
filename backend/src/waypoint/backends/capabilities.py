@@ -45,6 +45,7 @@ class AgentCapabilities(_FrozenModel):
     approval_decisions: tuple[str, ...] = ("approve", "decline")
     supports_thread_discovery: bool = False
     supports_thread_import: bool = False
+    supports_thread_delete: bool = False
     supports_fork: bool = False
     supports_plan_approval: bool = False
     supports_approval_note: bool = False
@@ -146,6 +147,10 @@ class BackendCapabilities(_FrozenModel):
     terminal_resizable: bool = False
     supports_thread_discovery: bool = False
     supports_thread_import: bool = False
+    # The plugin can delete a resumable thread's on-disk transcript via
+    # ``delete_thread``. Drives the delete affordance in the frontend's
+    # resume list.
+    supports_thread_delete: bool = False
     supports_fork: bool = False
     supports_plan_approval: bool = False
     supports_slash_compact: bool = False
@@ -194,6 +199,7 @@ class BackendCapabilities(_FrozenModel):
             approval_decisions=self.approval_decisions,
             supports_thread_discovery=self.supports_thread_discovery,
             supports_thread_import=self.supports_thread_import,
+            supports_thread_delete=self.supports_thread_delete,
             supports_fork=self.supports_fork,
             supports_plan_approval=self.supports_plan_approval,
             supports_approval_note=self.supports_approval_note,

@@ -373,6 +373,28 @@ export async function importBackendThread(
   return body.session as SessionRecord;
 }
 
+export async function deleteThread(
+  host: string,
+  token: string,
+  backend: string,
+  threadId: string,
+  launchTargetId?: string | null,
+): Promise<void> {
+  const params = new URLSearchParams();
+  if (launchTargetId) {
+    params.set("launch_target_id", launchTargetId);
+  }
+  const suffix = params.size ? `?${params.toString()}` : "";
+  const response = await fetch(
+    `${host}/api/backends/${backend}/threads/${encodeURIComponent(threadId)}${suffix}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  await ensureOk(response, `failed to delete ${backend} thread`);
+}
+
 export async function postAction(
   host: string,
   token: string,

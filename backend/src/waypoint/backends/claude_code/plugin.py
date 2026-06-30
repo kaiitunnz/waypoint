@@ -57,7 +57,9 @@ from waypoint.backends.claude_code.support import (
     ensure_claude_support_bundle,
 )
 from waypoint.backends.claude_code.threads import (
+    UUID_RE,
     ClaudeThreadInfo,
+    delete_local_claude_thread,
     find_local_claude_thread,
     list_local_claude_threads,
 )
@@ -161,6 +163,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         supports_set_permission_mode_inline=True,
         supports_thread_discovery=True,
         supports_thread_import=True,
+        supports_thread_delete=True,
         supports_fork=True,
         supports_slash_compact=False,
         supports_approval_note=True,
@@ -1208,6 +1211,30 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             for info in infos
             if (launch_target_id, info.id) not in imported
         ]
+
+    async def delete_thread(
+        self,
+        runtime: "SessionRuntime",
+        thread_id: str,
+        launch_target_id: str | None = None,
+    ) -> bool:
+        if launch_target_id is None:
+            return await asyncio.to_thread(delete_local_claude_thread, thread_id)
+        target = runtime._resolve_launch_target(launch_target_id, self.id)
+        if target is None:
+            return False
+        if not UUID_RE.match(thread_id):
+            return False
+        stdout = await target.ssh_capture(
+            'f=$(ls "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/"*/'
+            f"{thread_id}.jsonl 2>/dev/null | head -n1); "
+            '[ -n "$f" ] && rm -f "$f" && echo deleted'
+        )
+        if "deleted" not in stdout:
+            return False
+        if self.thread_enumerator is not None:
+            self.thread_enumerator.invalidate(launch_target_id)
+        return True
 
     async def create_session(
         self,

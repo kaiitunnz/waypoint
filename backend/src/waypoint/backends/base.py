@@ -223,6 +223,22 @@ class BackendPlugin(Protocol):
         """
         ...
 
+    async def delete_thread(
+        self,
+        runtime: "SessionRuntime",
+        thread_id: str,
+        launch_target_id: str | None = None,
+    ) -> bool:
+        """Delete a resumable backend-side thread's on-disk transcript.
+
+        Returns ``True`` when a transcript matching ``thread_id`` was found
+        and removed, ``False`` when none matched. ``launch_target_id`` selects
+        the SSH target whose store to delete from (``None`` = local). Only
+        invoked for plugins that advertise
+        ``capabilities.supports_thread_delete``; the API gates on it first.
+        """
+        ...
+
     async def create_session(
         self,
         runtime: "SessionRuntime",

@@ -1168,6 +1168,16 @@ class ClaudeTtyPlugin:
         imported = self._imported_thread_ids(runtime)
         return [self._thread_summary(info) for info in infos if info.id not in imported]
 
+    async def delete_thread(
+        self,
+        runtime: "SessionRuntime",
+        thread_id: str,
+        launch_target_id: str | None = None,
+    ) -> bool:
+        # Deletion is offered by the claude_code plugin; this tty-tail driver
+        # leaves supports_thread_delete False so the API never routes here.
+        return False
+
     async def import_thread(
         self,
         runtime: "SessionRuntime",

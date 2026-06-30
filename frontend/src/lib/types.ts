@@ -199,6 +199,7 @@ export interface AgentCapabilities {
   approval_decisions: string[];
   supports_thread_discovery: boolean;
   supports_thread_import: boolean;
+  supports_thread_delete: boolean;
   supports_fork: boolean;
   supports_plan_approval: boolean;
   supports_approval_note: boolean;
@@ -226,6 +227,7 @@ export interface BackendCapabilities {
   terminal_resizable: boolean;
   supports_thread_discovery: boolean;
   supports_thread_import: boolean;
+  supports_thread_delete: boolean;
   supports_fork: boolean;
   supports_plan_approval: boolean;
   supports_slash_compact: boolean;

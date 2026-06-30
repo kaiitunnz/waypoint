@@ -3483,6 +3483,10 @@ html[data-theme="light"] .code-copy.copied {
   z-index: 5;
   margin-top: -8px;
   pointer-events: none;
+  /* The parent `.stack` is a grid with an `auto` column, which sizes to its
+     widest child's max-content. Set this to prevent wide tasks from
+     blowing the grid — and the page — wider than the viewport. */
+  min-width: 0;
 }
 
 /* Expanded, the dock is a modal (full-screen scrim + task list) and must sit
@@ -3633,12 +3637,20 @@ html[data-theme="light"] .task-dock-scrim {
 }
 
 .task-dock-panel {
-  position: relative;
+  /* Absolute (not in flow) so expanding it overlays the transcript instead of
+     growing the sticky dock's box and reflowing content upward — mobile sits
+     flush atop the strip as a full-width sheet; desktop re-anchors below. */
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
   z-index: 7;
-  margin-bottom: 8px;
   max-height: 50vh;
   overflow-y: auto;
   display: grid;
+  /* minmax(0, 1fr) lets the grid column shrink so text wraps instead of
+     sizing to max-content and blowing the dock wider than the viewport. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   padding: 12px 14px;
   border: 1px solid var(--line-strong);
@@ -3659,7 +3671,6 @@ html[data-theme="light"] .task-dock-panel {
  * with the strip carrying the shadow. (Desktop overrides this below to float
  * the panel as a detached popover.) */
 .task-dock.expanded .task-dock-panel {
-  margin-bottom: 0;
   border-bottom: none;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
@@ -3705,11 +3716,10 @@ html[data-theme="light"] .task-dock-panel {
   }
 
   .task-dock-panel {
-    position: absolute;
+    left: auto;
     right: 0;
     bottom: calc(100% + 8px);
     width: min(420px, 92vw);
-    margin-bottom: 0;
   }
 
   /* The panel floats as a detached popover, so undo the mobile sheet join:
@@ -3927,7 +3937,6 @@ html[data-theme="light"] .sq-dock-panel {
 
 /* Mobile: join the panel to the strip into one surface. */
 .sq-dock.expanded .sq-dock-panel {
-  margin-bottom: 0;
   border-bottom: none;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;

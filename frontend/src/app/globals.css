@@ -9589,15 +9589,13 @@ html[data-theme="light"] .term-compose-input {
   color: var(--accent);
 }
 
-/* Outline the session-card pin / terminate (and the mutually-exclusive delete)
-   actions so they read as buttons. currentColor keeps each border in its own
-   action hue and adapts to both themes without a separate light override. */
+/* Underline the session-card pin / terminate / delete actions so they read as
+   tappable without the visual weight of a full button — they appear on every
+   card and carry no important state, so they stay deliberately low-key. */
 .session-card-actions .pin-link,
 .session-card-actions .danger-link {
-  border: 1px solid currentColor;
-  border-radius: 6px;
-  padding: 3px 10px;
-  margin-top: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .session-header-title-row,

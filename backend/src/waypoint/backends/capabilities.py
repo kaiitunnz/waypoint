@@ -148,9 +148,8 @@ class BackendCapabilities(_FrozenModel):
     supports_thread_discovery: bool = False
     supports_thread_import: bool = False
     # The plugin can delete a resumable thread's on-disk transcript via
-    # ``delete_thread`` (claude_code removes the ``<uuid>.jsonl``; codex the
-    # ``rollout-*-<uuid>.jsonl``). Drives the delete affordance in the
-    # frontend's resume list.
+    # ``delete_thread``. Drives the delete affordance in the frontend's
+    # resume list.
     supports_thread_delete: bool = False
     supports_fork: bool = False
     supports_plan_approval: bool = False

@@ -342,14 +342,12 @@ export function ResumeThreadPanel({
                     <div className="import-thread-cta">
                       {canDelete ? (
                         <button
-                          className="secondary danger import-thread-delete"
+                          className="link-button danger-link"
                           disabled={busy}
                           type="button"
-                          aria-label={`Delete ${thread.title}`}
-                          title="Delete stored thread"
                           onClick={() => void handleDelete(thread)}
                         >
-                          {isDeleting ? "deleting…" : "🗑"}
+                          {isDeleting ? "deleting…" : "delete"}
                         </button>
                       ) : null}
                       <button

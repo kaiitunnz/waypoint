@@ -353,6 +353,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"thread deletion is not supported for {backend}",
             )
+        # Refuse to delete a transcript still backing a Waypoint session — its
+        # adapter resumes from that file, so removing it would break the live
+        # session. (Discovery already hides imported threads from the list.)
+        for session in context.runtime.storage.list_sessions():
+            if session.backend == backend and plugin.native_thread_id(session) == (
+                thread_id
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"thread {thread_id} is in use by session {session.id}; "
+                        "delete that session first"
+                    ),
+                )
         deleted = await plugin.delete_thread(
             context.runtime, thread_id, launch_target_id
         )

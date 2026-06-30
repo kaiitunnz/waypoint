@@ -20,6 +20,8 @@ interface BackendSwitcherProps {
   launchTargets: LaunchTargetSummary[];
   targetId: string;
   onSwitch: (nextHost: string, nextTargetId: string) => void;
+  onConnectTarget: (target: LaunchTargetSummary) => void;
+  onDisconnectTarget: (targetId: string) => void;
   onAuthFailure?: () => void;
 }
 
@@ -33,7 +35,7 @@ interface PickerOption {
   hint: string | null;
 }
 
-export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch, onAuthFailure }: BackendSwitcherProps) {
+export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch, onConnectTarget, onDisconnectTarget, onAuthFailure }: BackendSwitcherProps) {
   const [open, setOpen] = useState(false);
   const [snapshot, setSnapshot] = useState<TailnetSnapshot | null>(null);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
@@ -112,6 +114,7 @@ export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch
   }, [open, hostOptions, host, targetId, launchTargets]);
 
   const selectedTargetId = selection.startsWith(TARGET_PREFIX) ? selection.slice(TARGET_PREFIX.length) : "";
+  const selectedTarget = launchTargets.find((target) => target.id === selectedTargetId) ?? null;
   const activeHost = selection === CUSTOM_VALUE || selection.startsWith(TARGET_PREFIX) ? customOrCurrentHost(selection, customHost, host) : selection;
   const dirty = !sameBackendUrl(activeHost, host) || selectedTargetId !== targetId;
 
@@ -140,12 +143,21 @@ export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch
 
   if (!open) {
     return (
-      <p className="meta backend-pill">
-        Connected: <strong>{currentLabel}</strong>
+      <div className="meta backend-pill">
+        <span>
+          Connected: <strong>{currentLabel}</strong>
+        </span>
         <button type="button" className="link-button" onClick={() => setOpen(true)}>
           change
         </button>
-      </p>
+        {activeTarget?.auth === "password" ? (
+          <SshAuthControl
+            target={activeTarget}
+            onConnect={onConnectTarget}
+            onDisconnect={onDisconnectTarget}
+          />
+        ) : null}
+      </div>
     );
   }
 
@@ -193,6 +205,13 @@ export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch
         </label>
       ) : null}
       {activeHost ? <ProbeIndicator status={probe} url={activeHost} /> : null}
+      {selectedTarget?.auth === "password" ? (
+        <SshAuthControl
+          target={selectedTarget}
+          onConnect={onConnectTarget}
+          onDisconnect={onDisconnectTarget}
+        />
+      ) : null}
       <div className="action-row">
         <button
           type="button"
@@ -204,6 +223,43 @@ export function BackendSwitcher({ host, token, launchTargets, targetId, onSwitch
         </button>
       </div>
     </section>
+  );
+}
+
+function SshAuthControl({
+  target,
+  onConnect,
+  onDisconnect,
+}: {
+  target: LaunchTargetSummary;
+  onConnect: (target: LaunchTargetSummary) => void;
+  onDisconnect: (targetId: string) => void;
+}) {
+  const connected = Boolean(target.connected);
+  return (
+    <div className={`ssh-auth-row${connected ? " is-connected" : ""}`}>
+      <span className="ssh-auth-dot" aria-hidden="true" />
+      <span className="ssh-auth-label">
+        {connected ? "SSH connected" : "SSH password required"}
+      </span>
+      {connected ? (
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => onDisconnect(target.id)}
+        >
+          Disconnect
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="secondary ssh-auth-connect"
+          onClick={() => onConnect(target)}
+        >
+          Connect
+        </button>
+      )}
+    </div>
   );
 }
 

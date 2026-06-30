@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
+import { PasswordInput } from "@/components/PasswordInput";
 import { probeBackend } from "@/lib/api";
 import {
   backendPortFromUrl,
@@ -174,8 +175,7 @@ export function LoginForm({ defaultHost, onSubmit }: LoginFormProps) {
       {activeHost ? <ProbeIndicator status={probe} url={activeHost} /> : null}
       <label className="field">
         <span>Password</span>
-        <input
-          type="password"
+        <PasswordInput
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           placeholder="Waypoint password"

@@ -56,6 +56,7 @@ from waypoint.schemas import (
     SessionStatus,
 )
 from waypoint.settings import Settings
+from waypoint.ssh_master import SshMasterManager, SshMasterStatus
 from waypoint.storage import Storage
 from waypoint.transports import TransportAdapter
 
@@ -173,6 +174,9 @@ class SessionRuntime:
         self.ssh_targets = {
             target.id: target for target in self.settings.ssh_targets if target.enabled
         }
+        # Owns the password-authenticated ControlMaster sockets for
+        # ``ssh_auth == "password"`` targets. Key-auth targets never touch it.
+        self.ssh_master = SshMasterManager()
         self.monitor_tasks: dict[str, asyncio.Task[None]] = {}
         # Per-session helpers that capture the agent's native thread id once
         # the underlying CLI has materialized it on disk (Codex writes its
@@ -237,6 +241,17 @@ class SessionRuntime:
             # EXITED stays skipped: that's a terminal user choice.
             if session.status == SessionStatus.EXITED:
                 continue
+            # A password-auth target has no live ControlMaster at boot, so a
+            # restore would block on an unanswerable password prompt. Leave the
+            # session in its stored state for the user to reconnect (prompting
+            # for the password) and /reattach.
+            launch_target = self._find_launch_target(session.launch_target_id)
+            if (
+                launch_target is not None
+                and launch_target.requires_password
+                and not self.ssh_master.is_connected_cached(launch_target)
+            ):
+                continue
             plugin = self.registry.plugin_for(session)
             task = asyncio.create_task(
                 self._restore_session_and_warm_completions(plugin, session),
@@ -300,6 +315,7 @@ class SessionRuntime:
         self._structured_log_handles.clear()
         for plugin in self.registry.all():
             await plugin.shutdown(self)
+        await self.ssh_master.disconnect_all(list(self.ssh_targets.values()))
         self.storage.close()
 
     def list_sessions(self) -> list[SessionRecord]:
@@ -339,6 +355,7 @@ class SessionRuntime:
         launch_target = self._resolve_launch_target(
             request.launch_target_id, request.backend
         )
+        await self._require_live_master(launch_target)
         # Local cwd is fed to subprocess.Popen / tmux new-session, neither of
         # which expand `~`. Resolve it before storing/launching. The remote
         # cwd is left verbatim so the remote shell can do its own expansion.
@@ -1331,6 +1348,9 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="this session cannot be reattached after exit",
             )
+        await self._require_live_master(
+            self._find_launch_target(session.launch_target_id)
+        )
         await plugin.terminate_session(self, session)
         await self._cancel_context_usage_source(session.id)
         # User-initiated retry: bypass any per-target cooldown / circuit
@@ -1733,9 +1753,50 @@ class SessionRuntime:
                         self.settings.default_backend
                     ),
                     "default_cwd": target.default_cwd,
+                    "auth": target.ssh_auth,
+                    "connected": self.ssh_master.is_connected_cached(target),
                 }
             )
         return summaries
+
+    async def connect_launch_target(
+        self, target_id: str, password: str
+    ) -> SshMasterStatus:
+        target = self._find_launch_target(target_id)
+        if target is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="unknown launch target"
+            )
+        if not target.requires_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="launch target does not use password auth",
+            )
+        return await self.ssh_master.connect(target, password)
+
+    async def launch_target_status(self, target_id: str) -> SshMasterStatus:
+        target = self._find_launch_target(target_id)
+        if target is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="unknown launch target"
+            )
+        connected = (
+            await self.ssh_master.is_connected(target)
+            if target.requires_password
+            else True
+        )
+        return SshMasterStatus(
+            target_id=target.id, auth=target.ssh_auth, connected=connected
+        )
+
+    async def disconnect_launch_target(self, target_id: str) -> None:
+        target = self._find_launch_target(target_id)
+        if target is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="unknown launch target"
+            )
+        if target.requires_password:
+            await self.ssh_master.disconnect(target)
 
     def _resolve_launch_target(
         self,
@@ -1762,6 +1823,35 @@ class SessionRuntime:
         if not launch_target_id:
             return None
         return self.ssh_targets.get(launch_target_id)
+
+    def remote_probe_blocked(self, launch_target_id: str | None) -> bool:
+        """True when a pre-launch SSH probe (thread/model enumeration) must be
+        skipped because the target needs a password and its ControlMaster is not
+        up. Otherwise the picker SSHes to an unreachable host on every load —
+        codex fails with ``Permission denied`` and opencode blocks on its
+        server-start timeout, both surfacing as "load failed" in the UI.
+        """
+        target = self._find_launch_target(launch_target_id)
+        return bool(
+            target
+            and target.requires_password
+            and not self.ssh_master.is_connected_cached(target)
+        )
+
+    async def _require_live_master(
+        self, launch_target: SshLaunchTargetConfig | None
+    ) -> None:
+        """Reject a launch on a password-auth target whose ControlMaster is not
+        up. The frontend matches the ``ssh-master-required`` detail to prompt
+        for the password (via ``/api/launch-targets/{id}/connect``) and retry.
+        """
+        if launch_target is None or not launch_target.requires_password:
+            return
+        if not await self.ssh_master.is_connected(launch_target):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="ssh-master-required",
+            )
 
     async def _record_user_event(
         self,

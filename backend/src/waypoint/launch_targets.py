@@ -19,9 +19,9 @@ import re
 import shlex
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from waypoint.backends.plugin_config import PluginLaunchTargetConfig
 from waypoint.backends.registry import get_registry
@@ -65,6 +65,14 @@ class SshLaunchTargetConfig(BaseModel):
     # codex/claude's stream protocols, so keep rcfile output on stderr only.
     remote_shell: str = "bash -ilc"
     remote_env: dict[str, str] = Field(default_factory=dict)
+    # SSH authentication method. ``key`` (the default) delegates entirely to
+    # the local ``ssh`` binary's key/agent discovery, exactly as before.
+    # ``password`` opts the target into UI-prompted password auth: the password
+    # is used once to seed a multiplexed ControlMaster connection (see
+    # ``ssh_master.py``) and never stored. Password auth therefore requires the
+    # ``ssh_args`` to enable connection multiplexing so every later call can
+    # reuse the authenticated socket without a password.
+    ssh_auth: Literal["key", "password"] = "key"
     # Per-plugin per-target config blocks keyed by plugin id. Presence
     # of a key means "this target supports the plugin"; an empty
     # mapping means "supports every non-fallback registered plugin
@@ -91,6 +99,52 @@ class SshLaunchTargetConfig(BaseModel):
                 raw if isinstance(raw, schema) else schema.model_validate(raw or {})
             )
         return dispatched
+
+    @model_validator(mode="after")
+    def _require_multiplexing_for_password(self) -> Self:
+        """Password auth reuses one ControlMaster socket, so the target must
+        configure connection multiplexing. Fail loud at config load (matching
+        ``_dispatch_plugin_configs``) rather than discovering it at connect time.
+        """
+        if self.ssh_auth != "password":
+            return self
+        options = self._parsed_ssh_options()
+        missing: list[str] = []
+        if options.get("controlmaster", "").lower() not in {"auto", "yes"}:
+            missing.append("ControlMaster=auto")
+        if not options.get("controlpath"):
+            missing.append("ControlPath=<path>")
+        if not options.get("controlpersist"):
+            missing.append("ControlPersist=<duration>")
+        if missing:
+            raise ValueError(
+                f"ssh target {self.id!r} uses password auth and must configure "
+                f"connection multiplexing; missing ssh_args: {', '.join(missing)}"
+            )
+        return self
+
+    def _parsed_ssh_options(self) -> dict[str, str]:
+        """Extract ``-o KEY=VALUE`` options from ``ssh_args`` keyed by lowercased
+        name. Accepts both the split (``["-o", "ControlMaster=auto"]``) and
+        glued (``["-oControlMaster=auto"]``) forms OpenSSH allows.
+        """
+        options: dict[str, str] = {}
+        args = iter(self.ssh_args)
+        for arg in args:
+            spec: str | None = None
+            if arg == "-o":
+                spec = next(args, None)
+            elif arg.startswith("-o") and len(arg) > 2:
+                spec = arg[2:]
+            if not spec or "=" not in spec:
+                continue
+            key, _, value = spec.partition("=")
+            options[key.strip().lower()] = value.strip()
+        return options
+
+    @property
+    def requires_password(self) -> bool:
+        return self.ssh_auth == "password"
 
     def supported_plugins(self) -> list[str]:
         """Plugin ids this target accepts managed launches for.
@@ -196,10 +250,19 @@ class SshLaunchTargetConfig(BaseModel):
         return f"{shell} {shlex.quote(command)}"
 
     async def ssh_capture(self, remote_cmd: str) -> str:
-        """``ssh <host> <cmd>`` — returns stdout (empty on non-zero exit)."""
+        """``ssh <host> <cmd>`` — returns stdout (empty on non-zero exit).
+
+        ``ConnectTimeout`` bounds the call so a probe against an unreachable
+        host (or a password-auth target whose ControlMaster has dropped) fails
+        within seconds instead of stalling the caller. The default is spliced
+        *after* ``ssh_args`` so an explicit ``ConnectTimeout`` there wins
+        (ssh first-value-wins); absent one, this 15s default applies.
+        """
         proc = await asyncio.create_subprocess_exec(
             self.ssh_bin,
             *self.ssh_args,
+            "-o",
+            "ConnectTimeout=15",
             self.ssh_destination,
             remote_cmd,
             stdout=asyncio.subprocess.PIPE,

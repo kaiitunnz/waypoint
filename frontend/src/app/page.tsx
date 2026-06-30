@@ -11,6 +11,7 @@ import { LaunchPanel } from "@/components/LaunchPanel";
 import { LoginForm } from "@/components/LoginForm";
 import { ScheduledSessionsPanel } from "@/components/ScheduledSessionsPanel";
 import { SessionList } from "@/components/SessionList";
+import { SshConnectModal } from "@/components/SshConnectModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { UsageDashboardSection } from "@/components/UsageDashboardSection";
 import { useTheme } from "@/lib/theme";
@@ -18,10 +19,13 @@ import {
   attachTmux,
   cancelSchedule as cancelScheduleRequest,
   clearScheduleHistory as clearScheduleHistoryRequest,
+  connectLaunchTarget,
   connectSessionsSocket,
   createSchedule as createScheduleRequest,
   createSession,
   deleteSession as deleteSessionRequest,
+  disconnectLaunchTarget,
+  fetchLaunchTargetStatus,
   fetchBackendThreads,
   fetchBoardChannels,
   fetchMe,
@@ -33,6 +37,7 @@ import {
   postAction,
   setSessionPinned,
   setSessionTitle,
+  SSH_MASTER_REQUIRED_DETAIL,
 } from "@/lib/api";
 import {
   clearToken,
@@ -121,6 +126,14 @@ export default function HomePage() {
   const [defaultCwd, setDefaultCwd] = useState("~/");
   const [launchTargets, setLaunchTargets] = useState<LaunchTargetSummary[]>([]);
   const [activeLaunchTargetId, setActiveLaunchTargetId] = useState("");
+  // Password-auth SSH connect prompt. ``retry`` re-runs the launch that hit a
+  // 409 once the ControlMaster is up; ``null`` when the prompt was opened
+  // proactively from the connection banner.
+  const [connectPrompt, setConnectPrompt] = useState<{
+    target: LaunchTargetSummary;
+    retry: (() => Promise<void>) | null;
+  } | null>(null);
+  const [connectError, setConnectError] = useState("");
   const [schedules, setSchedules] = useState<ScheduledSession[]>([]);
   const [boardChannels, setBoardChannels] = useState<BoardChannel[]>([]);
   const [recentCwds, setRecentCwds] = useState<string[]>([]);
@@ -153,6 +166,7 @@ export default function HomePage() {
 
   const activeLaunchTarget =
     launchTargets.find((target) => target.id === activeLaunchTargetId) ?? null;
+  const activeTargetAuth = activeLaunchTarget?.auth ?? null;
   const supportedBackends = activeLaunchTarget?.supported_backends.length
     ? activeLaunchTarget.supported_backends
     : registeredBackends;
@@ -191,6 +205,28 @@ export default function HomePage() {
   useEffect(() => {
     setRecentCwds(readRecentCwds(host, activeLaunchTargetId));
   }, [activeLaunchTargetId, host]);
+
+  // The `connected` flag from /api/me is a cached snapshot; the master may have
+  // dropped since. When a password-auth target becomes active, re-validate it
+  // live so the strip reflects reality instead of a stale "connected". Keyed on
+  // the auth kind (a stable primitive) — depending on `launchTargets` would loop
+  // since `markTargetConnected` rewrites that array.
+  useEffect(() => {
+    if (!host || !token || !activeLaunchTargetId || activeTargetAuth !== "password") {
+      return;
+    }
+    let cancelled = false;
+    fetchLaunchTargetStatus(host, token, activeLaunchTargetId)
+      .then((status) => {
+        if (!cancelled) {
+          markTargetConnected(activeLaunchTargetId, status.connected);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [activeLaunchTargetId, host, token, activeTargetAuth]);
 
   useEffect(() => {
     if (!host || !token) {
@@ -418,6 +454,66 @@ export default function HomePage() {
     setError("");
   }
 
+  function markTargetConnected(targetId: string, connected: boolean) {
+    setLaunchTargets((current) => {
+      const target = current.find((t) => t.id === targetId);
+      if (!target || target.connected === connected) {
+        return current; // no change → keep the same array (avoids refetch churn)
+      }
+      return current.map((t) => (t.id === targetId ? { ...t, connected } : t));
+    });
+  }
+
+  async function handleConnectTarget(password: string) {
+    const prompt = connectPrompt;
+    if (!prompt) {
+      return;
+    }
+    setConnectError("");
+    try {
+      const result = await connectLaunchTarget(
+        host,
+        token,
+        prompt.target.id,
+        password,
+      );
+      markTargetConnected(prompt.target.id, result.connected);
+      if (!result.connected) {
+        setConnectError(result.detail ?? "authentication failed");
+        return;
+      }
+      setConnectPrompt(null);
+      if (prompt.retry) {
+        await prompt.retry();
+      }
+    } catch (connectErr) {
+      if (isAuthError(connectErr)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      setConnectError(
+        connectErr instanceof Error ? connectErr.message : "failed to connect",
+      );
+    }
+  }
+
+  async function handleDisconnectTarget(targetId: string) {
+    try {
+      await disconnectLaunchTarget(host, token, targetId);
+      markTargetConnected(targetId, false);
+    } catch (disconnectErr) {
+      if (isAuthError(disconnectErr)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      setError(
+        disconnectErr instanceof Error
+          ? disconnectErr.message
+          : "failed to disconnect",
+      );
+    }
+  }
+
   async function handleCreate(
     backend: Backend,
     cwd: string,
@@ -452,6 +548,31 @@ export default function HomePage() {
     } catch (createError) {
       if (isAuthError(createError)) {
         resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      if (
+        createError instanceof Error &&
+        createError.message === SSH_MASTER_REQUIRED_DETAIL &&
+        activeLaunchTarget
+      ) {
+        // The target needs its password-auth ControlMaster opened first;
+        // prompt, then retry this exact launch on success.
+        setConnectError("");
+        setConnectPrompt({
+          target: activeLaunchTarget,
+          retry: () =>
+            handleCreate(
+              backend,
+              cwd,
+              title,
+              model,
+              effort,
+              transport,
+              args,
+              configOverrides,
+              permissionMode,
+            ),
+        });
         return;
       }
       setError(
@@ -758,6 +879,11 @@ export default function HomePage() {
           launchTargets={launchTargets}
           targetId={activeLaunchTargetId}
           onSwitch={handleSwitchBackend}
+          onConnectTarget={(target) => {
+            setConnectError("");
+            setConnectPrompt({ target, retry: null });
+          }}
+          onDisconnectTarget={handleDisconnectTarget}
           onAuthFailure={handleAuthFailure}
         />
       ) : null}
@@ -822,6 +948,17 @@ export default function HomePage() {
           </span>
           <span className="assistant-fab-label">Assistant</span>
         </Link>
+      ) : null}
+      {connectPrompt ? (
+        <SshConnectModal
+          targetName={connectPrompt.target.name}
+          error={connectError || null}
+          onSubmit={handleConnectTarget}
+          onCancel={() => {
+            setConnectPrompt(null);
+            setConnectError("");
+          }}
+        />
       ) : null}
     </main>
   );

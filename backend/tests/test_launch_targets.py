@@ -1,8 +1,71 @@
 import os
 from pathlib import Path
 
+import pytest
+
 from waypoint.launch_targets import SshLaunchTargetConfig, quote_remote_path
 from waypoint.settings import load_settings
+
+_MULTIPLEX_ARGS = [
+    "-o",
+    "ControlMaster=auto",
+    "-o",
+    "ControlPath=~/.ssh/cm-%C",
+    "-o",
+    "ControlPersist=600s",
+]
+
+
+def test_password_auth_requires_multiplexing_args() -> None:
+    target = SshLaunchTargetConfig(
+        id="pw",
+        name="pw",
+        ssh_destination="host",
+        ssh_auth="password",
+        ssh_args=_MULTIPLEX_ARGS,
+    )
+    assert target.requires_password is True
+
+
+def test_password_auth_accepts_glued_option_form() -> None:
+    target = SshLaunchTargetConfig(
+        id="pw",
+        name="pw",
+        ssh_destination="host",
+        ssh_auth="password",
+        ssh_args=[
+            "-oControlMaster=auto",
+            "-oControlPath=~/.ssh/cm-%C",
+            "-oControlPersist=yes",
+        ],
+    )
+    assert target._parsed_ssh_options()["controlmaster"] == "auto"
+
+
+@pytest.mark.parametrize(
+    "drop, expected",
+    [
+        ("ControlMaster", "ControlMaster=auto"),
+        ("ControlPath", "ControlPath"),
+        ("ControlPersist", "ControlPersist"),
+    ],
+)
+def test_password_auth_rejects_missing_multiplexing(drop: str, expected: str) -> None:
+    args = [a for a in _MULTIPLEX_ARGS if not a.startswith(drop)]
+    with pytest.raises(ValueError, match=expected):
+        SshLaunchTargetConfig(
+            id="pw",
+            name="pw",
+            ssh_destination="host",
+            ssh_auth="password",
+            ssh_args=args,
+        )
+
+
+def test_key_auth_skips_multiplexing_requirement() -> None:
+    target = SshLaunchTargetConfig(id="k", name="k", ssh_destination="host")
+    assert target.ssh_auth == "key"
+    assert target.requires_password is False
 
 
 def test_quote_remote_path_preserves_leading_tilde() -> None:

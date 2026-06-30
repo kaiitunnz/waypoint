@@ -87,16 +87,14 @@ function useMetaReserve(gap: number = 16) {
 export function PendingUserInputCard({
   text,
   ts,
-  confirmed = false,
 }: {
   text: string;
   ts: string;
-  confirmed?: boolean;
 }) {
   const { metaRef, style } = useMetaReserve();
   return (
     <article
-      className={`panel transcript codex user_input${confirmed ? " pending-optimistic persisted" : " pending-optimistic"}`}
+      className="panel transcript codex user_input pending-optimistic"
       aria-label="Message from you"
       style={style}
     >

@@ -444,7 +444,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // this from the raw payload before coalescing.
   const [oldestRawSequence, setOldestRawSequence] = useState<number | null>(null);
   const [optimisticMessages, setOptimisticMessages] = useState<
-    { tempId: string; text: string; ts: string; confirmed: boolean }[]
+    { tempId: string; text: string; ts: string }[]
   >([]);
   const sectionRef = useRef<HTMLElement | null>(null);
   const nearBottomRef = useRef(true);
@@ -633,23 +633,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     const confirmedUserTexts = pending
       .filter((e) => e.kind === "user_input")
       .map((e) => e.text);
-    if (confirmedUserTexts.length > 0) {
-      setOptimisticMessages((prev) => {
-        let next = prev;
-        for (const text of confirmedUserTexts) {
-          const idx = next.findIndex((m) => !m.confirmed && m.text === text);
-          if (idx !== -1) {
-            next = [
-              ...next.slice(0, idx),
-              { ...next[idx], confirmed: true },
-              ...next.slice(idx + 1),
-            ];
-          }
-        }
-        return next;
-      });
-    }
     startTransition(() => {
+      if (confirmedUserTexts.length > 0) {
+        setOptimisticMessages((prev) =>
+          removeConfirmedOptimisticMessages(prev, confirmedUserTexts),
+        );
+      }
       setEvents((current) =>
         pending.reduce<EventRecord[]>((acc, event) => mergeEvents(acc, event), current),
       );
@@ -1073,7 +1062,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     ) => {
       const tempId = Math.random().toString(36).slice(2);
       const ts = new Date().toISOString();
-      setOptimisticMessages((prev) => [...prev, { tempId, text, ts, confirmed: false }]);
+      setOptimisticMessages((prev) => [...prev, { tempId, text, ts }]);
       try {
         // Sending a message to an exited session restarts it: the placeholder
         // "Session has exited — send a message to reattach…" promises this UX.
@@ -1322,13 +1311,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     [filterMode, displayEvents],
   );
   const hiddenEventCount = displayEvents.length - visibleEvents.length;
-  const transcriptEvents = useMemo(
-    () =>
-      optimisticMessages.length > 0
-        ? filterOptimisticTranscriptEvents(visibleEvents, optimisticMessages)
-        : visibleEvents,
-    [visibleEvents, optimisticMessages],
-  );
   const pendingPlanApprovalEvent = useMemo(
     () =>
       session?.permission_mode === "plan" &&
@@ -1344,9 +1326,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const transcriptEventsForDisplay = useMemo(
     () =>
       pendingPlanApprovalEvent
-        ? transcriptEvents.filter((event) => event !== pendingPlanApprovalEvent)
-        : transcriptEvents,
-    [pendingPlanApprovalEvent, transcriptEvents],
+        ? visibleEvents.filter((event) => event !== pendingPlanApprovalEvent)
+        : visibleEvents,
+    [pendingPlanApprovalEvent, visibleEvents],
   );
   const transcriptItems = useMemo(
     () => buildTranscriptItems(transcriptEventsForDisplay),
@@ -1930,7 +1912,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
                   key={msg.tempId}
                   text={msg.text}
                   ts={msg.ts}
-                  confirmed={msg.confirmed}
                 />
               ))
             : null}
@@ -3804,31 +3785,27 @@ function mergeToolResultEvent(existing: EventRecord, incoming: EventRecord): Eve
   };
 }
 
-function filterOptimisticTranscriptEvents(
-  events: EventRecord[],
-  optimisticMessages: { text: string }[],
-): EventRecord[] {
-  const pendingCounts = new Map<string, number>();
-  for (const message of optimisticMessages) {
-    pendingCounts.set(message.text, (pendingCounts.get(message.text) ?? 0) + 1);
+function removeConfirmedOptimisticMessages<T extends { text: string }>(
+  messages: T[],
+  confirmedTexts: string[],
+): T[] {
+  const confirmedCounts = new Map<string, number>();
+  for (const text of confirmedTexts) {
+    confirmedCounts.set(text, (confirmedCounts.get(text) ?? 0) + 1);
   }
-  if (pendingCounts.size === 0) {
-    return events;
+  if (confirmedCounts.size === 0) {
+    return messages;
   }
-  const filtered: EventRecord[] = [];
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event.kind === "user_input") {
-      const pendingCount = pendingCounts.get(event.text) ?? 0;
-      if (pendingCount > 0) {
-        pendingCounts.set(event.text, pendingCount - 1);
-        continue;
-      }
+  const next: T[] = [];
+  for (const message of messages) {
+    const count = confirmedCounts.get(message.text) ?? 0;
+    if (count > 0) {
+      confirmedCounts.set(message.text, count - 1);
+      continue;
     }
-    filtered.push(event);
+    next.push(message);
   }
-  filtered.reverse();
-  return filtered;
+  return next;
 }
 
 function isToolResultDelta(event: EventRecord): boolean {

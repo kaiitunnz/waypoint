@@ -91,8 +91,13 @@ It maps the outcome to a process exit code so it composes in `&&` chains:
 
 ```bash
 waypoint sessions wait "$sid" --until exited,error --timeout 600 \
-  && waypoint sessions events "$sid"
+  && waypoint sessions output "$sid" --messages 40
 ```
+
+After `wait`, use `sessions output` for the child's normal answer. Use
+`sessions events "$sid" --coalesce` when you need structured JSON, and raw
+`events` when diagnosing approvals, tool calls/results, questions, or missing
+output.
 
 To watch a child's transcript live instead of blocking silently, stream events
 as NDJSON (one compact JSON object per line) until a terminal status or Ctrl+C:

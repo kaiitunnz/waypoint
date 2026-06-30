@@ -6,15 +6,19 @@ decide whether it is done or needs another turn.
 ## Read output
 
 ```bash
-waypoint sessions events <session-id> --messages 40
-waypoint sessions events <session-id> --before-sequence <sequence>   # page back
+waypoint sessions output <session-id> --messages 40
+waypoint sessions output <session-id> --messages 40 --text
+waypoint sessions events <session-id> --messages 40 --coalesce       # structured JSON
+waypoint sessions events <session-id> --before-sequence <sequence>   # page back JSON
 ```
 
-`events` returns JSON. Filter for `kind == "agent_output"` to read the agent's
-replies; skip the verbose `system_note` init payload and the `tool_call` /
-`tool_result` chatter. For sessions on the `tmux` (Terminal) transport, event
-kinds are inferred heuristically — also check `raw_terminal_chunk` if a reply
-seems missing.
+Use `sessions output` for the child's normal answer; it coalesces streaming
+deltas into readable assistant messages. Use `--text` when you only need the
+concatenated assistant text. Use `events --coalesce` for structured JSON
+transcript inspection, and raw `events` for approvals, tool calls/results,
+questions, or debugging missing output. For sessions on the `tmux` (Terminal)
+transport, event kinds are inferred heuristically — also check
+`raw_terminal_chunk` if structured output is incomplete.
 
 Quote only the minimum transcript text needed to justify your conclusion;
 summarize the rest. Distinguish the reported `status` from your interpretation of

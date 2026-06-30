@@ -37,18 +37,19 @@ waypoint sessions send <target-id> "[wp-msg from=$ME] Run the backend test suite
 
 ## Pull: read the target's stream (you omitted `reply-to`)
 
-Poll the target to a settled status, then read its `agent_output`:
+Poll the target to a settled status, then read its conversational output:
 
 ```bash
 waypoint sessions show <target-id>     # poll until idle / waiting_input / exited
-waypoint sessions events <target-id> --messages 20
+waypoint sessions output <target-id> --messages 20 --text
 ```
 
-Filter events for `kind == "agent_output"` to get the reply; skip
-`system_note`, `tool_call`, and `tool_result`. (For sessions on the `tmux`
-(Terminal) transport, kinds are heuristic — also check `raw_terminal_chunk`.)
-This path does not disturb your
-own turn: you choose when to look.
+Use `sessions output` for normal replies. If the reply seems missing, or the
+target is blocked on an approval/question, inspect
+`waypoint sessions events <target-id> --messages 20 --coalesce`. Use raw
+`events` only for exact stream debugging or transport/TUI artifacts such as
+`raw_terminal_chunk`. This path does not disturb your own turn: you choose when
+to look.
 
 ## Push: the answer arrives in your input (you set `reply-to`)
 

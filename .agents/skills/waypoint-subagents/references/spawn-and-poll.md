@@ -87,12 +87,17 @@ Statuses that mean keep waiting: `starting`, `running`, `interrupted`.
 
 It maps the outcome to a process exit code so it composes in `&&` chains:
 `error` → 1, timeout → 124, everything else → 0. Narrow the set with `--until`
-(comma-separated), e.g. wait only for the process to end, then dump events:
+(comma-separated), e.g. wait only for the process to end, then dump its output:
 
 ```bash
 waypoint sessions wait "$sid" --until exited,error --timeout 600 \
-  && waypoint sessions events "$sid"
+  && waypoint sessions output "$sid" --messages 40
 ```
+
+After `wait`, use `sessions output` for the child's normal answer. If the child
+stopped in `waiting_input`, inspect `sessions events "$sid" --coalesce` for a
+pending approval or question. Use raw `events` only for exact stream debugging,
+missing output, or transport/TUI artifacts.
 
 To watch a child's transcript live instead of blocking silently, stream events
 as NDJSON (one compact JSON object per line) until a terminal status or Ctrl+C:

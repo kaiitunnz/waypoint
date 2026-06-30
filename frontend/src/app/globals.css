@@ -9589,6 +9589,17 @@ html[data-theme="light"] .term-compose-input {
   color: var(--accent);
 }
 
+/* Outline the session-card pin / terminate (and the mutually-exclusive delete)
+   actions so they read as buttons. currentColor keeps each border in its own
+   action hue and adapts to both themes without a separate light override. */
+.session-card-actions .pin-link,
+.session-card-actions .danger-link {
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  padding: 3px 10px;
+  margin-top: 0;
+}
+
 .session-header-title-row,
 .session-card-title-row {
   display: flex;

@@ -22,6 +22,7 @@ import {
   approveSession,
   connectSessionSocket,
   connectTerminalSocket,
+  createMessageSchedule,
   createSession,
   deleteSession as deleteSessionRequest,
   fetchBackendModels,
@@ -2382,6 +2383,10 @@ const ReplyComposer = memo(function ReplyComposer({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const attachments = useAttachments({ host, token, sessionId, onError });
   const [filesOpen, setFilesOpen] = useState(false);
+  const [scheduleMsgOpen, setScheduleMsgOpen] = useState(false);
+  const [scheduleMsgDraft, setScheduleMsgDraft] = useState("");
+  const [scheduleMsgDelay, setScheduleMsgDelay] = useState("");
+  const [scheduleMsgSending, setScheduleMsgSending] = useState(false);
   const [sending, setSending] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
@@ -2566,6 +2571,29 @@ const ReplyComposer = memo(function ReplyComposer({
       }
     } finally {
       setSending(false);
+    }
+  }
+
+  async function handleScheduleMessage() {
+    const text = scheduleMsgDraft.trim();
+    if (!text || !session || scheduleMsgSending) {
+      return;
+    }
+    setScheduleMsgSending(true);
+    try {
+      const delaySeconds = scheduleMsgDelay
+        ? Math.max(0, parseInt(scheduleMsgDelay, 10) * 60)
+        : undefined;
+      await createMessageSchedule(host, token, sessionId, text, {
+        delaySeconds: delaySeconds || null,
+      });
+      setScheduleMsgOpen(false);
+      setScheduleMsgDraft("");
+      setScheduleMsgDelay("");
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "failed to schedule message");
+    } finally {
+      setScheduleMsgSending(false);
     }
   }
 
@@ -3311,6 +3339,18 @@ const ReplyComposer = memo(function ReplyComposer({
                     <span className="glyph">⇄</span>
                     Switch session…
                   </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="composer-overflow-item"
+                    onClick={() => {
+                      setOverflowOpen(false);
+                      setScheduleMsgOpen(true);
+                    }}
+                  >
+                    <span className="glyph">⏲</span>
+                    Schedule message…
+                  </button>
                   {workspacePreviewEnabled ? (
                     <button
                       type="button"
@@ -3462,6 +3502,62 @@ const ReplyComposer = memo(function ReplyComposer({
           onReference={attachments.referenceExisting}
           referencedIds={attachments.attachedIds}
         />
+      ) : null}
+      {scheduleMsgOpen ? (
+        <div className="schedule-msg-dialog-overlay" onClick={() => setScheduleMsgOpen(false)}>
+          <div className="schedule-msg-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="schedule-msg-dialog-header">
+              <span className="schedule-msg-dialog-title">Schedule message</span>
+              <button
+                type="button"
+                className="schedule-msg-dialog-close"
+                onClick={() => { setScheduleMsgOpen(false); setScheduleMsgDraft(""); setScheduleMsgDelay(""); }}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <textarea
+              className="schedule-msg-dialog-input"
+              rows={3}
+              value={scheduleMsgDraft}
+              onChange={(e) => setScheduleMsgDraft(e.target.value)}
+              placeholder="Message text…"
+              aria-label="Message text"
+            />
+            <div className="schedule-msg-dialog-options">
+              <label className="schedule-msg-dialog-field">
+                <span>Delay (minutes)</span>
+                <input
+                  type="number"
+                  className="schedule-msg-dialog-number"
+                  min={0}
+                  value={scheduleMsgDelay}
+                  onChange={(e) => setScheduleMsgDelay(e.target.value)}
+                  placeholder="0"
+                  aria-label="Delay in minutes"
+                />
+              </label>
+            </div>
+            <div className="schedule-msg-dialog-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => { setScheduleMsgOpen(false); setScheduleMsgDraft(""); setScheduleMsgDelay(""); }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => void handleScheduleMessage()}
+                disabled={!scheduleMsgDraft.trim() || scheduleMsgSending}
+              >
+                {scheduleMsgSending ? "Scheduling…" : "Schedule"}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </section>
   );

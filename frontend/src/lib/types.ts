@@ -398,6 +398,21 @@ export interface BoardChannel {
   last_created_at: string;
 }
 
+export type MessageScheduleStatus = "pending" | "sent" | "cancelled" | "failed";
+
+export interface MessageSchedule {
+  id: string;
+  session_id: string;
+  text: string;
+  submit: boolean;
+  delay_seconds?: number | null;
+  scheduled_at?: string | null;
+  status: MessageScheduleStatus;
+  created_at: string;
+  sent_at?: string | null;
+  failure_reason?: string | null;
+}
+
 export interface SessionEnvelope {
   type:
     | "session_list_update"
@@ -405,6 +420,7 @@ export interface SessionEnvelope {
     | "session_state"
     | "auth_revoked"
     | "schedule_list_update"
+    | "message_schedule_list_update"
     | "board_update"
     | "clipboard_copy"
     | "side_question";

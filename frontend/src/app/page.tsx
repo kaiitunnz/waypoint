@@ -9,6 +9,7 @@ import { BackendSwitcher } from "@/components/BackendSwitcher";
 import { BoardPanel } from "@/components/BoardPanel";
 import { LaunchPanel } from "@/components/LaunchPanel";
 import { LoginForm } from "@/components/LoginForm";
+import { ScheduledMessagesPanel } from "@/components/ScheduledMessagesPanel";
 import { ScheduledSessionsPanel } from "@/components/ScheduledSessionsPanel";
 import { SessionList } from "@/components/SessionList";
 import { SshConnectModal } from "@/components/SshConnectModal";
@@ -18,18 +19,20 @@ import { useTheme } from "@/lib/theme";
 import {
   attachTmux,
   cancelSchedule as cancelScheduleRequest,
+  clearMessageScheduleHistory as clearMessageScheduleHistoryRequest,
   clearScheduleHistory as clearScheduleHistoryRequest,
   connectLaunchTarget,
   connectSessionsSocket,
   createSchedule as createScheduleRequest,
   createSession,
+  deleteMessageSchedule as deleteMessageScheduleRequest,
   deleteSession as deleteSessionRequest,
   deleteThread,
   disconnectLaunchTarget,
-  fetchLaunchTargetStatus,
   fetchBackendThreads,
   fetchBoardChannels,
   fetchMe,
+  fetchMessageSchedules,
   fetchSchedules,
   fetchSessions,
   importBackendThread,
@@ -59,6 +62,7 @@ import {
   BackendDescriptor,
   BoardChannel,
   LaunchTargetSummary,
+  MessageSchedule,
   ScheduleCreateRequest,
   ScheduledSession,
   SessionEnvelope,
@@ -136,6 +140,7 @@ export default function HomePage() {
   } | null>(null);
   const [connectError, setConnectError] = useState("");
   const [schedules, setSchedules] = useState<ScheduledSession[]>([]);
+  const [messageSchedules, setMessageSchedules] = useState<MessageSchedule[]>([]);
   const [boardChannels, setBoardChannels] = useState<BoardChannel[]>([]);
   const [recentCwds, setRecentCwds] = useState<string[]>([]);
   const [threadsByBackend, setThreadsByBackend] = useState<
@@ -241,9 +246,10 @@ export default function HomePage() {
       fetchSessions(host, token),
       fetchMe(host, token),
       fetchSchedules(host, token).catch(() => [] as ScheduledSession[]),
+      fetchMessageSchedules(host, token).catch(() => [] as MessageSchedule[]),
       fetchBoardChannels(host, token).catch(() => []),
     ])
-      .then(([items, me, scheduleItems, boardChannels]) => {
+      .then(([items, me, scheduleItems, messageItems, boardChannels]) => {
         if (!active) {
           return;
         }
@@ -257,6 +263,7 @@ export default function HomePage() {
           setBackendDescriptors(me.backends);
         }
         setSchedules(scheduleItems);
+        setMessageSchedules(messageItems);
         const storedTargetId = readLaunchTarget(host);
         const nextTargetId = me.launch_targets.some(
           (target) => target.id === storedTargetId,
@@ -311,6 +318,11 @@ export default function HomePage() {
           }
           if (message.type === "schedule_list_update") {
             setSchedules(message.payload.schedules as ScheduledSession[]);
+          }
+          if (message.type === "message_schedule_list_update") {
+            setMessageSchedules(
+              message.payload.message_schedules as MessageSchedule[],
+            );
           }
           if (message.type === "board_update") {
             scheduleBoardRefresh();
@@ -741,6 +753,36 @@ export default function HomePage() {
     }
   }
 
+  async function handleDeleteMessageSchedule(scheduleId: string) {
+    try {
+      await deleteMessageScheduleRequest(host, token, scheduleId);
+      setMessageSchedules((current) =>
+        current.filter((ms) => ms.id !== scheduleId),
+      );
+    } catch (deleteError) {
+      if (isAuthError(deleteError)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      setError(deleteError instanceof Error ? deleteError.message : "failed to delete message schedule");
+    }
+  }
+
+  async function handleClearMessageScheduleHistory() {
+    try {
+      await clearMessageScheduleHistoryRequest(host, token);
+      setMessageSchedules((current) =>
+        current.filter((ms) => ms.status === "pending"),
+      );
+    } catch (clearError) {
+      if (isAuthError(clearError)) {
+        resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      setError(clearError instanceof Error ? clearError.message : "failed to clear message schedule history");
+    }
+  }
+
   async function handleDelete(sessionId: string) {
     try {
       await deleteSessionRequest(host, token, sessionId);
@@ -949,6 +991,13 @@ export default function HomePage() {
           catalog={catalog}
           onCancel={handleCancelSchedule}
           onClearHistory={handleClearScheduleHistory}
+        />
+      ) : null}
+      {token ? (
+        <ScheduledMessagesPanel
+          messageSchedules={messageSchedules}
+          onDelete={handleDeleteMessageSchedule}
+          onClearHistory={handleClearMessageScheduleHistory}
         />
       ) : null}
       {token ? (

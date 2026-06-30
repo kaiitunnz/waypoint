@@ -9775,6 +9775,135 @@ html[data-theme="light"] .term-compose-input {
   text-transform: none;
 }
 
+/* ─── Message schedule rows ─── */
+
+.schedule-row.schedule-sent {
+  border-color: rgba(94, 210, 156, 0.28);
+}
+
+.badge.schedule-status.sent {
+  background: rgba(94, 210, 156, 0.12);
+  color: var(--success);
+  border-color: rgba(94, 210, 156, 0.22);
+}
+
+.schedule-title.msg-text {
+  font-size: 0.9rem;
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+}
+
+html[data-theme="light"] .schedule-row.schedule-sent {
+  border-color: rgba(37, 122, 80, 0.25);
+}
+
+html[data-theme="light"] .badge.schedule-status.sent {
+  background: rgba(37, 122, 80, 0.08);
+  color: var(--success);
+  border-color: rgba(37, 122, 80, 0.18);
+}
+
+/* ─── Schedule message dialog ─── */
+
+.schedule-msg-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 24px;
+}
+
+html[data-theme="light"] .schedule-msg-dialog-overlay {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.schedule-msg-dialog {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px;
+  width: 100%;
+  max-width: 480px;
+  display: grid;
+  gap: 12px;
+  box-shadow: var(--shadow);
+}
+
+.schedule-msg-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.schedule-msg-dialog-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-strong);
+}
+
+.schedule-msg-dialog-close {
+  font-size: 1.2rem;
+  color: var(--muted);
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+
+.schedule-msg-dialog-close:hover {
+  background: rgba(120, 138, 168, 0.12);
+}
+
+.schedule-msg-dialog-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  resize: vertical;
+  min-height: 64px;
+}
+
+.schedule-msg-dialog-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.schedule-msg-dialog-field {
+  display: grid;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.schedule-msg-dialog-number {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.schedule-msg-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 @media (max-width: 720px) {
   .page-shell {
     padding: calc(20px + env(safe-area-inset-top))

@@ -2,10 +2,18 @@
 
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from waypoint.backends.codex.plugin import CodexPlugin
+
+if TYPE_CHECKING:
+    from waypoint.runtime import SessionRuntime
+
+# The local delete path never touches the runtime; a typed null keeps mypy
+# happy without standing up a real SessionRuntime.
+_NO_RUNTIME = cast("SessionRuntime", None)
 
 
 @pytest.fixture
@@ -31,7 +39,7 @@ async def test_delete_thread_local_removes_matching_rollout(
     thread_id = str(uuid.uuid4())
     rollout = _make_rollout(tmp_path, thread_id)
 
-    assert await plugin.delete_thread(None, thread_id) is True
+    assert await plugin.delete_thread(_NO_RUNTIME, thread_id) is True
     assert not rollout.exists()
 
 
@@ -44,7 +52,7 @@ async def test_delete_thread_local_missing_returns_false(
     monkeypatch.setenv("CODEX_HOME", str(tmp_path))
     kept = _make_rollout(tmp_path, str(uuid.uuid4()))
 
-    assert await plugin.delete_thread(None, str(uuid.uuid4())) is False
+    assert await plugin.delete_thread(_NO_RUNTIME, str(uuid.uuid4())) is False
     assert kept.exists()
 
 
@@ -57,6 +65,6 @@ async def test_delete_thread_rejects_non_uuid(
     monkeypatch.setenv("CODEX_HOME", str(tmp_path))
     kept = _make_rollout(tmp_path, str(uuid.uuid4()))
 
-    assert await plugin.delete_thread(None, "../../etc/passwd") is False
-    assert await plugin.delete_thread(None, "not-a-uuid") is False
+    assert await plugin.delete_thread(_NO_RUNTIME, "../../etc/passwd") is False
+    assert await plugin.delete_thread(_NO_RUNTIME, "not-a-uuid") is False
     assert kept.exists()

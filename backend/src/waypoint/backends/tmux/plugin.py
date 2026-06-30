@@ -683,6 +683,16 @@ class TmuxPlugin:
     ) -> list[Any]:
         return []
 
+    async def delete_thread(
+        self,
+        runtime: "SessionRuntime",
+        thread_id: str,
+        launch_target_id: str | None = None,
+    ) -> bool:
+        # No deletable transcript store; supports_thread_delete is False so the
+        # API never routes here.
+        return False
+
     async def import_thread(
         self, runtime: "SessionRuntime", request: Any, *, agent: str | None = None
     ) -> SessionRecord:

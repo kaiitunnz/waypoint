@@ -1464,6 +1464,16 @@ class OpenCodePlugin(DefaultLaunchContract):
         )
         return result
 
+    async def delete_thread(
+        self,
+        runtime: "SessionRuntime",
+        thread_id: str,
+        launch_target_id: str | None = None,
+    ) -> bool:
+        # OpenCode sessions live in the server's own store, not a deletable
+        # transcript file; supports_thread_delete stays False.
+        return False
+
     async def import_thread(
         self,
         runtime: "SessionRuntime",

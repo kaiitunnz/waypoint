@@ -553,6 +553,81 @@ async def test_transport_routes_calls_by_session_launch_target() -> None:
     assert transport.has_pending_approval(remote_session) is True
 
 
+class _DeleteAdapter:
+    def __init__(self, deletable: set[str]) -> None:
+        self.deletable = deletable
+        self.calls: list[str] = []
+
+    async def delete_session(self, session_id: str) -> bool:
+        self.calls.append(session_id)
+        return session_id in self.deletable
+
+
+@pytest.mark.asyncio
+async def test_delete_thread_routes_to_launch_target_adapter() -> None:
+    plugin = OpenCodePlugin()
+    local = _DeleteAdapter({"sess-local"})
+    remote = _DeleteAdapter({"sess-remote"})
+    plugin._adapters = cast(
+        Any,
+        {
+            (None, "/tmp", ()): local,
+            ("ssh-1", "/tmp", ()): remote,
+        },
+    )
+
+    assert await plugin.delete_thread(cast(Any, None), "sess-remote", "ssh-1") is True
+    assert remote.calls == ["sess-remote"]
+    # Adapters for other launch targets are never consulted.
+    assert local.calls == []
+
+
+@pytest.mark.asyncio
+async def test_delete_thread_tries_every_adapter_until_one_deletes() -> None:
+    plugin = OpenCodePlugin()
+    first = _DeleteAdapter(set())
+    second = _DeleteAdapter({"sess"})
+    plugin._adapters = cast(
+        Any,
+        {
+            (None, "/a", ()): first,
+            (None, "/b", ()): second,
+        },
+    )
+
+    assert await plugin.delete_thread(cast(Any, None), "sess", None) is True
+    assert first.calls == ["sess"]
+    assert second.calls == ["sess"]
+
+
+@pytest.mark.asyncio
+async def test_delete_thread_short_circuits_after_first_success() -> None:
+    plugin = OpenCodePlugin()
+    first = _DeleteAdapter({"sess"})
+    second = _DeleteAdapter({"sess"})
+    plugin._adapters = cast(
+        Any,
+        {
+            (None, "/a", ()): first,
+            (None, "/b", ()): second,
+        },
+    )
+
+    assert await plugin.delete_thread(cast(Any, None), "sess", None) is True
+    assert first.calls == ["sess"]
+    assert second.calls == []
+
+
+@pytest.mark.asyncio
+async def test_delete_thread_returns_false_when_no_adapter_has_it() -> None:
+    plugin = OpenCodePlugin()
+    only = _DeleteAdapter(set())
+    plugin._adapters = cast(Any, {(None, "/tmp", ()): only})
+
+    assert await plugin.delete_thread(cast(Any, None), "missing", None) is False
+    assert only.calls == ["missing"]
+
+
 @pytest.mark.asyncio
 async def test_get_or_create_adapter_keys_by_cwd(
     monkeypatch: pytest.MonkeyPatch,

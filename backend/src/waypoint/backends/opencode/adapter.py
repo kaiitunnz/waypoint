@@ -1220,6 +1220,19 @@ class OpenCodeAdapter:
         except Exception:
             return None
 
+    async def delete_session(self, session_id: str) -> bool:
+        if not self._started:
+            await self.start()
+        client = self._require_client()
+        try:
+            result = await client.delete(f"/session/{session_id}")
+        except Exception:
+            return False
+        # `DELETE /session/{id}` returns a JSON boolean; a missing session is a
+        # 4xx (raised above) or a `false` body. Treat only an explicit `false`
+        # as "nothing deleted"; an empty 204 counts as success.
+        return result is not False
+
     async def list_providers(self) -> dict[str, Any]:
         if not self._started:
             await self.start()

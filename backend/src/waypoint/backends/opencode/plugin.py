@@ -155,6 +155,7 @@ class OpenCodePlugin(DefaultLaunchContract):
         supports_set_permission_mode_inline=True,
         supports_thread_discovery=True,
         supports_thread_import=True,
+        supports_thread_delete=True,
         supports_fork=True,
         supports_slash_compact=True,
         supports_approval_note=True,
@@ -1470,8 +1471,20 @@ class OpenCodePlugin(DefaultLaunchContract):
         thread_id: str,
         launch_target_id: str | None = None,
     ) -> bool:
-        # OpenCode sessions live in the server's own store, not a deletable
-        # transcript file; supports_thread_delete stays False.
+        # OpenCode keeps sessions in its server's own store, so deletion is a
+        # `DELETE /session/{id}` against that server (the adapter routes it
+        # locally or over SSH) rather than a transcript unlink. A launch target
+        # can have several adapters — distinct cwds / custom args, each its own
+        # server — and the thread lives on exactly one, so try each and report
+        # success on the first that removes it.
+        adapters = self._adapters_for_launch_target(launch_target_id)
+        if not adapters:
+            adapters = [
+                await self._get_or_create_adapter(runtime, launch_target_id, None)
+            ]
+        for adapter in adapters:
+            if await adapter.delete_session(thread_id):
+                return True
         return False
 
     async def import_thread(

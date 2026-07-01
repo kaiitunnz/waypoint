@@ -395,6 +395,26 @@ class SessionRuntime:
                     "cannot be requested as the target backend"
                 ),
             )
+        # New-session preflight: an agent that can prove the installed CLI
+        # won't honor this model/effort combo raises ValueError here. Not
+        # consulted for resume / set-model / set-effort — only brand-new
+        # sessions. Optional method (see BackendPlugin's docstring), read
+        # defensively so agents that don't implement it (or predate it)
+        # still launch unimpeded.
+        preflight = getattr(plugin, "validate_new_session_selection", None)
+        if preflight is not None:
+            try:
+                await asyncio.to_thread(
+                    preflight,
+                    self,
+                    resolved_model,
+                    resolved_effort,
+                    request.launch_target_id,
+                )
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+                ) from exc
         launch_mode = request.launch_mode
         # An omitted transport under AUTO launch resolves to the agent's
         # declared default transport, so every spawn path (UI, CLI, spawned

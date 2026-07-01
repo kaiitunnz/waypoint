@@ -77,7 +77,8 @@
         "low",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "model_source": "static",
       "slash_commands": [
@@ -183,7 +184,8 @@
         "low",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "slash_commands": [
         {
@@ -348,7 +350,8 @@
         "low",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "model_source": "static",
       "slash_commands": [
@@ -454,7 +457,8 @@
         "low",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "slash_commands": [
         {

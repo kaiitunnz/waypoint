@@ -17,6 +17,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from waypoint.backends.claude_code.version import claude_cli_version_string
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.perf import debug_timer
 from waypoint.schemas import SessionRateLimitUsage, UsageWindow
@@ -37,8 +38,6 @@ _WINDOWS: tuple[tuple[str, str, int], ...] = (
 # Windows the account-wide plan always carries; the per-model windows are
 # gated in parse_claude_usage_payload.
 _PRIMARY_WINDOW_KEYS = frozenset({"five_hour", "seven_day"})
-_CLAUDE_USER_AGENT: str | None = None
-_CLAUDE_USER_AGENT_RESOLVED = False
 
 
 def parse_claude_usage_payload(
@@ -578,33 +577,8 @@ def parse_claude_rate_limit_headers(
 
 
 def _claude_user_agent() -> str:
-    global _CLAUDE_USER_AGENT
-    global _CLAUDE_USER_AGENT_RESOLVED
-    if _CLAUDE_USER_AGENT_RESOLVED:
-        return _CLAUDE_USER_AGENT or "claude-code/2.1.5"
-    _CLAUDE_USER_AGENT_RESOLVED = True
-    try:
-        completed = subprocess.run(
-            ["claude", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=3,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        _CLAUDE_USER_AGENT = "claude-code/2.1.5"
-        return _CLAUDE_USER_AGENT
-    if completed.returncode != 0:
-        _CLAUDE_USER_AGENT = "claude-code/2.1.5"
-        return _CLAUDE_USER_AGENT
-    match = re.search(r"\d+(?:\.\d+)+(?:[-+][A-Za-z0-9.-]+)?", completed.stdout)
-    version = (
-        match.group(0)
-        if match is not None
-        else completed.stdout.strip().split()[0] if completed.stdout.strip() else ""
-    )
-    _CLAUDE_USER_AGENT = f"claude-code/{version}" if version else "claude-code/2.1.5"
-    return _CLAUDE_USER_AGENT
+    version = claude_cli_version_string()
+    return f"claude-code/{version}" if version else "claude-code/2.1.5"
 
 
 def _fetch_claude_oauth_usage(access_token: str) -> _ClaudeHTTPResponse | None:

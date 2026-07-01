@@ -95,6 +95,18 @@ class BackendPlugin(Protocol):
     # parse their own ``notes`` into ``(account_key, account_label)`` here;
     # plugins that omit it fall back to a session-scoped dashboard bucket.
     # Kept off the Protocol surface for the same predating-plugin reason.
+    #
+    # ``validate_new_session_selection(runtime, model, effort, launch_target_id)
+    # -> None`` is another optional method, mixed in via
+    # :class:`DefaultLaunchContract` and read defensively by
+    # ``SessionRuntime.create_session`` (via
+    # ``getattr(plugin, "validate_new_session_selection", None)``). It is a
+    # new-session preflight: agents that can prove a model/effort combination
+    # the installed CLI won't honor raise ``ValueError`` to reject the
+    # launch; anything they can't judge (an unrecognized or free-text model)
+    # must return ``None`` and let the launch proceed. The default is a
+    # no-op. Never consulted for resume / set-model / set-effort — only for
+    # brand-new sessions.
     # Pydantic model used by the dispatcher in api.py to validate the
     # JSON body of POST /api/backends/{id}/sessions/import. ``None`` for
     # plugins that don't accept thread imports — the dispatcher gates on
@@ -580,4 +592,25 @@ class DefaultLaunchContract:
         since: datetime,
         launch_target: "SshLaunchTargetConfig | None",
     ) -> None:
+        return None
+
+    def validate_new_session_selection(
+        self,
+        runtime: "SessionRuntime",
+        model: str | None,
+        effort: str | None,
+        launch_target_id: str | None,
+    ) -> None:
+        """New-session preflight: raise to reject a model/effort combo.
+
+        Called once by ``SessionRuntime.create_session``, before the process
+        is spawned, so a combination the installed CLI is known not to
+        support (e.g. an effort level too new for the detected binary)
+        fails fast with a clear message instead of the CLI silently
+        rejecting or downgrading the flag. Must raise ``ValueError`` to
+        reject; anything else -- including a model this agent doesn't
+        recognize (free text is allowed) -- returns ``None`` and lets the
+        launch proceed. The default is a no-op: agents override this only
+        when they can prove a combination is unsupported.
+        """
         return None

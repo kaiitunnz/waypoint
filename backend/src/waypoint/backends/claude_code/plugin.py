@@ -15,7 +15,7 @@ import uuid
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
@@ -110,6 +110,74 @@ def _find_prefixed(notes: list[str], prefix: str) -> str | None:
             if value:
                 return value
     return None
+
+
+class ClaudeCatalogueConfig(Protocol):
+    """The config surface :func:`offered_claude_models` reads.
+
+    Satisfied structurally by both ``ClaudeCodePluginConfig`` and
+    ``ClaudeTtyPluginConfig`` (the two transports of the same agent), whose
+    ``models`` field the base ``PluginConfig`` does not carry.
+    """
+
+    models: list[BackendModelOption]
+    local_bin: str | None
+
+    @property
+    def model_fields_set(self) -> set[str]: ...
+
+
+def offered_claude_models(
+    config: ClaudeCatalogueConfig,
+    cli_binary: str,
+    launch_target: SshLaunchTargetConfig | None,
+) -> tuple[list[BackendModelOption], tuple[int, ...] | None]:
+    """The Claude model catalogue to offer for a new session on a target.
+
+    Shared by claude_code and its claude_tty transport -- the offered models
+    are an agent concern, identical across transports. A deployment that
+    explicitly configured ``models`` (even to a list identical to the built-in
+    default) opted out of the version gate; honor it verbatim (version is
+    ``None`` then). Otherwise gate the built-in catalogue on the target's
+    installed CLI version -- ``None`` when undetectable (missing binary, remote
+    target) means "assume latest".
+
+    Synchronous (spawns a subprocess on a cache miss): callers on the event
+    loop should run it via ``asyncio.to_thread``.
+    """
+    if "models" in config.model_fields_set:
+        return list(config.models), None
+    version = detect_claude_cli_version(
+        config.local_bin or cli_binary or "claude", launch_target
+    )
+    return list(claude_models_for_version(version)), version
+
+
+def raise_for_unsupported_selection(
+    models: list[BackendModelOption],
+    version: tuple[int, ...] | None,
+    model: str | None,
+    effort: str | None,
+) -> None:
+    """Reject a model/effort combo the detected CLI can't honor.
+
+    ``model`` is looked up in the version-gated catalogue ``list_models`` would
+    offer for the target. A model that isn't in it is free text (or an id from
+    a newer/unknown CLI) -- nothing to check it against, so it passes through
+    unrejected. Only a *recognized* model paired with an effort that catalogue
+    entry doesn't list is provably unsupported.
+    """
+    if effort is None:
+        return None
+    option = next((opt for opt in models if opt.id == model), None)
+    if option is None or effort in option.supported_efforts:
+        return None
+    version_label = ".".join(str(part) for part in version) if version else "unknown"
+    supported = ", ".join(option.supported_efforts) or "none"
+    raise ValueError(
+        f"model '{model}' does not support effort '{effort}' on the "
+        f"detected Claude CLI (v{version_label}); supported efforts: {supported}"
+    )
 
 
 class ClaudeCodePluginConfig(PluginConfig):
@@ -568,29 +636,14 @@ class ClaudeCodePlugin(DefaultLaunchContract):
     def _offered_models_with_version(
         self, runtime: "SessionRuntime", launch_target_id: str | None
     ) -> tuple[list[BackendModelOption], tuple[int, ...] | None]:
-        """The model catalogue offered for a new session on this target.
-
-        A deployment that explicitly configured ``models`` (even to a list
-        identical to the built-in default) opted out of the version-gated
-        catalogue; honor it verbatim (version is ``None`` in that case).
-        Otherwise gate the built-in catalogue on the target's installed CLI
-        version -- ``None`` when undetectable (missing binary, remote
-        target) means "assume latest".
-
-        Synchronous (spawns a subprocess on a cache miss): callers on the
-        event loop should run it via ``asyncio.to_thread``.
-        """
-        config = self._config(runtime)
-        if "models" in config.model_fields_set:
-            return list(config.models), None
         launch_target = (
             runtime._find_launch_target(launch_target_id) if launch_target_id else None
         )
-        version = detect_claude_cli_version(
-            config.local_bin or self.capabilities.cli_binary or "claude",
+        return offered_claude_models(
+            self._config(runtime),
+            self.capabilities.cli_binary or "claude",
             launch_target,
         )
-        return list(claude_models_for_version(version)), version
 
     def validate_new_session_selection(
         self,
@@ -599,29 +652,10 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         effort: str | None,
         launch_target_id: str | None,
     ) -> None:
-        """Reject a model/effort combo the detected CLI can't honor.
-
-        Looks the selection up in the same version-gated catalogue
-        ``list_models`` would offer for this target. A model that isn't in
-        that catalogue is free text (or an id from a newer/unknown CLI) --
-        there's nothing to check it against, so it passes through
-        unrejected. Only a *recognized* model paired with an effort level
-        that catalogue entry doesn't list is provably unsupported.
-        """
         if effort is None:
             return None
         options, version = self._offered_models_with_version(runtime, launch_target_id)
-        option = next((opt for opt in options if opt.id == model), None)
-        if option is None or effort in option.supported_efforts:
-            return None
-        version_label = (
-            ".".join(str(part) for part in version) if version else "unknown"
-        )
-        supported = ", ".join(option.supported_efforts) or "none"
-        raise ValueError(
-            f"model '{model}' does not support effort '{effort}' on the "
-            f"detected Claude CLI (v{version_label}); supported efforts: {supported}"
-        )
+        raise_for_unsupported_selection(options, version, model, effort)
 
     async def list_models(
         self,

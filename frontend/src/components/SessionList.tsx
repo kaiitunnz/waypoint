@@ -325,6 +325,18 @@ export function SessionList({
       {flatSearchResults !== null ? (
         <section className="session-section">
           {flatSearchResults.length > 0 ? (
+            <Pager
+              page={page}
+              totalPages={totalPages}
+              total={flatSearchResults.length}
+              pageStart={showingFrom}
+              pageEnd={showingTo}
+              onPage={setPage}
+              label="sessions"
+              compact
+            />
+          ) : null}
+          {flatSearchResults.length > 0 ? (
             <div className="stack">{visibleItems.map(renderCard)}</div>
           ) : (
             <p className="muted" style={{ textAlign: "center", padding: "20px 0" }}>
@@ -360,6 +372,18 @@ export function SessionList({
               <h4>Recent</h4>
               {recentSessions.length > 0 ? (
                 <span className="meta">{recentSessions.length}</span>
+              ) : null}
+              {recentSessions.length > 0 ? (
+                <Pager
+                  page={page}
+                  totalPages={totalPages}
+                  total={recentSessions.length}
+                  pageStart={showingFrom}
+                  pageEnd={showingTo}
+                  onPage={setPage}
+                  label="sessions"
+                  compact
+                />
               ) : null}
             </header>
             {visibleItems.length > 0 ? (

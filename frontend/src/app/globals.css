@@ -10134,6 +10134,47 @@ html[data-theme="light"] .msg-sched-count {
   padding: 0 2px;
 }
 
+/* Compact pager (top of a long list): controls only, separated from the list by
+   a bottom rule rather than the standard top rule, and right-aligned on wide
+   screens. */
+.pager.pager-compact {
+  justify-content: flex-end;
+  margin-top: 0;
+  margin-bottom: 8px;
+  padding-top: 0;
+  padding-bottom: 10px;
+  border-top: none;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Inlined into a section header (beside "Recent"): sit right-aligned next to the
+   title with no separator; when the header wraps on mobile, drop below the title
+   as a full-width controls row (space-between via the rule above), like the
+   bottom pager. */
+.session-section-header .pager.pager-compact {
+  margin: 0 0 0 auto;
+  padding: 0;
+  border: none;
+  align-self: center;
+}
+
+@media (max-width: 720px) {
+  .session-section-header .pager.pager-compact {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
+/* On mobile the range readout wraps above the controls; span the controls the
+   full width so Prev / Next sit at the thumb-reachable edges instead of bunching
+   at the left. Applies to every pager — top compact and bottom full. */
+@media (max-width: 720px) {
+  .pager-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
 html[data-theme="light"] .schedule-row.schedule-sent {
   border-color: rgba(37, 122, 80, 0.25);
 }

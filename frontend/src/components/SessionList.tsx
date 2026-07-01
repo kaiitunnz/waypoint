@@ -14,6 +14,7 @@ import { matchesQuery, parseQuery } from "@/lib/search";
 import { SessionRecord } from "@/lib/types";
 
 import { SearchInput } from "./SearchInput";
+import { Pager } from "@/components/Pager";
 
 interface SessionListProps {
   sessions: SessionRecord[];
@@ -324,28 +325,16 @@ export function SessionList({
               No sessions match your search.
             </p>
           )}
-          {totalPages > 1 && flatSearchResults.length > 0 ? (
-            <div className="action-row pagination-controls" style={{ marginTop: "12px", justifyContent: "flex-end" }}>
-              <button
-                className="secondary"
-                type="button"
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-                disabled={page === 1}
-              >
-                Previous
-              </button>
-              <span className="meta">
-                Page {page} of {totalPages}
-              </span>
-              <button
-                className="secondary"
-                type="button"
-                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-                disabled={page === totalPages}
-              >
-                Next
-              </button>
-            </div>
+          {flatSearchResults.length > 0 ? (
+            <Pager
+              page={page}
+              totalPages={totalPages}
+              total={flatSearchResults.length}
+              pageStart={showingFrom}
+              pageEnd={showingTo}
+              onPage={setPage}
+              label="sessions"
+            />
           ) : null}
         </section>
       ) : (
@@ -363,42 +352,26 @@ export function SessionList({
           <section className="session-section">
             <header className="session-section-header">
               <h4>Recent</h4>
-              <div className="action-row session-section-controls">
-                {recentSessions.length > 0 ? (
-                  <span className="meta">
-                    {showingFrom}–{showingTo} of {recentSessions.length}
-                  </span>
-                ) : null}
-                {totalPages > 1 ? (
-                  <div className="action-row pagination-controls">
-                    <button
-                      className="secondary"
-                      type="button"
-                      onClick={() => setPage((current) => Math.max(1, current - 1))}
-                      disabled={page === 1}
-                    >
-                      Previous
-                    </button>
-                    <span className="meta">
-                      Page {page} of {totalPages}
-                    </span>
-                    <button
-                      className="secondary"
-                      type="button"
-                      onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-                      disabled={page === totalPages}
-                    >
-                      Next
-                    </button>
-                  </div>
-                ) : null}
-              </div>
+              {recentSessions.length > 0 ? (
+                <span className="meta">{recentSessions.length}</span>
+              ) : null}
             </header>
             {visibleItems.length > 0 ? (
               <div className="stack">{visibleItems.map(renderCard)}</div>
             ) : (
               <p className="muted">All sessions are pinned.</p>
             )}
+            {recentSessions.length > 0 ? (
+              <Pager
+                page={page}
+                totalPages={totalPages}
+                total={recentSessions.length}
+                pageStart={showingFrom}
+                pageEnd={showingTo}
+                onPage={setPage}
+                label="sessions"
+              />
+            ) : null}
           </section>
         </>
       )}

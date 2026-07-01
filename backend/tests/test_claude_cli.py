@@ -448,6 +448,56 @@ async def test_dispatch_system_init_refreshes_context_window_on_family_change() 
 
 
 @pytest.mark.asyncio
+async def test_dispatch_system_init_persists_resolved_model() -> None:
+    emitted: list = []
+    session_updates: list[tuple[str, dict[str, Any], bool]] = []
+    adapter = _make_adapter(emitted, session_updates)
+    state, _ = _attach_state(adapter)
+
+    await adapter._dispatch(
+        state,
+        {
+            "type": "system",
+            "subtype": "init",
+            "model": "claude-sonnet-5",
+            "session_id": "claude-uuid",
+        },
+    )
+
+    assert state.resolved_model == "claude-sonnet-5"
+    resolved_updates = [
+        update for update in session_updates if "resolved_model" in update[1]
+    ]
+    assert resolved_updates == [("sess", {"resolved_model": "claude-sonnet-5"}, False)]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_system_init_does_not_repersist_unchanged_resolved_model() -> (
+    None
+):
+    emitted: list = []
+    session_updates: list[tuple[str, dict[str, Any], bool]] = []
+    adapter = _make_adapter(emitted, session_updates)
+    state, _ = _attach_state(adapter)
+    state.resolved_model = "claude-sonnet-5"
+
+    await adapter._dispatch(
+        state,
+        {
+            "type": "system",
+            "subtype": "init",
+            "model": "claude-sonnet-5",
+            "session_id": "claude-uuid",
+        },
+    )
+
+    resolved_updates = [
+        update for update in session_updates if "resolved_model" in update[1]
+    ]
+    assert resolved_updates == []
+
+
+@pytest.mark.asyncio
 async def test_dispatch_assistant_emits_context_usage_snapshot() -> None:
     emitted: list = []
     session_updates: list[tuple[str, dict[str, Any], bool]] = []

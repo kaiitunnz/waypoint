@@ -189,6 +189,42 @@ def test_session_round_trip_persists_spawner_session_id(tmp_path) -> None:
     assert updated.spawner_session_id == "parent-2"
 
 
+def test_session_round_trip_persists_resolved_model(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="session-resolved-model",
+        backend="claude_code",
+        source=SessionSource.MANAGED,
+        title="Claude session",
+        cwd="/tmp",
+        status=SessionStatus.RUNNING,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="/tmp/raw.log",
+        structured_log_path="/tmp/events.jsonl",
+        model="sonnet",
+    )
+    storage.create_session(session)
+
+    loaded = storage.get_session("session-resolved-model")
+    assert loaded is not None
+    assert loaded.model == "sonnet"
+    assert loaded.resolved_model is None
+
+    updated = storage.update_session(
+        "session-resolved-model", resolved_model="claude-sonnet-5"
+    )
+    assert updated.resolved_model == "claude-sonnet-5"
+    # The user's selection is untouched by the resolved-model update.
+    assert updated.model == "sonnet"
+
+    reloaded = storage.get_session("session-resolved-model")
+    assert reloaded is not None
+    assert reloaded.resolved_model == "claude-sonnet-5"
+
+
 def test_schedule_round_trip_persists_launch_mode(tmp_path) -> None:
     storage = Storage(tmp_path / "waypoint.db")
     now = datetime.now(UTC)
@@ -1009,6 +1045,60 @@ def test_storage_legacy_db_gets_launch_mode_column(tmp_path) -> None:
         assert row[0] == LaunchMode.AUTO.value
     finally:
         conn.close()
+
+
+def test_storage_legacy_db_gets_resolved_model_column(tmp_path) -> None:
+    """A pre-resolved_model SQLite file gains the column, reading null safely."""
+    import sqlite3
+
+    db_path = tmp_path / "legacy_resolved_model.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript("""
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            backend TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'managed',
+            title TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            launch_target_id TEXT,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_event_at TEXT NOT NULL,
+            raw_log_path TEXT NOT NULL,
+            structured_log_path TEXT NOT NULL,
+            transport_state TEXT NOT NULL DEFAULT '{}',
+            permission_mode TEXT,
+            model TEXT,
+            effort TEXT,
+            transport TEXT
+        );
+        """)
+    conn.commit()
+    now = datetime.now(UTC).isoformat()
+    conn.execute(
+        "INSERT INTO sessions (id, backend, title, cwd, status, created_at, "
+        "updated_at, last_event_at, raw_log_path, structured_log_path, model, "
+        "transport) "
+        "VALUES (?, 'claude_code', 't', '/tmp', 'idle', ?, ?, ?, '/tmp/raw.log', "
+        "'/tmp/events.jsonl', 'sonnet', 'tmux')",
+        ("legacy-1", now, now, now),
+    )
+    conn.commit()
+    conn.close()
+
+    storage = Storage(db_path)
+
+    cols = {row[1] for row in storage.connection.execute("PRAGMA table_info(sessions)")}
+    assert "resolved_model" in cols
+
+    loaded = storage.get_session("legacy-1")
+    assert loaded is not None
+    assert loaded.model == "sonnet"
+    assert loaded.resolved_model is None
+
+    updated = storage.update_session("legacy-1", resolved_model="claude-sonnet-5")
+    assert updated.resolved_model == "claude-sonnet-5"
 
 
 # ── board history / author_label / keep_last ────────────────────────────────

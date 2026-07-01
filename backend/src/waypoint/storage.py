@@ -141,6 +141,7 @@ class Storage:
                 pinned_at TEXT,
                 permission_mode TEXT,
                 model TEXT,
+                resolved_model TEXT,
                 effort TEXT,
                 args TEXT NOT NULL DEFAULT '[]',
                 config_overrides TEXT NOT NULL DEFAULT '[]',
@@ -237,6 +238,7 @@ class Storage:
         self._ensure_column("sessions", "rate_limit_usage", "TEXT")
         self._ensure_column("sessions", "spawner_session_id", "TEXT")
         self._ensure_column("sessions", "worktree_path", "TEXT")
+        self._ensure_column("sessions", "resolved_model", "TEXT")
         self._ensure_column(
             "scheduled_sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
         )
@@ -266,8 +268,9 @@ class Storage:
                 launch_mode, repo_name, branch, status, created_at, updated_at,
                 last_event_at, raw_log_path, structured_log_path, transport_state,
                 pinned_at, spawner_session_id, worktree_path, permission_mode, model,
-                effort, args, config_overrides, context_usage, rate_limit_usage
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                resolved_model, effort, args, config_overrides, context_usage,
+                rate_limit_usage
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -292,6 +295,7 @@ class Storage:
                 session.worktree_path,
                 session.permission_mode,
                 session.model,
+                session.resolved_model,
                 session.effort,
                 json.dumps(list(session.args)),
                 json.dumps(list(session.config_overrides)),

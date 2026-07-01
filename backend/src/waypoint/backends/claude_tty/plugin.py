@@ -41,7 +41,11 @@ from waypoint.backends.claude_code.models import (
     DEFAULT_CLAUDE_MODELS,
     claude_default_model_id,
 )
-from waypoint.backends.claude_code.plugin import ClaudeCodePlugin
+from waypoint.backends.claude_code.plugin import (
+    ClaudeCodePlugin,
+    offered_claude_models,
+    raise_for_unsupported_selection,
+)
 from waypoint.backends.claude_code.schemas import (
     ClaudeThreadImportRequest,
     ClaudeThreadSummary,
@@ -300,10 +304,19 @@ class ClaudeTtyPlugin:
     ) -> dict[str, Any]:
         config = self._config(runtime)
         default_model = config.default_model_id
-        options = [opt.model_dump(mode="json") for opt in config.models]
+        launch_target = (
+            runtime._find_launch_target(launch_target_id) if launch_target_id else None
+        )
+        models, _version = await asyncio.to_thread(
+            offered_claude_models,
+            config,
+            self._claude.capabilities.cli_binary or "claude",
+            launch_target,
+        )
+        options = [opt.model_dump(mode="json") for opt in models]
         default_model_id: str | None = None
         if default_model is None:
-            for opt in config.models:
+            for opt in models:
                 if opt.is_default:
                     default_model_id = opt.id
                     break
@@ -311,7 +324,7 @@ class ClaudeTtyPlugin:
             default_model_id = default_model
         default_model_label: str | None = None
         if default_model_id:
-            for opt in config.models:
+            for opt in models:
                 if opt.id == default_model_id:
                     default_model_label = opt.label
                     break
@@ -323,6 +336,27 @@ class ClaudeTtyPlugin:
             "default_effort": config.default_effort,
             "supports_free_text": True,
         }
+
+    def validate_new_session_selection(
+        self,
+        runtime: "SessionRuntime",
+        model: str | None,
+        effort: str | None,
+        launch_target_id: str | None,
+    ) -> None:
+        # Same agent as claude_code, so the same version-gated preflight
+        # applies over the TUI transport.
+        if effort is None:
+            return None
+        launch_target = (
+            runtime._find_launch_target(launch_target_id) if launch_target_id else None
+        )
+        models, version = offered_claude_models(
+            self._config(runtime),
+            self._claude.capabilities.cli_binary or "claude",
+            launch_target,
+        )
+        raise_for_unsupported_selection(models, version, model, effort)
 
     async def list_command_completions(
         self,

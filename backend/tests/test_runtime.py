@@ -1975,6 +1975,39 @@ async def test_create_session_rejects_tmux_backend(tmp_path) -> None:
     assert exc.value.status_code == 400
 
 
+@pytest.mark.asyncio
+async def test_create_session_rejects_unsupported_model_effort_combo(
+    monkeypatch, tmp_path
+) -> None:
+    """The new-session preflight fires before any transport/launch work --
+    a combo the detected CLI can't honor 400s without spawning anything."""
+    runtime, _, _ = make_runtime(tmp_path)
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.detect_claude_cli_version",
+        lambda binary, launch_target: (2, 1, 100),
+    )
+
+    # Pre-2.1.197 the `sonnet` alias is Sonnet 4.6, which accepts `max` but
+    # not `xhigh` -- so `xhigh` is the combo the preflight must reject before
+    # spawning anything. (A supported combo would fall through to a real
+    # launch and hang the suite, so this must stay an unsupported one.)
+    with pytest.raises(HTTPException) as exc:
+        await runtime.create_session(
+            SessionCreateRequest(
+                backend="claude_code",
+                cwd="~/workspace",
+                args=[],
+                model="sonnet",
+                effort="xhigh",
+                source_mode=SessionSource.MANAGED,
+            )
+        )
+
+    assert exc.value.status_code == 400
+    assert "sonnet" in exc.value.detail
+    assert "xhigh" in exc.value.detail
+
+
 def _fake_plugin_create_session(
     storage: Storage,
     settings: Settings,
@@ -2010,6 +2043,87 @@ def _fake_plugin_create_session(
         return session
 
     return _create
+
+
+@pytest.mark.asyncio
+async def test_create_session_accepts_supported_model_effort_combo(
+    monkeypatch, tmp_path
+) -> None:
+    """A combo the detected CLI does support sails through the preflight
+    and reaches the transport-resolved plugin's create_session unchanged."""
+    runtime, storage, settings = make_runtime(tmp_path)
+    claude = runtime.registry.get("claude_code")
+    tty = runtime.registry.get("claude_tty")
+    calls: list[tuple[str, str, str | None]] = []
+
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.detect_claude_cli_version",
+        lambda binary, launch_target: (2, 1, 197),
+    )
+    monkeypatch.setattr(tty, "is_available_for_managed_launch", lambda _runtime: True)
+    monkeypatch.setattr(
+        tty,
+        "create_session",
+        _fake_plugin_create_session(
+            storage, settings, transport="claude_tty", calls=calls
+        ),
+    )
+    monkeypatch.setattr(
+        claude,
+        "create_session",
+        lambda *args, **kwargs: pytest.fail("structured adapter is no longer default"),
+    )
+    monkeypatch.setattr(
+        runtime, "_warm_command_completions", lambda *_args, **_kwargs: None
+    )
+
+    session = await runtime.create_session(
+        SessionCreateRequest(
+            backend="claude_code",
+            cwd="~/workspace",
+            args=[],
+            model="sonnet",
+            effort="max",
+            source_mode=SessionSource.MANAGED,
+        )
+    )
+
+    assert calls == [(session.id, "claude_code", None)]
+
+
+@pytest.mark.asyncio
+async def test_apply_model_and_apply_effort_never_consult_preflight(tmp_path) -> None:
+    """set-model / set-effort mid-session never run the new-session
+    preflight -- it only gates create_session, per the resume/set contract."""
+    runtime, storage, settings = make_runtime(tmp_path)
+    claude = _claude_plugin(runtime)
+    calls: list[Any] = []
+    original = claude.validate_new_session_selection
+
+    def spy(*args: Any, **kwargs: Any) -> None:
+        calls.append((args, kwargs))
+        return original(*args, **kwargs)
+
+    claude.validate_new_session_selection = spy
+
+    class FakeAdapter:
+        async def set_model(self, session_id: str, model: str | None) -> None:
+            return None
+
+        async def set_effort(self, session_id: str, effort: str | None) -> None:
+            return None
+
+    claude.adapter = cast(Any, FakeAdapter())
+
+    session = make_session(
+        settings, id="s1", backend="claude_code", transport="claude_cli"
+    )
+    storage.create_session(session)
+
+    await claude.apply_model(runtime, session, "sonnet")
+    await claude.apply_effort(runtime, session, "max")
+
+    assert calls == []
 
 
 @pytest.mark.asyncio

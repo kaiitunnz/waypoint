@@ -90,6 +90,11 @@ export interface SessionRecord {
   pinned_at?: string | null;
   permission_mode?: string | null;
   model?: string | null;
+  // The concrete model id the backend actually resolved and ran (e.g.
+  // "claude-sonnet-5"), as reported at launch time. Distinct from `model`,
+  // which is the user's selection (e.g. the alias "sonnet") and is what
+  // relaunch/set-model send. Prefer this for display when present.
+  resolved_model?: string | null;
   effort?: string | null;
   context_usage?: SessionContextUsage | null;
   rate_limit_usage?: SessionRateLimitUsage | null;

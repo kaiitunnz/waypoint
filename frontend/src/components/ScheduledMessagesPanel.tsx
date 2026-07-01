@@ -144,7 +144,7 @@ function MessageRow({
           </span>
           <button
             type="button"
-            className="link-button danger-link msg-cancel"
+            className="link-button danger-link msg-cancel action-chip"
             onClick={() => void onDelete(schedule.id)}
           >
             {isPending ? "Cancel" : "Dismiss"}

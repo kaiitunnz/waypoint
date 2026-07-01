@@ -9589,13 +9589,44 @@ html[data-theme="light"] .term-compose-input {
   color: var(--accent);
 }
 
-/* Underline the session-card pin / terminate / delete actions so they read as
-   tappable without the visual weight of a full button — they appear on every
-   card and carry no important state, so they stay deliberately low-key. */
-.session-card-actions .pin-link,
-.session-card-actions .danger-link {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+/* Session-card actions (and the scheduled-panel row Cancel/Dismiss, via
+   .action-chip) echo the app's tinted-chip badge language but sit one rung
+   quieter: state badges are outlined, these are borderless soft-fill pills that
+   ignite to a deeper fill + hairline border and lift on hover/press. The
+   color-mix tints read off currentColor, so pin keeps its neutral→gold hue and
+   terminate/delete/cancel stay danger-red, adapting to both themes with no
+   override. */
+.session-card-actions .link-button.pin-link,
+.session-card-actions .link-button.danger-link,
+.link-button.danger-link.action-chip {
+  align-self: center;
+  margin-top: 0;
+  padding: 6px 13px;
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  background: color-mix(in srgb, currentColor 9%, transparent);
+  transition: background 140ms ease, border-color 140ms ease,
+    transform 120ms ease, color 140ms ease;
+}
+
+.session-card-actions .link-button.pin-link:hover:not(:disabled),
+.session-card-actions .link-button.danger-link:hover:not(:disabled),
+.link-button.danger-link.action-chip:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 17%, transparent);
+  border-color: color-mix(in srgb, currentColor 34%, transparent);
+  transform: translateY(-1px);
+}
+
+.session-card-actions .link-button.pin-link:active:not(:disabled),
+.session-card-actions .link-button.danger-link:active:not(:disabled),
+.link-button.danger-link.action-chip:active:not(:disabled) {
+  background: color-mix(in srgb, currentColor 23%, transparent);
+  transform: translateY(0);
+}
+
+.session-card-actions .link-button.pin-link.active {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  border-color: color-mix(in srgb, currentColor 30%, transparent);
 }
 
 .session-header-title-row,

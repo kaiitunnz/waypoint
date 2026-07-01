@@ -11,6 +11,7 @@ import {
   type BackendCatalog,
 } from "@/lib/backends";
 import { matchesQuery, parseQuery } from "@/lib/search";
+import { formatClock } from "@/lib/scheduleTime";
 import { SessionRecord } from "@/lib/types";
 
 import { SearchInput } from "./SearchInput";
@@ -198,19 +199,27 @@ export function SessionList({
     return (
       <Link className="panel session-card" href={`/session/${session.id}`} key={session.id}>
         <div className="session-row">
-          <span className={`badge ${agent}`}>
-            {humaniseBackend(agent, catalog)}
-          </span>
-          {showTransport ? (
-            <span className={`badge transport ${session.transport}`}>
-              {transportLabel(session.transport, catalog)}
+          <div className="session-card-badges">
+            <span className={`badge ${agent}`}>
+              {humaniseBackend(agent, catalog)}
             </span>
-          ) : null}
-          {session.launch_target_id ? (
-            <span className="badge neutral">{session.launch_target_id}</span>
-          ) : null}
-          <span className={`status ${session.status}`}>
-            {session.status.replace("_", " ")}
+            {showTransport ? (
+              <span className={`badge transport ${session.transport}`}>
+                {transportLabel(session.transport, catalog)}
+              </span>
+            ) : null}
+            {session.launch_target_id ? (
+              <span className="badge neutral">{session.launch_target_id}</span>
+            ) : null}
+            <span className={`status ${session.status}`}>
+              {session.status.replace("_", " ")}
+            </span>
+          </div>
+          <span
+            className="session-card-when"
+            title={new Date(session.last_event_at).toLocaleString()}
+          >
+            {formatClock(new Date(session.last_event_at))}
           </span>
         </div>
         <div className="session-card-title-row">
@@ -253,9 +262,6 @@ export function SessionList({
             {session.repo_name ?? "No repo"}
             {session.branch ? ` · ${session.branch}` : null}
             {session.source === "managed" ? " · managed" : " · attached"}
-          </p>
-          <p className="meta">
-            Last activity {new Date(session.last_event_at).toLocaleString()}
           </p>
         </div>
         <div className="session-card-actions">

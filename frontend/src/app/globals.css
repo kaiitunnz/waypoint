@@ -9716,6 +9716,31 @@ html[data-theme="light"] .term-compose-input {
   min-width: 0;
 }
 
+/* Card header: badges as one group on the left, last-activity time on the right.
+   space-between keeps the time in the right gutter when it fits, and — because a
+   lone flex item on a wrapped line sits at the start — drops it to its own
+   left-aligned line only when it can't fit. Works the same on every viewport, so
+   a short "8:20 PM" stays inline-right while a long "Jun 30 at 1:36 AM" wraps
+   left. */
+.session-card .session-row {
+  justify-content: space-between;
+}
+
+.session-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.session-card-when {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .schedule-panel {
   border-color: var(--line);
 }

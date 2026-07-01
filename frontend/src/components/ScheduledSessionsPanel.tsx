@@ -8,13 +8,17 @@ import {
   permissionModeLabel,
 } from "@/lib/backends";
 import { fetchBackendModels } from "@/lib/api";
+import { Pager } from "@/components/Pager";
+import { usePagination } from "@/lib/usePagination";
 import {
   Backend,
   BackendModelOption,
   ScheduledSession,
 } from "@/lib/types";
 
-interface ScheduledSessionsPanelProps {
+const PAGE_SIZE = 5;
+
+interface ScheduledSessionsGroupProps {
   host: string;
   token: string;
   schedules: ScheduledSession[];
@@ -23,17 +27,18 @@ interface ScheduledSessionsPanelProps {
   onClearHistory: () => Promise<void>;
 }
 
-// The list of upcoming and recent scheduled sessions. The creation form now
-// lives under the Schedule tab of the launch panel; this panel is purely the
-// management view and renders nothing until at least one schedule exists.
-export function ScheduledSessionsPanel({
+// The "Sessions" group inside the unified Scheduled panel: upcoming launches
+// first, then recently-resolved schedules. The creation form lives under the
+// Schedule tab of the launch panel; this is purely the management view and
+// renders nothing until at least one schedule exists.
+export function ScheduledSessionsGroup({
   host,
   token,
   schedules,
   catalog,
   onCancel,
   onClearHistory,
-}: ScheduledSessionsPanelProps) {
+}: ScheduledSessionsGroupProps) {
   const [modelsByBackend, setModelsByBackend] = useState<Record<string, BackendModelOption[]>>({});
   const [clearing, setClearing] = useState(false);
 
@@ -59,7 +64,9 @@ export function ScheduledSessionsPanel({
   }, [host, token, schedules, modelsByBackend]);
 
   const upcoming = schedules.filter((schedule) => schedule.status === "pending");
-  const recent = schedules.filter((schedule) => schedule.status !== "pending").slice(0, 4);
+  const recent = schedules.filter((schedule) => schedule.status !== "pending");
+  const ordered = [...upcoming, ...recent];
+  const pager = usePagination(ordered, PAGE_SIZE);
 
   async function handleClearHistory() {
     if (clearing) {
@@ -81,50 +88,44 @@ export function ScheduledSessionsPanel({
   }
 
   return (
-    <section className="panel stack schedule-panel" aria-label="Scheduled sessions">
-      <div>
-        <h3>Scheduled sessions</h3>
-        <p className="muted">Sessions waiting to start, and recently completed schedules.</p>
+    <div className="stack sched-group">
+      <div className="sched-group-head">
+        <h4 className="sched-group-title">
+          Sessions
+          {upcoming.length ? (
+            <span className="msg-sched-count">{upcoming.length}</span>
+          ) : null}
+        </h4>
+        {recent.length ? (
+          <button
+            type="button"
+            className="link-button danger-link"
+            onClick={() => void handleClearHistory()}
+            disabled={clearing}
+          >
+            {clearing ? "Clearing…" : "Clear history"}
+          </button>
+        ) : null}
       </div>
-      {upcoming.length ? (
-        <div className="stack">
-          <h4 className="schedule-heading">Upcoming</h4>
-          {upcoming.map((schedule) => (
-            <ScheduleRow
-              key={schedule.id}
-              schedule={schedule}
-              onCancel={onCancel}
-              catalog={catalog}
-              modelsByBackend={modelsByBackend}
-            />
-          ))}
-        </div>
-      ) : null}
-      {recent.length ? (
-        <div className="stack">
-          <div className="field-row">
-            <h4 className="schedule-heading">Recent</h4>
-            <button
-              type="button"
-              className="link-button danger-link"
-              onClick={() => void handleClearHistory()}
-              disabled={clearing}
-            >
-              {clearing ? "Clearing…" : "Clear history"}
-            </button>
-          </div>
-          {recent.map((schedule) => (
-            <ScheduleRow
-              key={schedule.id}
-              schedule={schedule}
-              onCancel={onCancel}
-              catalog={catalog}
-              modelsByBackend={modelsByBackend}
-            />
-          ))}
-        </div>
-      ) : null}
-    </section>
+      {pager.pageItems.map((schedule) => (
+        <ScheduleRow
+          key={schedule.id}
+          schedule={schedule}
+          onCancel={onCancel}
+          catalog={catalog}
+          modelsByBackend={modelsByBackend}
+        />
+      ))}
+      <Pager
+        page={pager.page}
+        totalPages={pager.totalPages}
+        total={pager.total}
+        pageStart={pager.pageStart}
+        pageEnd={pager.pageEnd}
+        onPage={pager.setPage}
+        label="schedules"
+      />
+    </div>
   );
 }
 

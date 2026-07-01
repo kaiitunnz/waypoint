@@ -1,65 +1,113 @@
 "use client";
 
-import { MessageSchedule } from "@/lib/types";
+import { useEffect, useState } from "react";
 
-interface ScheduledMessagesPanelProps {
+import { ExpandableText } from "@/components/ExpandableText";
+import { Pager } from "@/components/Pager";
+import { usePagination } from "@/lib/usePagination";
+import { MessageSchedule, SessionRecord } from "@/lib/types";
+
+const PAGE_SIZE = 5;
+
+interface ScheduledMessagesGroupProps {
   messageSchedules: MessageSchedule[];
+  sessionsById?: Record<string, SessionRecord>;
   onDelete: (scheduleId: string) => Promise<void>;
   onClearHistory: () => Promise<void>;
 }
 
-export function ScheduledMessagesPanel({
+// The "Messages" group inside the unified Scheduled panel: pending deliveries
+// first (with live countdowns), then recently sent/failed/cancelled ones.
+export function ScheduledMessagesGroup({
   messageSchedules,
+  sessionsById,
   onDelete,
   onClearHistory,
-}: ScheduledMessagesPanelProps) {
+}: ScheduledMessagesGroupProps) {
+  // Re-render on a slow cadence so the "in 14m" countdowns stay honest without
+  // hammering the main thread.
+  const [, setTick] = useState(0);
+  const [clearing, setClearing] = useState(false);
+
   const pending = messageSchedules.filter((ms) => ms.status === "pending");
-  const recent = messageSchedules.filter((ms) => ms.status !== "pending").slice(0, 4);
+  const recent = messageSchedules.filter((ms) => ms.status !== "pending");
+  // Pending first (with live countdowns), then recent history, paginated as one
+  // ordered list so the card stays a fixed height regardless of backlog.
+  const ordered = [...pending, ...recent];
+  const pager = usePagination(ordered, PAGE_SIZE);
+
+  useEffect(() => {
+    if (!pending.length) {
+      return;
+    }
+    const id = window.setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => window.clearInterval(id);
+  }, [pending.length]);
+
+  async function handleClearHistory() {
+    if (clearing) {
+      return;
+    }
+    setClearing(true);
+    try {
+      await onClearHistory();
+    } finally {
+      setClearing(false);
+    }
+  }
 
   if (!pending.length && !recent.length) {
     return null;
   }
 
   return (
-    <section className="panel stack schedule-panel" aria-label="Scheduled messages">
-      <div>
-        <h3>Scheduled messages</h3>
-        <p className="muted">Messages queued to send to sessions.</p>
+    <div className="stack sched-group msg-sched">
+      <div className="sched-group-head">
+        <h4 className="sched-group-title">
+          Messages
+          {pending.length ? (
+            <span className="msg-sched-count">{pending.length}</span>
+          ) : null}
+        </h4>
+        {recent.length ? (
+          <button
+            type="button"
+            className="link-button danger-link"
+            onClick={() => void handleClearHistory()}
+            disabled={clearing}
+          >
+            {clearing ? "Clearing…" : "Clear history"}
+          </button>
+        ) : null}
       </div>
-      {pending.length ? (
-        <div className="stack">
-          <h4 className="schedule-heading">Pending</h4>
-          {pending.map((ms) => (
-            <MessageRow key={ms.id} schedule={ms} onDelete={onDelete} />
-          ))}
-        </div>
-      ) : null}
-      {recent.length ? (
-        <div className="stack">
-          <div className="field-row">
-            <h4 className="schedule-heading">Recent</h4>
-            <button
-              type="button"
-              className="link-button danger-link"
-              onClick={() => void onClearHistory()}
-            >
-              Clear history
-            </button>
-          </div>
-          {recent.map((ms) => (
-            <MessageRow key={ms.id} schedule={ms} onDelete={onDelete} />
-          ))}
-        </div>
-      ) : null}
-    </section>
+      {pager.pageItems.map((ms) => (
+        <MessageRow
+          key={ms.id}
+          schedule={ms}
+          sessionTitle={sessionsById?.[ms.session_id]?.title ?? null}
+          onDelete={onDelete}
+        />
+      ))}
+      <Pager
+        page={pager.page}
+        totalPages={pager.totalPages}
+        total={pager.total}
+        pageStart={pager.pageStart}
+        pageEnd={pager.pageEnd}
+        onPage={pager.setPage}
+        label="messages"
+      />
+    </div>
   );
 }
 
 function MessageRow({
   schedule,
+  sessionTitle,
   onDelete,
 }: {
   schedule: MessageSchedule;
+  sessionTitle?: string | null;
   onDelete: (id: string) => Promise<void>;
 }) {
   const when = schedule.scheduled_at
@@ -67,31 +115,93 @@ function MessageRow({
     : schedule.created_at
       ? new Date(schedule.created_at)
       : null;
-  const formatted = when ? when.toLocaleString() : "";
+  const absolute = when ? formatClock(when) : "";
+  const isPending = schedule.status === "pending";
+  const relative = isPending && when ? formatRelative(when) : null;
+  const label = sessionTitle?.trim() || shortSessionId(schedule.session_id);
+
   return (
-    <article className={`schedule-row schedule-${schedule.status}`}>
-      <div className="session-row">
+    <article className={`schedule-row msg-row schedule-${schedule.status}`}>
+      <div className="msg-row-top">
+        <span className={`msg-status-dot ${schedule.status}`} aria-hidden="true" />
         <span className={`badge schedule-status ${schedule.status}`}>
           {schedule.status}
         </span>
-        <span className="badge model" title={`Session: ${schedule.session_id}`}>
-          {schedule.session_id.slice(0, 12)}…
-        </span>
-        <span className="muted">{formatted}</span>
-      </div>
-      <p className="schedule-title msg-text">{schedule.text}</p>
-      {schedule.failure_reason ? (
-        <p className="error">{schedule.failure_reason}</p>
-      ) : null}
-      <div className="action-row">
-        <button
-          type="button"
-          className="link-button danger-link"
-          onClick={() => void onDelete(schedule.id)}
+        <a
+          className="msg-session-link"
+          href={`/session/${schedule.session_id}`}
+          title={`Open session ${schedule.session_id}`}
         >
-          {schedule.status === "pending" ? "Cancel" : "Dismiss"}
-        </button>
+          <span className="msg-session-glyph" aria-hidden="true">
+            ⇢
+          </span>
+          <span className="msg-session-name">{label}</span>
+        </a>
+        <span className="msg-row-right">
+          <span className="msg-row-when">
+            {relative ? <span className="msg-countdown">{relative}</span> : null}
+            <span className="muted">{absolute}</span>
+          </span>
+          <button
+            type="button"
+            className="link-button danger-link msg-cancel"
+            onClick={() => void onDelete(schedule.id)}
+          >
+            {isPending ? "Cancel" : "Dismiss"}
+          </button>
+        </span>
       </div>
+      {schedule.text ? (
+        <ExpandableText
+          className="msg-text"
+          text={schedule.text}
+          collapsedMaxHeight="4.5em"
+        />
+      ) : (
+        <p className="msg-text">
+          <em className="muted">(no text)</em>
+        </p>
+      )}
+      {schedule.failure_reason ? (
+        <p className="error msg-error">{schedule.failure_reason}</p>
+      ) : null}
     </article>
   );
+}
+
+function shortSessionId(id: string): string {
+  // Session ids are "<backend>-<hex>"; the hex suffix is the unique part and
+  // reads as an intentional handle, unlike a blind prefix truncation.
+  const dash = id.lastIndexOf("-");
+  return dash >= 0 ? id.slice(dash + 1) : id;
+}
+
+function formatClock(target: Date): string {
+  const sameDay = new Date().toDateString() === target.toDateString();
+  return target.toLocaleString(undefined, {
+    month: sameDay ? undefined : "short",
+    day: sameDay ? undefined : "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatRelative(target: Date): string {
+  const diff = target.getTime() - Date.now();
+  if (diff <= 0) {
+    return "any moment";
+  }
+  const minutes = Math.round(diff / 60_000);
+  if (minutes < 1) {
+    return "in <1m";
+  }
+  if (minutes < 60) {
+    return `in ${minutes}m`;
+  }
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) {
+    return `in ${hours}h`;
+  }
+  const days = Math.round(hours / 24);
+  return `in ${days}d`;
 }

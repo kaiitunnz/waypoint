@@ -9,8 +9,7 @@ import { BackendSwitcher } from "@/components/BackendSwitcher";
 import { BoardPanel } from "@/components/BoardPanel";
 import { LaunchPanel } from "@/components/LaunchPanel";
 import { LoginForm } from "@/components/LoginForm";
-import { ScheduledMessagesPanel } from "@/components/ScheduledMessagesPanel";
-import { ScheduledSessionsPanel } from "@/components/ScheduledSessionsPanel";
+import { SchedulePanel } from "@/components/SchedulePanel";
 import { SessionList } from "@/components/SessionList";
 import { SshConnectModal } from "@/components/SshConnectModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -985,20 +984,17 @@ export default function HomePage() {
         />
       ) : null}
       {token ? (
-        <ScheduledSessionsPanel
+        <SchedulePanel
           host={host}
           token={token}
           schedules={schedules}
-          catalog={catalog}
-          onCancel={handleCancelSchedule}
-          onClearHistory={handleClearScheduleHistory}
-        />
-      ) : null}
-      {token ? (
-        <ScheduledMessagesPanel
           messageSchedules={messageSchedules}
-          onDelete={handleDeleteMessageSchedule}
-          onClearHistory={handleClearMessageScheduleHistory}
+          sessions={sessions}
+          catalog={catalog}
+          onCancelSchedule={handleCancelSchedule}
+          onClearScheduleHistory={handleClearScheduleHistory}
+          onDeleteMessage={handleDeleteMessageSchedule}
+          onClearMessageHistory={handleClearMessageScheduleHistory}
         />
       ) : null}
       {token ? (

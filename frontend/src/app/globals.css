@@ -9561,11 +9561,6 @@ html[data-theme="light"] .term-compose-input {
   letter-spacing: 0.04em;
 }
 
-.session-section-controls {
-  margin-left: auto;
-  flex-wrap: wrap;
-}
-
 .session-section-pinned .session-card {
   border-color: rgba(200, 169, 106, 0.32);
   box-shadow: inset 3px 0 0 var(--accent);
@@ -9592,10 +9587,6 @@ html[data-theme="light"] .term-compose-input {
 
 .pin-link.active {
   color: var(--accent);
-}
-
-.pagination-controls {
-  margin-left: auto;
 }
 
 .session-header-title-row,
@@ -9702,15 +9693,6 @@ html[data-theme="light"] .term-compose-input {
   font-size: 0.86rem;
 }
 
-.schedule-heading {
-  margin: 4px 0 0;
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--muted-soft);
-}
-
 .schedule-row {
   display: grid;
   gap: 6px;
@@ -9787,12 +9769,293 @@ html[data-theme="light"] .term-compose-input {
   border-color: rgba(94, 210, 156, 0.22);
 }
 
-.schedule-title.msg-text {
-  font-size: 0.9rem;
+/* ─── Unified schedule panel groups ─── */
+
+.msg-sched-head {
+  display: grid;
+  gap: 3px;
+}
+
+.msg-sched-head p {
+  margin: 0;
+}
+
+.sched-group {
+  gap: 8px;
+}
+
+.sched-group + .sched-group {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.sched-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sched-group-title {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.msg-sched-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: rgba(200, 169, 106, 0.16);
+  color: var(--accent-strong);
+  font-size: 0.66rem;
+  letter-spacing: 0.02em;
+}
+
+html[data-theme="light"] .msg-sched-count {
+  background: rgba(184, 130, 14, 0.14);
+  color: #8a5d05;
+}
+
+/* ─── Message schedule rows ─── */
+
+.msg-row {
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.msg-row-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.msg-row-right {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.msg-row-top .msg-cancel {
+  margin-top: 0;
+  align-self: baseline;
+}
+
+.msg-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--muted);
+}
+
+.msg-status-dot.pending {
+  background: var(--accent-cool);
+  animation: msg-dot-pulse 2.4s ease-in-out infinite;
+}
+
+.msg-status-dot.sent {
+  background: var(--success);
+}
+
+.msg-status-dot.failed {
+  background: var(--danger);
+}
+
+.msg-status-dot.cancelled {
+  background: var(--muted-soft);
+}
+
+@keyframes msg-dot-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(143, 179, 214, 0.16);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(143, 179, 214, 0.04);
+  }
+}
+
+.msg-session-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 180px;
+  padding: 2px 9px;
+  border: 1px solid rgba(143, 179, 214, 0.22);
+  border-radius: var(--radius-pill);
+  background: rgba(143, 179, 214, 0.08);
+  color: var(--accent-cool);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.03em;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+.msg-session-link:hover {
+  border-color: rgba(143, 179, 214, 0.45);
+  background: rgba(143, 179, 214, 0.14);
+}
+
+.msg-session-glyph {
+  flex: none;
+  opacity: 0.6;
+}
+
+.msg-session-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msg-row-when {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.msg-countdown {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.05em;
+  color: var(--accent-strong);
+}
+
+.msg-text {
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
-  line-height: 1.45;
+}
+
+.schedule-row.schedule-sent .msg-text,
+.schedule-row.schedule-cancelled .msg-text {
+  color: var(--muted);
+}
+
+.msg-error {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+/* ─── Expandable clamped text (shared by rows + dock) ─── */
+
+.expandable-text {
+  margin: 0;
+}
+
+.expandable-text-clamped {
+  overflow: hidden;
+}
+
+.expandable-text-fade {
+  -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent);
+  mask-image: linear-gradient(180deg, #000 70%, transparent);
+}
+
+.expandable-text-expanded {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.expandable-more {
+  display: inline-block;
+  justify-self: start;
+  margin-top: 5px;
+  padding: 0;
+  background: none;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  color: var(--accent-cool);
+  cursor: pointer;
+}
+
+.expandable-more:hover {
+  color: var(--text-strong);
+}
+
+/* ─── Shared list paginator ─── */
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.pager-range {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--muted-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.pager-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pager-btn {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    background-color 140ms ease;
+}
+
+.pager-btn:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.pager-btn:disabled {
+  color: var(--muted-soft);
+  opacity: 0.5;
+  cursor: default;
+}
+
+.pager-indicator {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted-soft);
+  font-variant-numeric: tabular-nums;
+  padding: 0 2px;
 }
 
 html[data-theme="light"] .schedule-row.schedule-sent {
@@ -9805,33 +10068,333 @@ html[data-theme="light"] .badge.schedule-status.sent {
   border-color: rgba(37, 122, 80, 0.18);
 }
 
+/* ─── In-session scheduled-messages dock ───
+ * Mirrors .task-dock / .sq-dock: a sticky strip floating above the composer
+ * that expands into a scrim + panel (bottom sheet on mobile, popover on
+ * desktop), so the three docks read and behave as one family. */
+
+.sched-dock {
+  position: sticky;
+  bottom: calc(var(--composer-height, 220px) + 12px);
+  z-index: 5;
+  margin-top: -8px;
+  pointer-events: none;
+  min-width: 0;
+}
+
+.sched-dock.expanded {
+  z-index: 50;
+}
+
+.sched-dock-strip {
+  pointer-events: auto;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: linear-gradient(
+    180deg,
+    rgba(20, 24, 33, 0.92),
+    rgba(12, 15, 22, 0.96)
+  );
+  box-shadow:
+    0 12px 30px rgba(0, 0, 0, 0.36),
+    0 0 0 1px rgba(200, 169, 106, 0.05) inset;
+  backdrop-filter: blur(22px) saturate(1.2);
+}
+
+html[data-theme="light"] .sched-dock-strip {
+  background: linear-gradient(
+    180deg,
+    rgba(248, 245, 238, 0.96),
+    rgba(240, 236, 226, 0.98)
+  );
+  box-shadow:
+    0 12px 30px rgba(60, 50, 30, 0.14),
+    0 0 0 1px rgba(200, 169, 106, 0.12) inset;
+}
+
+.sched-dock-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+}
+
+.sched-dock-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 2px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sched-dock-glyph {
+  flex: none;
+  color: var(--accent-strong);
+  font-size: 0.95rem;
+}
+
+.sched-dock-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+  color: var(--text);
+}
+
+.sched-dock-when {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  color: var(--accent-strong);
+}
+
+.sched-dock-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+.sched-dock-chevron {
+  flex: none;
+  display: inline-flex;
+  color: var(--muted-soft);
+  transition: transform 160ms ease;
+}
+
+.sched-dock-toggle[aria-expanded="true"] .sched-dock-chevron {
+  transform: rotate(180deg);
+}
+
+.sched-dock-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  border: none;
+  background: rgba(0, 0, 0, 0.4);
+  cursor: default;
+  pointer-events: auto;
+}
+
+html[data-theme="light"] .sched-dock-scrim {
+  background: rgba(20, 16, 8, 0.22);
+}
+
+.sched-dock-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  z-index: 7;
+  max-height: 50vh;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: linear-gradient(
+    180deg,
+    rgba(20, 24, 33, 0.96),
+    rgba(12, 15, 22, 0.98)
+  );
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(22px) saturate(1.2);
+  pointer-events: auto;
+}
+
+html[data-theme="light"] .sched-dock-panel {
+  background: linear-gradient(
+    180deg,
+    rgba(248, 245, 238, 0.98),
+    rgba(240, 236, 226, 0.99)
+  );
+  box-shadow: 0 -10px 30px rgba(60, 50, 30, 0.16);
+}
+
+.sched-dock.expanded .sched-dock-panel {
+  border-bottom: none;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  box-shadow: none;
+}
+
+.sched-dock.expanded .sched-dock-strip {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.sched-dock-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sched-dock-panel-title {
+  flex: 1;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.sched-dock-collapse {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 6px;
+  background: none;
+  border: none;
+  color: var(--muted-soft);
+  cursor: pointer;
+}
+
+/* The collapse control always points down ("close"). */
+.sched-dock-collapse svg {
+  transform: rotate(180deg);
+}
+
+.sched-dock-list {
+  display: grid;
+  gap: 2px;
+}
+
+.sched-dock-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 8px 2px;
+}
+
+.sched-dock-item + .sched-dock-item {
+  border-top: 1px solid var(--line);
+}
+
+.sched-dock-item-when {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--accent-strong);
+  white-space: nowrap;
+}
+
+.sched-dock-item-body {
+  min-width: 0;
+}
+
+.sched-dock-item-text {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sched-dock-item .sched-dock-cancel {
+  align-self: start;
+  white-space: nowrap;
+  margin-top: 0;
+}
+
+@media (min-width: 768px) {
+  .sched-dock-scrim,
+  html[data-theme="light"] .sched-dock-scrim {
+    background: transparent;
+  }
+
+  .sched-dock-panel {
+    left: auto;
+    right: 0;
+    bottom: calc(100% + 8px);
+    width: min(420px, 92vw);
+  }
+
+  .sched-dock.expanded .sched-dock-panel {
+    border-bottom: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  }
+
+  html[data-theme="light"] .sched-dock.expanded .sched-dock-panel {
+    box-shadow: 0 12px 30px rgba(60, 50, 30, 0.16);
+  }
+
+  .sched-dock.expanded .sched-dock-strip {
+    border-top-left-radius: var(--radius);
+    border-top-right-radius: var(--radius);
+  }
+}
+
 /* ─── Schedule message dialog ─── */
 
 .schedule-msg-dialog-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(4, 6, 10, 0.55);
+  backdrop-filter: blur(3px);
   z-index: 100;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
   padding: 24px;
+  animation: schedule-msg-fade 160ms ease;
 }
 
 html[data-theme="light"] .schedule-msg-dialog-overlay {
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(30, 26, 18, 0.28);
 }
 
 .schedule-msg-dialog {
   background: var(--bg-card);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  padding: 18px;
+  padding: 20px;
   width: 100%;
-  max-width: 480px;
+  max-width: 460px;
   display: grid;
-  gap: 12px;
+  gap: 14px;
   box-shadow: var(--shadow);
+  animation: schedule-msg-pop 200ms cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+
+@keyframes schedule-msg-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes schedule-msg-pop {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .schedule-msg-dialog-overlay,
+  .schedule-msg-dialog {
+    animation: none;
+  }
 }
 
 .schedule-msg-dialog-header {
@@ -9841,67 +10404,223 @@ html[data-theme="light"] .schedule-msg-dialog-overlay {
 }
 
 .schedule-msg-dialog-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--font-display);
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 1.1rem;
   color: var(--text-strong);
 }
 
+.schedule-msg-dialog-glyph {
+  color: var(--accent);
+  font-size: 1rem;
+}
+
 .schedule-msg-dialog-close {
-  font-size: 1.2rem;
+  font-size: 1.3rem;
+  line-height: 1;
   color: var(--muted);
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: 8px;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
 }
 
 .schedule-msg-dialog-close:hover {
   background: rgba(120, 138, 168, 0.12);
+  color: var(--text);
 }
 
 .schedule-msg-dialog-input {
   width: 100%;
-  padding: 10px 12px;
+  padding: 11px 13px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--bg-input);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 0.88rem;
-  line-height: 1.45;
+  line-height: 1.5;
   resize: vertical;
-  min-height: 64px;
+  min-height: 72px;
+  transition: border-color 140ms ease;
 }
 
-.schedule-msg-dialog-options {
+.schedule-msg-dialog-input:focus {
+  outline: none;
+  border-color: var(--line-strong);
+}
+
+.schedule-msg-modes {
+  width: 100%;
+}
+
+.schedule-msg-modes .segmented-item {
+  flex: 1;
+}
+
+.schedule-msg-delay {
   display: grid;
-  grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
 
-.schedule-msg-dialog-field {
+.schedule-msg-presets {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.schedule-msg-preset {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    background-color 140ms ease;
+}
+
+.schedule-msg-preset:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.schedule-msg-preset.active {
+  border-color: rgba(200, 169, 106, 0.4);
+  background: rgba(200, 169, 106, 0.12);
+  color: var(--accent-strong);
+}
+
+html[data-theme="light"] .schedule-msg-preset.active {
+  border-color: rgba(184, 130, 14, 0.38);
+  background: rgba(184, 130, 14, 0.12);
+  color: #8a5d05;
+}
+
+.schedule-msg-field {
   display: grid;
-  gap: 4px;
-  font-size: 0.82rem;
+  gap: 5px;
+}
+
+.schedule-msg-field-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.schedule-msg-field-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.schedule-msg-field-inline .schedule-msg-dialog-number {
+  width: 96px;
+}
+
+.schedule-msg-field-suffix {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
   color: var(--muted);
 }
 
 .schedule-msg-dialog-number {
-  width: 100%;
-  padding: 7px 10px;
+  padding: 8px 11px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--bg-input);
   color: var(--text);
+  font-family: var(--font-mono);
   font-size: 0.88rem;
+  transition: border-color 140ms ease;
+}
+
+.schedule-msg-dialog-number:focus {
+  outline: none;
+  border-color: var(--line-strong);
+}
+
+.schedule-msg-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(200, 169, 106, 0.08);
+  border: 1px solid rgba(200, 169, 106, 0.18);
+  font-size: 0.84rem;
+  color: var(--text);
+}
+
+html[data-theme="light"] .schedule-msg-preview {
+  background: rgba(184, 130, 14, 0.08);
+  border-color: rgba(184, 130, 14, 0.2);
+}
+
+.schedule-msg-preview strong {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.schedule-msg-preview-glyph {
+  color: var(--accent);
+}
+
+.schedule-msg-preview-rel {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  color: var(--accent-strong);
+}
+
+.schedule-msg-submit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.schedule-msg-submit-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.schedule-msg-submit .segmented-item {
+  min-height: 28px;
+  padding: 0 12px;
+  font-size: 0.7rem;
+}
+
+.schedule-msg-dialog-error {
+  margin: 0;
+  font-size: 0.82rem;
 }
 
 .schedule-msg-dialog-actions {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+  margin-top: 2px;
 }
 
 @media (max-width: 720px) {

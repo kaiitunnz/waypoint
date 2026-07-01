@@ -9884,13 +9884,24 @@ html[data-theme="light"] .msg-sched-count {
 .msg-row-right {
   margin-left: auto;
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
 }
 
 .msg-row-top .msg-cancel {
   margin-top: 0;
-  align-self: baseline;
+  align-self: center;
+}
+
+/* On narrow screens the time + action group wraps below the badges; give it the
+   full row and split it (time at the left edge, action at the right) instead of
+   letting margin-left:auto jam both against the right margin. */
+@media (max-width: 720px) {
+  .msg-row-right {
+    width: 100%;
+    margin-left: 0;
+    justify-content: space-between;
+  }
 }
 
 .msg-status-dot {

@@ -10,6 +10,7 @@ import {
 import { fetchBackendModels } from "@/lib/api";
 import { Pager } from "@/components/Pager";
 import { usePagination } from "@/lib/usePagination";
+import { formatClock, formatRelative } from "@/lib/scheduleTime";
 import {
   Backend,
   BackendModelOption,
@@ -141,8 +142,8 @@ function ScheduleRow({
   modelsByBackend: Record<string, BackendModelOption[]>;
 }) {
   const when = new Date(schedule.scheduled_at);
-  const formatted = when.toLocaleString();
-  const relative = formatRelative(when);
+  const formatted = formatClock(when);
+  const relative = schedule.status === "pending" ? formatRelative(when) : null;
   const modelCacheKey = scheduleModelCacheKey(
     schedule.backend,
     schedule.launch_target_id ?? null,
@@ -172,8 +173,19 @@ function ScheduleRow({
             {schedule.effort}
           </span>
         ) : null}
-        <span className="muted">{formatted}</span>
-        {schedule.status === "pending" ? <span className="muted">· {relative}</span> : null}
+        <span className="msg-row-right">
+          <span className="msg-row-when">
+            {relative ? <span className="msg-countdown">{relative}</span> : null}
+            <span className="muted">{formatted}</span>
+          </span>
+          <button
+            type="button"
+            className="link-button danger-link action-chip"
+            onClick={() => void onCancel(schedule.id)}
+          >
+            {schedule.status === "pending" ? "Cancel" : "Dismiss"}
+          </button>
+        </span>
       </div>
       <p className="schedule-title">
         {schedule.title || schedule.cwd}
@@ -187,41 +199,17 @@ function ScheduleRow({
       {schedule.failure_reason ? (
         <p className="error">{schedule.failure_reason}</p>
       ) : null}
-      <div className="action-row">
-        {schedule.session_id ? (
+      {schedule.session_id ? (
+        <div className="action-row">
           <a className="link-button" href={`/session/${schedule.session_id}`}>
             Open session →
           </a>
-        ) : null}
-        <button
-          type="button"
-          className="link-button danger-link"
-          onClick={() => void onCancel(schedule.id)}
-        >
-          {schedule.status === "pending" ? "Cancel" : "Dismiss"}
-        </button>
-      </div>
+        </div>
+      ) : null}
     </article>
   );
 }
 
 function scheduleModelCacheKey(backend: Backend, launchTargetId: string | null): string {
   return `${backend}::${launchTargetId ?? "local"}`;
-}
-
-function formatRelative(target: Date): string {
-  const diff = target.getTime() - Date.now();
-  if (diff <= 0) {
-    return "any moment";
-  }
-  const minutes = Math.round(diff / 60_000);
-  if (minutes < 60) {
-    return `in ${minutes}m`;
-  }
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) {
-    return `in ${hours}h`;
-  }
-  const days = Math.round(hours / 24);
-  return `in ${days}d`;
 }

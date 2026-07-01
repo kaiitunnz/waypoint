@@ -1,6 +1,6 @@
 ---
 name: waypoint
-description: Use when managing Waypoint coding sessions through the `waypoint` CLI, including listing sessions, reading transcripts, launching agents, discovering available models, sending messages, approvals, answering questions, interrupts, termination, doctor output, auth, or runtime reset decisions.
+description: Use when managing Waypoint coding sessions through the `waypoint` CLI, including listing sessions, reading transcripts, launching agents, discovering available models, sending messages, scheduling session launches or messages, approvals, answering questions, interrupts, termination, doctor output, auth, or runtime reset decisions.
 ---
 
 # Waypoint Sessions
@@ -24,6 +24,8 @@ trusting any flag list reproduced in this skill.
   backends` and `waypoint models [backend]` (see `references/sessions-launch.md`).
 - Send messages, interrupt running work, or terminate sessions: see
   `references/sessions-steer.md`.
+- Schedule a session launch or a message for later (deferred, server-side): see
+  `references/scheduling.md`.
 - Respond to approval requests or answer a session's question: see
   `references/sessions-approvals.md`.
 - Handle destructive operations such as reset or termination: see

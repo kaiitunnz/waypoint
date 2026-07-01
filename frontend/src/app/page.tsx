@@ -31,6 +31,7 @@ import {
   disconnectLaunchTarget,
   fetchBackendThreads,
   fetchBoardChannels,
+  fetchLaunchTargetStatus,
   fetchMe,
   fetchMessageSchedules,
   fetchSchedules,

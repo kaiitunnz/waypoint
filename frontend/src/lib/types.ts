@@ -408,11 +408,9 @@ export interface MessageSchedule {
   command?: SessionCommandInvocation | null;
   items?: unknown[] | null;
   attachments?: string[] | null;
-  delay_seconds?: number | null;
   scheduled_at?: string | null;
   status: MessageScheduleStatus;
   created_at: string;
-  sent_at?: string | null;
   failure_reason?: string | null;
 }
 

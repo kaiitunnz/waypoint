@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from waypoint.perf import debug_timer
 from waypoint.schemas import (
@@ -20,6 +20,8 @@ from waypoint.schemas import (
     ScheduledMessageStatus,
     ScheduledSessionRecord,
     ScheduleStatus,
+    SessionCommandInvocation,
+    SessionInputItem,
     SessionRecord,
     SessionStatus,
 )
@@ -245,9 +247,6 @@ class Storage:
         self._ensure_column("scheduled_sessions", "permission_mode", "TEXT")
         self._ensure_column("scheduled_sessions", "model", "TEXT")
         self._ensure_column("scheduled_sessions", "effort", "TEXT")
-        self._ensure_column(
-            "scheduled_messages", "submit", "INTEGER NOT NULL DEFAULT 1"
-        )
         self._ensure_column(
             "scheduled_sessions", "launch_mode", "TEXT NOT NULL DEFAULT 'auto'"
         )
@@ -1300,13 +1299,12 @@ class Storage:
         if raw_command:
             try:
                 cmd_data = json.loads(raw_command)
-                if isinstance(cmd_data, dict):
-                    from waypoint.schemas import SessionCommandInvocation
-
-                    payload["command"] = SessionCommandInvocation.model_validate(
-                        cmd_data
-                    )
-            except (json.JSONDecodeError, Exception):
+                payload["command"] = (
+                    SessionCommandInvocation.model_validate(cmd_data)
+                    if isinstance(cmd_data, dict)
+                    else None
+                )
+            except (json.JSONDecodeError, ValidationError):
                 payload["command"] = None
         else:
             payload["command"] = None
@@ -1314,13 +1312,12 @@ class Storage:
         if raw_items:
             try:
                 items_data = json.loads(raw_items)
-                if isinstance(items_data, list):
-                    from waypoint.schemas import SessionInputItem
-
-                    payload["items"] = [
-                        SessionInputItem.model_validate(i) for i in items_data
-                    ]
-            except (json.JSONDecodeError, Exception):
+                payload["items"] = (
+                    [SessionInputItem.model_validate(i) for i in items_data]
+                    if isinstance(items_data, list)
+                    else None
+                )
+            except (json.JSONDecodeError, ValidationError):
                 payload["items"] = None
         else:
             payload["items"] = None
@@ -1358,17 +1355,6 @@ class Storage:
             return value.isoformat()
         if isinstance(value, BaseModel):
             return json.dumps(value.model_dump(mode="json"))
-        if isinstance(value, list):
-            return json.dumps(
-                [
-                    (
-                        item.model_dump(mode="json")
-                        if isinstance(item, BaseModel)
-                        else item
-                    )
-                    for item in value
-                ]
-            )
         if isinstance(value, dict):
             return json.dumps(value)
         return value

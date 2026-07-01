@@ -2,7 +2,7 @@ import asyncio
 import logging
 import secrets
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
 
@@ -378,7 +378,9 @@ class Scheduler:
         )
 
     @staticmethod
-    def _resolve_scheduled_at(request: Any) -> datetime:
+    def _resolve_scheduled_at(
+        request: ScheduleCreateRequest | ScheduledMessageCreateRequest,
+    ) -> datetime:
         if request.scheduled_at is not None:
             scheduled_at = request.scheduled_at
             if scheduled_at.tzinfo is None:

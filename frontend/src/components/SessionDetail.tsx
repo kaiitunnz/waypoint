@@ -107,6 +107,7 @@ import {
 import { TaskProgressDock } from "@/components/TaskProgressDock";
 import { SideQuestionDock } from "@/components/SideQuestionDock";
 import { readTodoEntries, summarizeTodos } from "@/lib/todos";
+import { effortLabel, formatResolvedModelLabel } from "@/lib/modelDisplay";
 import { useSwitcher } from "@/components/SwitcherProvider";
 import {
   Backend,
@@ -225,17 +226,6 @@ function isSafariFamily(): boolean {
 function wrapBracketedPaste(text: string): string {
   return `\x1b[200~${text.replace(/\r\n?/g, "\n")}\x1b[201~`;
 }
-
-const EFFORT_LABEL: Record<string, string> = {
-  none: "None",
-  minimal: "Minimal",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  xhigh: "Extra high",
-  max: "Max",
-};
-
 
 // An existing backend-native thread the assistant can adopt.
 export interface AssistantThreadOption {
@@ -2800,7 +2790,7 @@ const ReplyComposer = memo(function ReplyComposer({
        parts.push(matched?.label ?? (currentModel || (defaultModelLabel ? `Default (${defaultModelLabel})` : "Default")));
     }
     if (hasEffortPicker) {
-      parts.push(currentEffort ? EFFORT_LABEL[currentEffort] ?? currentEffort : "Default");
+      parts.push(currentEffort ? effortLabel(currentEffort) : "Default");
     }
     return parts.join(" · ") || "Settings";
   })();
@@ -2980,13 +2970,11 @@ const ReplyComposer = memo(function ReplyComposer({
                       disabled={effortBusy || disabled}
                     >
                       <option value="">
-                        {defaultEffort
-                          ? `Default (${EFFORT_LABEL[defaultEffort] ?? defaultEffort})`
-                          : "Default"}
+                        {defaultEffort ? `Default (${effortLabel(defaultEffort)})` : "Default"}
                       </option>
                       {effortOptions.map((option) => (
                         <option key={option} value={option}>
-                          {EFFORT_LABEL[option] ?? option}
+                          {effortLabel(option)}
                         </option>
                       ))}
                       {currentEffort && !effortOptions.includes(currentEffort) ? (
@@ -2999,7 +2987,7 @@ const ReplyComposer = memo(function ReplyComposer({
                   <div className="composer-tune-restart">
                     <p>
                       Restart Claude with{" "}
-                      <strong>{EFFORT_LABEL[pendingEffort] ?? pendingEffort}</strong> effort?
+                      <strong>{effortLabel(pendingEffort)}</strong> effort?
                       The current turn is interrupted and the session resumes at the new
                       level.
                     </p>
@@ -3916,6 +3904,19 @@ function SessionHeader({
     headerAgentDefault !== null && session.transport !== headerAgentDefault;
   const sourceLabel = session.source === "managed" ? "Managed" : "Attached";
   const pinned = Boolean(session.pinned_at);
+  // Prefer the concrete model the backend actually ran (session.resolved_model)
+  // for display, so the badge doesn't drift when a catalogue update changes
+  // what the user's selection (session.model) currently resolves to. Relaunch
+  // / set-model / the picker all stay keyed off session.model, unchanged.
+  const resolvedModelLabel = formatResolvedModelLabel(
+    session.resolved_model,
+    session.model,
+    modelOptions,
+  );
+  const selectionModelLabel =
+    modelOptions.find((opt) => opt.id === session.model)?.label ?? session.model;
+  const modelBadgeLabel = resolvedModelLabel ?? selectionModelLabel;
+  const modelBadgeTitle = session.resolved_model ?? session.model;
   const [isEditing, setIsEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
 
@@ -4020,8 +4021,8 @@ function SessionHeader({
           </span>
         ) : null}
         {session.model ? (
-          <span className="badge model" title={`Model: ${session.model}`}>
-            {modelOptions.find((opt) => opt.id === session.model)?.label ?? session.model}
+          <span className="badge model" title={`Model: ${modelBadgeTitle}`}>
+            {modelBadgeLabel}
           </span>
         ) : null}
         {session.effort ? (

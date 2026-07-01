@@ -1,5 +1,7 @@
 "use client";
 
+import { effortLabel } from "@/lib/modelDisplay";
+
 interface EffortPickerProps {
   options: string[];
   value: string;
@@ -7,20 +9,6 @@ interface EffortPickerProps {
   disabled?: boolean;
   label?: string;
   hint?: string;
-}
-
-const EFFORT_LABELS: Record<string, string> = {
-  none: "None",
-  minimal: "Minimal",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  xhigh: "Extra high",
-  max: "Max",
-};
-
-function effortLabel(value: string): string {
-  return EFFORT_LABELS[value] ?? value;
 }
 
 export function EffortPicker({

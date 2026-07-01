@@ -13031,6 +13031,10 @@ html[data-theme="light"]
   background: rgba(14, 17, 24, 0.98);
   border-right: 1px solid var(--line-strong);
   box-shadow: 4px 0 32px rgba(0, 0, 0, 0.36);
+  /* Inset the top too, not just the left: as a wide side-dock (iPad/desktop) the
+     header — and its pinned close button — would otherwise sit under the status
+     bar. The ≤640px full-screen-sheet rule already pads all four insets. */
+  padding-top: env(safe-area-inset-top);
   padding-left: env(safe-area-inset-left);
   animation: wp-dock-in 200ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }

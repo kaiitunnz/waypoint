@@ -1069,6 +1069,14 @@ class Storage:
         return (cursor.rowcount or 0) > 0
 
     @_synchronized
+    def delete_scheduled_messages_by_session(self, session_id: str) -> int:
+        cursor = self.connection.execute(
+            "DELETE FROM scheduled_messages WHERE session_id = ?", (session_id,)
+        )
+        self.connection.commit()
+        return cursor.rowcount or 0
+
+    @_synchronized
     def delete_scheduled_messages_by_status(
         self,
         statuses: list[ScheduledMessageStatus],

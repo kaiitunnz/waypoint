@@ -148,7 +148,7 @@ class Scheduler:
     def create_message_schedule(
         self, session_id: str, request: ScheduledMessageCreateRequest
     ) -> ScheduledMessageRecord:
-        session = self._runtime.get_session(session_id)
+        session = self._runtime.storage.get_session(session_id)
         if session is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -204,6 +204,12 @@ class Scheduler:
         self._runtime.storage.delete_scheduled_message(message_id)
         asyncio.create_task(self._publish_update())
         return existing
+
+    async def purge_session_messages(self, session_id: str) -> int:
+        removed = self._runtime.storage.delete_scheduled_messages_by_session(session_id)
+        if removed:
+            await self._publish_update()
+        return removed
 
     def clear_message_history(self, session_id: str | None = None) -> int:
         removed = self._runtime.storage.delete_scheduled_messages_by_status(
@@ -277,7 +283,7 @@ class Scheduler:
 
     async def _fire_message(self, record: ScheduledMessageRecord) -> None:
         try:
-            session = self._runtime.get_session(record.session_id)
+            session = self._runtime.storage.get_session(record.session_id)
             if session is None:
                 self._runtime.storage.update_scheduled_message(
                     record.id,

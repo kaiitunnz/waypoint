@@ -381,7 +381,35 @@ async def test_fire_due_message_schedule_missing_session(tmp_path, monkeypatch) 
     refreshed = runtime.storage.get_scheduled_message("msg-orphan")
     assert refreshed is not None
     assert refreshed.status == ScheduledMessageStatus.FAILED
-    assert refreshed.failure_reason == "404: session not found"
+    assert refreshed.failure_reason == "session not found"
+
+
+@pytest.mark.asyncio
+async def test_purge_session_messages_drops_only_that_session(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    now = datetime.now(UTC)
+    for msg_id, session_id, status in (
+        ("msg-a1", "sess-a", ScheduledMessageStatus.PENDING),
+        ("msg-a2", "sess-a", ScheduledMessageStatus.SENT),
+        ("msg-b1", "sess-b", ScheduledMessageStatus.PENDING),
+    ):
+        runtime.storage.create_scheduled_message(
+            ScheduledMessageRecord(
+                id=msg_id,
+                session_id=session_id,
+                text="hi",
+                scheduled_at=now + timedelta(minutes=5),
+                created_at=now,
+                status=status,
+            )
+        )
+
+    removed = await runtime.scheduler.purge_session_messages("sess-a")
+
+    assert removed == 2
+    assert runtime.storage.get_scheduled_message("msg-a1") is None
+    assert runtime.storage.get_scheduled_message("msg-a2") is None
+    assert runtime.storage.get_scheduled_message("msg-b1") is not None
 
 
 @pytest.mark.asyncio

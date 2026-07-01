@@ -319,6 +319,12 @@ class ClaudeSessionState:
     last_plan_content: str | None = None
     closing: bool = False
     model: str | None = None
+    # The raw concrete model id the CLI last reported resolving to (e.g.
+    # ``claude-sonnet-5``), mirrored from the persisted
+    # ``SessionRecord.resolved_model`` so repeated ``system.init`` events for
+    # the same model don't trigger redundant storage writes. Unlike ``model``
+    # (normalized to a family, e.g. ``sonnet``), this is never normalized.
+    resolved_model: str | None = None
     context_usage_snapshot: SessionContextUsage | None = None
     context_usage_signature: tuple[int, int | None] | None = None
     rate_limit_usage_snapshot: SessionRateLimitUsage | None = None
@@ -1539,6 +1545,17 @@ class ClaudeCliAdapter:
                 if state.model is None or current_family != incoming_family:
                     state.model = model
                     await self._refresh_context_usage(state)
+            raw_model = event.get("model")
+            if (
+                isinstance(raw_model, str)
+                and raw_model
+                and raw_model != state.resolved_model
+            ):
+                state.resolved_model = raw_model
+                if self._on_session_update is not None:
+                    await self._on_session_update(
+                        state.session_id, {"resolved_model": raw_model}, False
+                    )
             if self._on_init is not None:
                 self._on_init(state.session_id, event)
             # Claude's stream-json mode emits `init` at the start of every

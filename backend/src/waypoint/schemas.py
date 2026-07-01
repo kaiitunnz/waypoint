@@ -204,6 +204,13 @@ class SessionRecord(BaseModel):
     worktree_path: str | None = None
     permission_mode: str | None = None
     model: str | None = None
+    # The concrete model id the backend actually resolved and ran (e.g.
+    # ``claude-sonnet-5``), as reported by the CLI/API at launch time.
+    # Distinct from ``model``, which is the user's *selection* (e.g. the
+    # alias ``sonnet``) and is what relaunch/set-model uses. Display should
+    # prefer this field so a session's shown model doesn't drift when a
+    # catalogue update changes what an alias currently resolves to.
+    resolved_model: str | None = None
     effort: str | None = None
     args: list[str] = Field(default_factory=list)
     # Backend-specific structured overrides distinct from raw ``args``.

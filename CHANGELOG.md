@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.0](https://github.com/kaiitunnz/waypoint/compare/v0.2.0...v0.3.0) (2026-07-01)
+
+
+### Features
+
+* add /btw side-questions to the Claude agent ([#181](https://github.com/kaiitunnz/waypoint/issues/181)) ([1d266aa](https://github.com/kaiitunnz/waypoint/commit/1d266aaee600f57ed50e625c4ac85e7df8204a35))
+* add `update --check` to report available updates without applying ([#185](https://github.com/kaiitunnz/waypoint/issues/185)) ([a18c964](https://github.com/kaiitunnz/waypoint/commit/a18c964eace0c0cd0f85b3d7fc49b9c32a30f2d0))
+* add event coalescing to CLI sessions events and output ([#183](https://github.com/kaiitunnz/waypoint/issues/183)) ([6442852](https://github.com/kaiitunnz/waypoint/commit/6442852d395d0983fbd58457e297ac5ee3fe6ff6))
+* add password SSH auth for remote coding sessions ([#189](https://github.com/kaiitunnz/waypoint/issues/189)) ([0f0dea9](https://github.com/kaiitunnz/waypoint/commit/0f0dea949c75082089a4b4b54cce3938d2d517a6))
+* add scheduled messages for sessions ([#192](https://github.com/kaiitunnz/waypoint/issues/192)) ([091ef40](https://github.com/kaiitunnz/waypoint/commit/091ef4068529e0704357d6f03c50cf944c0c7ba1))
+* delete resumable threads from the resume list ([#186](https://github.com/kaiitunnz/waypoint/issues/186)) ([c8ec6b7](https://github.com/kaiitunnz/waypoint/commit/c8ec6b7edce4e8e5643b9b3ed6c08c81be86a4c6))
+* make the Claude model & effort catalogue CLI-version aware ([#191](https://github.com/kaiitunnz/waypoint/issues/191)) ([001a6e6](https://github.com/kaiitunnz/waypoint/commit/001a6e66ba4b7a66b5b86fb3cfe65c58e4d74ff7))
+* polish the session list layout and add a top pager ([#194](https://github.com/kaiitunnz/waypoint/issues/194)) ([bc8840f](https://github.com/kaiitunnz/waypoint/commit/bc8840f51c8046d1473a1ba84fb9fb4e92177111))
+* restyle session/schedule actions as chips and align scheduled rows ([#187](https://github.com/kaiitunnz/waypoint/issues/187)) ([cf337eb](https://github.com/kaiitunnz/waypoint/commit/cf337ebd74074e33b801a4b6c191e0ea9334fd19))
+* support deleting resumable OpenCode threads ([#190](https://github.com/kaiitunnz/waypoint/issues/190)) ([715c741](https://github.com/kaiitunnz/waypoint/commit/715c741a3dd5f42f479a8ed8ff37698c88aa53f4))
+
+
+### Bug Fixes
+
+* keep wide tasks from overflowing the task dock past the viewport ([#188](https://github.com/kaiitunnz/waypoint/issues/188)) ([c6ce413](https://github.com/kaiitunnz/waypoint/commit/c6ce41391172252ea45e4ffb054510fb8bd40269))
+
 ## [0.2.0](https://github.com/kaiitunnz/waypoint/compare/v0.1.3...v0.2.0) (2026-06-26)
 
 

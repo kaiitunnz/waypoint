@@ -532,6 +532,60 @@ class WaypointClient:
         ).json()
         return data
 
+    # ── message schedules ────────────────────────────────────────────────
+
+    def list_message_schedules(
+        self, session_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        params: dict[str, str] = {}
+        if session_id is not None:
+            params["session_id"] = session_id
+        data: list[dict[str, Any]] = self._request(
+            "GET", "/api/message-schedules", params=params if params else None
+        ).json()["message_schedules"]
+        return data
+
+    def create_message_schedule(
+        self,
+        session_id: str,
+        text: str,
+        *,
+        submit: bool = True,
+        delay_seconds: int | None = None,
+        scheduled_at: str | None = None,
+        attachments: list[str] | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"text": text, "submit": submit}
+        if delay_seconds is not None:
+            body["delay_seconds"] = delay_seconds
+        if scheduled_at is not None:
+            body["scheduled_at"] = scheduled_at
+        if attachments:
+            body["attachments"] = attachments
+        data: dict[str, Any] = self._request(
+            "POST",
+            f"/api/sessions/{session_id}/message-schedules",
+            json=body,
+        ).json()["message_schedule"]
+        return data
+
+    def delete_message_schedule(self, schedule_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "DELETE", f"/api/message-schedules/{schedule_id}"
+        ).json()["message_schedule"]
+        return data
+
+    def clear_message_schedule_history(
+        self, session_id: str | None = None
+    ) -> dict[str, Any]:
+        params: dict[str, str] = {}
+        if session_id is not None:
+            params["session_id"] = session_id
+        data: dict[str, Any] = self._request(
+            "POST", "/api/message-schedules/clear-history", params=params or None
+        ).json()
+        return data
+
     # ── usage ────────────────────────────────────────────────────────────
 
     def get_usage(self) -> dict[str, Any]:

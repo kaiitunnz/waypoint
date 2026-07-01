@@ -2158,3 +2158,279 @@ def test_start_warns_on_unknown_model(
     # Warning, not rejection: the session is still created.
     assert result.exit_code == 0
     assert "is not among" in result.output
+
+
+# ── schedule message CLI tests ─────────────────────────────────────────────────
+
+
+def test_schedule_message_help_lists_commands(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["schedule", "message", "--help"])
+    assert result.exit_code == 0
+    for name in ("list", "create", "delete", "clear-history"):
+        assert name in result.stdout
+
+
+def _message_schedule_handler(
+    request: httpx.Request,
+) -> httpx.Response:
+    path = request.url.path
+    if path == "/api/message-schedules" and request.method == "GET":
+        return httpx.Response(
+            200,
+            json={
+                "message_schedules": [
+                    {"id": "ms1", "session_id": "s1", "text": "hello"}
+                ]
+            },
+        )
+    if path == "/api/sessions/s1/message-schedules" and request.method == "POST":
+        payload = json.loads(request.content)
+        return httpx.Response(200, json={"message_schedule": {"id": "ms1", **payload}})
+    if path.startswith("/api/message-schedules/") and request.method == "DELETE":
+        schedule_id = path.rsplit("/", 1)[-1]
+        return httpx.Response(200, json={"message_schedule": {"id": schedule_id}})
+    if path == "/api/message-schedules/clear-history" and request.method == "POST":
+        return httpx.Response(200, json={"removed": 2})
+    return httpx.Response(404, json={"detail": f"unexpected {path}"})
+
+
+def test_schedule_message_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(
+            transport=httpx.MockTransport(_message_schedule_handler),
+            base_url="http://t",
+        )
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "schedule", "message", "list"],
+    )
+    assert result.exit_code == 0
+    out = json.loads(result.stdout)
+    assert out["message_schedules"] == [
+        {"id": "ms1", "session_id": "s1", "text": "hello"}
+    ]
+
+
+def test_schedule_message_list_with_session_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/message-schedules" and request.method == "GET":
+            state["params"] = dict(request.url.params)
+            return httpx.Response(
+                200, json={"message_schedules": [{"id": "ms1", "session_id": "s1"}]}
+            )
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "schedule",
+            "message",
+            "list",
+            "--session-id",
+            "s1",
+        ],
+    )
+    assert result.exit_code == 0
+    assert state["params"]["session_id"] == "s1"
+
+
+def test_schedule_message_create(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(
+            transport=httpx.MockTransport(_message_schedule_handler),
+            base_url="http://t",
+        )
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "schedule",
+            "message",
+            "create",
+            "s1",
+            "hello world",
+            "--delay-seconds",
+            "30",
+        ],
+    )
+    assert result.exit_code == 0
+    out = json.loads(result.stdout)
+    assert out["message_schedule"]["id"] == "ms1"
+    assert out["message_schedule"]["text"] == "hello world"
+    assert out["message_schedule"]["delay_seconds"] == 30
+
+
+def test_schedule_message_create_with_scheduled_at(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(
+            transport=httpx.MockTransport(_message_schedule_handler),
+            base_url="http://t",
+        )
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "schedule",
+            "message",
+            "create",
+            "s1",
+            "hello",
+            "--scheduled-at",
+            "2026-07-01T12:00:00Z",
+        ],
+    )
+    assert result.exit_code == 0
+    out = json.loads(result.stdout)
+    assert out["message_schedule"]["scheduled_at"] == "2026-07-01T12:00:00Z"
+
+
+def test_schedule_message_create_no_submit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if (
+            request.url.path == "/api/sessions/s1/message-schedules"
+            and request.method == "POST"
+        ):
+            state["body"] = json.loads(request.content)
+            return httpx.Response(
+                200, json={"message_schedule": {"id": "ms1", **state["body"]}}
+            )
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "schedule",
+            "message",
+            "create",
+            "s1",
+            "hello",
+            "--no-submit",
+        ],
+    )
+    assert result.exit_code == 0
+    assert state["body"]["submit"] is False
+
+
+def test_schedule_message_delete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(
+            transport=httpx.MockTransport(_message_schedule_handler),
+            base_url="http://t",
+        )
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "schedule",
+            "message",
+            "delete",
+            "ms1",
+        ],
+    )
+    assert result.exit_code == 0
+    out = json.loads(result.stdout)
+    assert out["message_schedule"] == {"id": "ms1"}
+
+
+def test_schedule_message_clear_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(
+            transport=httpx.MockTransport(_message_schedule_handler),
+            base_url="http://t",
+        )
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "schedule",
+            "message",
+            "clear-history",
+        ],
+    )
+    assert result.exit_code == 0
+    out = json.loads(result.stdout)
+    assert out == {"removed": 2}
+
+
+def test_schedule_message_clear_history_with_session_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if (
+            request.url.path == "/api/message-schedules/clear-history"
+            and request.method == "POST"
+        ):
+            state["params"] = dict(request.url.params)
+            return httpx.Response(200, json={"removed": 1})
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "schedule",
+            "message",
+            "clear-history",
+            "--session-id",
+            "s1",
+        ],
+    )
+    assert result.exit_code == 0
+    assert state["params"]["session_id"] == "s1"

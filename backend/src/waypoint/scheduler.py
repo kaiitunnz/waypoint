@@ -9,6 +9,9 @@ from fastapi import HTTPException, status
 from waypoint.backends.registry import get_registry
 from waypoint.schemas import (
     ScheduleCreateRequest,
+    ScheduledMessageCreateRequest,
+    ScheduledMessageRecord,
+    ScheduledMessageStatus,
     ScheduledSessionRecord,
     ScheduleStatus,
     SessionCreateRequest,
@@ -137,6 +140,90 @@ class Scheduler:
         asyncio.create_task(self._publish_update())
         return existing
 
+    def list_message_schedules(
+        self, session_id: str | None = None
+    ) -> list[ScheduledMessageRecord]:
+        return self._runtime.storage.list_scheduled_messages(session_id=session_id)
+
+    def create_message_schedule(
+        self, session_id: str, request: ScheduledMessageCreateRequest
+    ) -> ScheduledMessageRecord:
+        session = self._runtime.storage.get_session(session_id)
+        if session is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"session {session_id} not found",
+            )
+        if (
+            request.text == ""
+            and request.command is None
+            and not request.items
+            and not request.attachments
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="message schedule must have text, command, items, or attachments",
+            )
+        scheduled_at = self._resolve_scheduled_at(request)
+        now = datetime.now(UTC)
+        if request.scheduled_at is not None and scheduled_at <= now:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="scheduled_at must be in the future",
+            )
+        record = ScheduledMessageRecord(
+            id=self._generate_id(),
+            session_id=session_id,
+            text=request.text,
+            submit=request.submit,
+            command=request.command,
+            items=request.items,
+            attachments=list(request.attachments),
+            scheduled_at=scheduled_at,
+            created_at=now,
+            status=ScheduledMessageStatus.PENDING,
+        )
+        self._runtime.storage.create_scheduled_message(record)
+        self._wakeup.set()
+        asyncio.create_task(self._publish_update())
+        return record
+
+    def cancel_message_schedule(self, message_id: str) -> ScheduledMessageRecord:
+        existing = self._runtime.storage.get_scheduled_message(message_id)
+        if existing is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="message schedule not found",
+            )
+        if existing.status == ScheduledMessageStatus.PENDING:
+            updated = self._runtime.storage.update_scheduled_message(
+                message_id, status=ScheduledMessageStatus.CANCELLED
+            )
+            asyncio.create_task(self._publish_update())
+            return updated
+        self._runtime.storage.delete_scheduled_message(message_id)
+        asyncio.create_task(self._publish_update())
+        return existing
+
+    async def purge_session_messages(self, session_id: str) -> int:
+        removed = self._runtime.storage.delete_scheduled_messages_by_session(session_id)
+        if removed:
+            await self._publish_update()
+        return removed
+
+    def clear_message_history(self, session_id: str | None = None) -> int:
+        removed = self._runtime.storage.delete_scheduled_messages_by_status(
+            [
+                ScheduledMessageStatus.SENT,
+                ScheduledMessageStatus.CANCELLED,
+                ScheduledMessageStatus.FAILED,
+            ],
+            session_id=session_id,
+        )
+        if removed:
+            asyncio.create_task(self._publish_update())
+        return removed
+
     def clear_history(self) -> int:
         removed = self._runtime.storage.delete_schedules_by_status(
             [
@@ -166,9 +253,14 @@ class Scheduler:
 
     def _compute_wait_seconds(self) -> float:
         pending = self._runtime.storage.list_schedules([ScheduleStatus.PENDING])
-        if not pending:
+        pending_msgs = self._runtime.storage.list_scheduled_messages(
+            [ScheduledMessageStatus.PENDING]
+        )
+        if not pending and not pending_msgs:
             return 60.0
-        soonest = min(item.scheduled_at for item in pending)
+        all_times = [item.scheduled_at for item in pending]
+        all_times.extend(item.scheduled_at for item in pending_msgs)
+        soonest = min(all_times)
         delta = (soonest - datetime.now(UTC)).total_seconds()
         if delta <= 0:
             return 0.5
@@ -181,6 +273,50 @@ class Scheduler:
             if schedule.scheduled_at > now:
                 continue
             await self._fire(schedule)
+        pending_msgs = self._runtime.storage.list_scheduled_messages(
+            [ScheduledMessageStatus.PENDING]
+        )
+        for msg in pending_msgs:
+            if msg.scheduled_at > now:
+                continue
+            await self._fire_message(msg)
+
+    async def _fire_message(self, record: ScheduledMessageRecord) -> None:
+        try:
+            session = self._runtime.storage.get_session(record.session_id)
+            if session is None:
+                self._runtime.storage.update_scheduled_message(
+                    record.id,
+                    status=ScheduledMessageStatus.FAILED,
+                    failure_reason="session not found",
+                )
+                return
+            await self._runtime.handle_input(
+                record.session_id,
+                SessionInputRequest(
+                    text=record.text,
+                    submit=record.submit,
+                    command=record.command,
+                    items=record.items,
+                    attachments=(
+                        list(record.attachments) if record.attachments else None
+                    ),
+                ),
+            )
+            self._runtime.storage.update_scheduled_message(
+                record.id, status=ScheduledMessageStatus.SENT
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.exception(
+                "scheduled message fire failed",
+                extra={"msg_id": record.id},
+            )
+            self._runtime.storage.update_scheduled_message(
+                record.id,
+                status=ScheduledMessageStatus.FAILED,
+                failure_reason=str(exc),
+            )
+        await self._publish_update()
 
     async def _fire(self, schedule: ScheduledSessionRecord) -> None:
         try:
@@ -232,7 +368,11 @@ class Scheduler:
                 payload={
                     "schedules": [
                         item.model_dump(mode="json") for item in self.list_schedules()
-                    ]
+                    ],
+                    "message_schedules": [
+                        item.model_dump(mode="json")
+                        for item in self.list_message_schedules()
+                    ],
                 },
             )
         )
@@ -244,7 +384,9 @@ class Scheduler:
         )
 
     @staticmethod
-    def _resolve_scheduled_at(request: ScheduleCreateRequest) -> datetime:
+    def _resolve_scheduled_at(
+        request: ScheduleCreateRequest | ScheduledMessageCreateRequest,
+    ) -> datetime:
         if request.scheduled_at is not None:
             scheduled_at = request.scheduled_at
             if scheduled_at.tzinfo is None:

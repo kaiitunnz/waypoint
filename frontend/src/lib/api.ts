@@ -13,6 +13,7 @@ import {
   EventRecord,
   EventsPage,
   MeResponse,
+  MessageSchedule,
   ScheduleCreateRequest,
   ScheduledSession,
   SessionCompletionsResponse,
@@ -607,6 +608,86 @@ export async function clearScheduleHistory(host: string, token: string): Promise
     headers: { Authorization: `Bearer ${token}` },
   });
   await ensureOk(response, "failed to clear schedule history");
+  const payload = (await response.json()) as { removed?: number };
+  return payload.removed ?? 0;
+}
+
+export async function fetchMessageSchedules(
+  host: string,
+  token: string,
+  sessionId?: string,
+): Promise<MessageSchedule[]> {
+  const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "";
+  const response = await fetch(`${host}/api/message-schedules${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch message schedules");
+  const payload = await response.json();
+  return (payload.message_schedules ?? []) as MessageSchedule[];
+}
+
+export async function createMessageSchedule(
+  host: string,
+  token: string,
+  sessionId: string,
+  text: string,
+  options: {
+    submit?: boolean;
+    delaySeconds?: number | null;
+    scheduledAt?: string | null;
+  } = {},
+): Promise<MessageSchedule> {
+  const body: Record<string, unknown> = { text, submit: options.submit ?? true };
+  if (options.delaySeconds != null) body.delay_seconds = options.delaySeconds;
+  if (options.scheduledAt != null) body.scheduled_at = options.scheduledAt;
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/message-schedules`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  await ensureOk(response, "failed to create message schedule");
+  const payload = await response.json();
+  return payload.message_schedule as MessageSchedule;
+}
+
+export async function deleteMessageSchedule(
+  host: string,
+  token: string,
+  scheduleId: string,
+): Promise<MessageSchedule> {
+  const response = await fetch(
+    `${host}/api/message-schedules/${encodeURIComponent(scheduleId)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  await ensureOk(response, "failed to delete message schedule");
+  const payload = await response.json();
+  return payload.message_schedule as MessageSchedule;
+}
+
+export async function clearMessageScheduleHistory(
+  host: string,
+  token: string,
+  sessionId?: string,
+): Promise<number> {
+  const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "";
+  const response = await fetch(
+    `${host}/api/message-schedules/clear-history${params}`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  await ensureOk(response, "failed to clear message schedule history");
   const payload = (await response.json()) as { removed?: number };
   return payload.removed ?? 0;
 }

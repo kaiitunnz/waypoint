@@ -125,6 +125,10 @@ schedule_app = typer.Typer(
     help="Manage scheduled session launches on a running Waypoint server.",
     no_args_is_help=True,
 )
+schedule_message_app = typer.Typer(
+    help="Manage scheduled messages on a running Waypoint server.",
+    no_args_is_help=True,
+)
 maintenance_app = typer.Typer(
     help="Maintenance commands for the Waypoint server data.",
     no_args_is_help=True,
@@ -134,6 +138,7 @@ app.add_typer(session_app, name="session")
 app.add_typer(sessions_app, name="sessions")
 app.add_typer(board_app, name="board")
 app.add_typer(schedule_app, name="schedule")
+schedule_app.add_typer(schedule_message_app, name="message")
 app.add_typer(maintenance_app, name="maintenance")
 
 
@@ -1871,6 +1876,83 @@ def schedule_delete(
 def schedule_clear_history(ctx: typer.Context) -> None:
     """Remove completed/cancelled schedule records."""
     _emit(_settings_from_ctx(ctx), lambda c: c.clear_schedule_history())
+
+
+@schedule_message_app.command("list")
+def schedule_message_list(
+    ctx: typer.Context,
+    session_id: Annotated[
+        str | None,
+        typer.Option(help="Filter by target session id."),
+    ] = None,
+) -> None:
+    """List all scheduled messages."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "message_schedules": c.list_message_schedules(session_id=session_id)
+        },
+    )
+
+
+@schedule_message_app.command("create")
+def schedule_message_create(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument(help="Target session id.")],
+    text: Annotated[str, typer.Argument(help="Message text to send.")],
+    delay_seconds: Annotated[
+        int | None,
+        typer.Option(help="Send this many seconds from now."),
+    ] = None,
+    scheduled_at: Annotated[
+        str | None,
+        typer.Option(help="ISO 8601 datetime at which to send the message."),
+    ] = None,
+    no_submit: Annotated[
+        bool,
+        typer.Option("--no-submit", help="Do not auto-submit the message."),
+    ] = False,
+) -> None:
+    """Schedule a message to be sent to a session."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "message_schedule": c.create_message_schedule(
+                session_id,
+                text,
+                submit=not no_submit,
+                delay_seconds=delay_seconds,
+                scheduled_at=scheduled_at,
+            )
+        },
+    )
+
+
+@schedule_message_app.command("delete")
+def schedule_message_delete(
+    ctx: typer.Context,
+    schedule_id: Annotated[str, typer.Argument(help="Message schedule id to cancel.")],
+) -> None:
+    """Cancel and remove a scheduled message."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"message_schedule": c.delete_message_schedule(schedule_id)},
+    )
+
+
+@schedule_message_app.command("clear-history")
+def schedule_message_clear_history(
+    ctx: typer.Context,
+    session_id: Annotated[
+        str | None,
+        typer.Option(help="Only clear history for this target session."),
+    ] = None,
+) -> None:
+    """Remove completed/cancelled/failed message schedule records."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: c.clear_message_schedule_history(session_id=session_id),
+    )
 
 
 @maintenance_app.command("stats")

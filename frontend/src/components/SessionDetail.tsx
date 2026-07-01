@@ -76,6 +76,7 @@ import {
   type PlanViewModel,
 } from "@/lib/events";
 import { useTheme } from "@/lib/theme";
+import { useSessionScheduledMessages } from "@/lib/useSessionScheduledMessages";
 import { formatRelativeTime } from "@/lib/usage";
 import {
   AttachmentContextProvider,
@@ -84,6 +85,8 @@ import {
   PaperclipIcon,
   useAttachments,
 } from "@/components/AttachmentTray";
+import { ScheduleMessageModal } from "@/components/ScheduleMessageModal";
+import { ScheduledMessagesDock } from "@/components/ScheduledMessagesDock";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
 import { WorkspaceFilesPanel } from "@/components/WorkspaceFilesPanel";
 import {
@@ -394,6 +397,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const [hasOlderEvents, setHasOlderEvents] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const { openSwitcher, setCurrentSession } = useSwitcher();
+  const scheduledMessages = useSessionScheduledMessages(host, token, sessionId);
   // Auto-dismiss the "Copied!" pill after a beat so it doesn't squat on
   // the toast slot. The fallback "Tap to copy" toast stays until the user
   // acts on it — clipboard access can't be reattempted programmatically
@@ -2180,11 +2184,18 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         />
       ) : null}
       {session && !terminalOnly ? (
+        <ScheduledMessagesDock
+          messages={scheduledMessages.messages}
+          onCancel={scheduledMessages.cancel}
+        />
+      ) : null}
+      {session && !terminalOnly ? (
         <ReplyComposer
           host={host}
           token={token}
           sessionId={sessionId}
           session={session}
+          onScheduled={scheduledMessages.refresh}
           permissionModeOptions={
             session ? permissionModesFor(session.backend, catalog) : []
           }
@@ -2277,6 +2288,7 @@ interface ReplyComposerProps {
   token: string;
   sessionId: string;
   session: SessionRecord | null;
+  onScheduled?: () => void;
   agentBusy: boolean;
   permissionModeOptions: readonly BackendPermissionMode[];
   hasToolRuns: boolean;
@@ -2334,6 +2346,7 @@ const ReplyComposer = memo(function ReplyComposer({
   token,
   sessionId,
   session,
+  onScheduled,
   agentBusy,
   permissionModeOptions,
   canDelete,
@@ -2382,6 +2395,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const attachments = useAttachments({ host, token, sessionId, onError });
   const [filesOpen, setFilesOpen] = useState(false);
+  const [scheduleMsgOpen, setScheduleMsgOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
@@ -3311,6 +3325,18 @@ const ReplyComposer = memo(function ReplyComposer({
                     <span className="glyph">⇄</span>
                     Switch session…
                   </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="composer-overflow-item"
+                    onClick={() => {
+                      setOverflowOpen(false);
+                      setScheduleMsgOpen(true);
+                    }}
+                  >
+                    <span className="glyph">◷</span>
+                    Schedule message…
+                  </button>
                   {workspacePreviewEnabled ? (
                     <button
                       type="button"
@@ -3461,6 +3487,17 @@ const ReplyComposer = memo(function ReplyComposer({
           onClose={() => setFilesOpen(false)}
           onReference={attachments.referenceExisting}
           referencedIds={attachments.attachedIds}
+        />
+      ) : null}
+      {scheduleMsgOpen ? (
+        <ScheduleMessageModal
+          host={host}
+          token={token}
+          sessionId={sessionId}
+          initialDraft={draft}
+          onClose={() => setScheduleMsgOpen(false)}
+          onScheduled={onScheduled}
+          onError={onError}
         />
       ) : null}
     </section>
@@ -4211,3 +4248,4 @@ function stripAnsi(text: string): string {
     .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
     .replace(/\u001B[@-_]/g, "");
 }
+

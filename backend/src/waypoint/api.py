@@ -43,6 +43,7 @@ from waypoint.schemas import (
     LoginRequest,
     MeResponse,
     ScheduleCreateRequest,
+    ScheduledMessageCreateRequest,
     SessionAnswerQuestionRequest,
     SessionApprovalRequest,
     SessionAttachRequest,
@@ -1111,6 +1112,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         removed = context.runtime.scheduler.clear_history()
+        return {"removed": removed}
+
+    @app.get("/api/message-schedules")
+    async def list_message_schedules(
+        _: Annotated[str, Depends(token_dependency())],
+        session_id: str | None = Query(default=None),
+    ) -> Any:
+        schedules = [
+            s.model_dump(mode="json")
+            for s in context.runtime.scheduler.list_message_schedules(
+                session_id=session_id
+            )
+        ]
+        return {"message_schedules": schedules}
+
+    @app.post("/api/sessions/{session_id}/message-schedules")
+    async def create_message_schedule(
+        session_id: str,
+        body: ScheduledMessageCreateRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        record = context.runtime.scheduler.create_message_schedule(session_id, body)
+        return {"message_schedule": record.model_dump(mode="json")}
+
+    @app.delete("/api/message-schedules/{schedule_id}")
+    async def cancel_message_schedule(
+        schedule_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        record = context.runtime.scheduler.cancel_message_schedule(schedule_id)
+        return {"message_schedule": record.model_dump(mode="json")}
+
+    @app.post("/api/message-schedules/clear-history")
+    async def clear_message_schedule_history(
+        _: Annotated[str, Depends(token_dependency())],
+        session_id: str | None = Query(default=None),
+    ) -> Any:
+        removed = context.runtime.scheduler.clear_message_history(session_id=session_id)
         return {"removed": removed}
 
     @app.get("/api/sessions/{session_id}/events")

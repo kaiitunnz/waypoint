@@ -523,6 +523,37 @@ class SessionEnvelope(BaseModel):
     payload: Mapping[str, Any]
 
 
+class ScheduledMessageStatus(StrEnum):
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class ScheduledMessageRecord(BaseModel):
+    id: str
+    session_id: str
+    text: str = ""
+    submit: bool = True
+    command: SessionCommandInvocation | None = None
+    items: list[SessionInputItem] | None = None
+    attachments: list[str] = Field(default_factory=list)
+    scheduled_at: datetime
+    created_at: datetime
+    status: ScheduledMessageStatus = ScheduledMessageStatus.PENDING
+    failure_reason: str | None = None
+
+
+class ScheduledMessageCreateRequest(BaseModel):
+    text: str = ""
+    submit: bool = True
+    command: SessionCommandInvocation | None = None
+    items: list[SessionInputItem] | None = None
+    attachments: list[str] = Field(default_factory=list)
+    delay_seconds: int | None = None
+    scheduled_at: datetime | None = None
+
+
 class SideQuestionStatus(StrEnum):
     PENDING = "pending"
     ANSWERED = "answered"

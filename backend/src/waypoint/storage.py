@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from waypoint.perf import debug_timer
 from waypoint.schemas import (
@@ -16,8 +16,12 @@ from waypoint.schemas import (
     BoardEntry,
     EventKind,
     EventRecord,
+    ScheduledMessageRecord,
+    ScheduledMessageStatus,
     ScheduledSessionRecord,
     ScheduleStatus,
+    SessionCommandInvocation,
+    SessionInputItem,
     SessionRecord,
     SessionStatus,
 )
@@ -190,6 +194,24 @@ class Storage:
                 session_id TEXT,
                 failure_reason TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS scheduled_messages (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                text TEXT NOT NULL DEFAULT '',
+                submit INTEGER NOT NULL DEFAULT 1,
+                command TEXT,
+                items TEXT,
+                attachments TEXT NOT NULL DEFAULT '[]',
+                scheduled_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                failure_reason TEXT,
+                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_scheduled_messages_status
+                ON scheduled_messages(status);
 
             CREATE TABLE IF NOT EXISTS board_entries (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -951,6 +973,128 @@ class Storage:
         return cursor.rowcount or 0
 
     @_synchronized
+    def create_scheduled_message(
+        self, record: ScheduledMessageRecord
+    ) -> ScheduledMessageRecord:
+        self.connection.execute(
+            """
+            INSERT INTO scheduled_messages (
+                id, session_id, text, submit, command, items, attachments,
+                scheduled_at, created_at, status, failure_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.id,
+                record.session_id,
+                record.text,
+                1 if record.submit else 0,
+                (
+                    json.dumps(record.command.model_dump(mode="json"))
+                    if record.command
+                    else None
+                ),
+                (
+                    json.dumps([item.model_dump(mode="json") for item in record.items])
+                    if record.items
+                    else None
+                ),
+                json.dumps(list(record.attachments)),
+                record.scheduled_at.isoformat(),
+                record.created_at.isoformat(),
+                record.status,
+                record.failure_reason,
+            ),
+        )
+        self.connection.commit()
+        return record
+
+    @_synchronized
+    def list_scheduled_messages(
+        self,
+        statuses: list[ScheduledMessageStatus] | None = None,
+        session_id: str | None = None,
+    ) -> list[ScheduledMessageRecord]:
+        query = "SELECT * FROM scheduled_messages"
+        params: list[Any] = []
+        conditions: list[str] = []
+        if statuses:
+            placeholders = ",".join(["?"] * len(statuses))
+            conditions.append(f"status IN ({placeholders})")
+            params.extend(status.value for status in statuses)
+        if session_id:
+            conditions.append("session_id = ?")
+            params.append(session_id)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY scheduled_at ASC, created_at ASC"
+        rows = self.connection.execute(query, params).fetchall()
+        return [self._scheduled_message_from_row(row) for row in rows]
+
+    @_synchronized
+    def get_scheduled_message(self, message_id: str) -> ScheduledMessageRecord | None:
+        row = self.connection.execute(
+            "SELECT * FROM scheduled_messages WHERE id = ?", (message_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._scheduled_message_from_row(row)
+
+    @_synchronized
+    def update_scheduled_message(
+        self, message_id: str, **fields: Any
+    ) -> ScheduledMessageRecord:
+        if not fields:
+            current = self.get_scheduled_message(message_id)
+            if current is None:
+                raise KeyError(message_id)
+            return current
+        assignments = ", ".join(f"{name} = ?" for name in fields)
+        values = [self._serialize_field(value) for value in fields.values()]
+        values.append(message_id)
+        self.connection.execute(
+            f"UPDATE scheduled_messages SET {assignments} WHERE id = ?", values
+        )
+        self.connection.commit()
+        updated = self.get_scheduled_message(message_id)
+        if updated is None:
+            raise KeyError(message_id)
+        return updated
+
+    @_synchronized
+    def delete_scheduled_message(self, message_id: str) -> bool:
+        cursor = self.connection.execute(
+            "DELETE FROM scheduled_messages WHERE id = ?", (message_id,)
+        )
+        self.connection.commit()
+        return (cursor.rowcount or 0) > 0
+
+    @_synchronized
+    def delete_scheduled_messages_by_session(self, session_id: str) -> int:
+        cursor = self.connection.execute(
+            "DELETE FROM scheduled_messages WHERE session_id = ?", (session_id,)
+        )
+        self.connection.commit()
+        return cursor.rowcount or 0
+
+    @_synchronized
+    def delete_scheduled_messages_by_status(
+        self,
+        statuses: list[ScheduledMessageStatus],
+        session_id: str | None = None,
+    ) -> int:
+        if not statuses:
+            return 0
+        placeholders = ",".join(["?"] * len(statuses))
+        query = f"DELETE FROM scheduled_messages WHERE status IN ({placeholders})"
+        params = [item.value for item in statuses]
+        if session_id:
+            query += " AND session_id = ?"
+            params.append(session_id)
+        cursor = self.connection.execute(query, params)
+        self.connection.commit()
+        return cursor.rowcount or 0
+
+    @_synchronized
     def next_sequence(self, session_id: str) -> int:
         row = self.connection.execute(
             "SELECT COALESCE(MAX(sequence), 0) AS max_sequence FROM events WHERE session_id = ?",
@@ -1152,6 +1296,48 @@ class Storage:
             parsed_overrides if isinstance(parsed_overrides, list) else []
         )
         return ScheduledSessionRecord.model_validate(payload)
+
+    def _scheduled_message_from_row(self, row: sqlite3.Row) -> ScheduledMessageRecord:
+        payload = dict(row)
+        for field_name in ("scheduled_at", "created_at"):
+            payload[field_name] = datetime.fromisoformat(payload[field_name])
+        payload["status"] = ScheduledMessageStatus(payload.get("status", "pending"))
+        payload["submit"] = bool(payload.get("submit", 1))
+        raw_command = payload.pop("command", None)
+        if raw_command:
+            try:
+                cmd_data = json.loads(raw_command)
+                payload["command"] = (
+                    SessionCommandInvocation.model_validate(cmd_data)
+                    if isinstance(cmd_data, dict)
+                    else None
+                )
+            except (json.JSONDecodeError, ValidationError):
+                payload["command"] = None
+        else:
+            payload["command"] = None
+        raw_items = payload.pop("items", None)
+        if raw_items:
+            try:
+                items_data = json.loads(raw_items)
+                payload["items"] = (
+                    [SessionInputItem.model_validate(i) for i in items_data]
+                    if isinstance(items_data, list)
+                    else None
+                )
+            except (json.JSONDecodeError, ValidationError):
+                payload["items"] = None
+        else:
+            payload["items"] = None
+        raw_attachments = payload.get("attachments") or "[]"
+        try:
+            parsed_attachments = json.loads(raw_attachments)
+        except json.JSONDecodeError:
+            parsed_attachments = []
+        payload["attachments"] = (
+            parsed_attachments if isinstance(parsed_attachments, list) else []
+        )
+        return ScheduledMessageRecord.model_validate(payload)
 
     def _event_from_row(self, row: sqlite3.Row) -> EventRecord:
         payload = dict(row)

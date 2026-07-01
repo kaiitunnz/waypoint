@@ -1432,6 +1432,9 @@ class SessionRuntime:
         self.attachments.discard(session_id)
         # Drop this session's blackboard posts along with its record.
         pruned = self.storage.prune_board_for_session(session_id)
+        # Drop any scheduled messages queued for the now-deleted session; the
+        # scheduled_messages FK is declarative only (foreign_keys pragma is off).
+        await self.scheduler.purge_session_messages(session_id)
         plugin.on_session_deleted(self, session)
         await self._broadcast_session_list()
         if pruned:

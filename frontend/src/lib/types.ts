@@ -398,6 +398,22 @@ export interface BoardChannel {
   last_created_at: string;
 }
 
+export type MessageScheduleStatus = "pending" | "sent" | "cancelled" | "failed";
+
+export interface MessageSchedule {
+  id: string;
+  session_id: string;
+  text: string;
+  submit: boolean;
+  command?: SessionCommandInvocation | null;
+  items?: unknown[] | null;
+  attachments?: string[] | null;
+  scheduled_at?: string | null;
+  status: MessageScheduleStatus;
+  created_at: string;
+  failure_reason?: string | null;
+}
+
 export interface SessionEnvelope {
   type:
     | "session_list_update"

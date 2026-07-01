@@ -8,6 +8,10 @@ interface PagerProps {
   pageEnd: number;
   onPage: (page: number) => void;
   label?: string;
+  // Compact drops the range readout and keeps only the controls — for a second
+  // pager at the top of a long list, where the section header already shows the
+  // count and the full range would be redundant.
+  compact?: boolean;
 }
 
 // Shared list paginator: a range readout plus Prev / page-indicator / Next.
@@ -21,15 +25,18 @@ export function Pager({
   pageEnd,
   onPage,
   label = "items",
+  compact = false,
 }: PagerProps) {
   if (totalPages <= 1) {
     return null;
   }
   return (
-    <div className="pager">
-      <span className="pager-range">
-        {pageStart}–{pageEnd} of {total} {label}
-      </span>
+    <div className={`pager${compact ? " pager-compact" : ""}`}>
+      {compact ? null : (
+        <span className="pager-range">
+          {pageStart}–{pageEnd} of {total} {label}
+        </span>
+      )}
       <div className="pager-controls">
         <button
           type="button"

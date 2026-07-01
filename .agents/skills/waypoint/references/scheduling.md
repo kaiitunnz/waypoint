@@ -8,13 +8,16 @@ created them can exit.
 
 ## Timing (both groups)
 
-Every schedule needs exactly one of:
+Every schedule needs at least one of:
 
-- `--scheduled-at <iso8601>` — absolute time; must be in the future. A datetime
-  without a timezone is read as UTC.
+- `--scheduled-at <iso8601>` — absolute time. A datetime without a timezone is
+  read as UTC.
 - `--delay-seconds <n>` — relative to now; must be non-negative.
 
-If both are given, `--scheduled-at` wins. Omitting both is an error.
+If both are given, `--scheduled-at` wins and `--delay-seconds` is ignored;
+omitting both is an error. A `schedule message` with a past `--scheduled-at` is
+rejected, but a `schedule` (session) with a past time is accepted and fires on
+the next poll rather than erroring.
 
 ## Scheduled sessions
 
@@ -23,15 +26,17 @@ waypoint schedule list
 waypoint schedule create --backend <agent-id> --cwd <path> --delay-seconds 300
 waypoint schedule create --backend <agent-id> --cwd <path> --scheduled-at 2026-07-02T09:00:00Z --prompt "start the migration"
 waypoint schedule delete <schedule-id>
-waypoint schedule clear-history          # drop launched/cancelled records
+waypoint schedule clear-history          # drop launched/cancelled/failed records
 ```
 
 `schedule create` takes the same launch options as `waypoint sessions start`
 (`--backend`, `--cwd`, `--transport`, `--title`, `--model`, `--effort`,
-`--permission-mode`, `--prompt`, and trailing `args`); see
-`references/sessions-launch.md` for what they mean and how to pick a
-transport. A record moves `pending → launched | cancelled | failed`; once
-launched it carries the new `session_id`, and a `failure_reason` on failure.
+`--permission-mode`, and trailing `args`); see `references/sessions-launch.md`
+for what they mean and how to pick a transport. `--prompt` is specific to
+`schedule create` — it sets the session's initial prompt on launch, which a
+manual `sessions start` has no flag for. A record moves `pending → launched |
+cancelled | failed`; once launched it carries the new `session_id`, and a
+`failure_reason` on failure.
 
 ## Scheduled messages
 

@@ -122,6 +122,10 @@ class OpenCodeThreadImportRequest(BaseModel):
     # transport (e.g. the tmux wrapper) is rejected with 400 since there is no
     # resume-via-tmux path for OpenCode. ``None`` keeps the native behavior.
     transport: SessionTransportId | None = None
+    # When true (default), the prior conversation is replayed into the new
+    # session's transcript at import time; when false the transcript starts
+    # empty and only the underlying agent resumes its own context.
+    import_history: bool = True
 
 
 class OpenCodeThreadSummary(BaseModel):

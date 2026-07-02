@@ -41,3 +41,7 @@ class CodexThreadImportRequest(BaseModel):
     # ``launch_mode`` and must be one the agent declares (the runtime
     # rejects mismatches with 400).
     transport: SessionTransportId | None = None
+    # When true (default), the prior conversation is replayed into the new
+    # session's transcript at import time; when false the transcript starts
+    # empty and only the underlying agent resumes its own context.
+    import_history: bool = True

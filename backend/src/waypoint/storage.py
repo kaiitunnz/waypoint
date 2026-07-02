@@ -729,6 +729,78 @@ class Storage:
         ).fetchone()[0]
 
     @_synchronized
+    def seed_events(
+        self, session_id: str, events: list[EventRecord]
+    ) -> list[EventRecord]:
+        """Bulk-append externally-sourced events (e.g. imported thread history).
+
+        Unlike ``clone_events`` (which copies another session's rows verbatim),
+        the caller supplies freshly-built ``EventRecord``s whose ``sequence`` is
+        ignored: sequences are (re)assigned ascending from
+        ``MAX(sequence) + 1`` for the target so seeded history slots after any
+        events already present. Each row is stamped with the canonical envelope
+        ``version`` like ``append_event``, but the session's
+        ``last_event_at``/``updated_at``/``status`` are updated once at the end
+        rather than per row. Returns the persisted rows (with assigned ``id`` and
+        ``sequence``) in order, so callers can mirror them to the structured log.
+        """
+        if not events:
+            return []
+        base = int(
+            self.connection.execute(
+                "SELECT COALESCE(MAX(sequence), 0) AS max_sequence FROM events WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()["max_sequence"]
+        )
+        rows: list[tuple[str, str, str, str, str, int]] = []
+        last_ts_iso: str | None = None
+        last_status: str | None = None
+        for offset, event in enumerate(events, start=1):
+            metadata = event.metadata
+            if "version" not in metadata:
+                metadata = {**metadata, "version": 1}
+            ts_iso = event.ts.isoformat()
+            rows.append(
+                (
+                    session_id,
+                    ts_iso,
+                    event.kind,
+                    event.text,
+                    json.dumps(metadata),
+                    base + offset,
+                )
+            )
+            last_ts_iso = ts_iso
+            status = metadata.get("status")
+            if status is not None:
+                last_status = status
+        self.connection.executemany(
+            """
+            INSERT INTO events (session_id, ts, kind, text, metadata, sequence)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        self.connection.execute(
+            """
+            UPDATE sessions
+            SET last_event_at = ?, updated_at = ?, status = COALESCE(?, status)
+            WHERE id = ?
+            """,
+            (last_ts_iso, last_ts_iso, last_status, session_id),
+        )
+        self.connection.commit()
+        persisted = self.connection.execute(
+            """
+            SELECT * FROM events
+            WHERE session_id = ? AND sequence > ?
+            ORDER BY sequence ASC, id ASC
+            """,
+            (session_id, base),
+        ).fetchall()
+        return [self._event_from_row(row) for row in persisted]
+
+    @_synchronized
     def list_events(
         self,
         session_id: str,

@@ -306,6 +306,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   );
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [events, setEvents] = useState<EventRecord[]>([]);
+  // The session's latest todo/task snapshot as of the initial load, carried on
+  // the tail events page. It keeps the task dock visible when the most recent
+  // todo predates the loaded transcript window; live/newer todos arrive through
+  // `events` and win the max-sequence comparison in `currentTaskEvent`.
+  const [loadedTodoEvent, setLoadedTodoEvent] = useState<EventRecord | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | undefined>(undefined);
   const [workspaceInitialDir, setWorkspaceInitialDir] = useState<string | undefined>(undefined);
@@ -745,6 +750,9 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         setEvents(coalesced);
         setHasOlderEvents(loadedPage.has_more);
         setOldestRawSequence(minRawSequence(sanitized));
+        setLoadedTodoEvent(
+          loadedPage.latest_todo ? sanitizeEvent(loadedPage.latest_todo) : null,
+        );
       } catch (loadError) {
         if (active) {
           if (isAuthError(loadError)) {
@@ -1336,15 +1344,26 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // endpoints.
   const workspacePreviewEnabled = Boolean(session && !session.launch_target_id);
   // Latest task group, read off the raw event stream so the dock reflects the
-  // true current state regardless of the transcript's event filter.
+  // true current state regardless of the transcript's event filter. Fall back
+  // to `loadedTodoEvent` (the tail-page snapshot) when the latest todo predates
+  // the loaded window; the higher sequence wins so a live update always beats
+  // the load-time snapshot.
   const currentTaskEvent = useMemo(() => {
+    let windowTodo: EventRecord | null = null;
     for (let i = events.length - 1; i >= 0; i -= 1) {
       if (isTodoListEvent(events[i])) {
-        return events[i];
+        windowTodo = events[i];
+        break;
       }
     }
-    return null;
-  }, [events]);
+    if (!windowTodo) {
+      return loadedTodoEvent;
+    }
+    if (loadedTodoEvent && loadedTodoEvent.sequence > windowTodo.sequence) {
+      return loadedTodoEvent;
+    }
+    return windowTodo;
+  }, [events, loadedTodoEvent]);
   const taskProgress = useMemo(
     () => summarizeTodos(readTodoEntries(currentTaskEvent)),
     [currentTaskEvent],

@@ -1,11 +1,11 @@
 :root {
   --bg-base: #0a0d12;
   --bg-deep: #06080b;
-  --bg-card: rgba(18, 22, 30, 0.84);
-  --bg-card-soft: rgba(24, 28, 38, 0.72);
-  --bg-input: rgba(8, 11, 16, 0.7);
-  --line: rgba(120, 138, 168, 0.18);
-  --line-strong: rgba(160, 178, 210, 0.32);
+  --bg-card: #12161e;
+  --bg-card-soft: #171c26;
+  --bg-input: #0d1117;
+  --line: #232a36;
+  --line-strong: #3a4556;
   --text: #e7ecf3;
   --text-strong: #f5f7fb;
   --muted: #97a2b3;
@@ -17,17 +17,24 @@
   --warn: #d99a4a;
   --success: #6cc99a;
   --todo-glyph: #c8a3eb;
-  --shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
-  --shadow-soft: 0 6px 18px rgba(0, 0, 0, 0.32);
-  --radius: 14px;
-  --radius-sm: 10px;
+  --glass-bg: rgba(16, 20, 27, 0.55);
+  --glass-line: rgba(160, 178, 210, 0.16);
+  --glass-hi: rgba(255, 255, 255, 0.08);
+  --glass-blur: blur(16px) saturate(1.7);
+  --shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
+  --shadow-soft: none;
+  --radius: 4px;
+  --radius-sm: 3px;
   --radius-pill: 999px;
   --font-sans:
-    ui-sans-serif, system-ui, -apple-system, "Inter", "Helvetica Neue", Arial,
+    ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", Arial,
     sans-serif;
   --font-mono:
-    "JetBrains Mono", "SFMono-Regular", "Menlo", "Consolas", monospace;
-  --font-display: "Iowan Old Style", "Charter", "Georgia", serif;
+    var(--font-mono-face, "JetBrains Mono"), ui-monospace, "SFMono-Regular",
+    "Menlo", "Consolas", monospace;
+  --font-display:
+    var(--font-display-face, "Source Serif 4"), "Iowan Old Style", "Charter",
+    "Georgia", serif;
 }
 
 html[data-theme="light"] {
@@ -35,11 +42,11 @@ html[data-theme="light"] {
 
   --bg-base: #f4f1eb;
   --bg-deep: #ede9e0;
-  --bg-card: rgba(255, 253, 247, 0.88);
-  --bg-card-soft: rgba(248, 244, 236, 0.78);
-  --bg-input: rgba(255, 252, 245, 0.9);
-  --line: rgba(90, 78, 58, 0.13);
-  --line-strong: rgba(90, 78, 58, 0.26);
+  --bg-card: #fbf8f1;
+  --bg-card-soft: #f4efe4;
+  --bg-input: #fffdf7;
+  --line: #ddd5c3;
+  --line-strong: #c2b69d;
   --text: #1c1914;
   --text-strong: #0e0c09;
   --muted: #6e6356;
@@ -51,8 +58,11 @@ html[data-theme="light"] {
   --warn: #aa6618;
   --success: #257a50;
   --todo-glyph: #7040b0;
-  --shadow: 0 24px 60px rgba(60, 45, 20, 0.1);
-  --shadow-soft: 0 6px 18px rgba(60, 45, 20, 0.08);
+  --glass-bg: rgba(250, 246, 238, 0.55);
+  --glass-line: rgba(90, 78, 58, 0.18);
+  --glass-hi: rgba(255, 255, 255, 0.55);
+  --shadow: 0 10px 28px rgba(60, 45, 20, 0.16);
+  --shadow-soft: none;
 }
 
 /* ─── Reset & base ─── */
@@ -61,22 +71,13 @@ html[data-theme="light"] {
 }
 
 html {
-  /* The gradient lives on the root element so it propagates to the viewport
-   * canvas: it spans the whole viewport and stays put while content scrolls,
-   * matching the old `background-attachment: fixed` look without forcing a
-   * full-screen repaint on every scroll frame. The solid `background-color`
-   * stays as a fallback and paints iOS Safari's rubber-band area. Keep all
-   * other layout / scroll properties off the html element so the browser
-   * uses it as the natural scroll root and trackpad wheel events reach it. */
-  background: linear-gradient(180deg, #0b0f15 0%, #0a0d12 60%, #08090d 100%);
-  background-color: var(--bg-deep);
+  /* Flat canvas on the root element so it spans the viewport and paints iOS
+   * Safari's rubber-band area. Keep all other layout / scroll properties off
+   * the html element so the browser uses it as the natural scroll root and
+   * trackpad wheel events reach it. */
+  background-color: var(--bg-base);
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-}
-
-html[data-theme="light"] {
-  background: linear-gradient(180deg, #f7f4ee 0%, #f4f0e8 60%, #efe9d8 100%);
-  background-color: var(--bg-deep);
 }
 
 body {
@@ -90,41 +91,7 @@ body {
   position: relative;
   color: var(--text);
   font-family: var(--font-sans);
-  font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
-}
-
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(
-      900px 480px at 12% -8%,
-      rgba(200, 169, 106, 0.07),
-      transparent 60%
-    ),
-    radial-gradient(
-      820px 540px at 110% 8%,
-      rgba(143, 179, 214, 0.06),
-      transparent 65%
-    );
-  z-index: 0;
-}
-
-html[data-theme="light"] body::before {
-  background:
-    radial-gradient(
-      900px 480px at 12% -8%,
-      rgba(200, 169, 106, 0.14),
-      transparent 60%
-    ),
-    radial-gradient(
-      820px 540px at 110% 8%,
-      rgba(59, 123, 168, 0.09),
-      transparent 65%
-    );
 }
 
 a {
@@ -195,21 +162,7 @@ pre {
   padding: 18px 22px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: linear-gradient(
-    180deg,
-    rgba(20, 24, 33, 0.85),
-    rgba(14, 17, 24, 0.85)
-  );
-  box-shadow: var(--shadow-soft);
-  backdrop-filter: blur(18px);
-}
-
-html[data-theme="light"] .app-bar {
-  background: linear-gradient(
-    180deg,
-    rgba(244, 241, 235, 0.94),
-    rgba(237, 233, 224, 0.9)
-  );
+  background: var(--bg-card);
 }
 
 .app-bar-brand {
@@ -222,7 +175,7 @@ html[data-theme="light"] .app-bar {
 .app-bar-mark {
   width: 38px;
   height: 38px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--line-strong);
   overflow: hidden;
   display: block;
@@ -271,13 +224,11 @@ html[data-theme="light"] .app-bar {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--line);
   font-family: var(--font-mono);
   font-size: 0.72rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  color: var(--muted);
 }
 
 .app-bar-status::before {
@@ -288,20 +239,22 @@ html[data-theme="light"] .app-bar {
   background: var(--muted-soft);
 }
 
-.app-bar-status.open::before {
-  background: #5ed29c;
-  box-shadow: 0 0 0 3px rgba(94, 210, 156, 0.16);
+.app-bar-status.open {
+  color: var(--success);
 }
 
-html[data-theme="light"] .app-bar-status.open::before {
+.app-bar-status.open::before {
   background: var(--success);
-  box-shadow: 0 0 0 3px rgba(37, 122, 80, 0.18);
+}
+
+.app-bar-status.connecting,
+.app-bar-status.reconnecting {
+  color: var(--warn);
 }
 
 .app-bar-status.connecting::before,
 .app-bar-status.reconnecting::before {
   background: var(--warn);
-  box-shadow: 0 0 0 3px rgba(217, 154, 74, 0.18);
 }
 
 .section-heading {
@@ -329,9 +282,7 @@ html[data-theme="light"] .app-bar-status.open::before {
   background: var(--bg-card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-soft);
   padding: 18px;
-  backdrop-filter: blur(14px);
   min-width: 0;
 }
 
@@ -751,7 +702,7 @@ html[data-theme="light"] .field select {
 .field select:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(200, 169, 106, 0.18);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .primary,
@@ -763,54 +714,45 @@ html[data-theme="light"] .field select {
   font-weight: 500;
   letter-spacing: 0.02em;
   transition:
-    transform 120ms ease,
     background-color 120ms ease,
     color 120ms ease,
-    border-color 120ms ease;
+    border-color 120ms ease,
+    filter 120ms ease;
   border: 1px solid transparent;
 }
 
 .primary {
-  background: linear-gradient(180deg, var(--accent-strong), var(--accent));
+  background: var(--accent);
   color: #1d1408;
   font-weight: 600;
-  border-color: rgba(200, 169, 106, 0.6);
 }
 
 html[data-theme="light"] .primary {
-  background: linear-gradient(180deg, #e0bb73, #c8a96a);
-  border-color: rgba(180, 155, 90, 0.55);
+  color: #fffdf5;
 }
 
 .primary:hover:not(:disabled) {
-  transform: translateY(-1px);
-  filter: brightness(1.04);
+  filter: brightness(1.06);
 }
 
 .primary:disabled {
   filter: grayscale(0.6);
   color: rgba(29, 20, 8, 0.45);
   cursor: default;
-  transform: none;
+}
+
+html[data-theme="light"] .primary:disabled {
+  color: rgba(255, 253, 245, 0.6);
 }
 
 .secondary {
-  background: rgba(28, 33, 44, 0.78);
+  background: var(--bg-card-soft);
   color: var(--text);
   border-color: var(--line);
 }
 
-html[data-theme="light"] .secondary {
-  background: rgba(220, 210, 190, 0.7);
-}
-
 .secondary:hover:not(:disabled) {
   border-color: var(--line-strong);
-  background: rgba(34, 40, 54, 0.9);
-}
-
-html[data-theme="light"] .secondary:hover:not(:disabled) {
-  background: rgba(205, 194, 170, 0.9);
 }
 
 .secondary:disabled {
@@ -819,18 +761,19 @@ html[data-theme="light"] .secondary:hover:not(:disabled) {
 }
 
 .danger {
-  background: rgba(226, 108, 112, 0.12);
+  background: transparent;
   color: var(--danger);
-  border-color: rgba(226, 108, 112, 0.36);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
 .danger:hover:not(:disabled) {
-  background: rgba(226, 108, 112, 0.18);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 .danger:disabled {
-  background: rgba(120, 130, 150, 0.12);
+  background: transparent;
   color: var(--muted);
+  border-color: var(--line);
   cursor: default;
 }
 
@@ -1742,159 +1685,102 @@ html[data-theme="light"] .probe.reachable {
   min-width: 0;
 }
 
-/* ─── Badges & status pills ─── */
+/* ─── Badges & status marks ───
+ * Identity badges are bare mono text in the owner's hue; statuses add a
+ * round lamp dot. No tinted fills or outlines — color alone carries the
+ * meaning, and both themes resolve from tokens. */
 .badge,
 .status {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  padding: 3px 8px;
+  gap: 6px;
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   font-family: var(--font-mono);
-  border: 1px solid transparent;
+}
+
+.status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
 }
 
 .badge.codex {
-  background: rgba(143, 179, 214, 0.12);
   color: var(--accent-cool);
-  border-color: rgba(143, 179, 214, 0.22);
 }
 
-html[data-theme="light"] .badge.codex {
-  background: rgba(47, 111, 158, 0.12);
-  border-color: rgba(47, 111, 158, 0.32);
-}
-
-.badge.claude_code {
-  background: rgba(200, 169, 106, 0.12);
-  color: var(--accent);
-  border-color: rgba(200, 169, 106, 0.22);
-}
-
-html[data-theme="light"] .badge.claude_code {
-  background: rgba(184, 130, 14, 0.12);
-  border-color: rgba(184, 130, 14, 0.3);
-}
-
-/* The tty-tail Claude variant shares Claude's gold identity; the transport
- * badge beside it is what distinguishes the TUI from the structured CLI. */
+.badge.claude_code,
 .badge.claude_tty {
-  background: rgba(200, 169, 106, 0.12);
   color: var(--accent);
-  border-color: rgba(200, 169, 106, 0.22);
-}
-
-html[data-theme="light"] .badge.claude_tty {
-  background: rgba(184, 130, 14, 0.12);
-  border-color: rgba(184, 130, 14, 0.3);
 }
 
 /* OpenCode's identity is monochrome — use a brighter slate than --muted so
  * the badge isn't mistaken for a grayed-out / disabled state. */
 .badge.opencode {
-  background: rgba(203, 213, 225, 0.16);
   color: #cbd5e1;
-  border-color: rgba(203, 213, 225, 0.32);
 }
 
 html[data-theme="light"] .badge.opencode {
-  background: rgba(110, 99, 86, 0.12);
   color: var(--muted);
-  border-color: rgba(110, 99, 86, 0.28);
 }
 
-.badge.neutral {
-  background: rgba(151, 162, 179, 0.12);
-  color: var(--muted);
-  border-color: var(--line);
-}
-
+.badge.neutral,
 .badge.transport.tmux {
-  background: rgba(151, 162, 179, 0.1);
   color: var(--muted);
-  border-color: var(--line);
-}
-
-html[data-theme="light"] .badge.neutral,
-html[data-theme="light"] .badge.transport.tmux {
-  background: rgba(110, 99, 86, 0.1);
 }
 
 .badge.transport.codex_app_server,
 .badge.transport.claude_cli,
 .badge.transport.claude_tty,
 .badge.fidelity.structured {
-  background: rgba(200, 169, 106, 0.1);
   color: var(--accent);
-  border-color: rgba(200, 169, 106, 0.24);
-}
-
-html[data-theme="light"] .badge.transport.codex_app_server,
-html[data-theme="light"] .badge.transport.claude_cli,
-html[data-theme="light"] .badge.transport.claude_tty,
-html[data-theme="light"] .badge.fidelity.structured {
-  background: rgba(184, 130, 14, 0.12);
-  border-color: rgba(184, 130, 14, 0.3);
 }
 
 .badge.transport.opencode_http {
-  background: rgba(203, 213, 225, 0.12);
   color: #cbd5e1;
-  border-color: rgba(203, 213, 225, 0.28);
 }
 
 html[data-theme="light"] .badge.transport.opencode_http {
-  background: rgba(90, 100, 120, 0.1);
   color: var(--muted);
-  border-color: rgba(90, 100, 120, 0.26);
 }
 
 .badge.model {
-  font-family: var(--font-mono);
-  background: rgba(120, 139, 188, 0.12);
   color: var(--accent-soft, var(--accent));
-  border-color: rgba(120, 139, 188, 0.28);
   letter-spacing: 0.02em;
   text-transform: none;
 }
 
 .badge.effort {
-  font-family: var(--font-mono);
-  background: rgba(200, 169, 106, 0.12);
   color: var(--warn, var(--accent));
-  border-color: rgba(200, 169, 106, 0.28);
   letter-spacing: 0.02em;
   text-transform: lowercase;
 }
 
 .status {
-  background: rgba(94, 210, 156, 0.1);
   color: var(--success);
-  border-color: rgba(94, 210, 156, 0.22);
 }
 
 .status.error,
 .status.interrupted {
-  background: rgba(226, 108, 112, 0.12);
   color: var(--danger);
-  border-color: rgba(226, 108, 112, 0.28);
 }
 
 .status.exited,
 .status.starting {
-  background: rgba(151, 162, 179, 0.1);
   color: var(--muted);
-  border-color: var(--line);
 }
 
-.status.running,
-.status.waiting_input {
-  background: rgba(143, 179, 214, 0.1);
+.status.running {
   color: var(--accent-cool);
-  border-color: rgba(143, 179, 214, 0.24);
+}
+
+/* Waiting for the user is the one state that wants eyes on it. */
+.status.waiting_input {
+  color: var(--warn);
 }
 
 /* ─── Transcript cards ─── */
@@ -2139,27 +2025,8 @@ details.tool-disclosure[open] .tool-glyph.todo {
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
-  border-color: rgba(143, 179, 214, 0.32);
-  background: linear-gradient(
-    180deg,
-    rgba(34, 44, 62, 0.78),
-    rgba(22, 28, 40, 0.78)
-  );
-  box-shadow:
-    var(--shadow-soft),
-    inset -2px 0 0 rgba(143, 179, 214, 0.32);
-}
-
-html[data-theme="light"] .transcript.codex.user_input {
-  background: linear-gradient(
-    180deg,
-    rgba(242, 234, 216, 0.9),
-    rgba(232, 222, 200, 0.86)
-  );
-  border-color: rgba(90, 78, 58, 0.22);
-  box-shadow:
-    var(--shadow-soft),
-    inset -2px 0 0 rgba(184, 130, 14, 0.32);
+  border-color: color-mix(in srgb, var(--accent-cool) 30%, var(--line));
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--bg-card));
 }
 
 .transcript.codex.user_input.pending-optimistic {
@@ -2178,17 +2045,7 @@ html[data-theme="light"] .transcript.codex.user_input {
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
-  border-color: rgba(200, 169, 106, 0.22);
-  box-shadow:
-    var(--shadow-soft),
-    inset 2px 0 0 rgba(200, 169, 106, 0.32);
-}
-
-html[data-theme="light"] .transcript.codex.agent_output {
-  border-color: rgba(184, 130, 14, 0.28);
-  box-shadow:
-    var(--shadow-soft),
-    inset 2px 0 0 rgba(184, 130, 14, 0.42);
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
 }
 
 /* On phones (and iPad portrait) drop `width: fit-content` and just go full-
@@ -9506,17 +9363,13 @@ html[data-theme="light"] .term-compose-input {
   gap: 8px;
   min-width: 0;
   width: 100%;
+  position: relative;
   overflow: hidden;
-  transition:
-    border-color 140ms ease,
-    transform 140ms ease,
-    box-shadow 140ms ease;
+  transition: border-color 140ms ease;
 }
 
 .session-card:hover {
   border-color: var(--line-strong);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow);
 }
 
 .session-card h3 {
@@ -9561,9 +9414,21 @@ html[data-theme="light"] .term-compose-input {
   letter-spacing: 0.04em;
 }
 
+/* Pinned cards carry a dog-ear — a flat fold in the top-right corner, the
+ * bookmark made literal. The corner under it is squared so the fold reads
+ * as intentional rather than clipped by the card radius. */
 .session-section-pinned .session-card {
-  border-color: rgba(200, 169, 106, 0.32);
-  box-shadow: inset 3px 0 0 var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  border-top-right-radius: 0;
+}
+
+.session-section-pinned .session-card::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  border-top: 15px solid var(--accent);
+  border-left: 15px solid transparent;
 }
 
 .session-card-actions {

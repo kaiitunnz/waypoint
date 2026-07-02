@@ -1454,16 +1454,41 @@ def sessions_import(
     ctx: typer.Context,
     backend: Annotated[str, typer.Argument()],
     json_source: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--json",
             help="Path to a JSON object body, or - to read it from stdin.",
             metavar="FILE|-",
         ),
-    ],
+    ] = None,
+    thread_id: Annotated[
+        str | None,
+        typer.Option("--thread-id", help="Backend-native thread id to import."),
+    ] = None,
+    import_history: Annotated[
+        bool | None,
+        typer.Option(
+            "--import-history/--no-import-history",
+            help=(
+                "Replay the thread's prior conversation into the new session's "
+                "transcript (default). --no-import-history starts empty and only "
+                "resumes the agent's own context."
+            ),
+        ),
+    ] = None,
 ) -> None:
-    """Import a backend-native thread into Waypoint."""
-    body = _parse_json_object(json_source)
+    """Import a backend-native thread into Waypoint.
+
+    Provide the request body via ``--json`` and/or the individual flags; an
+    explicit flag overrides the same field in the JSON body.
+    """
+    body = _parse_json_object(json_source) if json_source is not None else {}
+    if thread_id is not None:
+        body["thread_id"] = thread_id
+    if import_history is not None:
+        body["import_history"] = import_history
+    if not body.get("thread_id"):
+        raise typer.BadParameter("pass --thread-id or a --json body with thread_id")
     _emit(
         _settings_from_ctx(ctx),
         lambda c: {"session": c.import_thread(backend, body)},

@@ -1220,6 +1220,24 @@ class OpenCodeAdapter:
         except Exception:
             return None
 
+    async def get_session_messages(self, session_id: str) -> list[dict[str, Any]]:
+        """Fetch the full message history for a session (thread import).
+
+        Unlike ``get_session``/``list_sessions``, failures are raised rather
+        than swallowed: ``runtime.seed_thread_history``'s reader contract
+        expects a raise to signal "history unavailable" so it can degrade to
+        a plain resume with a system note instead of silently seeding an
+        empty transcript.
+        """
+        if not self._started:
+            await self.start()
+        client = self._require_client()
+        try:
+            result = await client.get(f"/session/{session_id}/message")
+        except Exception as exc:
+            raise OpenCodeError(f"failed to fetch session messages: {exc}") from exc
+        return result if isinstance(result, list) else []
+
     async def delete_session(self, session_id: str) -> bool:
         if not self._started:
             await self.start()

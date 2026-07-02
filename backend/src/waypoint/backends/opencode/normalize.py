@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 from waypoint.backends.diff_preview import (
@@ -409,6 +410,137 @@ def _map_tool_event(
         )
 
     return (EventKind.SYSTEM_NOTE, "", {})
+
+
+def historical_events_from_messages(
+    messages: list[dict[str, Any]],
+) -> list[tuple[datetime, EventKind, str, dict[str, Any]]]:
+    """Convert a ``GET /session/{id}/message`` response into ordered events.
+
+    Each entry is ``{"info": Message, "parts": Part[]}``. The live SSE path
+    streams assistant text/reasoning via ``message.part.delta`` and never
+    surfaces ``message.updated`` for user turns (see ``map_event`` above);
+    neither has a REST equivalent, so historical replay reads the full body
+    straight off each part snapshot and synthesizes the user turn from the
+    message itself. Tool parts reuse ``_map_tool_event`` directly — the
+    message-history endpoint already returns each tool part's terminal
+    state, so a lone ``TOOL_RESULT`` (or ``TOOL_CALL`` for a part that never
+    finished) is enough for the frontend to render a complete tool card.
+    """
+    events: list[tuple[datetime, EventKind, str, dict[str, Any]]] = []
+    for entry in messages:
+        if not isinstance(entry, dict):
+            continue
+        info = entry.get("info")
+        parts = entry.get("parts")
+        if not isinstance(info, dict) or not isinstance(parts, list):
+            continue
+        role = info.get("role")
+        if role == "user":
+            user_event = _map_historical_user_turn(info, parts)
+            if user_event is not None:
+                events.append(user_event)
+        elif role == "assistant":
+            events.extend(_map_historical_assistant_parts(info, parts))
+    return events
+
+
+def _map_historical_user_turn(
+    info: dict[str, Any], parts: list[dict[str, Any]]
+) -> tuple[datetime, EventKind, str, dict[str, Any]] | None:
+    segments = [
+        part["text"]
+        for part in parts
+        if isinstance(part, dict)
+        and part.get("type") == "text"
+        and isinstance(part.get("text"), str)
+        and part["text"]
+    ]
+    text = "\n".join(segments)
+    if not text:
+        return None
+    ts = _timestamp_from_ms(_as_dict(info.get("time")), "created") or datetime.now(UTC)
+    return (
+        ts,
+        EventKind.USER_INPUT,
+        text,
+        {"submit": True, "status": SessionStatus.RUNNING},
+    )
+
+
+def _map_historical_assistant_parts(
+    info: dict[str, Any], parts: list[dict[str, Any]]
+) -> list[tuple[datetime, EventKind, str, dict[str, Any]]]:
+    session_id = info.get("sessionID", "")
+    fallback_ts = (
+        _timestamp_from_ms(_as_dict(info.get("time")), "completed")
+        or _timestamp_from_ms(_as_dict(info.get("time")), "created")
+        or datetime.now(UTC)
+    )
+    events: list[tuple[datetime, EventKind, str, dict[str, Any]]] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        part_type = part.get("type")
+        if part_type in ("text", "reasoning"):
+            mapped = _map_historical_text_part(part, fallback_ts)
+            if mapped is not None:
+                events.append(mapped)
+        elif part_type == "tool":
+            kind, text, metadata = _map_tool_event(part, session_id)
+            if not text and not metadata:
+                continue
+            ts = _tool_part_timestamp(part) or fallback_ts
+            events.append((ts, kind, text, metadata))
+    return events
+
+
+def _map_historical_text_part(
+    part: dict[str, Any], fallback_ts: datetime
+) -> tuple[datetime, EventKind, str, dict[str, Any]] | None:
+    text = part.get("text")
+    if not isinstance(text, str) or not text:
+        return None
+    part_type = part.get("type")
+    part_id = part.get("id")
+    time_field = _as_dict(part.get("time"))
+    ts = (
+        _timestamp_from_ms(time_field, "end")
+        or _timestamp_from_ms(time_field, "start")
+        or fallback_ts
+    )
+    method = (
+        "message.part.delta.reasoning"
+        if part_type == "reasoning"
+        else "message.part.delta.text"
+    )
+    metadata: dict[str, Any] = {
+        "method": method,
+        "payload": {"partID": part_id, "field": "text", "delta": text},
+        "status": SessionStatus.RUNNING,
+    }
+    if isinstance(part_id, str) and part_id:
+        metadata["item_id"] = part_id
+    if part_type == "reasoning":
+        metadata["item_kind"] = "reasoning"
+    return (ts, EventKind.AGENT_OUTPUT, text, metadata)
+
+
+def _tool_part_timestamp(part: dict[str, Any]) -> datetime | None:
+    state = _as_dict(part.get("state")) or {}
+    time_field = _as_dict(state.get("time"))
+    return _timestamp_from_ms(time_field, "end") or _timestamp_from_ms(
+        time_field, "start"
+    )
+
+
+def _timestamp_from_ms(time_field: dict[str, Any] | None, key: str) -> datetime | None:
+    if time_field is None:
+        return None
+    value = time_field.get(key)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return datetime.fromtimestamp(value / 1000, tz=UTC)
 
 
 def _diff_preview_from_opencode_properties(

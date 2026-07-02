@@ -359,6 +359,11 @@ class MeResponse(BaseModel):
 class EventsPageResponse(BaseModel):
     events: list[EventRecord] = Field(default_factory=list)
     has_more: bool = False
+    # The session's most recent todo/task snapshot, populated only in tail
+    # mode so the frontend's task dock stays visible even when the latest
+    # todo predates the loaded transcript window. ``None`` when the session
+    # has no todos or when paginating older pages.
+    latest_todo: EventRecord | None = None
 
 
 class SessionCreateRequest(BaseModel):

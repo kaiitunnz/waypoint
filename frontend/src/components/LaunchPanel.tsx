@@ -201,7 +201,15 @@ export function LaunchPanel({
           <h3>Start a session</h3>
           <p className="muted">{subhead}</p>
         </div>
-        <LaunchModeChooser mode={mode} onChange={setMode} />
+        <LaunchModeChooser
+          mode={mode}
+          onChange={(next) => {
+            // The cwd field is shared across modes; a rejection from the New
+            // form is stale once we leave it, so clear it on any mode switch.
+            onClearCwdError?.();
+            setMode(next);
+          }}
+        />
       </div>
 
       {mode === "new" ? (

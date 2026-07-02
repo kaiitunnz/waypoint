@@ -691,6 +691,10 @@ html[data-theme="light"] .field select {
   .field input[aria-invalid="true"] {
     animation: field-shake 220ms ease-in-out;
   }
+
+  .field-error {
+    animation: field-error-in 140ms ease-out both;
+  }
 }
 
 /* Inline validation message beneath a field. Leads with a currentColor lamp
@@ -704,7 +708,6 @@ html[data-theme="light"] .field select {
   font-size: 0.8rem;
   line-height: 1.4;
   overflow-wrap: anywhere;
-  animation: field-error-in 140ms ease-out both;
 }
 
 .field-error::before {

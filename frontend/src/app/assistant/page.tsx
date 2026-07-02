@@ -230,7 +230,7 @@ export default function AssistantPage() {
           <section className="assistant-banner" aria-label="Assistant details">
             <div className="assistant-banner-lead">
               <span className="assistant-glyph" aria-hidden="true">
-                ✦
+                ⁂
               </span>
               <div className="assistant-banner-text">
                 <p className="assistant-banner-eyebrow">
@@ -275,7 +275,7 @@ export default function AssistantPage() {
       {state === "disabled" ? (
         <section className="panel bordered assistant-empty">
           <span className="assistant-glyph assistant-glyph-lg" aria-hidden="true">
-            ✦
+            ⁂
           </span>
           <h2>No assistant configured</h2>
           <p className="muted">
@@ -305,7 +305,7 @@ export default function AssistantPage() {
       {state === "error" ? (
         <section className="panel bordered assistant-empty">
           <span className="assistant-glyph assistant-glyph-lg" aria-hidden="true">
-            ✦
+            ⁂
           </span>
           <h2>Couldn’t load the assistant</h2>
           <p className="muted">

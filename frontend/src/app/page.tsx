@@ -1024,7 +1024,7 @@ export default function HomePage() {
           aria-label="Open personal assistant"
         >
           <span className="assistant-fab-glyph" aria-hidden="true">
-            ✦
+            ⁂
           </span>
           <span className="assistant-fab-label">Assistant</span>
         </Link>

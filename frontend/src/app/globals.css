@@ -4164,10 +4164,6 @@ html[data-theme="light"] .composer-context-trigger.tone-danger {
   }
 }
 
-.usage-panel-rail {
-  display: none;
-}
-
 .usage-block {
   display: grid;
   gap: 14px;
@@ -5453,23 +5449,14 @@ html[data-theme="light"] .usage-instrument-note-chip {
 
 .usage-dial-bezel {
   fill: rgba(0, 0, 0, 0);
-  stroke: rgba(200, 169, 106, 0.32);
+  stroke: color-mix(in srgb, var(--accent) 35%, transparent);
   stroke-width: 1.2;
 }
 
-html[data-theme="light"] .usage-dial-bezel {
-  stroke: rgba(184, 130, 14, 0.42);
-}
-
 .usage-dial-face {
-  fill: url(#usage-dial-face);
-  stroke: rgba(200, 169, 106, 0.12);
+  fill: var(--bg-input);
+  stroke: color-mix(in srgb, var(--accent) 12%, transparent);
   stroke-width: 0.8;
-}
-
-html[data-theme="light"] .usage-dial-face {
-  fill: url(#usage-dial-face-light);
-  stroke: rgba(184, 130, 14, 0.15);
 }
 
 .usage-dial-tick {

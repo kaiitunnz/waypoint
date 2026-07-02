@@ -14,7 +14,7 @@ type Theme = "light" | "dark";
 
 const STORAGE_KEY = "waypoint-theme";
 const LIGHT_THEME_COLOR = "#f4f1eb";
-const DARK_THEME_COLOR = "#06080b";
+const DARK_THEME_COLOR = "#0a0d12";
 
 function readStoredTheme(): Theme | null {
   try {

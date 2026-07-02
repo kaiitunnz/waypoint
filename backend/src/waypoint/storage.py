@@ -832,6 +832,32 @@ class Storage:
         return row is not None
 
     @_synchronized
+    def latest_todo_event(self, session_id: str) -> EventRecord | None:
+        """Return the most recent todo/task event, or ``None``.
+
+        Every todo event is a full snapshot of the current list, so the
+        single latest one drives the frontend's task dock regardless of
+        which transcript window the client has paginated into. The
+        predicate mirrors :func:`waypoint.events.is_todo_list_event`
+        (``item_type == "todo_list"`` or a ``TodoWrite`` tool name, with
+        the ``default_api:`` prefix); running it in SQL avoids
+        deserializing every row of a long, todo-less session on each load.
+        """
+        row = self.connection.execute(
+            """
+            SELECT * FROM events
+            WHERE session_id = ?
+              AND (json_extract(metadata, '$.item_type') = 'todo_list'
+                   OR lower(json_extract(metadata, '$.tool_name'))
+                      IN ('todowrite', 'default_api:todowrite'))
+            ORDER BY sequence DESC, id DESC
+            LIMIT 1
+            """,
+            [session_id],
+        ).fetchone()
+        return self._event_from_row(row) if row is not None else None
+
+    @_synchronized
     def insert_token(self, token: str, expires_at: datetime) -> None:
         now = datetime.now(UTC)
         self.connection.execute(

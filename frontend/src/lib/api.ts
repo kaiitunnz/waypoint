@@ -234,6 +234,7 @@ export async function fetchEvents(
   return {
     events: (payload.events ?? []) as EventRecord[],
     has_more: Boolean(payload.has_more),
+    latest_todo: (payload.latest_todo as EventRecord | null) ?? null,
   };
 }
 

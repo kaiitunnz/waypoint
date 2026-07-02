@@ -1761,7 +1761,16 @@ class SessionRuntime:
             has_more = self.storage.has_events_before_sequence(
                 session_id, oldest_in_window
             )
-        return EventsPageResponse(events=events, has_more=has_more)
+        # Only the tail request carries the sticky todo snapshot; older pages
+        # leave it None so the client never clobbers a valid pre-window todo.
+        latest_todo = (
+            self.storage.latest_todo_event(session_id)
+            if before_sequence is None
+            else None
+        )
+        return EventsPageResponse(
+            events=events, has_more=has_more, latest_todo=latest_todo
+        )
 
     def launch_target_summaries(self) -> list[dict[str, Any]]:
         summaries: list[dict[str, Any]] = []

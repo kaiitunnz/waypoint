@@ -387,6 +387,40 @@ def test_effective_permission_mode_no_spawner_is_none(tmp_path) -> None:
     assert runtime._effective_permission_mode(request) is None
 
 
+def test_session_events_page_surfaces_latest_todo_in_tail_mode(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    storage.create_session(make_session(settings, id="sess"))
+    now = datetime.now(UTC)
+    # An early todo followed by more messages than a tail window would hold.
+    storage.append_event(
+        EventRecord(
+            session_id="sess",
+            ts=now,
+            kind=EventKind.TOOL_RESULT,
+            text="todos",
+            metadata={"item_type": "todo_list"},
+            sequence=1,
+        )
+    )
+    for i in range(2, 12):
+        storage.append_event(
+            EventRecord(
+                session_id="sess",
+                ts=now + timedelta(seconds=i),
+                kind=EventKind.AGENT_OUTPUT,
+                text=f"chunk-{i}",
+                sequence=i,
+            )
+        )
+
+    tail = runtime.session_events_page("sess", message_limit=1)
+    assert tail.latest_todo is not None
+    assert tail.latest_todo.sequence == 1
+
+    older = runtime.session_events_page("sess", message_limit=1, before_sequence=5)
+    assert older.latest_todo is None
+
+
 @pytest.mark.asyncio
 async def test_post_board_entry_persists_and_broadcasts(tmp_path) -> None:
     runtime, storage, _ = make_runtime(tmp_path)

@@ -307,6 +307,9 @@ export interface MeResponse {
 export interface EventsPage {
   events: EventRecord[];
   has_more: boolean;
+  // The session's latest todo/task snapshot, sent only for the tail page so
+  // the task dock survives a todo update that predates the loaded window.
+  latest_todo: EventRecord | null;
 }
 
 export interface LaunchTargetSummary {

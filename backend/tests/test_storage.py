@@ -288,8 +288,9 @@ def _append(
     text: str,
     ts: datetime,
     item_id: str | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> None:
-    metadata: dict[str, object] = {}
+    metadata = dict(metadata or {})
     if item_id is not None:
         metadata["item_id"] = item_id
     storage.append_event(
@@ -656,6 +657,71 @@ def test_has_events_before_sequence(tmp_path) -> None:
     assert storage.has_events_before_sequence("sess", 1) is False
     assert storage.has_events_before_sequence("sess", 2) is True
     assert storage.has_events_before_sequence("sess", 99) is True
+
+
+def test_latest_todo_event_returns_highest_sequence_todo(tmp_path) -> None:
+    storage, now = _seed_session(tmp_path)
+    _append(
+        storage,
+        "sess",
+        sequence=1,
+        kind=EventKind.TOOL_RESULT,
+        text="old todos",
+        ts=now,
+        metadata={"item_type": "todo_list"},
+    )
+    _append(
+        storage,
+        "sess",
+        sequence=2,
+        kind=EventKind.TOOL_RESULT,
+        text="newer todos",
+        ts=now + timedelta(seconds=1),
+        metadata={"tool_name": "TodoWrite"},
+    )
+    # A later non-todo event must not shadow the latest todo snapshot.
+    _append(
+        storage,
+        "sess",
+        sequence=3,
+        kind=EventKind.AGENT_OUTPUT,
+        text="reply",
+        ts=now + timedelta(seconds=2),
+    )
+    latest = storage.latest_todo_event("sess")
+    assert latest is not None
+    assert latest.sequence == 2
+
+
+def test_latest_todo_event_matches_default_api_tool_name(tmp_path) -> None:
+    storage, now = _seed_session(tmp_path)
+    _append(
+        storage,
+        "sess",
+        sequence=1,
+        kind=EventKind.TOOL_RESULT,
+        text="todos",
+        ts=now,
+        metadata={"tool_name": "default_api:todowrite"},
+    )
+    latest = storage.latest_todo_event("sess")
+    assert latest is not None
+    assert latest.sequence == 1
+
+
+def test_latest_todo_event_returns_none_without_todos(tmp_path) -> None:
+    storage, now = _seed_session(tmp_path)
+    for i in range(3):
+        _append(
+            storage,
+            "sess",
+            sequence=i + 1,
+            kind=EventKind.AGENT_OUTPUT,
+            text=f"d{i}",
+            ts=now + timedelta(seconds=i),
+            metadata={"tool_name": "Bash"},
+        )
+    assert storage.latest_todo_event("sess") is None
 
 
 def test_storage_serializes_concurrent_threads(tmp_path) -> None:

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.1](https://github.com/kaiitunnz/waypoint/compare/v0.4.0...v0.4.1) (2026-07-02)
+
+
+### Bug Fixes
+
+* reject a nonexistent working directory at session launch ([#206](https://github.com/kaiitunnz/waypoint/issues/206)) ([5a05b10](https://github.com/kaiitunnz/waypoint/commit/5a05b106de666da883e2172158e7caa5688eae80))
+* replay thread history into imported sessions ([#208](https://github.com/kaiitunnz/waypoint/issues/208)) ([c2fcc67](https://github.com/kaiitunnz/waypoint/commit/c2fcc674e238558c52e8725dd2b158d67d58a95e))
+* unify row actions and dock expand behavior ([#209](https://github.com/kaiitunnz/waypoint/issues/209)) ([d69ab66](https://github.com/kaiitunnz/waypoint/commit/d69ab66219f77d6a47c6ea96cb926e07fe67e17c))
+
 ## [0.4.0](https://github.com/kaiitunnz/waypoint/compare/v0.3.0...v0.4.0) (2026-07-02)
 
 

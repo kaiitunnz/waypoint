@@ -466,6 +466,9 @@ html[data-theme="light"] .import-thread-chip {
   display: flex;
   align-items: center;
   gap: 12px;
+  /* Keep the actions right-aligned even when the bottomline wraps them onto
+     their own row — space-between alone would left-align a lone wrapped item. */
+  margin-left: auto;
 }
 
 .import-thread-cta button.secondary {

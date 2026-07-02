@@ -31,6 +31,7 @@ from waypoint.backends.claude_code.commands import (
     CLAUDE_BUILTIN_SLASH_COMMANDS,
     list_claude_command_completions,
 )
+from waypoint.backends.claude_code.history import read_local_claude_history
 from waypoint.backends.claude_code.models import (
     CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
@@ -81,6 +82,7 @@ from waypoint.schemas import (
     CommandCompletion,
     CompletionDispatch,
     EventKind,
+    EventRecord,
     LaunchMode,
     SessionCreateRequest,
     SessionEnvelope,
@@ -1549,6 +1551,23 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             self.thread_enumerator.invalidate(launch_target.id)
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
         await self._register_rate_limit_probe(runtime, session.id, launch_target)
+
+        async def _read_thread_history() -> list[EventRecord]:
+            if launch_target is not None:
+                # Remote transcripts aren't fetched today: RemoteClaudeThread-
+                # Enumerator only surfaces thread-list metadata (via
+                # claude_thread_enumerator.sh), not the full JSONL transcript,
+                # and there's no existing remote-file-read primitive cheap
+                # enough to reuse here. Degrade to a plain resume — an empty
+                # read is a no-op for seed_thread_history, not a failure.
+                return []
+            return await read_local_claude_history(session.id, info.id)
+
+        await runtime.seed_thread_history(
+            session.id,
+            reader=_read_thread_history,
+            enabled=request.import_history,
+        )
         await runtime._record_system_event(
             session.id,
             self.format_import_message(cwd, launch_target),

@@ -2,10 +2,10 @@
 
 import pytest
 
+from waypoint.backends.claude_code.normalize import is_injected_user_turn
 from waypoint.backends.claude_tty.normalize import (
     NormalizedEvent,
     TranscriptNormalizer,
-    _is_injected_turn,
 )
 from waypoint.schemas import EventKind, SessionStatus
 
@@ -66,29 +66,29 @@ def _edit_result_record(
 
 
 def test_is_injected_task_notification() -> None:
-    assert _is_injected_turn("<task-notification>foo</task-notification>")
+    assert is_injected_user_turn("<task-notification>foo</task-notification>")
 
 
 def test_is_injected_task_notification_leading_whitespace() -> None:
-    assert _is_injected_turn("  \n<task-notification>bar</task-notification>")
+    assert is_injected_user_turn("  \n<task-notification>bar</task-notification>")
 
 
 def test_is_injected_context_summary() -> None:
-    assert _is_injected_turn(
+    assert is_injected_user_turn(
         "This session is being continued from a previous conversation."
     )
 
 
 def test_not_injected_plain_text() -> None:
-    assert not _is_injected_turn("Hello, world!")
+    assert not is_injected_user_turn("Hello, world!")
 
 
 def test_not_injected_list_content() -> None:
-    assert not _is_injected_turn([{"type": "tool_result", "content": "ok"}])
+    assert not is_injected_user_turn([{"type": "tool_result", "content": "ok"}])
 
 
 def test_not_injected_none() -> None:
-    assert not _is_injected_turn(None)
+    assert not is_injected_user_turn(None)
 
 
 # ── TranscriptNormalizer: assistant records ────────────────────────────────────

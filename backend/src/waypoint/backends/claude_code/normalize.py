@@ -114,6 +114,20 @@ def iter_content_blocks(content: Any) -> list[dict[str, Any]]:
     return blocks
 
 
+def is_injected_user_turn(content: Any) -> bool:
+    """Return True for harness-injected user turns that must not surface as chat.
+
+    Shared by the live tty-tail normalizer and the historical thread-import
+    converter, both of which read the same on-disk transcript records.
+    """
+    if isinstance(content, str):
+        stripped = content.lstrip()
+        return stripped.startswith("<task-notification>") or stripped.startswith(
+            "This session is being continued"
+        )
+    return False
+
+
 def stringify_tool_result(content: Any) -> str:
     if content is None:
         return ""

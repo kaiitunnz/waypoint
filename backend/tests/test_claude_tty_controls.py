@@ -603,6 +603,7 @@ async def test_import_thread_resumes_and_starts_tailer(
     runtime.storage.list_sessions.return_value = []
     runtime.storage.create_session = MagicMock()
     runtime._record_system_event = AsyncMock()
+    runtime.seed_thread_history = AsyncMock(return_value=0)
     created_holder: dict[str, SessionRecord] = {}
 
     def _create(session: SessionRecord) -> None:
@@ -652,6 +653,7 @@ async def test_import_thread_persists_resolving_agent_backend(
     )
     runtime.get_session.side_effect = lambda sid: created_holder["session"]
     runtime._record_system_event = AsyncMock()
+    runtime.seed_thread_history = AsyncMock(return_value=0)
 
     request = ClaudeThreadImportRequest(thread_id="imp-2")
     result = await plugin.import_thread(runtime, request, agent="claude_code")

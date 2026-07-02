@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
 from waypoint.backends.claude_code import side_question as _sq
 from waypoint.backends.claude_code.commands import list_claude_command_completions
+from waypoint.backends.claude_code.history import read_local_claude_history
 from waypoint.backends.claude_code.models import (
     DEFAULT_CLAUDE_MODELS,
     claude_default_model_id,
@@ -69,6 +70,7 @@ from waypoint.schemas import (
     CommandCompletion,
     CompletionDispatch,
     EventKind,
+    EventRecord,
     SessionCreateRequest,
     SessionRateLimitUsage,
     SessionRecord,
@@ -1301,6 +1303,15 @@ class ClaudeTtyPlugin:
             },
         )
         runtime.storage.create_session(session)
+
+        async def _read_thread_history() -> list[EventRecord]:
+            return await read_local_claude_history(session.id, request.thread_id)
+
+        await runtime.seed_thread_history(
+            session.id,
+            reader=_read_thread_history,
+            enabled=request.import_history,
+        )
         await runtime._record_system_event(
             session.id,
             f"Imported stored Claude thread ({cwd})",
@@ -1308,7 +1319,9 @@ class ClaudeTtyPlugin:
             metadata={"imported_thread_id": request.thread_id},
         )
         # The resumed thread reopens an already-populated transcript; tail from
-        # the end so records already on disk are not replayed into the DB.
+        # the end so records already on disk are not replayed into the DB (the
+        # seed above has already replayed them, from the on-disk transcript
+        # directly rather than the live tail).
         self._start_tailer(
             runtime, session.id, request.thread_id, cwd, start_at_end=True
         )

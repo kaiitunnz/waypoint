@@ -37,6 +37,7 @@ from waypoint.backends.claude_code.normalize import (
     TaskListTracker,
     extract_created_task_id,
     format_task_snapshot,
+    is_injected_user_turn,
     iter_content_blocks,
     stringify_tool_result,
 )
@@ -345,7 +346,7 @@ class TranscriptNormalizer:
         message: dict[str, Any] = record.get("message") or {}
         content = message.get("content")
 
-        if _is_injected_turn(content):
+        if is_injected_user_turn(content):
             return []
 
         turn_aborted = _is_user_rejection(record)
@@ -474,16 +475,6 @@ def _strip_local_command_output(content: Any) -> str:
     if len(text) > _LOCAL_COMMAND_MAX_LEN:
         text = text[: _LOCAL_COMMAND_MAX_LEN - 1].rstrip() + "…"
     return text
-
-
-def _is_injected_turn(content: Any) -> bool:
-    """Return True for harness-injected user turns that must not surface as chat."""
-    if isinstance(content, str):
-        stripped = content.lstrip()
-        return stripped.startswith("<task-notification>") or stripped.startswith(
-            "This session is being continued"
-        )
-    return False
 
 
 def _is_user_rejection(record: dict[str, Any]) -> bool:

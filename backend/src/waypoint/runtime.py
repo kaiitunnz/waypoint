@@ -75,9 +75,31 @@ SESSION_BROADCAST_DEBOUNCE_SECONDS = 0.25
 # close). A crash can lose at most the last few un-flushed lines, all of which
 # are still durable in SQLite.
 STRUCTURED_LOG_FLUSH_EVERY = 16
+# Stable sentinel returned when a launch's working directory does not exist.
+# The frontend matches it (like ``ssh-master-required``) to surface an inline
+# error on the working-directory field instead of the generic banner.
+CWD_NOT_FOUND_DETAIL = "cwd-not-found"
 
 
 log = logging.getLogger("waypoint.runtime")
+
+
+def require_existing_local_dir(cwd: str) -> str:
+    """Expand ``~`` and return the resolved local cwd, raising 400 if it is not
+    an existing directory.
+
+    An unchecked missing cwd is handed to tmux / ``Popen``, which silently fall
+    back to ``$HOME``; the agent then runs in the wrong directory and — for the
+    tty-tail transport — writes its transcript where the tailer is not watching,
+    leaving an empty transcript. Failing fast surfaces the typo instead.
+    """
+    resolved = str(Path(cwd).expanduser())
+    if not Path(resolved).is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=CWD_NOT_FOUND_DETAIL,
+        )
+    return resolved
 
 
 @dataclass
@@ -362,7 +384,7 @@ class SessionRuntime:
         if launch_target is not None:
             local_cwd = request.cwd or launch_target.default_cwd
         else:
-            local_cwd = str(Path(request.cwd).expanduser())
+            local_cwd = require_existing_local_dir(request.cwd)
         request = request.model_copy(update={"cwd": local_cwd})
         title = (
             request.title

@@ -17,7 +17,12 @@ from waypoint.backends.codex.permission_modes import (
 )
 from waypoint.backends.codex.schemas import CodexThreadImportRequest
 from waypoint.launch_targets import SshLaunchTargetConfig
-from waypoint.runtime import STRUCTURED_LOG_FLUSH_EVERY, SessionRuntime
+from waypoint.runtime import (
+    CWD_NOT_FOUND_DETAIL,
+    STRUCTURED_LOG_FLUSH_EVERY,
+    SessionRuntime,
+    require_existing_local_dir,
+)
 from waypoint.schemas import (
     BoardEntryUpdateRequest,
     BoardPostRequest,
@@ -385,6 +390,39 @@ def test_effective_permission_mode_no_spawner_is_none(tmp_path) -> None:
     runtime, _, _ = make_runtime(tmp_path)
     request = SessionCreateRequest(backend="claude_code", cwd="/tmp")
     assert runtime._effective_permission_mode(request) is None
+
+
+def test_require_existing_local_dir_accepts_dir_and_expands(tmp_path) -> None:
+    assert require_existing_local_dir(str(tmp_path)) == str(tmp_path)
+    # ``~`` expands to the (existing) home directory.
+    assert require_existing_local_dir("~") == str(Path.home())
+
+
+def test_require_existing_local_dir_rejects_missing(tmp_path) -> None:
+    with pytest.raises(HTTPException) as exc:
+        require_existing_local_dir(str(tmp_path / "nope"))
+    assert exc.value.status_code == 400
+    assert exc.value.detail == CWD_NOT_FOUND_DETAIL
+
+
+def test_require_existing_local_dir_rejects_file(tmp_path) -> None:
+    target = tmp_path / "regular.txt"
+    target.write_text("x")
+    with pytest.raises(HTTPException) as exc:
+        require_existing_local_dir(str(target))
+    assert exc.value.detail == CWD_NOT_FOUND_DETAIL
+
+
+@pytest.mark.asyncio
+async def test_create_session_rejects_missing_cwd(tmp_path) -> None:
+    runtime, _, _ = make_runtime(tmp_path)
+    request = SessionCreateRequest(
+        backend="claude_code", cwd=str(tmp_path / "does-not-exist")
+    )
+    with pytest.raises(HTTPException) as exc:
+        await runtime.create_session(request)
+    assert exc.value.status_code == 400
+    assert exc.value.detail == CWD_NOT_FOUND_DETAIL
 
 
 def test_session_events_page_surfaces_latest_todo_in_tail_mode(tmp_path) -> None:
@@ -1852,7 +1890,7 @@ async def test_create_session_direct_mode_uses_requested_backend(
     session = await runtime.create_session(
         SessionCreateRequest(
             backend="codex",
-            cwd="~/workspace",
+            cwd=str(tmp_path),
             launch_mode=LaunchMode.DIRECT,
             title="Direct launch",
             args=[],
@@ -1863,7 +1901,7 @@ async def test_create_session_direct_mode_uses_requested_backend(
     assert create_calls == [(session.id, LaunchMode.DIRECT)]
     assert session.backend == "codex"
     assert session.transport == "codex_app_server"
-    assert session.cwd == str(Path.home() / "workspace")
+    assert session.cwd == str(tmp_path)
 
 
 @pytest.mark.asyncio
@@ -1915,7 +1953,7 @@ async def test_create_session_tmux_wrapper_mode_routes_through_tmux(
     session = await runtime.create_session(
         SessionCreateRequest(
             backend="codex",
-            cwd="~/workspace",
+            cwd=str(tmp_path),
             launch_mode=LaunchMode.TMUX_WRAPPER,
             title="Wrapper launch",
             args=[],
@@ -1926,7 +1964,7 @@ async def test_create_session_tmux_wrapper_mode_routes_through_tmux(
     assert create_calls == [(session.id, "codex", LaunchMode.TMUX_WRAPPER)]
     assert session.backend == "codex"
     assert session.transport == "tmux"
-    assert session.cwd == str(Path.home() / "workspace")
+    assert session.cwd == str(tmp_path)
 
 
 @pytest.mark.asyncio
@@ -1981,7 +2019,7 @@ async def test_create_session_auto_mode_falls_back_to_tmux_when_backend_unavaila
     session = await runtime.create_session(
         SessionCreateRequest(
             backend="codex",
-            cwd="~/workspace",
+            cwd=str(tmp_path),
             title="Auto fallback",
             args=[],
             source_mode=SessionSource.MANAGED,
@@ -2029,7 +2067,7 @@ async def test_create_session_rejects_unsupported_model_effort_combo(
         await runtime.create_session(
             SessionCreateRequest(
                 backend="claude_code",
-                cwd="~/workspace",
+                cwd=str(tmp_path),
                 args=[],
                 model="sonnet",
                 effort="xhigh",
@@ -2114,7 +2152,7 @@ async def test_create_session_accepts_supported_model_effort_combo(
     session = await runtime.create_session(
         SessionCreateRequest(
             backend="claude_code",
-            cwd="~/workspace",
+            cwd=str(tmp_path),
             args=[],
             model="sonnet",
             effort="max",
@@ -2188,7 +2226,7 @@ async def test_create_session_explicit_transport_routes_to_tty_driver(
     session = await runtime.create_session(
         SessionCreateRequest(
             backend="claude_code",
-            cwd="~/workspace",
+            cwd=str(tmp_path),
             transport="claude_tty",
             title="TUI",
             args=[],
@@ -2231,7 +2269,7 @@ async def test_create_session_explicit_transport_takes_precedence_over_launch_mo
     session = await runtime.create_session(
         SessionCreateRequest(
             backend="claude_code",
-            cwd="~/workspace",
+            cwd=str(tmp_path),
             launch_mode=LaunchMode.TMUX_WRAPPER,
             transport="claude_tty",
             args=[],
@@ -2271,7 +2309,7 @@ async def test_create_session_explicit_cli_transport_uses_structured_adapter(
     session = await runtime.create_session(
         SessionCreateRequest(
             backend="claude_code",
-            cwd="~/workspace",
+            cwd=str(tmp_path),
             transport="claude_cli",
             args=[],
             source_mode=SessionSource.MANAGED,
@@ -2290,7 +2328,7 @@ async def test_create_session_rejects_unsupported_transport(tmp_path) -> None:
         await runtime.create_session(
             SessionCreateRequest(
                 backend="claude_code",
-                cwd="~/workspace",
+                cwd=str(tmp_path),
                 transport="codex_app_server",
                 args=[],
                 source_mode=SessionSource.MANAGED,
@@ -2333,7 +2371,7 @@ async def test_create_session_legacy_claude_tty_backend_routes_to_tty(
     session = await runtime.create_session(
         SessionCreateRequest(
             backend="claude_tty",
-            cwd="~/workspace",
+            cwd=str(tmp_path),
             args=[],
             source_mode=SessionSource.MANAGED,
         )
@@ -2376,7 +2414,7 @@ async def test_create_session_local_claude_defaults_to_tty_transport(
     session = await runtime.create_session(
         SessionCreateRequest(
             backend="claude_code",
-            cwd="~/workspace",
+            cwd=str(tmp_path),
             args=[],
             source_mode=SessionSource.MANAGED,
         )
@@ -2418,7 +2456,7 @@ async def test_create_session_default_transport_falls_back_when_driver_unavailab
     session = await runtime.create_session(
         SessionCreateRequest(
             backend="claude_code",
-            cwd="~/workspace",
+            cwd=str(tmp_path),
             args=[],
             source_mode=SessionSource.MANAGED,
         )
@@ -2461,7 +2499,7 @@ async def test_create_session_explicit_transport_skips_unavailable_fallback(
     session = await runtime.create_session(
         SessionCreateRequest(
             backend="claude_code",
-            cwd="~/workspace",
+            cwd=str(tmp_path),
             transport="claude_tty",
             args=[],
             source_mode=SessionSource.MANAGED,

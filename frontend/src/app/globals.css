@@ -537,6 +537,79 @@ html[data-theme="light"] .import-thread-chip {
   min-width: 0;
 }
 
+/* Import-history toggle: an in-flow instrument, so flat token surfaces and a
+   solid hairline — no glass. The capsule track and round thumb are the one
+   sanctioned use of --radius-pill for a true capsule/circle. */
+.import-history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.import-history-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.import-history-label {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.import-history-hint {
+  font-size: 0.75rem;
+  color: var(--muted-soft);
+}
+
+.switch {
+  flex: none;
+  width: 42px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-input);
+  cursor: pointer;
+  position: relative;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease;
+}
+
+.switch[aria-checked="true"] {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  border-color: var(--accent);
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-pill);
+  background: var(--muted);
+  transform: translateY(-50%);
+  transition:
+    transform 140ms ease,
+    background 140ms ease;
+}
+
+.switch[aria-checked="true"] .switch-thumb {
+  transform: translate(18px, -50%);
+  background: var(--accent-strong);
+}
+
+.switch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
 .resume-panel-loading,
 .resume-panel-empty {
   margin: 0;

@@ -371,16 +371,16 @@ export function ResumeThreadPanel({
                     <div className="import-thread-cta">
                       {canDelete ? (
                         <button
-                          className="secondary danger"
+                          className="link-button danger-link action-chip"
                           disabled={busy}
                           type="button"
                           onClick={() => void handleDelete(thread)}
                         >
-                          {isDeleting ? "deleting…" : "delete"}
+                          {isDeleting ? "Deleting…" : "Delete"}
                         </button>
                       ) : null}
                       <button
-                        className="secondary"
+                        className="link-button action-chip"
                         disabled={busy}
                         type="button"
                         onClick={() => void handleImport(thread)}

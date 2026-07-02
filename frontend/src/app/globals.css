@@ -608,6 +608,21 @@ html[data-theme="light"] .import-thread-chip {
   background: var(--accent-strong);
 }
 
+/* Slight hover feedback: a hint of accent on the track and a brighter thumb —
+   no lift, in keeping with the flat in-flow instrument. */
+.switch:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line-strong));
+}
+
+.switch:not([aria-checked="true"]):hover .switch-thumb {
+  background: color-mix(in srgb, var(--muted) 55%, var(--text));
+}
+
+.switch[aria-checked="true"]:hover {
+  background: color-mix(in srgb, var(--accent) 42%, transparent);
+  border-color: var(--accent-strong);
+}
+
 .switch:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);

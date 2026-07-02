@@ -858,7 +858,6 @@ html[data-theme="light"] .primary:disabled {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   box-shadow:
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
@@ -3119,7 +3118,6 @@ html[data-theme="light"] .inline-code {
   line-height: 1;
   cursor: pointer;
   backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
   opacity: 0;
   transform: translateY(-2px);
   transition:
@@ -3215,7 +3213,6 @@ html[data-theme="light"] .inline-code {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
 }
 
 .task-dock-meter {
@@ -3364,7 +3361,6 @@ html[data-theme="light"] .task-dock-scrim {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   pointer-events: auto;
 }
 
@@ -3498,7 +3494,6 @@ html[data-theme="light"] .task-dock-scrim {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
 }
 
 .sq-dock-row {
@@ -3625,7 +3620,6 @@ html[data-theme="light"] .sq-dock-scrim {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   pointer-events: auto;
 }
 
@@ -4017,7 +4011,6 @@ html[data-theme="light"] .sq-dock-scrim {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
 }
 
 /* The toprow is now a thin "context rail": a single muted line carrying the
@@ -4150,7 +4143,6 @@ html[data-theme="light"] .composer-context-trigger.tone-danger {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   display: grid;
   gap: 18px;
   z-index: 30;
@@ -5895,7 +5887,6 @@ html[data-theme="light"] .composer-tune-trigger.open {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   display: grid;
   gap: 12px;
   z-index: 30;
@@ -6187,7 +6178,6 @@ html[data-theme="light"] .composer-overflow-trigger.open {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   display: grid;
   gap: 2px;
   z-index: 30;
@@ -6643,7 +6633,6 @@ html[data-theme="light"] .composer-send {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   transition:
     border-color 200ms ease,
     color 200ms ease;
@@ -6685,7 +6674,6 @@ html[data-theme="light"] .composer-send {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   transition: border-color 160ms ease;
 }
 
@@ -7362,7 +7350,6 @@ html[data-theme="light"] .ask-question-note-input {
   justify-content: center;
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
   padding: 16px;
 }
 
@@ -7378,7 +7365,6 @@ html[data-theme="light"] .ask-question-note-input {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -7636,7 +7622,6 @@ html[data-theme="light"] .ask-question-note-input {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   z-index: 20;
   display: grid;
   align-content: start;
@@ -8064,7 +8049,6 @@ html[data-theme="light"] .xterm-rows span[style*="color:#00cdcd"] {
   align-items: center;
   justify-content: center;
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   touch-action: manipulation;
   -webkit-user-select: none;
   user-select: none;
@@ -8194,7 +8178,6 @@ html[data-theme="light"] .term-keys button:hover {
   border-top: 1px solid var(--glass-line);
   background: var(--glass-bg);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   /* The handle row owns the home-indicator inset on iOS so the
      tappable pill never sits under the system gesture area. The
      keybar above drops its own inset (rule below) so the gap shows up
@@ -9397,7 +9380,6 @@ html[data-theme="light"] .badge.schedule-status.sent {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
 }
 
 .sched-dock-row {
@@ -9498,7 +9480,6 @@ html[data-theme="light"] .sched-dock-scrim {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   pointer-events: auto;
 }
 
@@ -10377,7 +10358,6 @@ html[data-theme="light"] .advanced-warning {
   padding: 12px;
   background: var(--glass-bg-thick);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-line);
   border-radius: var(--radius-glass);
   box-shadow:
@@ -10435,7 +10415,6 @@ html[data-theme="light"] .advanced-warning {
   justify-content: center;
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
   padding: 16px;
 }
 
@@ -10451,7 +10430,6 @@ html[data-theme="light"] .advanced-warning {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -10681,7 +10659,6 @@ html[data-theme="light"] .session-switcher-row.selected {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   transition:
     border-color 0.16s ease,
     background 0.16s ease;
@@ -12162,7 +12139,6 @@ html[data-theme="light"] .session-switcher-row.selected {
   overscroll-behavior: contain;
   background: var(--glass-bg-thick);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   border-right: 1px solid var(--glass-line);
   box-shadow: var(--shadow);
   /* Inset the top too, not just the left: as a wide side-dock (iPad/desktop) the
@@ -13826,7 +13802,6 @@ html[data-theme="light"] .wp-hl {
   justify-content: center;
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
   padding: 16px;
 }
 
@@ -13844,7 +13819,6 @@ html[data-theme="light"] .wp-hl {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   animation: ssh-connect-in 200ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 

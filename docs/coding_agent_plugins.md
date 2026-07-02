@@ -332,6 +332,26 @@ serves to the frontend (`{models, default_model_id, default_model_label,
 default_effort, supports_free_text}`). `list_threads` returns plugin-specific
 summary objects; the API serialises via `model_dump`.
 
+`import_thread` adopts an externally-created native thread into a brand-new
+session. When the import request's `import_history` flag is set (it defaults to
+`True` on every backend's import-request schema), the plugin also **replays the
+thread's prior conversation into the new session's transcript** so an imported
+thread reads as continuous rather than starting empty. The plugin does this by
+reading the native history (Claude's `~/.claude/projects` transcript JSONL,
+Codex's `thread_read(include_turns=True)`, OpenCode's `GET /session/{id}/message`)
+and converting each record into `EventRecord`s, then calling
+`runtime.seed_thread_history(session_id, reader, enabled=request.import_history)`
+after `create_session` and before the "Imported…" system note. Two caveats make
+this a purpose-built converter rather than a call into the live `normalize.py`:
+the live normalizers **suppress user turns** (they arrive at the input boundary
+live) and **delta-streamed assistant text** (no snapshot equivalent), so the
+converter must re-add both from the historical snapshot; and Codex tool metadata
+lives in the adapter, not the normalizer, so its converter reproduces the full
+`item_id`/`item_type`/`tool_name`/`payload.item` envelope and synthesizes the
+tool_call+tool_result pair. `seed_thread_history` swallows read/convert failures
+and degrades to a plain resume with a note, so history import never blocks the
+import. The generic `tmux`-wrapper import path does not seed history today.
+
 ### Slash routing & per-event hooks
 
 ```python

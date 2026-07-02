@@ -487,11 +487,47 @@ def _map_historical_assistant_parts(
             if mapped is not None:
                 events.append(mapped)
         elif part_type == "tool":
-            kind, text, metadata = _map_tool_event(part, session_id)
-            if not text and not metadata:
-                continue
-            ts = _tool_part_timestamp(part) or fallback_ts
-            events.append((ts, kind, text, metadata))
+            events.extend(_map_historical_tool_part(part, session_id, fallback_ts))
+    return events
+
+
+def _map_historical_tool_part(
+    part: dict[str, Any], session_id: str, fallback_ts: datetime
+) -> list[tuple[datetime, EventKind, str, dict[str, Any]]]:
+    # A REST message snapshot carries only a tool part's terminal state, but
+    # the live SSE path emits a TOOL_CALL (pending/running) before the
+    # TOOL_RESULT (completed/error). Synthesize the missing call half from the
+    # terminal snapshot so an imported tool renders as a paired card (the
+    # frontend pairs on call_id/tool_use_id) instead of a lone result.
+    events: list[tuple[datetime, EventKind, str, dict[str, Any]]] = []
+    state = _as_dict(part.get("state")) or {}
+    end_ts = _tool_part_timestamp(part) or fallback_ts
+    if state.get("status") in ("completed", "error"):
+        call_id = part.get("callID", "")
+        tool_name = part.get("tool", "tool")
+        tool_input = state.get("input", {})
+        start_ts = _timestamp_from_ms(_as_dict(state.get("time")), "start") or end_ts
+        events.append(
+            (
+                start_ts,
+                EventKind.TOOL_CALL,
+                f"{tool_name}({json.dumps(tool_input, indent=2)})",
+                {
+                    "method": "tool.pending",
+                    "item_id": call_id,
+                    "item_type": "tool_use",
+                    "call_id": call_id,
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                    "tool_use_id": call_id,
+                    "payload": part,
+                    "status": SessionStatus.RUNNING,
+                },
+            )
+        )
+    kind, text, metadata = _map_tool_event(part, session_id)
+    if text or metadata:
+        events.append((end_ts, kind, text, metadata))
     return events
 
 

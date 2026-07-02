@@ -177,13 +177,21 @@ def test_assistant_tool_part_reuses_map_tool_event_and_keeps_tool_use_id() -> No
 
     events = historical_events_from_messages(messages)
 
-    assert len(events) == 1
-    ts, kind, text, metadata = events[0]
-    assert kind == EventKind.TOOL_RESULT
-    assert text.startswith("Result for Read:")
-    assert metadata["tool_use_id"] == "call_1"
-    assert metadata["item_id"] == "call_1"
-    assert ts == datetime.fromtimestamp(1.5, tz=UTC)
+    # A completed tool snapshot is replayed as a paired TOOL_CALL + TOOL_RESULT
+    # (the live SSE path emits both across state updates), sharing tool_use_id.
+    assert [kind for _, kind, _, _ in events] == [
+        EventKind.TOOL_CALL,
+        EventKind.TOOL_RESULT,
+    ]
+    call_ts, _, call_text, call_meta = events[0]
+    assert call_text.startswith("Read(")
+    assert call_meta["tool_use_id"] == "call_1"
+    assert call_ts == datetime.fromtimestamp(1.0, tz=UTC)
+    result_ts, _, result_text, result_meta = events[1]
+    assert result_text.startswith("Result for Read:")
+    assert result_meta["tool_use_id"] == "call_1"
+    assert result_meta["item_id"] == "call_1"
+    assert result_ts == datetime.fromtimestamp(1.5, tz=UTC)
 
 
 def test_ordered_thread_preserves_user_then_assistant_order() -> None:
@@ -223,6 +231,7 @@ def test_ordered_thread_preserves_user_then_assistant_order() -> None:
     kinds = [kind for _, kind, _, _ in events]
     assert kinds == [
         EventKind.USER_INPUT,
+        EventKind.TOOL_CALL,
         EventKind.TOOL_RESULT,
         EventKind.AGENT_OUTPUT,
     ]

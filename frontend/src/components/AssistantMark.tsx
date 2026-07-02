@@ -1,6 +1,7 @@
-/* The assistant's identity mark: a tilted compass needle — north half
- * filled, south hollow — inside a quiet ring. Draws in currentColor and
- * scales with the surrounding font-size. */
+/* The assistant's identity mark: the conventional AI sparkle — a large
+ * four-point star with a small companion — drawn as a path rather than a
+ * font glyph so it renders with consistent weight at any size. Uses
+ * currentColor and scales with the surrounding font-size. */
 export function AssistantMark({ className }: { className?: string }) {
   return (
     <svg
@@ -11,25 +12,14 @@ export function AssistantMark({ className }: { className?: string }) {
       aria-hidden="true"
       focusable="false"
     >
-      <circle
-        cx="12"
-        cy="12"
-        r="8.8"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        opacity="0.45"
+      <path
+        fill="currentColor"
+        d="M11 5C11.72 9.64 14.36 12.28 19 13C14.36 13.72 11.72 16.36 11 21C10.28 16.36 7.64 13.72 3 13C7.64 12.28 10.28 9.64 11 5Z"
       />
-      <g transform="rotate(45 12 12)">
-        <path d="M12 4.9 L14.6 12 L9.4 12 Z" fill="currentColor" />
-        <path
-          d="M9.4 12 L14.6 12 L12 19.1 Z"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.4"
-          strokeLinejoin="round"
-        />
-      </g>
+      <path
+        fill="currentColor"
+        d="M18.5 2C18.82 4.03 19.97 5.18 22 5.5C19.97 5.82 18.82 6.97 18.5 9C18.18 6.97 17.03 5.82 15 5.5C17.03 5.18 18.18 4.03 18.5 2Z"
+      />
     </svg>
   );
 }

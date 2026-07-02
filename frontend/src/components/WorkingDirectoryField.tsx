@@ -59,14 +59,7 @@ export function WorkingDirectoryField({
       />
       {error ? (
         <span className="field-error" id={errorId} role="alert">
-          <span className="field-error-msg">
-            Working directory not found: <code>{error}</code>
-            <span className="field-error-hint">
-              {targetLabel
-                ? `Check the path exists on ${targetLabel}.`
-                : "Check the path exists on this machine."}
-            </span>
-          </span>
+          Directory not found: <code>{error}</code>
         </span>
       ) : null}
       {hasRecents ? (

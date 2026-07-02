@@ -692,41 +692,39 @@ html[data-theme="light"] .field select {
     animation: field-shake 220ms ease-in-out;
   }
 
-  .field-error {
+  .field .field-error {
     animation: field-error-in 140ms ease-out both;
   }
 }
 
-/* Inline validation message beneath a field. Leads with a currentColor lamp
-   dot — the same status vocabulary as badges — and wraps long paths so it can
-   never overflow the launch card. */
-.field-error {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
+/* Inline validation message beneath a field. The `.field .field-error`
+   specificity (and the resets below) override `.field span`, which otherwise
+   styles this as an uppercase mono label. Leads with a currentColor lamp dot —
+   the same status vocabulary as badges — and wraps long paths naturally. */
+.field .field-error {
+  display: block;
   color: var(--danger);
+  font-family: var(--font-sans);
   font-size: 0.8rem;
   line-height: 1.4;
+  letter-spacing: normal;
+  text-transform: none;
   overflow-wrap: anywhere;
 }
 
-.field-error::before {
+.field .field-error::before {
   content: "";
-  flex: none;
+  display: inline-block;
   width: 6px;
   height: 6px;
-  margin-top: 0.35em;
+  margin-right: 7px;
   border-radius: var(--radius-pill);
   background: currentColor;
+  vertical-align: middle;
 }
 
-.field-error code {
+.field .field-error code {
   font-family: var(--font-mono);
-}
-
-.field-error-hint {
-  color: color-mix(in srgb, var(--danger) 70%, var(--muted));
-  margin-left: 6px;
 }
 
 @keyframes field-error-in {

@@ -7,8 +7,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Remote-control surface for Claude Code and Codex sessions",
     start_url: "/",
     display: "standalone",
-    background_color: "#06080b",
-    theme_color: "#06080b",
+    background_color: "#0a0d12",
+    theme_color: "#0a0d12",
     icons: [
       {
         src: "/icons/icon-192.png",

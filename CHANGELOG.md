@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/kaiitunnz/waypoint/compare/v0.3.0...v0.4.0) (2026-07-02)
+
+
+### Features
+
+* restyle the design system — flat instruments, liquid-glass chrome ([#203](https://github.com/kaiitunnz/waypoint/issues/203)) ([686cd13](https://github.com/kaiitunnz/waypoint/commit/686cd13bf6002c07937cfb4469a7618ec53d0d6d))
+
+
+### Bug Fixes
+
+* keep the task dock visible for out-of-window todos ([#205](https://github.com/kaiitunnz/waypoint/issues/205)) ([53ca3b8](https://github.com/kaiitunnz/waypoint/commit/53ca3b82801860c2667fe32ccef67e2571ad5bf1))
+
 ## [0.3.0](https://github.com/kaiitunnz/waypoint/compare/v0.2.0...v0.3.0) (2026-07-01)
 
 

@@ -10688,7 +10688,8 @@ html[data-theme="light"] .session-switcher-row.selected {
 }
 
 .assistant-fab-glyph {
-  font-size: 1.05rem;
+  display: inline-flex;
+  font-size: 1.15rem;
   line-height: 1;
 }
 
@@ -10703,7 +10704,7 @@ html[data-theme="light"] .session-switcher-row.selected {
     display: none;
   }
   .assistant-fab-glyph {
-    font-size: 1.3rem;
+    font-size: 1.5rem;
   }
 }
 
@@ -10732,11 +10733,11 @@ html[data-theme="light"] .session-switcher-row.selected {
   width: 36px;
   height: 36px;
   flex: none;
-  border-radius: 11px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
   color: var(--accent-strong);
-  font-size: 1.1rem;
+  font-size: 1.3rem;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
@@ -10960,13 +10961,8 @@ html[data-theme="light"] .session-switcher-row.selected {
 .assistant-glyph-lg {
   width: 56px;
   height: 56px;
-  border-radius: 18px;
-  font-size: 1.8rem;
-  /* Soft accent halo grounds the empty/disabled state and echoes the
-     page's radial atmosphere. */
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--accent) 20%, transparent),
-    0 0 0 8px color-mix(in srgb, var(--accent) 8%, transparent);
+  border-radius: var(--radius);
+  font-size: 2rem;
 }
 
 .assistant-snippet {
@@ -11039,7 +11035,7 @@ html[data-theme="light"] .session-switcher-row.selected {
   justify-content: center;
   width: 46px;
   height: 46px;
-  border-radius: 15px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
   box-shadow:

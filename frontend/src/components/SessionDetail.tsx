@@ -98,6 +98,7 @@ import { CommandSuggestions } from "@/components/CommandSuggestions";
 import { FileMentions } from "@/components/FileMentions";
 import { type XTerminalHandle } from "@/components/XTerminal";
 import { ApprovalRequestCard, PlanApprovalCard } from "@/components/ApprovalCard";
+import { AssistantMark } from "@/components/AssistantMark";
 import {
   PendingUserInputCard,
   TranscriptCard,
@@ -3428,7 +3429,7 @@ const ReplyComposer = memo(function ReplyComposer({
                           }
                         }}
                       >
-                        <span className="glyph">⁂</span>
+                        <span className="glyph">⌫</span>
                         Clear context
                       </button>
                       {assistantExited ? (
@@ -4097,7 +4098,7 @@ function AssistantWelcome({
   return (
     <div className="assistant-welcome">
       <span className="assistant-welcome-glyph" aria-hidden="true">
-        ⁂
+        <AssistantMark />
       </span>
       <p className="assistant-welcome-title">Ask your assistant</p>
       <p className="assistant-welcome-sub">

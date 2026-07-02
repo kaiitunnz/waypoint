@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
+import { AssistantMark } from "@/components/AssistantMark";
 import { BackendSwitcher } from "@/components/BackendSwitcher";
 import { BoardPanel } from "@/components/BoardPanel";
 import { LaunchPanel } from "@/components/LaunchPanel";
@@ -1024,7 +1025,7 @@ export default function HomePage() {
           aria-label="Open personal assistant"
         >
           <span className="assistant-fab-glyph" aria-hidden="true">
-            ⁂
+            <AssistantMark />
           </span>
           <span className="assistant-fab-label">Assistant</span>
         </Link>

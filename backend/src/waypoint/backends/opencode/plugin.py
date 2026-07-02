@@ -1607,7 +1607,7 @@ class OpenCodePlugin(DefaultLaunchContract):
         await runtime.seed_thread_history(
             session.id,
             reader=read_history,
-            enabled=getattr(request, "import_history", True),
+            enabled=request.import_history,
         )
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
         await runtime._record_system_event(

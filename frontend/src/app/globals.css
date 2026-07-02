@@ -471,22 +471,9 @@ html[data-theme="light"] .import-thread-chip {
   margin-left: auto;
 }
 
-.import-thread-cta button.secondary {
-  min-height: 32px;
-  padding: 0 14px;
+.import-thread-cta .link-button {
   font-family: var(--font-mono);
-  font-size: 0.76rem;
-  letter-spacing: 0.06em;
-  text-transform: lowercase;
-}
-
-/* The delete action is a danger-styled sibling of Import; keep the row-hover
-   accent recolor off it so it stays in its danger hue. */
-.import-thread-row:hover
-  .import-thread-cta
-  button.secondary:not(.danger):not(:disabled) {
-  border-color: rgba(200, 169, 106, 0.5);
-  color: var(--accent-strong);
+  font-size: 0.78rem;
 }
 
 .import-thread-footer {
@@ -3565,8 +3552,8 @@ html[data-theme="light"] .task-dock-scrim {
   }
 
   .task-dock.expanded .task-dock-strip {
-    border-top-left-radius: var(--radius);
-    border-top-right-radius: var(--radius);
+    border-top-left-radius: var(--radius-glass);
+    border-top-right-radius: var(--radius-glass);
   }
 }
 
@@ -3822,8 +3809,8 @@ html[data-theme="light"] .sq-dock-scrim {
   }
 
   .sq-dock.expanded .sq-dock-strip {
-    border-top-left-radius: var(--radius);
-    border-top-right-radius: var(--radius);
+    border-top-left-radius: var(--radius-glass);
+    border-top-right-radius: var(--radius-glass);
   }
 }
 
@@ -8791,7 +8778,7 @@ html[data-theme="light"] .term-compose-send {
    the touch target without drawing a chip around it. */
 .session-card-actions .link-button.pin-link,
 .session-card-actions .link-button.danger-link,
-.link-button.danger-link.action-chip {
+.link-button.action-chip {
   align-self: center;
   margin-top: 0;
   padding: 6px 10px;
@@ -8802,7 +8789,7 @@ html[data-theme="light"] .term-compose-send {
 
 .session-card-actions .link-button.pin-link:hover:not(:disabled),
 .session-card-actions .link-button.danger-link:hover:not(:disabled),
-.link-button.danger-link.action-chip:hover:not(:disabled) {
+.link-button.action-chip:hover:not(:disabled) {
   background: color-mix(in srgb, currentColor 10%, transparent);
 }
 

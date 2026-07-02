@@ -43,6 +43,7 @@ import {
   setSessionPinned,
   setSessionTitle,
   SSH_MASTER_REQUIRED_DETAIL,
+  CWD_NOT_FOUND_DETAIL,
 } from "@/lib/api";
 import {
   clearToken,
@@ -127,6 +128,9 @@ export default function HomePage() {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [assistant, setAssistant] = useState<AssistantSummary | null>(null);
   const [error, setError] = useState("");
+  // The working directory the last New launch was rejected for (400
+  // cwd-not-found), surfaced inline on the launch form's cwd field.
+  const [cwdError, setCwdError] = useState<string | null>(null);
   const [connection, setConnection] = useState<ConnectionState>("idle");
   const [defaultBackend, setDefaultBackend] = useState<Backend>("codex");
   const [defaultCwd, setDefaultCwd] = useState("~/");
@@ -211,6 +215,9 @@ export default function HomePage() {
 
   useEffect(() => {
     setRecentCwds(readRecentCwds(host, activeLaunchTargetId));
+    // A cwd rejection is target-specific ("not found on <target>"), so drop it
+    // when the target changes to avoid showing a now-irrelevant error.
+    setCwdError(null);
   }, [activeLaunchTargetId, host]);
 
   // The `connected` flag from /api/me is a cached snapshot; the master may have
@@ -539,6 +546,7 @@ export default function HomePage() {
     configOverrides: string[] = [],
     permissionMode: string | null = null,
   ) {
+    setCwdError(null);
     try {
       const session = await createSession(host, token, {
         backend,
@@ -562,6 +570,15 @@ export default function HomePage() {
     } catch (createError) {
       if (isAuthError(createError)) {
         resetAuthState("Session expired. Log in again.");
+        return;
+      }
+      if (
+        createError instanceof Error &&
+        createError.message === CWD_NOT_FOUND_DETAIL
+      ) {
+        // A field-level validation error: surface it inline on the working
+        // directory input rather than the global banner.
+        setCwdError(cwd);
         return;
       }
       if (
@@ -982,6 +999,8 @@ export default function HomePage() {
           onImportThread={handleImportThread}
           onCreateSchedule={handleCreateSchedule}
           onAuthFailure={handleAuthFailure}
+          cwdError={cwdError}
+          onClearCwdError={() => setCwdError(null)}
         />
       ) : null}
       {token ? (

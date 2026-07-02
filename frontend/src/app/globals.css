@@ -676,6 +676,82 @@ html[data-theme="light"] .field select {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
+/* Invalid field: the same instrument reading, in the danger hue. Mirrors the
+   accent focus ring above so the treatment reads as one system. */
+.field input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.field input[aria-invalid="true"]:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 20%, transparent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .field input[aria-invalid="true"] {
+    animation: field-shake 220ms ease-in-out;
+  }
+
+  .field .field-error {
+    animation: field-error-in 140ms ease-out both;
+  }
+}
+
+/* Inline validation message beneath a field. The `.field .field-error`
+   specificity (and the resets below) override `.field span`, which otherwise
+   styles this as an uppercase mono label. Leads with a currentColor lamp dot —
+   the same status vocabulary as badges — and wraps long paths naturally. */
+.field .field-error {
+  display: block;
+  color: var(--danger);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  letter-spacing: normal;
+  text-transform: none;
+  overflow-wrap: anywhere;
+}
+
+.field .field-error::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 7px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+  vertical-align: middle;
+}
+
+.field .field-error code {
+  font-family: var(--font-mono);
+}
+
+@keyframes field-error-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes field-shake {
+  10%,
+  90% {
+    transform: translateX(-1px);
+  }
+  30%,
+  70% {
+    transform: translateX(2px);
+  }
+  50% {
+    transform: translateX(-2px);
+  }
+}
+
 .primary,
 .secondary,
 .danger {

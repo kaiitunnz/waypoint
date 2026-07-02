@@ -260,6 +260,10 @@ export async function createSession(
 // password-auth SSH host whose ControlMaster is not connected yet.
 export const SSH_MASTER_REQUIRED_DETAIL = "ssh-master-required";
 
+// Detail token the backend returns (HTTP 400) when a launch's working
+// directory does not exist; the client surfaces it inline on the cwd field.
+export const CWD_NOT_FOUND_DETAIL = "cwd-not-found";
+
 export interface LaunchTargetConnectResult {
   target_id: string;
   connected: boolean;

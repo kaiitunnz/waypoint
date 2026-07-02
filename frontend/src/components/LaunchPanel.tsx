@@ -76,6 +76,9 @@ interface LaunchPanelProps {
   ) => Promise<void>;
   onCreateSchedule: (payload: ScheduleCreateRequest) => Promise<void>;
   onAuthFailure?: () => void;
+  // The cwd the backend rejected as nonexistent on the last New launch, or null.
+  cwdError?: string | null;
+  onClearCwdError?: () => void;
 }
 
 export function LaunchPanel({
@@ -96,6 +99,8 @@ export function LaunchPanel({
   onDeleteThread,
   onCreateSchedule,
   onAuthFailure,
+  cwdError,
+  onClearCwdError,
 }: LaunchPanelProps) {
   const [mode, setMode] = useState<PanelMode>("new");
   const form = useLaunchForm({ defaultBackend, defaultCwd, launchTargetId, catalog });
@@ -196,7 +201,15 @@ export function LaunchPanel({
           <h3>Start a session</h3>
           <p className="muted">{subhead}</p>
         </div>
-        <LaunchModeChooser mode={mode} onChange={setMode} />
+        <LaunchModeChooser
+          mode={mode}
+          onChange={(next) => {
+            // The cwd field is shared across modes; a rejection from the New
+            // form is stale once we leave it, so clear it on any mode switch.
+            onClearCwdError?.();
+            setMode(next);
+          }}
+        />
       </div>
 
       {mode === "new" ? (
@@ -212,6 +225,8 @@ export function LaunchPanel({
             catalog={catalog}
             busy={formBusy}
             onAuthFailure={onAuthFailure}
+            cwdError={cwdError}
+            onClearCwdError={onClearCwdError}
           />
           <div className="launch-actions">
             <span className="grow" />

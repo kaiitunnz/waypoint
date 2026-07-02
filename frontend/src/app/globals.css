@@ -503,10 +503,6 @@ html[data-theme="light"] .import-thread-chip {
   text-transform: lowercase;
 }
 
-html[data-theme="light"] .import-thread-footer {
-  background: rgba(220, 210, 190, 0.45);
-}
-
 .import-thread-pager {
   display: flex;
   align-items: center;
@@ -574,7 +570,7 @@ html[data-theme="light"] .import-thread-footer {
 /* The existing ::before color-bar reuses backend tone — visible at rest
    so users can scan provenance, full-strength on hover. */
 .resume-thread-row::before {
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--text-strong) 9%, transparent);
 }
 
 .resume-thread-row.is-codex::before {
@@ -1252,10 +1248,6 @@ html[data-theme="light"] .clipboard-prompt__arrow {
   flex-shrink: 0;
 }
 
-html[data-theme="light"] .session-pulse {
-  background: rgba(240, 236, 226, 0.8);
-}
-
 .session-pulse-dot {
   width: 8px;
   height: 8px;
@@ -1318,7 +1310,6 @@ html[data-theme="light"] .session-pulse.open.warn {
 }
 
 html[data-theme="light"] .session-pulse.open.dim {
-  background: rgba(240, 236, 226, 0.8);
   border-color: var(--line);
 }
 
@@ -1446,10 +1437,6 @@ html[data-theme="light"] .session-pulse.reconnecting .session-pulse-dot {
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--bg-deep) 60%, transparent);
   gap: 2px;
-}
-
-html[data-theme="light"] .segmented {
-  background: rgba(222, 213, 196, 0.55);
 }
 
 .segmented-item {
@@ -2063,8 +2050,8 @@ details.tool-disclosure[open] .tool-glyph.todo {
   height: 30px;
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--line-soft);
-  color: var(--text-soft);
+  border: 1px solid var(--line);
+  color: var(--muted);
   font-size: 1.05rem;
   line-height: 1;
   cursor: pointer;
@@ -2086,7 +2073,7 @@ details.tool-disclosure[open] .tool-glyph.todo {
 }
 
 .message-copy:hover {
-  background: var(--surface-2);
+  background: var(--bg-card-soft);
   border-color: var(--line-strong);
   color: var(--text-strong);
 }
@@ -2220,10 +2207,6 @@ details.tool-disclosure[open] .tool-glyph.todo {
   border-radius: var(--radius);
   background: var(--bg-input);
   text-align: center;
-}
-
-html[data-theme="light"] .transcript-empty {
-  background: rgba(235, 230, 218, 0.45);
 }
 
 .transcript-empty-pulse {
@@ -2540,10 +2523,6 @@ html[data-theme="light"] .diff-preview-note {
   background: var(--bg-input);
 }
 
-html[data-theme="light"] .diff-preview-file {
-  background: rgba(255, 252, 245, 0.66);
-}
-
 .diff-file-header {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -2594,7 +2573,7 @@ html[data-theme="light"] .diff-change-type {
   margin: 0;
   max-height: 360px;
   overflow: auto;
-  background: rgba(5, 7, 10, 0.52);
+  background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
   color: #cbd4e2;
   font-family: var(--font-mono);
   font-size: 0.78rem;
@@ -2602,7 +2581,6 @@ html[data-theme="light"] .diff-change-type {
 }
 
 html[data-theme="light"] .diff-code {
-  background: rgba(246, 242, 232, 0.8);
   color: var(--text);
 }
 
@@ -2937,17 +2915,12 @@ html[data-theme="light"] .tool-call-run-children {
 }
 
 .approval-plan {
-  border-left: 2px solid rgba(200, 169, 106, 0.4);
   padding: 6px 12px;
-  background: var(--bg-input);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-input));
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
   border-radius: var(--radius-sm);
   min-width: 0;
   overflow: hidden;
-}
-
-html[data-theme="light"] .approval-plan {
-  background: rgba(235, 230, 218, 0.6);
-  border-left-color: rgba(184, 130, 14, 0.4);
 }
 
 .approval-shell {
@@ -2959,10 +2932,6 @@ html[data-theme="light"] .approval-plan {
   font-family: var(--font-mono);
   font-size: 0.88rem;
   overflow-x: auto;
-}
-
-html[data-theme="light"] .approval-shell {
-  background: rgba(228, 222, 208, 0.7);
 }
 
 .approval-note-wrap {
@@ -3006,7 +2975,7 @@ html[data-theme="light"] .approval-shell {
 
 .approval-pager-btn:hover:not(:disabled) {
   border-color: var(--line-strong);
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--text-strong) 6%, transparent);
 }
 
 .approval-pager-btn:disabled {
@@ -3113,8 +3082,8 @@ html[data-theme="light"] .inline-code {
   height: 28px;
   border-radius: 7px;
   background: color-mix(in srgb, var(--bg-deep) 60%, transparent);
-  border: 1px solid var(--line-soft);
-  color: var(--text-soft);
+  border: 1px solid var(--line);
+  color: var(--muted);
   font-size: 0.95rem;
   line-height: 1;
   cursor: pointer;
@@ -3137,7 +3106,7 @@ html[data-theme="light"] .inline-code {
 }
 
 .code-copy:hover {
-  background: var(--surface-2);
+  background: var(--bg-card-soft);
   border-color: var(--line-strong);
   color: var(--text-strong);
 }
@@ -3425,13 +3394,11 @@ html[data-theme="light"] .task-dock-scrim {
    * restore its own border, rounding, and a downward shadow, and give the
    * strip its full rounding back. */
   .task-dock.expanded .task-dock-panel {
-    border-bottom: 1px solid var(--line-strong);
-    border-radius: var(--radius);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
-  }
-
-  html[data-theme="light"] .task-dock.expanded .task-dock-panel {
-    box-shadow: 0 12px 30px rgba(60, 50, 30, 0.16);
+    border-bottom: 1px solid var(--glass-line);
+    border-radius: var(--radius-glass);
+    box-shadow:
+      inset 0 1px 0 var(--glass-hi),
+      var(--shadow);
   }
 
   .task-dock.expanded .task-dock-strip {
@@ -3684,13 +3651,11 @@ html[data-theme="light"] .sq-dock-scrim {
   }
 
   .sq-dock.expanded .sq-dock-panel {
-    border-bottom: 1px solid var(--line-strong);
-    border-radius: var(--radius);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
-  }
-
-  html[data-theme="light"] .sq-dock.expanded .sq-dock-panel {
-    box-shadow: 0 12px 30px rgba(60, 50, 30, 0.16);
+    border-bottom: 1px solid var(--glass-line);
+    border-radius: var(--radius-glass);
+    box-shadow:
+      inset 0 1px 0 var(--glass-hi),
+      var(--shadow);
   }
 
   .sq-dock.expanded .sq-dock-strip {
@@ -3724,9 +3689,9 @@ html[data-theme="light"] .sq-dock-scrim {
 .sq-card {
   position: relative;
   min-width: 0;
-  border-left: 3px solid var(--accent);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  padding: 10px 4px 12px 14px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px 12px 14px;
 }
 
 .sq-card + .sq-card {
@@ -4056,10 +4021,6 @@ html[data-theme="light"] .sq-dock-scrim {
   flex: 0 0 auto;
 }
 
-html[data-theme="light"] .composer-connection {
-  background: rgba(235, 230, 218, 0.75);
-}
-
 .composer-context {
   position: relative;
   display: inline-flex;
@@ -4210,10 +4171,6 @@ html[data-theme="light"] .usage-block-mark {
   font-size: 0.62rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-}
-
-html[data-theme="light"] .usage-block-tag {
-  background: rgba(235, 230, 218, 0.78);
 }
 
 /* Refresh button — brass-tinted, subtle hover */
@@ -4499,10 +4456,6 @@ html[data-theme="light"] .usage-chips {
   overflow: hidden;
 }
 
-html[data-theme="light"] .usage-window {
-  background: rgba(255, 252, 245, 0.55);
-}
-
 /* Tone-driven left accent stripe on each window */
 .usage-window::before {
   content: "";
@@ -4586,10 +4539,6 @@ html[data-theme="light"] .usage-window {
   border: 1px dashed var(--line);
   border-radius: var(--radius-sm);
   background: var(--bg-input);
-}
-
-html[data-theme="light"] .usage-empty {
-  background: rgba(235, 230, 218, 0.4);
 }
 
 /* Status footer — single-line monospace readout with bullet separators */
@@ -5626,7 +5575,7 @@ html[data-theme="light"] .usage-dial-hub-cap {
     max-height: min(72vh, calc(100vh - 200px));
     overflow-y: auto;
     padding: 16px 16px 14px;
-    border-radius: var(--radius);
+    border-radius: var(--radius-glass);
   }
 
   .usage-numeral strong {
@@ -5823,28 +5772,16 @@ html[data-theme="light"] .composer-activity-spinner {
     color 120ms ease;
 }
 
-html[data-theme="light"] .composer-tune-trigger {
-  background: rgba(235, 230, 218, 0.75);
-}
-
 .composer-tune-trigger:hover:not(:disabled) {
   border-color: var(--line-strong);
   background: var(--bg-card-soft);
   color: var(--text-strong);
 }
 
-html[data-theme="light"] .composer-tune-trigger:hover:not(:disabled) {
-  background: rgba(220, 210, 190, 0.8);
-}
-
 .composer-tune-trigger.open {
   border-color: var(--line-strong);
   background: var(--bg-card-soft);
   color: var(--text-strong);
-}
-
-html[data-theme="light"] .composer-tune-trigger.open {
-  background: rgba(210, 198, 174, 0.9);
 }
 
 .composer-tune-trigger:focus-visible {
@@ -5921,7 +5858,6 @@ html[data-theme="light"] .composer-tune-trigger.open {
 }
 
 html[data-theme="light"] .composer-tune-field select {
-  background: rgba(235, 230, 218, 0.85);
   color: var(--accent);
 }
 
@@ -6006,10 +5942,6 @@ html[data-theme="light"] .composer-tune-restart-apply {
   background: var(--bg-input);
 }
 
-html[data-theme="light"] .composer-tune-confirm {
-  background: rgba(235, 230, 218, 0.6);
-}
-
 .composer-tune-confirm p {
   margin: 0;
   font-size: 0.8rem;
@@ -6091,10 +6023,6 @@ html[data-theme="light"] .composer-tune-confirm {
   letter-spacing: 0;
 }
 
-html[data-theme="light"] .composer-shortcut kbd {
-  background: rgba(235, 230, 218, 0.85);
-}
-
 /* The textarea is now the bare input inside the .composer-bar capsule — the
  * capsule owns the border / background / focus ring, so the field itself is
  * transparent and chromeless. Default ~2 lines; grows to a cap then scrolls. */
@@ -6152,18 +6080,10 @@ html[data-theme="light"] .composer-shortcut kbd {
   background: var(--bg-card-soft);
 }
 
-html[data-theme="light"] .composer-overflow-trigger:hover:not(:disabled) {
-  background: rgba(220, 210, 190, 0.6);
-}
-
 .composer-overflow-trigger.open {
   border-color: var(--line-strong);
   color: var(--text-strong);
   background: var(--bg-card-soft);
-}
-
-html[data-theme="light"] .composer-overflow-trigger.open {
-  background: rgba(215, 204, 182, 0.8);
 }
 
 .composer-overflow-menu {
@@ -6216,17 +6136,9 @@ html[data-theme="light"] .composer-overflow-trigger.open {
     color 120ms ease;
 }
 
-html[data-theme="light"] .composer-overflow-item {
-  background: rgba(220, 210, 190, 0.45);
-}
-
 .composer-overflow-item:hover:not(:disabled) {
   background: var(--bg-card-soft);
   border-color: var(--line-strong);
-}
-
-html[data-theme="light"] .composer-overflow-item:hover:not(:disabled) {
-  background: rgba(205, 194, 170, 0.85);
 }
 
 .composer-overflow-item.danger {
@@ -6349,15 +6261,12 @@ html[data-theme="light"] .composer-overflow-item.warn:hover:not(:disabled) {
   justify-content: center;
   border: 1px solid var(--line-strong);
   border-radius: 20px;
-  background: rgba(6, 8, 13, 0.66);
+  background: var(--bg-input);
   padding: 5px var(--pill-send-gutter) 5px var(--pill-inset-left);
   box-shadow: inset 0 1px 0 rgba(200, 169, 106, 0.1);
   transition:
     border-color 160ms ease,
     box-shadow 160ms ease;
-}
-html[data-theme="light"] .reply-textarea-wrap {
-  background: rgba(255, 252, 245, 0.9);
 }
 .reply-textarea-wrap:focus-within {
   border-color: var(--accent);
@@ -6570,9 +6479,11 @@ html[data-theme="light"] .composer-send {
     max-width: 100%;
     max-height: 58vh;
     overflow-y: auto;
-    border-radius: 16px;
+    border-radius: var(--radius-glass);
     padding: 10px 12px;
-    box-shadow: 0 16px 44px rgba(0, 0, 0, 0.5);
+    box-shadow:
+      inset 0 1px 0 var(--glass-hi),
+      var(--shadow);
     animation: sheet-rise 200ms cubic-bezier(0.22, 1, 0.36, 1);
     z-index: 60;
   }
@@ -6793,17 +6704,9 @@ html[data-theme="light"] .composer-send {
     color 120ms ease;
 }
 
-html[data-theme="light"] .ask-option {
-  background: rgba(240, 236, 226, 0.65);
-}
-
 .ask-option:hover:not(:disabled) {
   border-color: var(--line-strong);
   background: var(--bg-card-soft);
-}
-
-html[data-theme="light"] .ask-option:hover:not(:disabled) {
-  background: rgba(220, 210, 190, 0.7);
 }
 
 .ask-option.selected {
@@ -6890,14 +6793,9 @@ html[data-theme="light"] .ask-answer-chip {
   display: grid;
   gap: 4px;
   padding: 8px 10px;
-  border-left: 2px solid rgba(200, 169, 106, 0.4);
-  background: var(--bg-input);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-input));
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
   border-radius: var(--radius-sm);
-}
-
-html[data-theme="light"] .ask-answer-item {
-  background: rgba(235, 230, 218, 0.55);
-  border-left-color: rgba(184, 130, 14, 0.38);
 }
 
 .ask-answer-question {
@@ -6965,10 +6863,6 @@ html[data-theme="light"] .ask-answer-item {
   color: var(--text);
   font: inherit;
   line-height: 1.4;
-}
-
-html[data-theme="light"] .ask-question-note-input {
-  background: rgba(248, 244, 236, 0.9);
 }
 
 .ask-question-note-input:focus {
@@ -7718,12 +7612,8 @@ html[data-theme="light"] .slash-suggestion.active {
 
 .terminal {
   min-height: 320px;
-  background: rgba(8, 10, 14, 0.92);
+  background: #060810;
   min-width: 0;
-}
-
-html[data-theme="light"] .terminal {
-  background: rgba(228, 222, 208, 0.7);
 }
 
 /* ─── Terminal session (redesigned) ───
@@ -7823,7 +7713,7 @@ html[data-theme="light"] .terminal {
   padding: 6px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line-strong);
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--text-strong) 4%, transparent);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 0.78rem;
@@ -7832,17 +7722,9 @@ html[data-theme="light"] .terminal {
   transition: background 120ms ease, border-color 120ms ease;
 }
 
-html[data-theme="light"] .term-bar-action {
-  background: rgba(255, 255, 255, 0.6);
-}
-
 .term-bar-action:hover {
   border-color: var(--line-strong);
   background: rgba(255, 255, 255, 0.08);
-}
-
-html[data-theme="light"] .term-bar-action:hover {
-  background: rgba(255, 255, 255, 0.86);
 }
 
 .term-bar-action.primary {
@@ -8081,7 +7963,7 @@ html[data-theme="light"] .xterm-rows span[style*="color:#00cdcd"] {
      non-notched devices the inset is 0 and the bar looks unchanged. */
   padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.025);
+  background: color-mix(in srgb, var(--text-strong) 3%, transparent);
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
@@ -8093,10 +7975,6 @@ html[data-theme="light"] .xterm-rows span[style*="color:#00cdcd"] {
 
 .term-keys::-webkit-scrollbar {
   display: none;
-}
-
-html[data-theme="light"] .term-keys {
-  background: rgba(255, 255, 255, 0.5);
 }
 
 .term-keys button {
@@ -8117,10 +7995,6 @@ html[data-theme="light"] .term-keys {
     background 120ms ease,
     border-color 120ms ease,
     transform 80ms ease;
-}
-
-html[data-theme="light"] .term-keys button {
-  background: rgba(255, 255, 255, 0.74);
 }
 
 .term-keys button:hover {
@@ -8178,6 +8052,7 @@ html[data-theme="light"] .term-keys button:hover {
   position: relative;
   border-top: 1px solid var(--glass-line);
   background: var(--glass-bg);
+  box-shadow: inset 0 1px 0 var(--glass-hi);
   backdrop-filter: var(--glass-blur);
   /* The handle row owns the home-indicator inset on iOS so the
      tappable pill never sits under the system gesture area. The
@@ -8318,9 +8193,6 @@ html[data-theme="light"] .term-compose-handle:hover {
   transition:
     border-color 160ms ease,
     box-shadow 160ms ease;
-}
-html[data-theme="light"] .term-compose-input {
-  background: rgba(255, 252, 245, 0.9);
 }
 .term-compose-input:focus-within {
   border-color: var(--accent);
@@ -10014,10 +9886,6 @@ html[data-theme="light"] .schedule-msg-preview {
     box-shadow 200ms ease;
 }
 
-html[data-theme="light"] .advanced-section {
-  background: rgba(222, 213, 198, 0.65);
-}
-
 .advanced-section.open {
   border-color: rgba(200, 169, 106, 0.22);
   box-shadow: 0 0 0 1px rgba(200, 169, 106, 0.07) inset;
@@ -10178,7 +10046,7 @@ html[data-theme="light"] .advanced-args-field span {
   line-height: 1.7;
   resize: vertical;
   min-height: 72px;
-  background: rgba(6, 8, 12, 0.8) !important;
+  background: var(--bg-input) !important;
   color: var(--text-strong);
   border: 1px solid rgba(100, 118, 148, 0.2) !important;
   letter-spacing: 0.02em;
@@ -10189,7 +10057,6 @@ html[data-theme="light"] .advanced-args-field span {
 }
 
 html[data-theme="light"] .advanced-args-field textarea {
-  background: rgba(235, 230, 218, 0.9) !important;
   border-color: rgba(90, 78, 58, 0.2) !important;
   color: var(--text-strong);
 }
@@ -10315,7 +10182,7 @@ html[data-theme="light"] .advanced-warning {
   background: var(--bg-input);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  color: var(--fg);
+  color: var(--text);
 }
 
 .search-bar input:focus {
@@ -10336,7 +10203,7 @@ html[data-theme="light"] .advanced-warning {
 }
 
 .search-bar .clear-btn:hover {
-  color: var(--fg);
+  color: var(--text);
 }
 
 .search-bar .help-icon {
@@ -10366,7 +10233,7 @@ html[data-theme="light"] .advanced-warning {
     var(--shadow);
   font-family: var(--font-mono);
   font-size: 0.75rem;
-  color: var(--fg);
+  color: var(--text);
   z-index: 200;
 }
 
@@ -10392,7 +10259,7 @@ html[data-theme="light"] .advanced-warning {
 }
 
 .help-tooltip code {
-  color: var(--fg);
+  color: var(--text);
 }
 
 .session-list-search {
@@ -10443,10 +10310,6 @@ html[data-theme="light"] .advanced-warning {
 
 .session-switcher-search input {
   background: var(--bg-input);
-}
-
-html[data-theme="light"] .session-switcher-search input {
-  background: rgba(240, 236, 226, 0.7);
 }
 
 .session-switcher-list {
@@ -11533,9 +11396,8 @@ html[data-theme="light"] .session-switcher-row.selected {
   flex-direction: column;
   gap: 10px;
   padding: 16px 18px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--line));
-  border-left: 3px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 7%, var(--bg-card));
 }
 
@@ -12141,7 +12003,9 @@ html[data-theme="light"] .session-switcher-row.selected {
   background: var(--glass-bg-thick);
   backdrop-filter: var(--glass-blur);
   border-right: 1px solid var(--glass-line);
-  box-shadow: var(--shadow);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    var(--shadow);
   /* Inset the top too, not just the left: as a wide side-dock (iPad/desktop) the
      header — and its pinned close button — would otherwise sit under the status
      bar. The ≤640px full-screen-sheet rule already pads all four insets. */
@@ -13274,10 +13138,6 @@ html[data-theme="light"] .wp-diff-split .wp-diff-ln.del {
   background: var(--bg-input);
 }
 
-html[data-theme="light"] .wp-preview-header {
-  background: rgba(200, 190, 170, 0.08);
-}
-
 .wp-preview-path {
   font-family: var(--font-mono);
   font-size: 0.78rem;
@@ -13423,10 +13283,6 @@ html[data-theme="light"] .wp-preview-header {
   background: var(--bg-input);
 }
 
-html[data-theme="light"] .wp-md-toggle {
-  background: rgba(200, 190, 170, 0.06);
-}
-
 .wp-md-btn {
   border: 1px solid var(--line);
   background: transparent;
@@ -13471,12 +13327,8 @@ html[data-theme="light"] .wp-md-toggle {
   justify-content: space-between;
   padding: 6px 10px;
   border-bottom: 1px solid var(--line);
-  background: rgba(5, 7, 10, 0.3);
+  background: color-mix(in srgb, var(--bg-deep) 30%, transparent);
   flex-shrink: 0;
-}
-
-html[data-theme="light"] .wp-code-toolbar {
-  background: rgba(200, 190, 170, 0.08);
 }
 
 .wp-code-lang {

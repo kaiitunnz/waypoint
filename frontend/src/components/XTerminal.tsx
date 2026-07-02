@@ -19,7 +19,6 @@ export interface XTerminalHandle {
 }
 
 interface XTerminalProps {
-  theme?: "dark" | "light";
   readOnly?: boolean;
   // When false, the terminal does not fit its grid to the container. The
   // server owns the geometry (emulated panes like claude_tty are pinned to a
@@ -37,7 +36,11 @@ interface XTerminalProps {
   className?: string;
 }
 
-const DARK_THEME: ITheme = {
+/* The terminal is a dark instrument in both app themes: TUIs emit truecolor
+ * output tuned for a dark ground (e.g. Claude Code's diff backgrounds), and
+ * only the 16 ANSI palette slots can be remapped — rendering that output on
+ * a light background is illegible no matter the palette. */
+const TERMINAL_THEME: ITheme = {
   background: "#060810",
   foreground: "#e7ecf3",
   cursor: "#e0bb73",
@@ -61,38 +64,10 @@ const DARK_THEME: ITheme = {
   brightWhite: "#f5f7fb",
 };
 
-const LIGHT_THEME: ITheme = {
-  background: "#f7f3eb",
-  foreground: "#1c1914",
-  cursor: "#b8820e",
-  cursorAccent: "#fffdf7",
-  selectionBackground: "rgba(184, 130, 14, 0.22)",
-  black: "#1c1914",
-  red: "#b83038",
-  green: "#257a50",
-  yellow: "#aa6618",
-  blue: "#2f6f9e",
-  magenta: "#7040b0",
-  cyan: "#1e7a8e",
-  white: "#6e6356",
-  brightBlack: "#a09380",
-  brightRed: "#d04050",
-  brightGreen: "#2e9866",
-  brightYellow: "#c87a18",
-  brightBlue: "#3a87ba",
-  brightMagenta: "#8c52cc",
-  brightCyan: "#2c98b0",
-  brightWhite: "#0e0c09",
-};
-
-function themeFor(mode: "dark" | "light"): ITheme {
-  return mode === "light" ? LIGHT_THEME : DARK_THEME;
-}
 
 export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
   function XTerminal(
     {
-      theme = "dark",
       readOnly = false,
       autoFit = true,
       onData,
@@ -138,7 +113,7 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
         scrollback: 20000,
         allowProposedApi: true,
         disableStdin: readOnly,
-        theme: themeFor(theme),
+        theme: TERMINAL_THEME,
       });
       const fit = autoFit ? new FitAddon() : null;
       if (fit) term.loadAddon(fit);
@@ -248,12 +223,6 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-
-    useEffect(() => {
-      const term = termRef.current;
-      if (!term) return;
-      term.options.theme = themeFor(theme);
-    }, [theme]);
 
     useEffect(() => {
       const term = termRef.current;

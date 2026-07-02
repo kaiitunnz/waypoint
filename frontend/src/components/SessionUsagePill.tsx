@@ -177,7 +177,6 @@ export function SessionUsagePill({
           role="dialog"
           aria-label="Usage details"
         >
-          <span className="usage-panel-rail" aria-hidden="true" />
 
           {contextUsage ? (
             <section className="usage-block">

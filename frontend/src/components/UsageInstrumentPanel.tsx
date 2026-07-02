@@ -52,11 +52,6 @@ export function UsageInstrumentPanel({
         ["--enter-delay" as string]: `${index * 80}ms`,
       }}
     >
-      <span className="usage-instrument-rivet usage-instrument-rivet--tl" aria-hidden />
-      <span className="usage-instrument-rivet usage-instrument-rivet--tr" aria-hidden />
-      <span className="usage-instrument-rivet usage-instrument-rivet--bl" aria-hidden />
-      <span className="usage-instrument-rivet usage-instrument-rivet--br" aria-hidden />
-
       <header className="usage-instrument-head">
         <div className="usage-instrument-plaque">
           <span className="usage-instrument-eyebrow">

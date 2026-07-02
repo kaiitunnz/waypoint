@@ -75,7 +75,6 @@ import {
   type PlanDecision,
   type PlanViewModel,
 } from "@/lib/events";
-import { useTheme } from "@/lib/theme";
 import { useSessionScheduledMessages } from "@/lib/useSessionScheduledMessages";
 import { formatRelativeTime } from "@/lib/usage";
 import {
@@ -99,6 +98,7 @@ import { CommandSuggestions } from "@/components/CommandSuggestions";
 import { FileMentions } from "@/components/FileMentions";
 import { type XTerminalHandle } from "@/components/XTerminal";
 import { ApprovalRequestCard, PlanApprovalCard } from "@/components/ApprovalCard";
+import { AssistantMark } from "@/components/AssistantMark";
 import {
   PendingUserInputCard,
   TranscriptCard,
@@ -1393,7 +1393,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     currentTaskEvent !== null &&
     dismissedTaskSequence !== undefined &&
     currentTaskEvent.sequence !== dismissedTaskSequence;
-  const { theme } = useTheme();
   const terminalRef = useRef<XTerminalHandle | null>(null);
   const terminalSocketRef = useRef<WebSocket | null>(null);
   // Bumped to reconnect the terminal WS: on EXITED → live transitions and
@@ -1920,7 +1919,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           session={session}
           interactive={canTerminalInteract}
           terminalRef={terminalRef}
-          theme={theme}
           terminalDims={terminalDims}
           sessionExited={sessionExited}
           dormantReattach={dormantReattach}
@@ -3431,7 +3429,7 @@ const ReplyComposer = memo(function ReplyComposer({
                           }
                         }}
                       >
-                        <span className="glyph">✦</span>
+                        <span className="glyph">⌫</span>
                         Clear context
                       </button>
                       {assistantExited ? (
@@ -4100,7 +4098,7 @@ function AssistantWelcome({
   return (
     <div className="assistant-welcome">
       <span className="assistant-welcome-glyph" aria-hidden="true">
-        ✦
+        <AssistantMark />
       </span>
       <p className="assistant-welcome-title">Ask your assistant</p>
       <p className="assistant-welcome-sub">

@@ -67,19 +67,6 @@ export function UsageDial({
             : `${label}: ${Math.round(safePercent)}%`
         }
       >
-        <defs>
-          <radialGradient id="usage-dial-face" cx="50%" cy="42%" r="62%">
-            <stop offset="0%" stopColor="rgba(35, 41, 54, 0.92)" />
-            <stop offset="78%" stopColor="rgba(14, 18, 26, 0.96)" />
-            <stop offset="100%" stopColor="rgba(6, 8, 12, 1)" />
-          </radialGradient>
-          <radialGradient id="usage-dial-face-light" cx="50%" cy="42%" r="62%">
-            <stop offset="0%" stopColor="rgba(255, 252, 244, 1)" />
-            <stop offset="80%" stopColor="rgba(244, 237, 220, 1)" />
-            <stop offset="100%" stopColor="rgba(228, 216, 188, 1)" />
-          </radialGradient>
-        </defs>
-
         <circle
           cx={CENTER}
           cy={CENTER}

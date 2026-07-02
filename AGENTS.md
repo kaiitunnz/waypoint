@@ -35,12 +35,18 @@ The repo's `.agents/skills/` are auto-installed only into the personal assistant
 Follow the existing style in each half of the repo. Python uses 4-space indentation, type hints, top-level imports, and `snake_case` for functions/modules; keep FastAPI handlers and Pydantic models explicit. TypeScript uses 2-space indentation, strict typing, `PascalCase` for components, and `camelCase` for helpers and state. Keep comments sparse and only explain non-obvious reasoning.
 
 ## Frontend Theming
-The app supports dark (default) and light themes via the `html[data-theme="light"]` attribute set by `ThemeToggle`. All CSS lives in `frontend/src/app/globals.css`, which is organized into named sections with `/* ─── Section ─── */` dividers; light-mode overrides are co-located immediately after the base rule they override.
+The app supports dark (default) and light themes via the `html[data-theme="light"]` attribute set by `ThemeToggle`. All CSS lives in `frontend/src/app/globals.css`, which is organized into named sections with `/* ─── Section ─── */` dividers; when a light-mode override is genuinely needed it sits immediately after the base rule it overrides.
 
-**When adding or editing styles**, you must maintain parity between themes:
-- `:root` defines CSS variables for dark mode. Variables like `--bg-card`, `--line`, `--text`, `--success`, etc. resolve automatically in both themes — use them for anything that should adapt without extra work.
-- Components that use **hardcoded dark RGBA values** (e.g. `background: rgba(8,11,16,0.35)`) will not adapt automatically. Every such rule needs a matching `html[data-theme="light"] .selector { ... }` override placed directly below it.
-- After adding any new component styles, scan for hardcoded dark RGBA values and add the corresponding light override before committing.
+The design language is **flat instruments, liquid-glass chrome**:
+- In-flow content (panels, cards, transcript, inputs) is flat and opaque: token surfaces (`--bg-card`, `--bg-card-soft`, `--bg-input`), solid hairlines (`--line`, `--line-strong`), radii `--radius`/`--radius-sm`, no gradients, no blur, no drop shadows, no hover lifts.
+- Floating chrome only (sticky composer, docks, popovers, modals, tooltips, scroll floaters) uses the glass recipe: `background: var(--glass-bg)` (or `--glass-bg-thick` — fully opaque — for sheets that carry text), `backdrop-filter: var(--glass-blur)`, `border: 1px solid var(--glass-line)`, `box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow)`, `border-radius: var(--radius-glass)`. Never put glass on in-flow content, and never float the app bar. Write `backdrop-filter` unprefixed only — the build adds vendor prefixes, and a hand-written `-webkit-` twin makes the minifier drop the unprefixed declaration entirely.
+- Badges are bare mono text in the owner's hue; statuses add a `currentColor` lamp dot. Pinned cards/headers are marked with the top-right dog-ear fold (squared corner + accent triangle), not an accent rail or edge stripe.
+- Pill radii (`--radius-pill`) are reserved for true circles, capsule glass floaters, and scrollbar thumbs — content chips use `--radius-sm`.
+
+**When adding or editing styles**, keep both themes resolving from tokens:
+- Derive every color from `:root` variables, using `color-mix(in srgb, var(--token) N%, transparent)` for tints — these adapt to both themes with no override block.
+- Do not introduce hardcoded dark RGBA surfaces; if a per-theme override is unavoidable, place the `html[data-theme="light"] .selector { ... }` block directly below the base rule.
+- After adding component styles, verify in both themes before committing.
 
 ## Testing Guidelines
 Backend tests use `pytest` and `pytest-asyncio`; place new tests in `backend/tests/` as `test_<feature>.py`. Add focused unit tests for reusable runtime, storage, auth, or API behavior. Before shipping backend changes, prefer running `uv run pre-commit run --all-files` so formatting, lint, spelling, and mypy stay aligned with the repo hooks. The frontend currently has no automated test harness in this repo, so at minimum run `npm run lint` and a production build for UI changes.

@@ -449,7 +449,7 @@ function toolBadgeFor(toolName: string | null | undefined): ToolBadge {
       return { glyph: "?", variant: "task", label: "Ask" };
     default:
       if (toolName) {
-        return { glyph: "✦", variant: "default", label: toolName };
+        return { glyph: "ƒ", variant: "default", label: toolName };
       }
       return { glyph: "→", variant: "default", label: "tool" };
   }
@@ -580,7 +580,7 @@ export function ToolCallRunGroup({
           )}
           {otherCount > 0 && (
             <span className="tool-run-chip other">
-              <span className="tool-run-glyph">✦</span>
+              <span className="tool-run-glyph">ƒ</span>
               <span className="tool-run-label">other</span>
               <span className="tool-run-count">×{otherCount}</span>
             </span>

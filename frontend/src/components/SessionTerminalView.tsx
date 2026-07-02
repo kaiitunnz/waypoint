@@ -21,7 +21,6 @@ interface SessionTerminalViewProps {
   session: SessionRecord | null;
   interactive: boolean;
   terminalRef: MutableRefObject<XTerminalHandle | null>;
-  theme: "dark" | "light";
   terminalDims: { cols: number; rows: number } | null;
   sessionExited: boolean;
   dormantReattach: boolean;
@@ -72,7 +71,6 @@ export function SessionTerminalView({
   session,
   interactive,
   terminalRef,
-  theme,
   terminalDims,
   sessionExited,
   dormantReattach,
@@ -285,7 +283,6 @@ export function SessionTerminalView({
             // is fixed at mount, so switching sessions must rebuild the term.
             key={session?.transport ?? "none"}
             ref={terminalRef}
-            theme={theme}
             readOnly={!interactive}
             autoFit={!fixedGrid}
             onData={interactive ? onTerminalInput : undefined}

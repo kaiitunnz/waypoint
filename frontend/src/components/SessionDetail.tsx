@@ -75,7 +75,6 @@ import {
   type PlanDecision,
   type PlanViewModel,
 } from "@/lib/events";
-import { useTheme } from "@/lib/theme";
 import { useSessionScheduledMessages } from "@/lib/useSessionScheduledMessages";
 import { formatRelativeTime } from "@/lib/usage";
 import {
@@ -1393,7 +1392,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     currentTaskEvent !== null &&
     dismissedTaskSequence !== undefined &&
     currentTaskEvent.sequence !== dismissedTaskSequence;
-  const { theme } = useTheme();
   const terminalRef = useRef<XTerminalHandle | null>(null);
   const terminalSocketRef = useRef<WebSocket | null>(null);
   // Bumped to reconnect the terminal WS: on EXITED → live transitions and
@@ -1920,7 +1918,6 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           session={session}
           interactive={canTerminalInteract}
           terminalRef={terminalRef}
-          theme={theme}
           terminalDims={terminalDims}
           sessionExited={sessionExited}
           dormantReattach={dormantReattach}

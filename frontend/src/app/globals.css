@@ -7885,17 +7885,16 @@ html[data-theme="light"] .term-bar-action.primary {
   flex: 0 0 auto;
 }
 
+/* The stage stays dark in both app themes, matching XTerminal's fixed dark
+ * palette — TUI truecolor output is tuned for a dark ground and cannot be
+ * remapped, so a light stage renders it illegibly. */
 .term-stage {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
-  background: var(--bg-deep);
+  background: #060810;
   overflow: hidden;
-}
-
-html[data-theme="light"] .term-stage {
-  background: var(--bg-input);
 }
 
 .term-stage-host {

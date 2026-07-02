@@ -43,3 +43,7 @@ class ClaudeThreadImportRequest(BaseModel):
     # thread under the tty-tail driver while still persisting
     # ``backend=claude_code``.
     transport: SessionTransportId | None = None
+    # When true (default), the prior conversation is replayed into the new
+    # session's transcript at import time; when false the transcript starts
+    # empty and only the underlying agent resumes its own context.
+    import_history: bool = True

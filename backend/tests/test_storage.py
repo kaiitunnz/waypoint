@@ -319,6 +319,68 @@ def test_list_events_returns_full_history_in_ascending_order(tmp_path) -> None:
     assert [event.sequence for event in storage.list_events("sess")] == [1, 2, 3, 4, 5]
 
 
+def test_seed_events_assigns_sequences_and_stamps_version(tmp_path) -> None:
+    storage, now = _seed_session(tmp_path)
+    seeded = storage.seed_events(
+        "sess",
+        [
+            EventRecord(
+                session_id="sess",
+                ts=now,
+                kind=EventKind.USER_INPUT,
+                text="hello",
+                metadata={},
+                sequence=0,  # ignored; reassigned from MAX(sequence)+1
+            ),
+            EventRecord(
+                session_id="sess",
+                ts=now + timedelta(seconds=1),
+                kind=EventKind.AGENT_OUTPUT,
+                text="hi there",
+                metadata={"item_id": "a1"},
+                sequence=0,
+            ),
+        ],
+    )
+    assert [e.sequence for e in seeded] == [1, 2]
+    assert all(e.metadata["version"] == 1 for e in seeded)
+    stored = storage.list_events("sess")
+    assert [e.kind for e in stored] == [EventKind.USER_INPUT, EventKind.AGENT_OUTPUT]
+    assert [e.text for e in stored] == ["hello", "hi there"]
+
+
+def test_seed_events_appends_after_existing_events(tmp_path) -> None:
+    storage, now = _seed_session(tmp_path)
+    _append(
+        storage,
+        "sess",
+        sequence=1,
+        kind=EventKind.SYSTEM_NOTE,
+        text="existing",
+        ts=now,
+    )
+    storage.seed_events(
+        "sess",
+        [
+            EventRecord(
+                session_id="sess",
+                ts=now + timedelta(seconds=1),
+                kind=EventKind.USER_INPUT,
+                text="imported",
+                metadata={},
+                sequence=99,
+            )
+        ],
+    )
+    assert [e.sequence for e in storage.list_events("sess")] == [1, 2]
+
+
+def test_seed_events_empty_is_noop(tmp_path) -> None:
+    storage, _ = _seed_session(tmp_path)
+    assert storage.seed_events("sess", []) == []
+    assert storage.list_events("sess") == []
+
+
 def test_list_events_with_cursor_returns_only_newer_rows(tmp_path) -> None:
     # Cursor-after semantics is the legacy reconnect/catch-up path: return
     # everything strictly newer than the supplied id, no clamp.

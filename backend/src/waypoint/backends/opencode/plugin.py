@@ -18,6 +18,7 @@ from waypoint.backends.capabilities import (
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.opencode.adapter import OpenCodeAdapter, OpenCodeError
 from waypoint.backends.opencode.health import AdapterHealth
+from waypoint.backends.opencode.normalize import historical_events_from_messages
 from waypoint.backends.opencode.pane import composer_ready, composer_submitted
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.git_meta import GitMeta
@@ -26,6 +27,7 @@ from waypoint.schemas import (
     CommandCompletion,
     CompletionDispatch,
     EventKind,
+    EventRecord,
     SessionCreateRequest,
     SessionEnvelope,
     SessionInputRequest,
@@ -122,6 +124,10 @@ class OpenCodeThreadImportRequest(BaseModel):
     # transport (e.g. the tmux wrapper) is rejected with 400 since there is no
     # resume-via-tmux path for OpenCode. ``None`` keeps the native behavior.
     transport: SessionTransportId | None = None
+    # When true (default), the prior conversation is replayed into the new
+    # session's transcript at import time; when false the transcript starts
+    # empty and only the underlying agent resumes its own context.
+    import_history: bool = True
 
 
 class OpenCodeThreadSummary(BaseModel):
@@ -1581,6 +1587,28 @@ class OpenCodePlugin(DefaultLaunchContract):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"failed to restore session: {exc}",
             ) from exc
+
+        async def read_history() -> list[EventRecord]:
+            messages = await adapter.get_session_messages(opencode_session_id)
+            return [
+                EventRecord(
+                    session_id=session.id,
+                    ts=ts,
+                    kind=kind,
+                    text=text,
+                    metadata=metadata,
+                    sequence=0,
+                )
+                for ts, kind, text, metadata in historical_events_from_messages(
+                    messages
+                )
+            ]
+
+        await runtime.seed_thread_history(
+            session.id,
+            reader=read_history,
+            enabled=request.import_history,
+        )
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
         await runtime._record_system_event(
             session.id,

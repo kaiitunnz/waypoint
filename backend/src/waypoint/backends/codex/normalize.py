@@ -287,6 +287,29 @@ def extract_item(payload: dict[str, Any]) -> dict[str, Any]:
     return item if isinstance(item, dict) else {}
 
 
+def extract_tool_name(item_type: str | None, item: dict[str, Any]) -> str | None:
+    """Return a canonical tool name for metadata["tool_name"] given a Codex item."""
+    if item_type == "commandExecution":
+        return "Bash"
+    if item_type == "fileChange":
+        return "Edit"
+    if item_type == "mcpToolCall":
+        server = item.get("server", "")
+        tool = item.get("tool", "")
+        if server and tool:
+            return f"{server}:{tool}"
+        return str(tool or server) or None
+    if item_type in {"dynamicToolCall", "collabAgentToolCall"}:
+        ns = item.get("namespace", "")
+        tool = item.get("tool", "")
+        if ns and tool:
+            return f"{ns}:{tool}"
+        return str(tool) if tool else None
+    if item_type == "webSearch":
+        return "WebSearch"
+    return None
+
+
 _PLAN_DECISIONS: tuple[str, ...] = ("accept", "acceptForSession", "decline", "cancel")
 
 

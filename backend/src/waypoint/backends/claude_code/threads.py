@@ -24,6 +24,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 log = logging.getLogger("waypoint.claude_threads")
 
@@ -259,12 +260,65 @@ def _fallback_title(preview: str | None, cwd: str, session_id: str) -> str:
 
 
 def _parse_iso_timestamp(value: str) -> float | None:
+    parsed = parse_iso_timestamp(value)
+    return parsed.timestamp() if parsed is not None else None
+
+
+def parse_iso_timestamp(value: str) -> datetime | None:
+    """Parse a transcript record's ISO-8601 ``timestamp`` field.
+
+    Shared with the history converter so seeded events preserve the
+    source timestamp rather than the import time.
+    """
     text = value.strip()
     if not text:
         return None
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
     try:
-        return datetime.fromisoformat(text).timestamp()
+        return datetime.fromisoformat(text)
     except ValueError:
         return None
+
+
+def read_local_claude_transcript(thread_id: str) -> list[dict[str, Any]]:
+    """Read every record of a local Claude transcript, in file order.
+
+    Unlike ``_read_thread_info`` (which stops after ``MAX_LINES_SCANNED``
+    once it has enough metadata for a thread-list entry), this reads the
+    transcript in full: thread-history import needs every user/assistant/
+    tool record the CLI wrote, not just the first ones.
+    """
+    if not UUID_RE.match(thread_id):
+        return []
+    root = claude_projects_root()
+    if not root.is_dir():
+        return []
+    for project_dir in root.iterdir():
+        if not project_dir.is_dir():
+            continue
+        candidate = project_dir / f"{thread_id}.jsonl"
+        if not candidate.is_file():
+            continue
+        return _read_all_records(candidate)
+    return []
+
+
+def _read_all_records(path: Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(record, dict):
+                    records.append(record)
+    except OSError as exc:
+        log.warning("failed to read claude transcript %s: %s", path, exc)
+        return []
+    return records

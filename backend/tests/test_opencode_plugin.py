@@ -1123,6 +1123,15 @@ async def test_import_thread_preserves_launch_target_id() -> None:
         async def _record_system_event(self, *args, **kwargs) -> None:
             return None
 
+        async def seed_thread_history(self, session_id, reader, *, enabled) -> int:
+            if not enabled:
+                return 0
+            try:
+                events = await reader()
+            except Exception:
+                return 0
+            return len(events)
+
         def get_session(self, session_id: str) -> SessionRecord:
             return self.storage.sessions[-1]
 
@@ -1130,7 +1139,12 @@ async def test_import_thread_preserves_launch_target_id() -> None:
     request = type(
         "Req",
         (),
-        {"thread_id": "ses_1", "launch_target_id": "ssh-1", "cwd": "/repo"},
+        {
+            "thread_id": "ses_1",
+            "launch_target_id": "ssh-1",
+            "cwd": "/repo",
+            "import_history": False,
+        },
     )()
 
     result = await plugin.import_thread(runtime, request)
@@ -1209,6 +1223,15 @@ async def test_import_thread_keys_adapter_by_session_directory() -> None:
         async def _record_system_event(self, *args, **kwargs) -> None:
             return None
 
+        async def seed_thread_history(self, session_id, reader, *, enabled) -> int:
+            if not enabled:
+                return 0
+            try:
+                events = await reader()
+            except Exception:
+                return 0
+            return len(events)
+
         def get_session(self, session_id: str) -> SessionRecord:
             return self.storage.sessions[-1]
 
@@ -1220,6 +1243,7 @@ async def test_import_thread_keys_adapter_by_session_directory() -> None:
             "thread_id": "ses_1",
             "launch_target_id": "ssh-1",
             "cwd": "/repo/requested",
+            "import_history": False,
         },
     )()
 

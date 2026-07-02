@@ -649,6 +649,7 @@ export default function HomePage() {
     threadId: string,
     cwd: string,
     transport: SessionTransport | null,
+    importHistory: boolean,
   ) {
     try {
       const payload = {
@@ -659,6 +660,9 @@ export default function HomePage() {
         // pin the chosen transport and leave the launch mode on "auto".
         launch_mode: "auto",
         transport: transport || null,
+        // Replay the thread's prior conversation into the new session's
+        // transcript; false starts empty and only resumes the agent's context.
+        import_history: importHistory,
       };
       const session = await importBackendThread(host, token, backend, payload);
       setSessions((current) => [

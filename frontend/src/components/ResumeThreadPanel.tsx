@@ -39,6 +39,7 @@ interface ResumeThreadPanelProps {
     threadId: string,
     cwd: string,
     transport: SessionTransport | null,
+    importHistory: boolean,
   ) => Promise<void>;
   onDeleteThread?: (
     backend: Backend,
@@ -114,6 +115,9 @@ export function ResumeThreadPanel({
   const [importingId, setImportingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  // Replay the prior conversation into the new session's transcript on import.
+  // On by default: an imported thread should look continuous, not empty.
+  const [importHistory, setImportHistory] = useState(true);
 
   // The transport picker only applies to a single-agent view. Feed the hook a
   // concrete agent (the filtered one, or the preferred fallback while "All" is
@@ -189,7 +193,13 @@ export function ResumeThreadPanel({
         : defaultTransportFor(thread.backend, catalog);
     setImportingId(thread.id);
     try {
-      await onImportThread(thread.backend, thread.id, thread.cwd, chosen);
+      await onImportThread(
+        thread.backend,
+        thread.id,
+        thread.cwd,
+        chosen,
+        importHistory,
+      );
     } finally {
       setImportingId(null);
     }
@@ -259,6 +269,25 @@ export function ResumeThreadPanel({
           catalog={catalog}
         />
       ) : null}
+
+      <div className="import-history-row">
+        <div className="import-history-copy">
+          <span className="import-history-label">Import history</span>
+          <span className="import-history-hint">
+            Replay the prior conversation into the new session
+          </span>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={importHistory}
+          aria-label="Import prior conversation history"
+          className="switch"
+          onClick={() => setImportHistory((value) => !value)}
+        >
+          <span className="switch-thumb" />
+        </button>
+      </div>
 
       <div className="resume-filters">
         <div className="resume-filters-search">

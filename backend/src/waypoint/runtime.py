@@ -1935,6 +1935,48 @@ class SessionRuntime:
         self._append_structured_log(session_id, persisted)
         await self._publish_event(persisted)
 
+    async def seed_thread_history(
+        self,
+        session_id: str,
+        reader: Callable[[], Awaitable[list[EventRecord]]],
+        *,
+        enabled: bool,
+    ) -> int:
+        """Replay imported thread history into a freshly-created session.
+
+        Agent plugins call this from ``import_thread`` after ``create_session``
+        and before recording the "Imported…" note, passing a ``reader`` that
+        reads the native thread and converts it into ``EventRecord``s. The
+        converter is agent-specific (it shares helpers with, but is not, the
+        live ``normalize.py`` — historical snapshots must re-add the user turns
+        and full assistant text the live path streams on other channels); this
+        method owns the transport-agnostic seed and its failure handling.
+
+        When ``enabled`` is false this is a no-op (the transcript stays empty and
+        the agent merely resumes its own context). Any failure to read or
+        convert history is swallowed: the import still succeeds as a plain
+        resume, with a system note explaining history was unavailable. Returns
+        the number of events seeded.
+        """
+        if not enabled:
+            return 0
+        try:
+            events = await reader()
+        except Exception:
+            log.exception("failed to import thread history for %s", session_id)
+            await self._record_system_event(
+                session_id,
+                "Prior conversation history could not be imported; "
+                "the session resumes without it.",
+            )
+            return 0
+        if not events:
+            return 0
+        persisted = self.storage.seed_events(session_id, events)
+        for event in persisted:
+            self._append_structured_log(session_id, event)
+        return len(persisted)
+
     async def _record_system_event(
         self,
         session_id: str,

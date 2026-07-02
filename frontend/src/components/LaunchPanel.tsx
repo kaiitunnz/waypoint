@@ -68,6 +68,7 @@ interface LaunchPanelProps {
     threadId: string,
     cwd: string,
     transport: SessionTransport | null,
+    importHistory: boolean,
   ) => Promise<void>;
   onDeleteThread?: (
     backend: Backend,

@@ -626,6 +626,7 @@ def make_thread(**overrides: Any) -> Any:
         updated_at=overrides.pop("updated_at", 1_700_000_300),
         ephemeral=overrides.pop("ephemeral", False),
         git_info=git_info,
+        turns=overrides.pop("turns", []),
     )
 
 
@@ -2571,7 +2572,13 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
         ),
     )
 
-    async def fake_read(_runtime, thread_id: str, launch_target_id: str | None) -> Any:
+    async def fake_read(
+        _runtime,
+        thread_id: str,
+        launch_target_id: str | None,
+        *,
+        include_turns: bool = False,
+    ) -> Any:
         assert thread_id == "thread-9"
         assert launch_target_id == "devbox"
         return thread

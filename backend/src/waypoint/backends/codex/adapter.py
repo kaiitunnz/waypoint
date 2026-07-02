@@ -18,6 +18,7 @@ from waypoint.backends.codex.normalize import (
     diff_preview_for_notification,
     extract_item,
     extract_item_id,
+    extract_tool_name,
     format_approval_text,
     map_notification,
     payload_to_dict,
@@ -41,29 +42,6 @@ ApprovalDecisionHandler = Callable[
 ApprovalCallback = Callable[[str, dict[str, Any] | None], dict[str, Any]]
 ClientFactory = Callable[[str, ApprovalCallback], CodexClient]
 SessionUpdateCallback = Callable[[str, dict[str, Any], bool], Awaitable[Any]]
-
-
-def _extract_tool_name(item_type: str | None, item: dict[str, Any]) -> str | None:
-    """Return a canonical tool name for metadata["tool_name"] given a Codex item."""
-    if item_type == "commandExecution":
-        return "Bash"
-    if item_type == "fileChange":
-        return "Edit"
-    if item_type == "mcpToolCall":
-        server = item.get("server", "")
-        tool = item.get("tool", "")
-        if server and tool:
-            return f"{server}:{tool}"
-        return str(tool or server) or None
-    if item_type in {"dynamicToolCall", "collabAgentToolCall"}:
-        ns = item.get("namespace", "")
-        tool = item.get("tool", "")
-        if ns and tool:
-            return f"{ns}:{tool}"
-        return str(tool) if tool else None
-    if item_type == "webSearch":
-        return "WebSearch"
-    return None
 
 
 def default_client_factory(cwd: str, approval_handler: ApprovalCallback) -> CodexClient:
@@ -641,7 +619,7 @@ class CodexAppServerAdapter:
                         item_type = item.get("type")
                         if isinstance(item_type, str) and item_type:
                             metadata["item_type"] = item_type
-                        tool_name = _extract_tool_name(item_type, item)
+                        tool_name = extract_tool_name(item_type, item)
                         if tool_name:
                             metadata["tool_name"] = tool_name
                         plan_envelope = plan_metadata_for_item(item)

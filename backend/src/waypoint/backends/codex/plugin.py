@@ -34,6 +34,7 @@ from waypoint.backends.codex.adapter import (
     CodexAppServerAdapter,
     default_client_factory,
 )
+from waypoint.backends.codex.history import turns_to_events
 from waypoint.backends.codex.pane import composer_ready, composer_submitted
 from waypoint.backends.codex.permission_modes import (
     CODEX_PERMISSION_MODE_IDS,
@@ -1294,11 +1295,15 @@ class CodexPlugin(DefaultLaunchContract):
         runtime: "SessionRuntime",
         thread_id: str,
         launch_target_id: str | None,
+        *,
+        include_turns: bool = False,
     ) -> Any:
         runtime._resolve_launch_target(launch_target_id, self.id)
 
         async def operation(client: CodexClient) -> Any:
-            response = await asyncio.to_thread(client.thread_read, thread_id, False)
+            response = await asyncio.to_thread(
+                client.thread_read, thread_id, include_turns
+            )
             return response.thread
 
         try:
@@ -1479,7 +1484,10 @@ class CodexPlugin(DefaultLaunchContract):
                 detail="codex thread already imported",
             )
         thread = await self._read_thread(
-            runtime, request.thread_id, request.launch_target_id
+            runtime,
+            request.thread_id,
+            request.launch_target_id,
+            include_turns=request.import_history,
         )
         if thread.ephemeral:
             raise HTTPException(
@@ -1581,6 +1589,13 @@ class CodexPlugin(DefaultLaunchContract):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"failed to import codex thread: {exc}",
             ) from exc
+
+        async def read_history() -> list[EventRecord]:
+            return turns_to_events(thread.turns, session.id)
+
+        await runtime.seed_thread_history(
+            session.id, read_history, enabled=request.import_history
+        )
         runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
         await self._register_rate_limit_probe(runtime, session.id, cwd, launch_target)
         await runtime._record_system_event(

@@ -212,6 +212,8 @@ interface LaunchFormFieldsProps {
   catalog: BackendCatalog;
   busy: boolean;
   onAuthFailure?: () => void;
+  cwdError?: string | null;
+  onClearCwdError?: () => void;
 }
 
 // The shared input block for New and Schedule: agent/transport picker, the
@@ -228,6 +230,8 @@ export function LaunchFormFields({
   catalog,
   busy,
   onAuthFailure,
+  cwdError,
+  onClearCwdError,
 }: LaunchFormFieldsProps) {
   return (
     <>
@@ -245,6 +249,8 @@ export function LaunchFormFields({
           onChange={form.setCwd}
           targetLabel={targetLabel}
           recentCwds={recentCwds}
+          error={cwdError}
+          onClearError={onClearCwdError}
         />
         <label className="field">
           <span>Title</span>

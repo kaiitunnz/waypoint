@@ -489,7 +489,7 @@ html[data-theme="light"] .import-thread-chip {
   gap: 12px;
   flex-wrap: wrap;
   padding: 10px 20px;
-  background: rgba(8, 11, 16, 0.36);
+  background: var(--bg-input);
   font-family: var(--font-mono);
   font-size: 0.72rem;
   letter-spacing: 0.06em;
@@ -1743,11 +1743,10 @@ details[open] > .transcript-summary::after {
 .transcript.codex.tool_result,
 .transcript.codex.tool_pair {
   padding: 9px 12px;
-  border: 1px solid rgba(120, 138, 168, 0.12);
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: rgba(8, 11, 16, 0.32);
+  background: var(--bg-input);
   box-shadow: none;
-  backdrop-filter: none;
   margin: 0 24px;
   max-width: calc(100% - 48px);
   min-width: 0;
@@ -1770,25 +1769,13 @@ details[open] > .transcript-summary::after {
 .transcript.codex.tool_call:not(.ask-user-question):hover,
 .transcript.codex.tool_result:hover,
 .transcript.codex.tool_pair:hover {
-  border-color: var(--line);
-  background: rgba(12, 16, 22, 0.5);
-}
-
-html[data-theme="light"]
-  .transcript.codex.tool_call:not(.ask-user-question):hover,
-html[data-theme="light"] .transcript.codex.tool_result:hover,
-html[data-theme="light"] .transcript.codex.tool_pair:hover {
-  background: rgba(220, 210, 190, 0.65);
-  border-color: rgba(90, 78, 58, 0.22);
+  border-color: var(--line-strong);
+  background: var(--bg-card-soft);
 }
 
 details.tool-disclosure[open] {
-  border-color: var(--line);
-  background: rgba(10, 13, 18, 0.6);
-}
-
-html[data-theme="light"] details.tool-disclosure[open] {
-  background: rgba(220, 210, 190, 0.55);
+  border-color: var(--line-strong);
+  background: var(--bg-card-soft);
 }
 
 .transcript.codex.tool_call:not(.ask-user-question) .transcript-role,
@@ -2226,7 +2213,7 @@ details.tool-disclosure[open] .tool-glyph.todo {
   padding: 56px 24px;
   border: 1px dashed var(--line);
   border-radius: var(--radius);
-  background: rgba(8, 11, 16, 0.32);
+  background: var(--bg-input);
   text-align: center;
 }
 
@@ -2320,14 +2307,7 @@ html[data-theme="light"] .tool-pair-body pre.output {
 }
 
 .transcript.codex.tool_pair {
-  border-color: rgba(200, 169, 106, 0.22);
-}
-
-html[data-theme="light"] .transcript.codex.tool_call:not(.ask-user-question),
-html[data-theme="light"] .transcript.codex.tool_result,
-html[data-theme="light"] .transcript.codex.tool_pair {
-  background: rgba(235, 230, 218, 0.55);
-  border-color: rgba(90, 78, 58, 0.14);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
 }
 
 .tool-pair-body {
@@ -2552,7 +2532,7 @@ html[data-theme="light"] .diff-preview-note {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: rgba(8, 11, 16, 0.38);
+  background: var(--bg-input);
 }
 
 html[data-theme="light"] .diff-preview-file {
@@ -2642,7 +2622,7 @@ html[data-theme="light"] .diff-code {
 }
 
 .diff-line.add {
-  background: rgba(108, 201, 154, 0.13);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
   color: #a8e6c5;
 }
 
@@ -2652,7 +2632,7 @@ html[data-theme="light"] .diff-line.add {
 }
 
 .diff-line.del {
-  background: rgba(226, 108, 112, 0.13);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
   color: #f1aaa8;
 }
 
@@ -2954,7 +2934,7 @@ html[data-theme="light"] .tool-call-run-children {
 .approval-plan {
   border-left: 2px solid rgba(200, 169, 106, 0.4);
   padding: 6px 12px;
-  background: rgba(15, 19, 27, 0.4);
+  background: var(--bg-input);
   border-radius: var(--radius-sm);
   min-width: 0;
   overflow: hidden;
@@ -2968,7 +2948,7 @@ html[data-theme="light"] .approval-plan {
 .approval-shell {
   margin: 0;
   padding: 8px 12px;
-  background: rgba(15, 19, 27, 0.55);
+  background: var(--bg-input);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
@@ -4068,7 +4048,7 @@ html[data-theme="light"] .sq-dock-scrim {
   padding: 4px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
-  background: rgba(8, 11, 16, 0.45);
+  background: var(--bg-input);
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: 0.7rem;
@@ -4219,7 +4199,6 @@ html[data-theme="light"] .composer-context-trigger.tone-danger {
   color: var(--accent);
   font-size: 0.78em;
   transform: translateY(-1px);
-  text-shadow: 0 0 8px rgba(200, 169, 106, 0.4);
 }
 
 html[data-theme="light"] .usage-block-mark {
@@ -4231,7 +4210,7 @@ html[data-theme="light"] .usage-block-mark {
   padding: 3px 9px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: rgba(8, 11, 16, 0.5);
+  background: var(--bg-input);
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: 0.62rem;
@@ -4522,7 +4501,7 @@ html[data-theme="light"] .usage-chips {
   padding: 12px 14px 12px 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: rgba(8, 11, 16, 0.4);
+  background: var(--bg-input);
   overflow: hidden;
 }
 
@@ -4612,7 +4591,7 @@ html[data-theme="light"] .usage-window {
   text-align: center;
   border: 1px dashed var(--line);
   border-radius: var(--radius-sm);
-  background: rgba(8, 11, 16, 0.25);
+  background: var(--bg-input);
 }
 
 html[data-theme="light"] .usage-empty {
@@ -4771,7 +4750,6 @@ html[data-theme="light"] .usage-meta-bullet {
   transform: rotate(-30deg);
   transition: transform 600ms cubic-bezier(0.34, 1.56, 0.64, 1);
   border-radius: 1px;
-  filter: drop-shadow(0 0 4px var(--deck-tone));
 }
 
 .usage-deck.tone-warn .usage-deck-toggle-needle {
@@ -5523,7 +5501,6 @@ html[data-theme="light"] .usage-dial-track {
 
 .usage-dial-fill {
   stroke: var(--success);
-  filter: drop-shadow(0 0 6px rgba(108, 201, 154, 0.45));
   /*  Stroke sweeps from 0 → full on mount. */
   stroke-dasharray: 260 260;
   stroke-dashoffset: 260;
@@ -5532,24 +5509,19 @@ html[data-theme="light"] .usage-dial-track {
 
 .usage-dial.tone-warn .usage-dial-fill {
   stroke: var(--warn);
-  filter: drop-shadow(0 0 6px rgba(217, 154, 74, 0.45));
 }
 
 .usage-dial.tone-danger .usage-dial-fill {
   stroke: var(--danger);
-  filter: drop-shadow(0 0 8px rgba(226, 108, 112, 0.5));
 }
 
 html[data-theme="light"] .usage-dial-fill {
-  filter: drop-shadow(0 0 5px rgba(37, 122, 80, 0.35));
 }
 
 html[data-theme="light"] .usage-dial.tone-warn .usage-dial-fill {
-  filter: drop-shadow(0 0 5px rgba(170, 102, 24, 0.35));
 }
 
 html[data-theme="light"] .usage-dial.tone-danger .usage-dial-fill {
-  filter: drop-shadow(0 0 7px rgba(184, 48, 56, 0.4));
 }
 
 @keyframes dial-fill-in {
@@ -5564,7 +5536,6 @@ html[data-theme="light"] .usage-dial.tone-danger .usage-dial-fill {
 .usage-dial-needle {
   stroke: var(--accent-strong);
   stroke-width: 2;
-  filter: drop-shadow(0 0 3px rgba(224, 187, 115, 0.6));
   transform-origin: 72px 72px;
   /*  Needle sweeps in from rest at -135° to its target position. */
   animation: dial-needle-sweep 900ms cubic-bezier(0.22, 0.8, 0.36, 1) both 120ms;
@@ -5589,11 +5560,10 @@ html[data-theme="light"] .usage-dial.tone-danger .usage-dial-fill {
 
 .usage-dial-hub {
   fill: var(--accent-strong);
-  filter: drop-shadow(0 0 3px rgba(200, 169, 106, 0.55));
 }
 
 .usage-dial-hub-cap {
-  fill: rgba(8, 11, 16, 0.95);
+  fill: var(--bg-input);
 }
 
 html[data-theme="light"] .usage-dial-hub-cap {
@@ -5856,7 +5826,7 @@ html[data-theme="light"] .composer-activity-spinner {
   padding: 5px 12px 5px 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: rgba(8, 11, 16, 0.5);
+  background: var(--bg-input);
   color: var(--accent-strong);
   font-family: var(--font-mono);
   font-size: 0.78rem;
@@ -5874,7 +5844,7 @@ html[data-theme="light"] .composer-tune-trigger {
 
 .composer-tune-trigger:hover:not(:disabled) {
   border-color: var(--line-strong);
-  background: rgba(28, 33, 44, 0.6);
+  background: var(--bg-card-soft);
   color: var(--text-strong);
 }
 
@@ -5884,7 +5854,7 @@ html[data-theme="light"] .composer-tune-trigger:hover:not(:disabled) {
 
 .composer-tune-trigger.open {
   border-color: var(--line-strong);
-  background: rgba(28, 33, 44, 0.8);
+  background: var(--bg-card-soft);
   color: var(--text-strong);
 }
 
@@ -5958,7 +5928,7 @@ html[data-theme="light"] .composer-tune-trigger.open {
   padding: 7px 9px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: rgba(8, 11, 16, 0.65);
+  background: var(--bg-input);
   color: var(--accent-strong);
   font-family: var(--font-mono);
   font-size: 0.85rem;
@@ -6049,7 +6019,7 @@ html[data-theme="light"] .composer-tune-restart-apply {
   padding: 10px 12px;
   border: 1px solid var(--line-strong);
   border-radius: 6px;
-  background: rgba(8, 11, 16, 0.4);
+  background: var(--bg-input);
 }
 
 html[data-theme="light"] .composer-tune-confirm {
@@ -6130,7 +6100,7 @@ html[data-theme="light"] .composer-tune-confirm {
   border: 1px solid var(--line);
   border-bottom-width: 2px;
   border-radius: 4px;
-  background: rgba(8, 11, 16, 0.65);
+  background: var(--bg-input);
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: 0.7rem;
@@ -6195,7 +6165,7 @@ html[data-theme="light"] .composer-shortcut kbd {
 .composer-overflow-trigger:hover:not(:disabled) {
   border-color: var(--line-strong);
   color: var(--text);
-  background: rgba(28, 33, 44, 0.6);
+  background: var(--bg-card-soft);
 }
 
 html[data-theme="light"] .composer-overflow-trigger:hover:not(:disabled) {
@@ -6205,7 +6175,7 @@ html[data-theme="light"] .composer-overflow-trigger:hover:not(:disabled) {
 .composer-overflow-trigger.open {
   border-color: var(--line-strong);
   color: var(--text-strong);
-  background: rgba(28, 33, 44, 0.8);
+  background: var(--bg-card-soft);
 }
 
 html[data-theme="light"] .composer-overflow-trigger.open {
@@ -6252,7 +6222,7 @@ html[data-theme="light"] .composer-overflow-trigger.open {
   /* Subtle persistent background + border so each row reads as a discrete
    * button at rest (without it the row reads as plain text). */
   border: 1px solid var(--line);
-  background: rgba(28, 33, 44, 0.45);
+  background: var(--bg-card-soft);
   color: var(--text);
   font-size: 0.88rem;
   text-align: left;
@@ -6268,7 +6238,7 @@ html[data-theme="light"] .composer-overflow-item {
 }
 
 .composer-overflow-item:hover:not(:disabled) {
-  background: rgba(28, 33, 44, 0.85);
+  background: var(--bg-card-soft);
   border-color: var(--line-strong);
 }
 
@@ -6834,7 +6804,7 @@ html[data-theme="light"] .composer-send {
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: rgba(15, 19, 27, 0.55);
+  background: var(--bg-input);
   color: var(--text);
   transition:
     border-color 120ms ease,
@@ -6848,7 +6818,7 @@ html[data-theme="light"] .ask-option {
 
 .ask-option:hover:not(:disabled) {
   border-color: var(--line-strong);
-  background: rgba(28, 33, 44, 0.7);
+  background: var(--bg-card-soft);
 }
 
 html[data-theme="light"] .ask-option:hover:not(:disabled) {
@@ -6940,7 +6910,7 @@ html[data-theme="light"] .ask-answer-chip {
   gap: 4px;
   padding: 8px 10px;
   border-left: 2px solid rgba(200, 169, 106, 0.4);
-  background: rgba(15, 19, 27, 0.4);
+  background: var(--bg-input);
   border-radius: var(--radius-sm);
 }
 
@@ -7010,7 +6980,7 @@ html[data-theme="light"] .ask-answer-item {
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
-  background: rgba(15, 19, 27, 0.55);
+  background: var(--bg-input);
   color: var(--text);
   font: inherit;
   line-height: 1.4;
@@ -8909,7 +8879,6 @@ html[data-theme="light"] .term-compose-send {
 .session-header-pin.active {
   color: var(--accent);
   opacity: 1;
-  text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .session-header-pin.active:hover {
@@ -10066,7 +10035,7 @@ html[data-theme="light"] .schedule-msg-preview {
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
   overflow: hidden;
-  background: rgba(10, 13, 18, 0.5);
+  background: var(--bg-input);
   transition:
     border-color 200ms ease,
     box-shadow 200ms ease;
@@ -10503,7 +10472,7 @@ html[data-theme="light"] .advanced-warning {
 }
 
 .session-switcher-search input {
-  background: rgba(8, 11, 16, 0.5);
+  background: var(--bg-input);
 }
 
 html[data-theme="light"] .session-switcher-search input {
@@ -10639,17 +10608,13 @@ html[data-theme="light"] .session-switcher-row.selected {
 .session-switcher-footer {
   padding: 8px 16px;
   border-top: 1px solid var(--line);
-  background: rgba(8, 11, 16, 0.4);
+  background: var(--bg-input);
   font-family: var(--font-mono);
   font-size: 0.7rem;
   color: var(--muted-soft);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   text-align: center;
-}
-
-html[data-theme="light"] .session-switcher-footer {
-  background: rgba(240, 236, 226, 0.6);
 }
 
 .session-switcher-pagination {
@@ -10667,25 +10632,15 @@ html[data-theme="light"] .session-switcher-footer {
   padding: 4px 8px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
-  background: rgba(28, 33, 44, 0.45);
+  background: var(--bg-card-soft);
   color: var(--text);
   cursor: pointer;
   transition: all 120ms ease;
 }
 
-html[data-theme="light"] .session-switcher-pagination button {
-  background: rgba(220, 210, 190, 0.45);
-}
-
 .session-switcher-pagination button:hover:not(:disabled) {
-  background: rgba(28, 33, 44, 0.85);
+  background: var(--bg-card-soft);
   border-color: var(--line-strong);
-}
-
-html[data-theme="light"]
-  .session-switcher-pagination
-  button:hover:not(:disabled) {
-  background: rgba(205, 194, 170, 0.85);
 }
 
 .session-switcher-pagination button:disabled {
@@ -12218,9 +12173,11 @@ html[data-theme="light"]
      already-at-edge pane stay inside the dock instead of scrolling the
      transcript behind it (notably when the dock is a full-screen sheet). */
   overscroll-behavior: contain;
-  background: rgba(14, 17, 24, 0.98);
-  border-right: 1px solid var(--line-strong);
-  box-shadow: 4px 0 32px rgba(0, 0, 0, 0.36);
+  background: var(--glass-bg-thick);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-right: 1px solid var(--glass-line);
+  box-shadow: var(--shadow);
   /* Inset the top too, not just the left: as a wide side-dock (iPad/desktop) the
      header — and its pinned close button — would otherwise sit under the status
      bar. The ≤640px full-screen-sheet rule already pads all four insets. */
@@ -12233,11 +12190,6 @@ html[data-theme="light"]
    open file) persists across a close/reopen. */
 .wp-dock.wp-dock-closed {
   display: none;
-}
-
-html[data-theme="light"] .wp-dock {
-  background: rgba(252, 249, 242, 0.99);
-  box-shadow: 4px 0 28px rgba(60, 45, 20, 0.16);
 }
 
 @keyframes wp-dock-in {
@@ -12939,19 +12891,11 @@ body.wp-dock-resizing {
 }
 
 .wp-diff-row.add {
-  background: rgba(108, 201, 154, 0.13);
-}
-
-html[data-theme="light"] .wp-diff-row.add {
-  background: rgba(37, 122, 80, 0.1);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
 }
 
 .wp-diff-row.del {
-  background: rgba(226, 108, 112, 0.13);
-}
-
-html[data-theme="light"] .wp-diff-row.del {
-  background: rgba(184, 48, 56, 0.09);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
 .wp-diff-ln {
@@ -13007,7 +12951,7 @@ html[data-theme="light"] .wp-diff-row.del {
 
 .wp-diff-scode.add,
 .wp-diff-split .wp-diff-ln.add {
-  background: rgba(108, 201, 154, 0.13);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
 }
 
 html[data-theme="light"] .wp-diff-scode.add,
@@ -13017,7 +12961,7 @@ html[data-theme="light"] .wp-diff-split .wp-diff-ln.add {
 
 .wp-diff-scode.del,
 .wp-diff-split .wp-diff-ln.del {
-  background: rgba(226, 108, 112, 0.13);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
 html[data-theme="light"] .wp-diff-scode.del,
@@ -13363,7 +13307,7 @@ html[data-theme="light"] .wp-diff-split .wp-diff-ln.del {
   flex-wrap: wrap;
   gap: 8px 12px;
   flex-shrink: 0;
-  background: rgba(8, 11, 16, 0.2);
+  background: var(--bg-input);
 }
 
 html[data-theme="light"] .wp-preview-header {
@@ -13512,7 +13456,7 @@ html[data-theme="light"] .wp-preview-header {
   padding: 8px;
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
-  background: rgba(8, 11, 16, 0.12);
+  background: var(--bg-input);
 }
 
 html[data-theme="light"] .wp-md-toggle {

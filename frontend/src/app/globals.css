@@ -17,13 +17,14 @@
   --warn: #d99a4a;
   --success: #6cc99a;
   --todo-glyph: #c8a3eb;
-  /* Opacity must carry legibility on its own: backdrop blur is progressive
-   * enhancement, and for surfaces nested inside another backdrop-filter
-   * (composer popovers) the ancestor is the backdrop root, so they can never
-   * blur the page behind it. Thick glass is near-solid for text-dense
-   * sheets; regular glass stays airier for strips and floaters. */
+  /* Thick glass is fully opaque: text-dense sheets sit over bright
+   * transcript text, where even a few percent of bleed-through reads as
+   * ghost text on a dark ground — and popovers nested inside the composer
+   * can never blur the page anyway (the composer's own backdrop-filter is
+   * their backdrop root). Regular glass stays translucent for strips and
+   * floaters, whose blur genuinely samples the page. */
   --glass-bg: rgba(16, 20, 27, 0.78);
-  --glass-bg-thick: rgba(13, 17, 23, 0.97);
+  --glass-bg-thick: rgb(13, 17, 23);
   --glass-line: rgba(160, 178, 210, 0.16);
   --glass-hi: rgba(255, 255, 255, 0.08);
   --glass-blur: blur(16px) saturate(1.7);
@@ -66,7 +67,7 @@ html[data-theme="light"] {
   --success: #257a50;
   --todo-glyph: #7040b0;
   --glass-bg: rgba(250, 246, 238, 0.8);
-  --glass-bg-thick: rgba(250, 247, 240, 0.97);
+  --glass-bg-thick: rgb(250, 247, 240);
   --glass-line: rgba(90, 78, 58, 0.18);
   --glass-hi: rgba(255, 255, 255, 0.55);
   --shadow: 0 10px 28px rgba(60, 45, 20, 0.16);

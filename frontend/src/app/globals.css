@@ -9930,12 +9930,10 @@ html[data-theme="light"] .schedule-msg-preview {
     gap: 12px;
   }
 
+  /* Keep the text actions right-aligned when the bottomline stacks, matching
+     the desktop alignment. */
   .import-thread-cta {
-    align-self: stretch;
-  }
-
-  .import-thread-cta button.secondary {
-    width: 100%;
+    align-self: flex-end;
   }
 
   .import-thread-footer {

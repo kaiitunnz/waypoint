@@ -49,7 +49,6 @@ single change.
 - **Lead / engineering manager** — you. The one role active every phase and never
   delegated away (the standing crew persists too, but shifts focus by phase): owns the board,
   the org chart, dependency sequencing, integration, and every phase checkpoint.
-  Never delegated away.
 - **Role sessions** — a small, **persistent standing crew** of the code-touching
   roles (tech lead/architect, frontend, backend, QA), spawned once and reused
   across phases rather than churned per phase; the product manager and reviewer are

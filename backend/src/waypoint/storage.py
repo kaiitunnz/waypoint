@@ -3,19 +3,30 @@ import json
 import logging
 import sqlite3
 import threading
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from waypoint.perf import debug_timer
 from waypoint.schemas import (
+    INBOX_INTERACTIVE_BLOCK_TYPES,
     BoardChannel,
     BoardEntry,
     EventKind,
     EventRecord,
+    InboxApprovalAnswer,
+    InboxBlock,
+    InboxBlockInput,
+    InboxBlockType,
+    InboxItem,
+    InboxQuestionAnswer,
+    InboxReply,
+    InboxReplyInput,
+    InboxStatus,
     ScheduledMessageRecord,
     ScheduledMessageStatus,
     ScheduledSessionRecord,
@@ -100,6 +111,55 @@ def _synchronized[**P, R](method: Callable[P, R]) -> Callable[P, R]:
             return method(*args, **kwargs)
 
     return wrapper
+
+
+_INBOX_BLOCKS_ADAPTER: TypeAdapter[list[InboxBlock]] = TypeAdapter(list[InboxBlock])
+
+
+class InboxError(Exception):
+    """Base for inbox block-submit errors the API maps to HTTP codes."""
+
+
+class InboxBlockNotFoundError(InboxError):
+    """The item exists but has no block with the given id (→ 404)."""
+
+
+class InboxBlockTypeError(InboxError):
+    """The submitted answer does not fit the target block's type (→ 422)."""
+
+
+def _materialize_blocks(blocks: list[InboxBlockInput]) -> list[InboxBlock]:
+    # Assign a server-side id to each authored block; answers/replies start null.
+    return _INBOX_BLOCKS_ADAPTER.validate_python(
+        [{**block.model_dump(mode="json"), "id": uuid.uuid4().hex} for block in blocks]
+    )
+
+
+def _recompute_inbox_status(blocks: list[InboxBlock]) -> InboxStatus:
+    # Resolved iff there is at least one required interactive block AND all such
+    # blocks are answered. The ``≥1 required`` guard defeats the vacuous-truth
+    # trap: an item with no required interactive blocks (pure-FYI, or only
+    # optional questions) must NOT resolve here — it resolves on read instead.
+    required = [
+        block
+        for block in blocks
+        if block.type in INBOX_INTERACTIVE_BLOCK_TYPES
+        and getattr(block, "required", False)
+    ]
+    if not required:
+        return InboxStatus.OPEN
+    if all(getattr(block, "answer", None) is not None for block in required):
+        return InboxStatus.RESOLVED
+    return InboxStatus.OPEN
+
+
+def _inbox_is_no_action(blocks: list[InboxBlock]) -> bool:
+    # True when nothing required gates the item — the resolve-on-read path.
+    return not any(
+        block.type in INBOX_INTERACTIVE_BLOCK_TYPES
+        and getattr(block, "required", False)
+        for block in blocks
+    )
 
 
 class Storage:
@@ -236,6 +296,23 @@ class Storage:
                 channel TEXT PRIMARY KEY,
                 created_at TEXT NOT NULL
             );
+
+            -- Durable, human-facing inbox. Everything filtered/searched/sorted
+            -- is a real column; the ordered content (with answers/replies) is a
+            -- JSON blob under ``blocks``, updated in place via an atomic
+            -- read-modify-write under the storage lock.
+            CREATE TABLE IF NOT EXISTS inbox_items (
+                id TEXT PRIMARY KEY,
+                from_session_id TEXT NOT NULL,
+                from_label TEXT,
+                subject TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                read_at TEXT,
+                version INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                blocks TEXT NOT NULL DEFAULT '[]'
+            );
             """)
         # Register any channels that predate the board_channels table.
         self.connection.execute(
@@ -265,6 +342,12 @@ class Storage:
         self._ensure_column(
             "scheduled_sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
         )
+        # Additive migration for the inbox table on databases that predate it.
+        # (No-ops on a fresh DB where the CREATE TABLE above already made the
+        # complete table; only load-bearing for columns added in a later release.)
+        self._ensure_column("inbox_items", "from_label", "TEXT")
+        self._ensure_column("inbox_items", "read_at", "TEXT")
+        self._ensure_column("inbox_items", "version", "INTEGER NOT NULL DEFAULT 0")
         # Indexes for columns filtered on by the runtime/scheduler. Created
         # after the ALTER TABLE block above so ``spawner_session_id`` exists on
         # databases that predate it.
@@ -275,6 +358,10 @@ class Storage:
                 ON board_entries(author_session_id);
             CREATE INDEX IF NOT EXISTS idx_scheduled_status
                 ON scheduled_sessions(status);
+            CREATE INDEX IF NOT EXISTS idx_inbox_status
+                ON inbox_items(status);
+            CREATE INDEX IF NOT EXISTS idx_inbox_updated
+                ON inbox_items(updated_at, id);
             """)
         self.connection.commit()
 
@@ -671,6 +758,216 @@ class Storage:
             (entry_id,),
         ).fetchone()
         return self._board_entry_from_row(row) if row else None
+
+    # ───────────────────────────── Inbox ─────────────────────────────
+
+    @_synchronized
+    def create_inbox_item(
+        self,
+        from_session_id: str,
+        from_label: str | None,
+        subject: str,
+        blocks: list[InboxBlockInput],
+    ) -> InboxItem:
+        now = datetime.now(UTC)
+        item = InboxItem(
+            id=uuid.uuid4().hex,
+            from_session_id=from_session_id,
+            from_label=from_label,
+            subject=subject,
+            status=InboxStatus.OPEN,
+            read_at=None,
+            version=0,
+            created_at=now,
+            updated_at=now,
+            blocks=_materialize_blocks(blocks),
+        )
+        self.connection.execute(
+            """
+            INSERT INTO inbox_items (
+                id, from_session_id, from_label, subject, status, read_at,
+                version, created_at, updated_at, blocks
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                item.id,
+                item.from_session_id,
+                item.from_label,
+                item.subject,
+                item.status,
+                None,
+                item.version,
+                now.isoformat(),
+                now.isoformat(),
+                self._dump_inbox_blocks(item.blocks),
+            ),
+        )
+        self.connection.commit()
+        return item
+
+    @_synchronized
+    def get_inbox_item(self, item_id: str) -> InboxItem | None:
+        row = self.connection.execute(
+            "SELECT * FROM inbox_items WHERE id = ?", (item_id,)
+        ).fetchone()
+        return self._inbox_item_from_row(row) if row else None
+
+    @_synchronized
+    def list_inbox_items(
+        self,
+        *,
+        status: InboxStatus | None = None,
+        query: str | None = None,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> tuple[list[InboxItem], bool, str | None]:
+        # Keyset pagination over the ``(updated_at, id)`` sort. ``updated_at`` is
+        # volatile (block-submit rewrites it), so a walk can skip/duplicate an
+        # item answered mid-pagination — acceptable for a live load-more list
+        # that also receives ``inbox_update`` events and self-heals on the client.
+        sql = "SELECT * FROM inbox_items WHERE 1 = 1"
+        params: list[Any] = []
+        if status is not None:
+            sql += " AND status = ?"
+            params.append(status)
+        if query:
+            like = f"%{query}%"
+            sql += " AND (subject LIKE ? OR from_label LIKE ?)"
+            params.extend([like, like])
+        if cursor:
+            cursor_updated, _, cursor_id = cursor.partition("|")
+            sql += " AND (updated_at < ? OR (updated_at = ? AND id < ?))"
+            params.extend([cursor_updated, cursor_updated, cursor_id])
+        sql += " ORDER BY updated_at DESC, id DESC LIMIT ?"
+        params.append(limit + 1)
+        rows = self.connection.execute(sql, params).fetchall()
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        items = [self._inbox_item_from_row(row) for row in rows]
+        next_cursor: str | None = None
+        if has_more and items:
+            last = rows[-1]
+            next_cursor = f"{last['updated_at']}|{last['id']}"
+        return items, has_more, next_cursor
+
+    @_synchronized
+    def submit_inbox_block(
+        self,
+        item_id: str,
+        block_id: str,
+        *,
+        answer: dict[str, Any] | None = None,
+        reply: InboxReplyInput | None = None,
+    ) -> InboxItem | None:
+        # Atomic read-modify-write on the ``blocks`` JSON: SELECT → mutate the
+        # one block (validated against its type) → recompute status (monotonic)
+        # → bump version → UPDATE, all under this method's lock (mirrors
+        # ``update_board_entry``). Returns None if the item is gone (→ 404);
+        # raises InboxBlockNotFoundError / InboxBlockTypeError for block-level
+        # problems the API maps to 404 / 422.
+        row = self.connection.execute(
+            "SELECT * FROM inbox_items WHERE id = ?", (item_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        blocks = self._parse_inbox_blocks(row["blocks"])
+        target = next((block for block in blocks if block.id == block_id), None)
+        if target is None:
+            raise InboxBlockNotFoundError(block_id)
+        now = datetime.now(UTC)
+        changed = False
+        if answer is not None:
+            self._apply_inbox_answer(target, answer, now)
+            changed = True
+        if reply is not None:
+            target.reply = InboxReply(
+                notes=reply.notes,
+                attachments=list(reply.attachments),
+                created_at=now,
+            )
+            changed = True
+        if not changed:
+            return self._inbox_item_from_row(row)
+        existing_status = InboxStatus(row["status"])
+        # Monotonic: resolved is terminal — a later reply/optional answer must
+        # never demote a read-resolved item back to open (RFC §7/§13).
+        if (
+            existing_status == InboxStatus.RESOLVED
+            or _recompute_inbox_status(blocks) == InboxStatus.RESOLVED
+        ):
+            new_status = InboxStatus.RESOLVED
+        else:
+            new_status = existing_status
+        new_version = int(row["version"]) + 1
+        self.connection.execute(
+            "UPDATE inbox_items SET status = ?, version = ?, updated_at = ?, "
+            "blocks = ? WHERE id = ?",
+            (
+                new_status,
+                new_version,
+                now.isoformat(),
+                self._dump_inbox_blocks(blocks),
+                item_id,
+            ),
+        )
+        self.connection.commit()
+        return self.get_inbox_item(item_id)
+
+    @_synchronized
+    def mark_inbox_read(self, item_id: str) -> InboxItem | None:
+        # Idempotent: the UI calls this on every open. A first read stamps
+        # ``read_at``; a no-action item additionally resolves-on-read (a real
+        # state change → bump version). A plain read of an interactive item sets
+        # ``read_at`` only and never bumps version (RFC §7). Once ``read_at`` is
+        # set this is a no-op.
+        row = self.connection.execute(
+            "SELECT * FROM inbox_items WHERE id = ?", (item_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        if row["read_at"]:
+            return self._inbox_item_from_row(row)
+        now = datetime.now(UTC)
+        blocks = self._parse_inbox_blocks(row["blocks"])
+        status = InboxStatus(row["status"])
+        if status == InboxStatus.OPEN and _inbox_is_no_action(blocks):
+            self.connection.execute(
+                "UPDATE inbox_items SET read_at = ?, status = ?, version = ?, "
+                "updated_at = ? WHERE id = ?",
+                (
+                    now.isoformat(),
+                    InboxStatus.RESOLVED,
+                    int(row["version"]) + 1,
+                    now.isoformat(),
+                    item_id,
+                ),
+            )
+        else:
+            self.connection.execute(
+                "UPDATE inbox_items SET read_at = ? WHERE id = ?",
+                (now.isoformat(), item_id),
+            )
+        self.connection.commit()
+        return self.get_inbox_item(item_id)
+
+    @_synchronized
+    def delete_inbox_item(self, item_id: str) -> bool:
+        # Removes the inbox row only; reply/display attachments stay in their
+        # session stores (RFC §13).
+        cursor = self.connection.execute(
+            "DELETE FROM inbox_items WHERE id = ?", (item_id,)
+        )
+        self.connection.commit()
+        return (cursor.rowcount or 0) > 0
+
+    @_synchronized
+    def unresolved_inbox_count(self) -> int:
+        return int(
+            self.connection.execute(
+                "SELECT COUNT(*) AS n FROM inbox_items WHERE status = ?",
+                (InboxStatus.OPEN,),
+            ).fetchone()["n"]
+        )
 
     @_synchronized
     def prune_board_for_session(self, session_id: str) -> int:
@@ -1484,6 +1781,52 @@ class Storage:
             decoded = {}
         payload["metadata"] = decoded if isinstance(decoded, dict) else {}
         return BoardEntry.model_validate(payload)
+
+    def _dump_inbox_blocks(self, blocks: list[InboxBlock]) -> str:
+        return json.dumps(_INBOX_BLOCKS_ADAPTER.dump_python(blocks, mode="json"))
+
+    def _parse_inbox_blocks(self, raw: str | None) -> list[InboxBlock]:
+        try:
+            decoded = json.loads(raw or "[]")
+        except json.JSONDecodeError:
+            decoded = []
+        if not isinstance(decoded, list):
+            return []
+        return _INBOX_BLOCKS_ADAPTER.validate_python(decoded)
+
+    def _apply_inbox_answer(
+        self, block: InboxBlock, answer: dict[str, Any], now: datetime
+    ) -> None:
+        # An ``answer`` is only valid on the matching interactive block type; a
+        # shape mismatch (guarded by ``extra="forbid"`` on the answer models) or
+        # an answer on a non-interactive block is a 422.
+        try:
+            if block.type == InboxBlockType.QUESTION:
+                block.answer = InboxQuestionAnswer.model_validate(answer)
+            elif block.type == InboxBlockType.APPROVAL:
+                block.answer = InboxApprovalAnswer.model_validate(answer)
+            else:
+                raise InboxBlockTypeError(f"answer not allowed on {block.type} block")
+        except ValidationError as exc:
+            raise InboxBlockTypeError(str(exc)) from exc
+        block.answered_at = now
+
+    def _inbox_item_from_row(self, row: sqlite3.Row) -> InboxItem:
+        payload = dict(row)
+        payload["created_at"] = datetime.fromisoformat(payload["created_at"])
+        payload["updated_at"] = datetime.fromisoformat(payload["updated_at"])
+        payload["read_at"] = (
+            datetime.fromisoformat(payload["read_at"])
+            if payload.get("read_at")
+            else None
+        )
+        raw_blocks = payload.get("blocks") or "[]"
+        try:
+            decoded = json.loads(raw_blocks)
+        except json.JSONDecodeError:
+            decoded = []
+        payload["blocks"] = decoded if isinstance(decoded, list) else []
+        return InboxItem.model_validate(payload)
 
     def _serialize_field(self, value: Any) -> Any:
         if isinstance(value, datetime):

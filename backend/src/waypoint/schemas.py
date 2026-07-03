@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, Field, StringConstraints
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
 
 
 def _validate_backend_id(value: Any) -> str:
@@ -605,3 +605,193 @@ class SideQuestion(BaseModel):
     attempts: int = 1
     resumed: bool = False
     created_at: datetime
+
+
+# ─────────────────────────────── Inbox ───────────────────────────────
+# A durable, human-facing inbox: a session (typically a crew lead) posts an
+# item whose ordered ``blocks`` each carry an optional universal ``reply`` and,
+# for interactive blocks, a structured ``answer``. The human triages in the UI;
+# the requesting session reads the answers back as data. See
+# ``Draft_Lead-Initiated_Human_Checkpoint_Inbox`` (RFC).
+
+
+class InboxBlockType(StrEnum):
+    MARKDOWN = "markdown"
+    ATTACHMENT = "attachment"
+    QUESTION = "question"
+    APPROVAL = "approval"
+
+
+class InboxStatus(StrEnum):
+    OPEN = "open"
+    RESOLVED = "resolved"
+
+
+class InboxAttachmentRef(BaseModel):
+    # References a blob in an existing session's attachment store. Display
+    # ``attachment`` blocks point at the requester's store; reply uploads land
+    # in the requester session (pinned) and are stored the same way.
+    session_id: str
+    attachment_id: str
+
+
+class InboxQuestionOption(BaseModel):
+    label: str
+    description: str | None = None
+
+
+class InboxQuestionAnswer(BaseModel):
+    # Mirrors the session ``AskUserQuestion`` answer: selected option labels plus
+    # optional free-text. ``extra="forbid"`` so an approval-shaped payload can
+    # never silently validate as a question answer at the block-submit boundary.
+    model_config = ConfigDict(extra="forbid")
+
+    selected: list[str] = Field(default_factory=list)
+    other: str | None = None
+
+
+class InboxApprovalAnswer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: str
+
+
+class InboxReply(BaseModel):
+    # Universal per-block comment: available on every block type, including
+    # plain prose, so the human can annotate and attach files anywhere.
+    notes: str | None = None
+    attachments: list[InboxAttachmentRef] = Field(default_factory=list)
+    created_at: datetime
+
+
+class InboxReplyInput(BaseModel):
+    notes: str | None = None
+    attachments: list[InboxAttachmentRef] = Field(default_factory=list)
+
+
+class _InboxBlockCommon(BaseModel):
+    id: str
+    reply: InboxReply | None = None
+
+
+class InboxMarkdownBlock(_InboxBlockCommon):
+    type: Literal[InboxBlockType.MARKDOWN] = InboxBlockType.MARKDOWN
+    text: str
+
+
+class InboxAttachmentBlock(_InboxBlockCommon):
+    type: Literal[InboxBlockType.ATTACHMENT] = InboxBlockType.ATTACHMENT
+    ref: InboxAttachmentRef
+
+
+class InboxQuestionBlock(_InboxBlockCommon):
+    type: Literal[InboxBlockType.QUESTION] = InboxBlockType.QUESTION
+    header: str | None = None
+    question: str
+    options: list[InboxQuestionOption] = Field(default_factory=list)
+    multi: bool = False
+    required: bool = True
+    answer: InboxQuestionAnswer | None = None
+    answered_at: datetime | None = None
+
+
+class InboxApprovalBlock(_InboxBlockCommon):
+    type: Literal[InboxBlockType.APPROVAL] = InboxBlockType.APPROVAL
+    prompt: str
+    options: list[str] = Field(default_factory=list)
+    required: bool = True
+    answer: InboxApprovalAnswer | None = None
+    answered_at: datetime | None = None
+
+
+InboxBlock = Annotated[
+    InboxMarkdownBlock | InboxAttachmentBlock | InboxQuestionBlock | InboxApprovalBlock,
+    Field(discriminator="type"),
+]
+
+# The interactive block types that can gate resolution.
+INBOX_INTERACTIVE_BLOCK_TYPES = frozenset(
+    {InboxBlockType.QUESTION, InboxBlockType.APPROVAL}
+)
+
+
+class InboxItem(BaseModel):
+    id: str
+    # The session that posted the item, stamped from ``WAYPOINT_SESSION_ID``.
+    from_session_id: str
+    # Snapshot of the sender session's title at post time; a search target that
+    # stays readable after the session row is gone.
+    from_label: str | None = None
+    subject: str
+    status: InboxStatus = InboxStatus.OPEN
+    # Null = unread. Independent of ``status``.
+    read_at: datetime | None = None
+    # Monotonic; bumped on every answer/reply and on a no-action resolve-on-read
+    # (not on a plain read). The cursor for ``inbox wait --until update``.
+    version: int = 0
+    created_at: datetime
+    updated_at: datetime
+    blocks: list[InboxBlock] = Field(default_factory=list)
+
+
+# ── Authoring (post) input: blocks without server-assigned ids/answers ──
+
+
+class InboxMarkdownBlockInput(BaseModel):
+    type: Literal[InboxBlockType.MARKDOWN] = InboxBlockType.MARKDOWN
+    text: str
+
+
+class InboxAttachmentBlockInput(BaseModel):
+    type: Literal[InboxBlockType.ATTACHMENT] = InboxBlockType.ATTACHMENT
+    ref: InboxAttachmentRef
+
+
+class InboxQuestionBlockInput(BaseModel):
+    type: Literal[InboxBlockType.QUESTION] = InboxBlockType.QUESTION
+    header: str | None = None
+    question: str
+    options: list[InboxQuestionOption] = Field(default_factory=list)
+    multi: bool = False
+    required: bool = True
+
+
+class InboxApprovalBlockInput(BaseModel):
+    type: Literal[InboxBlockType.APPROVAL] = InboxBlockType.APPROVAL
+    prompt: str
+    options: list[str] = Field(default_factory=list)
+    required: bool = True
+
+
+InboxBlockInput = Annotated[
+    InboxMarkdownBlockInput
+    | InboxAttachmentBlockInput
+    | InboxQuestionBlockInput
+    | InboxApprovalBlockInput,
+    Field(discriminator="type"),
+]
+
+
+class InboxPostRequest(BaseModel):
+    subject: str
+    blocks: list[InboxBlockInput] = Field(default_factory=list)
+    from_session_id: str | None = None
+
+
+class InboxBlockSubmitRequest(BaseModel):
+    # A single UI action resolves a block: pick an option (``answer``), type a
+    # note and/or attach files (``reply``) — either or both, in one submit. An
+    # omitted field leaves the existing value untouched (never clears it).
+    # ``answer`` is validated against the target block's type server-side.
+    answer: dict[str, Any] | None = None
+    reply: InboxReplyInput | None = None
+
+
+class InboxListResponse(BaseModel):
+    items: list[InboxItem] = Field(default_factory=list)
+    has_more: bool = False
+    cursor: str | None = None
+
+
+class InboxUnresolvedCountResponse(BaseModel):
+    unresolved_count: int

@@ -43,12 +43,15 @@ When you keep children, tell the user which ones and why, and quote their ids so
 they can find them.
 
 **Park ≠ terminate.** Parking means leave the child **idle and alive** — neither
-`terminate` nor `delete`. `terminate` ends the process, and a structured backend
-(`supports_resume=False` — claude_code, codex, opencode) then **cannot** take a
-`sessions send`, so continuing it forces the very reimport parking avoids; only
-`claude_tty` / `tmux` (`supports_resume=True`) can be re-attached after their
-process ends. So to keep a child iterable, leave it running idle — do not
-`terminate` it as a "lighter" form of keeping.
+`terminate` nor `delete`. `terminate` ends the process, and whether you can pick
+the child back up then depends on its **transport's** `supports_resume`: a
+non-resumable transport (`supports_resume=False` — the structured `claude_cli`
+adapter, and `codex` / `opencode`) **cannot** be resumed, so continuing it forces
+the very reimport parking avoids; `claude_tty` / `tmux` (`supports_resume=True`)
+re-attach after the process ends — and a default `claude_code` subagent runs on
+`claude_tty`, so it *is* resumable. Parking (leave it running idle) is safe on
+every transport; `terminate` is recoverable only on the resumable ones, so don't
+use it as a "lighter" form of keeping.
 
 ## Rules
 

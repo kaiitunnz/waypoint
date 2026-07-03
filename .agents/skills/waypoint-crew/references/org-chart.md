@@ -8,7 +8,9 @@ small work, expand them where a product warrants it.
 
 ## Roles
 
-- **Lead / engineering manager** — you, and the only role that is always on. It
+- **Lead / engineering manager** — you, and the one role active every phase (the
+  standing crew persists too, but its members shift focus phase to phase; the lead
+  never does). It
   splits the product into phases and tasks, sequences coupled work, owns every
   keyed board cell, integrates each result, and runs the phase checkpoints with
   the user. Exactly one lead. Everything durable lives with it, because it is the
@@ -70,6 +72,12 @@ Manage the cost by **size, not churn**:
   posture — crew roles are long-lived like the lead — and a successor lead
   adopting a crew it did not spawn is sanctioned (as in workqueue's
   resume-after-lead-death).
+- **Ephemeral overflow workers are the exception to all of the above.** A burst
+  beyond standing headcount can spawn transient workers for one batch; reap those
+  **by their tracked session ids** (or a distinct `subagent:overflow-*` title) as
+  the batch finishes — never with the blanket `reap --spawned-by <lead>` sweep,
+  which would also reap the standing crew. Track the standing sids so they are
+  excluded. The blanket sweep is reserved for wind-down.
 
 Which roles exist at all is a judgement call:
 

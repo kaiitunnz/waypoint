@@ -57,7 +57,7 @@ posture — but widening is a deliberate act, not a default. Guidance:
   `full_access`; opencode `allow`). An auto-approving child runs tools without
   prompting, so only choose one for work you would pre-approve yourself.
 - **When the child must run unattended, decide its posture before spawning.** A
-  child left on `default` parks silently on its first approval — it sits in
+  child left on `default` stalls silently on its first approval — it sits in
   `waiting_input` while you block waiting for it, with no prompt back to you. If
   you cannot determine a safe auto-approving mode yourself, **ask the user** which
   `--permission-mode` to use (use the ask-question tool) rather than spawning on
@@ -128,7 +128,7 @@ waypoint sessions answer-question <child-id> --answer "<your answer>"
 - Pass `--tool-use-id <id>` to target a specific question when several are
   pending; omit it to answer the sole pending one.
 - **Do not** use `sessions send` to answer a question — injecting a message does
-  not satisfy the blocking prompt, so the child stays parked. `answer-question`
+  not satisfy the blocking prompt, so the child stays blocked. `answer-question`
   is the only command that releases it.
 - As with approvals, do not answer on the child's behalf when the choice is the
   user's to make — surface it instead.

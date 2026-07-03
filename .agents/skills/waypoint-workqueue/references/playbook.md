@@ -21,7 +21,7 @@ it off. Pre-spawn checklist, all settled **before** the `sessions start`:
   which tier fits? Ask the user. `sessions start` warns if the id isn't in the
   backend's catalogue, but treat that as a backstop, not the check.
 - **Permission mode.** A crew runs unattended, so the workers must auto-approve —
-  do **not** leave them on the inherited `default` (they park silently on the
+  do **not** leave them on the inherited `default` (they stall silently on the
   first approval). Pick an auto-approving `--permission-mode` for the backend
   (`waypoint backends` lists the ids); if you can't determine a safe one, ask the
   user rather than spawning blind.

@@ -46,7 +46,8 @@ single change.
 
 ## The organization in brief
 
-- **Lead / engineering manager** — you. The one persistent role: owns the board,
+- **Lead / engineering manager** — you. The one role active every phase and never
+  delegated away (the standing crew persists too, but shifts focus by phase): owns the board,
   the org chart, dependency sequencing, integration, and every phase checkpoint.
   Never delegated away.
 - **Role sessions** — a small, **persistent standing crew** of the code-touching

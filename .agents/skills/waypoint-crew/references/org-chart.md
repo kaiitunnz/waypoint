@@ -49,6 +49,11 @@ Which roles exist at all is a judgement call:
   discovery and architecture phases, then swap to engineers + QA for the build,
   then a reviewer for ship. Roles come and go by phase; the lead is the through
   line.
+- **Existing codebase (brownfield)** — the tech lead earns its seat up front for
+  the codebase survey; give it (or a fan-out of readers) a strong model to map an
+  unfamiliar repo before scoping. The PM role is lighter — the change is often
+  already agreed — so it usually collapses into the lead. Otherwise the build/QA
+  staffing matches the greenfield case.
 
 ## Reporting lines
 

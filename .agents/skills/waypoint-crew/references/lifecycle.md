@@ -1,4 +1,4 @@
-# The product lifecycle (from zero)
+# The product lifecycle (greenfield or brownfield)
 
 Seven phases carry a product from an intent to a shipped, iterating thing. Each
 phase names the role that owns it, the board artifact it produces (all cells are
@@ -9,6 +9,28 @@ items re-enter earlier phases.
 
 Small products compress this: several phases can be a single lead turn. Do not
 run a heavyweight seven-phase process on a thin slice.
+
+## Greenfield vs. brownfield entry
+
+The same seven phases run whether the product starts from an empty repo
+(**greenfield**) or the crew is evolving an **existing codebase** (**brownfield**
+— adding a feature, a redesign, a migration-plus-features effort). Only the front
+two phases change shape; phases 3–7 are identical.
+
+- **Greenfield** — phase 1 writes a product PRD and phase 2 chooses a stack and
+  scaffolds a skeleton, as written below.
+- **Brownfield** — phase 1 is **codebase onboarding plus change scoping** against
+  what already exists, and phase 2 **adopts the existing architecture** rather
+  than choosing one and **skips scaffolding**. Each phase below carries a
+  *Brownfield* note where it differs. On an existing workspace the crew inherits
+  the repo's stack, conventions, and verify command — it does not re-decide them —
+  and the integration branch is cut from the repo's current default branch, not
+  an empty tree. A resumed or mid-flight product is itself brownfield: this is
+  also the shape of every phase-7 iteration.
+
+Set the `phase` cell's `current=` to wherever the work actually enters — a
+brownfield effort with a clear, already-agreed change can open directly at
+scoping or even backlog decomposition rather than replaying discovery from zero.
 
 ## How the engineering work actually gets done
 
@@ -35,9 +57,18 @@ Two things must hold, or a phase quietly produces nothing:
 - **Do:** turn the user's intent into a PRD — problem, users, scope, explicit
   non-goals — plus acceptance criteria and an initial backlog. Frame it as *plan
   this product / write the PRD*.
-- **Artifact:** `prd` and `backlog` cells on `org:<product>`.
-- **Checkpoint (human):** post the PRD and gate on the user's approval before
-  building. This is where scope is agreed; the lead must not silently expand it.
+- **Brownfield:** first **onboard to the existing codebase** — the tech lead
+  surveys the repo's structure, stack, conventions, and test/verify command (fan
+  this out to readers for a large codebase) and captures it in the `architecture`
+  cell up front. The PRD then scopes the *change* against what exists — what to
+  reuse, what to touch, what to leave alone — and its non-goals call out parts of
+  the system that must not regress. Frame it as *understand this codebase / plan
+  this change*.
+- **Artifact:** `prd` and `backlog` cells on `org:<product>` (brownfield also
+  seeds the `architecture` cell with the survey).
+- **Checkpoint (human):** post the PRD (and, brownfield, the codebase survey) and
+  gate on the user's approval before building. This is where scope is agreed; the
+  lead must not silently expand it.
 - **Exit:** user has signed off the PRD (recorded in `approved=`).
 
 ## Phase 2 — Architecture & scaffold
@@ -47,12 +78,24 @@ Two things must hold, or a phase quietly produces nothing:
   skeleton with an integration branch, a verify command, and CI green on an empty
   app. Frame scaffolding as *start a new <language> project / set up the
   toolchain*. Define the API `contract:` shapes for any coupled features.
-- **Artifact:** `architecture` cell; the scaffolded repo (ground truth) on the
-  integration branch; `contract:<name>` cells for coupled interfaces.
-- **Checkpoint (human):** post the architecture + stack choice and gate on
-  approval — a wrong foundation is expensive to unwind.
-- **Exit:** skeleton builds and the verify command is green; architecture
-  approved (recorded in `approved=`).
+- **Brownfield:** **skip scaffolding — the project already exists.** Instead, cut
+  the integration branch from the repo's current default branch, confirm the
+  existing verify command runs green *before* any change (the baseline), and
+  design the change to **fit the existing architecture and conventions** rather
+  than imposing a new one. Deviations from the established patterns are a
+  checkpoint item, not a silent choice. Fill the `architecture` cell with how the
+  change slots into the current design (extending the survey from phase 1), and
+  define `contract:` shapes for any new or changed interfaces — flag a changed
+  contract as touching existing callers.
+- **Artifact:** `architecture` cell; the integration branch (greenfield: a
+  scaffolded skeleton; brownfield: a branch off the existing tree with a green
+  baseline); `contract:<name>` cells for coupled interfaces.
+- **Checkpoint (human):** post the architecture (greenfield: + stack choice;
+  brownfield: + how the change fits and any deviation from existing patterns) and
+  gate on approval — a wrong foundation is expensive to unwind.
+- **Exit:** the verify command is green on the integration branch (greenfield: a
+  building skeleton; brownfield: the untouched baseline); architecture approved
+  (recorded in `approved=`).
 
 ## Phase 3 — Backlog decomposition & sequencing
 
@@ -89,11 +132,15 @@ Two things must hold, or a phase quietly produces nothing:
 - **Do:** run the full suite on the integration branch, then **exercise the real
   running app** end-to-end — the paths mocked tests miss. File each defect to the
   board's log. Frame it as *verify this / does the app actually work*.
+- **Brownfield:** also guard against **regression** — the change must not break
+  existing behavior. Compare against the phase-2 green baseline, run the
+  pre-existing suite (not just tests added for the change), and exercise adjacent
+  untouched flows the change could have disturbed.
 - **Artifact:** bug reports on the log; the lead triages them into new backlog
   tasks.
 - **Checkpoint:** none — findings loop back to phase 3/4.
 - **Exit:** no open blocking defects; the running product meets the PRD's
-  acceptance criteria.
+  acceptance criteria (brownfield: and shows no regression against the baseline).
 
 ## Phase 6 — Ship / release
 

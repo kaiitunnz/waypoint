@@ -50,9 +50,9 @@ turns that coupling into an explicit, enforced order:
     so `deps=` (and the contract's dependent set) can be expressed. Never split
     tightly-coupled work across separate sub-phase channels.
   - **Cross-sub-phase ordering is the lifecycle's job.** Ordering *between*
-    sub-phases (e.g. "scaffold before any build batch") is sequenced by the phase
-    progression and the `phase` cell, not by `deps=`, which cannot reach across
-    channels.
+    sub-phases (e.g. "scaffold — or, brownfield, establish the green baseline —
+    before any build batch") is sequenced by the phase progression and the
+    `phase` cell, not by `deps=`, which cannot reach across channels.
 
 ## Contract-first coupling (and renegotiation)
 

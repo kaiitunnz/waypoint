@@ -1,15 +1,18 @@
 ---
 name: waypoint-crew
-description: Use when a coding agent must stand up a multi-role software-engineering organization — product manager, tech lead, frontend, backend, QA, release — across durable Waypoint sessions to carry a product through its whole lifecycle from zero: discovery, architecture, iterative build, QA, ship, and iterate. A lead runs the org chart, sequences coupled work by dependency and contract, and checkpoints with the user at phase boundaries. Not for a batch of independent tasks (use waypoint-workqueue) or a single coupled change (use delegate-and-review).
+description: Use when a coding agent must stand up a multi-role software-engineering organization — product manager, tech lead, frontend, backend, QA, release — across durable Waypoint sessions to carry a product through its lifecycle, whether starting a new product from zero or evolving an existing codebase: discovery, architecture, iterative build, QA, ship, and iterate. A lead runs the org chart, sequences coupled work by dependency and contract, and checkpoints with the user at phase boundaries. Not for a batch of independent tasks (use waypoint-workqueue) or a single coupled change (use delegate-and-review).
 ---
 
 # Waypoint Crew
 
 Stand up a **software-engineering organization** — a lead plus role sessions
 (product, tech lead, frontend, backend, QA, release) — and drive a product
-through its **full lifecycle from zero**: discovery → architecture → build → QA
-→ ship → iterate. The org lives on the blackboard, so it survives the lead
-running out of context and can be resumed.
+through its **full lifecycle**: discovery → architecture → build → QA → ship →
+iterate. It works both **greenfield** (a new product from zero) and
+**brownfield** (evolving an existing codebase) — the same phases run either way,
+some just compress or adapt on an existing workspace (see
+`references/lifecycle.md`). The org lives on the blackboard, so it survives the
+lead running out of context and can be resumed.
 
 Builds on three skills — skim them first: `waypoint-subagents` (spawn and reap
 role sessions), `waypoint-comms` (the board and direct sends), and
@@ -35,8 +38,9 @@ of the work, not its size:
   API), and the job runs through **lifecycle phases** rather than a one-shot
   batch. This is the shape work queue explicitly disclaims.
 
-Reach for a crew when the deliverable is a *product built and evolved from
-scratch*, not a bounded batch or a single change.
+Reach for a crew when the deliverable is a *product built or evolved over time* —
+whether from an empty repo or an existing codebase — not a bounded batch or a
+single change.
 
 ## The organization in brief
 
@@ -47,9 +51,10 @@ scratch*, not a bounded batch or a single change.
   QA, reviewer/release. Spawned to fit the current phase and reaped when idle;
   small products collapse several roles into the lead. Each is a durable Waypoint
   session on any backend/model. The full template is in `references/org-chart.md`.
-- **Lifecycle** — seven phases from zero to a shipped, iterating product, each
-  with an owner, a board artifact, an exit criterion, and (at PRD / architecture
-  / pre-ship) a **human checkpoint**. See `references/lifecycle.md`.
+- **Lifecycle** — seven phases from intake to a shipped, iterating product
+  (greenfield or brownfield), each with an owner, a board artifact, an exit
+  criterion, and (at PRD / architecture / pre-ship) a **human checkpoint**. See
+  `references/lifecycle.md`.
 - **Coordination** — a two-tier board: an `org:<product>` channel for durable
   lifecycle artifacts, and a `job:<phase-slug>` channel per parallelizable build
   batch that composes the work-queue crew natively. Dependency sequencing and

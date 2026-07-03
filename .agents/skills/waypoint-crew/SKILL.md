@@ -35,7 +35,7 @@ of the work, not its size:
 - **Delegate-and-review** (`waypoint-subagents`) — *one* child takes a coherent,
   tightly-coupled chunk and you review its diff. For work too big to do inline
   but too coupled to parallelize.
-- **Crew** (this skill) — a **hierarchical org** driving a whole product over
+- **Crew** (this skill) — a **role-specialized org** driving a whole product over
   time. Roles specialize, work is **coupled** (frontend depends on a backend
   API), and the job runs through **lifecycle phases** rather than a one-shot
   batch. This is the shape work queue explicitly disclaims.

@@ -492,6 +492,21 @@ def test_download_attachment_uses_query_token_and_filename(
     assert state["download_token"] == VALID_TOKEN
 
 
+def test_download_attachment_falls_back_to_id_without_header(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"raw")  # no Content-Disposition
+
+    http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    with WaypointClient(_settings(tmp_path), token=VALID_TOKEN, client=http) as client:
+        content, filename = client.download_attachment("s1", "d" * 32)
+    assert content == b"raw"
+    assert filename == "d" * 32
+
+
 def test_delete_attachment_and_all(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -452,8 +452,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         context.runtime.attachments.sweep(
             session_id, context.settings.attachment_orphan_ttl_seconds
         )
+        pinned = context.runtime.attachments.pinned_ids(session_id)
         return [
-            {**spec.model_dump(mode="json"), "uploaded_at": uploaded_at}
+            {
+                **spec.model_dump(mode="json"),
+                "uploaded_at": uploaded_at,
+                "pinned": spec.id in pinned,
+            }
             for spec, uploaded_at in context.runtime.attachments.entries(session_id)
         ]
 

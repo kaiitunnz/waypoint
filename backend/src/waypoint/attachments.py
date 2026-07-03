@@ -205,6 +205,10 @@ class AttachmentStore:
         the user-intent "keep this durably" signal."""
         self._add_to_index(session_id, _PINNED_INDEX, attachment_ids)
 
+    def pinned_ids(self, session_id: str) -> set[str]:
+        """Ids currently pinned in this session, for surfacing pin state."""
+        return self._read_id_index(self._session_dir(session_id), _PINNED_INDEX)
+
     def unmark_pinned(self, session_id: str, attachment_ids: list[str]) -> None:
         """Drop ids from the pin index, re-exposing them to the orphan sweep."""
         ids = {aid for aid in attachment_ids if _ATTACHMENT_ID.fullmatch(aid)}

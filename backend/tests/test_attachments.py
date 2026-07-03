@@ -135,6 +135,18 @@ def test_sweep_keeps_pinned(tmp_path: Path) -> None:
     assert store.resolve("s", spec.id) is not None
 
 
+def test_pinned_ids_reports_current_pins(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    a = store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")
+    b = store.save("s", data=PNG_BYTES, filename="b.png", content_type="image/png")
+    assert store.pinned_ids("s") == set()
+    store.mark_pinned("s", [a.id])
+    assert store.pinned_ids("s") == {a.id}
+    store.unmark_pinned("s", [a.id])
+    store.mark_pinned("s", [b.id])
+    assert store.pinned_ids("s") == {b.id}
+
+
 def test_unpin_re_exposes_to_sweep(tmp_path: Path) -> None:
     store = _store(tmp_path)
     spec = store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")

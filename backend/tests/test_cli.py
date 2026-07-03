@@ -1737,6 +1737,44 @@ def test_sessions_attachments_list_get_delete_pin(
     assert state["pin"] == ("DELETE", "c" * 32)
 
 
+def test_sessions_attachments_get_out_directory_uses_filename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b"blob",
+            headers={"content-disposition": 'inline; filename="shot.png"'},
+        )
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    out_dir = tmp_path / "downloads"
+    out_dir.mkdir()
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "attachments",
+            "get",
+            "s1",
+            "a" * 32,
+            "--out",
+            str(out_dir),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    # A directory --out lands the blob under its original filename.
+    assert (out_dir / "shot.png").read_bytes() == b"blob"
+
+
 def test_sessions_send_attachment_id_passes_ids_to_send_input(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

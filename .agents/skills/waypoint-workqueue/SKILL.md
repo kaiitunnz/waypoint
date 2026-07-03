@@ -59,8 +59,12 @@ harness and model with `references/backends.md`.
 ## Guardrails
 
 - Size the crew to the work and scale it deliberately — fan-out has no
-  server-side limit, so an unbounded pool exhausts the host. Reap what you finish
-  with.
+  server-side limit, so an unbounded pool exhausts the host. **Reuse a worker
+  across tasks rather than reaping it after each one**: a parked (idle-and-alive)
+  worker takes its next task via `sessions send`, and keeping it lets you iterate
+  in place instead of reaping and reimporting the thread later. Reap at job end (or
+  when a worker has gone stale); if the PR may still need review-fix iteration,
+  keep the crew — or a subset — until it lands.
 - The lead owns the board cells; workers only append to the log. A worker-authored
   keyed cell is pruned when the worker is reaped; keyless log posts are durable
   history — they survive reap and are readable with `board log job:<id>`. Durable
@@ -69,7 +73,7 @@ harness and model with `references/backends.md`.
   never let two workers share a tree.
 - Check the **final merged** result, not just per-task success.
 - **Be inquisitive about environmental choices.** A crew runs unattended, so a
-  silently-guessed permission mode (workers park on `default`) or model (a wrong
+  silently-guessed permission mode (workers stall on `default`) or model (a wrong
   id dies on turn 1) stalls the whole job. Settle both before spawning — pass ids
   verbatim from `waypoint models`/`waypoint backends`, and ask the user when
   unsure rather than guessing.

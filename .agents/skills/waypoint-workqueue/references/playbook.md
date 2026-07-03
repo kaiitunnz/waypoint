@@ -102,12 +102,12 @@ underlying commits, so any conflict you resolved *inside* a merge commit
 silently resurfaces at landing time.
 
 - Green check → fast-forward (above) and set the task done: `waypoint board
-  set-meta job:$job --key status:$n --meta state=done`. The worktree is removed
-  for you when the worker is reaped (its path is recorded on the session), so
-  there is no manual `git worktree remove`.
-- Red check → hand the task back (`--meta state=todo`) and reassign it (often a
-  fresh worktree). You checked *before* the fast-forward, so the integration
-  branch is untouched — nothing to undo.
+  set-meta job:$job --key status:$n --meta state=done`. When you reap the worker at
+  the end, its recorded worktree is removed for you; if you **reuse** the worker for
+  the next task instead (below), `git worktree remove` its finished tree yourself.
+- Red check → hand the task back (`--meta state=todo`) and reassign it — to the
+  **same parked worker** with a fresh worktree, not a respawn. You checked *before*
+  the fast-forward, so the integration branch is untouched — nothing to undo.
 - Conflict during the rebase → tell the two kinds apart. An **additive**
   conflict — two workers appending to the same append-only file (a test suite, a
   registry, an export list) — is not a real disagreement: keep both. Take the
@@ -118,15 +118,28 @@ silently resurfaces at landing time.
   hand back. If a shared file conflicts on *every* task, the tasks were not
   independent enough and should have been one worker.
 
+**Reusing a worker across tasks.** Prefer parking a free worker (idle **and
+alive**) and handing it the next `todo` task over reaping and respawning per task —
+you keep its warmed-up context and avoid a later thread reimport. One mechanic
+changes: `--worktree` only cuts a tree at `sessions start`, so a reused worker gets
+no fresh tree automatically. The **lead cuts the next worktree** — `git worktree
+add <path> -b wq/$job-t<m> "wq/$job"` off the integration tip — sends the worker
+its new `task:<m>` pointing at that path (override the fixed message's "in your
+cwd"), and `git worktree remove`s the finished one. The auto-removal-on-reap only
+fires at reap, which a reused worker skips, so manage its worktrees explicitly.
+
 Finish when no task is `todo` or `doing`: run the **full** suite on `wq/$job`,
 then — for a server/CLI/integration artifact — **exercise the real thing**, not
 just unit tests. Green mocked tests routinely miss wiring bugs (a 422 from an
 unset field, git chatter polluting stdout); start the app and run the new paths
-once. Post a summary to the board, reap the workers with `waypoint sessions reap
---spawned-by "$lead" --prune-branches` (this removes their recorded worktrees
+once. Post a summary to the board, then reap the workers with `waypoint sessions
+reap --spawned-by "$lead" --prune-branches` (this removes their recorded worktrees
 *and* force-deletes the leftover `wq/$job-t<n>` branches; without
 `--prune-branches`, an unmerged worker branch survives and collides with a later
-respawn's `--worktree`), and report integrated vs. blocked counts.
+respawn's `--worktree`), and report integrated vs. blocked counts. **If the PR may
+still need review-fix iteration, hold the crew** (or a subset) until it lands
+rather than reaping now — a later fix continues a parked worker in place, where a
+reaped one would have to reimport the thread.
 
 ## Worker
 

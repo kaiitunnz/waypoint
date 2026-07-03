@@ -625,6 +625,56 @@ def _build_session_tree(
     return node(by_id[root_id], {root_id})
 
 
+def compute_ready_tasks(cells: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Read-only view over the workqueue/crew ``task:``/``status:`` convention:
+    the tasks that are pending and whose every dep is done.
+
+    Follows the documented layout — ``deps=`` on the immutable ``task:<n>`` cell,
+    ``state=`` on the mutable ``status:<n>`` cell — but tolerates both keys living
+    on either cell (a one-cell layout after a metadata patch). A task is *ready*
+    when its own state is ``todo``/unset and every id in its ``deps`` has state
+    ``done``; a missing dep cell counts as not-done. Channels that don't follow
+    the convention yield an empty list rather than an error.
+    """
+    meta_by_key = {
+        cell["key"]: (cell.get("metadata") or {})
+        for cell in cells
+        if cell.get("key") is not None
+    }
+    text_by_key = {
+        cell["key"]: cell.get("text", "")
+        for cell in cells
+        if cell.get("key") is not None
+    }
+
+    def meta_for(n: str) -> dict[str, Any]:
+        # Merge task/status metadata so a key on either cell is seen.
+        return {
+            **meta_by_key.get(f"task:{n}", {}),
+            **meta_by_key.get(f"status:{n}", {}),
+        }
+
+    def state_of(n: str) -> str:
+        return str(meta_for(n).get("state", "") or "")
+
+    task_numbers = sorted(
+        (key.split(":", 1)[1] for key in meta_by_key if key.startswith("task:")),
+        key=lambda n: (0, int(n)) if n.isdigit() else (1, 0),
+    )
+    ready: list[dict[str, Any]] = []
+    for n in task_numbers:
+        own_state = state_of(n)
+        if own_state not in ("", "todo"):
+            continue
+        deps_raw = str(meta_for(n).get("deps", "") or "")
+        deps = [d.strip() for d in deps_raw.split(",") if d.strip()]
+        if all(state_of(dep) == "done" for dep in deps):
+            ready.append(
+                {"task": n, "text": text_by_key.get(f"task:{n}", ""), "deps": deps}
+            )
+    return ready
+
+
 def parse_wait_until(raw: str | None) -> frozenset[str]:
     """Parse a comma-separated ``--until`` list into a set of valid statuses.
 
@@ -1984,6 +2034,22 @@ def board_read(
             typer.echo(f"{ts}  {author}: {post.get('text', '')}")
     else:
         typer.echo("(no posts)")
+
+
+@board_app.command("ready")
+def board_ready(
+    ctx: typer.Context,
+    channel: Annotated[str, typer.Argument()],
+) -> None:
+    """List tasks in a channel whose deps are all done (read-only helper).
+
+    Reads the ``task:``/``status:`` cell convention and reports the tasks that
+    are pending with every dependency satisfied. This is a convenience view; it
+    enforces nothing and stays out of the way of the skill-side task logic.
+    """
+    entries = _run_client(_settings_from_ctx(ctx), lambda c: c.read_board(channel))
+    ready = compute_ready_tasks(entries)
+    typer.echo(json.dumps({"channel": channel, "ready": ready}, indent=2))
 
 
 @board_app.command("log")

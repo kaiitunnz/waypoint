@@ -536,6 +536,95 @@ def _parse_tags(items: list[str] | None) -> dict[str, str]:
     return tags
 
 
+_DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def _parse_duration(value: str) -> float:
+    """Parse a duration like ``90s``/``5m``/``2h``/``1d`` (a bare number is
+    seconds) into seconds."""
+    text = value.strip().lower()
+    if not text:
+        raise typer.BadParameter("duration is empty")
+    unit = _DURATION_UNITS.get(text[-1])
+    number = text[:-1] if unit is not None else text
+    try:
+        seconds = float(number) * (unit if unit is not None else 1)
+    except ValueError as exc:
+        raise typer.BadParameter(f"invalid duration: {value}") from exc
+    if seconds < 0:
+        raise typer.BadParameter(f"duration must be non-negative: {value}")
+    return seconds
+
+
+def _last_activity(session: dict[str, Any]) -> datetime | None:
+    """A session's last-activity timestamp, parsed from ``last_event_at``.
+
+    Coerces a naive timestamp (e.g. a tz-less value from imported thread
+    history) to UTC so it can be compared against an aware ``now``."""
+    raw = session.get("last_event_at")
+    if not isinstance(raw, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def _filter_idle(
+    sessions: list[dict[str, Any]], idle_seconds: float
+) -> list[dict[str, Any]]:
+    """Keep sessions whose last activity is at least ``idle_seconds`` ago.
+    Sessions with no parsable timestamp are treated as active (dropped)."""
+    cutoff = datetime.now(UTC) - timedelta(seconds=idle_seconds)
+    kept: list[dict[str, Any]] = []
+    for session in sessions:
+        last = _last_activity(session)
+        if last is not None and last <= cutoff:
+            kept.append(session)
+    return kept
+
+
+def _build_session_tree(
+    sessions: list[dict[str, Any]], root_id: str
+) -> dict[str, Any] | None:
+    """Nested spawn tree rooted at ``root_id``, or ``None`` if it isn't present.
+
+    Cycle-safe via a visited set so a self-referential or looped
+    ``spawner_session_id`` can't recurse forever.
+    """
+    by_id = {s["id"]: s for s in sessions}
+    if root_id not in by_id:
+        return None
+    children_map: dict[str, list[dict[str, Any]]] = {}
+    for session in sessions:
+        parent = session.get("spawner_session_id")
+        if parent is not None:
+            children_map.setdefault(parent, []).append(session)
+
+    def node(session: dict[str, Any], seen: set[str]) -> dict[str, Any]:
+        sid = session["id"]
+        entry: dict[str, Any] = {
+            "id": sid,
+            "title": session.get("title"),
+            "status": session.get("status"),
+            "last_event_at": session.get("last_event_at"),
+        }
+        # Forward-compatible: surface tags when the server reports them.
+        if "tags" in session:
+            entry["tags"] = session["tags"]
+        children: list[dict[str, Any]] = []
+        for child in children_map.get(sid, []):
+            if child["id"] in seen:
+                continue
+            seen.add(child["id"])
+            children.append(node(child, seen))
+        entry["children"] = children
+        return entry
+
+    return node(by_id[root_id], {root_id})
+
+
 def parse_wait_until(raw: str | None) -> frozenset[str]:
     """Parse a comma-separated ``--until`` list into a set of valid statuses.
 
@@ -816,6 +905,23 @@ def sessions_list(
             "(present). Repeatable; all must match.",
         ),
     ] = None,
+    recursive: Annotated[
+        bool,
+        typer.Option(
+            "--recursive",
+            "-r",
+            help="With --spawned-by/--mine, include the whole spawn subtree "
+            "(transitive descendants), not just direct children.",
+        ),
+    ] = False,
+    idle_for: Annotated[
+        str | None,
+        typer.Option(
+            "--idle-for",
+            help="Keep only sessions idle at least this long (e.g. 30m, 2h, 1d), "
+            "measured from last activity.",
+        ),
+    ] = None,
 ) -> None:
     """List all sessions."""
     if mine:
@@ -825,10 +931,20 @@ def sessions_list(
                 "$WAYPOINT_SESSION_ID is not set; cannot use --mine",
                 param_hint="--mine",
             )
-    _emit(
-        _settings_from_ctx(ctx),
-        lambda c: {"sessions": c.list_sessions(spawned_by=spawned_by, tags=tag)},
-    )
+    if recursive and spawned_by is None:
+        raise typer.BadParameter(
+            "--recursive requires --spawned-by or --mine",
+            param_hint="--recursive",
+        )
+    idle_seconds = _parse_duration(idle_for) if idle_for is not None else None
+
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        sessions = c.list_sessions(spawned_by=spawned_by, tags=tag, recursive=recursive)
+        if idle_seconds is not None:
+            sessions = _filter_idle(sessions, idle_seconds)
+        return {"sessions": sessions}
+
+    _emit(_settings_from_ctx(ctx), _run)
 
 
 @sessions_app.command("show")
@@ -866,6 +982,22 @@ def sessions_tag(
                 session_id, set_tags=set_tags, unset=list(unset or [])
             )
         }
+
+    _emit(_settings_from_ctx(ctx), _run)
+
+
+@sessions_app.command("tree")
+def sessions_tree(
+    ctx: typer.Context, session_id: Annotated[str, typer.Argument()]
+) -> None:
+    """Show the spawn subtree rooted at a session (reconstructed from the server)."""
+
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        tree = _build_session_tree(c.list_sessions(), session_id)
+        if tree is None:
+            typer.echo(f"error: no session with id '{session_id}'", err=True)
+            raise typer.Exit(code=1)
+        return {"tree": tree}
 
     _emit(_settings_from_ctx(ctx), _run)
 

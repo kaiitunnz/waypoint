@@ -60,10 +60,13 @@ Manage the cost by **size, not churn**:
 - **Reap at wind-down**, or when a role is genuinely never needed again. There is
   no idle-session GC, so the backstop for an abandoned crew is that the next actor
   to touch it (a successor lead, the user, or a maintenance sweep) reaps it if it
-  is stale. This is a deliberate exception to `waypoint-subagents`' reap-when-done
-  posture — crew roles are long-lived like the lead — and a successor lead
-  adopting a crew it did not spawn is sanctioned (as in workqueue's
-  resume-after-lead-death).
+  is stale. Find stale sessions with `sessions list --idle-for <dur>` (e.g.
+  `--idle-for 2h`), and reconstruct a crew you did not spawn with
+  `sessions tree <lead-sid>` or `sessions list --spawned-by <lead-sid> --recursive`
+  (which walks the whole spawn subtree, not just direct children). This is a
+  deliberate exception to `waypoint-subagents`' reap-when-done posture — crew roles
+  are long-lived like the lead — and a successor lead adopting a crew it did not
+  spawn is sanctioned (as in workqueue's resume-after-lead-death).
 - **Ephemeral overflow workers are the exception to all of the above.** A burst
   beyond standing headcount can spawn transient workers for one batch. Tag them at
   launch (`sessions start ... --tag overflow`) and reap the batch with

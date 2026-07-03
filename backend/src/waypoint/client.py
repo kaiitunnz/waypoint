@@ -167,13 +167,18 @@ class WaypointClient:
     # ── sessions ────────────────────────────────────────────────────────
 
     def list_sessions(
-        self, spawned_by: str | None = None, tags: list[str] | None = None
+        self,
+        spawned_by: str | None = None,
+        tags: list[str] | None = None,
+        recursive: bool = False,
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {}
         if spawned_by is not None:
             params["spawned_by"] = spawned_by
         if tags:
             params["tag"] = list(tags)
+        if recursive:
+            params["recursive"] = "true"
         data: list[dict[str, Any]] = self._request(
             "GET", "/api/sessions", params=params if params else None
         ).json()["sessions"]

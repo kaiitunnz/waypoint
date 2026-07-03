@@ -87,6 +87,7 @@ class TmuxPlugin:
         live_terminal=True,
         has_terminal_pane=True,
         terminal_interactive=True,
+        terminal_key_injection=True,
         terminal_resizable=True,
         is_fallback_for_managed_launch=True,
     )

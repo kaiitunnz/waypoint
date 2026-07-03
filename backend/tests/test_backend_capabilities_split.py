@@ -67,17 +67,22 @@ def test_terminal_pane_caps() -> None:
     tmux = caps_by_id["tmux"]
     assert tmux.has_terminal_pane is True
     assert tmux.terminal_interactive is True
+    assert tmux.terminal_key_injection is True
     assert tmux.terminal_resizable is True
 
+    # claude_tty is read-only for typing but accepts the key-bar / scroll
+    # escape hatch (terminal_key_injection) without being fully interactive.
     tty = caps_by_id["claude_tty"]
     assert tty.has_terminal_pane is True
     assert tty.terminal_interactive is False
+    assert tty.terminal_key_injection is True
     assert tty.terminal_resizable is False
 
     for pid in ("claude_code", "codex", "opencode"):
         c = caps_by_id[pid]
         assert c.has_terminal_pane is False
         assert c.terminal_interactive is False
+        assert c.terminal_key_injection is False
         assert c.terminal_resizable is False
 
 

@@ -1366,6 +1366,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await websocket.close(code=4403)
             return
         terminal_interactive = caps.terminal_interactive
+        # Discrete key-bar / scroll-wheel injection is allowed for fully
+        # interactive panes and for panes that opt into the narrow escape hatch
+        # (claude_tty). Free-form input (input_submit) still requires the full
+        # interactive flag.
+        terminal_input_injection = terminal_interactive or caps.terminal_key_injection
         terminal_resizable = caps.terminal_resizable
         # Refuse to attach to an already-dead pane — the renderer would
         # seed from a stale capture and the stream would never produce
@@ -1665,7 +1670,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         continue
                     kind = payload.get("type")
                     if kind == "input":
-                        if terminal_interactive:
+                        if terminal_input_injection:
                             data = payload.get("data", "")
                             if isinstance(data, str) and data:
                                 input_bytes += data.encode("utf-8")
@@ -1688,10 +1693,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         if r_cols > 0 and r_rows > 0:
                             resize_target = (r_cols, r_rows)
 
+                if terminal_input_injection and input_bytes:
+                    with suppress(TmuxError):
+                        await adapter.send_bytes(pane, input_bytes)
                 if terminal_interactive:
-                    if input_bytes:
-                        with suppress(TmuxError):
-                            await adapter.send_bytes(pane, input_bytes)
                     for text, submit in submits:
                         with suppress(TmuxError):
                             await adapter.send_input(pane, text, submit=submit)

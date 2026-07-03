@@ -14,9 +14,11 @@ def _make_repo(
     home: Path,
     *,
     skills: tuple[str, ...] = (
+        "waypoint",
         "waypoint-subagents",
         "waypoint-comms",
         "waypoint-workqueue",
+        "waypoint-crew",
         "waypoint-worktree",
     ),
 ) -> Path:
@@ -143,9 +145,11 @@ def test_helper_default_installs_all_skills(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     for skill in (
+        "waypoint",
         "waypoint-subagents",
         "waypoint-comms",
         "waypoint-workqueue",
+        "waypoint-crew",
         "waypoint-worktree",
     ):
         assert (dest / skill).is_symlink()

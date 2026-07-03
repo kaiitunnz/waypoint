@@ -21,7 +21,7 @@ it off. Pre-spawn checklist, all settled **before** the `sessions start`:
   which tier fits? Ask the user. `sessions start` warns if the id isn't in the
   backend's catalogue, but treat that as a backstop, not the check.
 - **Permission mode.** A crew runs unattended, so the workers must auto-approve —
-  do **not** leave them on the inherited `default` (they park silently on the
+  do **not** leave them on the inherited `default` (they stall silently on the
   first approval). Pick an auto-approving `--permission-mode` for the backend
   (`waypoint backends` lists the ids); if you can't determine a safe one, ask the
   user rather than spawning blind.
@@ -84,14 +84,20 @@ single event kind; drop it to see everything).
 
 Integrate **one task at a time**, and keep the integration branch's history
 **linear** — no merge commits. Rebase each task's branch onto the current
-integration tip, check it there, then fast-forward:
+integration tip, check it there, then fast-forward. Because the worker stays
+**alive** on `wq/$job-t$n` in its own worktree, that branch is already checked out
+there — so **rebase it in the worker's worktree, not in `$repo`** (a `git switch
+wq/$job-t$n` in `$repo` would fail with `already used by worktree`). The final
+`merge --ff-only` is safe from `$repo` because a fast-forward does not check out
+the source branch:
 
 ```bash
-git -C "$repo" switch "wq/$job-t$n"
-git -C "$repo" rebase "wq/$job"        # replay the task's commits onto the integration tip
-# run the task's check on the rebased branch, e.g. uv run pytest pkg/auth
-git -C "$repo" switch "wq/$job"
-git -C "$repo" merge --ff-only "wq/$job-t$n"   # green check → fast-forward, never a merge commit
+# worker's worktree path — from `git worktree list` or `waypoint sessions show <sid>`
+wt=<worker-worktree>
+git -C "$wt" rebase "wq/$job"        # replay the task's commits onto the integration tip, where the branch lives
+# run the task's check in $wt, e.g. (cd "$wt" && uv run pytest pkg/auth)
+git -C "$repo" switch "wq/$job"      # the integration checkout (never a worker's tree)
+git -C "$repo" merge --ff-only "wq/$job-t$n"   # green check → fast-forward, never checks out the source
 ```
 
 A linear integration branch is the preferred shape. Rebasing one branch at a
@@ -102,31 +108,57 @@ underlying commits, so any conflict you resolved *inside* a merge commit
 silently resurfaces at landing time.
 
 - Green check → fast-forward (above) and set the task done: `waypoint board
-  set-meta job:$job --key status:$n --meta state=done`. The worktree is removed
-  for you when the worker is reaped (its path is recorded on the session), so
-  there is no manual `git worktree remove`.
-- Red check → hand the task back (`--meta state=todo`) and reassign it (often a
-  fresh worktree). You checked *before* the fast-forward, so the integration
-  branch is untouched — nothing to undo.
-- Conflict during the rebase → tell the two kinds apart. An **additive**
-  conflict — two workers appending to the same append-only file (a test suite, a
-  registry, an export list) — is not a real disagreement: keep both. Take the
-  integration side and re-append the worker's block (`git checkout --ours
-  <file>`, then add the worker's additions to the end, or hand-merge both
-  hunks), `git add` it, and `git rebase --continue`. A **semantic** conflict —
-  both branches changed the same logic — is the one you `git rebase --abort` and
-  hand back. If a shared file conflicts on *every* task, the tasks were not
+  set-meta job:$job --key status:$n --meta state=done`. If you reuse the worker
+  (below), it stays in its worktree and starts its next task on a fresh branch
+  there; the worktree is only removed when you finally reap the worker.
+- Red check → hand the task back (`--meta state=todo`) and reassign it — to the
+  **same parked worker**, which resets **in its existing worktree**, not a respawn.
+  Since the retry keeps the same task number, reset the existing branch with
+  `git switch -C wq/$job-t<n> "wq/$job"` (capital `-C` — plain `-c` fails, the
+  branch already exists from the failed attempt). You checked *before* the
+  fast-forward, so the integration branch is untouched — nothing to undo.
+- Conflict during the rebase → tell the two kinds apart (resolve it **in `$wt`**,
+  where the rebase is running — `git -C "$wt" …` for every step below, not
+  `$repo`). An **additive** conflict — two workers appending to the same
+  append-only file (a test suite, a registry, an export list) — is not a real
+  disagreement: keep both. Take the integration side and re-append the worker's
+  block (`git checkout --ours <file>`, then add the worker's additions to the end,
+  or hand-merge both hunks), `git add` it, and `git rebase --continue`. A
+  **semantic** conflict — both branches changed the same logic — is the one you
+  `git rebase --abort` and hand back. If a shared file conflicts on *every* task, the tasks were not
   independent enough and should have been one worker.
+
+**Reusing a worker across tasks.** Prefer parking a free worker (idle **and
+alive**) and handing it the next `todo` task over reaping and respawning per task —
+you keep its warmed-up context and avoid a later thread reimport. The mechanic:
+a session is **pinned to its launch `cwd`** (there is no way to repoint a running
+session), so a reused worker **keeps its one worktree and rotates the branch inside
+it** — it does *not* move to a new worktree. Send it the next `task:<m>` (its fixed
+"work in your cwd" still holds) and have it start on a fresh branch off the current
+integration tip: `git switch -c wq/$job-t<m> "wq/$job"` from within its worktree.
+This works because worktrees share the object store (the `wq/$job` ref is visible)
+and the worker only ever checks out its own task branches — the integration branch
+itself stays in your tree, so nothing collides. The worktree is removed only when
+you eventually reap the worker; there is nothing to `git worktree remove` between
+tasks.
 
 Finish when no task is `todo` or `doing`: run the **full** suite on `wq/$job`,
 then — for a server/CLI/integration artifact — **exercise the real thing**, not
 just unit tests. Green mocked tests routinely miss wiring bugs (a 422 from an
 unset field, git chatter polluting stdout); start the app and run the new paths
-once. Post a summary to the board, reap the workers with `waypoint sessions reap
---spawned-by "$lead" --prune-branches` (this removes their recorded worktrees
+once. Post a summary to the board, then reap the workers with `waypoint sessions
+reap --spawned-by "$lead" --prune-branches` (this removes their recorded worktrees
 *and* force-deletes the leftover `wq/$job-t<n>` branches; without
 `--prune-branches`, an unmerged worker branch survives and collides with a later
-respawn's `--worktree`), and report integrated vs. blocked counts.
+respawn's `--worktree`), and report integrated vs. blocked counts. **If the PR may
+still need review-fix iteration, hold the crew** (or a subset) until it lands
+rather than reaping now — a later fix continues a parked worker in place, where a
+reaped one would have to reimport the thread.
+
+A worker's cwd files are user-readable by opening its session, so don't
+bulk-upload them; but reaping removes the worktree, so `sessions upload` (the
+`waypoint` skill's `references/artifacts.md`) anything the user must keep that
+isn't already landed on `wq/$job` or in a durable cwd.
 
 ## Worker
 

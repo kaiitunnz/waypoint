@@ -4,10 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_DIR="${ROOT_DIR}/.agents/skills"
 
-# Default skill installed for use by arbitrary coding sessions. The other repo
-# skills (waypoint, waypointctl) target the personal assistant and are mirrored
-# into its workspace already, so they are not installed globally by default.
-DEFAULT_SKILLS=("waypoint-subagents" "waypoint-comms" "waypoint-workqueue" "waypoint-worktree")
+# Default skills installed for use by arbitrary coding sessions. The waypointctl
+# skill targets the personal assistant and is mirrored into its workspace
+# already, so it is not installed globally by default.
+DEFAULT_SKILLS=("waypoint" "waypoint-subagents" "waypoint-comms" "waypoint-workqueue" "waypoint-crew" "waypoint-worktree")
 
 # Default destination skill root: the cross-agent global skills directory.
 # Override with --skill-dir or WAYPOINT_SKILLS_DIR to target an agent-specific
@@ -38,7 +38,7 @@ Environment:
                        --skill-dir is given.
 
 Defaults:
-  skills        waypoint-subagents waypoint-comms waypoint-workqueue waypoint-worktree
+  skills        waypoint waypoint-subagents waypoint-comms waypoint-workqueue waypoint-crew waypoint-worktree
   destination   ~/.agents/skills
 
 Symlink installs track this repo's copy of the skill. Copied installs are

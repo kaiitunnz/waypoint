@@ -1789,13 +1789,25 @@ def board_set_meta(
     channel: Annotated[str, typer.Argument()],
     meta: Annotated[
         list[str] | None,
-        typer.Option("--meta", help="Replace metadata with key=value. Repeatable."),
+        typer.Option("--meta", help="Set metadata key=value. Repeatable."),
     ] = None,
     key: Annotated[
         str | None, typer.Option("--key", help="Cell key to target.")
     ] = None,
     entry_id: Annotated[
         int | None, typer.Option("--entry-id", help="Entry id to target.")
+    ] = None,
+    merge: Annotated[
+        bool,
+        typer.Option(
+            "--merge/--replace",
+            help="Merge --meta into the existing metadata (patch) instead of "
+            "replacing the whole blob.",
+        ),
+    ] = False,
+    unset: Annotated[
+        list[str] | None,
+        typer.Option("--unset", help="Remove metadata key(s). Repeatable."),
     ] = None,
 ) -> None:
     """Update a keyed cell's metadata without changing its text."""
@@ -1816,7 +1828,14 @@ def board_set_meta(
             assert entry_id is not None
             eid = entry_id
         return {
-            "entry": c.update_board_entry(channel, eid, text=None, metadata=metadata)
+            "entry": c.update_board_entry(
+                channel,
+                eid,
+                text=None,
+                metadata=metadata,
+                merge=merge,
+                unset=unset,
+            )
         }
 
     _emit(_settings_from_ctx(ctx), _run)

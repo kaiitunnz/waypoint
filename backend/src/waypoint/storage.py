@@ -626,19 +626,40 @@ class Storage:
         entry_id: int,
         text: str | None,
         metadata: dict[str, Any] | None = None,
+        merge: bool = False,
+        unset: list[str] | None = None,
     ) -> BoardEntry | None:
         now = datetime.now(UTC)
+        patch = metadata or {}
+        unset = unset or []
+        # Merge/unset both patch the current blob rather than replacing it, so
+        # they read it first; the SELECT and UPDATE share this method's
+        # ``@_synchronized`` lock, so the read-modify-write is atomic. ``unset``
+        # implies patch semantics too — removing a key must not drop the others.
+        if merge or unset:
+            existing_row = self.connection.execute(
+                "SELECT metadata FROM board_entries WHERE id = ? AND channel = ?",
+                (entry_id, channel),
+            ).fetchone()
+            if existing_row is None:
+                return None
+            existing = json.loads(existing_row["metadata"] or "{}")
+            final_meta = {**existing, **patch}
+            for removed_key in unset:
+                final_meta.pop(removed_key, None)
+        else:
+            final_meta = patch
         if text is None:
             cursor = self.connection.execute(
                 "UPDATE board_entries SET metadata = ?, edited_at = ? "
                 "WHERE id = ? AND channel = ?",
-                (json.dumps(metadata or {}), now.isoformat(), entry_id, channel),
+                (json.dumps(final_meta), now.isoformat(), entry_id, channel),
             )
         else:
             cursor = self.connection.execute(
                 "UPDATE board_entries SET text = ?, metadata = ?, edited_at = ? "
                 "WHERE id = ? AND channel = ?",
-                (text, json.dumps(metadata or {}), now.isoformat(), entry_id, channel),
+                (text, json.dumps(final_meta), now.isoformat(), entry_id, channel),
             )
         self.connection.commit()
         if not (cursor.rowcount or 0):

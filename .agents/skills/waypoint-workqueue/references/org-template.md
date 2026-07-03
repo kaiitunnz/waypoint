@@ -33,7 +33,9 @@ Three kinds of cell, **all written only by the lead**:
   plus how to check it. Set once; never rewritten.
 - `status:<n>` — paired with each `task:<n>`. **Mutable status**: `--meta`
   carries `state=todo|doing|done|blocked` and `assignee=<sid>`. Text is a brief
-  label. Update with `waypoint board set-meta` to flip state without touching text.
+  label. Update with `waypoint board set-meta ... --merge` to flip one key without
+  touching text or the other metas (`--unset <key>` removes a key); plain `--meta`
+  without `--merge` replaces the whole blob.
 
 ```bash
 # plan — once

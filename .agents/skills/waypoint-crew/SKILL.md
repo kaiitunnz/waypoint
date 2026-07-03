@@ -83,10 +83,10 @@ than producing nothing (see `references/lifecycle.md`).
 
 - **Keep a bounded standing crew; size by headcount, not churn.** Reuse role
   sessions across phases: parking a role (idle-and-alive) preserves its codebase
-  context, where reap-and-respawn forces a lossy thread reimport. Idle isn't free,
-  so keep the crew small and scoped to code-touching roles; reap at wind-down. The
-  transport trade, overflow workers, and staleness backstop are in
-  `references/org-chart.md`.
+  context, where reaping a role you later need forces a lossy thread reimport (a
+  new session, replayed history). Idle isn't free, so keep the crew small and
+  scoped to code-touching roles; reap at wind-down. Overflow workers and the
+  staleness backstop are in `references/org-chart.md`.
 - **Coupled work is sequenced, never raced.** Two roles touching a shared
   interface must agree a `contract:` cell first, and the lead assigns a task only
   when its `deps=` are all `done` (`references/coordination.md`). Racing coupled

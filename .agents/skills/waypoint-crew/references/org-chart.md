@@ -51,11 +51,6 @@ Manage the cost by **size, not churn**:
   scale by the work, not by the phase. This is the primary lever, because idle is
   not free: a `claude_tty` role holds a live tmux pane, a structured role holds a
   headless server process.
-- **Transport is a trade** (not a clear win either way): a structured transport
-  (`claude_cli` / `codex` / `opencode`) avoids the interactive pane but is
-  `supports_resume=False`, so a Waypoint/backend restart forces a reimport;
-  `claude_tty` / `tmux` cost a pane but are `supports_resume=True` and re-attach.
-  Pick by which failure matters for a long-lived crew.
 - **Context hygiene without teardown** — the board cells are the memory of record
   (`architecture`, `prd`, `contract:*`, `phase`); a role's session context is a
   cache over them. When a role nears its window it compacts — `codex`/`opencode`

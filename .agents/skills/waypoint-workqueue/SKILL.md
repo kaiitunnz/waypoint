@@ -40,7 +40,9 @@ porting a test suite file by file.
 ## Skip it when
 
 - The tasks depend on each other or share a moving interface — one agent handles
-  coupled work better than a crew.
+  coupled work better than a crew. For a whole product built and evolved from
+  zero — coupled roles (frontend/backend), a lifecycle, dependency sequencing —
+  use `waypoint-crew`, which layers an org chart and lifecycle on this crew.
 - It fits a single in-process run (your harness's own Task/Workflow fan-out) and
   needs no separate model, harness, or workspace — that is cheaper.
 - It is only a few tasks — just do them yourself; the crew has overhead.

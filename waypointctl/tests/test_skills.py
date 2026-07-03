@@ -17,6 +17,7 @@ def _make_repo(
         "waypoint-subagents",
         "waypoint-comms",
         "waypoint-workqueue",
+        "waypoint-crew",
         "waypoint-worktree",
     ),
 ) -> Path:
@@ -146,6 +147,7 @@ def test_helper_default_installs_all_skills(tmp_path: Path) -> None:
         "waypoint-subagents",
         "waypoint-comms",
         "waypoint-workqueue",
+        "waypoint-crew",
         "waypoint-worktree",
     ):
         assert (dest / skill).is_symlink()

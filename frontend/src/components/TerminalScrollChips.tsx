@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { type KeyboardEvent, useCallback, useEffect, useRef } from "react";
 
 interface TerminalScrollChipsProps {
   onWheel: (direction: "up" | "down") => void;
@@ -44,6 +44,20 @@ export function TerminalScrollChips({ onWheel, withJump }: TerminalScrollChipsPr
     [onWheel, stop],
   );
 
+  // The buttons bind pointer, not click, handlers, so keyboard activation
+  // (which dispatches a synthetic click, never pointer events) would do
+  // nothing. Handle Enter/Space directly. preventDefault stops Space from
+  // paging the document; OS key-repeat re-fires keydown while held, giving
+  // hold-to-repeat for free.
+  const onKey = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>, direction: "up" | "down") => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      onWheel(direction);
+    },
+    [onWheel],
+  );
+
   useEffect(() => stop, [stop]);
 
   return (
@@ -66,6 +80,7 @@ export function TerminalScrollChips({ onWheel, withJump }: TerminalScrollChipsPr
         }}
         onPointerUp={stop}
         onPointerCancel={stop}
+        onKeyDown={(e) => onKey(e, "up")}
         onContextMenu={(e) => e.preventDefault()}
         aria-label="Scroll up"
       >
@@ -80,6 +95,7 @@ export function TerminalScrollChips({ onWheel, withJump }: TerminalScrollChipsPr
         }}
         onPointerUp={stop}
         onPointerCancel={stop}
+        onKeyDown={(e) => onKey(e, "down")}
         onContextMenu={(e) => e.preventDefault()}
         aria-label="Scroll down"
       >

@@ -10,6 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from waypoint.cli import app, compute_ready_tasks
+from waypoint.client import WaypointClient
 from waypoint.settings import Settings
 
 runner = CliRunner()
@@ -87,6 +88,20 @@ def test_non_conforming_channel_yields_empty() -> None:
     assert compute_ready_tasks(cells) == []
 
 
+def test_mixed_numeric_and_named_task_keys_do_not_crash() -> None:
+    # A non-numeric task key must not blow up the numeric sort, and a status
+    # cell with no matching task cell is ignored.
+    cells = [
+        _cell("task:2"),
+        _cell("status:2", state="todo"),
+        _cell("task:foo"),
+        _cell("status:foo", state="todo"),
+        _cell("status:99", state="done"),  # orphan status, no task:99
+    ]
+    ready = {r["task"] for r in compute_ready_tasks(cells)}
+    assert ready == {"2", "foo"}
+
+
 def _config(tmp_path: Path) -> Path:
     settings = Settings(data_dir=tmp_path / "data")
     path = tmp_path / "waypoint.yaml"
@@ -129,8 +144,6 @@ def test_board_ready_command_emits_ready(
                 },
             )
         return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
-
-    from waypoint.client import WaypointClient
 
     def fake_client(settings: Settings, **_: object) -> WaypointClient:
         http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")

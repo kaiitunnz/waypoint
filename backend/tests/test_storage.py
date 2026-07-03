@@ -1094,6 +1094,61 @@ def test_board_update_entry_missing_returns_none(tmp_path) -> None:
     assert storage.list_board_entries("topic:a")[0].text == "hi"
 
 
+def test_board_update_entry_replace_drops_omitted_keys(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    entry = storage.add_board_entry(
+        "topic:a", "cell", key="status", metadata={"state": "todo", "assignee": "x"}
+    )
+    updated = storage.update_board_entry(
+        "topic:a", entry.id, None, metadata={"state": "done"}
+    )
+    assert updated is not None
+    # Default (replace) semantics: omitted keys vanish.
+    assert updated.metadata == {"state": "done"}
+
+
+def test_board_update_entry_merge_preserves_untouched_keys(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    entry = storage.add_board_entry(
+        "topic:a",
+        "cell",
+        key="phase",
+        metadata={"current": "build", "approved": "no", "teams": "1,2"},
+    )
+    updated = storage.update_board_entry(
+        "topic:a", entry.id, None, metadata={"approved": "yes"}, merge=True
+    )
+    assert updated is not None
+    assert updated.metadata == {"current": "build", "approved": "yes", "teams": "1,2"}
+
+
+def test_board_update_entry_unset_removes_keys(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    entry = storage.add_board_entry(
+        "topic:a", "cell", key="k", metadata={"a": "1", "b": "2", "c": "3"}
+    )
+    updated = storage.update_board_entry(
+        "topic:a", entry.id, None, metadata={"a": "9"}, merge=True, unset=["b"]
+    )
+    assert updated is not None
+    assert updated.metadata == {"a": "9", "c": "3"}
+
+
+def test_board_update_entry_merge_missing_returns_none(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    entry = storage.add_board_entry("topic:a", "hi", key="k", metadata={"a": "1"})
+    assert (
+        storage.update_board_entry("topic:a", 99999, None, {"a": "2"}, merge=True)
+        is None
+    )
+    # Wrong channel with merge is a clean no-op, not a partial write.
+    assert (
+        storage.update_board_entry("topic:b", entry.id, None, {"a": "2"}, merge=True)
+        is None
+    )
+    assert storage.list_board_entries("topic:a", key="k")[0].metadata == {"a": "1"}
+
+
 def test_storage_legacy_db_gets_launch_mode_column(tmp_path) -> None:
     """A pre-launch_mode SQLite file gains the column with default 'auto'."""
     import sqlite3

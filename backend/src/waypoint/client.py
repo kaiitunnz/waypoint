@@ -461,10 +461,16 @@ class WaypointClient:
         entry_id: int,
         text: str | None = None,
         metadata: dict[str, Any] | None = None,
+        merge: bool = False,
+        unset: list[str] | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"metadata": metadata or {}}
         if text is not None:
             body["text"] = text
+        if merge:
+            body["merge"] = True
+        if unset:
+            body["unset"] = list(unset)
         data: dict[str, Any] = self._request(
             "PATCH", f"/api/board/{channel}/entries/{entry_id}", json=body
         ).json()["entry"]

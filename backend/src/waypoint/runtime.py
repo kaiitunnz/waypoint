@@ -1565,7 +1565,12 @@ class SessionRuntime:
         self, channel: str, entry_id: int, request: BoardEntryUpdateRequest
     ) -> BoardEntry | None:
         entry = self.storage.update_board_entry(
-            channel, entry_id, request.text, request.metadata
+            channel,
+            entry_id,
+            request.text,
+            request.metadata,
+            merge=request.merge,
+            unset=request.unset,
         )
         if entry is not None:
             await self._publish_board_update(channel)

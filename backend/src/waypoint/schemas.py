@@ -272,6 +272,11 @@ class BoardPostRequest(BaseModel):
 class BoardEntryUpdateRequest(BaseModel):
     text: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # When True, merge ``metadata`` into the entry's existing metadata (patch
+    # semantics) instead of replacing the whole blob. Keys in ``unset`` are
+    # removed from the result in either mode.
+    merge: bool = False
+    unset: list[str] = Field(default_factory=list)
 
 
 class LoginRequest(BaseModel):

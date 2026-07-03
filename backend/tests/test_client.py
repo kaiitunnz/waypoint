@@ -128,6 +128,8 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
             and request.method == "POST"
         ):
             state["uploads"] = state.get("uploads", 0) + 1
+            # Multipart: the pin form field rides alongside the file part.
+            state["upload_pinned"] = b'name="pin"' in request.content
             return httpx.Response(
                 200,
                 json={
@@ -138,6 +140,35 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
                     "kind": "file",
                 },
             )
+        if (
+            request.url.path == "/api/sessions/s1/attachments"
+            and request.method == "GET"
+        ):
+            return httpx.Response(
+                200,
+                json=[{"id": "a" * 32, "filename": "shot.png", "uploaded_at": 1.0}],
+            )
+        if (
+            request.url.path == "/api/sessions/s1/attachments"
+            and request.method == "DELETE"
+        ):
+            state["deleted_all"] = True
+            return httpx.Response(204)
+        if request.url.path.startswith("/api/sessions/s1/attachments/"):
+            tail = request.url.path[len("/api/sessions/s1/attachments/") :]
+            if tail.endswith("/pin"):
+                state["pin"] = (request.method, tail[: -len("/pin")])
+                return httpx.Response(204)
+            if request.method == "GET":
+                state["download_token"] = request.url.params.get("token")
+                return httpx.Response(
+                    200,
+                    content=b"blob-bytes",
+                    headers={"content-disposition": 'inline; filename="shot.png"'},
+                )
+            if request.method == "DELETE":
+                state["deleted_one"] = tail
+                return httpx.Response(204)
         if request.url.path == "/api/sessions/s1/input":
             state["input_body"] = json.loads(request.content)
             return httpx.Response(200, json={"session": {"id": "s1"}})
@@ -412,6 +443,92 @@ def test_send_input_omits_attachments_when_none(
     with _client(_settings(tmp_path), state) as client:
         client.send_input("s1", "hi")
     assert "attachments" not in state["input_body"]
+
+
+def test_upload_attachment_pin_sends_form_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    f = tmp_path / "a.txt"
+    f.write_text("x")
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.upload_attachment("s1", f, pin=True)
+    assert state["upload_pinned"] is True
+
+
+def test_upload_attachment_omits_pin_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    f = tmp_path / "a.txt"
+    f.write_text("x")
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.upload_attachment("s1", f)
+    assert state["upload_pinned"] is False
+
+
+def test_list_attachments_returns_specs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        listed = client.list_attachments("s1")
+    assert listed[0]["filename"] == "shot.png"
+
+
+def test_download_attachment_uses_query_token_and_filename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        content, filename = client.download_attachment("s1", "a" * 32)
+    assert content == b"blob-bytes"
+    assert filename == "shot.png"
+    # The serve endpoint authenticates by query token, not the Bearer header.
+    assert state["download_token"] == VALID_TOKEN
+
+
+def test_download_attachment_falls_back_to_id_without_header(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"raw")  # no Content-Disposition
+
+    http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+    with WaypointClient(_settings(tmp_path), token=VALID_TOKEN, client=http) as client:
+        content, filename = client.download_attachment("s1", "d" * 32)
+    assert content == b"raw"
+    assert filename == "d" * 32
+
+
+def test_delete_attachment_and_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.delete_attachment("s1", "b" * 32)
+        client.delete_all_attachments("s1")
+    assert state["deleted_one"] == "b" * 32
+    assert state["deleted_all"] is True
+
+
+def test_pin_and_unpin_attachment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.pin_attachment("s1", "c" * 32)
+        assert state["pin"] == ("POST", "c" * 32)
+        client.unpin_attachment("s1", "c" * 32)
+        assert state["pin"] == ("DELETE", "c" * 32)
 
 
 def test_create_session_omits_launch_mode_when_unset(

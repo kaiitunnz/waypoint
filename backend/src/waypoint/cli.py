@@ -117,6 +117,10 @@ sessions_app = typer.Typer(
     help="Manage sessions on a running Waypoint server over HTTP.",
     no_args_is_help=True,
 )
+attachments_app = typer.Typer(
+    help="Manage a session's file attachments on a running Waypoint server.",
+    no_args_is_help=True,
+)
 board_app = typer.Typer(
     help="Blackboard messaging shared across sessions.",
     no_args_is_help=True,
@@ -136,6 +140,7 @@ maintenance_app = typer.Typer(
 app.add_typer(backends_app, name="backends")
 app.add_typer(session_app, name="session")
 app.add_typer(sessions_app, name="sessions")
+sessions_app.add_typer(attachments_app, name="attachments")
 app.add_typer(board_app, name="board")
 app.add_typer(schedule_app, name="schedule")
 schedule_app.add_typer(schedule_message_app, name="message")
@@ -1223,12 +1228,127 @@ def sessions_upload(
             help="File(s) to upload.",
         ),
     ],
+    pin: Annotated[
+        bool,
+        typer.Option(
+            "--pin",
+            help="Exempt the upload(s) from the orphan sweep so they persist "
+            "without being sent in a message.",
+        ),
+    ] = False,
 ) -> None:
     """Upload file attachment(s) to a session without sending a message."""
 
     def _run(c: WaypointClient) -> dict[str, Any]:
-        specs = [c.upload_attachment(session_id, path) for path in files]
+        specs = [c.upload_attachment(session_id, path, pin=pin) for path in files]
         return {"attachments": specs}
+
+    _emit(_settings_from_ctx(ctx), _run)
+
+
+@attachments_app.command("list")
+def attachments_list(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+) -> None:
+    """List a session's attachments (newest first)."""
+
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        return {"attachments": c.list_attachments(session_id)}
+
+    _emit(_settings_from_ctx(ctx), _run)
+
+
+@attachments_app.command("get")
+def attachments_get(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    attachment_id: Annotated[str, typer.Argument()],
+    out: Annotated[
+        Path | None,
+        typer.Option(
+            "--out",
+            "-o",
+            dir_okay=True,
+            help="Write to this path (a directory uses the original filename); "
+            "defaults to the original filename in the current directory.",
+        ),
+    ] = None,
+) -> None:
+    """Download an attachment to a local file."""
+
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        content, filename = c.download_attachment(session_id, attachment_id)
+        destination = out if out is not None else Path(filename)
+        if destination.is_dir():
+            destination = destination / filename
+        destination.write_bytes(content)
+        return {"attachment_id": attachment_id, "path": str(destination.resolve())}
+
+    _emit(_settings_from_ctx(ctx), _run)
+
+
+@attachments_app.command("delete")
+def attachments_delete(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    attachment_id: Annotated[str, typer.Argument()],
+) -> None:
+    """Delete a single attachment."""
+
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        c.delete_attachment(session_id, attachment_id)
+        return {"attachment_id": attachment_id, "deleted": True}
+
+    _emit(_settings_from_ctx(ctx), _run)
+
+
+@attachments_app.command("delete-all")
+def attachments_delete_all(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Skip the confirmation prompt."),
+    ] = False,
+) -> None:
+    """Delete every attachment on a session."""
+    if not yes:
+        typer.confirm(f"Delete all attachments on {session_id}?", abort=True)
+
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        c.delete_all_attachments(session_id)
+        return {"session_id": session_id, "deleted_all": True}
+
+    _emit(_settings_from_ctx(ctx), _run)
+
+
+@attachments_app.command("pin")
+def attachments_pin(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    attachment_id: Annotated[str, typer.Argument()],
+) -> None:
+    """Pin an existing attachment so the orphan sweep never reaps it."""
+
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        c.pin_attachment(session_id, attachment_id)
+        return {"attachment_id": attachment_id, "pinned": True}
+
+    _emit(_settings_from_ctx(ctx), _run)
+
+
+@attachments_app.command("unpin")
+def attachments_unpin(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    attachment_id: Annotated[str, typer.Argument()],
+) -> None:
+    """Unpin an attachment, re-exposing it to the orphan sweep."""
+
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        c.unpin_attachment(session_id, attachment_id)
+        return {"attachment_id": attachment_id, "pinned": False}
 
     _emit(_settings_from_ctx(ctx), _run)
 

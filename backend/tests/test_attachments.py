@@ -122,6 +122,44 @@ def test_sweep_keeps_recent_and_sent(tmp_path: Path) -> None:
     assert store.resolve("s", sent.id) is not None
 
 
+def test_sweep_keeps_pinned(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    spec = store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")
+    resolved = store.resolve("s", spec.id)
+    assert resolved is not None
+    os.utime(resolved[1].parent / f"{spec.id}.json", (1000, 1000))
+    store.mark_pinned("s", [spec.id])
+
+    # Pinned survives the sweep even though it is old and unsent.
+    assert store.sweep("s", ttl_seconds=60) == 0
+    assert store.resolve("s", spec.id) is not None
+
+
+def test_pinned_ids_reports_current_pins(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    a = store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")
+    b = store.save("s", data=PNG_BYTES, filename="b.png", content_type="image/png")
+    assert store.pinned_ids("s") == set()
+    store.mark_pinned("s", [a.id])
+    assert store.pinned_ids("s") == {a.id}
+    store.unmark_pinned("s", [a.id])
+    store.mark_pinned("s", [b.id])
+    assert store.pinned_ids("s") == {b.id}
+
+
+def test_unpin_re_exposes_to_sweep(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    spec = store.save("s", data=PNG_BYTES, filename="a.png", content_type="image/png")
+    resolved = store.resolve("s", spec.id)
+    assert resolved is not None
+    os.utime(resolved[1].parent / f"{spec.id}.json", (1000, 1000))
+    store.mark_pinned("s", [spec.id])
+    store.unmark_pinned("s", [spec.id])
+
+    assert store.sweep("s", ttl_seconds=60) == 1
+    assert store.resolve("s", spec.id) is None
+
+
 def test_sweep_missing_session_is_noop(tmp_path: Path) -> None:
     assert _store(tmp_path).sweep("never-existed", ttl_seconds=60) == 0
 

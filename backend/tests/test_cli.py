@@ -1614,6 +1614,167 @@ def test_sessions_upload_emits_attachment_specs(
     assert [a["id"] for a in out["attachments"]] == uploads
 
 
+def test_sessions_upload_pin_sends_form_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+    f = tmp_path / "a.txt"
+    f.write_text("x")
+    state: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if (
+            request.url.path == "/api/sessions/s1/attachments"
+            and request.method == "POST"
+        ):
+            state["pinned"] = b'name="pin"' in request.content
+            return httpx.Response(
+                200,
+                json={
+                    "id": "att" + "0" * 29,
+                    "filename": "a.txt",
+                    "mime": "text/plain",
+                    "size": 1,
+                    "kind": "file",
+                },
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "upload",
+            "s1",
+            str(f),
+            "--pin",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert state["pinned"] is True
+
+
+def test_sessions_attachments_list_get_delete_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+    state: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/sessions/s1/attachments" and request.method == "GET":
+            return httpx.Response(200, json=[{"id": "a" * 32, "filename": "shot.png"}])
+        if path.startswith("/api/sessions/s1/attachments/"):
+            tail = path[len("/api/sessions/s1/attachments/") :]
+            if tail.endswith("/pin"):
+                state["pin"] = (request.method, tail[: -len("/pin")])
+                return httpx.Response(204)
+            if request.method == "GET":
+                return httpx.Response(
+                    200,
+                    content=b"blob-bytes",
+                    headers={"content-disposition": 'inline; filename="shot.png"'},
+                )
+            if request.method == "DELETE":
+                state["deleted"] = tail
+                return httpx.Response(204)
+        return httpx.Response(404, json={"detail": f"unexpected {path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    cfg = str(_config(tmp_path))
+
+    listed = runner.invoke(
+        app, ["--config", cfg, "sessions", "attachments", "list", "s1"]
+    )
+    assert listed.exit_code == 0, listed.output
+    assert json.loads(listed.stdout)["attachments"][0]["filename"] == "shot.png"
+
+    out_path = tmp_path / "downloaded.png"
+    got = runner.invoke(
+        app,
+        [
+            "--config",
+            cfg,
+            "sessions",
+            "attachments",
+            "get",
+            "s1",
+            "a" * 32,
+            "--out",
+            str(out_path),
+        ],
+    )
+    assert got.exit_code == 0, got.output
+    assert out_path.read_bytes() == b"blob-bytes"
+
+    deleted = runner.invoke(
+        app, ["--config", cfg, "sessions", "attachments", "delete", "s1", "b" * 32]
+    )
+    assert deleted.exit_code == 0, deleted.output
+    assert state["deleted"] == "b" * 32
+
+    pinned = runner.invoke(
+        app, ["--config", cfg, "sessions", "attachments", "pin", "s1", "c" * 32]
+    )
+    assert pinned.exit_code == 0, pinned.output
+    assert state["pin"] == ("POST", "c" * 32)
+
+    unpinned = runner.invoke(
+        app, ["--config", cfg, "sessions", "attachments", "unpin", "s1", "c" * 32]
+    )
+    assert unpinned.exit_code == 0, unpinned.output
+    assert state["pin"] == ("DELETE", "c" * 32)
+
+
+def test_sessions_attachments_get_out_directory_uses_filename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", "t")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b"blob",
+            headers={"content-disposition": 'inline; filename="shot.png"'},
+        )
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    out_dir = tmp_path / "downloads"
+    out_dir.mkdir()
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "attachments",
+            "get",
+            "s1",
+            "a" * 32,
+            "--out",
+            str(out_dir),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    # A directory --out lands the blob under its original filename.
+    assert (out_dir / "shot.png").read_bytes() == b"blob"
+
+
 def test_sessions_send_attachment_id_passes_ids_to_send_input(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

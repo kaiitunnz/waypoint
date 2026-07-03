@@ -117,14 +117,15 @@ silently resurfaces at landing time.
   `git switch -C wq/$job-t<n> "wq/$job"` (capital `-C` — plain `-c` fails, the
   branch already exists from the failed attempt). You checked *before* the
   fast-forward, so the integration branch is untouched — nothing to undo.
-- Conflict during the rebase → tell the two kinds apart. An **additive**
-  conflict — two workers appending to the same append-only file (a test suite, a
-  registry, an export list) — is not a real disagreement: keep both. Take the
-  integration side and re-append the worker's block (`git checkout --ours
-  <file>`, then add the worker's additions to the end, or hand-merge both
-  hunks), `git add` it, and `git rebase --continue`. A **semantic** conflict —
-  both branches changed the same logic — is the one you `git rebase --abort` and
-  hand back. If a shared file conflicts on *every* task, the tasks were not
+- Conflict during the rebase → tell the two kinds apart (resolve it **in `$wt`**,
+  where the rebase is running — `git -C "$wt" …` for every step below, not
+  `$repo`). An **additive** conflict — two workers appending to the same
+  append-only file (a test suite, a registry, an export list) — is not a real
+  disagreement: keep both. Take the integration side and re-append the worker's
+  block (`git checkout --ours <file>`, then add the worker's additions to the end,
+  or hand-merge both hunks), `git add` it, and `git rebase --continue`. A
+  **semantic** conflict — both branches changed the same logic — is the one you
+  `git rebase --abort` and hand back. If a shared file conflicts on *every* task, the tasks were not
   independent enough and should have been one worker.
 
 **Reusing a worker across tasks.** Prefer parking a free worker (idle **and

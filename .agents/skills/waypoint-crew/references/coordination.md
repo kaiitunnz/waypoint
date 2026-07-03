@@ -53,8 +53,11 @@ turns that coupling into an explicit, enforced order:
   treat it as last-wins).
 - **The gate.** There is no server-side enforcement — it is lead discipline. Each
   lead turn: read all `status:<n>` cells in the channel and assign a `todo` task
-  only when every id in its `task:<n>` `deps=` is `done`. That gate is what lets a
-  flat crew execute a coupled dependency graph correctly.
+  only when every id in its `task:<n>` `deps=` is `done`. `waypoint board ready
+  <channel>` computes this for you — a read-only view that returns the `todo` tasks
+  whose deps are all `done` — but it enforces nothing; the assignment discipline is
+  still the lead's. That gate is what lets a flat crew execute a coupled dependency
+  graph correctly.
 - **Scope: `deps=` is intra-`job:`-channel.** Because `<n>` is channel-local, a
   `deps=` id can only reference tasks **in the same `job:` channel**. Two
   consequences, and they are the crux of coupled work:

@@ -166,13 +166,30 @@ class WaypointClient:
 
     # ── sessions ────────────────────────────────────────────────────────
 
-    def list_sessions(self, spawned_by: str | None = None) -> list[dict[str, Any]]:
-        params: dict[str, str] = {}
+    def list_sessions(
+        self, spawned_by: str | None = None, tags: list[str] | None = None
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {}
         if spawned_by is not None:
             params["spawned_by"] = spawned_by
+        if tags:
+            params["tag"] = list(tags)
         data: list[dict[str, Any]] = self._request(
             "GET", "/api/sessions", params=params if params else None
         ).json()["sessions"]
+        return data
+
+    def set_session_tags(
+        self,
+        session_id: str,
+        *,
+        set_tags: dict[str, str] | None = None,
+        unset: list[str] | None = None,
+    ) -> dict[str, Any]:
+        body = {"set": set_tags or {}, "unset": unset or []}
+        data: dict[str, Any] = self._request(
+            "PATCH", f"/api/sessions/{session_id}/tags", json=body
+        ).json()["session"]
         return data
 
     def get_session(self, session_id: str) -> dict[str, Any]:
@@ -269,6 +286,7 @@ class WaypointClient:
         spawner_session_id: str | None = None,
         worktree_path: str | None = None,
         args: list[str] | None = None,
+        tags: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "backend": backend,
@@ -281,6 +299,7 @@ class WaypointClient:
             "spawner_session_id": spawner_session_id,
             "worktree_path": worktree_path,
             "args": args or [],
+            "tags": tags or {},
         }
         # Omit launch_mode when unset: it is a non-optional-with-default enum
         # field, so an explicit null is a 422 (mirrors create_schedule).

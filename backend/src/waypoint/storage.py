@@ -261,6 +261,7 @@ class Storage:
         self._ensure_column("sessions", "spawner_session_id", "TEXT")
         self._ensure_column("sessions", "worktree_path", "TEXT")
         self._ensure_column("sessions", "resolved_model", "TEXT")
+        self._ensure_column("sessions", "tags", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column(
             "scheduled_sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
         )
@@ -291,8 +292,8 @@ class Storage:
                 last_event_at, raw_log_path, structured_log_path, transport_state,
                 pinned_at, spawner_session_id, worktree_path, permission_mode, model,
                 resolved_model, effort, args, config_overrides, context_usage,
-                rate_limit_usage
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                rate_limit_usage, tags
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -331,6 +332,7 @@ class Storage:
                     if session.rate_limit_usage is not None
                     else None
                 ),
+                json.dumps(session.tags),
             ),
         )
         self.connection.commit()
@@ -1368,6 +1370,12 @@ class Storage:
         payload["config_overrides"] = (
             parsed_overrides if isinstance(parsed_overrides, list) else []
         )
+        raw_tags = payload.get("tags") or "{}"
+        try:
+            parsed_tags = json.loads(raw_tags)
+        except json.JSONDecodeError:
+            parsed_tags = {}
+        payload["tags"] = parsed_tags if isinstance(parsed_tags, dict) else {}
         raw_context_usage = payload.get("context_usage")
         if raw_context_usage:
             try:

@@ -480,6 +480,162 @@ def test_sessions_reap_requires_scope(tmp_path: Path) -> None:
     assert "--all" in result.output or "scope" in result.output
 
 
+def test_sessions_launch_tag_sends_tags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions" and request.method == "POST":
+            state["create"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "new"}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "start",
+            "--backend",
+            "codex",
+            "--cwd",
+            "/tmp",
+            "--tag",
+            "role=backend-lead",
+            "--tag",
+            "overflow",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert state["create"]["tags"] == {"role": "backend-lead", "overflow": ""}
+
+
+def test_sessions_tag_command_sends_set_and_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions/s1/tags" and request.method == "PATCH":
+            state["body"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "s1", "tags": {}}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "tag",
+            "s1",
+            "--set",
+            "role=qa",
+            "--unset",
+            "old",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert state["body"] == {"set": {"role": "qa"}, "unset": ["old"]}
+
+
+def test_sessions_tag_command_requires_change(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "tag", "s1"],
+    )
+    assert result.exit_code != 0
+
+
+def test_sessions_list_tag_passes_params(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions" and request.method == "GET":
+            state["params"] = list(request.url.params.multi_items())
+            return httpx.Response(200, json={"sessions": []})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "list",
+            "--tag",
+            "role=qa",
+            "--tag",
+            "overflow",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert state["params"] == [("tag", "role=qa"), ("tag", "overflow")]
+
+
+def test_sessions_reap_tag_and_exclude(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deleted: list[str] = []
+    state: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions" and request.method == "GET":
+            state["params"] = list(request.url.params.multi_items())
+            return httpx.Response(
+                200, json={"sessions": [{"id": "keep"}, {"id": "drop"}]}
+            )
+        if request.url.path.startswith("/api/sessions/") and request.method == "DELETE":
+            sid = request.url.path.rsplit("/", 1)[-1]
+            deleted.append(sid)
+            return httpx.Response(200, json={"deleted": sid})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "reap",
+            "--tag",
+            "overflow",
+            "--exclude",
+            "keep",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    summary = json.loads(result.stdout)
+    assert summary["reaped"] == ["drop"]
+    assert summary["skipped"] == ["keep"]
+    assert deleted == ["drop"]
+    assert ("tag", "overflow") in state["params"]
+
+
 def test_sessions_import_reads_json_file_and_emits_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

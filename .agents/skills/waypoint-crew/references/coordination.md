@@ -3,8 +3,12 @@
 How the org stays in sync on the blackboard and how the lead sequences coupled
 work. This builds directly on `waypoint-comms` (the board and direct sends) and
 reuses `waypoint-workqueue`'s cell shapes; read those first. Everything durable
-is a **lead-written keyed cell** — roles only append to the log, because a
-worker-authored cell is pruned when the worker is reaped.
+is a keyed cell written by its **owning lead** — roles only append to the log,
+because a worker-authored cell is pruned when its author is reaped. In the flat
+org the owning lead is always the one lead; under a hierarchy
+(`references/org-chart.md`) ownership is **scoped per tier** — the main lead owns
+org-level cells and cross-team `contract:` cells, a team lead owns its team
+channel's cells — but the rule is identical within each tier.
 
 ## Channel model (two tiers)
 
@@ -24,6 +28,13 @@ re-iterations, and would fight the work-queue template (which keys off its own
   from a plain work queue is only *who fills the worker slots*: the **standing crew
   sessions** are assigned to the task cells (ephemeral overflow workers only beyond
   standing headcount) — the channel and its cells are identical.
+
+Under a **hierarchical org** (`references/org-chart.md`) a third owner tier
+appears: each **team lead** owns a team channel — an ordinary `job:<team-slug>`
+channel (`job:team-payments`) with the same `plan` / `task:<n>` / `status:<n>`
+cells and channel-local `<n>`; the only difference is the owner. Teams sit behind
+a stable cross-team `contract:` (a loosely-coupled seam — never split a
+tightly-coupled slice across two team channels).
 
 Keep every channel name and cell key **single-segment and slash-free** — the
 blackboard API path breaks on slashes. Use `contract:orders-api`, never
@@ -79,6 +90,38 @@ racing:
   `job:` channel(s) to invalidate and re-notify. (One more reason coupled tasks
   share a single `job:` channel — the dependent set is then a single-channel
   scan.)
+- **Hierarchical note — renegotiation is delegated.** When ownership is split
+  across tiers, the main lead owns a cross-team `contract:` but **not** the team
+  channels whose tasks depend on it, so it cannot invalidate those `doing` tasks
+  itself. It bumps `version=`, then **direct-sends each affected team lead** to run
+  steps 2–3 inside its own channel (invalidate its dependent `doing` tasks,
+  re-notify its members). The main lead knows which teams consume the contract —
+  that is why it is org-level. The dependent set now spans team channels (not the
+  single-channel scan of intra-channel coupling); that is an accepted cost, bounded
+  because a team seam is loosely-coupled by construction, so cross-team
+  renegotiation is rare. Intra-team `contract:` cells live on the team channel and
+  renegotiate single-channel exactly as above.
+
+## Merge-up (two-level integration, hierarchical org)
+
+Flat integration is centralized on the one lead. Under a hierarchy it splits in
+two, mirroring the ownership tiers:
+
+- **Intra-team.** A team lead integrates its own members' branches into a single
+  team result using `waypoint-workqueue`'s linear-integration procedure (rebase in
+  the worker's worktree, ff-merge from the team base), runs the team's dependency
+  gate, and does intra-team QA.
+- **Report up as a commit ref, not a tree.** When the team's batch is green the
+  team lead hands the main lead **one reviewed commit ref** (plus a completion note
+  on `org:<product>`'s log) — never its members' individual branches, and never a
+  live working tree.
+- **Cross-team.** The main lead integrates the team refs in cross-team dependency
+  order, **in its own pinned integration worktree** — never inside a team's live
+  tree, which sidesteps the "a live worker holds its branch checked out" hazard.
+  The first team ff-merges; because the org tip then advances, each later team's
+  ref is **rebased onto the new tip before merging** (the same rebase-then-integrate
+  step the playbook teaches, one tier up). Quiesce a team — batch done, members
+  idle — before integrating its ref, so it does not move underfoot.
 
 ## Handoff
 
@@ -108,22 +151,34 @@ waypoint board post org:<product> "lifecycle state" --key phase \
 - `current=` — the active phase, so a fresh lead does not re-run discovery.
 - `approved=` — the checkpoints the user already signed off, so a fresh lead does
   not re-prompt for an approval already given.
-- `jobs=` — every live `job:<phase-slug>` sub-phase channel. Without this a
-  resumed lead has no pointer to the in-flight build batches (work-queue resume
-  operates *within* a known channel and cannot announce that the channel exists),
-  so it would have to guess from `board channels` and could silently drop a batch.
-  The lead updates `jobs=` whenever it spins up or retires a sub-phase channel.
+- `jobs=` — every live **self-run** `job:<phase-slug>` sub-phase channel (those the
+  lead drives itself). Without this a resumed lead has no pointer to the in-flight
+  build batches (work-queue resume operates *within* a known channel and cannot
+  announce that the channel exists), so it would have to guess from `board
+  channels` and could silently drop a batch. The lead updates `jobs=` whenever it
+  spins up or retires a self-run sub-phase channel.
+- `teams=` *(hierarchical org only)* — the **delegated** team channels as
+  `channel:team-lead-sid` pairs (`team-payments:sess-abc`). These are recovered
+  *via their team lead*, not by the main lead running task recovery on them
+  (below), so they are tracked apart from the self-run `jobs=`. The main lead
+  rewrites `teams=` whenever a team lead is spawned, respawned (new sid), or a team
+  is absorbed — move the entry to `jobs=` if the main lead keeps running the
+  channel, or drop it on lift-to-org.
 
 Update the cell with `board set-meta ... --key phase` (it preserves the text), and
-**re-supply all three metas every time** — `--meta` replaces the cell's metadata
-wholesale, so an update that passes only `jobs=` silently drops `current=` and
-`approved=`. This is the same keyed-cell hazard the work queue avoids with its
-two-cell split; here the `phase` cell has no text worth protecting, so one cell
-plus always-write-all-metas is enough.
+**re-supply all metas every time** — `--meta` replaces the cell's metadata
+wholesale, so an update that passes only `jobs=` silently drops `current=`,
+`approved=`, and (under a hierarchy) `teams=`. This is the same keyed-cell hazard
+the work queue avoids with its two-cell split; here the `phase` cell has no text
+worth protecting, so one cell plus always-write-all-metas is enough.
 
-A lead restarting reads `phase`, reattaches to each channel in `jobs=`, and
-resumes each with the work-queue resume procedure (done tasks skipped, `todo`
-reassigned, orphaned `doing` handed back).
+A lead restarting reads `phase`, then for each **self-run** channel in `jobs=`
+runs the work-queue resume procedure directly (done tasks skipped, `todo`
+reassigned, orphaned `doing` handed back). For each **delegated** channel in
+`teams=` it does **not** run that recovery itself — it re-establishes the
+channel's **team lead** (adopt if alive, respawn or absorb if dead — below) and
+lets that owner recover its own channel; running task recovery on a delegated
+channel would race its team lead on the same `status:<n>` cells.
 
 ### Resume after the lead dies
 
@@ -135,9 +190,38 @@ the old lead's workers by `--spawned-by`, hand orphaned `doing` tasks back to
 didn't create") and resumes steering them rather than reaping — reaping would throw
 away exactly the context persistence is protecting. What is new beyond the work
 queue is the **lifecycle** layer: first read the `phase` cell to learn `current`,
-`approved`, and `jobs`, then run that per-channel task recovery over every channel
-in `jobs=`. If the product is genuinely abandoned (no successor, crew idle past a
-staleness threshold), the crew is reaped as the backstop.
+`approved`, `jobs`, and (hierarchical) `teams`, then run that per-channel task
+recovery over every **self-run** channel in `jobs=`. Delegated `teams=` channels
+are recovered through their team leads, not directly (below). If the product is
+genuinely abandoned (no successor, crew idle past a staleness threshold), the crew
+is reaped as the backstop — tier-ordered under a hierarchy
+(`references/org-chart.md`).
+
+### Resume after a team lead dies
+
+A team lead **authors** its channel's cells, so cell durability is tied to that
+session **not being deleted** — not merely to living on the board. Team state
+therefore survives a *dead* team lead for the same reason it survives a dead main
+lead: a dead-but-not-deleted session's cells are not pruned. The rule is
+explicit — **a team lead that has died or must be replaced is adopted, never
+deleted, until its cells are read or migrated.**
+
+- **Recovery (team lead dead, main lead alive).** The main lead (or a successor
+  main lead reading `teams=`) either **respawns a team lead that adopts** the team
+  channel and its members, or **absorbs the team directly**. If it absorbs, the
+  team's cells are **migrated to the new owner** (a successor team lead re-authors
+  them, or the main lead lifts them to org level) **before** the old team lead is
+  reaped — reaping first prunes them. Orphaned `doing` tasks are then handed back
+  to `todo` by the standard recovery, run by whoever now owns the channel.
+- **Any owner change rewrites the `phase` metas, symmetrically** — else a *later*
+  successor is stranded on a stale entry (a `teams=` channel with no team lead
+  behind it): respawn → rewrite `teams=` with the new sid; absorb-and-keep-running
+  → move the entry `teams=` → `jobs=`; absorb-and-lift-to-org → drop it from
+  `teams=`. All under the re-supply-all-metas rule.
+- **Double death.** If a team lead is *also* dead, its members were `--spawned-by`
+  the dead team-lead sid (recorded in `teams=`), not by the old main lead, so the
+  successor walks the spawn tree **tier by tier** — recover the team via the path
+  above, then adopt its members through the respawned/absorbed owner.
 
 ## Human checkpoints under autonomy
 

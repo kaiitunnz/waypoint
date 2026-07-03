@@ -126,6 +126,11 @@ Two things must hold, or a phase quietly produces nothing:
   **overflow workers** cover a burst beyond standing headcount, reaped per batch by
   tracked id (`references/org-chart.md`). Frame each task as *build and ship this
   feature / implement this*, and verify each with its own check before integrating.
+  For a build too large for one lead to sequence, split it into per-team `job:`
+  channels each run by a **team lead**, with the main lead sequencing across teams
+  by cross-team `contract:` cells and integrating their results (the hierarchical
+  org and its merge-up are in `references/org-chart.md` and
+  `references/coordination.md`).
 - **Artifact:** merged commits on the integration branch; `status:<n>` cells
   flipping to `done`.
 - **Checkpoint:** none per task; the lead integrates one task at a time and keeps
@@ -143,6 +148,9 @@ Two things must hold, or a phase quietly produces nothing:
   existing behavior. Compare against the phase-2 green baseline, run the
   pre-existing suite (not just tests added for the change), and exercise adjacent
   untouched flows the change could have disturbed.
+- **Hierarchical:** QA is two-level — each team lead runs intra-team QA on its own
+  result, and the main lead still runs this org-level QA on the cross-team-integrated
+  app after merge-up. The team checks do not replace exercising the whole product.
 - **Artifact:** bug reports on the log; the lead triages them into new backlog
   tasks.
 - **Checkpoint:** none — findings loop back to phase 3/4.

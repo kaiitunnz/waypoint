@@ -70,6 +70,15 @@ Manage the cost by **size, not churn**:
   the batch finishes — never with the blanket `reap --spawned-by <lead>` sweep,
   which would also reap the standing crew. Track the standing sids so they are
   excluded. The blanket sweep is reserved for wind-down.
+- **Under a hierarchy, wind-down is tier-ordered.** Members are `--spawned-by`
+  their *team lead*, not the main lead, so a main-lead `reap --spawned-by <lead>`
+  sweep would orphan the members while reaping the team leads. Wind down
+  bottom-up: each team lead drains its members, the main lead migrates or retires
+  each team's cells, then the team leads are reaped. A team lead being replaced is
+  **adopted, never deleted, until its cells are read or migrated** — deleting it
+  prunes them (the resume rules are in `references/coordination.md`).
+  Exclusion-tracking is now two-level: the main lead tracks team-lead sids, each
+  team lead its own members'.
 
 Which roles exist at all is a judgement call:
 
@@ -94,6 +103,56 @@ peers directly; a frontend session does not negotiate a contract with a backend
 session on its own, it consumes the `contract:` cell the lead published. This
 keeps all durable decisions on the one session that survives, and keeps coupled
 work from racing (see `references/coordination.md`).
+
+For a product too large for one lead to hold, this generalizes to **flat within
+each tier** — see "Scaling to sub-teams" below.
+
+## Scaling to sub-teams (hierarchical org)
+
+The flat org above is the default and fits almost every product. Reach for a
+hierarchy **only when a single lead can no longer hold the whole org** — too many
+simultaneous `job:` channels to sequence, the lead compacting constantly, an org
+chart too wide for one session to track. It buys headroom at the cost of an extra
+coordination tier and a new failure mode (a team lead can die), so it is not a
+starting point.
+
+The shape is the same lead↔role pattern **one level deep**: a **team lead** is to
+its team what the main lead is to the org. Cap it there — deeper nesting
+multiplies the resume story without buying much.
+
+- **Team lead** — an org-structural position, distinct from the **tech lead /
+  architect** *role* above (a skillset). A team lead owns a team and its channel,
+  and is usually a senior engineer session; the tech-lead role may itself be one.
+- **Reporting stays flat within each tier.** Members report to their team lead,
+  team leads to the main lead. The no-peer-messaging rule holds across teams: a
+  member of one team never negotiates with another team's member — cross-team
+  coupling goes through the main lead's org-level `contract:` cells. Within a team,
+  the team lead is the cell-owning "lead" its members consume from.
+
+**Cut teams along loosely-coupled seams, never through a tightly-coupled slice.**
+A team boundary is a channel boundary, so it inherits the rule that coupled tasks
+share one channel (`references/coordination.md`): teams are valid only where the
+seam between them is a **stable, published cross-team `contract:`** — a
+bounded-context / service boundary (a payments-service team, a search-service
+team), each owning its subsystem behind an agreed API. A frontend/backend pair
+co-building **one** tightly-coupled feature stays **inside one team channel**;
+splitting it into a "frontend team" and a "backend team" reintroduces the
+cross-channel racing the flat model forbids. So "backend lead / frontend lead" is
+a valid split only when the two sides meet at a stable contract, not when they are
+jointly building one coupled slice.
+
+**Ownership is scoped per tier** — the durable-state, integration, contract, and
+resume mechanics live in `references/coordination.md`:
+
+- the **main lead** owns org-level durable state (`prd`, `architecture`, `phase`,
+  `backlog`) and **all cross-team `contract:` cells**, and integrates the teams'
+  results;
+- a **team lead** owns its team channel's cells (`plan`, `task:<n>`, `status:<n>`,
+  intra-team `contract:`) and integrates its own members' work into a single
+  result it reports up.
+
+Give a team lead a strong model tier, like the main lead and tech lead — it runs a
+sub-org's sequencing and integration, the same wide-blast-radius work.
 
 ## Choosing each role's backend and model
 

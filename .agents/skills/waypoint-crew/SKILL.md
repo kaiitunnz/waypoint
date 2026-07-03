@@ -1,6 +1,6 @@
 ---
 name: waypoint-crew
-description: Use when a coding agent must stand up a multi-role software-engineering organization — product manager, tech lead, frontend, backend, QA, release — across durable Waypoint sessions to carry a product through its full lifecycle — discovery, architecture, iterative build, QA, ship, and iterate — whether starting a new product from zero or evolving an existing codebase. A lead runs the org chart, sequences coupled work by dependency and contract, and checkpoints with the user at phase boundaries. Not for a batch of independent tasks (use waypoint-workqueue) or a single coupled change (use delegate-and-review).
+description: Use when a coding agent must stand up a multi-role software-engineering organization — product manager, tech lead, frontend, backend, QA, release — across durable Waypoint sessions to carry a product through its full lifecycle — discovery, architecture, iterative build, QA, ship, and iterate — whether starting a new product from zero or evolving an existing codebase. A lead runs the org chart, sequences coupled work by dependency and contract, and checkpoints with the user at phase boundaries. The org is flat by default and can scale one level into sub-teams with their own team leads for a large product. Not for a batch of independent tasks (use waypoint-workqueue) or a single coupled change (use delegate-and-review).
 ---
 
 # Waypoint Crew
@@ -63,6 +63,11 @@ single change.
   batch, whose worker slots the standing crew fills (ephemeral workers only as
   overflow beyond standing headcount). Dependency sequencing and contract-first
   coupling live here. See `references/coordination.md`.
+- **Org shape** — **flat by default**: one lead, all roles report to it. For a
+  product too large for one lead to hold, the crew scales **one level deep** into
+  sub-teams — a main lead over **team leads** who each own a team, its channel, and
+  its integration, reporting one result up. Hierarchy is opt-in and for large
+  products only; see `references/org-chart.md`.
 
 ## How it works
 
@@ -91,9 +96,16 @@ than producing nothing (see `references/lifecycle.md`).
   interface must agree a `contract:` cell first, and the lead assigns a task only
   when its `deps=` are all `done` (`references/coordination.md`). Racing coupled
   work is the failure mode the crew exists to avoid.
-- **The lead owns all durable state.** Every keyed cell (`prd`, `architecture`,
-  `contract:*`, `phase`, per-task contracts) is written only by the long-lived
-  lead; roles append to the log. Worker-authored cells are pruned on reap.
+- **The owning lead of each tier owns its durable state.** Every keyed cell
+  (`prd`, `architecture`, `contract:*`, `phase`, per-task contracts) is written
+  only by a long-lived lead, never by workers; roles append to the log, and
+  worker-authored cells are pruned on reap. In the flat org that is the one lead;
+  under a hierarchy the main lead owns org-level cells and cross-team contracts
+  while each team lead owns its own channel's cells (`references/org-chart.md`).
+- **Default to a flat org; go hierarchical only when one lead can't hold it.**
+  Sub-teams add a coordination tier and a new failure mode (a team lead can die),
+  so reach for them only for a product too large for a single lead to sequence —
+  not as a starting structure (`references/org-chart.md`).
 - **Checkpoint, don't drift.** At PRD, architecture, and pre-ship, post the
   artifact and gate on the user's approval — the lead must not silently redefine
   the product's scope. Between checkpoints, run autonomously.

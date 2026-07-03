@@ -39,6 +39,9 @@ from waypoint.schemas import (
     AssistantSummary,
     BoardEntryUpdateRequest,
     BoardPostRequest,
+    InboxBlockSubmitRequest,
+    InboxPostRequest,
+    InboxStatus,
     LaunchTargetConnectRequest,
     LaunchTargetConnectResponse,
     LoginRequest,
@@ -62,7 +65,11 @@ from waypoint.schemas import (
     SessionTitleRequest,
 )
 from waypoint.settings import Settings, load_settings
-from waypoint.storage import Storage
+from waypoint.storage import (
+    InboxBlockNotFoundError,
+    InboxBlockTypeError,
+    Storage,
+)
 from waypoint.tailnet import fetch_snapshot
 from waypoint.usage_dashboard import build_dashboard
 from waypoint.workspace_git import git_file_diff, git_list_files, git_status
@@ -1066,6 +1073,87 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="board entry not found")
         return {"entry": entry.model_dump(mode="json")}
 
+    @app.post("/api/inbox")
+    async def inbox_post(
+        body: InboxPostRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        item = await context.runtime.post_inbox_item(body)
+        return {"item": item.model_dump(mode="json")}
+
+    @app.get("/api/inbox")
+    async def inbox_list(
+        _: Annotated[str, Depends(token_dependency())],
+        status_filter: Annotated[InboxStatus | None, Query(alias="status")] = None,
+        q: Annotated[str | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+        cursor: Annotated[str | None, Query()] = None,
+    ) -> Any:
+        page = context.runtime.list_inbox_items(
+            status=status_filter, query=q, limit=limit, cursor=cursor
+        )
+        return page.model_dump(mode="json")
+
+    @app.get("/api/inbox/unresolved-count")
+    async def inbox_unresolved_count(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        # Seeds the cross-session badge before the first WS event arrives.
+        return {"unresolved_count": context.runtime.unresolved_inbox_count()}
+
+    @app.get("/api/inbox/{item_id}")
+    async def inbox_get(
+        item_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        item = context.runtime.get_inbox_item(item_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="inbox item not found")
+        return {"item": item.model_dump(mode="json")}
+
+    @app.post("/api/inbox/{item_id}/blocks/{block_id}")
+    async def inbox_submit_block(
+        item_id: str,
+        block_id: str,
+        body: InboxBlockSubmitRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        # One submit carries an optional answer and/or reply; the answer is
+        # validated against the target block's type in the storage layer.
+        try:
+            item = await context.runtime.submit_inbox_block(
+                item_id, block_id, answer=body.answer, reply=body.reply
+            )
+        except InboxBlockNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="inbox block not found"
+            ) from exc
+        except InboxBlockTypeError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if item is None:
+            raise HTTPException(status_code=404, detail="inbox item not found")
+        return {"item": item.model_dump(mode="json")}
+
+    @app.post("/api/inbox/{item_id}/read")
+    async def inbox_read(
+        item_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        item = await context.runtime.mark_inbox_read(item_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="inbox item not found")
+        return {"item": item.model_dump(mode="json")}
+
+    @app.delete("/api/inbox/{item_id}")
+    async def inbox_delete(
+        item_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        deleted = await context.runtime.delete_inbox_item(item_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="inbox item not found")
+        return {"item_id": item_id, "deleted": True}
+
     @app.patch("/api/sessions/{session_id}/title")
     async def session_set_title(
         session_id: str,
@@ -1343,6 +1431,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             pass
         finally:
             context.runtime.broadcast.unsubscribe_session(session_id, queue)
+            with suppress(Exception):
+                await websocket.close()
+
+    @app.websocket("/ws/inbox/{item_id}")
+    async def ws_inbox(websocket: WebSocket, item_id: str) -> None:
+        await websocket.accept()
+        token = websocket.query_params.get("token", "")
+        if not context.tokens.validate(token):
+            await websocket.close(code=4401)
+            return
+        queue = context.runtime.broadcast.subscribe_inbox(item_id)
+        try:
+            item = context.runtime.get_inbox_item(item_id)
+            if item is None:
+                # Already gone at connect: emit the terminal ``deleted`` frame
+                # so a ``wait`` resolves to ``gone`` instead of hanging.
+                await websocket.send_json(
+                    SessionEnvelope(
+                        type="inbox_update",
+                        payload={"item_id": item_id, "deleted": True, "item": None},
+                    ).model_dump(mode="json")
+                )
+                return
+            # Hydrate the full item so ``wait`` can evaluate its condition
+            # against the current snapshot before awaiting the next change.
+            await websocket.send_json(
+                SessionEnvelope(
+                    type="inbox_update",
+                    payload={
+                        "item_id": item.id,
+                        "deleted": False,
+                        "item": item.model_dump(mode="json"),
+                    },
+                ).model_dump(mode="json")
+            )
+            while True:
+                message = await queue.get()
+                await websocket.send_json(message)
+        except (WebSocketDisconnect, asyncio.CancelledError):
+            pass
+        finally:
+            context.runtime.broadcast.unsubscribe_inbox(item_id, queue)
             with suppress(Exception):
                 await websocket.close()
 

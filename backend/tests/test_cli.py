@@ -1,5 +1,6 @@
 import json
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -450,8 +451,6 @@ def test_sessions_list_recursive_requires_scope(tmp_path: Path) -> None:
 def test_sessions_list_idle_for_filters_client_side(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from datetime import UTC, datetime, timedelta
-
     now = datetime.now(UTC)
 
     def handler(request: httpx.Request) -> httpx.Response:

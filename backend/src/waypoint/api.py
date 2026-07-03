@@ -99,8 +99,8 @@ def session_matches_tag_filters(tags: dict[str, str], filters: list[str]) -> boo
 def _descendant_ids(sessions: list[SessionRecord], root_id: str) -> set[str]:
     """Ids of every transitive descendant of ``root_id`` (excluding the root).
 
-    Walks the ``spawner_session_id`` parent pointers breadth-first with a
-    visited set so a cycle or an orphaned subtree can't loop forever.
+    Walks the ``spawner_session_id`` parent pointers with a visited set so a
+    cycle or an orphaned subtree can't loop forever.
     """
     children: dict[str, list[str]] = {}
     for session in sessions:

@@ -557,14 +557,18 @@ def _parse_duration(value: str) -> float:
 
 
 def _last_activity(session: dict[str, Any]) -> datetime | None:
-    """A session's last-activity timestamp, parsed from ``last_event_at``."""
+    """A session's last-activity timestamp, parsed from ``last_event_at``.
+
+    Coerces a naive timestamp (e.g. a tz-less value from imported thread
+    history) to UTC so it can be compared against an aware ``now``."""
     raw = session.get("last_event_at")
     if not isinstance(raw, str):
         return None
     try:
-        return datetime.fromisoformat(raw)
+        parsed = datetime.fromisoformat(raw)
     except ValueError:
         return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
 def _filter_idle(
@@ -935,9 +939,7 @@ def sessions_list(
     idle_seconds = _parse_duration(idle_for) if idle_for is not None else None
 
     def _run(c: WaypointClient) -> dict[str, Any]:
-        sessions = c.list_sessions(
-            spawned_by=spawned_by, tags=tag, recursive=recursive
-        )
+        sessions = c.list_sessions(spawned_by=spawned_by, tags=tag, recursive=recursive)
         if idle_seconds is not None:
             sessions = _filter_idle(sessions, idle_seconds)
         return {"sessions": sessions}

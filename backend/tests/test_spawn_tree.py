@@ -72,6 +72,15 @@ def test_filter_idle_keeps_only_stale() -> None:
     assert [s["id"] for s in kept] == ["stale"]
 
 
+def test_filter_idle_handles_naive_timestamp() -> None:
+    # A tz-less last_event_at (e.g. from imported thread history) must not crash
+    # the aware-vs-naive comparison; it is coerced to UTC.
+    stale_naive = (datetime.now(UTC) - timedelta(hours=2)).replace(tzinfo=None)
+    session = {"id": "imported", "last_event_at": stale_naive.isoformat()}
+    kept = _filter_idle([session], idle_seconds=3600)
+    assert [s["id"] for s in kept] == ["imported"]
+
+
 def test_build_session_tree_nests_children() -> None:
     now = datetime.now(UTC).isoformat()
     sessions = [

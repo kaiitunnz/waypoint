@@ -781,15 +781,26 @@ def _inbox_condition_met(
     return None
 
 
+def _resolve_baseline(baseline: list[int | None], item: dict[str, Any]) -> int:
+    # First observed frame (WS hydration or first poll) fixes the ``update``
+    # baseline so it never self-triggers, and — because the holder is shared —
+    # a change seen by the WS path survives a WS→poll handoff instead of being
+    # re-baselined off a fresh fetch.
+    current = baseline[0]
+    if current is None:
+        current = int(item.get("version", 0))
+        baseline[0] = current
+    return current
+
+
 async def _await_inbox_via_ws(
     client: _InboxWaitClient,
     item_id: str,
     until: frozenset[str],
-    since: int | None,
+    baseline: list[int | None],
 ) -> _InboxWaitResult | None:
     """Block on the per-item WS stream until the condition is met or the item
     is deleted. Returns ``None`` if the stream cannot connect (caller polls)."""
-    baseline = since
     try:
         async for envelope in client.stream_inbox_envelopes(item_id):
             if envelope.get("type") != "inbox_update":
@@ -800,11 +811,9 @@ async def _await_inbox_via_ws(
             item = payload.get("item")
             if not isinstance(item, dict):
                 continue
-            if baseline is None:
-                # First frame (hydration) sets the update baseline so it never
-                # self-triggers ``update``.
-                baseline = int(item.get("version", 0))
-            outcome = _inbox_condition_met(item, until, baseline)
+            outcome = _inbox_condition_met(
+                item, until, _resolve_baseline(baseline, item)
+            )
             if outcome is not None:
                 return _InboxWaitResult(outcome, item)
     except (OSError, WebSocketException):
@@ -816,9 +825,8 @@ async def _await_inbox_via_poll(
     client: _InboxWaitClient,
     item_id: str,
     until: frozenset[str],
-    since: int | None,
+    baseline: list[int | None],
 ) -> _InboxWaitResult:
-    baseline = since
     while True:
         try:
             # Off the loop: get_inbox is sync httpx, so an inline call would
@@ -827,10 +835,14 @@ async def _await_inbox_via_poll(
         except WaypointError as exc:
             if exc.status_code == 404:
                 return _InboxWaitResult("gone", None)
-            raise
-        if baseline is None:
-            baseline = int(item.get("version", 0))
-        outcome = _inbox_condition_met(item, until, baseline)
+            if exc.status_code is not None and 400 <= exc.status_code < 500:
+                raise  # a genuine client error (e.g. 401) — don't spin on it
+            # Transient (connection refused → status_code None, or a 5xx while
+            # the backend restarts): a checkpoint is a durable gate, so keep
+            # polling within the --timeout budget instead of aborting the wait.
+            await asyncio.sleep(WAIT_POLL_INTERVAL_SECONDS)
+            continue
+        outcome = _inbox_condition_met(item, until, _resolve_baseline(baseline, item))
         if outcome is not None:
             return _InboxWaitResult(outcome, item)
         await asyncio.sleep(WAIT_POLL_INTERVAL_SECONDS)
@@ -845,14 +857,17 @@ async def _wait_for_inbox(
 ) -> _InboxWaitResult:
     """Block until the item meets ``until``, is deleted (``gone``), or times out.
 
-    Prefers the WS stream, falling back to polling if it cannot connect.
+    Prefers the WS stream, falling back to polling if it cannot connect. The
+    ``update`` baseline is shared across both paths so a version bump seen just
+    before a WS drop is still reported after the poll takeover.
     """
+    baseline: list[int | None] = [since]
     try:
         async with asyncio.timeout(timeout):
-            streamed = await _await_inbox_via_ws(client, item_id, until, since)
+            streamed = await _await_inbox_via_ws(client, item_id, until, baseline)
             if streamed is not None:
                 return streamed
-            return await _await_inbox_via_poll(client, item_id, until, since)
+            return await _await_inbox_via_poll(client, item_id, until, baseline)
     except TimeoutError:
         try:
             item: dict[str, Any] | None = await asyncio.to_thread(

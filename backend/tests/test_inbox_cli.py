@@ -32,10 +32,13 @@ class _FakeClient:
         frames: list[dict[str, Any]] | None = None,
         poll_items: list[dict[str, Any]] | None = None,
         get_error: WaypointError | None = None,
+        get_sequence: list[dict[str, Any] | WaypointError] | None = None,
     ) -> None:
         self._frames = frames if frames is not None else []
         self._poll_items = poll_items or []
         self._get_error = get_error
+        # Ordered get_inbox outcomes: a dict is returned, a WaypointError raised.
+        self._get_sequence = get_sequence
 
     async def stream_inbox_envelopes(
         self, item_id: str
@@ -44,6 +47,11 @@ class _FakeClient:
             yield frame
 
     def get_inbox(self, item_id: str) -> dict[str, Any]:
+        if self._get_sequence:
+            outcome = self._get_sequence.pop(0)
+            if isinstance(outcome, WaypointError):
+                raise outcome
+            return outcome
         if self._get_error is not None:
             raise self._get_error
         if self._poll_items:
@@ -151,6 +159,34 @@ async def test_poll_fallback_resolves() -> None:
         client, "i1", frozenset({"resolved"}), None, timeout=1.0
     )
     assert result.outcome == "resolved"
+
+
+async def test_poll_survives_transient_error(monkeypatch) -> None:
+    # A 5xx / connection blip during a durable wait must not abort it — the poll
+    # loop retries within the timeout budget and still resolves.
+    import waypoint.cli as cli
+
+    monkeypatch.setattr(cli, "WAIT_POLL_INTERVAL_SECONDS", 0.01)
+    client = _FakeClient(
+        frames=[],
+        get_sequence=[
+            WaypointError("boom", status_code=503),
+            {"version": 1, "status": "resolved"},
+        ],
+    )
+    result = await _wait_for_inbox(
+        client, "i1", frozenset({"resolved"}), None, timeout=1.0
+    )
+    assert result.outcome == "resolved"
+
+
+async def test_poll_aborts_on_client_error() -> None:
+    # A genuine 4xx (e.g. 401) is not transient — surface it, don't spin.
+    client = _FakeClient(
+        frames=[], get_error=WaypointError("unauthorized", status_code=401)
+    )
+    with pytest.raises(WaypointError):
+        await _wait_for_inbox(client, "i1", frozenset({"resolved"}), None, timeout=1.0)
 
 
 async def test_timeout_returns_timeout_outcome() -> None:

@@ -1667,8 +1667,12 @@ class SessionRuntime:
         return item
 
     async def mark_inbox_read(self, item_id: str) -> InboxItem | None:
-        item = self.storage.mark_inbox_read(item_id)
-        if item is not None:
+        result = self.storage.mark_inbox_read(item_id)
+        if result is None:
+            return None
+        item, changed = result
+        # A repeat read is a no-op; don't re-broadcast to every client.
+        if changed:
             await self._publish_inbox_update(item)
         return item
 

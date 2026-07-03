@@ -91,8 +91,10 @@ def test_no_action_item_resolves_on_read(tmp_path) -> None:
     )
     assert item.status is InboxStatus.OPEN
 
-    read = storage.mark_inbox_read(item.id)
-    assert read is not None
+    result = storage.mark_inbox_read(item.id)
+    assert result is not None
+    read, changed = result
+    assert changed is True
     assert read.status is InboxStatus.RESOLVED
     assert read.read_at is not None
     assert read.version == 1  # resolve-on-read is a real state change
@@ -103,11 +105,15 @@ def test_read_is_idempotent_and_no_rebump(tmp_path) -> None:
     item = storage.create_inbox_item(
         "s1", None, "fyi", [InboxMarkdownBlockInput(text="hi")]
     )
-    first = storage.mark_inbox_read(item.id)
-    assert first is not None and first.version == 1
+    first_result = storage.mark_inbox_read(item.id)
+    assert first_result is not None
+    first, first_changed = first_result
+    assert first_changed is True and first.version == 1
 
-    second = storage.mark_inbox_read(item.id)
-    assert second is not None
+    second_result = storage.mark_inbox_read(item.id)
+    assert second_result is not None
+    second, second_changed = second_result
+    assert second_changed is False  # no-op re-read → no broadcast
     assert second.version == 1  # no re-bump on repeat read
     assert second.read_at == first.read_at
 
@@ -115,8 +121,10 @@ def test_read_is_idempotent_and_no_rebump(tmp_path) -> None:
 def test_read_of_interactive_item_does_not_bump_version(tmp_path) -> None:
     storage = _storage(tmp_path)
     item = storage.create_inbox_item("s1", None, "gate", [_question()])
-    read = storage.mark_inbox_read(item.id)
-    assert read is not None
+    result = storage.mark_inbox_read(item.id)
+    assert result is not None
+    read, changed = result
+    assert changed is True  # first read stamps read_at
     assert read.status is InboxStatus.OPEN
     assert read.read_at is not None
     assert read.version == 0  # plain read never bumps version
@@ -128,8 +136,10 @@ def test_resolved_is_terminal_no_demotion_on_later_reply(tmp_path) -> None:
     item = storage.create_inbox_item(
         "s1", None, "fyi", [InboxMarkdownBlockInput(text="hi")]
     )
-    read = storage.mark_inbox_read(item.id)
-    assert read is not None and read.status is InboxStatus.RESOLVED
+    result = storage.mark_inbox_read(item.id)
+    assert result is not None
+    read, _ = result
+    assert read.status is InboxStatus.RESOLVED
     assert storage.unresolved_inbox_count() == 0
 
     bid = item.blocks[0].id
@@ -187,6 +197,45 @@ def test_mismatched_answer_shape_raises(tmp_path) -> None:
     # A question-shaped answer on an approval block is rejected.
     with pytest.raises(InboxBlockTypeError):
         storage.submit_inbox_block(item.id, bid, answer={"selected": ["yes"]})
+
+
+def test_answer_with_unknown_option_raises(tmp_path) -> None:
+    storage = _storage(tmp_path)
+    item = storage.create_inbox_item("s1", None, "gate", [_question()])
+    bid = item.blocks[0].id
+    with pytest.raises(InboxBlockTypeError):
+        storage.submit_inbox_block(item.id, bid, answer={"selected": ["maybe"]})
+
+
+def test_single_select_question_rejects_multiple(tmp_path) -> None:
+    storage = _storage(tmp_path)
+    item = storage.create_inbox_item("s1", None, "gate", [_question()])  # multi False
+    bid = item.blocks[0].id
+    with pytest.raises(InboxBlockTypeError):
+        storage.submit_inbox_block(item.id, bid, answer={"selected": ["yes", "no"]})
+
+
+def test_multi_select_question_accepts_multiple(tmp_path) -> None:
+    storage = _storage(tmp_path)
+    multi = InboxQuestionBlockInput(
+        question="Pick any",
+        options=[InboxQuestionOption(label="a"), InboxQuestionOption(label="b")],
+        multi=True,
+        required=True,
+    )
+    item = storage.create_inbox_item("s1", None, "gate", [multi])
+    bid = item.blocks[0].id
+    updated = storage.submit_inbox_block(item.id, bid, answer={"selected": ["a", "b"]})
+    assert updated is not None
+    assert updated.status is InboxStatus.RESOLVED
+
+
+def test_approval_with_off_menu_decision_raises(tmp_path) -> None:
+    storage = _storage(tmp_path)
+    item = storage.create_inbox_item("s1", None, "gate", [_approval()])
+    bid = item.blocks[0].id
+    with pytest.raises(InboxBlockTypeError):
+        storage.submit_inbox_block(item.id, bid, answer={"decision": "maybe"})
 
 
 def test_missing_block_raises_not_found(tmp_path) -> None:

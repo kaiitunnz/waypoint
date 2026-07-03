@@ -19,11 +19,12 @@ from waypoint.schemas import (
     EventKind,
     EventRecord,
     InboxApprovalAnswer,
+    InboxApprovalBlock,
     InboxBlock,
     InboxBlockInput,
-    InboxBlockType,
     InboxItem,
     InboxQuestionAnswer,
+    InboxQuestionBlock,
     InboxReply,
     InboxReplyInput,
     InboxStatus,
@@ -914,19 +915,21 @@ class Storage:
         return self.get_inbox_item(item_id)
 
     @_synchronized
-    def mark_inbox_read(self, item_id: str) -> InboxItem | None:
+    def mark_inbox_read(self, item_id: str) -> tuple[InboxItem, bool] | None:
         # Idempotent: the UI calls this on every open. A first read stamps
         # ``read_at``; a no-action item additionally resolves-on-read (a real
         # state change → bump version). A plain read of an interactive item sets
         # ``read_at`` only and never bumps version (RFC §7). Once ``read_at`` is
-        # set this is a no-op.
+        # set this is a no-op. Returns ``(item, changed)`` — ``changed`` is False
+        # for the no-op re-read so the runtime can skip a redundant broadcast; or
+        # ``None`` when the item does not exist.
         row = self.connection.execute(
             "SELECT * FROM inbox_items WHERE id = ?", (item_id,)
         ).fetchone()
         if row is None:
             return None
         if row["read_at"]:
-            return self._inbox_item_from_row(row)
+            return self._inbox_item_from_row(row), False
         now = datetime.now(UTC)
         blocks = self._parse_inbox_blocks(row["blocks"])
         status = InboxStatus(row["status"])
@@ -948,7 +951,9 @@ class Storage:
                 (now.isoformat(), item_id),
             )
         self.connection.commit()
-        return self.get_inbox_item(item_id)
+        updated = self.get_inbox_item(item_id)
+        assert updated is not None  # just updated it under the lock
+        return updated, True
 
     @_synchronized
     def delete_inbox_item(self, item_id: str) -> bool:
@@ -1797,14 +1802,31 @@ class Storage:
     def _apply_inbox_answer(
         self, block: InboxBlock, answer: dict[str, Any], now: datetime
     ) -> None:
-        # An ``answer`` is only valid on the matching interactive block type; a
-        # shape mismatch (guarded by ``extra="forbid"`` on the answer models) or
-        # an answer on a non-interactive block is a 422.
+        # An ``answer`` is only valid on the matching interactive block type, and
+        # must fit that block's declared options — the CLI/REST scripting surface
+        # bypasses the UI's constraints, so an off-menu decision or an unknown /
+        # over-count selection is a 422 here rather than silently recorded.
         try:
-            if block.type == InboxBlockType.QUESTION:
-                block.answer = InboxQuestionAnswer.model_validate(answer)
-            elif block.type == InboxBlockType.APPROVAL:
-                block.answer = InboxApprovalAnswer.model_validate(answer)
+            if isinstance(block, InboxQuestionBlock):
+                parsed_q = InboxQuestionAnswer.model_validate(answer)
+                labels = {option.label for option in block.options}
+                unknown = [
+                    choice for choice in parsed_q.selected if choice not in labels
+                ]
+                if unknown:
+                    raise InboxBlockTypeError(
+                        f"unknown option(s): {', '.join(unknown)}"
+                    )
+                if not block.multi and len(parsed_q.selected) > 1:
+                    raise InboxBlockTypeError(
+                        "single-select question got multiple selections"
+                    )
+                block.answer = parsed_q
+            elif isinstance(block, InboxApprovalBlock):
+                parsed_a = InboxApprovalAnswer.model_validate(answer)
+                if parsed_a.decision not in set(block.options):
+                    raise InboxBlockTypeError(f"unknown decision: {parsed_a.decision}")
+                block.answer = parsed_a
             else:
                 raise InboxBlockTypeError(f"answer not allowed on {block.type} block")
         except ValidationError as exc:

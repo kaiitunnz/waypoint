@@ -96,6 +96,27 @@ def session_matches_tag_filters(tags: dict[str, str], filters: list[str]) -> boo
     return True
 
 
+def _descendant_ids(sessions: list[SessionRecord], root_id: str) -> set[str]:
+    """Ids of every transitive descendant of ``root_id`` (excluding the root).
+
+    Walks the ``spawner_session_id`` parent pointers breadth-first with a
+    visited set so a cycle or an orphaned subtree can't loop forever.
+    """
+    children: dict[str, list[str]] = {}
+    for session in sessions:
+        if session.spawner_session_id is not None:
+            children.setdefault(session.spawner_session_id, []).append(session.id)
+    found: set[str] = set()
+    queue = list(children.get(root_id, []))
+    while queue:
+        current = queue.pop()
+        if current in found or current == root_id:
+            continue
+        found.add(current)
+        queue.extend(children.get(current, []))
+    return found
+
+
 def _backend_descriptors(registry: BackendRegistry) -> list[dict[str, Any]]:
     """Serialise every registered backend for the frontend catalogue.
 
@@ -299,12 +320,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
         spawned_by: Annotated[str | None, Query()] = None,
         tag: Annotated[list[str] | None, Query()] = None,
+        recursive: Annotated[bool, Query()] = False,
     ) -> Any:
         all_sessions = context.runtime.list_sessions()
         if spawned_by is not None:
-            all_sessions = [
-                s for s in all_sessions if s.spawner_session_id == spawned_by
-            ]
+            if recursive:
+                wanted = _descendant_ids(all_sessions, spawned_by)
+                all_sessions = [s for s in all_sessions if s.id in wanted]
+            else:
+                all_sessions = [
+                    s for s in all_sessions if s.spawner_session_id == spawned_by
+                ]
         if tag:
             all_sessions = [
                 s for s in all_sessions if session_matches_tag_filters(s.tags, tag)

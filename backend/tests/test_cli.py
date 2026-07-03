@@ -406,6 +406,138 @@ def test_sessions_list_mine_errors_when_env_unset(
     assert "WAYPOINT_SESSION_ID" in result.output
 
 
+def test_sessions_list_recursive_passes_param(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions" and request.method == "GET":
+            state["params"] = dict(request.url.params)
+            return httpx.Response(200, json={"sessions": []})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "list",
+            "--spawned-by",
+            "p1",
+            "--recursive",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert state["params"] == {"spawned_by": "p1", "recursive": "true"}
+
+
+def test_sessions_list_recursive_requires_scope(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "list", "--recursive"],
+    )
+    assert result.exit_code != 0
+    assert "recursive" in result.output.lower()
+
+
+def test_sessions_list_idle_for_filters_client_side(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions" and request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "sessions": [
+                        {"id": "fresh", "last_event_at": now.isoformat()},
+                        {
+                            "id": "stale",
+                            "last_event_at": (now - timedelta(hours=2)).isoformat(),
+                        },
+                    ]
+                },
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "list", "--idle-for", "1h"],
+    )
+    assert result.exit_code == 0, result.output
+    ids = [s["id"] for s in json.loads(result.stdout)["sessions"]]
+    assert ids == ["stale"]
+
+
+def test_sessions_tree_renders_nested(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions" and request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "sessions": [
+                        {"id": "root", "title": "R", "status": "idle"},
+                        {"id": "a", "spawner_session_id": "root"},
+                        {"id": "b", "spawner_session_id": "a"},
+                    ]
+                },
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "tree", "root"],
+    )
+    assert result.exit_code == 0, result.output
+    tree = json.loads(result.stdout)["tree"]
+    assert tree["id"] == "root"
+    assert tree["children"][0]["id"] == "a"
+    assert tree["children"][0]["children"][0]["id"] == "b"
+
+
+def test_sessions_tree_unknown_id_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions" and request.method == "GET":
+            return httpx.Response(200, json={"sessions": []})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "sessions", "tree", "ghost"],
+    )
+    assert result.exit_code != 0
+    assert "ghost" in result.output
+
+
 def test_sessions_reap_deletes_matched_sessions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

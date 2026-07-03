@@ -14,8 +14,9 @@ run a heavyweight seven-phase process on a thin slice.
 
 The same seven phases run whether the product starts from an empty repo
 (**greenfield**) or the crew is evolving an **existing codebase** (**brownfield**
-— adding a feature, a redesign, a migration-plus-features effort). Only the front
-two phases change shape; phases 3–7 are identical.
+— adding a feature, a redesign, a migration-plus-features effort). Phases 1 and 2
+change shape the most; phases 3, 4, 6, and 7 are identical, and phase 5 adds a
+brownfield regression guard.
 
 - **Greenfield** — phase 1 writes a product PRD and phase 2 chooses a stack and
   scaffolds a skeleton, as written below.
@@ -31,6 +32,10 @@ two phases change shape; phases 3–7 are identical.
 Set the `phase` cell's `current=` to wherever the work actually enters — a
 brownfield effort with a clear, already-agreed change can open directly at
 scoping or even backlog decomposition rather than replaying discovery from zero.
+What is skippable is discovery/scoping, **not** phase 2's branch-and-baseline
+step: however early you enter, still cut the integration branch from the default
+branch and confirm the green baseline before any build batch, since phase 5's
+regression guard compares against it.
 
 ## How the engineering work actually gets done
 

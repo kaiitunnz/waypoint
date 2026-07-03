@@ -632,8 +632,10 @@ class Storage:
         now = datetime.now(UTC)
         patch = metadata or {}
         unset = unset or []
-        # Merge/unset need the current blob; the SELECT and UPDATE share this
-        # method's ``@_synchronized`` lock, so the read-modify-write is atomic.
+        # Merge/unset both patch the current blob rather than replacing it, so
+        # they read it first; the SELECT and UPDATE share this method's
+        # ``@_synchronized`` lock, so the read-modify-write is atomic. ``unset``
+        # implies patch semantics too — removing a key must not drop the others.
         if merge or unset:
             existing_row = self.connection.execute(
                 "SELECT metadata FROM board_entries WHERE id = ? AND channel = ?",
@@ -642,7 +644,7 @@ class Storage:
             if existing_row is None:
                 return None
             existing = json.loads(existing_row["metadata"] or "{}")
-            final_meta = {**existing, **patch} if merge else dict(patch)
+            final_meta = {**existing, **patch}
             for removed_key in unset:
                 final_meta.pop(removed_key, None)
         else:

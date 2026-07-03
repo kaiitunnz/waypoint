@@ -1134,6 +1134,31 @@ def test_board_update_entry_unset_removes_keys(tmp_path) -> None:
     assert updated.metadata == {"a": "9", "c": "3"}
 
 
+def test_board_update_entry_unset_without_merge_keeps_other_keys(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    entry = storage.add_board_entry(
+        "topic:a", "cell", key="k", metadata={"current": "build", "stale": "x"}
+    )
+    # unset alone (no merge, no metadata) must remove only the named key, not
+    # wipe the whole blob back to {}.
+    updated = storage.update_board_entry("topic:a", entry.id, None, unset=["stale"])
+    assert updated is not None
+    assert updated.metadata == {"current": "build"}
+
+
+def test_board_update_entry_merge_with_text_updates_both(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    entry = storage.add_board_entry(
+        "topic:a", "old", key="k", metadata={"a": "1", "b": "2"}
+    )
+    updated = storage.update_board_entry(
+        "topic:a", entry.id, "new", metadata={"b": "9"}, merge=True
+    )
+    assert updated is not None
+    assert updated.text == "new"
+    assert updated.metadata == {"a": "1", "b": "9"}
+
+
 def test_board_update_entry_merge_missing_returns_none(tmp_path) -> None:
     storage = Storage(tmp_path / "waypoint.db")
     entry = storage.add_board_entry("topic:a", "hi", key="k", metadata={"a": "1"})

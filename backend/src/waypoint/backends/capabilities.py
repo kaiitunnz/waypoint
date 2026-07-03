@@ -88,9 +88,16 @@ class TransportCapabilities(_FrozenModel):
     # Unlike live_terminal (raw-scrape-only), a terminal pane may be read-only
     # (terminal_interactive=False) or fixed-size (terminal_resizable=False).
     has_terminal_pane: bool = False
-    # The terminal pane accepts keyboard input forwarded from the frontend.
-    # False for claude_tty (read-only mirror of the structured TUI).
+    # The terminal pane accepts free-form keyboard input forwarded from the
+    # frontend (xterm ``onData``, the compose drawer, mouse). False for
+    # claude_tty, whose primary input surface is the structured chat.
     terminal_interactive: bool = False
+    # The terminal pane accepts discrete injected input — the key-bar chips
+    # (Esc/Enter/arrows/^C) and scroll-wheel events — without opening the pane
+    # to free-form typing. An escape hatch for driving the TUI when the
+    # structured surface can't (unexpected dialogs, scrolling history). Implied
+    # by terminal_interactive; also True for claude_tty.
+    terminal_key_injection: bool = False
     # The terminal pane's dimensions can be driven by the client viewport.
     # False for claude_tty (pane is managed by the structured relaunch cycle).
     terminal_resizable: bool = False
@@ -141,8 +148,13 @@ class BackendCapabilities(_FrozenModel):
     live_terminal: bool = False
     # The transport exposes a tmux pane the terminal websocket can mirror.
     has_terminal_pane: bool = False
-    # The terminal pane accepts keyboard input forwarded from the frontend.
+    # The terminal pane accepts free-form keyboard input forwarded from the
+    # frontend (xterm onData, compose drawer, mouse).
     terminal_interactive: bool = False
+    # The terminal pane accepts discrete injected input (key-bar chips, scroll
+    # wheel) without opening it to free-form typing. Implied by
+    # terminal_interactive; also True for claude_tty as an escape hatch.
+    terminal_key_injection: bool = False
     # The terminal pane's dimensions can be driven by the client viewport.
     terminal_resizable: bool = False
     supports_thread_discovery: bool = False
@@ -227,6 +239,7 @@ class BackendCapabilities(_FrozenModel):
             live_terminal=self.live_terminal,
             has_terminal_pane=self.has_terminal_pane,
             terminal_interactive=self.terminal_interactive,
+            terminal_key_injection=self.terminal_key_injection,
             terminal_resizable=self.terminal_resizable,
             is_fallback_for_managed_launch=self.is_fallback_for_managed_launch,
         )

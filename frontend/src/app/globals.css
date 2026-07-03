@@ -8037,23 +8037,21 @@ html[data-theme="light"] .xterm-rows span[style*="color:#00cdcd"] {
   position: absolute;
   right: 12px;
   bottom: 14px;
-  display: none;
+  display: flex;
   flex-direction: column;
   gap: 8px;
   z-index: 5;
+  /* Let clicks in the gutter around the pills reach the pane below (text
+     selection, links); only the buttons themselves capture pointer events. */
+  pointer-events: none;
 }
 
 .term-scroll-cluster[data-with-jump="true"] {
   bottom: 64px;
 }
 
-@media (pointer: coarse) {
-  .term-scroll-cluster {
-    display: flex;
-  }
-}
-
 .term-scroll-cluster button {
+  pointer-events: auto;
   width: 44px;
   height: 44px;
   border-radius: var(--radius-pill);

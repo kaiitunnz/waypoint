@@ -75,6 +75,7 @@ const FALLBACK_STRUCTURED = new Set([
 const FALLBACK_LIVE_TERMINAL = new Set(["tmux"]);
 const FALLBACK_HAS_TERMINAL_PANE = new Set(["tmux", "claude_tty"]);
 const FALLBACK_TERMINAL_INTERACTIVE = new Set(["tmux"]);
+const FALLBACK_TERMINAL_KEY_INJECTION = new Set(["tmux", "claude_tty"]);
 const FALLBACK_TERMINAL_RESIZABLE = new Set(["tmux"]);
 const FALLBACK_APPROVAL_NOTE = new Set(["claude_code", "opencode"]);
 const FALLBACK_PLAN_APPROVAL = new Set(["codex"]);
@@ -243,6 +244,19 @@ export function terminalInteractive(
 ): boolean {
   const caps = catalog?.transportCaps(transport);
   return caps ? caps.terminal_interactive : FALLBACK_TERMINAL_INTERACTIVE.has(transport);
+}
+
+// Whether the terminal pane accepts discrete injected input — the key-bar
+// chips and scroll-wheel events — even when it's not open to free-form typing
+// (claude_tty). Implied by terminalInteractive.
+export function terminalKeyInjection(
+  transport: SessionTransport,
+  catalog?: BackendCatalog,
+): boolean {
+  const caps = catalog?.transportCaps(transport);
+  return caps
+    ? caps.terminal_key_injection
+    : FALLBACK_TERMINAL_KEY_INJECTION.has(transport);
 }
 
 // Whether the terminal pane accepts resize frames from the frontend.

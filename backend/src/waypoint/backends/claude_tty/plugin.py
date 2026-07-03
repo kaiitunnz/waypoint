@@ -157,6 +157,11 @@ class ClaudeTtyPlugin:
         badges={"glyph": "C", "color": "#a78bfa"},
         has_terminal_pane=True,
         terminal_interactive=False,
+        # The pane stays read-only for typing (structured chat is the input
+        # surface), but accepts injected key-bar chips and scroll-wheel events
+        # so the user can drive the TUI through unexpected dialogs and scroll
+        # its history.
+        terminal_key_injection=True,
         terminal_resizable=False,
         cli_binary="claude",
         target_aliases=("claude_tty",),

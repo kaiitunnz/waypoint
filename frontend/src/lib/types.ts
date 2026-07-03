@@ -192,6 +192,7 @@ export interface TransportCapabilities {
   live_terminal: boolean;
   has_terminal_pane: boolean;
   terminal_interactive: boolean;
+  terminal_key_injection: boolean;
   terminal_resizable: boolean;
   is_fallback_for_managed_launch: boolean;
 }
@@ -229,6 +230,7 @@ export interface BackendCapabilities {
   live_terminal: boolean;
   has_terminal_pane: boolean;
   terminal_interactive: boolean;
+  terminal_key_injection: boolean;
   terminal_resizable: boolean;
   supports_thread_discovery: boolean;
   supports_thread_import: boolean;

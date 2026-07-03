@@ -26,6 +26,7 @@
       "live_terminal": false,
       "has_terminal_pane": false,
       "terminal_interactive": false,
+      "terminal_key_injection": false,
       "terminal_resizable": false,
       "supports_thread_discovery": true,
       "supports_thread_import": true,
@@ -270,6 +271,7 @@
       "live_terminal": false,
       "has_terminal_pane": false,
       "terminal_interactive": false,
+      "terminal_key_injection": false,
       "terminal_resizable": false,
       "is_fallback_for_managed_launch": false
     }
@@ -299,6 +301,7 @@
       "live_terminal": false,
       "has_terminal_pane": true,
       "terminal_interactive": false,
+      "terminal_key_injection": true,
       "terminal_resizable": false,
       "supports_thread_discovery": true,
       "supports_thread_import": true,
@@ -543,6 +546,7 @@
       "live_terminal": false,
       "has_terminal_pane": true,
       "terminal_interactive": false,
+      "terminal_key_injection": true,
       "terminal_resizable": false,
       "is_fallback_for_managed_launch": false
     }
@@ -573,6 +577,7 @@
       "live_terminal": false,
       "has_terminal_pane": false,
       "terminal_interactive": false,
+      "terminal_key_injection": false,
       "terminal_resizable": false,
       "supports_thread_discovery": true,
       "supports_thread_import": true,
@@ -723,6 +728,7 @@
       "live_terminal": false,
       "has_terminal_pane": false,
       "terminal_interactive": false,
+      "terminal_key_injection": false,
       "terminal_resizable": false,
       "is_fallback_for_managed_launch": false
     }
@@ -753,6 +759,7 @@
       "live_terminal": false,
       "has_terminal_pane": false,
       "terminal_interactive": false,
+      "terminal_key_injection": false,
       "terminal_resizable": false,
       "supports_thread_discovery": true,
       "supports_thread_import": true,
@@ -915,6 +922,7 @@
       "live_terminal": false,
       "has_terminal_pane": false,
       "terminal_interactive": false,
+      "terminal_key_injection": false,
       "terminal_resizable": false,
       "is_fallback_for_managed_launch": false
     }
@@ -944,6 +952,7 @@
       "live_terminal": true,
       "has_terminal_pane": true,
       "terminal_interactive": true,
+      "terminal_key_injection": true,
       "terminal_resizable": true,
       "supports_thread_discovery": false,
       "supports_thread_import": false,
@@ -1006,6 +1015,7 @@
       "live_terminal": true,
       "has_terminal_pane": true,
       "terminal_interactive": true,
+      "terminal_key_injection": true,
       "terminal_resizable": true,
       "is_fallback_for_managed_launch": true
     }

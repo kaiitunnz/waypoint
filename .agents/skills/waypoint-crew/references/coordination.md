@@ -170,12 +170,12 @@ waypoint board post org:<product> "lifecycle state" --key phase \
   is absorbed — move the entry to `jobs=` if the main lead keeps running the
   channel, or drop it on lift-to-org.
 
-Update the cell with `board set-meta ... --key phase` (it preserves the text), and
-**re-supply all metas every time** — `--meta` replaces the cell's metadata
-wholesale, so an update that passes only `jobs=` silently drops `current=`,
-`approved=`, and (under a hierarchy) `teams=`. This is the same keyed-cell hazard
-the work queue avoids with its two-cell split; here the `phase` cell has no text
-worth protecting, so one cell plus always-write-all-metas is enough.
+Update the cell with `board set-meta ... --key phase --merge` (it preserves the
+text). `--merge` patches only the keys you pass and leaves the rest intact, so an
+update that passes only `jobs=` keeps `current=`, `approved=`, and (under a
+hierarchy) `teams=` untouched; drop a stale key with `--unset <key>`. Without
+`--merge`, `--meta` replaces the cell's metadata wholesale — you must then
+re-supply every meta or silently lose the omitted ones.
 
 A lead restarting reads `phase`, then for each **self-run** channel in `jobs=`
 runs the work-queue resume procedure directly (done tasks skipped, `todo`
@@ -222,7 +222,8 @@ deleted, until its cells are read or migrated.**
   successor is stranded on a stale entry (a `teams=` channel with no team lead
   behind it): respawn → rewrite `teams=` with the new sid; absorb-and-keep-running
   → move the entry `teams=` → `jobs=`; absorb-and-lift-to-org → drop it from
-  `teams=`. All under the re-supply-all-metas rule.
+  `teams=`. Use `set-meta --merge` to patch just `teams=` (and `--unset teams` to
+  drop it) without disturbing the other metas.
 - **Double death.** If a team lead is *also* dead, its members were `--spawned-by`
   the dead team-lead sid (recorded in `teams=`), not by the old main lead, so the
   successor walks the spawn tree **tier by tier** — recover the team via the path

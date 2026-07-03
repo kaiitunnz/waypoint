@@ -34,7 +34,11 @@ waypoint sessions delete <child-id>
   into it, and loses the live session state. Bound how many you keep parked (an
   idle child still holds resources — see below), and reap it once you are genuinely
   done or it has gone stale.
-- It produced output the **user should review**.
+- It produced output the **user should review**. Files in the child's own cwd are
+  already user-readable — the user opens the child's session and browses its
+  working directory — so don't upload them; reserve `sessions upload` for an
+  artifact outside any session's cwd (the `waypoint` skill's
+  `references/artifacts.md`).
 - It ended in `error` — deleting it would hide the failure. Leave it and surface
   it to the user.
 - It is **pinned** by the user (`pinned_at` set) — never delete a pinned session.

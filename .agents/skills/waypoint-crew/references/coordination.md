@@ -128,6 +128,11 @@ two, mirroring the ownership tiers:
 - **Durable artifact → board cell**, written by the lead. Anything a role must
   read later, or that must survive a reap, is a cell (or a keyless log post for
   history).
+- **File deliverable the user must open → keep it in a cwd or upload it.** Text
+  artifacts stay board cells as above, but a *file* the user should open (a
+  generated report, design doc, or diagram) that lives outside any session's
+  working directory is invisible in the UI — write it into the repo/cwd, or
+  `sessions upload` it (the `waypoint` skill's `references/artifacts.md`).
 - **"Act now" → direct send.** To hand a specific idle role a task or wake it
   after a contract change, `waypoint sessions send` (send-vs-board trade:
   `waypoint-comms`).

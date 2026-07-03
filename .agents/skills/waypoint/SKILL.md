@@ -34,6 +34,8 @@ trusting any flag list reproduced in this skill.
 - Handle destructive operations such as reset or termination: see
   `references/destructive-ops.md`.
 - Diagnose CLI auth/config issues: see `references/auth-config.md`.
+- Surface a file to the user — make an artifact outside a session's working
+  directory visible in the UI: see `references/artifacts.md`.
 
 ## Guardrails
 
@@ -43,3 +45,7 @@ trusting any flag list reproduced in this skill.
 - Never try to delete or terminate the personal assistant through generic
   session endpoints; it is a protected singleton.
 - When reporting status, include concrete session ids and current statuses.
+- A file outside a session's working directory is invisible in that session's
+  file explorer. If the user needs to see it, either keep it in a session cwd (they
+  can open that session) or `sessions upload` it — minding the orphan TTL for
+  anything durable (`references/artifacts.md`).

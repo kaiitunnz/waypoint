@@ -31,9 +31,9 @@ waypoint sessions delete <child-id>
   leave it idle so you can `waypoint sessions send <id> "<next instruction>"` and
   continue in place. Reaping is a one-way door — to pick the work back up you would
   have to **reimport the thread**, which spins a *new* session, replays the history
-  into it, and loses the live session state. Parking avoids all of that. Bound how
-  many you keep parked (an idle child still holds resources — see below), and reap
-  it once you are genuinely done or it has gone stale.
+  into it, and loses the live session state. Bound how many you keep parked (an
+  idle child still holds resources — see below), and reap it once you are genuinely
+  done or it has gone stale.
 - It produced output the **user should review**.
 - It ended in `error` — deleting it would hide the failure. Leave it and surface
   it to the user.

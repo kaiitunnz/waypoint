@@ -85,9 +85,9 @@ racing:
 - **Durable artifact → board cell**, written by the lead. Anything a role must
   read later, or that must survive a reap, is a cell (or a keyless log post for
   history).
-- **"Act now" → direct send.** To hand a specific idle role a task or to wake it
-  after a contract change, `waypoint sessions send`. A send injects a turn; a
-  board post interrupts no one — prefer the board when the message can wait.
+- **"Act now" → direct send.** To hand a specific idle role a task or wake it
+  after a contract change, `waypoint sessions send` (send-vs-board trade:
+  `waypoint-comms`).
 - **Ground truth is the repo and the running app**, not the board. The board is
   the narrative and the coordination state; confirm what actually landed from git
   and by exercising the app.

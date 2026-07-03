@@ -49,10 +49,9 @@ single change.
 - **Lead / engineering manager** — you. The one role active every phase and never
   delegated away (the standing crew persists too, but shifts focus by phase): owns the board,
   the org chart, dependency sequencing, integration, and every phase checkpoint.
-- **Role sessions** — a small, **persistent standing crew** of the code-touching
-  roles (tech lead/architect, frontend, backend, QA), spawned once and reused
-  across phases rather than churned per phase; the product manager and reviewer are
-  on-demand or collapse into the lead (their output is a durable board cell). Each
+- **Role sessions** — a small persistent crew of the code-touching roles (tech
+  lead/architect, frontend, backend, QA); the product manager and reviewer are
+  on-demand or collapse into the lead. Each
   is a Waypoint session on any backend/model. The full template is in
   `references/org-chart.md`.
 - **Lifecycle** — seven phases from intake to a shipped, iterating product
@@ -83,17 +82,11 @@ than producing nothing (see `references/lifecycle.md`).
 ## Guardrails
 
 - **Keep a bounded standing crew; size by headcount, not churn.** Reuse role
-  sessions across phases — a parked (idle-and-alive) role takes its next task via
-  `sessions send`, preserving its accumulated codebase context; churning
-  create/reap cycles discards that context and forces a lossy thread reimport to
-  iterate. Idle isn't free (a `claude_tty` role holds a live pane; a structured
-  role holds a headless server process), so the primary lever is a **small,
-  bounded** crew, scoped to the code-touching roles; reap at product wind-down (or
-  when a role is genuinely never needed again), with a staleness backstop for an
-  abandoned crew. Transport is a trade — structured avoids a pane but a restart
-  forces reimport (`supports_resume=False`); `claude_tty`/`tmux` cost a pane but
-  re-attach. Ephemeral overflow workers, reaped per batch, cover a burst beyond
-  standing headcount. (Details: `references/org-chart.md`.)
+  sessions across phases: parking a role (idle-and-alive) preserves its codebase
+  context, where reap-and-respawn forces a lossy thread reimport. Idle isn't free,
+  so keep the crew small and scoped to code-touching roles; reap at wind-down. The
+  transport trade, overflow workers, and staleness backstop are in
+  `references/org-chart.md`.
 - **Coupled work is sequenced, never raced.** Two roles touching a shared
   interface must agree a `contract:` cell first, and the lead assigns a task only
   when its `deps=` are all `done` (`references/coordination.md`). Racing coupled

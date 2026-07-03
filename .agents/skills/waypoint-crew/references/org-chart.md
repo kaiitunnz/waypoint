@@ -8,9 +8,7 @@ small work, expand them where a product warrants it.
 
 ## Roles
 
-- **Lead / engineering manager** — you, and the one role active every phase (the
-  standing crew persists too, but its members shift focus phase to phase; the lead
-  never does). It
+- **Lead / engineering manager** — you, and the one role active every phase. It
   splits the product into phases and tasks, sequences coupled work, owns every
   keyed board cell, integrates each result, and runs the phase checkpoints with
   the user. Exactly one lead. Everything durable lives with it, because it is the
@@ -62,9 +60,8 @@ Manage the cost by **size, not churn**:
   (`architecture`, `prd`, `contract:*`, `phase`); a role's session context is a
   cache over them. When a role nears its window it compacts — `codex`/`opencode`
   take an agent-invoked `/compact`; `claude_code`/`claude_tty` auto-compact in
-  place (Claude Code does this mid-turn, not on command) — then **re-grounds by
-  re-reading the board**. Because the load-bearing decisions live on durable cells,
-  a lossy compaction doesn't sever continuity.
+  place (mid-turn, not on command) — then **re-grounds by re-reading the board**,
+  so a lossy compaction doesn't sever continuity.
 - **Reap at wind-down**, or when a role is genuinely never needed again. There is
   no idle-session GC, so the backstop for an abandoned crew is that the next actor
   to touch it (a successor lead, the user, or a maintenance sweep) reaps it if it
@@ -128,17 +125,10 @@ their own worktrees off a common integration base so their work converges cleanl
 (per the coordination rules) — but each role still gets its **own** worktree;
 never let two roles edit the same tree.
 
-A session is **pinned to its launch `cwd` for life** — there is no command to
-repoint a running session at a different directory. So a standing role keeps **one
-worktree, its `cwd`, across all its tasks**; you rotate the **git branch inside
-that worktree**, never the worktree. Per task the role (in its own `cwd`) runs
-`git switch -c wq/<job>-t<n> <integration-tip>`, does the work, and commits; the
-lead ff-merges that branch into the integration branch from its own checkout, then
-the role switches to the next fresh task branch off the updated tip — same
-worktree throughout. Because worktrees share the repo's object store, the
-integration ref is always visible for branching; because each role has its own
-worktree and works its own task branches (never the integration branch directly,
-which lives in the lead's tree), no two checkouts collide. Workqueue's fixed
-"work in your `cwd`" therefore **still holds** — the role never leaves its `cwd`.
-(A role is also pinned to its **repo**: a task in a different repository needs a
-different session, not a branch switch.)
+A session is **pinned to its launch `cwd` for life**, so a standing role keeps
+**one worktree across all its tasks** and rotates the git branch inside it
+(`git switch -c wq/<job>-t<n> <integration-tip>`) — the reuse mechanic
+`waypoint-workqueue`'s `references/playbook.md` spells out under "Reusing a worker
+across tasks". Crew-specific: each role gets its **own** worktree (never two roles
+in one tree), and is pinned to its **repo** too — a task in another repository
+needs a different session.

@@ -51,10 +51,8 @@ Two things must hold, or a phase quietly produces nothing:
 - **The skills must be present where the work runs.** A standing engineer without
   the build skill installed will not build. Confirm the role sessions have them,
   or expect the fallback.
-- **Fallback: if no skill fires, the role does the phase's work inline.** A phase
-  is defined by its artifact and exit criterion, not by a skill firing. When no
-  configured skill picks up the task, the owning role performs the work directly
-  rather than no-op'ing.
+- **Fallback:** if no configured skill fires, the owning role does the phase's
+  work inline — a phase is defined by its artifact, not by a skill firing.
 
 ## Phase 1 — Discovery / PRD
 
@@ -120,18 +118,14 @@ Two things must hold, or a phase quietly produces nothing:
 - **Do:** for each parallelizable batch, spin a `job:<phase-slug>` channel with the
   work-queue task/status/deps/contract cells — but **fill its worker slots with the
   standing engineers** (assign each a `task:<n>`, flip `status:<n>` to `doing
-  assignee=<sid>`), reused across tasks and batches rather than spawned and reaped
-  per task. A reused role stays in its **own pinned worktree** and rotates the git
-  branch inside it per task (`git switch -c wq/<job>-t<n> <integration-tip>`) — its
-  `cwd` never moves, since a session can't be repointed (see
-  `references/org-chart.md`). Assign
-  a task only when its `deps=` are all `done`. Coupled pairs build against the
-  agreed `contract:`; if a contract must change, renegotiate it
-  (`references/coordination.md`) rather than letting the sides diverge. **Ephemeral
-  overflow workers** — reaped per batch by tracked id, never via the blanket
-  `--spawned-by` sweep — cover a burst beyond standing headcount. Frame each task
-  as *build and ship this feature / implement this*, and verify each with its own
-  check before integrating.
+  assignee=<sid>`), reused across tasks and batches (each keeps its pinned
+  worktree, rotating the branch inside it — `references/org-chart.md`). Assign a
+  task only when its `deps=` are all `done`. Coupled pairs build against the agreed
+  `contract:`; if a contract must change, renegotiate it
+  (`references/coordination.md`) rather than letting the sides diverge. Ephemeral
+  **overflow workers** cover a burst beyond standing headcount, reaped per batch by
+  tracked id (`references/org-chart.md`). Frame each task as *build and ship this
+  feature / implement this*, and verify each with its own check before integrating.
 - **Artifact:** merged commits on the integration branch; `status:<n>` cells
   flipping to `done`.
 - **Checkpoint:** none per task; the lead integrates one task at a time and keeps

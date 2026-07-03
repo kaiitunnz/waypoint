@@ -11,6 +11,7 @@ from fastapi import (
     Depends,
     FastAPI,
     File,
+    Form,
     Header,
     HTTPException,
     Query,
@@ -421,6 +422,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session_id: str,
         _: Annotated[str, Depends(token_dependency())],
         file: Annotated[UploadFile, File()],
+        pin: Annotated[bool, Form()] = False,
     ) -> Any:
         # 404 on an unknown session before persisting anything.
         context.runtime.get_session(session_id)
@@ -437,6 +439,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             filename=file.filename or "file",
             content_type=file.content_type,
         )
+        if pin:
+            context.runtime.attachments.mark_pinned(session_id, [spec.id])
         return spec.model_dump(mode="json")
 
     @app.get("/api/sessions/{session_id}/attachments")
@@ -754,6 +758,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="attachment not found"
             )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.post("/api/sessions/{session_id}/attachments/{attachment_id}/pin")
+    async def pin_attachment(
+        session_id: str,
+        attachment_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Response:
+        # Exempt the blob from the orphan sweep. 404 on an unknown attachment so
+        # a typo doesn't silently pin nothing.
+        context.runtime.get_session(session_id)
+        if context.runtime.attachments.resolve(session_id, attachment_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="attachment not found"
+            )
+        context.runtime.attachments.mark_pinned(session_id, [attachment_id])
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.delete("/api/sessions/{session_id}/attachments/{attachment_id}/pin")
+    async def unpin_attachment(
+        session_id: str,
+        attachment_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Response:
+        # Re-expose the blob to the orphan sweep. Idempotent: unpinning an
+        # already-unpinned (or unknown) id is a clean no-op.
+        context.runtime.get_session(session_id)
+        context.runtime.attachments.unmark_pinned(session_id, [attachment_id])
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.post("/api/sessions/{session_id}/interrupt")

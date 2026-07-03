@@ -54,6 +54,17 @@ def is_event_envelope(envelope: Mapping[str, Any]) -> bool:
     return envelope.get("type") == "event"
 
 
+def _content_disposition_filename(response: httpx.Response, fallback: str) -> str:
+    """Extract the ``filename`` from a response's Content-Disposition header,
+    falling back to ``fallback`` when it is absent or unparsable."""
+    header = response.headers.get("content-disposition", "")
+    for part in header.split(";"):
+        key, sep, value = part.strip().partition("=")
+        if sep and key.lower() == "filename":
+            return value.strip().strip('"') or fallback
+    return fallback
+
+
 def cli_token_path(settings: Settings) -> Path:
     return settings.data_dir / CLI_TOKEN_FILENAME
 
@@ -290,14 +301,57 @@ class WaypointClient:
         ).json()["session"]
         return data
 
-    def upload_attachment(self, session_id: str, path: Path) -> dict[str, Any]:
+    def upload_attachment(
+        self, session_id: str, path: Path, *, pin: bool = False
+    ) -> dict[str, Any]:
         with path.open("rb") as handle:
             spec: dict[str, Any] = self._request(
                 "POST",
                 f"/api/sessions/{session_id}/attachments",
                 files={"file": (path.name, handle)},
+                data={"pin": "true"} if pin else None,
             ).json()
         return spec
+
+    def list_attachments(self, session_id: str) -> list[dict[str, Any]]:
+        data: list[dict[str, Any]] = self._request(
+            "GET", f"/api/sessions/{session_id}/attachments"
+        ).json()
+        return data
+
+    def download_attachment(
+        self, session_id: str, attachment_id: str
+    ) -> tuple[bytes, str]:
+        """Fetch an attachment's bytes plus its original filename.
+
+        The serve endpoint authenticates by ``?token=`` query param (it must be
+        loadable from an ``<img>`` tag), not the Bearer header the other routes
+        use, so the token rides in the query string here.
+        """
+        response = self._request(
+            "GET",
+            f"/api/sessions/{session_id}/attachments/{attachment_id}",
+            params={"token": self.token()},
+        )
+        return response.content, _content_disposition_filename(response, attachment_id)
+
+    def delete_attachment(self, session_id: str, attachment_id: str) -> None:
+        self._request(
+            "DELETE", f"/api/sessions/{session_id}/attachments/{attachment_id}"
+        )
+
+    def delete_all_attachments(self, session_id: str) -> None:
+        self._request("DELETE", f"/api/sessions/{session_id}/attachments")
+
+    def pin_attachment(self, session_id: str, attachment_id: str) -> None:
+        self._request(
+            "POST", f"/api/sessions/{session_id}/attachments/{attachment_id}/pin"
+        )
+
+    def unpin_attachment(self, session_id: str, attachment_id: str) -> None:
+        self._request(
+            "DELETE", f"/api/sessions/{session_id}/attachments/{attachment_id}/pin"
+        )
 
     def send_input(
         self,

@@ -19,6 +19,9 @@ _IMAGE_MIME_PREFIX = "image/"
 # Index of ids referenced by a sent message; its stem isn't a uuid so it's
 # transparent to entries()/sweep, which only consider sidecars.
 _SENT_INDEX = "_sent.json"
+# Index of ids the user explicitly pinned to survive the orphan sweep even
+# without being sent. Same transparent-to-sidecars shape as _SENT_INDEX.
+_PINNED_INDEX = "_pinned.json"
 
 
 def _sanitize_component(value: str, *, fallback: str) -> str:
@@ -195,31 +198,41 @@ class AttachmentStore:
     def mark_sent(self, session_id: str, attachment_ids: list[str]) -> None:
         """Record ids carried by a sent message so the sweep never reaps them
         (a sent file is referenced by the transcript and must survive)."""
-        ids = [aid for aid in attachment_ids if _ATTACHMENT_ID.fullmatch(aid)]
+        self._add_to_index(session_id, _SENT_INDEX, attachment_ids)
+
+    def mark_pinned(self, session_id: str, attachment_ids: list[str]) -> None:
+        """Pin ids so the sweep never reaps them, independent of being sent —
+        the user-intent "keep this durably" signal."""
+        self._add_to_index(session_id, _PINNED_INDEX, attachment_ids)
+
+    def unmark_pinned(self, session_id: str, attachment_ids: list[str]) -> None:
+        """Drop ids from the pin index, re-exposing them to the orphan sweep."""
+        ids = {aid for aid in attachment_ids if _ATTACHMENT_ID.fullmatch(aid)}
         if not ids:
             return
         session_dir = self._session_dir(session_id)
         if not session_dir.is_dir():
             return
-        current = self._sent_ids(session_dir)
-        current.update(ids)
-        (session_dir / _SENT_INDEX).write_text(
-            json.dumps(sorted(current)), encoding="utf-8"
+        remaining = self._read_id_index(session_dir, _PINNED_INDEX) - ids
+        (session_dir / _PINNED_INDEX).write_text(
+            json.dumps(sorted(remaining)), encoding="utf-8"
         )
 
     def sweep(self, session_id: str, ttl_seconds: float) -> int:
         """Reap eager uploads that were never sent — blobs older than
-        ``ttl_seconds`` that no sent message references. Returns the count
-        removed. Best-effort; never raises."""
+        ``ttl_seconds`` that no sent message references and the user hasn't
+        pinned. Returns the count removed. Best-effort; never raises."""
         session_dir = self._session_dir(session_id)
         if not session_dir.is_dir():
             return 0
-        sent = self._sent_ids(session_dir)
+        kept = self._read_id_index(session_dir, _SENT_INDEX) | self._read_id_index(
+            session_dir, _PINNED_INDEX
+        )
         cutoff = time.time() - ttl_seconds
         removed = 0
         for sidecar in session_dir.glob("*.json"):
             attachment_id = sidecar.stem
-            if not _ATTACHMENT_ID.fullmatch(attachment_id) or attachment_id in sent:
+            if not _ATTACHMENT_ID.fullmatch(attachment_id) or attachment_id in kept:
                 continue
             try:
                 if sidecar.stat().st_mtime >= cutoff:
@@ -230,9 +243,24 @@ class AttachmentStore:
                 removed += 1
         return removed
 
-    def _sent_ids(self, session_dir: Path) -> set[str]:
+    def _add_to_index(
+        self, session_id: str, index_name: str, attachment_ids: list[str]
+    ) -> None:
+        ids = [aid for aid in attachment_ids if _ATTACHMENT_ID.fullmatch(aid)]
+        if not ids:
+            return
+        session_dir = self._session_dir(session_id)
+        if not session_dir.is_dir():
+            return
+        current = self._read_id_index(session_dir, index_name)
+        current.update(ids)
+        (session_dir / index_name).write_text(
+            json.dumps(sorted(current)), encoding="utf-8"
+        )
+
+    def _read_id_index(self, session_dir: Path, index_name: str) -> set[str]:
         try:
-            data = json.loads((session_dir / _SENT_INDEX).read_text(encoding="utf-8"))
+            data = json.loads((session_dir / index_name).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return set()
         return set(data) if isinstance(data, list) else set()

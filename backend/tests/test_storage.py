@@ -109,6 +109,56 @@ def test_storage_round_trip(tmp_path) -> None:
     assert len(events) == 1
 
 
+def test_storage_round_trips_tags(tmp_path) -> None:
+    storage = Storage(tmp_path / "waypoint.db")
+    now = datetime.now(UTC)
+    storage.create_session(
+        SessionRecord(
+            id="tagged",
+            backend="codex",
+            source=SessionSource.MANAGED,
+            title="t",
+            cwd="/tmp",
+            status=SessionStatus.RUNNING,
+            created_at=now,
+            updated_at=now,
+            last_event_at=now,
+            raw_log_path="/tmp/raw.log",
+            structured_log_path="/tmp/events.jsonl",
+            tags={"role": "backend-lead", "overflow": ""},
+        )
+    )
+    loaded = storage.get_session("tagged")
+    assert loaded is not None
+    # The JSON column decodes back to a dict, not the raw string.
+    assert loaded.tags == {"role": "backend-lead", "overflow": ""}
+    updated = storage.update_session("tagged", tags={"role": "qa"})
+    assert updated.tags == {"role": "qa"}
+    reloaded = storage.get_session("tagged")
+    assert reloaded is not None
+    assert reloaded.tags == {"role": "qa"}
+
+
+def test_storage_defaults_tags_for_legacy_rows(tmp_path) -> None:
+    """A row written before the tags column loads with empty tags, not a crash."""
+    import sqlite3
+
+    db = tmp_path / "waypoint.db"
+    storage = Storage(db)
+    _make_session(storage, "legacy", "legacy")
+    storage.close()
+    # Simulate a pre-migration row by nulling the column, then re-open (which
+    # re-runs _ensure_column) and confirm the decode tolerates it.
+    raw = sqlite3.connect(db)
+    raw.execute("UPDATE sessions SET tags = '' WHERE id = 'legacy'")
+    raw.commit()
+    raw.close()
+    reopened = Storage(db)
+    loaded = reopened.get_session("legacy")
+    assert loaded is not None
+    assert loaded.tags == {}
+
+
 def test_storage_round_trips_pinned_at(tmp_path) -> None:
     storage = Storage(tmp_path / "waypoint.db")
     now = datetime.now(UTC)

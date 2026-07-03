@@ -58,6 +58,7 @@ from waypoint.schemas import (
     SessionPlanApprovalRequest,
     SessionRecord,
     SessionStatus,
+    SessionTagsUpdateRequest,
     SessionTitleRequest,
 )
 from waypoint.settings import Settings, load_settings
@@ -77,6 +78,22 @@ from waypoint.workspace_preview import (
 )
 
 log = logging.getLogger("waypoint.api")
+
+
+def session_matches_tag_filters(tags: dict[str, str], filters: list[str]) -> bool:
+    """Whether ``tags`` satisfies every filter (AND semantics).
+
+    A ``key=value`` filter matches on exact value; a bare ``key`` filter matches
+    on key presence regardless of value.
+    """
+    for spec in filters:
+        key, sep, value = spec.partition("=")
+        if sep:
+            if tags.get(key) != value:
+                return False
+        elif key not in tags:
+            return False
+    return True
 
 
 def _backend_descriptors(registry: BackendRegistry) -> list[dict[str, Any]]:
@@ -281,11 +298,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def list_sessions(
         _: Annotated[str, Depends(token_dependency())],
         spawned_by: Annotated[str | None, Query()] = None,
+        tag: Annotated[list[str] | None, Query()] = None,
     ) -> Any:
         all_sessions = context.runtime.list_sessions()
         if spawned_by is not None:
             all_sessions = [
                 s for s in all_sessions if s.spawner_session_id == spawned_by
+            ]
+        if tag:
+            all_sessions = [
+                s for s in all_sessions if session_matches_tag_filters(s.tags, tag)
             ]
         sessions = [session.model_dump(mode="json") for session in all_sessions]
         return {"sessions": sessions}
@@ -1025,6 +1047,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         session = await context.runtime.set_title(session_id, body.title)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.patch("/api/sessions/{session_id}/tags")
+    async def session_set_tags(
+        session_id: str,
+        body: SessionTagsUpdateRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.set_tags(session_id, body.set, body.unset)
         return {"session": session.model_dump(mode="json")}
 
     @app.post("/api/sessions/{session_id}/mode")

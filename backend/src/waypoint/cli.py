@@ -524,6 +524,18 @@ def _parse_meta(items: list[str] | None) -> dict[str, str]:
     return metadata
 
 
+def _parse_tags(items: list[str] | None) -> dict[str, str]:
+    """Parse ``--tag`` values into a dict. ``key=value`` sets a value; a bare
+    ``key`` stores an empty value (matched by presence)."""
+    tags: dict[str, str] = {}
+    for item in items or []:
+        key, _, value = item.partition("=")
+        if not key:
+            raise typer.BadParameter(f"--tag expects a key, got: {item}")
+        tags[key] = value
+    return tags
+
+
 def parse_wait_until(raw: str | None) -> frozenset[str]:
     """Parse a comma-separated ``--until`` list into a set of valid statuses.
 
@@ -796,6 +808,14 @@ def sessions_list(
             help="Return only sessions spawned by $WAYPOINT_SESSION_ID.",
         ),
     ] = False,
+    tag: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--tag",
+            help="Keep only sessions matching key=value (exact) or a bare key "
+            "(present). Repeatable; all must match.",
+        ),
+    ] = None,
 ) -> None:
     """List all sessions."""
     if mine:
@@ -807,7 +827,7 @@ def sessions_list(
             )
     _emit(
         _settings_from_ctx(ctx),
-        lambda c: {"sessions": c.list_sessions(spawned_by=spawned_by)},
+        lambda c: {"sessions": c.list_sessions(spawned_by=spawned_by, tags=tag)},
     )
 
 
@@ -817,6 +837,37 @@ def sessions_show(
 ) -> None:
     """Show one session."""
     _emit(_settings_from_ctx(ctx), lambda c: {"session": c.get_session(session_id)})
+
+
+@sessions_app.command("tag")
+def sessions_tag(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    set_: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--set",
+            help="Set a tag as key=value (or a bare key). Repeatable.",
+        ),
+    ] = None,
+    unset: Annotated[
+        list[str] | None,
+        typer.Option("--unset", help="Remove a tag key. Repeatable."),
+    ] = None,
+) -> None:
+    """Add or remove tags on an existing session."""
+    if not set_ and not unset:
+        raise typer.BadParameter("provide --set and/or --unset.")
+    set_tags = _parse_tags(set_)
+
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        return {
+            "session": c.set_session_tags(
+                session_id, set_tags=set_tags, unset=list(unset or [])
+            )
+        }
+
+    _emit(_settings_from_ctx(ctx), _run)
 
 
 @sessions_app.command("events")
@@ -1132,6 +1183,14 @@ def sessions_start(
             help="Base ref for the new worktree branch (default: current HEAD, else main).",
         ),
     ] = None,
+    tag: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--tag",
+            help="Tag the session as key=value (or a bare key). Repeatable. "
+            "Filter later with `sessions list --tag` / `reap --tag`.",
+        ),
+    ] = None,
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
     """Launch a new session on the running server."""
@@ -1140,6 +1199,7 @@ def sessions_start(
     if worktree is not None:
         worktree_path = _create_worktree(worktree, worktree_base, cwd)
         effective_cwd = worktree_path
+    tags = _parse_tags(tag)
 
     def _run(c: WaypointClient) -> dict[str, Any]:
         if permission_mode is not None:
@@ -1160,6 +1220,7 @@ def sessions_start(
                 spawner_session_id=spawner_session_id,
                 worktree_path=worktree_path,
                 args=list(args or []),
+                tags=tags,
             )
         }
 
@@ -1480,6 +1541,22 @@ def sessions_reap(
             "leftover branches otherwise collide with a respawn's --worktree.",
         ),
     ] = False,
+    tag: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--tag",
+            help="Reap only sessions matching key=value (exact) or a bare key "
+            "(present). Repeatable; all must match.",
+        ),
+    ] = None,
+    exclude: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--exclude",
+            help="Session id(s) to spare from the reap. Repeatable. Use to keep "
+            "the standing crew while tearing down overflow.",
+        ),
+    ] = None,
 ) -> None:
     """Terminate and delete sessions in bulk."""
     if mine:
@@ -1490,24 +1567,30 @@ def sessions_reap(
                 param_hint="--mine",
             )
 
-    if spawned_by is None and not all_sessions:
+    if spawned_by is None and not all_sessions and not tag:
         raise typer.BadParameter(
-            "pass --spawned-by <id>, --mine, or --all to select a scope",
-            param_hint="--spawned-by/--mine/--all",
+            "pass --spawned-by <id>, --mine, --all, or --tag to select a scope",
+            param_hint="--spawned-by/--mine/--all/--tag",
         )
 
+    excluded = set(exclude or [])
+
     def _run(client: WaypointClient) -> dict[str, Any]:
-        sessions = client.list_sessions(spawned_by=spawned_by)
+        sessions = client.list_sessions(spawned_by=spawned_by, tags=tag)
         reaped: list[str] = []
         failed: list[str] = []
+        skipped: list[str] = []
         for session in sessions:
             sid = session["id"]
+            if sid in excluded:
+                skipped.append(sid)
+                continue
             try:
                 client.delete(sid, prune_branches=prune_branches)
                 reaped.append(sid)
             except Exception:
                 failed.append(sid)
-        return {"reaped": reaped, "failed": failed}
+        return {"reaped": reaped, "failed": failed, "skipped": skipped}
 
     _emit(_settings_from_ctx(ctx), _run)
 

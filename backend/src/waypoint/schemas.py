@@ -219,6 +219,11 @@ class SessionRecord(BaseModel):
     config_overrides: list[str] = Field(default_factory=list)
     context_usage: SessionContextUsage | None = None
     rate_limit_usage: SessionRateLimitUsage | None = None
+    # Free-form user/agent labels for grouping and selective teardown, e.g.
+    # ``{"role": "backend-lead"}`` or ``{"overflow": ""}`` (a bare tag stores an
+    # empty value). Set at launch or via ``sessions tag``; filtered by
+    # ``sessions list --tag`` / ``sessions reap --tag``.
+    tags: dict[str, str] = Field(default_factory=dict)
 
 
 class EventRecord(BaseModel):
@@ -393,6 +398,13 @@ class SessionCreateRequest(BaseModel):
     permission_mode: str | None = None
     model: str | None = None
     effort: str | None = None
+    tags: dict[str, str] = Field(default_factory=dict)
+
+
+class SessionTagsUpdateRequest(BaseModel):
+    # Merge ``set`` into the session's tags and drop each key in ``unset``.
+    set: dict[str, str] = Field(default_factory=dict)
+    unset: list[str] = Field(default_factory=list)
 
 
 class SessionAttachRequest(BaseModel):

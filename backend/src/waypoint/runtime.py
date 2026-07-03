@@ -522,6 +522,10 @@ class SessionRuntime:
             session = self.storage.update_session(
                 session.id, worktree_path=request.worktree_path
             )
+        # Stamp tags generically after the plugin builds the record, so every
+        # backend picks them up without a per-plugin launch-site edit.
+        if request.tags:
+            session = self.storage.update_session(session.id, tags=request.tags)
         self._warm_command_completions(session)
         self._start_context_usage_source(session)
         return session
@@ -1672,6 +1676,19 @@ class SessionRuntime:
         if session.title == title:
             return session
         updated = self.storage.update_session(session_id, title=title)
+        await self._broadcast_session_list()
+        return updated
+
+    async def set_tags(
+        self, session_id: str, set_tags: dict[str, str], unset: list[str]
+    ) -> SessionRecord:
+        session = self.get_session(session_id)
+        new_tags = {**session.tags, **set_tags}
+        for key in unset:
+            new_tags.pop(key, None)
+        if new_tags == session.tags:
+            return session
+        updated = self.storage.update_session(session_id, tags=new_tags)
         await self._broadcast_session_list()
         return updated
 

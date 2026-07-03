@@ -36,7 +36,11 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
         if request.headers.get("Authorization") != f"Bearer {VALID_TOKEN}":
             return httpx.Response(401, json={"detail": "invalid token"})
         if request.url.path == "/api/sessions" and request.method == "GET":
+            state["list_params"] = list(request.url.params.multi_items())
             return httpx.Response(200, json={"sessions": [{"id": "s1"}]})
+        if request.url.path == "/api/sessions/s1/tags" and request.method == "PATCH":
+            state["tags_body"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "s1", "tags": {}}})
         if request.url.path == "/api/backends" and request.method == "GET":
             return httpx.Response(
                 200, json={"backends": [{"id": "claude_code"}, {"id": "codex"}]}
@@ -529,6 +533,40 @@ def test_pin_and_unpin_attachment(
         assert state["pin"] == ("POST", "c" * 32)
         client.unpin_attachment("s1", "c" * 32)
         assert state["pin"] == ("DELETE", "c" * 32)
+
+
+def test_create_session_includes_tags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.create_session(backend="codex", cwd="/tmp", tags={"role": "qa"})
+    assert state["session_create"]["tags"] == {"role": "qa"}
+
+
+def test_list_sessions_passes_tag_params(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.list_sessions(spawned_by="lead", tags=["role=qa", "overflow"])
+    assert state["list_params"] == [
+        ("spawned_by", "lead"),
+        ("tag", "role=qa"),
+        ("tag", "overflow"),
+    ]
+
+
+def test_set_session_tags_sends_set_and_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.set_session_tags("s1", set_tags={"team": "1"}, unset=["role"])
+    assert state["tags_body"] == {"set": {"team": "1"}, "unset": ["role"]}
 
 
 def test_create_session_omits_launch_mode_when_unset(

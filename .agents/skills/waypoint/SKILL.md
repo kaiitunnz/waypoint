@@ -11,8 +11,11 @@ unless the user explicitly wants an in-process one-shot runtime.
 
 Run `waypoint help` to dump the entire CLI surface — every nested command, its
 arguments, and its options — in one call (`waypoint help --json` for structured
-output). This is generated directly from the command definitions, so it is
-ground truth for the installed version and never drifts. Prefer it over running
+output). `--json` is **not** a universal flag: most commands already emit JSON by
+default and take no `--json`, and only a few — `help`, `board read`/`board log`,
+`sessions import` — accept an explicit one. `waypoint help` is generated directly
+from the command definitions, so it is ground truth for the installed version and
+never drifts. Prefer it over running
 `--help` at each nested level, and defer to it for exact flags rather than
 trusting any flag list reproduced in this skill.
 

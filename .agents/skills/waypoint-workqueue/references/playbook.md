@@ -84,14 +84,20 @@ single event kind; drop it to see everything).
 
 Integrate **one task at a time**, and keep the integration branch's history
 **linear** — no merge commits. Rebase each task's branch onto the current
-integration tip, check it there, then fast-forward:
+integration tip, check it there, then fast-forward. Because the worker stays
+**alive** on `wq/$job-t$n` in its own worktree, that branch is already checked out
+there — so **rebase it in the worker's worktree, not in `$repo`** (a `git switch
+wq/$job-t$n` in `$repo` would fail with `already used by worktree`). The final
+`merge --ff-only` is safe from `$repo` because a fast-forward does not check out
+the source branch:
 
 ```bash
-git -C "$repo" switch "wq/$job-t$n"
-git -C "$repo" rebase "wq/$job"        # replay the task's commits onto the integration tip
-# run the task's check on the rebased branch, e.g. uv run pytest pkg/auth
-git -C "$repo" switch "wq/$job"
-git -C "$repo" merge --ff-only "wq/$job-t$n"   # green check → fast-forward, never a merge commit
+# worker's worktree path — from `git worktree list` or `waypoint sessions show <sid>`
+wt=<worker-worktree>
+git -C "$wt" rebase "wq/$job"        # replay the task's commits onto the integration tip, where the branch lives
+# run the task's check in $wt, e.g. (cd "$wt" && uv run pytest pkg/auth)
+git -C "$repo" switch "wq/$job"      # the integration checkout (never a worker's tree)
+git -C "$repo" merge --ff-only "wq/$job-t$n"   # green check → fast-forward, never checks out the source
 ```
 
 A linear integration branch is the preferred shape. Rebasing one branch at a
@@ -106,9 +112,11 @@ silently resurfaces at landing time.
   (below), it stays in its worktree and starts its next task on a fresh branch
   there; the worktree is only removed when you finally reap the worker.
 - Red check → hand the task back (`--meta state=todo`) and reassign it — to the
-  **same parked worker**, which resets to a fresh branch **in its existing
-  worktree**, not a respawn. You checked *before* the fast-forward, so the
-  integration branch is untouched — nothing to undo.
+  **same parked worker**, which resets **in its existing worktree**, not a respawn.
+  Since the retry keeps the same task number, reset the existing branch with
+  `git switch -C wq/$job-t<n> "wq/$job"` (capital `-C` — plain `-c` fails, the
+  branch already exists from the failed attempt). You checked *before* the
+  fast-forward, so the integration branch is untouched — nothing to undo.
 - Conflict during the rebase → tell the two kinds apart. An **additive**
   conflict — two workers appending to the same append-only file (a test suite, a
   registry, an export list) — is not a real disagreement: keep both. Take the

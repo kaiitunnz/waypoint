@@ -230,6 +230,35 @@ def test_multi_select_question_accepts_multiple(tmp_path) -> None:
     assert updated.status is InboxStatus.RESOLVED
 
 
+def test_required_question_rejects_empty_answer(tmp_path) -> None:
+    storage = _storage(tmp_path)
+    item = storage.create_inbox_item("s1", None, "gate", [_question()])
+    bid = item.blocks[0].id
+    # A content-free answer must not silently satisfy a required gate.
+    with pytest.raises(InboxBlockTypeError):
+        storage.submit_inbox_block(item.id, bid, answer={"selected": []})
+    assert storage.unresolved_inbox_count() == 1
+
+
+def test_required_question_accepts_other_only_answer(tmp_path) -> None:
+    storage = _storage(tmp_path)
+    item = storage.create_inbox_item("s1", None, "gate", [_question()])
+    bid = item.blocks[0].id
+    updated = storage.submit_inbox_block(
+        item.id, bid, answer={"selected": [], "other": "something else"}
+    )
+    assert updated is not None
+    assert updated.status is InboxStatus.RESOLVED
+
+
+def test_optional_question_accepts_empty_answer(tmp_path) -> None:
+    storage = _storage(tmp_path)
+    item = storage.create_inbox_item("s1", None, "fyi", [_question(required=False)])
+    bid = item.blocks[0].id
+    updated = storage.submit_inbox_block(item.id, bid, answer={"selected": []})
+    assert updated is not None  # lenient: optional blocks don't gate
+
+
 def test_approval_with_off_menu_decision_raises(tmp_path) -> None:
     storage = _storage(tmp_path)
     item = storage.create_inbox_item("s1", None, "gate", [_approval()])

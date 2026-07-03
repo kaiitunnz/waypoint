@@ -1821,6 +1821,15 @@ class Storage:
                     raise InboxBlockTypeError(
                         "single-select question got multiple selections"
                     )
+                if (
+                    block.required
+                    and not parsed_q.selected
+                    and not (parsed_q.other or "").strip()
+                ):
+                    # A content-free answer must not satisfy a required gate.
+                    raise InboxBlockTypeError(
+                        "required question needs a selection or free-text answer"
+                    )
                 block.answer = parsed_q
             elif isinstance(block, InboxApprovalBlock):
                 parsed_a = InboxApprovalAnswer.model_validate(answer)

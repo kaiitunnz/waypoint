@@ -65,11 +65,15 @@ Manage the cost by **size, not churn**:
   adopting a crew it did not spawn is sanctioned (as in workqueue's
   resume-after-lead-death).
 - **Ephemeral overflow workers are the exception to all of the above.** A burst
-  beyond standing headcount can spawn transient workers for one batch; reap those
-  **by their tracked session ids** (or a distinct `subagent:overflow-*` title) as
-  the batch finishes — never with the blanket `reap --spawned-by <lead>` sweep,
-  which would also reap the standing crew. Track the standing sids so they are
-  excluded. The blanket sweep is reserved for wind-down.
+  beyond standing headcount can spawn transient workers for one batch. Tag them at
+  launch (`sessions start ... --tag overflow`) and reap the batch with
+  `sessions reap --tag overflow` — this spares the standing crew without tracking
+  sids. Equivalently, tag standing roles (`--tag role=backend`) and spare them from
+  a `--spawned-by <lead>` sweep with `reap --spawned-by <lead> --exclude <sid> ...`.
+  Never use the blanket `reap --spawned-by <lead>` sweep for overflow, which would
+  also reap the standing crew. The blanket sweep is reserved for wind-down.
+  Tags survive for the life of a session but not across a relaunch/fork — re-tag a
+  respawned role with `sessions tag <sid> --set role=...`.
 - **Under a hierarchy, wind-down is tier-ordered.** Members are `--spawned-by`
   their *team lead*, not the main lead, so a main-lead `reap --spawned-by <lead>`
   sweep would orphan the members while reaping the team leads. Wind down

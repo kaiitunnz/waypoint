@@ -19,9 +19,11 @@ re-iterations, and would fight the work-queue template (which keys off its own
 - **Per-sub-phase channel `job:<phase-slug>`** — each parallelizable build batch
   spins its own work-queue-style channel (`job:build-auth`, `job:build-ui-v2`)
   and reuses `waypoint-workqueue`'s `plan` / `task:<n>` / `status:<n>` cells
-  **unchanged and scoped to that channel**. This composes the work queue natively
-  and confines the `<n>` counter to one batch, so a later build phase never
-  overwrites an earlier one's cells.
+  **unchanged and scoped to that channel**. This confines the `<n>` counter to one
+  batch, so a later build phase never overwrites an earlier one's cells. The change
+  from a plain work queue is only *who fills the worker slots*: the **standing crew
+  sessions** are assigned to the task cells (ephemeral overflow workers only beyond
+  standing headcount) — the channel and its cells are identical.
 
 Keep every channel name and cell key **single-segment and slash-free** — the
 blackboard API path breaks on slashes. Use `contract:orders-api`, never
@@ -128,9 +130,14 @@ reassigned, orphaned `doing` handed back).
 The task-state plumbing is the work queue's — for each live `job:` channel,
 follow `waypoint-workqueue`'s "Resume after the lead dies" (read the board, find
 the old lead's workers by `--spawned-by`, hand orphaned `doing` tasks back to
-`todo`, adopt still-running workers). What is new here is the **lifecycle** layer:
-first read the `phase` cell to learn `current`, `approved`, and `jobs`, then run
-that per-channel task recovery over every channel in `jobs=`.
+`todo`). Here the still-running workers are the **standing crew**: a successor lead
+**adopts** them (this is the sanctioned exception to "don't touch sessions you
+didn't create") and resumes steering them rather than reaping — reaping would throw
+away exactly the context persistence is protecting. What is new beyond the work
+queue is the **lifecycle** layer: first read the `phase` cell to learn `current`,
+`approved`, and `jobs`, then run that per-channel task recovery over every channel
+in `jobs=`. If the product is genuinely abandoned (no successor, crew idle past a
+staleness threshold), the crew is reaped as the backstop.
 
 ## Human checkpoints under autonomy
 
@@ -143,7 +150,9 @@ forever. Instead:
   not a blocking prompt. The signal can be a board post the user (or the UI)
   makes on `org:<product>`, or a direct message to the lead session — either way
   the lead reads it at a turn boundary and records it into `approved=`.
-- **While waiting, park or reap the phase's roles** rather than holding a standing
-  crew idle-spinning (per the cost-discipline guardrail).
+- **While waiting, park the roles** — leave them idle **and alive** (a `sessions
+  send` resumes them the moment approval lands); do not reap between checkpoints,
+  which would only force a later reimport (see the standing-crew rule in
+  `references/org-chart.md`).
 - Record the granted approval in the `phase` cell's `approved=` meta so it
   survives resume and is never re-asked.

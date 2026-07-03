@@ -1,10 +1,10 @@
 # The org chart (role template)
 
 Start from this organization instead of designing one per product, then make it
-your own. It is a shallow hierarchy: one persistent lead, a set of role sessions
-spawned to fit the current phase. The roles, counts, and backends below are a
-launch point, not a rule — collapse them toward the lead for small work, expand
-them where a product warrants it.
+your own. It is a shallow hierarchy: one persistent lead and a small **standing
+crew** of role sessions reused across the lifecycle. The roles, counts, and
+backends below are a launch point, not a rule — collapse them toward the lead for
+small work, expand them where a product warrants it.
 
 ## Roles
 
@@ -32,28 +32,59 @@ them where a product warrants it.
   before merge and the owner of the ship/release step. Add it for high-blast
   changes; otherwise the lead reviews in-process.
 
-## Persistent vs. per-phase
+## A standing crew
 
-Only the lead is persistent. Spawn the rest to fit the phase and reap them when
-it ends — a standing multi-role crew burns host resources idle (see the
-`waypoint-subagents` reap guidance). Across a long-lived product, keep at most a
-small standing crew (say one backend, one frontend, one QA) between iterations
-rather than the whole org.
+**Reuse role sessions across phases; don't churn them.** The **code-touching
+roles** — tech lead, engineers, QA — are the standing crew: they accumulate the
+codebase and architecture context that makes them effective, so spawning them once
+and keeping them beats tearing down and re-onboarding each phase. A parked role
+(idle **and alive** — neither terminated nor deleted) picks up its next task via a
+`sessions send`, preserving that context; reaping it and later reimporting the
+thread spins a *new* session, replays history, and loses live state. The **PM and
+reviewer stay on-demand or collapse into the lead** — their durable output is a
+board cell (`prd`, a review verdict), so persistence buys them little beyond an
+idle session.
+
+Manage the cost by **size, not churn**:
+
+- **Bound the crew** — roughly one tech lead, one backend, one frontend, one QA;
+  scale by the work, not by the phase. This is the primary lever, because idle is
+  not free: a `claude_tty` role holds a live tmux pane, a structured role holds a
+  headless server process.
+- **Transport is a trade** (not a clear win either way): a structured transport
+  (`claude_cli` / `codex` / `opencode`) avoids the interactive pane but is
+  `supports_resume=False`, so a Waypoint/backend restart forces a reimport;
+  `claude_tty` / `tmux` cost a pane but are `supports_resume=True` and re-attach.
+  Pick by which failure matters for a long-lived crew.
+- **Context hygiene without teardown** — the board cells are the memory of record
+  (`architecture`, `prd`, `contract:*`, `phase`); a role's session context is a
+  cache over them. When a role nears its window it compacts — `codex`/`opencode`
+  take an agent-invoked `/compact`; `claude_code`/`claude_tty` auto-compact in
+  place (Claude Code does this mid-turn, not on command) — then **re-grounds by
+  re-reading the board**. Because the load-bearing decisions live on durable cells,
+  a lossy compaction doesn't sever continuity.
+- **Reap at wind-down**, or when a role is genuinely never needed again. There is
+  no idle-session GC, so the backstop for an abandoned crew is that the next actor
+  to touch it (a successor lead, the user, or a maintenance sweep) reaps it if it
+  is stale. This is a deliberate exception to `waypoint-subagents`' reap-when-done
+  posture — crew roles are long-lived like the lead — and a successor lead
+  adopting a crew it did not spawn is sanctioned (as in workqueue's
+  resume-after-lead-death).
 
 Which roles exist at all is a judgement call:
 
 - **Small product / thin slice** — the lead *is* the PM, tech lead, and reviewer;
-  spawn only an engineer or two and a QA session. Do not manufacture an org chart
+  keep only an engineer or two and a QA session. Do not manufacture an org chart
   the work does not need.
-- **Full product from zero** — stand up the PM and tech-lead roles for the
-  discovery and architecture phases, then swap to engineers + QA for the build,
-  then a reviewer for ship. Roles come and go by phase; the lead is the through
-  line.
+- **Full product from zero** — stand up each role as its phase first needs it (PM
+  and tech lead for discovery/architecture, engineers and QA for the build, a
+  reviewer for ship), but once present a role **persists and is reused**; the
+  *active* role shifts by phase, the sessions are not torn down.
 - **Existing codebase (brownfield)** — the tech lead earns its seat up front for
-  the codebase survey; give it (or a fan-out of readers) a strong model to map an
-  unfamiliar repo before scoping. The PM role is lighter — the change is often
-  already agreed — so it usually collapses into the lead. Otherwise the build/QA
-  staffing matches the greenfield case.
+  the codebase survey (give it, or a fan-out of readers, a strong model to map an
+  unfamiliar repo) and **stays** for later architecture questions — its retained
+  map of the repo is exactly the continuity win. The PM role is lighter — the
+  change is often already agreed — so it usually collapses into the lead.
 
 ## Reporting lines
 
@@ -88,3 +119,11 @@ Place each engineer where its task's code lives (`--cwd`). Coupled roles branch
 their own worktrees off a common integration base so their work converges cleanly
 (per the coordination rules) — but each role still gets its **own** worktree;
 never let two roles edit the same tree.
+
+Because roles are **reused** rather than respawned, worktrees can't ride on the
+spawn: workqueue's `--worktree` only cuts a tree at `sessions start`, so a standing
+role gets no fresh tree for its next task automatically. The **lead cuts a per-task
+worktree** — `git worktree add` off the current integration tip — points the role
+at it in the `sessions send` (overriding workqueue's "work in your cwd", since the
+tree is not the role's spawn cwd), and `git worktree remove`s it after integrating.
+The session persists; the worktree is per-task and ephemeral.

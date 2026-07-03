@@ -14,13 +14,15 @@ some just compress or adapt on an existing workspace (see
 `references/lifecycle.md`). The org lives on the blackboard, so it survives the
 lead running out of context and can be resumed.
 
-Builds on three skills — skim them first: `waypoint-subagents` (spawn and reap
-role sessions), `waypoint-comms` (the board and direct sends), and
-`waypoint-workqueue`, whose crew mechanics (spawn/worktree/reap, immutable task
-contract + mutable status cells, linear integration) this skill **reuses
-unchanged** for each parallelizable build batch. This skill does not re-teach
-those mechanics; it layers an **org chart**, a **lifecycle**, and
-**dependency-aware sequencing of coupled work** on top of them.
+Builds on three skills — skim them first: `waypoint-subagents` (spawn, steer, and
+keep/reap role sessions), `waypoint-comms` (the board and direct sends), and
+`waypoint-workqueue`, whose **channel + task/status/contract cells and linear
+integration** this skill **reuses unchanged** for each parallelizable build batch.
+The difference is *who staffs the worker slots*: the crew fills them with its
+**persistent role sessions** (reused across tasks and phases), not workers spawned
+and reaped per task. This skill does not re-teach those mechanics; it layers an
+**org chart**, a **lifecycle**, and **dependency-aware sequencing of coupled work**
+on top of them.
 
 ## Crew vs. work queue vs. delegate-and-review
 
@@ -47,18 +49,21 @@ single change.
 - **Lead / engineering manager** — you. The one persistent role: owns the board,
   the org chart, dependency sequencing, integration, and every phase checkpoint.
   Never delegated away.
-- **Role sessions** — product manager, tech lead/architect, frontend, backend,
-  QA, reviewer/release. Spawned to fit the current phase and reaped when idle;
-  small products collapse several roles into the lead. Each is a durable Waypoint
-  session on any backend/model. The full template is in `references/org-chart.md`.
+- **Role sessions** — a small, **persistent standing crew** of the code-touching
+  roles (tech lead/architect, frontend, backend, QA), spawned once and reused
+  across phases rather than churned per phase; the product manager and reviewer are
+  on-demand or collapse into the lead (their output is a durable board cell). Each
+  is a Waypoint session on any backend/model. The full template is in
+  `references/org-chart.md`.
 - **Lifecycle** — seven phases from intake to a shipped, iterating product
   (greenfield or brownfield), each with an owner, a board artifact, an exit
   criterion, and (at PRD / architecture / pre-ship) a **human checkpoint**. See
   `references/lifecycle.md`.
 - **Coordination** — a two-tier board: an `org:<product>` channel for durable
   lifecycle artifacts, and a `job:<phase-slug>` channel per parallelizable build
-  batch that composes the work-queue crew natively. Dependency sequencing and
-  contract-first coupling live here. See `references/coordination.md`.
+  batch, whose worker slots the standing crew fills (ephemeral workers only as
+  overflow beyond standing headcount). Dependency sequencing and contract-first
+  coupling live here. See `references/coordination.md`.
 
 ## How it works
 
@@ -77,10 +82,18 @@ than producing nothing (see `references/lifecycle.md`).
 
 ## Guardrails
 
-- **Size the org to the phase, not the product.** A standing multi-role crew
-  exhausts the host. Spawn the roles a phase needs, reap them when it ends, keep
-  at most a small standing crew across iterations. Fan-out has no server-side
-  limit.
+- **Keep a bounded standing crew; size by headcount, not churn.** Reuse role
+  sessions across phases — a parked (idle-and-alive) role takes its next task via
+  `sessions send`, preserving its accumulated codebase context; churning
+  create/reap cycles discards that context and forces a lossy thread reimport to
+  iterate. Idle isn't free (a `claude_tty` role holds a live pane; a structured
+  role holds a headless server process), so the primary lever is a **small,
+  bounded** crew, scoped to the code-touching roles; reap at product wind-down (or
+  when a role is genuinely never needed again), with a staleness backstop for an
+  abandoned crew. Transport is a trade — structured avoids a pane but a restart
+  forces reimport (`supports_resume=False`); `claude_tty`/`tmux` cost a pane but
+  re-attach. Ephemeral overflow workers, reaped per batch, cover a burst beyond
+  standing headcount. (Details: `references/org-chart.md`.)
 - **Coupled work is sequenced, never raced.** Two roles touching a shared
   interface must agree a `contract:` cell first, and the lead assigns a task only
   when its `deps=` are all `done` (`references/coordination.md`). Racing coupled
@@ -92,8 +105,8 @@ than producing nothing (see `references/lifecycle.md`).
   artifact and gate on the user's approval — the lead must not silently redefine
   the product's scope. Between checkpoints, run autonomously.
 - **Be inquisitive about environmental choices.** Settle each role's model and an
-  auto-approving permission mode before spawning — a guessed mode parks the
-  session and a wrong model id dies on turn 1. Pass ids verbatim from `waypoint
+  auto-approving permission mode before spawning — a guessed mode stalls the
+  session on its first approval and a wrong model id dies on turn 1. Pass ids verbatim from `waypoint
   models` / `waypoint backends`, and ask the user when unsure.
 - **Check the shipped product, not just green tests.** Before a phase or the
   product is called done, exercise the real running app, not only unit tests.

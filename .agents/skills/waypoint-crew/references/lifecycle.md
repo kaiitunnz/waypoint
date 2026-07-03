@@ -48,7 +48,7 @@ wording is deliberate: it is the trigger surface.
 
 Two things must hold, or a phase quietly produces nothing:
 
-- **The skills must be present where the work runs.** A spawned engineer without
+- **The skills must be present where the work runs.** A standing engineer without
   the build skill installed will not build. Confirm the role sessions have them,
   or expect the fallback.
 - **Fallback: if no skill fires, the role does the phase's work inline.** A phase
@@ -116,14 +116,21 @@ Two things must hold, or a phase quietly produces nothing:
 
 ## Phase 4 — Iterative build
 
-- **Owner:** engineers, sequenced by the lead.
-- **Do:** for each parallelizable batch, spin a `job:<phase-slug>` channel and run
-  it as a work-queue crew — this is where `waypoint-workqueue` is composed
-  directly. Assign a task only when its `deps=` are all `done`. Coupled pairs
-  build against the agreed `contract:`; if a contract must change, renegotiate it
-  (`references/coordination.md`) rather than letting the sides diverge. Frame each
-  task as *build and ship this feature / implement this*, and verify each with
-  its own check before integrating.
+- **Owner:** the standing engineers, sequenced by the lead.
+- **Do:** for each parallelizable batch, spin a `job:<phase-slug>` channel with the
+  work-queue task/status/deps/contract cells — but **fill its worker slots with the
+  standing engineers** (assign each a `task:<n>`, flip `status:<n>` to `doing
+  assignee=<sid>`), reused across tasks and batches rather than spawned and reaped
+  per task. Each task runs in a **lead-cut per-task worktree** (see
+  `references/org-chart.md`); the `sessions send` points the role at that path
+  (workqueue's fixed "work in your cwd" does not apply to a reused session). Assign
+  a task only when its `deps=` are all `done`. Coupled pairs build against the
+  agreed `contract:`; if a contract must change, renegotiate it
+  (`references/coordination.md`) rather than letting the sides diverge. **Ephemeral
+  overflow workers** — reaped per batch by tracked id, never via the blanket
+  `--spawned-by` sweep — cover a burst beyond standing headcount. Frame each task
+  as *build and ship this feature / implement this*, and verify each with its own
+  check before integrating.
 - **Artifact:** merged commits on the integration branch; `status:<n>` cells
   flipping to `done`.
 - **Checkpoint:** none per task; the lead integrates one task at a time and keeps
@@ -159,14 +166,15 @@ Two things must hold, or a phase quietly produces nothing:
 
 ## Phase 7 — Iterate / maintain
 
-- **Owner:** lead, with a small standing crew.
+- **Owner:** lead, with the standing crew.
 - **Do:** fold new requests, QA findings, and follow-ups into the backlog and
-  loop back to phase 3 (or phase 1 for a new product area). Reap the roles a
-  finished iteration no longer needs; keep only a small standing crew between
-  iterations.
+  loop back to phase 3 (or phase 1 for a new product area). **Keep the standing
+  crew between iterations** — its retained context is what makes the next iteration
+  cheap; each iteration is itself brownfield work on the product it just built.
 - **Checkpoint:** re-enters phase 1's checkpoint for any material new scope.
-- **Exit:** open-ended — the product keeps evolving, or the user winds the crew
-  down (reap all roles).
+- **Exit:** open-ended — the product keeps evolving, or the user winds it down and
+  the crew is reaped (with the staleness backstop, `references/org-chart.md`, for a
+  product abandoned without an explicit wind-down).
 
 ## Resuming a lifecycle
 

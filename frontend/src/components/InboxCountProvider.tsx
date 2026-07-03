@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   createContext,
   useContext,
@@ -24,6 +25,7 @@ export function useInboxCount(): number {
 // session socket, re-fetching on (re)connect to close the reconnect gap. Renders
 // the bottom-left inbox floater on every route (only when authenticated).
 export function InboxCountProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
   const [count, setCount] = useState(0);
@@ -96,10 +98,13 @@ export function InboxCountProvider({ children }: { children: ReactNode }) {
     };
   }, [host, token]);
 
+  // No shortcut into the inbox while already in it.
+  const onInboxRoute = pathname?.startsWith("/inbox") ?? false;
+
   return (
     <InboxCountContext.Provider value={count}>
       {children}
-      {token ? <InboxDock count={count} /> : null}
+      {token && !onInboxRoute ? <InboxDock count={count} /> : null}
     </InboxCountContext.Provider>
   );
 }

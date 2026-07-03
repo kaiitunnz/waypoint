@@ -20,6 +20,9 @@ interface SessionTerminalViewProps {
   sessionId: string;
   session: SessionRecord | null;
   interactive: boolean;
+  // The pane accepts key-bar / scroll injection even when not fully
+  // interactive (claude_tty). Implied by, and broader than, ``interactive``.
+  keyInjection: boolean;
   terminalRef: MutableRefObject<XTerminalHandle | null>;
   terminalDims: { cols: number; rows: number } | null;
   sessionExited: boolean;
@@ -70,6 +73,7 @@ export function SessionTerminalView({
   sessionId,
   session,
   interactive,
+  keyInjection,
   terminalRef,
   terminalDims,
   sessionExited,
@@ -307,7 +311,7 @@ export function SessionTerminalView({
           withJump={interactive && !termAtBottom}
         />
       </div>
-      {interactive ? (
+      {keyInjection ? (
         <TerminalKeyBar
           onSend={onTerminalInput}
           onRequestPaste={onRequestPaste}

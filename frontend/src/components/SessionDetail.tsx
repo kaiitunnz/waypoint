@@ -58,6 +58,7 @@ import {
   supportsReattachAfterExit,
   supportsStructuredApproval,
   terminalInteractive,
+  terminalKeyInjection,
   terminalResizable,
   transportLabel,
   transportPresentation,
@@ -1401,6 +1402,11 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   const canTerminalResize = session
     ? terminalResizable(session.transport, catalog)
     : false;
+  // Whether the pane accepts key-bar / scroll-wheel injection (true for the
+  // fully interactive tmux pane and the claude_tty escape hatch).
+  const canInjectKeys = session
+    ? terminalKeyInjection(session.transport, catalog)
+    : false;
   const activeView: ViewMode = terminalOnly
     ? "terminal"
     : !canShowTerminal
@@ -1610,19 +1616,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   );
   const handleTerminalScrollChip = useCallback(
     (direction: "up" | "down") => {
-      if (!canTerminalResize) {
-        // Fixed-grid (emulated) pane: scroll the host div over the over-tall
-        // grid. No terminal input — the WS would drop it (non-interactive).
-        terminalRef.current?.scrollByLines(direction === "up" ? -3 : 3);
-        return;
-      }
-      // Resizable (tmux) pane: synthesize a wheel event as terminal input.
-      // SGR mouse encoding (mode 1006). Button 64 = wheel up, 65 =
-      // wheel down. Column/row are the cursor position the inner app
-      // attributes the wheel event to; centering on the viewport is
-      // a safe stand-in for "user's eye" without coupling to xterm's
-      // actual mouse position. This path assumes the pane is interactive
-      // (resizable ⟺ interactive for the paned transports today).
+      // Synthesize a wheel event as terminal input so the inner TUI scrolls
+      // its own view (both tmux and the claude_tty escape hatch accept this).
+      // SGR mouse encoding (mode 1006). Button 64 = wheel up, 65 = wheel
+      // down. Column/row are the cursor position the inner app attributes the
+      // wheel event to; centering on the viewport is a safe stand-in for
+      // "user's eye" without coupling to xterm's actual mouse position.
       const cols = terminalDims?.cols ?? 80;
       const rows = terminalDims?.rows ?? 24;
       const col = Math.max(1, Math.floor(cols / 2));
@@ -1630,7 +1629,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       const button = direction === "up" ? 64 : 65;
       handleTerminalInput(`\x1b[<${button};${col};${row}M`);
     },
-    [canTerminalResize, terminalDims, handleTerminalInput],
+    [terminalDims, handleTerminalInput],
   );
   const [termMenuOpen, setTermMenuOpen] = useState(false);
   const [termAtBottom, setTermAtBottom] = useState(true);
@@ -1945,6 +1944,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           sessionId={sessionId}
           session={session}
           interactive={canTerminalInteract}
+          keyInjection={canInjectKeys}
           terminalRef={terminalRef}
           terminalDims={terminalDims}
           sessionExited={sessionExited}

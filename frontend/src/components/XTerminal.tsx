@@ -16,10 +16,6 @@ export interface XTerminalHandle {
   rows(): number;
   focus(): void;
   scrollToBottom(): void;
-  // Scroll the host viewport by a number of grid rows (negative = up). Only
-  // meaningful for fixed-grid panes, whose host div scrolls over an over-tall
-  // grid; resizable panes fit their grid and have nothing to scroll here.
-  scrollByLines(lines: number): void;
 }
 
 interface XTerminalProps {
@@ -269,16 +265,6 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       focus: () => termRef.current?.focus(),
       scrollToBottom: () => {
         termRef.current?.scrollToBottom();
-      },
-      scrollByLines: (lines: number) => {
-        const host = containerRef.current;
-        const term = termRef.current;
-        if (!host || !term) return;
-        // The host content is the full-size xterm DOM (the server grid), so
-        // scrollHeight / rows is the per-row cell height. The scrolled element
-        // carries no padding of its own, so this is exact.
-        const perRow = host.scrollHeight / Math.max(1, term.rows);
-        host.scrollTop += lines * perRow;
       },
     }));
 

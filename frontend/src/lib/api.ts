@@ -12,6 +12,11 @@ import {
   BoardEntry,
   EventRecord,
   EventsPage,
+  InboxApprovalAnswer,
+  InboxAttachmentRef,
+  InboxItem,
+  InboxQuestionAnswer,
+  InboxStatus,
   MeResponse,
   MessageSchedule,
   ScheduleCreateRequest,
@@ -957,9 +962,15 @@ export async function uploadAttachment(
   token: string,
   sessionId: string,
   file: File,
+  options: { pin?: boolean } = {},
 ): Promise<AttachmentSpec> {
   const body = new FormData();
   body.append("file", file, file.name);
+  // Reply attachments are pinned at upload so the orphan sweep can't reap
+  // them before the requesting session reads them back.
+  if (options.pin) {
+    body.append("pin", "true");
+  }
   const response = await fetch(
     `${host}/api/sessions/${sessionId}/attachments`,
     {
@@ -1315,6 +1326,126 @@ export function connectSessionSocket(
   extra: { onOpen?: () => void; onClose?: (event: CloseEvent) => void } = {},
 ): WebSocket {
   const url = `${host.replace(/^http/, "ws")}/ws/sessions/${sessionId}?token=${encodeURIComponent(token)}`;
+  return attachHandlers(new WebSocket(url), { onMessage, onAuthFailure, ...extra });
+}
+
+export interface InboxListPage {
+  items: InboxItem[];
+  hasMore: boolean;
+  cursor: string | null;
+}
+
+export interface InboxBlockSubmit {
+  answer?: InboxQuestionAnswer | InboxApprovalAnswer | null;
+  reply?: { notes?: string | null; attachments?: InboxAttachmentRef[] } | null;
+}
+
+export async function fetchInboxList(
+  host: string,
+  token: string,
+  options: { status?: InboxStatus; q?: string; limit?: number; cursor?: string | null } = {},
+): Promise<InboxListPage> {
+  const params = new URLSearchParams();
+  if (options.status) params.set("status", options.status);
+  if (options.q) params.set("q", options.q);
+  if (options.limit !== undefined) params.set("limit", String(options.limit));
+  if (options.cursor) params.set("cursor", options.cursor);
+  const suffix = params.size ? `?${params.toString()}` : "";
+  const response = await fetch(`${host}/api/inbox${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch inbox");
+  const payload = await response.json();
+  return {
+    items: (payload.items ?? []) as InboxItem[],
+    hasMore: Boolean(payload.has_more),
+    cursor: (payload.cursor as string | null) ?? null,
+  };
+}
+
+export async function fetchInboxItem(
+  host: string,
+  token: string,
+  id: string,
+): Promise<InboxItem> {
+  const response = await fetch(`${host}/api/inbox/${id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch inbox item");
+  const payload = await response.json();
+  return payload.item as InboxItem;
+}
+
+export async function fetchInboxUnresolvedCount(
+  host: string,
+  token: string,
+): Promise<number> {
+  const response = await fetch(`${host}/api/inbox/unresolved-count`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch inbox count");
+  const payload = (await response.json()) as { unresolved_count?: number };
+  return payload.unresolved_count ?? 0;
+}
+
+export async function submitInboxBlock(
+  host: string,
+  token: string,
+  id: string,
+  blockId: string,
+  body: InboxBlockSubmit,
+): Promise<InboxItem> {
+  const response = await fetch(`${host}/api/inbox/${id}/blocks/${blockId}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  await ensureOk(response, "failed to submit inbox reply");
+  const payload = await response.json();
+  return payload.item as InboxItem;
+}
+
+export async function markInboxRead(
+  host: string,
+  token: string,
+  id: string,
+): Promise<InboxItem> {
+  const response = await fetch(`${host}/api/inbox/${id}/read`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, "failed to mark inbox item read");
+  const payload = await response.json();
+  return payload.item as InboxItem;
+}
+
+export async function deleteInboxItem(
+  host: string,
+  token: string,
+  id: string,
+): Promise<void> {
+  const response = await fetch(`${host}/api/inbox/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, "failed to delete inbox item");
+}
+
+export function connectInboxSocket(
+  host: string,
+  token: string,
+  id: string,
+  onMessage: (message: SessionEnvelope) => void,
+  onAuthFailure?: () => void,
+  extra: { onOpen?: () => void; onClose?: (event: CloseEvent) => void } = {},
+): WebSocket {
+  const url = `${host.replace(/^http/, "ws")}/ws/inbox/${id}?token=${encodeURIComponent(token)}`;
   return attachHandlers(new WebSocket(url), { onMessage, onAuthFailure, ...extra });
 }
 

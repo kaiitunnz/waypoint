@@ -79,6 +79,7 @@ large-context variants for real implementation work). The role-specific slant:
   backend gives a genuine second opinion. If you need none of that for a role,
   the lead can do it in-process instead of spawning.
 
-Place each engineer where its task's code lives (`--cwd`), and give coupled work
-one shared worktree lineage per the coordination rules — never let two roles
-edit the same tree.
+Place each engineer where its task's code lives (`--cwd`). Coupled roles branch
+their own worktrees off a common integration base so their work converges cleanly
+(per the coordination rules) — but each role still gets its **own** worktree;
+never let two roles edit the same tree.

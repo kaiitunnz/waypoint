@@ -112,6 +112,13 @@ waypoint board post org:<product> "lifecycle state" --key phase \
   so it would have to guess from `board channels` and could silently drop a batch.
   The lead updates `jobs=` whenever it spins up or retires a sub-phase channel.
 
+Update the cell with `board set-meta ... --key phase` (it preserves the text), and
+**re-supply all three metas every time** — `--meta` replaces the cell's metadata
+wholesale, so an update that passes only `jobs=` silently drops `current=` and
+`approved=`. This is the same keyed-cell hazard the work queue avoids with its
+two-cell split; here the `phase` cell has no text worth protecting, so one cell
+plus always-write-all-metas is enough.
+
 A lead restarting reads `phase`, reattaches to each channel in `jobs=`, and
 resumes each with the work-queue resume procedure (done tasks skipped, `todo`
 reassigned, orphaned `doing` handed back).
@@ -132,8 +139,10 @@ unattended, so a blocking question is wrong — it would stall an unattended tur
 forever. Instead:
 
 - The owner **posts the artifact to the board** (`prd`, `architecture`, or a
-  release summary) and gates on a **user board post / approval**, not a blocking
-  prompt.
+  release summary) and gates on an explicit **approval signal** from the user,
+  not a blocking prompt. The signal can be a board post the user (or the UI)
+  makes on `org:<product>`, or a direct message to the lead session — either way
+  the lead reads it at a turn boundary and records it into `approved=`.
 - **While waiting, park or reap the phase's roles** rather than holding a standing
   crew idle-spinning (per the cost-discipline guardrail).
 - Record the granted approval in the `phase` cell's `approved=` meta so it

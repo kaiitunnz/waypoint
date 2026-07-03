@@ -84,7 +84,12 @@ visible to a downstream lead reading the board.
   missing or unauthenticated.
 - Keep fan-out small and deliberate — there is no server-side concurrency
   limit, so a runaway loop will exhaust host resources.
-- Reap what you spawn. Leaving orphaned `subagent:*` sessions behind is a bug.
+- Reap what you spawn — but reap when *done*, not eagerly. If the work may need
+  another turn, **park the child (leave it idle and alive) rather than reaping**:
+  continuing it with `sessions send` beats reaping and later reimporting the thread
+  (a new session with replayed history, live state lost). Parked-for-iteration is
+  fine; an orphaned, finished-with child left behind is the bug
+  (`references/cleanup.md`).
 - Ground every status claim in `waypoint sessions show`/`events` output, not
   assumption.
 - **Be inquisitive about environmental choices.** When the permission mode,

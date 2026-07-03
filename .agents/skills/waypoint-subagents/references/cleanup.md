@@ -1,8 +1,10 @@
 # Cleanup
 
-Reap the children you spawned once their work is collected. Leaving orphaned
-`subagent:*` sessions behind — running *or* as stale `exited` records — clutters
-the user's session list and is a bug.
+Reap the children you spawned once you are done with them. A child left running
+idle because you may still **iterate** on it is fine — that is *parking*, covered
+below. What is a bug is an **orphaned** child: one you have finished with (or
+forgotten), left running or as a stale `exited` record, cluttering the user's
+session list.
 
 There are two operations:
 
@@ -22,8 +24,16 @@ or relayed, and a left-behind record is just clutter.
 waypoint sessions delete <child-id>
 ```
 
-**Keep** a child (terminate only, or leave it as-is) when:
+**Keep** a child when:
 
+- **You may still iterate on it.** If the work is likely to need another turn —
+  a follow-up, a fix, a re-run against changed inputs — **park it, don't reap it**:
+  leave it idle so you can `waypoint sessions send <id> "<next instruction>"` and
+  continue in place. Reaping is a one-way door — to pick the work back up you would
+  have to **reimport the thread**, which spins a *new* session, replays the history
+  into it, and loses the live session state. Parking avoids all of that. Bound how
+  many you keep parked (an idle child still holds resources — see below), and reap
+  it once you are genuinely done or it has gone stale.
 - It produced output the **user should review**.
 - It ended in `error` — deleting it would hide the failure. Leave it and surface
   it to the user.
@@ -31,6 +41,14 @@ waypoint sessions delete <child-id>
 
 When you keep children, tell the user which ones and why, and quote their ids so
 they can find them.
+
+**Park ≠ terminate.** Parking means leave the child **idle and alive** — neither
+`terminate` nor `delete`. `terminate` ends the process, and a structured backend
+(`supports_resume=False` — claude_code, codex, opencode) then **cannot** take a
+`sessions send`, so continuing it forces the very reimport parking avoids; only
+`claude_tty` / `tmux` (`supports_resume=True`) can be re-attached after their
+process ends. So to keep a child iterable, leave it running idle — do not
+`terminate` it as a "lighter" form of keeping.
 
 ## Rules
 

@@ -31,6 +31,12 @@ waypoint sessions send <session-id> "<follow-up instructions>"
 After sending, poll again (see `spawn-and-poll.md`) — `send` returns
 immediately; it does not wait for the child to finish the new turn.
 
+When the work is likely to need more turns, **keep the child parked (idle and
+alive) between them and continue it with `sessions send`** — this is far cheaper
+than reaping it and reimporting the thread later (which spins a new session,
+replays history, and loses live state). See `references/cleanup.md` for park vs.
+terminate vs. delete.
+
 ## Answer an approval
 
 A child sitting in `waiting_input` may be blocked on an approval rather than

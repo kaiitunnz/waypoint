@@ -1,6 +1,6 @@
 ---
 name: waypoint-crew
-description: Use when a coding agent must stand up a multi-role software-engineering organization — product manager, tech lead, frontend, backend, QA, release — across durable Waypoint sessions to carry a product through its lifecycle, whether starting a new product from zero or evolving an existing codebase: discovery, architecture, iterative build, QA, ship, and iterate. A lead runs the org chart, sequences coupled work by dependency and contract, and checkpoints with the user at phase boundaries. Not for a batch of independent tasks (use waypoint-workqueue) or a single coupled change (use delegate-and-review).
+description: Use when a coding agent must stand up a multi-role software-engineering organization — product manager, tech lead, frontend, backend, QA, release — across durable Waypoint sessions to carry a product through its full lifecycle — discovery, architecture, iterative build, QA, ship, and iterate — whether starting a new product from zero or evolving an existing codebase. A lead runs the org chart, sequences coupled work by dependency and contract, and checkpoints with the user at phase boundaries. Not for a batch of independent tasks (use waypoint-workqueue) or a single coupled change (use delegate-and-review).
 ---
 
 # Waypoint Crew

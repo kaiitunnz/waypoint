@@ -300,12 +300,12 @@ export function SessionTerminalView({
             ↡ Jump to live
           </button>
         ) : null}
-        {interactive ? (
-          <TerminalScrollChips
-            onWheel={onTerminalScrollChip}
-            withJump={!termAtBottom}
-          />
-        ) : null}
+        <TerminalScrollChips
+          onWheel={onTerminalScrollChip}
+          // Lift the cluster only when the "jump to live" pill shares the
+          // corner — that pill is interactive-only (see above).
+          withJump={interactive && !termAtBottom}
+        />
       </div>
       {interactive ? (
         <TerminalKeyBar

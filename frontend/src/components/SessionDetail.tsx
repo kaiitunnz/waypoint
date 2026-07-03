@@ -1610,11 +1610,19 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   );
   const handleTerminalScrollChip = useCallback(
     (direction: "up" | "down") => {
+      if (!canTerminalResize) {
+        // Fixed-grid (emulated) pane: scroll the host div over the over-tall
+        // grid. No terminal input — the WS would drop it (non-interactive).
+        terminalRef.current?.scrollByLines(direction === "up" ? -3 : 3);
+        return;
+      }
+      // Resizable (tmux) pane: synthesize a wheel event as terminal input.
       // SGR mouse encoding (mode 1006). Button 64 = wheel up, 65 =
       // wheel down. Column/row are the cursor position the inner app
       // attributes the wheel event to; centering on the viewport is
       // a safe stand-in for "user's eye" without coupling to xterm's
-      // actual mouse position.
+      // actual mouse position. This path assumes the pane is interactive
+      // (resizable ⟺ interactive for the paned transports today).
       const cols = terminalDims?.cols ?? 80;
       const rows = terminalDims?.rows ?? 24;
       const col = Math.max(1, Math.floor(cols / 2));
@@ -1622,7 +1630,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
       const button = direction === "up" ? 64 : 65;
       handleTerminalInput(`\x1b[<${button};${col};${row}M`);
     },
-    [terminalDims, handleTerminalInput],
+    [canTerminalResize, terminalDims, handleTerminalInput],
   );
   const [termMenuOpen, setTermMenuOpen] = useState(false);
   const [termAtBottom, setTermAtBottom] = useState(true);

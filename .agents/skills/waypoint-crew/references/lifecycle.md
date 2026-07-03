@@ -121,9 +121,10 @@ Two things must hold, or a phase quietly produces nothing:
   work-queue task/status/deps/contract cells — but **fill its worker slots with the
   standing engineers** (assign each a `task:<n>`, flip `status:<n>` to `doing
   assignee=<sid>`), reused across tasks and batches rather than spawned and reaped
-  per task. Each task runs in a **lead-cut per-task worktree** (see
-  `references/org-chart.md`); the `sessions send` points the role at that path
-  (workqueue's fixed "work in your cwd" does not apply to a reused session). Assign
+  per task. A reused role stays in its **own pinned worktree** and rotates the git
+  branch inside it per task (`git switch -c wq/<job>-t<n> <integration-tip>`) — its
+  `cwd` never moves, since a session can't be repointed (see
+  `references/org-chart.md`). Assign
   a task only when its `deps=` are all `done`. Coupled pairs build against the
   agreed `contract:`; if a contract must change, renegotiate it
   (`references/coordination.md`) rather than letting the sides diverge. **Ephemeral

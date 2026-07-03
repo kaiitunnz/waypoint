@@ -128,10 +128,17 @@ their own worktrees off a common integration base so their work converges cleanl
 (per the coordination rules) — but each role still gets its **own** worktree;
 never let two roles edit the same tree.
 
-Because roles are **reused** rather than respawned, worktrees can't ride on the
-spawn: workqueue's `--worktree` only cuts a tree at `sessions start`, so a standing
-role gets no fresh tree for its next task automatically. The **lead cuts a per-task
-worktree** — `git worktree add` off the current integration tip — points the role
-at it in the `sessions send` (overriding workqueue's "work in your cwd", since the
-tree is not the role's spawn cwd), and `git worktree remove`s it after integrating.
-The session persists; the worktree is per-task and ephemeral.
+A session is **pinned to its launch `cwd` for life** — there is no command to
+repoint a running session at a different directory. So a standing role keeps **one
+worktree, its `cwd`, across all its tasks**; you rotate the **git branch inside
+that worktree**, never the worktree. Per task the role (in its own `cwd`) runs
+`git switch -c wq/<job>-t<n> <integration-tip>`, does the work, and commits; the
+lead ff-merges that branch into the integration branch from its own checkout, then
+the role switches to the next fresh task branch off the updated tip — same
+worktree throughout. Because worktrees share the repo's object store, the
+integration ref is always visible for branching; because each role has its own
+worktree and works its own task branches (never the integration branch directly,
+which lives in the lead's tree), no two checkouts collide. Workqueue's fixed
+"work in your `cwd`" therefore **still holds** — the role never leaves its `cwd`.
+(A role is also pinned to its **repo**: a task in a different repository needs a
+different session, not a branch switch.)

@@ -22,13 +22,30 @@ working directory is reachable already.
    `$WAYPOINT_SESSION_ID` is your own session id, so this lands the file in your
    session's files panel, where the user opens it. Upload sends **no message**, so
    it doesn't disturb the agent in the target session.
-3. **Must persist for the long term → don't rely on a bare upload.** An eager
-   upload that no sent message references is an **orphan**: it shows in the panel
-   but is swept once older than `WAYPOINT_ATTACHMENT_ORPHAN_TTL_SECONDS` (default
-   **24h**). For anything durable, keep the file in a session cwd (option 1), or
-   attach it to an actual message (`sessions send --attach <file>`), which marks it
-   sent and exempt from the sweep. Uploads and cwd files alike also vanish if the
+3. **Must persist for the long term → pin it, or keep it in a cwd.** An eager
+   upload that nothing keeps is an **orphan**: it shows in the panel but is swept
+   once older than `WAYPOINT_ATTACHMENT_ORPHAN_TTL_SECONDS` (default **24h**). To
+   keep an uploaded file *without* sending a message, pass **`--pin`**:
+
+   ```bash
+   waypoint sessions upload --pin "$WAYPOINT_SESSION_ID" <file>
+   ```
+
+   Pinned uploads are exempt from the sweep (a file carried by a sent message —
+   `sessions send --attach` — is likewise kept). Keeping the file in a session cwd
+   (option 1) is durable too. Either way, uploads and cwd files vanish if the
    session is **deleted/reaped** — surface or commit before wind-down.
+
+## Managing what's surfaced
+
+```bash
+waypoint sessions attachments list <session-id>              # what's already surfaced
+waypoint sessions attachments get <session-id> <att-id>      # download one back
+waypoint sessions attachments pin <session-id> <att-id>      # keep a past upload; unpin re-exposes it
+waypoint sessions attachments delete <session-id> <att-id>   # (delete-all clears the session)
+```
+
+List first to avoid re-uploading a file already surfaced.
 
 ## Notes
 

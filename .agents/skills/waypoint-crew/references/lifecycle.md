@@ -131,7 +131,7 @@ Two things must hold, or a phase quietly produces nothing:
   `contract:`; if a contract must change, renegotiate it
   (`references/coordination.md`) rather than letting the sides diverge. Ephemeral
   **overflow workers** cover a burst beyond standing headcount, reaped per batch by
-  tracked id (`references/org-chart.md`). Frame each task as *build and ship this
+  tag or tracked id (`references/org-chart.md`). Frame each task as *build and ship this
   feature / implement this*, and verify each with its own check before integrating.
   For a build too large for one lead to sequence, split it into per-team `job:`
   channels each run by a **team lead**, with the main lead sequencing across teams

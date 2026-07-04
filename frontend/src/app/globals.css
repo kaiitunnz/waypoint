@@ -14105,8 +14105,9 @@ html[data-theme="light"] .wp-hl {
   }
 
   /* The delete button takes the timestamp's top slot on hover; the timestamp
-     (ordinary metadata) gives way. The unread dot below it stays put. */
-  .inbox-row-wrap:hover .inbox-row-time {
+     (ordinary metadata) gives way. The unread dot below it stays put. Not in
+     select mode — the delete button is hidden there, so nothing replaces it. */
+  .inbox-row-wrap:not(.selecting):hover .inbox-row-time {
     opacity: 0;
   }
 }

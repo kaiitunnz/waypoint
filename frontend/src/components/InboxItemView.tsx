@@ -43,32 +43,35 @@ export function InboxItemView({
   onDelete?: () => void;
 }) {
   return (
-    <div className="inbox-item">
-      <header className="inbox-item-head">
-        <div className="inbox-item-titles">
-          <h2 className="inbox-item-subject">{item.subject}</h2>
-          <div className="inbox-item-meta">
-            {item.from_label ? (
-              <span className="badge neutral">{item.from_label}</span>
-            ) : null}
-            <span className={`inbox-status inbox-status-${item.status}`}>
-              <span className="inbox-status-dot" aria-hidden="true" />
-              {item.status}
-            </span>
-            <span className="role-time">{formatTime(item.created_at)}</span>
-          </div>
+    <article className="inbox-doc">
+      <header className="inbox-doc-head">
+        <div className="inbox-doc-meta">
+          {item.from_label ? (
+            <span className="inbox-doc-from">{item.from_label}</span>
+          ) : null}
+          <span className={`inbox-doc-status inbox-status-${item.status}`}>
+            <span className="inbox-lamp" aria-hidden="true" />
+            {item.status}
+          </span>
+          <span className="inbox-doc-read">
+            {item.read_at ? "read" : "unread"}
+          </span>
+          <span className="inbox-doc-time">{formatTime(item.created_at)}</span>
         </div>
-        {onDelete ? (
-          <button
-            type="button"
-            className="link-button inbox-item-delete"
-            onClick={onDelete}
-          >
-            Delete
-          </button>
-        ) : null}
+        <div className="inbox-doc-title-row">
+          <h2 className="inbox-doc-subject">{item.subject}</h2>
+          {onDelete ? (
+            <button
+              type="button"
+              className="inbox-doc-delete"
+              onClick={onDelete}
+            >
+              Delete
+            </button>
+          ) : null}
+        </div>
       </header>
-      <div className="inbox-blocks">
+      <div className="inbox-doc-blocks">
         {item.blocks.map((block) => (
           <InboxBlockRow
             key={block.id}
@@ -79,7 +82,7 @@ export function InboxItemView({
           />
         ))}
       </div>
-    </div>
+    </article>
   );
 }
 
@@ -114,8 +117,27 @@ function InboxBlockRow({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const answered = blockAnswered(block);
+  // A pending question keeps its composer open — the Submit control lives
+  // there; every other block reveals it behind an unobtrusive Reply trigger.
+  const [replyOpen, setReplyOpen] = useState(
+    block.type === "question" && !answered,
+  );
   const hasReplyDraft =
     notes.trim().length > 0 || attachments.readyIds.length > 0;
+
+  const isDecisionBlock =
+    block.type === "question" || block.type === "approval";
+  const pending = isDecisionBlock && !answered;
+  const decisionTag = block.type === "approval" ? "APPROVAL" : "QUESTION";
+  let answerEcho = "";
+  if (block.type === "approval" && block.answer) {
+    answerEcho = block.answer.decision;
+  } else if (block.type === "question" && block.answer) {
+    answerEcho = [
+      ...block.answer.selected,
+      ...(block.answer.other ? [block.answer.other] : []),
+    ].join(", ");
+  }
 
   function toggle(label: string) {
     if (block.type !== "question") return;
@@ -176,7 +198,22 @@ function InboxBlockRow({
     (selected.size > 0 || other.trim().length > 0 || hasReplyDraft);
 
   return (
-    <section className="inbox-block">
+    <section className={`inbox-block${pending ? " pending" : ""}`}>
+      {isDecisionBlock ? (
+        <div className="inbox-block-head">
+          <span className="inbox-block-tag">{decisionTag}</span>
+          <span
+            className={`inbox-block-state${pending ? " pending" : " answered"}`}
+          >
+            <span className="inbox-lamp" aria-hidden="true" />
+            {pending ? "Pending" : "Answered"}
+          </span>
+          {!pending && answerEcho ? (
+            <span className="inbox-block-echo">{answerEcho}</span>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="inbox-block-content">
         {block.type === "markdown" ? (
           <MarkdownMessage text={block.text} />
@@ -185,22 +222,14 @@ function InboxBlockRow({
           <InboxAttachment host={host} token={token} attachmentRef={block.ref} />
         ) : null}
         {block.type === "question" ? (
-          <>
-            <InboxQuestionCard
-              block={block}
-              selected={selected}
-              other={other}
-              onToggle={toggle}
-              onOtherChange={setOther}
-              disabled={answered}
-            />
-            {answered && block.answer?.other ? (
-              <p className="inbox-answer-note">
-                <span className="inbox-answer-label">Answer</span>
-                {block.answer.other}
-              </p>
-            ) : null}
-          </>
+          <InboxQuestionCard
+            block={block}
+            selected={selected}
+            other={other}
+            onToggle={toggle}
+            onOtherChange={setOther}
+            disabled={answered}
+          />
         ) : null}
         {block.type === "approval" ? (
           <SharedApprovalCard
@@ -218,20 +247,16 @@ function InboxBlockRow({
             }
           >
             <p className="approval-prompt">{block.prompt}</p>
-            {answered && block.answer ? (
-              <p className="inbox-answer-note">
-                <span className="inbox-answer-label">Decision</span>
-                {block.answer.decision}
-              </p>
-            ) : null}
           </SharedApprovalCard>
         ) : null}
       </div>
 
       {block.reply ? (
-        <div className="inbox-block-reply-shown">
-          <span className="inbox-answer-label">Reply</span>
-          {block.reply.notes ? <p>{block.reply.notes}</p> : null}
+        <div className="inbox-reply-shown">
+          <span className="inbox-reply-shown-label">Your reply</span>
+          {block.reply.notes ? (
+            <p className="inbox-reply-shown-notes">{block.reply.notes}</p>
+          ) : null}
           <InboxAttachments
             host={host}
             token={token}
@@ -240,68 +265,80 @@ function InboxBlockRow({
         </div>
       ) : null}
 
-      <div className="inbox-block-reply">
-        <textarea
-          className="inbox-reply-input"
-          value={notes}
-          onChange={(event) => setNotes(event.target.value)}
-          placeholder="Add a reply note (optional)…"
-          rows={2}
-          disabled={submitting}
-        />
-        <AttachmentTray
-          items={attachments.items}
-          onRemove={attachments.remove}
-          onRetry={attachments.retry}
-          onClear={attachments.discardAll}
-        />
-        <div className="inbox-block-actions">
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            hidden
-            onChange={(event) => onFilesPicked(event.target.files)}
-          />
+      <div className="inbox-block-foot">
+        {replyOpen ? (
+          <div className="inbox-reply">
+            <textarea
+              className="inbox-reply-input"
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Add a reply note (optional)…"
+              rows={2}
+              disabled={submitting}
+            />
+            <AttachmentTray
+              items={attachments.items}
+              onRemove={attachments.remove}
+              onRetry={attachments.retry}
+              onClear={attachments.discardAll}
+            />
+            <div className="inbox-reply-actions">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                hidden
+                onChange={(event) => onFilesPicked(event.target.files)}
+              />
+              <button
+                type="button"
+                className="secondary inbox-attach-btn"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={submitting}
+              >
+                <PaperclipIcon />
+                Attach
+              </button>
+              {block.type === "question" && !answered ? (
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={submitting || !questionSubmitEnabled}
+                  onClick={() =>
+                    void submit(
+                      selected.size > 0 || other.trim().length > 0
+                        ? {
+                            selected: Array.from(selected),
+                            other: other.trim() || null,
+                          }
+                        : undefined,
+                    )
+                  }
+                >
+                  {submitting ? "Sending…" : "Submit"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={submitting || !hasReplyDraft || attachments.uploading}
+                  onClick={() => void submit()}
+                >
+                  {submitting ? "Sending…" : "Send reply"}
+                </button>
+              )}
+            </div>
+            {error ? <p className="inbox-block-error">{error}</p> : null}
+          </div>
+        ) : (
           <button
             type="button"
-            className="secondary inbox-attach-btn"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={submitting}
+            className="inbox-reply-trigger"
+            onClick={() => setReplyOpen(true)}
           >
-            <PaperclipIcon />
-            Attach
+            Reply
           </button>
-          {block.type === "question" && !answered ? (
-            <button
-              type="button"
-              className="primary"
-              disabled={submitting || !questionSubmitEnabled}
-              onClick={() =>
-                void submit(
-                  selected.size > 0 || other.trim().length > 0
-                    ? {
-                        selected: Array.from(selected),
-                        other: other.trim() || null,
-                      }
-                    : undefined,
-                )
-              }
-            >
-              {submitting ? "Sending…" : "Submit"}
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="primary"
-              disabled={submitting || !hasReplyDraft || attachments.uploading}
-              onClick={() => void submit()}
-            >
-              {submitting ? "Sending…" : "Send reply"}
-            </button>
-          )}
-        </div>
-        {error ? <p className="inbox-block-error">{error}</p> : null}
+        )}
       </div>
     </section>
   );

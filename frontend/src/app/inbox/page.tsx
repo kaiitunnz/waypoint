@@ -46,6 +46,85 @@ function byUpdatedDesc(a: InboxItem, b: InboxItem): number {
   return 0;
 }
 
+function relativeTime(value: string): string {
+  const then = new Date(value).getTime();
+  if (Number.isNaN(then)) return "";
+  const sec = Math.round((Date.now() - then) / 1000);
+  if (sec < 45) return "now";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h`;
+  const day = Math.round(hr / 24);
+  if (day < 7) return `${day}d`;
+  const wk = Math.round(day / 7);
+  if (wk < 5) return `${wk}w`;
+  return new Date(value).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+type BlockChip = { key: string; label: string; pending: boolean };
+
+function blockChips(item: InboxItem): BlockChip[] {
+  let questions = 0;
+  let questionsPending = 0;
+  let approvals = 0;
+  let approvalsPending = 0;
+  let files = 0;
+  for (const block of item.blocks) {
+    if (block.type === "question") {
+      questions += 1;
+      if (block.answer === null) questionsPending += 1;
+    } else if (block.type === "approval") {
+      approvals += 1;
+      if (block.answer === null) approvalsPending += 1;
+    } else if (block.type === "attachment") {
+      files += 1;
+    }
+  }
+  const chips: BlockChip[] = [];
+  if (questions > 0)
+    chips.push({
+      key: "q",
+      label: `${questions} question${questions > 1 ? "s" : ""}`,
+      pending: questionsPending > 0,
+    });
+  if (approvals > 0)
+    chips.push({
+      key: "a",
+      label: `${approvals} approval${approvals > 1 ? "s" : ""}`,
+      pending: approvalsPending > 0,
+    });
+  if (files > 0)
+    chips.push({
+      key: "f",
+      label: `${files} file${files > 1 ? "s" : ""}`,
+      pending: false,
+    });
+  return chips;
+}
+
+function EnvelopeGlyph() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="34"
+      height="34"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m3 7 9 6 9-6" />
+    </svg>
+  );
+}
+
 export default function InboxPage() {
   return (
     <Suspense fallback={null}>
@@ -246,19 +325,21 @@ function InboxPageInner() {
           <div
             className={`inbox-list-pane${mobileView === "item" ? " wp-mobile-hidden" : ""}`}
           >
-            <div className="inbox-controls">
+            <div className="inbox-toolbar">
               <SearchInput
                 value={q}
                 onChange={setQ}
                 placeholder="Search inbox…"
                 showStatusExample={false}
               />
-              <div className="inbox-status-filter">
+              <div className="inbox-tabs" role="tablist" aria-label="Filter inbox">
                 {STATUS_FILTERS.map((filter) => (
                   <button
                     key={filter.id}
                     type="button"
-                    className={`inbox-filter-btn${status === filter.id ? " active" : ""}`}
+                    role="tab"
+                    aria-selected={status === filter.id}
+                    className={`inbox-tab${status === filter.id ? " active" : ""}`}
                     onClick={() => setStatus(filter.id)}
                   >
                     {filter.label}
@@ -267,40 +348,69 @@ function InboxPageInner() {
               </div>
             </div>
             <div className="inbox-list" role="list">
-              {items.length === 0 && !loading ? (
-                <p className="inbox-empty">No items.</p>
+              {loading && items.length === 0
+                ? Array.from({ length: 6 }).map((_, i) => (
+                    <span key={i} className="inbox-row-skeleton" aria-hidden="true">
+                      <span className="inbox-skel-bar short" />
+                      <span className="inbox-skel-bar wide" />
+                    </span>
+                  ))
+                : null}
+              {!loading && items.length === 0 ? (
+                <div className="inbox-empty inbox-empty-list">
+                  <EnvelopeGlyph />
+                  <p>Nothing here</p>
+                </div>
               ) : null}
-              {items.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  role="listitem"
-                  className={`inbox-list-item${item.id === selectedId ? " active" : ""}${
-                    item.read_at ? "" : " unread"
-                  }`}
-                  onClick={() => select(item.id)}
-                >
-                  <span className="inbox-list-item-top">
-                    <span className="inbox-list-subject">{item.subject}</span>
+              {items.map((item) => {
+                const chips = blockChips(item);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="listitem"
+                    className={`inbox-row${item.id === selectedId ? " active" : ""}${
+                      item.read_at ? "" : " unread"
+                    }`}
+                    onClick={() => select(item.id)}
+                  >
                     <span
-                      className={`inbox-status-dot inbox-status-${item.status}`}
+                      className={`inbox-lamp inbox-status-${item.status}`}
                       aria-label={item.status}
                     />
-                  </span>
-                  <span className="inbox-list-item-bottom">
-                    {item.from_label ? (
-                      <span className="inbox-list-from">{item.from_label}</span>
-                    ) : null}
-                    <span className="inbox-list-time">
-                      {new Date(item.updated_at).toLocaleString()}
+                    <span className="inbox-row-main">
+                      <span className="inbox-row-line">
+                        <span className="inbox-row-from">
+                          {item.from_label ?? "unknown"}
+                        </span>
+                        <span className="inbox-row-time">
+                          {relativeTime(item.updated_at)}
+                        </span>
+                      </span>
+                      <span className="inbox-row-subject">{item.subject}</span>
+                      {chips.length > 0 ? (
+                        <span className="inbox-row-tags">
+                          {chips.map((chip) => (
+                            <span
+                              key={chip.key}
+                              className={`inbox-row-tag${chip.pending ? " pending" : ""}`}
+                            >
+                              {chip.label}
+                            </span>
+                          ))}
+                        </span>
+                      ) : null}
                     </span>
-                  </span>
-                </button>
-              ))}
+                    {item.read_at ? null : (
+                      <span className="inbox-row-unread" aria-label="unread" />
+                    )}
+                  </button>
+                );
+              })}
               {hasMore ? (
                 <button
                   type="button"
-                  className="secondary inbox-load-more"
+                  className="inbox-load-more"
                   onClick={loadMore}
                   disabled={loading}
                 >
@@ -331,7 +441,10 @@ function InboxPageInner() {
                 />
               </>
             ) : (
-              <p className="inbox-empty">Select an item to view it.</p>
+              <div className="inbox-empty inbox-empty-select">
+                <EnvelopeGlyph />
+                <p>Select an item to read it</p>
+              </div>
             )}
           </div>
         </div>

@@ -15,6 +15,7 @@ import { SharedApprovalCard } from "@/components/ApprovalCard";
 import { submitInboxBlock, type InboxBlockSubmit } from "@/lib/api";
 import type {
   InboxApprovalAnswer,
+  InboxAttachmentRef,
   InboxBlock,
   InboxItem,
   InboxQuestionAnswer,
@@ -120,6 +121,10 @@ function InboxBlockRow({
     block.type === "question" ? block.answer?.other ?? "" : "",
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // The reply's persisted attachments as of the last successful submit. Carried
+  // forward on the next edit so a re-submit landing before the WS refresh (when
+  // the `block.reply` prop is still stale) can't drop just-sent files.
+  const sentReplyAttachmentsRef = useRef<InboxAttachmentRef[] | null>(null);
 
   const answered = blockAnswered(block);
   // A pending question keeps its composer open — the Submit control lives
@@ -173,17 +178,23 @@ function InboxBlockRow({
         session_id: item.from_session_id,
         attachment_id: attachmentId,
       }));
+      // Editing replaces the single reply, so carry the existing reply's
+      // attachments forward — a notes-only edit must not drop prior files.
+      // Prefer the last-sent set (ref) over the prop, which lags the WS refresh.
+      const prior =
+        sentReplyAttachmentsRef.current ?? block.reply?.attachments ?? [];
       body.reply = {
         notes: trimmed || null,
-        // Editing replaces the single reply, so carry the existing reply's
-        // attachments forward — a notes-only edit must not drop prior files.
-        attachments: [...(block.reply?.attachments ?? []), ...newAttachments],
+        attachments: [...prior, ...newAttachments],
       };
     }
     setSubmitting(true);
     setError(null);
     try {
       await submitInboxBlock(host, token, item.id, block.id, body);
+      if (body.reply) {
+        sentReplyAttachmentsRef.current = body.reply.attachments ?? [];
+      }
       // Drop the pinned reply blobs from the orphan set so the hook's
       // unmount/pagehide cleanup can't delete them out from under the lead.
       attachments.clear();

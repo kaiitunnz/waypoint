@@ -14637,11 +14637,13 @@ html[data-theme="light"] .wp-hl {
   /* Desktop traps scroll inside a fixed-100dvh shell with independent per-pane
      overflow — which fights the mobile URL-bar collapse and double-scrolls. On
      mobile, release the cap and let the document scroll as one; the single
-     visible pane grows with its content. */
+     visible pane grows with its content. The document scrolls as one here, so
+     keep the fuller trailing margin the desktop split view trims away. */
   .inbox-shell {
     height: auto;
     overflow: visible;
     grid-template-rows: auto;
+    padding-bottom: calc(40px + env(safe-area-inset-bottom));
   }
 
   .inbox-item-pane,
@@ -14660,12 +14662,6 @@ html[data-theme="light"] .wp-hl {
 
   .inbox-mobile-back {
     display: inline-flex;
-  }
-
-  /* The document scrolls as one on mobile, so keep the fuller trailing margin
-     the desktop split view trims away. */
-  .inbox-shell {
-    padding-bottom: calc(40px + env(safe-area-inset-bottom));
   }
 
   .inbox-dock {

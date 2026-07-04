@@ -14491,6 +14491,19 @@ html[data-theme="light"] .wp-hl {
   flex-wrap: wrap;
 }
 
+/* Push Save/Cancel to the trailing edge, Attach stays leading. */
+.inbox-reply-actions-spacer {
+  flex: 1 1 auto;
+}
+
+/* Existing reply attachments carried forward while editing, shown read-only
+   above the editable note so the user sees what's preserved. */
+.inbox-reply-carried {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .inbox-attach-btn {
   display: inline-flex;
   align-items: center;

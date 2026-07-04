@@ -126,18 +126,19 @@ function InboxBlockRow({
   // the `block.reply` prop is still stale) can't drop just-sent files.
   const sentReplyAttachmentsRef = useRef<InboxAttachmentRef[] | null>(null);
 
-  const answered = blockAnswered(block);
-  // A pending question keeps its composer open — the Submit control lives
-  // there; every other block reveals it behind an unobtrusive Reply trigger.
-  const [replyOpen, setReplyOpen] = useState(
-    block.type === "question" && !answered,
+  const [decision, setDecision] = useState<string | null>(
+    block.type === "approval" ? (block.answer?.decision ?? null) : null,
   );
-  const hasReplyDraft =
-    notes.trim().length > 0 || attachments.readyIds.length > 0;
 
+  const answered = blockAnswered(block);
   const isDecisionBlock =
     block.type === "question" || block.type === "approval";
   const pending = isDecisionBlock && !answered;
+  const hasCommittedReply = block.reply != null;
+  // Unanswered decision blocks open straight into edit mode (low-friction
+  // first answer); everything else starts read-only behind an Edit/Reply
+  // affordance.
+  const [editing, setEditing] = useState(pending);
   const decisionTag = block.type === "approval" ? "APPROVAL" : "QUESTION";
   let answerEcho = "";
   if (block.type === "approval" && block.answer) {
@@ -166,11 +167,57 @@ function InboxBlockRow({
     });
   }
 
-  async function submit(answer?: InboxQuestionAnswer | InboxApprovalAnswer) {
+  // The answer built from the current edit-mode selection, or undefined when
+  // there's nothing to record. Omitting it (e.g. a required question with no
+  // selection) leaves any existing answer untouched and never sends an empty
+  // answer the backend would reject.
+  function buildAnswer(): InboxQuestionAnswer | InboxApprovalAnswer | undefined {
+    if (block.type === "question") {
+      if (selected.size === 0 && !other.trim()) return undefined;
+      return { selected: Array.from(selected), other: other.trim() || null };
+    }
+    if (block.type === "approval") {
+      return decision ? { decision } : undefined;
+    }
+    return undefined;
+  }
+
+  function startEdit() {
+    // Re-seed from the latest committed values so an edit opens on current
+    // state even if props changed since mount.
+    setSelected(
+      new Set(block.type === "question" ? (block.answer?.selected ?? []) : []),
+    );
+    setOther(block.type === "question" ? (block.answer?.other ?? "") : "");
+    setDecision(block.type === "approval" ? (block.answer?.decision ?? null) : null);
+    setNotes(block.reply?.notes ?? "");
+    setError(null);
+    setEditing(true);
+  }
+
+  function cancel() {
+    // Revert local edits and free any uncommitted (pinned) uploads.
+    setSelected(
+      new Set(block.type === "question" ? (block.answer?.selected ?? []) : []),
+    );
+    setOther(block.type === "question" ? (block.answer?.other ?? "") : "");
+    setDecision(block.type === "approval" ? (block.answer?.decision ?? null) : null);
+    setNotes(block.reply?.notes ?? "");
+    attachments.discardAll();
+    setError(null);
+    setEditing(false);
+  }
+
+  async function save() {
     if (submitting) return;
+    const answer = buildAnswer();
     const trimmed = notes.trim();
     const hasReply = trimmed.length > 0 || attachments.readyIds.length > 0;
-    if (!answer && !hasReply) return;
+    if (!answer && !hasReply) {
+      // Nothing to persist — just leave edit mode.
+      cancel();
+      return;
+    }
     const body: InboxBlockSubmit = {};
     if (answer) body.answer = answer;
     if (hasReply) {
@@ -178,9 +225,9 @@ function InboxBlockRow({
         session_id: item.from_session_id,
         attachment_id: attachmentId,
       }));
-      // Editing replaces the single reply, so carry the existing reply's
-      // attachments forward — a notes-only edit must not drop prior files.
-      // Prefer the last-sent set (ref) over the prop, which lags the WS refresh.
+      // The single reply is replaced on submit, so carry the existing reply's
+      // attachments forward — an edit must not drop prior files. Prefer the
+      // last-sent set (ref) over the prop, which lags the WS refresh.
       const prior =
         sentReplyAttachmentsRef.current ?? block.reply?.attachments ?? [];
       body.reply = {
@@ -198,9 +245,8 @@ function InboxBlockRow({
       // Drop the pinned reply blobs from the orphan set so the hook's
       // unmount/pagehide cleanup can't delete them out from under the lead.
       attachments.clear();
-      // Reflect the persisted reply (WS refresh updates block.reply too) rather
-      // than blanking the box after an edit.
       setNotes(trimmed);
+      setEditing(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to submit");
     } finally {
@@ -234,9 +280,11 @@ function InboxBlockRow({
     setDragActive(true);
   }
 
-  const questionSubmitEnabled =
-    block.type === "question" &&
-    (selected.size > 0 || other.trim().length > 0 || hasReplyDraft);
+  const canSave =
+    !!buildAnswer() ||
+    notes.trim().length > 0 ||
+    attachments.readyIds.length > 0;
+  const editTrigger = pending ? "Answer" : hasCommittedReply || answered ? "Edit" : "Reply";
 
   return (
     <section className={`inbox-block${pending ? " pending" : ""}`}>
@@ -249,7 +297,7 @@ function InboxBlockRow({
             <span className="inbox-lamp" aria-hidden="true" />
             {pending ? "Pending" : "Answered"}
           </span>
-          {!pending && answerEcho ? (
+          {!editing && answered && answerEcho ? (
             <span className="inbox-block-echo">{answerEcho}</span>
           ) : null}
         </div>
@@ -269,7 +317,7 @@ function InboxBlockRow({
             other={other}
             onToggle={toggle}
             onOtherChange={setOther}
-            disabled={answered}
+            disabled={!editing}
           />
         ) : null}
         {block.type === "approval" ? (
@@ -277,14 +325,14 @@ function InboxBlockRow({
             badge="approval"
             copyText={block.prompt}
             actions={
-              answered
-                ? []
-                : block.options.map((option, index) => ({
+              editing
+                ? block.options.map((option) => ({
                     id: option,
                     label: option,
-                    className: index === 0 ? "primary" : "secondary",
-                    onSelect: () => submit({ decision: option }),
+                    className: option === decision ? "primary" : "secondary",
+                    onSelect: () => setDecision(option),
                   }))
+                : []
             }
           >
             <p className="approval-prompt">{block.prompt}</p>
@@ -292,105 +340,101 @@ function InboxBlockRow({
         ) : null}
       </div>
 
-      {block.reply ? (
-        <div className="inbox-reply-shown">
-          <span className="inbox-reply-shown-label">Your reply</span>
-          {block.reply.notes ? (
-            <p className="inbox-reply-shown-notes">{block.reply.notes}</p>
-          ) : null}
-          <InboxAttachments
-            host={host}
-            token={token}
-            refs={block.reply.attachments}
-          />
-        </div>
-      ) : null}
-
-      <div className="inbox-block-foot">
-        {replyOpen ? (
-          <div
-            className={`inbox-reply${dragActive ? " dragging" : ""}`}
-            onDrop={onDrop}
-            onDragOver={onDragOver}
-            onDragLeave={() => setDragActive(false)}
-          >
-            <textarea
-              className="inbox-reply-input"
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              onPaste={onPaste}
-              placeholder="Write a reply — paste or drop an image to attach…"
-              rows={2}
-              disabled={submitting}
-            />
-            <AttachmentTray
-              items={attachments.items}
-              onRemove={attachments.remove}
-              onRetry={attachments.retry}
-              onClear={attachments.discardAll}
-            />
-            <div className="inbox-reply-actions">
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                hidden
-                onChange={(event) => onFilesPicked(event.target.files)}
+      {editing ? (
+        <div
+          className={`inbox-reply${dragActive ? " dragging" : ""}`}
+          onDrop={onDrop}
+          onDragOver={onDragOver}
+          onDragLeave={() => setDragActive(false)}
+        >
+          {block.reply?.attachments && block.reply.attachments.length > 0 ? (
+            <div className="inbox-reply-carried">
+              <span className="inbox-reply-shown-label">Attached</span>
+              <InboxAttachments
+                host={host}
+                token={token}
+                refs={block.reply.attachments}
               />
-              <button
-                type="button"
-                className="secondary inbox-attach-btn"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={submitting}
-              >
-                <PaperclipIcon />
-                Attach
-              </button>
-              {block.type === "question" && !answered ? (
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={submitting || !questionSubmitEnabled}
-                  onClick={() =>
-                    void submit(
-                      selected.size > 0 || other.trim().length > 0
-                        ? {
-                            selected: Array.from(selected),
-                            other: other.trim() || null,
-                          }
-                        : undefined,
-                    )
-                  }
-                >
-                  {submitting ? "Sending…" : "Submit"}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={submitting || !hasReplyDraft || attachments.uploading}
-                  onClick={() => void submit()}
-                >
-                  {submitting
-                    ? "Sending…"
-                    : block.reply
-                      ? "Update reply"
-                      : "Send reply"}
-                </button>
-              )}
             </div>
-            {error ? <p className="inbox-block-error">{error}</p> : null}
+          ) : null}
+          <textarea
+            className="inbox-reply-input"
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            onPaste={onPaste}
+            placeholder="Write a reply — paste or drop an image to attach…"
+            rows={2}
+            disabled={submitting}
+          />
+          <AttachmentTray
+            items={attachments.items}
+            onRemove={attachments.remove}
+            onRetry={attachments.retry}
+            onClear={attachments.discardAll}
+          />
+          <div className="inbox-reply-actions">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              onChange={(event) => onFilesPicked(event.target.files)}
+            />
+            <button
+              type="button"
+              className="secondary inbox-attach-btn"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={submitting}
+            >
+              <PaperclipIcon />
+              Attach
+            </button>
+            <span className="inbox-reply-actions-spacer" />
+            <button
+              type="button"
+              className="secondary"
+              onClick={cancel}
+              disabled={submitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={submitting || !canSave || attachments.uploading}
+              onClick={() => void save()}
+            >
+              {submitting ? "Saving…" : "Save"}
+            </button>
           </div>
-        ) : (
-          <button
-            type="button"
-            className="inbox-reply-trigger"
-            onClick={() => setReplyOpen(true)}
-          >
-            {block.reply ? "Edit reply" : "Reply"}
-          </button>
-        )}
-      </div>
+          {error ? <p className="inbox-block-error">{error}</p> : null}
+        </div>
+      ) : (
+        <>
+          {block.reply ? (
+            <div className="inbox-reply-shown">
+              <span className="inbox-reply-shown-label">Your reply</span>
+              {block.reply.notes ? (
+                <p className="inbox-reply-shown-notes">{block.reply.notes}</p>
+              ) : null}
+              <InboxAttachments
+                host={host}
+                token={token}
+                refs={block.reply.attachments}
+              />
+            </div>
+          ) : null}
+          <div className="inbox-block-foot">
+            <button
+              type="button"
+              className="inbox-reply-trigger"
+              onClick={startEdit}
+            >
+              {editTrigger}
+            </button>
+          </div>
+        </>
+      )}
     </section>
   );
 }

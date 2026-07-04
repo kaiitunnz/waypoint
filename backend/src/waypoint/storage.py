@@ -971,8 +971,8 @@ class Storage:
     def delete_inbox_items(self, item_ids: list[str]) -> list[str]:
         # Batch delete by id. Returns the subset that actually existed (so the
         # runtime fans a ``deleted`` broadcast only for real removals). Chunked
-        # under SQLite's ~999 bound-variable limit; whole thing is one lock hold
-        # but committed per chunk (SELECT-then-DELETE each chunk is atomic).
+        # under SQLite's ~999 bound-variable limit; the whole batch is one lock
+        # hold with a single trailing commit (all-or-nothing across chunks).
         unique_ids = list(dict.fromkeys(item_ids))
         deleted: list[str] = []
         for start in range(0, len(unique_ids), 500):

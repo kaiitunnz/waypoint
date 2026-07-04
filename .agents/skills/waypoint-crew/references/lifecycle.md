@@ -7,6 +7,13 @@ the next phase start, and whether it carries a **human checkpoint**. The lead
 runs the phases in order but loops back freely — QA findings and new backlog
 items re-enter earlier phases.
 
+A **human checkpoint** is the one place the lead pauses for the *user* (the
+board and direct sends only reach other sessions). Surface it through the inbox:
+post the artifact as an approval item, wait until it resolves, and read the
+decision back into the phase's `approved=` cell — the CLI mechanics are in the
+`waypoint` skill's `references/inbox.md`. Between checkpoints the crew runs
+autonomously.
+
 Small products compress this: several phases can be a single lead turn. Do not
 run a heavyweight seven-phase process on a thin slice.
 

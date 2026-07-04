@@ -125,7 +125,9 @@ class AttachmentStore:
         stored_name = _write_unique(session_dir, clean_name, data)
         spec = AttachmentSpec(
             id=attachment_id,
-            filename=clean_name,
+            # The de-duplicated on-disk name, so the filename shown/downloaded
+            # matches the stored blob and colliding uploads never share a name.
+            filename=stored_name,
             mime=mime,
             size=len(data),
             kind=_kind_for(mime),

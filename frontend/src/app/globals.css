@@ -14040,7 +14040,17 @@ html[data-theme="light"] .wp-hl {
     border-color 0.12s ease;
 }
 
-.inbox-row-wrap:hover .inbox-row-delete,
+/* Hover-reveal only on real pointer devices. On touch, :hover is sticky — the
+   first tap would reveal the button instead of opening the item (double-tap
+   trap); there, deletion is the swipe gesture. Keyboard focus reveals it
+   everywhere for a11y. */
+@media (hover: hover) and (pointer: fine) {
+  .inbox-row-wrap:hover .inbox-row-delete {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 .inbox-row-delete:focus-visible {
   opacity: 1;
   pointer-events: auto;

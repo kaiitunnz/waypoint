@@ -6,10 +6,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import { InboxItemPane } from "@/components/InboxItemPane";
+import { InboxRow } from "@/components/InboxRow";
 import { SearchInput } from "@/components/SearchInput";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   connectSessionsSocket,
+  deleteInboxItem,
   fetchInboxList,
   isAuthError,
 } from "@/lib/api";
@@ -294,6 +296,22 @@ function InboxPageInner() {
     router.replace("/inbox", { scroll: false });
   }, [router]);
 
+  const handleRowDelete = useCallback(
+    async (id: string) => {
+      try {
+        await deleteInboxItem(host, token, id);
+        // The inbox_update {deleted} WS event also removes it; this is a
+        // belt-and-braces immediate removal. Only clear selection if the
+        // deleted row was the open one.
+        setItems((prev) => prev.filter((it) => it.id !== id));
+        if (id === selectedId) handleDeleted();
+      } catch (err) {
+        if (isAuthError(err)) handleAuthFailure();
+      }
+    },
+    [host, token, selectedId, handleDeleted, handleAuthFailure],
+  );
+
   return (
     <div className="page-shell inbox-shell">
       <header className="app-bar">
@@ -361,51 +379,17 @@ function InboxPageInner() {
                   <p>Nothing here</p>
                 </div>
               ) : null}
-              {items.map((item) => {
-                const chips = blockChips(item);
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    role="listitem"
-                    className={`inbox-row${item.id === selectedId ? " active" : ""}${
-                      item.read_at ? "" : " unread"
-                    }`}
-                    onClick={() => select(item.id)}
-                  >
-                    <span
-                      className={`inbox-lamp inbox-status-${item.status}`}
-                      aria-label={item.status}
-                    />
-                    <span className="inbox-row-main">
-                      <span className="inbox-row-line">
-                        <span className="inbox-row-from">
-                          {item.from_label ?? "unknown"}
-                        </span>
-                        <span className="inbox-row-time">
-                          {relativeTime(item.updated_at)}
-                        </span>
-                      </span>
-                      <span className="inbox-row-subject">{item.subject}</span>
-                      {chips.length > 0 ? (
-                        <span className="inbox-row-tags">
-                          {chips.map((chip) => (
-                            <span
-                              key={chip.key}
-                              className={`inbox-row-tag${chip.pending ? " pending" : ""}`}
-                            >
-                              {chip.label}
-                            </span>
-                          ))}
-                        </span>
-                      ) : null}
-                    </span>
-                    {item.read_at ? null : (
-                      <span className="inbox-row-unread" aria-label="unread" />
-                    )}
-                  </button>
-                );
-              })}
+              {items.map((item) => (
+                <InboxRow
+                  key={item.id}
+                  item={item}
+                  active={item.id === selectedId}
+                  chips={blockChips(item)}
+                  timeLabel={relativeTime(item.updated_at)}
+                  onSelect={select}
+                  onDelete={handleRowDelete}
+                />
+              ))}
               {hasMore ? (
                 <button
                   type="button"

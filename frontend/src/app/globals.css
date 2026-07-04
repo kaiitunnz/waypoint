@@ -13953,18 +13953,36 @@ html[data-theme="light"] .wp-hl {
 }
 
 /* ── List rows: dense, hairline-separated, flat ── */
+/* Row wrapper hosts the swipe-reveal delete panel behind the row and the
+   hover/focus delete button above it — the row itself is a sibling, never a
+   parent of another button. */
+.inbox-row-wrap {
+  position: relative;
+  overflow: hidden;
+}
+
 .inbox-row {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: flex-start;
   gap: 11px;
   padding: 12px 14px;
   border: none;
   border-bottom: 1px solid var(--line);
-  background: transparent;
+  /* Opaque so it fully covers the delete panel until swiped. */
+  background: var(--bg-card);
   text-align: left;
   cursor: pointer;
   min-width: 0;
   width: 100%;
+  touch-action: pan-y;
+  transition:
+    background 0.12s ease,
+    transform 0.18s ease;
+}
+
+.inbox-row.swiping {
   transition: background 0.12s ease;
 }
 
@@ -13974,6 +13992,70 @@ html[data-theme="light"] .wp-hl {
 
 .inbox-row.active {
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+}
+
+/* Swipe-reveal panel (touch): a flat danger tint uncovered as the row slides
+   left. Visual only — the accessible control is .inbox-row-delete. */
+.inbox-row-delete-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  padding: 0 18px;
+  font-family: var(--font-mono-face);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg-card));
+}
+
+/* Keyboard/desktop delete: hidden until the row is hovered or the button is
+   focused, so it's reachable without the gesture. */
+.inbox-row-delete {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  z-index: 2;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.inbox-row-wrap:hover .inbox-row-delete,
+.inbox-row-delete:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.inbox-row-delete:hover,
+.inbox-row-delete:focus-visible {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inbox-row {
+    transition: background 0.12s ease;
+  }
 }
 
 .inbox-lamp {

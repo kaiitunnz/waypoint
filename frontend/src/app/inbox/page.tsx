@@ -332,13 +332,12 @@ function InboxPageInner() {
                 placeholder="Search inbox…"
                 showStatusExample={false}
               />
-              <div className="inbox-tabs" role="tablist" aria-label="Filter inbox">
+              <div className="inbox-tabs" role="group" aria-label="Filter inbox">
                 {STATUS_FILTERS.map((filter) => (
                   <button
                     key={filter.id}
                     type="button"
-                    role="tab"
-                    aria-selected={status === filter.id}
+                    aria-pressed={status === filter.id}
                     className={`inbox-tab${status === filter.id ? " active" : ""}`}
                     onClick={() => setStatus(filter.id)}
                   >

@@ -287,6 +287,85 @@ async def test_delete_removes_item(tmp_path: Path) -> None:
     assert again.status_code == 404
 
 
+async def _post_item(
+    client: httpx.AsyncClient, token: str, subject: str
+) -> dict[str, Any]:
+    resp = await client.post(
+        "/api/inbox",
+        json={"subject": subject, "blocks": [_question_block()]},
+        headers=_auth(token),
+    )
+    return resp.json()["item"]
+
+
+async def _resolve(client: httpx.AsyncClient, token: str, item: dict[str, Any]) -> None:
+    block_id = item["blocks"][0]["id"]
+    await client.post(
+        f"/api/inbox/{item['id']}/blocks/{block_id}",
+        json={"answer": {"selected": ["yes"]}},
+        headers=_auth(token),
+    )
+
+
+async def test_batch_delete_removes_known_ids(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        a = await _post_item(client, token, "a")
+        b = await _post_item(client, token, "b")
+        c = await _post_item(client, token, "c")
+
+        resp = await client.post(
+            "/api/inbox/batch-delete",
+            json={"item_ids": [a["id"], c["id"], "ghost"]},
+            headers=_auth(token),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert set(body["deleted_ids"]) == {a["id"], c["id"]}
+        assert body["count"] == 2
+
+        assert (
+            await client.get(f"/api/inbox/{a['id']}", headers=_auth(token))
+        ).status_code == 404
+        assert (
+            await client.get(f"/api/inbox/{b['id']}", headers=_auth(token))
+        ).status_code == 200
+
+
+async def test_batch_delete_empty_list(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        await _post_item(client, token, "a")
+        resp = await client.post(
+            "/api/inbox/batch-delete", json={"item_ids": []}, headers=_auth(token)
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"deleted_ids": [], "count": 0}
+        count = await client.get("/api/inbox/unresolved-count", headers=_auth(token))
+    assert count.json()["unresolved_count"] == 1
+
+
+async def test_delete_resolved_leaves_open(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        open_item = await _post_item(client, token, "open")
+        res_a = await _post_item(client, token, "res-a")
+        res_b = await _post_item(client, token, "res-b")
+        await _resolve(client, token, res_a)
+        await _resolve(client, token, res_b)
+
+        resp = await client.post("/api/inbox/delete-resolved", headers=_auth(token))
+        assert resp.status_code == 200
+        assert set(resp.json()["deleted_ids"]) == {res_a["id"], res_b["id"]}
+
+        assert (
+            await client.get(f"/api/inbox/{open_item['id']}", headers=_auth(token))
+        ).status_code == 200
+        # Idempotent once the resolved folder is empty.
+        again = await client.post("/api/inbox/delete-resolved", headers=_auth(token))
+    assert again.json() == {"deleted_ids": [], "count": 0}
+
+
 # ── WebSocket stream (drives ``inbox wait``) ──────────────────────────
 
 

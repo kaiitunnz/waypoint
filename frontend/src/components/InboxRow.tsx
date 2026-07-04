@@ -45,6 +45,18 @@ export function InboxRow({
     setDx(value);
   }
 
+  // Both delete paths (swipe past threshold, hover-button click) confirm first
+  // — deletion is irreversible — matching the item pane's wording.
+  function requestDelete() {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm("Delete this inbox item? This cannot be undone.")
+    ) {
+      return;
+    }
+    onDelete(item.id);
+  }
+
   function onPointerDown(event: PointerEvent<HTMLButtonElement>) {
     if (event.pointerType === "mouse" && event.button !== 0) return;
     start.current = { x: event.clientX, y: event.clientY };
@@ -76,7 +88,7 @@ export function InboxRow({
       setSwiping(false);
       const passed = Math.abs(dxRef.current) >= DELETE_THRESHOLD;
       setOffset(0);
-      if (passed) onDelete(item.id);
+      if (passed) requestDelete();
     }
     start.current = null;
     axis.current = "none";
@@ -143,18 +155,7 @@ export function InboxRow({
         type="button"
         className="inbox-row-delete"
         aria-label={`Delete ${item.subject}`}
-        onClick={() => {
-          // A single click is easy to misfire on an irreversible delete, so it
-          // confirms like the item pane's button; the swipe gesture stays
-          // confirm-free since its distance threshold is the safeguard.
-          if (
-            typeof window !== "undefined" &&
-            !window.confirm("Delete this inbox item?")
-          ) {
-            return;
-          }
-          onDelete(item.id);
-        }}
+        onClick={requestDelete}
       >
         <TrashIcon />
       </button>

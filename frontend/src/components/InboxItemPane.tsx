@@ -102,7 +102,10 @@ export function InboxItemPane({
   }, [host, token, itemId, onAuthFailure]);
 
   const handleDelete = useCallback(() => {
-    if (typeof window !== "undefined" && !window.confirm("Delete this inbox item?")) {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm("Delete this inbox item? This cannot be undone.")
+    ) {
       return;
     }
     deleteInboxItem(host, token, itemId)

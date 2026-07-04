@@ -458,6 +458,10 @@ export type InboxBlockType = "markdown" | "attachment" | "question" | "approval"
 export interface InboxAttachmentRef {
   session_id: string;
   attachment_id: string;
+  // Denormalized by the backend at post/submit time so the name renders inline
+  // without a per-session lookup; null for an unresolvable ref (or legacy rows).
+  filename?: string | null;
+  kind?: AttachmentKind | null;
 }
 
 export interface InboxReply {

@@ -1,54 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-import { attachmentUrl, fetchSessionAttachments } from "@/lib/api";
-import type { InboxAttachmentRef, SessionAttachment } from "@/lib/types";
+import { attachmentUrl } from "@/lib/api";
+import type { InboxAttachmentRef } from "@/lib/types";
 
-// One fetch per (host, session) shared across every attachment instance: an
-// inbox ref is only {session_id, attachment_id}, so the filename/kind are
-// resolved from the session's attachment specs. The cached promise resolves to
-// an empty map on error (e.g. the requester session is gone) so consumers fall
-// back to the id without an unhandled rejection.
-const specCache = new Map<string, Promise<Map<string, SessionAttachment>>>();
-
-function loadSpecs(
-  host: string,
-  token: string,
-  sessionId: string,
-): Promise<Map<string, SessionAttachment>> {
-  const key = `${host}::${sessionId}`;
-  let entry = specCache.get(key);
-  if (!entry) {
-    entry = fetchSessionAttachments(host, token, sessionId)
-      .then((list) => new Map(list.map((spec) => [spec.id, spec])))
-      .catch(() => new Map<string, SessionAttachment>());
-    specCache.set(key, entry);
-  }
-  return entry;
-}
-
-function useAttachmentSpec(
-  host: string,
-  token: string,
-  ref: InboxAttachmentRef,
-): SessionAttachment | undefined {
-  const [spec, setSpec] = useState<SessionAttachment | undefined>(undefined);
-  useEffect(() => {
-    let active = true;
-    loadSpecs(host, token, ref.session_id).then((specs) => {
-      if (active) setSpec(specs.get(ref.attachment_id));
-    });
-    return () => {
-      active = false;
-    };
-  }, [host, token, ref.session_id, ref.attachment_id]);
-  return spec;
-}
-
-// Renders an inbox attachment ref, resolving the uploaded filename and kind
-// from the session's attachment specs (falling back to the id + an optimistic
-// thumbnail while unresolved). Mirrors AttachmentTray's MessageAttachmentCard.
+// Renders an inbox attachment ref. The backend denormalizes filename/kind onto
+// the ref at post/submit time, so the name renders inline with no per-session
+// lookup (mirrors how a chat message carries its attachment specs). Falls back
+// to the id + an optimistic thumbnail for an unresolved ref (e.g. legacy rows
+// or a since-deleted attachment).
 export function InboxAttachment({
   host,
   token,
@@ -59,16 +20,17 @@ export function InboxAttachment({
   attachmentRef: InboxAttachmentRef;
 }) {
   const [imageBroken, setImageBroken] = useState(false);
-  const spec = useAttachmentSpec(host, token, attachmentRef);
   const url = attachmentUrl(
     host,
     token,
     attachmentRef.session_id,
     attachmentRef.attachment_id,
   );
-  const name = spec?.filename ?? attachmentRef.attachment_id;
+  const name = attachmentRef.filename ?? attachmentRef.attachment_id;
   // Glyph for a known non-image, or when an optimistic image fails to load.
-  const showGlyph = imageBroken || (spec != null && spec.kind !== "image");
+  const showGlyph =
+    imageBroken ||
+    (attachmentRef.kind != null && attachmentRef.kind !== "image");
 
   return (
     <a

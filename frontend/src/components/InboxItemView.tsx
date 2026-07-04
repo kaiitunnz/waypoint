@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 
 import {
   AttachmentTray,
+  filesFromDataTransfer,
   PaperclipIcon,
   useAttachments,
 } from "@/components/AttachmentTray";
@@ -105,8 +106,12 @@ function InboxBlockRow({
     pin: true,
     onError: setError,
   });
-  const [notes, setNotes] = useState("");
+  // Pre-fill with the existing reply so a re-submit visibly edits that one
+  // reply instead of silently overwriting an invisible prior (single reply
+  // per block — no thread).
+  const [notes, setNotes] = useState(block.reply?.notes ?? "");
   const [submitting, setSubmitting] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(
     () =>
       new Set(block.type === "question" ? block.answer?.selected ?? [] : []),
@@ -164,12 +169,15 @@ function InboxBlockRow({
     const body: InboxBlockSubmit = {};
     if (answer) body.answer = answer;
     if (hasReply) {
+      const newAttachments = attachments.readyIds.map((attachmentId) => ({
+        session_id: item.from_session_id,
+        attachment_id: attachmentId,
+      }));
       body.reply = {
         notes: trimmed || null,
-        attachments: attachments.readyIds.map((attachmentId) => ({
-          session_id: item.from_session_id,
-          attachment_id: attachmentId,
-        })),
+        // Editing replaces the single reply, so carry the existing reply's
+        // attachments forward — a notes-only edit must not drop prior files.
+        attachments: [...(block.reply?.attachments ?? []), ...newAttachments],
       };
     }
     setSubmitting(true);
@@ -179,7 +187,9 @@ function InboxBlockRow({
       // Drop the pinned reply blobs from the orphan set so the hook's
       // unmount/pagehide cleanup can't delete them out from under the lead.
       attachments.clear();
-      setNotes("");
+      // Reflect the persisted reply (WS refresh updates block.reply too) rather
+      // than blanking the box after an edit.
+      setNotes(trimmed);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to submit");
     } finally {
@@ -191,6 +201,26 @@ function InboxBlockRow({
     const list = files ? Array.from(files) : [];
     if (list.length) attachments.addFiles(list);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = filesFromDataTransfer(event.clipboardData);
+    if (files.length === 0) return;
+    event.preventDefault();
+    attachments.addFiles(files);
+  }
+
+  function onDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setDragActive(false);
+    const files = filesFromDataTransfer(event.dataTransfer);
+    if (files.length) attachments.addFiles(files);
+  }
+
+  function onDragOver(event: DragEvent<HTMLDivElement>) {
+    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+    event.preventDefault();
+    setDragActive(true);
   }
 
   const questionSubmitEnabled =
@@ -267,12 +297,18 @@ function InboxBlockRow({
 
       <div className="inbox-block-foot">
         {replyOpen ? (
-          <div className="inbox-reply">
+          <div
+            className={`inbox-reply${dragActive ? " dragging" : ""}`}
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            onDragLeave={() => setDragActive(false)}
+          >
             <textarea
               className="inbox-reply-input"
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
-              placeholder="Add a reply note (optional)…"
+              onPaste={onPaste}
+              placeholder="Write a reply — paste or drop an image to attach…"
               rows={2}
               disabled={submitting}
             />
@@ -324,7 +360,11 @@ function InboxBlockRow({
                   disabled={submitting || !hasReplyDraft || attachments.uploading}
                   onClick={() => void submit()}
                 >
-                  {submitting ? "Sending…" : "Send reply"}
+                  {submitting
+                    ? "Sending…"
+                    : block.reply
+                      ? "Update reply"
+                      : "Send reply"}
                 </button>
               )}
             </div>
@@ -336,7 +376,7 @@ function InboxBlockRow({
             className="inbox-reply-trigger"
             onClick={() => setReplyOpen(true)}
           >
-            Reply
+            {block.reply ? "Edit reply" : "Reply"}
           </button>
         )}
       </div>

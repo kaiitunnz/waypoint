@@ -14365,6 +14365,15 @@ html[data-theme="light"] .wp-hl {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  border-radius: var(--radius-sm);
+}
+
+/* Drag-active feedback while dropping an image onto the reply — a flat token
+   tint over the opaque block, no glass/shadow. */
+.inbox-reply.dragging {
+  outline: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 3px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
 
 .inbox-reply-input {

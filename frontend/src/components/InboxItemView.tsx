@@ -205,7 +205,11 @@ function InboxBlockRow({
     setNotes(block.reply?.notes ?? "");
     attachments.discardAll();
     setError(null);
-    setEditing(false);
+    // Restore the initial edit state: a never-answered decision block
+    // (pending) stays open/answerable rather than collapsing into a
+    // misleading answered-looking view; everything else returns to its
+    // read-only trigger.
+    setEditing(pending);
   }
 
   async function save() {
@@ -362,7 +366,7 @@ function InboxBlockRow({
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
             onPaste={onPaste}
-            placeholder="Write a reply — paste or drop an image to attach…"
+            placeholder="Write a reply…"
             rows={2}
             disabled={submitting}
           />

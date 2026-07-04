@@ -31,8 +31,8 @@ trusting any flag list reproduced in this skill.
   `references/scheduling.md`.
 - Respond to approval requests or answer a session's question: see
   `references/sessions-approvals.md`.
-- Reach the **human** with a durable checkpoint — post a message the user
-  triages in the inbox UI (a question or an approval) and optionally block until
+- Reach the **human** — post a message the user triages in the inbox UI (ask a
+  question, request an approval, or surface an FYI) and optionally block until
   they answer: see `references/inbox.md`.
 - Handle destructive operations such as reset or termination: see
   `references/destructive-ops.md`.

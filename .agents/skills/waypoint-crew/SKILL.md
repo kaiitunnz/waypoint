@@ -107,8 +107,10 @@ than producing nothing (see `references/lifecycle.md`).
   so reach for them only for a product too large for a single lead to sequence —
   not as a starting structure (`references/org-chart.md`).
 - **Checkpoint, don't drift.** At PRD, architecture, and pre-ship, post the
-  artifact and gate on the user's approval — the lead must not silently redefine
-  the product's scope. Between checkpoints, run autonomously.
+  artifact and gate on the user's approval through the inbox (`inbox post` an
+  approval item, block on `inbox wait`; `references/lifecycle.md`) — the lead
+  must not silently redefine the product's scope. Between checkpoints, run
+  autonomously.
 - **Be inquisitive about environmental choices.** Settle each role's model and an
   auto-approving permission mode before spawning — a guessed mode stalls the
   session on its first approval and a wrong model id dies on turn 1. Pass ids verbatim from `waypoint

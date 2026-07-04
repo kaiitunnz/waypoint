@@ -24,6 +24,10 @@ two mechanisms, and picking the right one matters:
 Rule of thumb: one specific session must act now → direct send. Otherwise (no
 single recipient, not urgent, should persist, or the target is busy) → board.
 
+Both reach only **other sessions**. To ask the **human** something and
+optionally block on their answer, use the inbox (the `waypoint` skill's
+`references/inbox.md`), not a send or board post.
+
 ## Preflight
 
 Confirm the CLI is reachable before relying on it:

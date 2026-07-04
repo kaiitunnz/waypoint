@@ -50,5 +50,6 @@ trusting any flag list reproduced in this skill.
 - When reporting status, include concrete session ids and current statuses.
 - A file outside a session's working directory is invisible in that session's
   file explorer. If the user needs to see it, either keep it in a session cwd (they
-  can open that session) or `sessions upload` it — minding the orphan TTL for
-  anything durable (`references/artifacts.md`).
+  can open that session) or `sessions upload` it — with `--pin` for anything
+  durable, since an unpinned upload is swept after the orphan TTL
+  (`references/artifacts.md`).

@@ -156,9 +156,10 @@ rather than reaping now — a later fix continues a parked worker in place, wher
 reaped one would have to reimport the thread.
 
 A worker's cwd files are user-readable by opening its session, so don't
-bulk-upload them; but reaping removes the worktree, so `sessions upload` (the
-`waypoint` skill's `references/artifacts.md`) anything the user must keep that
-isn't already landed on `wq/$job` or in a durable cwd.
+bulk-upload them; but reaping removes the worktree, so `sessions upload --pin`
+(the `waypoint` skill's `references/artifacts.md`) anything the user must keep
+that isn't already landed on `wq/$job` or in a durable cwd — `--pin` keeps it past
+the orphan sweep.
 
 ## Worker
 

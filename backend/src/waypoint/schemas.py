@@ -630,9 +630,14 @@ class InboxStatus(StrEnum):
 class InboxAttachmentRef(BaseModel):
     # References a blob in an existing session's attachment store. Display
     # ``attachment`` blocks point at the requester's store; reply uploads land
-    # in the requester session (pinned) and are stored the same way.
+    # in the requester session (pinned) and are stored the same way. The
+    # runtime denormalizes ``filename``/``kind`` from the resolved spec at
+    # write time (post/submit) so the UI renders the name inline without a
+    # per-session lookup; both are None for an unresolvable ref.
     session_id: str
     attachment_id: str
+    filename: str | None = None
+    kind: AttachmentKind | None = None
 
 
 class InboxQuestionOption(BaseModel):

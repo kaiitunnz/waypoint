@@ -43,6 +43,8 @@ from waypoint.schemas import (
     EventKind,
     EventRecord,
     EventsPageResponse,
+    InboxAttachmentBlockInput,
+    InboxAttachmentRef,
     InboxBlockInput,
     InboxItem,
     InboxListResponse,
@@ -1619,13 +1621,34 @@ class SessionRuntime:
 
     # ───────────────────────────── Inbox ─────────────────────────────
 
+    def _enrich_inbox_ref(self, ref: InboxAttachmentRef) -> InboxAttachmentRef:
+        # Denormalize the display name/kind from the resolved spec so the UI
+        # renders it inline (no per-session lookup). Backend-authoritative:
+        # overwrite whatever the client sent, and clear both fields when the
+        # attachment can't be resolved so a bogus ref can't carry a fake label.
+        match = self.attachments.resolve(ref.session_id, ref.attachment_id)
+        spec = match[0] if match is not None else None
+        return ref.model_copy(
+            update={
+                "filename": spec.filename if spec else None,
+                "kind": spec.kind if spec else None,
+            }
+        )
+
     async def post_inbox_item(self, request: InboxPostRequest) -> InboxItem:
         from_label: str | None = None
         if request.from_session_id is not None:
             session = self.storage.get_session(request.from_session_id)
             if session is not None:
                 from_label = session.title
-        blocks: list[InboxBlockInput] = list(request.blocks)
+        blocks: list[InboxBlockInput] = [
+            (
+                block.model_copy(update={"ref": self._enrich_inbox_ref(block.ref)})
+                if isinstance(block, InboxAttachmentBlockInput)
+                else block
+            )
+            for block in request.blocks
+        ]
         item = self.storage.create_inbox_item(
             from_session_id=request.from_session_id or "",
             from_label=from_label,
@@ -1659,10 +1682,23 @@ class SessionRuntime:
         answer: dict[str, Any] | None = None,
         reply: InboxReplyInput | None = None,
     ) -> InboxItem | None:
-        item = self.storage.submit_inbox_block(
+        if reply is not None:
+            reply = reply.model_copy(
+                update={
+                    "attachments": [
+                        self._enrich_inbox_ref(ref) for ref in reply.attachments
+                    ]
+                }
+            )
+        result = self.storage.submit_inbox_block(
             item_id, block_id, answer=answer, reply=reply
         )
-        if item is not None:
+        if result is None:
+            return None
+        item, changed = result
+        # A no-op submit (neither answer nor reply) leaves the item untouched;
+        # don't re-broadcast to every client.
+        if changed:
             await self._publish_inbox_update(item)
         return item
 

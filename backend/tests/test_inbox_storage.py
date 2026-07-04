@@ -4,6 +4,7 @@ from waypoint.schemas import (
     InboxApprovalBlockInput,
     InboxAttachmentBlockInput,
     InboxAttachmentRef,
+    InboxItem,
     InboxMarkdownBlockInput,
     InboxQuestionBlock,
     InboxQuestionBlockInput,
@@ -36,6 +37,15 @@ def _approval(required: bool = True) -> InboxApprovalBlockInput:
     )
 
 
+def _submit_ok(storage: Storage, item_id: str, block_id: str, **kwargs) -> InboxItem:
+    # submit_inbox_block returns (item, changed) on success; most tests only
+    # care about the resulting item, so unwrap and assert it wasn't gone.
+    result = storage.submit_inbox_block(item_id, block_id, **kwargs)
+    assert result is not None
+    item, _ = result
+    return item
+
+
 def test_create_assigns_ids_and_starts_open(tmp_path) -> None:
     storage = _storage(tmp_path)
     item = storage.create_inbox_item(
@@ -61,8 +71,7 @@ def test_answering_required_block_resolves_and_bumps_version(tmp_path) -> None:
     item = storage.create_inbox_item("s1", None, "gate", [_question()])
     qid = item.blocks[0].id
 
-    updated = storage.submit_inbox_block(item.id, qid, answer={"selected": ["yes"]})
-    assert updated is not None
+    updated = _submit_ok(storage, item.id, qid, answer={"selected": ["yes"]})
     assert updated.status is InboxStatus.RESOLVED
     assert updated.version == 1
     block = updated.blocks[0]
@@ -77,8 +86,7 @@ def test_optional_only_item_does_not_resolve_on_answer(tmp_path) -> None:
     item = storage.create_inbox_item("s1", None, "fyi+opt", [_question(required=False)])
     qid = item.blocks[0].id
 
-    updated = storage.submit_inbox_block(item.id, qid, answer={"selected": ["no"]})
-    assert updated is not None
+    updated = _submit_ok(storage, item.id, qid, answer={"selected": ["no"]})
     # No required interactive block gates it: stays open, resolves only on read.
     assert updated.status is InboxStatus.OPEN
     assert updated.version == 1
@@ -143,10 +151,7 @@ def test_resolved_is_terminal_no_demotion_on_later_reply(tmp_path) -> None:
     assert storage.unresolved_inbox_count() == 0
 
     bid = item.blocks[0].id
-    replied = storage.submit_inbox_block(
-        item.id, bid, reply=InboxReplyInput(notes="thanks")
-    )
-    assert replied is not None
+    replied = _submit_ok(storage, item.id, bid, reply=InboxReplyInput(notes="thanks"))
     assert replied.status is InboxStatus.RESOLVED  # not demoted back to open
     assert replied.version == read.version + 1  # reply still bumps version
     assert storage.unresolved_inbox_count() == 0
@@ -157,11 +162,11 @@ def test_multi_block_resolution_gates_on_all_required(tmp_path) -> None:
     item = storage.create_inbox_item("s1", None, "two-gate", [_question(), _approval()])
     qid, aid = item.blocks[0].id, item.blocks[1].id
 
-    after_q = storage.submit_inbox_block(item.id, qid, answer={"selected": ["yes"]})
-    assert after_q is not None and after_q.status is InboxStatus.OPEN
+    after_q = _submit_ok(storage, item.id, qid, answer={"selected": ["yes"]})
+    assert after_q.status is InboxStatus.OPEN
 
-    after_a = storage.submit_inbox_block(item.id, aid, answer={"decision": "approve"})
-    assert after_a is not None and after_a.status is InboxStatus.RESOLVED
+    after_a = _submit_ok(storage, item.id, aid, answer={"decision": "approve"})
+    assert after_a.status is InboxStatus.RESOLVED
 
 
 def test_reply_allowed_on_any_block_type(tmp_path) -> None:
@@ -171,10 +176,12 @@ def test_reply_allowed_on_any_block_type(tmp_path) -> None:
     )
     bid = item.blocks[0].id
     ref = InboxAttachmentRef(session_id="s1", attachment_id="a" * 32)
-    updated = storage.submit_inbox_block(
-        item.id, bid, reply=InboxReplyInput(notes="see file", attachments=[ref])
+    updated = _submit_ok(
+        storage,
+        item.id,
+        bid,
+        reply=InboxReplyInput(notes="see file", attachments=[ref]),
     )
-    assert updated is not None
     assert updated.blocks[0].reply is not None
     assert updated.blocks[0].reply.notes == "see file"
     assert updated.blocks[0].reply.attachments[0].attachment_id == "a" * 32
@@ -225,8 +232,7 @@ def test_multi_select_question_accepts_multiple(tmp_path) -> None:
     )
     item = storage.create_inbox_item("s1", None, "gate", [multi])
     bid = item.blocks[0].id
-    updated = storage.submit_inbox_block(item.id, bid, answer={"selected": ["a", "b"]})
-    assert updated is not None
+    updated = _submit_ok(storage, item.id, bid, answer={"selected": ["a", "b"]})
     assert updated.status is InboxStatus.RESOLVED
 
 
@@ -244,10 +250,9 @@ def test_required_question_accepts_other_only_answer(tmp_path) -> None:
     storage = _storage(tmp_path)
     item = storage.create_inbox_item("s1", None, "gate", [_question()])
     bid = item.blocks[0].id
-    updated = storage.submit_inbox_block(
-        item.id, bid, answer={"selected": [], "other": "something else"}
+    updated = _submit_ok(
+        storage, item.id, bid, answer={"selected": [], "other": "something else"}
     )
-    assert updated is not None
     assert updated.status is InboxStatus.RESOLVED
 
 
@@ -255,8 +260,8 @@ def test_optional_question_accepts_empty_answer(tmp_path) -> None:
     storage = _storage(tmp_path)
     item = storage.create_inbox_item("s1", None, "fyi", [_question(required=False)])
     bid = item.blocks[0].id
-    updated = storage.submit_inbox_block(item.id, bid, answer={"selected": []})
-    assert updated is not None  # lenient: optional blocks don't gate
+    updated = _submit_ok(storage, item.id, bid, answer={"selected": []})
+    assert updated.status is InboxStatus.OPEN  # lenient: optional blocks don't gate
 
 
 def test_approval_with_off_menu_decision_raises(tmp_path) -> None:
@@ -279,6 +284,19 @@ def test_submit_on_missing_item_returns_none(tmp_path) -> None:
     assert storage.submit_inbox_block("ghost", "b", answer={"selected": ["y"]}) is None
     assert storage.mark_inbox_read("ghost") is None
     assert storage.get_inbox_item("ghost") is None
+
+
+def test_noop_submit_reports_unchanged_without_bump(tmp_path) -> None:
+    storage = _storage(tmp_path)
+    item = storage.create_inbox_item("s1", None, "gate", [_question()])
+    bid = item.blocks[0].id
+    # Neither answer nor reply: nothing changes, so the runtime can skip the
+    # broadcast and the version must not bump.
+    result = storage.submit_inbox_block(item.id, bid)
+    assert result is not None
+    unchanged, changed = result
+    assert changed is False
+    assert unchanged.version == item.version
 
 
 def test_delete_removes_row(tmp_path) -> None:

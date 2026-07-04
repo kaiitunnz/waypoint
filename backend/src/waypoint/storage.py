@@ -13,7 +13,6 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from waypoint.perf import debug_timer
 from waypoint.schemas import (
-    INBOX_INTERACTIVE_BLOCK_TYPES,
     BoardChannel,
     BoardEntry,
     EventKind,
@@ -144,12 +143,12 @@ def _recompute_inbox_status(blocks: list[InboxBlock]) -> InboxStatus:
     required = [
         block
         for block in blocks
-        if block.type in INBOX_INTERACTIVE_BLOCK_TYPES
-        and getattr(block, "required", False)
+        if isinstance(block, (InboxQuestionBlock, InboxApprovalBlock))
+        and block.required
     ]
     if not required:
         return InboxStatus.OPEN
-    if all(getattr(block, "answer", None) is not None for block in required):
+    if all(block.answer is not None for block in required):
         return InboxStatus.RESOLVED
     return InboxStatus.OPEN
 
@@ -157,8 +156,7 @@ def _recompute_inbox_status(blocks: list[InboxBlock]) -> InboxStatus:
 def _inbox_is_no_action(blocks: list[InboxBlock]) -> bool:
     # True when nothing required gates the item — the resolve-on-read path.
     return not any(
-        block.type in INBOX_INTERACTIVE_BLOCK_TYPES
-        and getattr(block, "required", False)
+        isinstance(block, (InboxQuestionBlock, InboxApprovalBlock)) and block.required
         for block in blocks
     )
 
@@ -859,13 +857,15 @@ class Storage:
         *,
         answer: dict[str, Any] | None = None,
         reply: InboxReplyInput | None = None,
-    ) -> InboxItem | None:
+    ) -> tuple[InboxItem, bool] | None:
         # Atomic read-modify-write on the ``blocks`` JSON: SELECT → mutate the
         # one block (validated against its type) → recompute status (monotonic)
         # → bump version → UPDATE, all under this method's lock (mirrors
-        # ``update_board_entry``). Returns None if the item is gone (→ 404);
-        # raises InboxBlockNotFoundError / InboxBlockTypeError for block-level
-        # problems the API maps to 404 / 422.
+        # ``update_board_entry``). Returns ``(item, changed)`` — ``changed`` is
+        # False for a no-op submit (neither answer nor reply), so the runtime
+        # can skip the broadcast (mirrors ``mark_inbox_read``). Returns None if
+        # the item is gone (→ 404); raises InboxBlockNotFoundError /
+        # InboxBlockTypeError for block-level problems the API maps to 404 / 422.
         row = self.connection.execute(
             "SELECT * FROM inbox_items WHERE id = ?", (item_id,)
         ).fetchone()
@@ -888,7 +888,7 @@ class Storage:
             )
             changed = True
         if not changed:
-            return self._inbox_item_from_row(row)
+            return self._inbox_item_from_row(row), False
         existing_status = InboxStatus(row["status"])
         # Monotonic: resolved is terminal — a later reply/optional answer must
         # never demote a read-resolved item back to open (RFC §7/§13).
@@ -912,7 +912,9 @@ class Storage:
             ),
         )
         self.connection.commit()
-        return self.get_inbox_item(item_id)
+        updated = self.get_inbox_item(item_id)
+        assert updated is not None
+        return updated, True
 
     @_synchronized
     def mark_inbox_read(self, item_id: str) -> tuple[InboxItem, bool] | None:

@@ -73,6 +73,91 @@ async def test_post_and_get_round_trip(tmp_path: Path) -> None:
     assert got.json()["item"]["subject"] == "PRD ready"
 
 
+async def test_attachment_block_ref_is_denormalized(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    spec = app.state.context.runtime.attachments.save(
+        "s1", data=b"\x89PNG\r\n", filename="shot.png", content_type="image/png"
+    )
+    async with _client(app) as client:
+        post = await client.post(
+            "/api/inbox",
+            json={
+                "subject": "with attachment",
+                "from_session_id": "s1",
+                "blocks": [
+                    {
+                        "type": "attachment",
+                        "ref": {"session_id": "s1", "attachment_id": spec.id},
+                    }
+                ],
+            },
+            headers=_auth(token),
+        )
+        assert post.status_code == 200
+        ref = post.json()["item"]["blocks"][0]["ref"]
+    # The runtime resolved the spec at post time so the UI needs no lookup.
+    assert ref["filename"] == spec.filename
+    assert ref["kind"] == "image"
+
+
+async def test_reply_attachment_ref_is_denormalized(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    spec = app.state.context.runtime.attachments.save(
+        "s1", data=b"\x89PNG\r\n", filename="reply.png", content_type="image/png"
+    )
+    async with _client(app) as client:
+        post = await client.post(
+            "/api/inbox",
+            json={
+                "subject": "gate",
+                "from_session_id": "s1",
+                "blocks": [_question_block()],
+            },
+            headers=_auth(token),
+        )
+        item = post.json()["item"]
+        block_id = item["blocks"][0]["id"]
+        submit = await client.post(
+            f"/api/inbox/{item['id']}/blocks/{block_id}",
+            json={
+                "reply": {
+                    "notes": "see file",
+                    "attachments": [{"session_id": "s1", "attachment_id": spec.id}],
+                }
+            },
+            headers=_auth(token),
+        )
+        assert submit.status_code == 200
+        reply = submit.json()["item"]["blocks"][0]["reply"]
+    assert reply["attachments"][0]["filename"] == spec.filename
+    assert reply["attachments"][0]["kind"] == "image"
+
+
+async def test_unresolvable_ref_has_no_denormalized_name(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        post = await client.post(
+            "/api/inbox",
+            json={
+                "subject": "bogus",
+                "from_session_id": "s1",
+                "blocks": [
+                    {
+                        "type": "attachment",
+                        "ref": {"session_id": "s1", "attachment_id": "0" * 32},
+                    }
+                ],
+            },
+            headers=_auth(token),
+        )
+        assert post.status_code == 200
+        ref = post.json()["item"]["blocks"][0]["ref"]
+    # A ref that can't be resolved carries no name — the backend never trusts a
+    # client-supplied label.
+    assert ref["filename"] is None
+    assert ref["kind"] is None
+
+
 async def test_get_missing_is_404(tmp_path: Path) -> None:
     app, token = _build(tmp_path)
     async with _client(app) as client:

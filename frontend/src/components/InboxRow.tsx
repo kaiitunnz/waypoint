@@ -92,7 +92,10 @@ export function InboxRow({
   }
 
   return (
-    <div className="inbox-row-wrap" role="listitem">
+    <div
+      className={`inbox-row-wrap${swiping ? " swiping" : ""}`}
+      role="listitem"
+    >
       <span className="inbox-row-delete-bg" aria-hidden="true">
         <TrashIcon />
         <span>Delete</span>

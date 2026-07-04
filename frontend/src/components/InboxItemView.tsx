@@ -60,9 +60,6 @@ export function InboxItemView({
             {item.read_at ? "read" : "unread"}
           </span>
           <span className="inbox-doc-time">{formatTime(item.created_at)}</span>
-        </div>
-        <div className="inbox-doc-title-row">
-          <h2 className="inbox-doc-subject">{item.subject}</h2>
           {item.from_session_id || onDelete ? (
             <div className="inbox-doc-actions">
               {item.from_session_id ? (
@@ -84,6 +81,9 @@ export function InboxItemView({
               ) : null}
             </div>
           ) : null}
+        </div>
+        <div className="inbox-doc-title-row">
+          <h2 className="inbox-doc-subject">{item.subject}</h2>
         </div>
       </header>
       <div className="inbox-doc-blocks">

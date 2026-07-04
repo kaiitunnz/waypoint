@@ -13881,6 +13881,10 @@ html[data-theme="light"] .wp-hl {
   height: 100dvh;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
+  /* Fill toward the viewport bottom like a mail client: drop the inherited
+     40px page-shell floor to a tight margin so the split view doesn't leave a
+     dead band below it on desktop (mobile restores 40px in the width query). */
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
 }
 
 /* Split view: two columns divided by a single hairline, no gap, independent
@@ -14049,6 +14053,15 @@ html[data-theme="light"] .wp-hl {
     opacity: 1;
     pointer-events: auto;
   }
+}
+
+/* During a swipe the pointer still hovers the row, which would reveal the
+   hover button on top of the swipe panel (two trash affordances at once);
+   suppress it while dragging. Ordered after the hover rule to win at equal
+   specificity. */
+.inbox-row-wrap.swiping .inbox-row-delete {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .inbox-row-delete:focus-visible {
@@ -14308,13 +14321,23 @@ html[data-theme="light"] .wp-hl {
   min-width: 0;
 }
 
-/* Header action cluster: the "Open session" link and Delete, grouped at the
-   trailing edge of the title row. */
+/* Header action cluster: the "Open session" link and Delete ride the trailing
+   edge of the mono meta strip (a masthead control line), so the serif subject
+   below runs full width instead of competing with them. */
 .inbox-doc-actions {
+  margin-left: auto;
   flex: none;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 12px;
+}
+
+/* Faint middot pairs the two actions without reading as more metadata; only
+   drawn when Delete follows the link (single-action cases get no separator). */
+.inbox-doc-actions .inbox-doc-delete:not(:first-child)::before {
+  content: "·";
+  margin-right: 12px;
+  color: color-mix(in srgb, var(--muted-soft) 55%, transparent);
 }
 
 .inbox-doc-delete,
@@ -14639,13 +14662,10 @@ html[data-theme="light"] .wp-hl {
     display: inline-flex;
   }
 
-  /* Stack the header so the serif subject takes the full pane width instead of
-     being squeezed into a narrow column beside the Open-session/Delete cluster
-     (which forced a 5-line wrap on phones); actions drop to their own row. */
-  .inbox-doc-title-row {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
+  /* The document scrolls as one on mobile, so keep the fuller trailing margin
+     the desktop split view trims away. */
+  .inbox-shell {
+    padding-bottom: calc(40px + env(safe-area-inset-bottom));
   }
 
   .inbox-dock {

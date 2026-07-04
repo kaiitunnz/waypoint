@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Source_Serif_4 } from "next/font/google";
 
-import { InboxCountProvider } from "@/components/InboxCountProvider";
 import { SwitcherProvider } from "@/components/SwitcherProvider";
 import { ThemeProvider } from "@/lib/theme";
 import "./globals.css";
@@ -61,9 +60,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       </head>
       <body>
         <ThemeProvider>
-          <SwitcherProvider>
-            <InboxCountProvider>{children}</InboxCountProvider>
-          </SwitcherProvider>
+          <SwitcherProvider>{children}</SwitcherProvider>
         </ThemeProvider>
       </body>
     </html>

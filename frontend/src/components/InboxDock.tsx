@@ -1,48 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  type ReactNode,
-} from "react";
+import { useEffect, useState } from "react";
 
 import { connectSessionsSocket, fetchInboxUnresolvedCount } from "@/lib/api";
-import { readHost, readToken, TOKEN_EVENT } from "@/lib/store";
 import type { SessionEnvelope } from "@/lib/types";
 
-const InboxCountContext = createContext<number>(0);
-
-export function useInboxCount(): number {
-  return useContext(InboxCountContext);
-}
-
-// App-wide unresolved-inbox count. Seeds from the REST count, then tracks the
-// absolute `unresolved_count` carried on every `inbox_update` over the global
-// session socket, re-fetching on (re)connect to close the reconnect gap. Renders
-// the bottom-left inbox floater on every route (only when authenticated).
-export function InboxCountProvider({ children }: { children: ReactNode }) {
-  const pathname = usePathname();
-  const [host, setHost] = useState("");
-  const [token, setToken] = useState("");
+// Bottom-left glass floater with the unresolved-inbox count. Mounted only on
+// the homepage (auth is owned there and passed in), so the count socket lives
+// only while the homepage is mounted. Seeds from the REST count, then tracks
+// the absolute `unresolved_count` on every `inbox_update` over the global
+// session socket, re-fetching on (re)connect to close the reconnect gap.
+export function InboxDock({ host, token }: { host: string; token: string }) {
   const [count, setCount] = useState(0);
-
-  useEffect(() => {
-    const sync = () => {
-      setHost(readHost());
-      setToken(readToken());
-    };
-    sync();
-    window.addEventListener(TOKEN_EVENT, sync);
-    window.addEventListener("storage", sync);
-    return () => {
-      window.removeEventListener(TOKEN_EVENT, sync);
-      window.removeEventListener("storage", sync);
-    };
-  }, []);
 
   useEffect(() => {
     if (!host || !token) {
@@ -98,18 +68,6 @@ export function InboxCountProvider({ children }: { children: ReactNode }) {
     };
   }, [host, token]);
 
-  // No shortcut into the inbox while already in it.
-  const onInboxRoute = pathname?.startsWith("/inbox") ?? false;
-
-  return (
-    <InboxCountContext.Provider value={count}>
-      {children}
-      {token && !onInboxRoute ? <InboxDock count={count} /> : null}
-    </InboxCountContext.Provider>
-  );
-}
-
-function InboxDock({ count }: { count: number }) {
   return (
     <Link className="inbox-dock" href="/inbox" aria-label="Open inbox">
       <span className="inbox-dock-glyph" aria-hidden="true">

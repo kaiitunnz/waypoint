@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from waypoint.backends.base import DefaultLaunchContract
 from waypoint.backends.capabilities import (
@@ -22,6 +22,7 @@ from waypoint.backends.opencode.normalize import historical_events_from_messages
 from waypoint.backends.opencode.pane import composer_ready, composer_submitted
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
 from waypoint.git_meta import GitMeta
+from waypoint.launch_env import LaunchEnv
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import (
     CommandCompletion,
@@ -85,6 +86,9 @@ OPENCODE_REASONING_EFFORTS = (
     "extra high",
     "max",
 )
+
+OpenCodeLaunchEnvKey = tuple[tuple[str, str], ...]
+OpenCodeAdapterKey = tuple[str | None, str, tuple[str, ...], OpenCodeLaunchEnvKey]
 OPENCODE_REASONING_EFFORT_LEVELS = dict(
     (level.lower(), i) for i, level in enumerate(OPENCODE_REASONING_EFFORTS)
 )
@@ -111,6 +115,15 @@ def _ruleset_for_mode(mode: str | None) -> list[dict[str, str]] | None:
     return [{"permission": "*", "pattern": "*", "action": mode}]
 
 
+def _agent_process_env(
+    runtime: "SessionRuntime", backend: str, launch_env: dict[str, str]
+) -> dict[str, str]:
+    merger = getattr(runtime, "_agent_process_env", None)
+    if callable(merger):
+        return merger(backend, launch_env)
+    return dict(launch_env)
+
+
 class OpenCodePluginConfig(PluginConfig):
     pass
 
@@ -124,6 +137,7 @@ class OpenCodeThreadImportRequest(BaseModel):
     # transport (e.g. the tmux wrapper) is rejected with 400 since there is no
     # resume-via-tmux path for OpenCode. ``None`` keeps the native behavior.
     transport: SessionTransportId | None = None
+    launch_env: LaunchEnv = Field(default_factory=dict)
     # When true (default), the prior conversation is replayed into the new
     # session's transcript at import time; when false the transcript starts
     # empty and only the underlying agent resumes its own context.
@@ -180,24 +194,18 @@ class OpenCodePlugin(DefaultLaunchContract):
     )
 
     def __init__(self) -> None:
-        # Adapter key is (launch_target_id, normalized_cwd, extra_args).
-        # Sessions with distinct custom_cli_args get their own server process.
-        self._adapters: dict[
-            tuple[str | None, str, tuple[str, ...]], OpenCodeAdapter
-        ] = {}
+        # Adapter key is (launch_target_id, normalized_cwd, extra_args, env).
+        # Sessions with distinct custom_cli_args or env get their own server process.
+        self._adapters: dict[OpenCodeAdapterKey, OpenCodeAdapter] = {}
         # Per-adapter health (cooldown after death + circuit breaker after
         # repeated launch failures). Keyed identically to ``_adapters`` so
         # one entry survives adapter object replacement.
-        self._health: dict[tuple[str | None, str, tuple[str, ...]], AdapterHealth] = {}
+        self._health: dict[OpenCodeAdapterKey, AdapterHealth] = {}
         # Reconnect tasks keyed on adapter key so a single launch_target
         # never has more than one reconnect loop running concurrently.
-        self._reconnect_tasks: dict[
-            tuple[str | None, str, tuple[str, ...]], asyncio.Task[None]
-        ] = {}
+        self._reconnect_tasks: dict[OpenCodeAdapterKey, asyncio.Task[None]] = {}
         # Sessions tracked by the reconnect loop per adapter key.
-        self._reconnect_targets: dict[
-            tuple[str | None, str, tuple[str, ...]], set[str]
-        ] = {}
+        self._reconnect_targets: dict[OpenCodeAdapterKey, set[str]] = {}
         self._lock = asyncio.Lock()
         self._pending_tasks: set[asyncio.Task[Any]] = set()
         self._shutting_down = False
@@ -250,11 +258,13 @@ class OpenCodePlugin(DefaultLaunchContract):
         launch_target_id: str | None,
         cwd: str | None,
         custom_args: tuple[str, ...] = (),
-    ) -> tuple[str | None, str, tuple[str, ...]]:
+        launch_env: dict[str, str] | None = None,
+    ) -> OpenCodeAdapterKey:
         return (
             launch_target_id,
             self._adapter_cwd(runtime, launch_target_id, cwd),
             custom_args,
+            tuple(sorted((launch_env or {}).items())),
         )
 
     def _find_adapter_for_launch_target(
@@ -280,9 +290,10 @@ class OpenCodePlugin(DefaultLaunchContract):
         launch_target_id: str | None = None,
         cwd: str | None = None,
         custom_args: tuple[str, ...] = (),
+        launch_env: dict[str, str] | None = None,
     ) -> OpenCodeAdapter:
         adapter = self._adapters.get(
-            self._adapter_key(runtime, launch_target_id, cwd, custom_args)
+            self._adapter_key(runtime, launch_target_id, cwd, custom_args, launch_env)
         )
         if adapter is None:
             raise HTTPException(
@@ -316,6 +327,9 @@ class OpenCodePlugin(DefaultLaunchContract):
                             self._effective_args(
                                 runtime, session.launch_target_id, session.args
                             )
+                        ),
+                        launch_env=_agent_process_env(
+                            runtime, self.id, session.launch_env
                         ),
                     )
                     target_mode = adapter.get_pre_plan_mode(session.id) or "default"
@@ -353,9 +367,7 @@ class OpenCodePlugin(DefaultLaunchContract):
                     )
                 )
 
-    def _health_for(
-        self, key: tuple[str | None, str, tuple[str, ...]]
-    ) -> AdapterHealth:
+    def _health_for(self, key: OpenCodeAdapterKey) -> AdapterHealth:
         if key not in self._health:
             self._health[key] = AdapterHealth()
         return self._health[key]
@@ -366,11 +378,14 @@ class OpenCodePlugin(DefaultLaunchContract):
         launch_target_id: str | None,
         cwd: str | None,
         custom_args: tuple[str, ...] = (),
+        launch_env: dict[str, str] | None = None,
         *,
         user_initiated: bool = False,
     ) -> OpenCodeAdapter:
         async with self._lock:
-            key = self._adapter_key(runtime, launch_target_id, cwd, custom_args)
+            key = self._adapter_key(
+                runtime, launch_target_id, cwd, custom_args, launch_env
+            )
             if key in self._adapters:
                 return self._adapters[key]
 
@@ -416,6 +431,7 @@ class OpenCodePlugin(DefaultLaunchContract):
                 on_server_died=_on_server_died,
                 workdir=key[1],
                 extra_args=custom_args,
+                launch_env=dict(key[3]),
             )
             self._adapters[key] = adapter
             return adapter
@@ -423,7 +439,7 @@ class OpenCodePlugin(DefaultLaunchContract):
     def _handle_server_died(
         self,
         runtime: "SessionRuntime",
-        key: tuple[str | None, str, tuple[str, ...]],
+        key: OpenCodeAdapterKey,
         active_session_ids: list[str],
     ) -> None:
         # Synchronous bridge from the adapter's `_on_server_died` into the
@@ -439,7 +455,7 @@ class OpenCodePlugin(DefaultLaunchContract):
     def _ensure_reconnect_task(
         self,
         runtime: "SessionRuntime",
-        key: tuple[str | None, str, tuple[str, ...]],
+        key: OpenCodeAdapterKey,
     ) -> None:
         existing = self._reconnect_tasks.get(key)
         if existing is not None and not existing.done():
@@ -456,7 +472,7 @@ class OpenCodePlugin(DefaultLaunchContract):
     async def _reconnect_loop(
         self,
         runtime: "SessionRuntime",
-        key: tuple[str | None, str, tuple[str, ...]],
+        key: OpenCodeAdapterKey,
     ) -> None:
         # Capped exponential backoff that loops forever until either every
         # tracked session is gone (user deleted them) or the plugin is
@@ -479,7 +495,12 @@ class OpenCodePlugin(DefaultLaunchContract):
                 # really touching SSH. The gate exists to fail-fast
                 # passive HTTP callers, not the loop.
                 adapter = await self._get_or_create_adapter(
-                    runtime, key[0], key[1] or None, key[2], user_initiated=True
+                    runtime,
+                    key[0],
+                    key[1] or None,
+                    key[2],
+                    dict(key[3]),
+                    user_initiated=True,
                 )
                 await adapter.start()
                 health = self._health_for(key)
@@ -511,7 +532,7 @@ class OpenCodePlugin(DefaultLaunchContract):
     async def _restore_after_reconnect(
         self,
         runtime: "SessionRuntime",
-        key: tuple[str | None, str, tuple[str, ...]],
+        key: OpenCodeAdapterKey,
     ) -> None:
         targets = list(self._reconnect_targets.get(key, set()))
         for session_id in targets:
@@ -609,6 +630,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             tuple(
                 self._effective_args(runtime, session.launch_target_id, session.args)
             ),
+            _agent_process_env(runtime, self.id, session.launch_env),
         )
         # Drop this session from any in-flight reconnect-loop target set so
         # an explicit terminate can't be silently undone by a later loop
@@ -638,6 +660,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             tuple(
                 self._effective_args(runtime, session.launch_target_id, session.args)
             ),
+            _agent_process_env(runtime, self.id, session.launch_env),
         )
         health = self._health.get(key)
         if health is not None:
@@ -666,6 +689,7 @@ class OpenCodePlugin(DefaultLaunchContract):
                         runtime, session.launch_target_id, session.args
                     )
                 ),
+                _agent_process_env(runtime, self.id, session.launch_env),
             )
         )
         if adapter is not None:
@@ -724,6 +748,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             tuple(
                 self._effective_args(runtime, session.launch_target_id, session.args)
             ),
+            _agent_process_env(runtime, self.id, session.launch_env),
         )
 
         if mode == "plan":
@@ -779,6 +804,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             tuple(
                 self._effective_args(runtime, session.launch_target_id, session.args)
             ),
+            _agent_process_env(runtime, self.id, session.launch_env),
         )
         success = await adapter.set_model(session.id, model)
         if not success:
@@ -800,6 +826,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             tuple(
                 self._effective_args(runtime, session.launch_target_id, session.args)
             ),
+            _agent_process_env(runtime, self.id, session.launch_env),
         )
         success = await adapter.set_effort(session.id, effort)
         if not success:
@@ -901,6 +928,7 @@ class OpenCodePlugin(DefaultLaunchContract):
                         runtime, session.launch_target_id, session.args
                     )
                 ),
+                _agent_process_env(runtime, self.id, session.launch_env),
             )
             commands = await adapter.list_commands(session.id)
         except Exception:
@@ -1099,6 +1127,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             tuple(
                 self._effective_args(runtime, session.launch_target_id, session.args)
             ),
+            _agent_process_env(runtime, self.id, session.launch_env),
         )
 
         if command == "compact":
@@ -1192,6 +1221,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             tuple(
                 self._effective_args(runtime, session.launch_target_id, session.args)
             ),
+            _agent_process_env(runtime, self.id, session.launch_env),
         )
         request_id = tool_use_id or adapter.current_question_id(session.id)
         if not request_id:
@@ -1253,6 +1283,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             tuple(
                 self._effective_args(runtime, session.launch_target_id, session.args)
             ),
+            _agent_process_env(runtime, self.id, session.launch_env),
         )
         try:
             adapter = await self._get_or_create_adapter(
@@ -1264,6 +1295,7 @@ class OpenCodePlugin(DefaultLaunchContract):
                         runtime, session.launch_target_id, session.args
                     )
                 ),
+                launch_env=_agent_process_env(runtime, self.id, session.launch_env),
             )
         except Exception as exc:
             self._health_for(key).record_failure()
@@ -1330,6 +1362,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             session.launch_target_id,
             session.cwd,
             effective_args,
+            _agent_process_env(runtime, self.id, session.launch_env),
         )
         try:
             adapter = await self._get_or_create_adapter(
@@ -1337,6 +1370,7 @@ class OpenCodePlugin(DefaultLaunchContract):
                 session.launch_target_id,
                 session.cwd,
                 custom_args=effective_args,
+                launch_env=_agent_process_env(runtime, self.id, session.launch_env),
             )
         except Exception as exc:
             self._health_for(key).record_failure()
@@ -1405,6 +1439,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             effort=session.effort,
             args=session.args,
             config_overrides=session.config_overrides,
+            launch_env=session.launch_env,
         )
         runtime.storage.create_session(new_session)
         runtime.storage.clone_events(session.id, new_session_id)
@@ -1526,16 +1561,19 @@ class OpenCodePlugin(DefaultLaunchContract):
                     detail="session already imported",
                 )
 
+        request_launch_env = getattr(request, "launch_env", {})
+        process_env = _agent_process_env(runtime, self.id, request_launch_env)
         # Fetch the session first so the adapter we cache and the
         # SessionRecord we persist agree on cwd. The session already exists
         # on the OpenCode server with whatever directory it was created in;
         # keying the adapter by `requested_cwd` here would orphan it from
         # later `_require_adapter(..., session.cwd)` lookups.
-        fetch_adapter = self._find_adapter_for_launch_target(launch_target_id)
-        if fetch_adapter is None:
-            fetch_adapter = await self._get_or_create_adapter(
-                runtime, launch_target_id, requested_cwd
-            )
+        fetch_adapter = await self._get_or_create_adapter(
+            runtime,
+            launch_target_id,
+            requested_cwd,
+            launch_env=process_env,
+        )
         sess = await fetch_adapter.get_session(opencode_session_id)
         if not sess:
             raise HTTPException(
@@ -1548,7 +1586,9 @@ class OpenCodePlugin(DefaultLaunchContract):
             if isinstance(raw_directory, str) and raw_directory
             else (requested_cwd or ".")
         )
-        adapter = await self._get_or_create_adapter(runtime, launch_target_id, cwd)
+        adapter = await self._get_or_create_adapter(
+            runtime, launch_target_id, cwd, launch_env=process_env
+        )
         session_id = runtime._generate_session_id(self.id)
         session_dir = runtime._session_dir(session_id)
         raw_log = session_dir / "raw.log"
@@ -1573,6 +1613,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             structured_log_path=str(structured_log),
             transport_state={"opencode_session_id": opencode_session_id},
             permission_mode="ask",
+            launch_env=request_launch_env,
         )
         runtime.storage.create_session(session)
         try:
@@ -1633,6 +1674,7 @@ class OpenCodePlugin(DefaultLaunchContract):
         resolved_effort: str | None,
     ) -> SessionRecord:
         launch_target_id = launch_target.id if launch_target else None
+        process_env = _agent_process_env(runtime, self.id, request.launch_env)
         try:
             adapter = await self._get_or_create_adapter(
                 runtime,
@@ -1645,6 +1687,7 @@ class OpenCodePlugin(DefaultLaunchContract):
                         request.args,
                     )
                 ),
+                launch_env=process_env,
             )
         except Exception as exc:
             raise HTTPException(
@@ -1676,6 +1719,7 @@ class OpenCodePlugin(DefaultLaunchContract):
             model=resolved_model,
             effort=resolved_effort,
             args=request.args,
+            launch_env=request.launch_env,
         )
         runtime.storage.create_session(session)
 

@@ -209,6 +209,7 @@ class _FakeRuntime:
         *,
         allocate_tty: bool = False,
         session_id: str | None = None,
+        launch_env: dict[str, str] | None = None,
     ) -> list[str]:
         self.command_calls.append(
             {
@@ -216,6 +217,7 @@ class _FakeRuntime:
                 "args": args,
                 "allocate_tty": allocate_tty,
                 "session_id": session_id,
+                "launch_env": launch_env,
             }
         )
         return [backend, *args]

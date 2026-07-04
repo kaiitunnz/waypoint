@@ -40,6 +40,7 @@ interface LaunchPanelProps {
   token: string;
   defaultBackend: Backend;
   defaultCwd: string;
+  defaultLaunchEnvByBackend: Record<Backend, Record<string, string>>;
   targetLabel: string | null;
   launchTargetId: string | null;
   recentCwds: string[];
@@ -56,6 +57,7 @@ interface LaunchPanelProps {
     transport: SessionTransport | null,
     args: string[],
     configOverrides: string[],
+    launchEnv: Record<string, string>,
     permissionMode: string | null,
   ) => Promise<void>;
   onAttach: (
@@ -69,6 +71,7 @@ interface LaunchPanelProps {
     cwd: string,
     transport: SessionTransport | null,
     importHistory: boolean,
+    launchEnv: Record<string, string>,
   ) => Promise<void>;
   onDeleteThread?: (
     backend: Backend,
@@ -87,6 +90,7 @@ export function LaunchPanel({
   token,
   defaultBackend,
   defaultCwd,
+  defaultLaunchEnvByBackend,
   targetLabel,
   launchTargetId,
   recentCwds,
@@ -104,7 +108,13 @@ export function LaunchPanel({
   onClearCwdError,
 }: LaunchPanelProps) {
   const [mode, setMode] = useState<PanelMode>("new");
-  const form = useLaunchForm({ defaultBackend, defaultCwd, launchTargetId, catalog });
+  const form = useLaunchForm({
+    defaultBackend,
+    defaultCwd,
+    defaultLaunchEnvByBackend,
+    launchTargetId,
+    catalog,
+  });
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [prompt, setPrompt] = useState("");
   const [scheduleTiming, setScheduleTiming] = useState<ScheduleTiming>("delay");
@@ -117,7 +127,7 @@ export function LaunchPanel({
     event.preventDefault();
     setFormBusy(true);
     try {
-      const { args, configOverrides } = form.collectArgs();
+      const { args, configOverrides, launchEnv } = form.collectArgs();
       await onCreate(
         form.backend,
         form.cwd,
@@ -127,6 +137,7 @@ export function LaunchPanel({
         form.transport || null,
         args,
         configOverrides,
+        launchEnv,
         form.permissionMode || null,
       );
       form.setTitle("");
@@ -150,7 +161,7 @@ export function LaunchPanel({
   async function submitSchedule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setScheduleError("");
-    const { args, configOverrides } = form.collectArgs();
+    const { args, configOverrides, launchEnv } = form.collectArgs();
     const payload: ScheduleCreateRequest = {
       backend: form.backend,
       cwd: form.cwd,
@@ -165,6 +176,7 @@ export function LaunchPanel({
       effort: form.effortSupported ? form.effort.trim() || null : null,
       args,
       config_overrides: configOverrides,
+      launch_env: launchEnv,
     };
     if (scheduleTiming === "delay") {
       const minutes = Number.parseFloat(delayMinutes);
@@ -318,6 +330,7 @@ export function LaunchPanel({
           onImportThread={onImportThread}
           onDeleteThread={onDeleteThread}
           catalog={catalog}
+          defaultLaunchEnvByBackend={defaultLaunchEnvByBackend}
         />
       ) : null}
 

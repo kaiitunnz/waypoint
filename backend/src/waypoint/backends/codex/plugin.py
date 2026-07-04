@@ -834,6 +834,9 @@ class CodexPlugin(DefaultLaunchContract):
         effective_config_overrides = self._effective_config_overrides(
             runtime, session.launch_target_id, session.config_overrides
         )
+        process_env = runtime._agent_process_env(
+            self.id, session.launch_env, session_id=new_session_id
+        )
 
         try:
             new_thread_id = await self._require_adapter().fork_session(
@@ -845,11 +848,13 @@ class CodexPlugin(DefaultLaunchContract):
                     session.launch_target_id,
                     custom_args=effective_cli_args,
                     custom_config_overrides=effective_config_overrides,
+                    launch_env=process_env,
                 ),
                 model=session.model,
                 effort=session.effort,
                 custom_args=effective_cli_args,
                 config_overrides=effective_config_overrides,
+                launch_env=process_env,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(
@@ -893,6 +898,7 @@ class CodexPlugin(DefaultLaunchContract):
             effort=session.effort,
             args=session.args,
             config_overrides=session.config_overrides,
+            launch_env=session.launch_env,
         )
         runtime.storage.create_session(new_session)
         runtime.storage.clone_events(session.id, new_session_id)
@@ -939,6 +945,9 @@ class CodexPlugin(DefaultLaunchContract):
         effective_config_overrides = self._effective_config_overrides(
             runtime, session.launch_target_id, session.config_overrides
         )
+        process_env = runtime._agent_process_env(
+            self.id, session.launch_env, session_id=session.id
+        )
         try:
             await self._require_adapter().restore_session(
                 session.id,
@@ -949,11 +958,13 @@ class CodexPlugin(DefaultLaunchContract):
                     session.launch_target_id,
                     custom_args=effective_cli_args,
                     custom_config_overrides=effective_config_overrides,
+                    launch_env=process_env,
                 ),
                 model=session.model,
                 effort=session.effort,
                 custom_args=effective_cli_args,
                 config_overrides=effective_config_overrides,
+                launch_env=process_env,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(
@@ -1253,6 +1264,7 @@ class CodexPlugin(DefaultLaunchContract):
         launch_target_id: str | None,
         custom_args: list[str] | None = None,
         custom_config_overrides: list[str] | None = None,
+        launch_env: dict[str, str] | None = None,
     ) -> ClientFactory | None:
         launch_target = runtime._find_launch_target(launch_target_id)
         if launch_target is None:
@@ -1261,6 +1273,7 @@ class CodexPlugin(DefaultLaunchContract):
             launch_target,
             cli_args=tuple(custom_args or ()),
             config_overrides=tuple(custom_config_overrides or ()),
+            launch_env=launch_env,
         )
 
     def client_cwd(
@@ -1423,6 +1436,7 @@ class CodexPlugin(DefaultLaunchContract):
             effort=resolved_effort,
             args=list(request.args),
             config_overrides=list(request.config_overrides),
+            launch_env=request.launch_env,
         )
         runtime.storage.create_session(session)
         effective_cli_args = self._effective_args(
@@ -1430,6 +1444,9 @@ class CodexPlugin(DefaultLaunchContract):
         )
         effective_config_overrides = self._effective_config_overrides(
             runtime, session.launch_target_id, request.config_overrides
+        )
+        process_env = runtime._agent_process_env(
+            self.id, session.launch_env, session_id=session.id
         )
         try:
             thread_id = await self._require_adapter().start_session(
@@ -1440,11 +1457,13 @@ class CodexPlugin(DefaultLaunchContract):
                     session.launch_target_id,
                     custom_args=effective_cli_args,
                     custom_config_overrides=effective_config_overrides,
+                    launch_env=process_env,
                 ),
                 model=resolved_model,
                 effort=resolved_effort,
                 custom_args=effective_cli_args,
                 config_overrides=effective_config_overrides,
+                launch_env=process_env,
             )
         except Exception:
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
@@ -1521,6 +1540,7 @@ class CodexPlugin(DefaultLaunchContract):
                 cwd=_thread_cwd(thread),
                 launch_target_id=request.launch_target_id,
                 title=_thread_title(thread),
+                launch_env=request.launch_env,
             )
         session_id = runtime._generate_session_id(self.id)
         session_dir = runtime._session_dir(session_id)
@@ -1547,6 +1567,7 @@ class CodexPlugin(DefaultLaunchContract):
             structured_log_path=str(structured_log),
             transport_state={"thread_id": thread.id},
             permission_mode="default",
+            launch_env=request.launch_env,
         )
         runtime.storage.create_session(session)
         # Imported sessions start with no per-session args/config_overrides;
@@ -1555,6 +1576,9 @@ class CodexPlugin(DefaultLaunchContract):
         effective_cli_args = self._effective_args(runtime, session.launch_target_id, [])
         effective_config_overrides = self._effective_config_overrides(
             runtime, session.launch_target_id, []
+        )
+        process_env = runtime._agent_process_env(
+            self.id, session.launch_env, session_id=session.id
         )
         try:
             await self._require_adapter().restore_session(
@@ -1566,9 +1590,11 @@ class CodexPlugin(DefaultLaunchContract):
                     session.launch_target_id,
                     custom_args=effective_cli_args,
                     custom_config_overrides=effective_config_overrides,
+                    launch_env=process_env,
                 ),
                 custom_args=effective_cli_args,
                 config_overrides=effective_config_overrides,
+                launch_env=process_env,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(

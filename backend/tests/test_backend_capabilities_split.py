@@ -18,6 +18,7 @@ from waypoint.backends.capabilities import (
     BackendCapabilities,
     TransportCapabilities,
 )
+from waypoint.settings import Settings
 
 _GOLDEN = Path(__file__).parent / "golden" / "backends_payload.json"
 
@@ -96,7 +97,7 @@ def test_backends_payload_matches_golden() -> None:
     fixture deliberately if the contract intentionally changes.
     """
     registry = build_default_registry()
-    live = _backend_descriptors(registry)
+    live = _backend_descriptors(registry, Settings())
     expected = json.loads(_GOLDEN.read_text())
     assert live == expected
 
@@ -106,7 +107,7 @@ def test_backends_payload_carries_split_subobjects() -> None:
     disturbing the flat ``capabilities`` block (kept byte-identical for
     existing consumers) — and the sub-objects are exactly the projections."""
     registry = build_default_registry()
-    descriptors = _backend_descriptors(registry)
+    descriptors = _backend_descriptors(registry, Settings())
     for plugin, entry in zip(registry.all(), descriptors, strict=True):
         caps = plugin.capabilities
         assert entry["capabilities"] == caps.model_dump(mode="json")

@@ -6,6 +6,11 @@ import {
   TransportPicker,
   useTransportForAgent,
 } from "@/components/AgentTransportPicker";
+import {
+  formatLaunchEnv,
+  LaunchOptionsDetails,
+  parseLaunchEnv,
+} from "@/components/LaunchOptions";
 import type { BackendCatalog } from "@/lib/backends";
 import { defaultTransportFor, humaniseBackend } from "@/lib/backends";
 import { matchesQuery, parseQuery } from "@/lib/search";
@@ -40,6 +45,7 @@ interface ResumeThreadPanelProps {
     cwd: string,
     transport: SessionTransport | null,
     importHistory: boolean,
+    launchEnv: Record<string, string>,
   ) => Promise<void>;
   onDeleteThread?: (
     backend: Backend,
@@ -47,6 +53,7 @@ interface ResumeThreadPanelProps {
     launchTargetId?: string,
   ) => Promise<void>;
   catalog: BackendCatalog;
+  defaultLaunchEnvByBackend: Record<Backend, Record<string, string>>;
 }
 
 // "all" merges every agent's threads into one list; a concrete backend narrows
@@ -80,6 +87,7 @@ export function ResumeThreadPanel({
   onImportThread,
   onDeleteThread,
   catalog,
+  defaultLaunchEnvByBackend,
 }: ResumeThreadPanelProps) {
   const multiAgent = supportedBackends.length >= 2;
 
@@ -129,10 +137,17 @@ export function ResumeThreadPanel({
         ? preferredBackend
         : (supportedBackends[0] ?? preferredBackend)
       : filter;
+  const [launchEnvText, setLaunchEnvText] = useState(() =>
+    formatLaunchEnv(defaultLaunchEnvByBackend[transportAgent]),
+  );
   const [transport, setTransport, transports] = useTransportForAgent(
     transportAgent,
     catalog,
   );
+
+  useEffect(() => {
+    setLaunchEnvText(formatLaunchEnv(defaultLaunchEnvByBackend[transportAgent]));
+  }, [defaultLaunchEnvByBackend, transportAgent]);
 
   const isExpanded = expanded || query.trim().length > 0;
 
@@ -191,6 +206,10 @@ export function ResumeThreadPanel({
       filter === thread.backend
         ? transport || null
         : defaultTransportFor(thread.backend, catalog);
+    const launchEnv =
+      filter === thread.backend
+        ? parseLaunchEnv(launchEnvText)
+        : { ...(defaultLaunchEnvByBackend[thread.backend] ?? {}) };
     setImportingId(thread.id);
     try {
       await onImportThread(
@@ -199,6 +218,7 @@ export function ResumeThreadPanel({
         thread.cwd,
         chosen,
         importHistory,
+        launchEnv,
       );
     } finally {
       setImportingId(null);
@@ -259,6 +279,15 @@ export function ResumeThreadPanel({
             })}
           </select>
         </label>
+      ) : null}
+
+      {filter !== "all" ? (
+        <LaunchOptionsDetails
+          mode="resume"
+          launchEnvText={launchEnvText}
+          onLaunchEnvChange={setLaunchEnvText}
+          formBusy={importingId !== null || deletingId !== null}
+        />
       ) : null}
 
       {filter !== "all" ? (

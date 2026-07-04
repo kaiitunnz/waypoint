@@ -51,6 +51,7 @@ def build_remote_claude_launch_factory(
         effort: str | None = None,
         custom_args: list[str] | None = None,
         fork_from_claude_session_id: str | None = None,
+        launch_env: dict[str, str] | None = None,
     ) -> ClaudeLaunchSpec:
         cwd = cwd or target.default_cwd
         claude_bin = (
@@ -95,6 +96,7 @@ def build_remote_claude_launch_factory(
             target=target,
             cwd=cwd,
             claude_args=claude_args,
+            launch_env=launch_env,
         )
         args = [
             _resolve_local_binary(target.ssh_bin),
@@ -137,6 +139,7 @@ def _build_remote_claude_command(
     target: SshLaunchTargetConfig,
     cwd: str,
     claude_args: list[str],
+    launch_env: dict[str, str] | None = None,
 ) -> str:
     launch_line = [
         f"cd {quote_remote_path(cwd)}",
@@ -146,6 +149,7 @@ def _build_remote_claude_command(
     ]
     combined_env = {
         **target.remote_env,
+        **(launch_env or {}),
         # Enable the dynamic-workflow feature so the Workflow tool is available
         # and routes its approval through `can_use_tool`.
         "CLAUDE_CODE_WORKFLOWS": "1",

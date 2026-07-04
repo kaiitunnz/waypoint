@@ -18,6 +18,8 @@ errors surface at startup rather than first runtime access.
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from waypoint.launch_env import LaunchEnv
+
 
 class PluginConfig(BaseModel):
     """Base class for per-plugin global config blocks.
@@ -38,6 +40,9 @@ class PluginConfig(BaseModel):
     local_bin: str | None = None
     # Additional CLI arguments to pass to the agent binary when launched locally.
     cli_args: list[str] = Field(default_factory=list)
+    # Environment variables added to local agent launches. Per-launch values
+    # from the UI/API override these defaults.
+    env: LaunchEnv = Field(default_factory=dict)
 
 
 class PluginLaunchTargetConfig(BaseModel):
@@ -57,3 +62,6 @@ class PluginLaunchTargetConfig(BaseModel):
     remote_bin: str | None = None
     # Additional CLI arguments to pass to the agent binary on this specific target.
     cli_args: list[str] = Field(default_factory=list)
+    # Environment variables added to agent launches on this SSH target. These
+    # override global plugin env defaults; per-launch values override both.
+    env: LaunchEnv = Field(default_factory=dict)

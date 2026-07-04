@@ -10,8 +10,9 @@ so callers don't need to import these types directly.
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from waypoint.launch_env import LaunchEnv
 from waypoint.schemas import LaunchMode, SessionTransportId
 
 
@@ -41,6 +42,7 @@ class CodexThreadImportRequest(BaseModel):
     # ``launch_mode`` and must be one the agent declares (the runtime
     # rejects mismatches with 400).
     transport: SessionTransportId | None = None
+    launch_env: LaunchEnv = Field(default_factory=dict)
     # When true (default), the prior conversation is replayed into the new
     # session's transcript at import time; when false the transcript starts
     # empty and only the underlying agent resumes its own context.

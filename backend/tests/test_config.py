@@ -145,6 +145,41 @@ def test_load_settings_parses_plugin_configs(
     assert [model.id for model in claude_config.models] == ["opus"]
 
 
+def test_load_settings_parses_launch_env_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "waypoint.yaml"
+    config_file.write_text(
+        "\n".join(
+            [
+                "plugin_configs:",
+                "  codex:",
+                "    env:",
+                "      OPENAI_API_KEY: local-secret",
+                "ssh_targets:",
+                "  - id: devbox",
+                "    name: Devbox",
+                "    ssh_destination: dev@example.com",
+                "    plugin_configs:",
+                "      codex:",
+                "        env:",
+                "          OPENAI_API_KEY: remote-secret",
+                "          FEATURE_FLAG: enabled",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings_module, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
+    settings = load_settings()
+    assert settings.plugin_config("codex").env == {"OPENAI_API_KEY": "local-secret"}
+    target = settings.ssh_targets[0]
+    assert target.plugin_config("codex").env == {
+        "OPENAI_API_KEY": "remote-secret",
+        "FEATURE_FLAG": "enabled",
+    }
+
+
 def test_assistant_defaults_to_none_when_block_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -21,6 +21,7 @@ def build_codex_launch_args(
     cwd: str,
     cli_args: tuple[str, ...] = (),
     config_overrides: tuple[str, ...] = (),
+    launch_env: dict[str, str] | None = None,
 ) -> tuple[str, ...]:
     """Build the remote argv for ``codex app-server``.
 
@@ -44,21 +45,23 @@ def build_codex_launch_args(
     for override in config_overrides:
         codex_args.extend(["--config", override])
     codex_args.extend(["app-server", "--listen", "stdio://"])
-    return target.build_remote_exec_args(codex_args, cwd)
+    return target.build_remote_exec_args(codex_args, cwd, extra_env=launch_env)
 
 
 def build_remote_codex_client_factory(
     target: SshLaunchTargetConfig,
     cli_args: tuple[str, ...] = (),
     config_overrides: tuple[str, ...] = (),
+    launch_env: dict[str, str] | None = None,
 ) -> ClientFactory:
     def factory(cwd: str, approval_handler: ApprovalCallback) -> CodexClient:
         launch_cwd = cwd or target.default_cwd
         return CodexClient(
             config=CodexConfig(
                 launch_args_override=build_codex_launch_args(
-                    target, launch_cwd, cli_args, config_overrides
+                    target, launch_cwd, cli_args, config_overrides, launch_env
                 ),
+                env=launch_env,
                 client_name="waypoint",
                 client_title="Waypoint",
             ),

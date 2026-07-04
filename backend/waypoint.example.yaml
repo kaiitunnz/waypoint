@@ -39,6 +39,8 @@ plugin_configs:
     # default_model_id: gpt-5
     # default_effort: high
     # local_bin: /opt/codex/bin/codex   # path on the local host; falls back to `codex`
+    # env:                              # editable defaults surfaced in the launch panel
+    #   OPENAI_API_KEY: sk-your-key
     # cli_args:                              # raw flags for `codex …` before `app-server`
     #   - "--verbose"
     # config_overrides:                      # codex-only; each entry → `codex --config K=V`
@@ -47,6 +49,8 @@ plugin_configs:
     # default_model_id: opus
     # default_effort: high
     # local_bin: /opt/claude/bin/claude
+    # env:
+    #   ANTHROPIC_AUTH_TOKEN: sk-ant-your-key
     # cli_args:
     #   - "--dangerously-skip-permissions"
     # models:
@@ -57,6 +61,8 @@ plugin_configs:
     # default_model_id: anthropic/claude-sonnet-4-6
     # default_effort: high
     # local_bin: /opt/codex/bin/opencode
+    # env:
+    #   OPENAI_API_KEY: sk-your-key
     # cli_args:
     #   - "--max-iterations=50"
 
@@ -98,16 +104,22 @@ ssh_targets:
     plugin_configs:
       codex:
         # remote_bin: /opt/codex/bin/codex     # path on the remote host
+        # env:                                  # editable defaults for this target/backend
+        #   OPENAI_API_KEY: sk-your-key
         # cli_args:                            # raw flags before `app-server`
         #   - "--verbose"
         config_overrides:                      # codex --config K=V
           - model_reasoning_effort="high"
       claude_code:
         # remote_bin: /opt/claude/bin/claude
+        # env:
+        #   ANTHROPIC_AUTH_TOKEN: sk-ant-your-key
         # cli_args:
         #   - "--dangerously-skip-permissions"
       opencode:
         # remote_bin: /opt/codex/bin/opencode
+        # env:
+        #   OPENAI_API_KEY: sk-your-key
         # cli_args:
         #   - "--max-iterations=50"
     default_cwd: "~"

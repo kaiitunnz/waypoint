@@ -30,6 +30,7 @@ def test_remote_claude_launch_factory_uses_stdio_permission_protocol(
         None,
         [],
         None,
+        {},
     )
 
     assert launch.cwd is None
@@ -90,6 +91,7 @@ def test_remote_claude_launch_factory_appends_model_flag(monkeypatch) -> None:
         None,
         [],
         None,
+        {},
     )
     assert "--model opus" in launch.args[-1]
 

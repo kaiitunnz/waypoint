@@ -237,9 +237,9 @@ def test_build_remote_exec_args_allocates_tty_when_requested(monkeypatch) -> Non
 
 
 def test_build_remote_exec_args_merges_extra_env_with_target_env(monkeypatch) -> None:
-    """Plugin-contributed env (e.g. claude's CLAUDE_CODE_NO_FLICKER) merges
-    with the target's user-configured ``remote_env``; on key collision the
-    target wins so explicit yaml config still overrides plugin defaults."""
+    """Call-site env merges with the target's configured ``remote_env``; on key
+    collision the call-site value wins so runtime-required vars cannot be
+    shadowed by yaml config."""
     monkeypatch.setattr(
         "waypoint.launch_targets.shutil.which", lambda _: "/usr/bin/ssh"
     )
@@ -257,8 +257,8 @@ def test_build_remote_exec_args_merges_extra_env_with_target_env(monkeypatch) ->
     )
 
     remote_command = args[-1]
-    assert "FOO=from-target" in remote_command
-    assert "FOO=from-plugin" not in remote_command
+    assert "FOO=from-plugin" in remote_command
+    assert "FOO=from-target" not in remote_command
     assert "TARGET_ONLY=1" in remote_command
     assert "PLUGIN_ONLY=1" in remote_command
 

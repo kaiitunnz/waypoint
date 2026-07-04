@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
-from typing import Any, TextIO
+from typing import Any, TextIO, cast
 
 from fastapi import HTTPException, status
 
@@ -399,6 +399,40 @@ class SessionRuntime:
                 ),
             )
 
+    def _default_launch_env(
+        self,
+        backend: str,
+        launch_target: SshLaunchTargetConfig | None = None,
+    ) -> dict[str, str]:
+        env = dict(self.settings.plugin_config(backend).env)
+        if launch_target is not None:
+            env.update(launch_target.plugin_config(backend).env)
+        return env
+
+    def _effective_launch_env_for_request(
+        self,
+        request: Any,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> dict[str, str]:
+        if "launch_env" in request.model_fields_set:
+            return dict(request.launch_env)
+        return self._default_launch_env(request.backend, launch_target)
+
+    def _agent_process_env(
+        self,
+        backend: str,
+        launch_env: dict[str, str],
+        *,
+        session_id: str | None = None,
+    ) -> dict[str, str]:
+        plugin = self.registry.get(backend)
+        env = {**launch_env, **plugin.extra_env}
+        if session_id:
+            # Runtime-owned keys win even if a user-supplied launch env tried
+            # to shadow them.
+            env["WAYPOINT_SESSION_ID"] = session_id
+        return env
+
     async def create_session(self, request: SessionCreateRequest) -> SessionRecord:
         if request.source_mode != SessionSource.MANAGED:
             raise HTTPException(
@@ -417,7 +451,14 @@ class SessionRuntime:
             local_cwd = request.cwd or launch_target.default_cwd
         else:
             local_cwd = require_existing_local_dir(request.cwd)
-        request = request.model_copy(update={"cwd": local_cwd})
+        request = request.model_copy(
+            update={
+                "cwd": local_cwd,
+                "launch_env": self._effective_launch_env_for_request(
+                    request, launch_target
+                ),
+            }
+        )
         title = (
             request.title
             or f"{request.backend} {Path(request.cwd).name or request.backend}"
@@ -823,6 +864,14 @@ class SessionRuntime:
                 detail=f"thread import is not supported for {backend}",
             )
         request = schema.model_validate(body)
+        launch_target_id = getattr(request, "launch_target_id", None)
+        launch_target = self._resolve_launch_target(launch_target_id, backend)
+        launch_env = (
+            dict(cast(Any, request).launch_env)
+            if "launch_env" in request.model_fields_set
+            else self._default_launch_env(backend, launch_target)
+        )
+        request = request.model_copy(update={"launch_env": launch_env})
         transport = getattr(request, "transport", None)
         if transport is not None:
             self._validate_supported_transport(backend, transport)
@@ -2012,6 +2061,10 @@ class SessionRuntime:
                     "default_cwd": target.default_cwd,
                     "auth": target.ssh_auth,
                     "connected": self.ssh_master.is_connected_cached(target),
+                    "default_launch_env_by_backend": {
+                        backend: self._default_launch_env(backend, target)
+                        for backend in target.supported_plugins()
+                    },
                 }
             )
         return summaries
@@ -2328,13 +2381,12 @@ class SessionRuntime:
         *,
         allocate_tty: bool = False,
         session_id: str | None = None,
+        launch_env: dict[str, str] | None = None,
     ) -> list[str]:
         plugin = self.registry.get(backend)
-        extra_env = dict(plugin.extra_env)
-        if session_id:
-            # So the wrapped agent (and any waypoint CLI it runs) knows its own
-            # session and can inherit this session's posture into children.
-            extra_env["WAYPOINT_SESSION_ID"] = session_id
+        extra_env = self._agent_process_env(
+            backend, dict(launch_env or {}), session_id=session_id
+        )
         if launch_target is None:
             executable = (
                 self.settings.plugin_config(backend).local_bin

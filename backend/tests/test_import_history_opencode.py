@@ -272,7 +272,7 @@ async def test_import_thread_seeds_history_before_the_imported_note() -> None:
     ):
         return fake_adapter
 
-    plugin._get_or_create_adapter = fake_get_or_create_adapter  # type: ignore[method-assign]
+    cast(Any, plugin)._get_or_create_adapter = fake_get_or_create_adapter
 
     class FakeStorage:
         def __init__(self) -> None:
@@ -365,7 +365,7 @@ async def test_import_thread_skips_history_when_disabled() -> None:
     ):
         return fake_adapter
 
-    plugin._get_or_create_adapter = fake_get_or_create_adapter  # type: ignore[method-assign]
+    cast(Any, plugin)._get_or_create_adapter = fake_get_or_create_adapter
 
     class FakeStorage:
         def __init__(self) -> None:

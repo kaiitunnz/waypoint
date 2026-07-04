@@ -497,8 +497,8 @@ async def test_transport_routes_calls_by_session_launch_target() -> None:
     plugin._adapters = cast(
         Any,
         {
-            (None, "/tmp", ()): default_adapter,
-            ("ssh-1", "/tmp", ()): remote_adapter,
+            (None, "/tmp", (), ()): default_adapter,
+            ("ssh-1", "/tmp", (), ()): remote_adapter,
         },
     )
 
@@ -571,8 +571,8 @@ async def test_delete_thread_routes_to_launch_target_adapter() -> None:
     plugin._adapters = cast(
         Any,
         {
-            (None, "/tmp", ()): local,
-            ("ssh-1", "/tmp", ()): remote,
+            (None, "/tmp", (), ()): local,
+            ("ssh-1", "/tmp", (), ()): remote,
         },
     )
 
@@ -590,8 +590,8 @@ async def test_delete_thread_tries_every_adapter_until_one_deletes() -> None:
     plugin._adapters = cast(
         Any,
         {
-            (None, "/a", ()): first,
-            (None, "/b", ()): second,
+            (None, "/a", (), ()): first,
+            (None, "/b", (), ()): second,
         },
     )
 
@@ -608,8 +608,8 @@ async def test_delete_thread_short_circuits_after_first_success() -> None:
     plugin._adapters = cast(
         Any,
         {
-            (None, "/a", ()): first,
-            (None, "/b", ()): second,
+            (None, "/a", (), ()): first,
+            (None, "/b", (), ()): second,
         },
     )
 
@@ -622,7 +622,7 @@ async def test_delete_thread_short_circuits_after_first_success() -> None:
 async def test_delete_thread_returns_false_when_no_adapter_has_it() -> None:
     plugin = OpenCodePlugin()
     only = _DeleteAdapter(set())
-    plugin._adapters = cast(Any, {(None, "/tmp", ()): only})
+    plugin._adapters = cast(Any, {(None, "/tmp", (), ()): only})
 
     assert await plugin.delete_thread(cast(Any, None), "missing", None) is False
     assert only.calls == ["missing"]
@@ -644,6 +644,7 @@ async def test_get_or_create_adapter_keys_by_cwd(
             on_server_died=None,
             workdir=None,
             extra_args=(),
+            launch_env=None,
         ) -> None:
             self.workdir = workdir
 
@@ -690,6 +691,7 @@ async def test_get_or_create_adapter_normalizes_equivalent_cwds(
             on_server_died=None,
             workdir=None,
             extra_args=(),
+            launch_env=None,
         ) -> None:
             self.workdir = workdir
 
@@ -748,8 +750,8 @@ async def test_list_models_uses_target_adapter_independent_of_cwd() -> None:
     plugin._adapters = cast(
         Any,
         {
-            ("ssh-1", "/repo-a"): stale_adapter,
-            ("ssh-1", "/repo-b"): healthy_adapter,
+            ("ssh-1", "/repo-a", (), ()): stale_adapter,
+            ("ssh-1", "/repo-b", (), ()): healthy_adapter,
         },
     )
 
@@ -784,7 +786,7 @@ async def test_list_threads_ignores_cwd_and_dedupes_by_launch_target() -> None:
     plugin._adapters = cast(
         Any,
         {
-            ("ssh-1", "/repo-a"): FakeAdapter(
+            ("ssh-1", "/repo-a", (), ()): FakeAdapter(
                 [
                     {
                         "id": "ses_1",
@@ -794,7 +796,7 @@ async def test_list_threads_ignores_cwd_and_dedupes_by_launch_target() -> None:
                     }
                 ]
             ),
-            ("ssh-1", "/repo-b"): FakeAdapter(
+            ("ssh-1", "/repo-b", (), ()): FakeAdapter(
                 [
                     {
                         "id": "ses_1",
@@ -869,7 +871,7 @@ async def test_list_threads_sorts_by_updated_at_after_merging_adapters() -> None
     plugin._adapters = cast(
         Any,
         {
-            ("ssh-1", "/repo-a"): FakeAdapter(
+            ("ssh-1", "/repo-a", (), ()): FakeAdapter(
                 [
                     {
                         "id": "ses_a",
@@ -879,7 +881,7 @@ async def test_list_threads_sorts_by_updated_at_after_merging_adapters() -> None
                     }
                 ]
             ),
-            ("ssh-1", "/repo-b"): FakeAdapter(
+            ("ssh-1", "/repo-b", (), ()): FakeAdapter(
                 [
                     {
                         "id": "ses_b",
@@ -941,7 +943,7 @@ async def test_reconnect_restore_rehydrates_pre_plan_mode(tmp_path) -> None:
             return True
 
     fake_adapter = FakeAdapter()
-    key = (None, "/repo", ())
+    key = (None, "/repo", (), ())
     plugin._adapters = cast(Any, {key: fake_adapter})
     plugin._reconnect_targets[key] = {"sess"}
 
@@ -1082,13 +1084,19 @@ async def test_import_thread_preserves_launch_target_id() -> None:
     fake_adapter = FakeAdapter()
 
     async def fake_get_or_create_adapter(
-        runtime, launch_target_id, cwd, custom_args=(), *, user_initiated=False
+        runtime,
+        launch_target_id,
+        cwd,
+        custom_args=(),
+        launch_env=None,
+        *,
+        user_initiated=False,
     ):
         assert launch_target_id == "ssh-1"
         assert cwd == "/repo"
         return fake_adapter
 
-    plugin._get_or_create_adapter = fake_get_or_create_adapter  # type: ignore[method-assign]
+    cast(Any, plugin)._get_or_create_adapter = fake_get_or_create_adapter
 
     class FakeStorage:
         def __init__(self) -> None:
@@ -1183,12 +1191,18 @@ async def test_import_thread_keys_adapter_by_session_directory() -> None:
     cwds_seen: list[str | None] = []
 
     async def fake_get_or_create_adapter(
-        runtime, launch_target_id, cwd, custom_args=(), *, user_initiated=False
+        runtime,
+        launch_target_id,
+        cwd,
+        custom_args=(),
+        launch_env=None,
+        *,
+        user_initiated=False,
     ):
         cwds_seen.append(cwd)
         return fake_adapter
 
-    plugin._get_or_create_adapter = fake_get_or_create_adapter  # type: ignore[method-assign]
+    cast(Any, plugin)._get_or_create_adapter = fake_get_or_create_adapter
 
     class FakeStorage:
         def __init__(self) -> None:

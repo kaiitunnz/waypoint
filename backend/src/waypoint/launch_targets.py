@@ -214,10 +214,10 @@ class SshLaunchTargetConfig(BaseModel):
         thread enumerator) need stdin as a real pipe.
         """
         ssh_bin = _resolve_local_binary(self.ssh_bin)
-        # Plugin contributions (e.g. claude's ``CLAUDE_CODE_NO_FLICKER=1``)
-        # form the base; user-supplied ``remote_env`` overrides on key
-        # collision so explicit yaml config still wins.
-        merged_env = {**(extra_env or {}), **self.remote_env}
+        # Target-wide remote_env is the base. Call-site extra_env can include
+        # runtime-required values (e.g. WAYPOINT_SESSION_ID), so it must win
+        # on collisions.
+        merged_env = {**self.remote_env, **(extra_env or {})}
         remote_parts: list[str] = []
         if cwd:
             remote_parts.extend([f"cd {quote_remote_path(cwd)}", "&&"])

@@ -13,6 +13,7 @@
       "glyph": "C",
       "color": "#a78bfa"
     },
+    "default_launch_env": {},
     "capabilities": {
       "is_structured": true,
       "supports_resume": false,
@@ -288,6 +289,7 @@
       "glyph": "C",
       "color": "#a78bfa"
     },
+    "default_launch_env": {},
     "capabilities": {
       "is_structured": true,
       "supports_resume": true,
@@ -564,6 +566,7 @@
       "glyph": "X",
       "color": "#34d399"
     },
+    "default_launch_env": {},
     "capabilities": {
       "is_structured": true,
       "supports_resume": false,
@@ -746,6 +749,7 @@
       "glyph": "O",
       "color": "#cbd5e1"
     },
+    "default_launch_env": {},
     "capabilities": {
       "is_structured": true,
       "supports_resume": false,
@@ -939,6 +943,7 @@
       "glyph": "T",
       "color": "#94a3b8"
     },
+    "default_launch_env": {},
     "capabilities": {
       "is_structured": false,
       "supports_resume": true,

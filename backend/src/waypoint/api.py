@@ -126,7 +126,9 @@ def _descendant_ids(sessions: list[SessionRecord], root_id: str) -> set[str]:
     return found
 
 
-def _backend_descriptors(registry: BackendRegistry) -> list[dict[str, Any]]:
+def _backend_descriptors(
+    registry: BackendRegistry, settings: Settings
+) -> list[dict[str, Any]]:
     """Serialise every registered backend for the frontend catalogue.
 
     The frontend consumes this from ``GET /api/backends`` (and from the
@@ -151,6 +153,7 @@ def _backend_descriptors(registry: BackendRegistry) -> list[dict[str, Any]]:
                 ),
                 "label": plugin.label,
                 "badges": dict(caps.badges),
+                "default_launch_env": dict(settings.plugin_config(plugin.id).env),
                 # The flat ``capabilities`` object stays byte-identical for
                 # existing consumers; the split sub-objects are emitted
                 # alongside it so the frontend can migrate to the (agent,
@@ -220,7 +223,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             default_backend=context.settings.default_backend,
             default_cwd=context.settings.default_cwd,
             launch_targets=context.runtime.launch_target_summaries(),
-            backends=_backend_descriptors(context.runtime.registry),
+            backends=_backend_descriptors(context.runtime.registry, context.settings),
             assistant=context.runtime.assistant_summary(),
         )
 
@@ -312,7 +315,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def list_backends(
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        return {"backends": _backend_descriptors(context.runtime.registry)}
+        return {
+            "backends": _backend_descriptors(context.runtime.registry, context.settings)
+        }
 
     # Plugin-registered routes (e.g. the Claude PreToolUse hook) come
     # in here so api.py stays backend-agnostic.

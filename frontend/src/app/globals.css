@@ -14070,10 +14070,11 @@ html[data-theme="light"] .wp-hl {
    focused, so it's reachable without the gesture. */
 .inbox-row-delete {
   position: absolute;
-  top: 50%;
+  /* Top-aligned to the timestamp slot it replaces on hover, so it stays clear
+     of the unread dot pinned at the bottom of the meta rail. */
+  top: 8px;
   right: 12px;
   z-index: 2;
-  transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -14103,9 +14104,9 @@ html[data-theme="light"] .wp-hl {
     pointer-events: auto;
   }
 
-  /* The revealed delete button occupies the row's top-right corner, where the
-     unread dot sits — hide the dot on hover so the two don't collide. */
-  .inbox-row-wrap:hover .inbox-row-unread {
+  /* The delete button takes the timestamp's top slot on hover; the timestamp
+     (ordinary metadata) gives way. The unread dot below it stays put. */
+  .inbox-row-wrap:hover .inbox-row-time {
     opacity: 0;
   }
 }
@@ -14183,12 +14184,26 @@ html[data-theme="light"] .wp-hl {
   letter-spacing: 0.03em;
 }
 
+/* Right rail: full row height, timestamp pinned top, unread dot pinned bottom
+   (space-between), so the hover delete button owns the top slot without ever
+   covering the status dot. */
+.inbox-row-meta {
+  flex: none;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 6px;
+}
+
 .inbox-row-time {
   flex: none;
   color: var(--muted-soft);
   font-family: var(--font-mono);
   font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
+  transition: opacity 0.12s ease;
 }
 
 .inbox-row-subject {
@@ -14229,7 +14244,6 @@ html[data-theme="light"] .wp-hl {
   flex: none;
   width: 7px;
   height: 7px;
-  margin-top: 6px;
   border-radius: var(--radius-pill);
   background: var(--accent);
 }

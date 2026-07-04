@@ -157,7 +157,6 @@ export function InboxRow({
         <span className="inbox-row-main">
           <span className="inbox-row-line">
             <span className="inbox-row-from">{item.from_label ?? "unknown"}</span>
-            <span className="inbox-row-time">{timeLabel}</span>
           </span>
           <span className="inbox-row-subject">{item.subject}</span>
           {chips.length > 0 ? (
@@ -173,9 +172,14 @@ export function InboxRow({
             </span>
           ) : null}
         </span>
-        {item.read_at ? null : (
-          <span className="inbox-row-unread" aria-label="unread" />
-        )}
+        {/* Right rail: timestamp pinned top (yields to the hover delete button),
+            unread dot pinned bottom so it stays clear and always visible. */}
+        <span className="inbox-row-meta">
+          <span className="inbox-row-time">{timeLabel}</span>
+          {item.read_at ? null : (
+            <span className="inbox-row-unread" aria-label="unread" />
+          )}
+        </span>
       </button>
       <button
         type="button"

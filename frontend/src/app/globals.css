@@ -13901,6 +13901,7 @@ html[data-theme="light"] .wp-hl {
 
 /* ── List pane ── */
 .inbox-list-pane {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -13946,6 +13947,54 @@ html[data-theme="light"] .wp-hl {
 .inbox-tab.active {
   color: var(--accent);
   border-bottom-color: currentColor;
+}
+
+/* Toolbar control row: filter tabs on the left, batch actions on the right. */
+.inbox-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.inbox-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* Bare mono actions matching the doc-header control line. */
+.inbox-action {
+  border: none;
+  background: none;
+  padding: 3px 0;
+  color: var(--muted-soft);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.14s ease;
+}
+
+.inbox-action:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.inbox-action.active {
+  color: var(--accent);
+}
+
+/* Own class, not the shared ``.danger`` button style (which carries padding,
+   a border, and a boxed hover fill) — this is a bare mono action. */
+.inbox-action-danger:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.inbox-action:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .inbox-list {
@@ -14021,10 +14070,11 @@ html[data-theme="light"] .wp-hl {
    focused, so it's reachable without the gesture. */
 .inbox-row-delete {
   position: absolute;
-  top: 50%;
+  /* Top-aligned to the timestamp slot it replaces on hover, so it stays clear
+     of the unread dot pinned at the bottom of the meta rail. */
+  top: 8px;
   right: 12px;
   z-index: 2;
-  transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -14052,6 +14102,13 @@ html[data-theme="light"] .wp-hl {
   .inbox-row-wrap:hover .inbox-row-delete {
     opacity: 1;
     pointer-events: auto;
+  }
+
+  /* The delete button takes the timestamp's top slot on hover; the timestamp
+     (ordinary metadata) gives way. The unread dot below it stays put. Not in
+     select mode — the delete button is hidden there, so nothing replaces it. */
+  .inbox-row-wrap:not(.selecting):hover .inbox-row-time {
+    opacity: 0;
   }
 }
 
@@ -14128,12 +14185,26 @@ html[data-theme="light"] .wp-hl {
   letter-spacing: 0.03em;
 }
 
+/* Right rail: full row height, timestamp pinned top, unread dot pinned bottom
+   (space-between), so the hover delete button owns the top slot without ever
+   covering the status dot. */
+.inbox-row-meta {
+  flex: none;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 6px;
+}
+
 .inbox-row-time {
   flex: none;
   color: var(--muted-soft);
   font-family: var(--font-mono);
   font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
+  transition: opacity 0.12s ease;
 }
 
 .inbox-row-subject {
@@ -14174,7 +14245,6 @@ html[data-theme="light"] .wp-hl {
   flex: none;
   width: 7px;
   height: 7px;
-  margin-top: 6px;
   border-radius: var(--radius-pill);
   background: var(--accent);
 }
@@ -14204,6 +14274,124 @@ html[data-theme="light"] .wp-hl {
 .inbox-load-more:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* ── Batch selection ── */
+/* Flat checkbox occupying the lamp column while selecting; checked/mixed fill
+   with the accent, matching the row-select highlight. */
+.inbox-check {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--bg-base);
+  cursor: pointer;
+}
+
+.inbox-row .inbox-check {
+  margin-top: 1px;
+}
+
+.inbox-check.checked,
+.inbox-check.mixed {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg-base);
+}
+
+.inbox-check:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* A selected row reads like the active row but in the accent, independent of
+   which item is open in the pane. */
+.inbox-row.selected {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card));
+}
+
+.inbox-row.selected:hover {
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-card));
+}
+
+/* The swipe/hover single-delete affordance is meaningless while selecting. */
+.inbox-row-wrap.selecting .inbox-row-delete {
+  display: none;
+}
+
+/* Contextual bulk-action bar: floating chrome, so it takes the glass recipe.
+   Pinned to the bottom of the list pane, floating over the scrolling rows. */
+.inbox-bulk-bar {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-glass);
+  background: var(--glass-bg-thick);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    var(--shadow);
+  backdrop-filter: var(--glass-blur);
+}
+
+.inbox-bulk-count {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+
+.inbox-bulk-spacer {
+  flex: 1;
+}
+
+.inbox-bulk-btn {
+  border: none;
+  background: none;
+  padding: 3px 4px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.14s ease;
+}
+
+.inbox-bulk-btn:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.inbox-bulk-btn-danger {
+  color: var(--danger);
+}
+
+.inbox-bulk-btn-danger:hover:not(:disabled) {
+  color: color-mix(in srgb, var(--danger) 78%, var(--text-strong));
+}
+
+.inbox-bulk-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Reserve room so the floating bar never sits on top of the last row. */
+.inbox-list-pane:has(.inbox-bulk-bar) .inbox-list {
+  padding-bottom: 64px;
 }
 
 /* ── Skeleton (loading) ── */

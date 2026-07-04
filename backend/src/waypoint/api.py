@@ -39,6 +39,8 @@ from waypoint.schemas import (
     AssistantSummary,
     BoardEntryUpdateRequest,
     BoardPostRequest,
+    InboxBatchDeleteRequest,
+    InboxBatchDeleteResponse,
     InboxBlockSubmitRequest,
     InboxPostRequest,
     InboxStatus,
@@ -1100,6 +1102,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         # Seeds the cross-session badge before the first WS event arrives.
         return {"unresolved_count": context.runtime.unresolved_inbox_count()}
+
+    # Literal paths registered before ``/api/inbox/{item_id}`` so the id matcher
+    # never shadows them (both are POST; the id route is GET, so there is no
+    # method overlap either).
+    @app.post("/api/inbox/batch-delete")
+    async def inbox_batch_delete(
+        body: InboxBatchDeleteRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        deleted = await context.runtime.delete_inbox_items(body.item_ids)
+        return InboxBatchDeleteResponse(
+            deleted_ids=deleted, count=len(deleted)
+        ).model_dump(mode="json")
+
+    @app.post("/api/inbox/delete-resolved")
+    async def inbox_delete_resolved(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        deleted = await context.runtime.delete_resolved_inbox_items()
+        return InboxBatchDeleteResponse(
+            deleted_ids=deleted, count=len(deleted)
+        ).model_dump(mode="json")
 
     @app.get("/api/inbox/{item_id}")
     async def inbox_get(

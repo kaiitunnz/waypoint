@@ -307,6 +307,44 @@ def test_delete_removes_row(tmp_path) -> None:
     assert storage.delete_inbox_item(item.id) is False
 
 
+def test_delete_items_removes_only_known_ids(tmp_path) -> None:
+    storage = _storage(tmp_path)
+    a = storage.create_inbox_item("s1", None, "a", [_question()])
+    b = storage.create_inbox_item("s1", None, "b", [_question()])
+    c = storage.create_inbox_item("s1", None, "c", [_question()])
+
+    deleted = storage.delete_inbox_items([a.id, c.id, "nope", a.id])
+    assert set(deleted) == {a.id, c.id}
+    assert storage.get_inbox_item(a.id) is None
+    assert storage.get_inbox_item(c.id) is None
+    assert storage.get_inbox_item(b.id) is not None
+
+
+def test_delete_items_empty_list_is_noop(tmp_path) -> None:
+    storage = _storage(tmp_path)
+    storage.create_inbox_item("s1", None, "a", [_question()])
+    assert storage.delete_inbox_items([]) == []
+    assert storage.unresolved_inbox_count() == 1
+
+
+def test_delete_resolved_leaves_open_items(tmp_path) -> None:
+    storage = _storage(tmp_path)
+    open_item = storage.create_inbox_item("s1", None, "open", [_question()])
+    resolved_a = storage.create_inbox_item("s1", None, "res-a", [_question()])
+    resolved_b = storage.create_inbox_item("s1", None, "res-b", [_question()])
+    for item in (resolved_a, resolved_b):
+        storage.submit_inbox_block(
+            item.id, item.blocks[0].id, answer={"selected": ["yes"]}
+        )
+
+    deleted = storage.delete_resolved_inbox_items()
+    assert set(deleted) == {resolved_a.id, resolved_b.id}
+    assert storage.get_inbox_item(open_item.id) is not None
+    assert storage.get_inbox_item(resolved_a.id) is None
+    # Idempotent once the resolved folder is empty.
+    assert storage.delete_resolved_inbox_items() == []
+
+
 def test_unresolved_count_tracks_open_items(tmp_path) -> None:
     storage = _storage(tmp_path)
     storage.create_inbox_item("s1", None, "a", [_question()])

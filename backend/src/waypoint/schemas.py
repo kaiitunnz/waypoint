@@ -800,3 +800,13 @@ class InboxListResponse(BaseModel):
 
 class InboxUnresolvedCountResponse(BaseModel):
     unresolved_count: int
+
+
+class InboxBatchDeleteRequest(BaseModel):
+    item_ids: list[str] = Field(default_factory=list)
+
+
+class InboxBatchDeleteResponse(BaseModel):
+    # The ids that actually existed and were removed (unknown ids are ignored).
+    deleted_ids: list[str] = Field(default_factory=list)
+    count: int

@@ -25,6 +25,9 @@ export function InboxRow({
   timeLabel,
   onSelect,
   onDelete,
+  selectMode = false,
+  selected = false,
+  onToggleSelect,
 }: {
   item: InboxItem;
   active: boolean;
@@ -32,6 +35,9 @@ export function InboxRow({
   timeLabel: string;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  selectMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: string) => void;
 }) {
   const [dx, setDx] = useState(0);
   const [swiping, setSwiping] = useState(false);
@@ -58,6 +64,8 @@ export function InboxRow({
   }
 
   function onPointerDown(event: PointerEvent<HTMLButtonElement>) {
+    // No swipe-to-delete while selecting; the row is a selection toggle.
+    if (selectMode) return;
     if (event.pointerType === "mouse" && event.button !== 0) return;
     start.current = { x: event.clientX, y: event.clientY };
     axis.current = "none";
@@ -95,6 +103,11 @@ export function InboxRow({
   }
 
   function onClick() {
+    // In select mode a tap toggles selection instead of opening the item.
+    if (selectMode) {
+      onToggleSelect?.(item.id);
+      return;
+    }
     // Suppress the click that follows a drag so a swipe never also selects.
     if (draggedRef.current) {
       draggedRef.current = false;
@@ -105,7 +118,9 @@ export function InboxRow({
 
   return (
     <div
-      className={`inbox-row-wrap${swiping ? " swiping" : ""}`}
+      className={`inbox-row-wrap${swiping ? " swiping" : ""}${
+        selectMode ? " selecting" : ""
+      }`}
       role="listitem"
     >
       <span className="inbox-row-delete-bg" aria-hidden="true">
@@ -116,22 +131,32 @@ export function InboxRow({
         type="button"
         className={`inbox-row${active ? " active" : ""}${
           item.read_at ? "" : " unread"
-        }${swiping ? " swiping" : ""}`}
+        }${swiping ? " swiping" : ""}${selected ? " selected" : ""}`}
         style={dx ? { transform: `translateX(${dx}px)` } : undefined}
+        role={selectMode ? "checkbox" : undefined}
+        aria-checked={selectMode ? selected : undefined}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerFinish}
         onPointerCancel={onPointerFinish}
         onClick={onClick}
       >
-        <span
-          className={`inbox-lamp inbox-status-${item.status}`}
-          aria-label={item.status}
-        />
+        {selectMode ? (
+          <span
+            className={`inbox-check${selected ? " checked" : ""}`}
+            aria-hidden="true"
+          >
+            {selected ? <CheckIcon /> : null}
+          </span>
+        ) : (
+          <span
+            className={`inbox-lamp inbox-status-${item.status}`}
+            aria-label={item.status}
+          />
+        )}
         <span className="inbox-row-main">
           <span className="inbox-row-line">
             <span className="inbox-row-from">{item.from_label ?? "unknown"}</span>
-            <span className="inbox-row-time">{timeLabel}</span>
           </span>
           <span className="inbox-row-subject">{item.subject}</span>
           {chips.length > 0 ? (
@@ -147,9 +172,14 @@ export function InboxRow({
             </span>
           ) : null}
         </span>
-        {item.read_at ? null : (
-          <span className="inbox-row-unread" aria-label="unread" />
-        )}
+        {/* Right rail: timestamp pinned top (yields to the hover delete button),
+            unread dot pinned bottom so it stays clear and always visible. */}
+        <span className="inbox-row-meta">
+          <span className="inbox-row-time">{timeLabel}</span>
+          {item.read_at ? null : (
+            <span className="inbox-row-unread" aria-label="unread" />
+          )}
+        </span>
       </button>
       <button
         type="button"
@@ -160,6 +190,24 @@ export function InboxRow({
         <TrashIcon />
       </button>
     </div>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="12"
+      height="12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
   );
 }
 

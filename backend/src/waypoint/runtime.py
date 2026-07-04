@@ -1718,6 +1718,18 @@ class SessionRuntime:
             await self._publish_inbox_deleted(item_id)
         return deleted
 
+    async def delete_inbox_items(self, item_ids: list[str]) -> list[str]:
+        deleted = self.storage.delete_inbox_items(item_ids)
+        for item_id in deleted:
+            await self._publish_inbox_deleted(item_id)
+        return deleted
+
+    async def delete_resolved_inbox_items(self) -> list[str]:
+        deleted = self.storage.delete_resolved_inbox_items()
+        for item_id in deleted:
+            await self._publish_inbox_deleted(item_id)
+        return deleted
+
     def unresolved_inbox_count(self) -> int:
         return self.storage.unresolved_inbox_count()
 

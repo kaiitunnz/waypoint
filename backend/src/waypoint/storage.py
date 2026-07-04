@@ -968,6 +968,52 @@ class Storage:
         return (cursor.rowcount or 0) > 0
 
     @_synchronized
+    def delete_inbox_items(self, item_ids: list[str]) -> list[str]:
+        # Batch delete by id. Returns the subset that actually existed (so the
+        # runtime fans a ``deleted`` broadcast only for real removals). Chunked
+        # under SQLite's ~999 bound-variable limit; the whole batch is one lock
+        # hold with a single trailing commit (all-or-nothing across chunks).
+        unique_ids = list(dict.fromkeys(item_ids))
+        deleted: list[str] = []
+        for start in range(0, len(unique_ids), 500):
+            chunk = unique_ids[start : start + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            present = [
+                row["id"]
+                for row in self.connection.execute(
+                    f"SELECT id FROM inbox_items WHERE id IN ({placeholders})", chunk
+                ).fetchall()
+            ]
+            if not present:
+                continue
+            self.connection.execute(
+                f"DELETE FROM inbox_items WHERE id IN ({placeholders})", chunk
+            )
+            deleted.extend(present)
+        if deleted:
+            self.connection.commit()
+        return deleted
+
+    @_synchronized
+    def delete_resolved_inbox_items(self) -> list[str]:
+        # Empty-the-resolved-folder: removes every resolved item regardless of
+        # pagination. SELECT ids first so the runtime can broadcast each removal.
+        resolved = [
+            row["id"]
+            for row in self.connection.execute(
+                "SELECT id FROM inbox_items WHERE status = ?",
+                (InboxStatus.RESOLVED,),
+            ).fetchall()
+        ]
+        if not resolved:
+            return []
+        self.connection.execute(
+            "DELETE FROM inbox_items WHERE status = ?", (InboxStatus.RESOLVED,)
+        )
+        self.connection.commit()
+        return resolved
+
+    @_synchronized
     def unresolved_inbox_count(self) -> int:
         return int(
             self.connection.execute(

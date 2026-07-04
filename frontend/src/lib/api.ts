@@ -1437,6 +1437,42 @@ export async function deleteInboxItem(
   await ensureOk(response, "failed to delete inbox item");
 }
 
+// Batch delete a set of items; returns the ids that actually existed and were
+// removed (the server ignores unknown ids). Live clients also receive one
+// inbox_update {deleted} frame per removed id.
+export async function batchDeleteInboxItems(
+  host: string,
+  token: string,
+  ids: string[],
+): Promise<string[]> {
+  const response = await fetch(`${host}/api/inbox/batch-delete`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ item_ids: ids }),
+  });
+  await ensureOk(response, "failed to delete inbox items");
+  const payload = (await response.json()) as { deleted_ids?: string[] };
+  return payload.deleted_ids ?? [];
+}
+
+// Empty the resolved folder: removes every resolved item server-side,
+// regardless of what the client has loaded. Returns the removed ids.
+export async function deleteResolvedInboxItems(
+  host: string,
+  token: string,
+): Promise<string[]> {
+  const response = await fetch(`${host}/api/inbox/delete-resolved`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, "failed to delete resolved inbox items");
+  const payload = (await response.json()) as { deleted_ids?: string[] };
+  return payload.deleted_ids ?? [];
+}
+
 export function connectInboxSocket(
   host: string,
   token: string,

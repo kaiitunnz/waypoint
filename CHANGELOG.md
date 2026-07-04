@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.0](https://github.com/kaiitunnz/waypoint/compare/v0.4.1...v0.5.0) (2026-07-04)
+
+
+### Features
+
+* add a user inbox for lead-initiated human checkpoints ([#218](https://github.com/kaiitunnz/waypoint/issues/218)) ([7cc9453](https://github.com/kaiitunnz/waypoint/commit/7cc945351fda4d081f64f366d1c801bd6a59df5a))
+* add batch deletion to the inbox (select + delete-resolved) ([#220](https://github.com/kaiitunnz/waypoint/issues/220)) ([0521e8b](https://github.com/kaiitunnz/waypoint/commit/0521e8bce6b1e19696a2c99d9079e77b264e1c70))
+* add board ready dep-satisfaction query ([#216](https://github.com/kaiitunnz/waypoint/issues/216)) ([455aee5](https://github.com/kaiitunnz/waypoint/commit/455aee51a4cb0568e3d2c68901ba536a7b950b70))
+* add waypoint-crew skill for autonomous engineering orgs ([#210](https://github.com/kaiitunnz/waypoint/issues/210)) ([1780130](https://github.com/kaiitunnz/waypoint/commit/1780130a36c02f83bad2c4444066e0f1441e6b6d))
+* patch board cell metadata with set-meta --merge ([#212](https://github.com/kaiitunnz/waypoint/issues/212)) ([132f93e](https://github.com/kaiitunnz/waypoint/commit/132f93e4795d996040f833a658f9e6fd5717288b))
+* pin and manage session attachments from the CLI ([#213](https://github.com/kaiitunnz/waypoint/issues/213)) ([a49812a](https://github.com/kaiitunnz/waypoint/commit/a49812a94d086aaac473ae2f242b34e03f1f1902))
+* recursive spawn-tree and idle filtering for sessions ([#215](https://github.com/kaiitunnz/waypoint/issues/215)) ([5e38c85](https://github.com/kaiitunnz/waypoint/commit/5e38c85cd4dfdd0d6c2c1241ac20d80cb061b488))
+* scroll buttons and key-bar for desktop and the emulated pane ([#217](https://github.com/kaiitunnz/waypoint/issues/217)) ([4ccffc1](https://github.com/kaiitunnz/waypoint/commit/4ccffc163895b2af8db3792ed5c51ed0492a3e97))
+* session tags and selective reap ([#214](https://github.com/kaiitunnz/waypoint/issues/214)) ([073d481](https://github.com/kaiitunnz/waypoint/commit/073d4810b80c68167e152bf93cbb27d43b1599b1))
+
 ## [0.4.1](https://github.com/kaiitunnz/waypoint/compare/v0.4.0...v0.4.1) (2026-07-02)
 
 

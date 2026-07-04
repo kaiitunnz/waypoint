@@ -143,7 +143,18 @@ export function InboxRow({
         type="button"
         className="inbox-row-delete"
         aria-label={`Delete ${item.subject}`}
-        onClick={() => onDelete(item.id)}
+        onClick={() => {
+          // A single click is easy to misfire on an irreversible delete, so it
+          // confirms like the item pane's button; the swipe gesture stays
+          // confirm-free since its distance threshold is the safeguard.
+          if (
+            typeof window !== "undefined" &&
+            !window.confirm("Delete this inbox item?")
+          ) {
+            return;
+          }
+          onDelete(item.id);
+        }}
       >
         <TrashIcon />
       </button>

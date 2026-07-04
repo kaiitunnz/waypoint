@@ -2,10 +2,6 @@
 
 const HOST_KEY = "waypoint.host";
 const TOKEN_KEY = "waypoint.token";
-// Same-tab signal for token writes/clears — `storage` events only fire in
-// other tabs, so app-wide listeners (e.g. the inbox count provider) need this
-// to notice a login/logout in the current tab.
-export const TOKEN_EVENT = "waypoint:token";
 const TARGETS_KEY = "waypoint.launch-targets";
 const RECENT_CWDS_KEY = "waypoint.recent-cwds";
 const RECENT_CWDS_LIMIT = 8;
@@ -39,12 +35,10 @@ export function readToken(): string {
 
 export function writeToken(token: string): void {
   window.localStorage.setItem(TOKEN_KEY, token);
-  window.dispatchEvent(new Event(TOKEN_EVENT));
 }
 
 export function clearToken(): void {
   window.localStorage.removeItem(TOKEN_KEY);
-  window.dispatchEvent(new Event(TOKEN_EVENT));
 }
 
 export function readLaunchTarget(host: string): string {

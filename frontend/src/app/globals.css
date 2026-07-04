@@ -14664,6 +14664,13 @@ html[data-theme="light"] .wp-hl {
     display: inline-flex;
   }
 
+  /* The meta strip stacks on mobile, so the actions wrap to their own line;
+     left-align them with the rest of the metadata instead of floating to the
+     right edge (the desktop margin-left:auto reads as disconnected here). */
+  .inbox-doc-actions {
+    margin-left: 0;
+  }
+
   .inbox-dock {
     padding: 0;
     width: 52px;

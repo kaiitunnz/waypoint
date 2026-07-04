@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 
 import {
@@ -62,14 +63,26 @@ export function InboxItemView({
         </div>
         <div className="inbox-doc-title-row">
           <h2 className="inbox-doc-subject">{item.subject}</h2>
-          {onDelete ? (
-            <button
-              type="button"
-              className="inbox-doc-delete"
-              onClick={onDelete}
-            >
-              Delete
-            </button>
+          {item.from_session_id || onDelete ? (
+            <div className="inbox-doc-actions">
+              {item.from_session_id ? (
+                <Link
+                  className="inbox-doc-action-link"
+                  href={`/session/${item.from_session_id}`}
+                >
+                  Open session
+                </Link>
+              ) : null}
+              {onDelete ? (
+                <button
+                  type="button"
+                  className="inbox-doc-delete"
+                  onClick={onDelete}
+                >
+                  Delete
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </header>
@@ -393,23 +406,24 @@ function InboxBlockRow({
               <PaperclipIcon />
               Attach
             </button>
-            <span className="inbox-reply-actions-spacer" />
-            <button
-              type="button"
-              className="secondary"
-              onClick={cancel}
-              disabled={submitting}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="primary"
-              disabled={submitting || !canSave || attachments.uploading}
-              onClick={() => void save()}
-            >
-              {submitting ? "Saving…" : "Save"}
-            </button>
+            <div className="inbox-reply-actions-end">
+              <button
+                type="button"
+                className="secondary"
+                onClick={cancel}
+                disabled={submitting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={submitting || !canSave || attachments.uploading}
+                onClick={() => void save()}
+              >
+                {submitting ? "Saving…" : "Save"}
+              </button>
+            </div>
           </div>
           {error ? <p className="inbox-block-error">{error}</p> : null}
         </div>

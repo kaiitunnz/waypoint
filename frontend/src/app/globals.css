@@ -14308,7 +14308,17 @@ html[data-theme="light"] .wp-hl {
   min-width: 0;
 }
 
-.inbox-doc-delete {
+/* Header action cluster: the "Open session" link and Delete, grouped at the
+   trailing edge of the title row. */
+.inbox-doc-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.inbox-doc-delete,
+.inbox-doc-action-link {
   flex: none;
   border: none;
   background: none;
@@ -14318,12 +14328,17 @@ html[data-theme="light"] .wp-hl {
   font-size: 0.68rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  text-decoration: none;
   cursor: pointer;
   transition: color 0.14s ease;
 }
 
 .inbox-doc-delete:hover {
   color: var(--danger);
+}
+
+.inbox-doc-action-link:hover {
+  color: var(--accent);
 }
 
 .inbox-doc-blocks {
@@ -14487,13 +14502,17 @@ html[data-theme="light"] .wp-hl {
 .inbox-reply-actions {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-/* Push Save/Cancel to the trailing edge, Attach stays leading. */
-.inbox-reply-actions-spacer {
-  flex: 1 1 auto;
+/* Cancel + Save travel together as one trailing group, so a narrow row wraps
+   the pair below Attach instead of stranding Save on its own line. */
+.inbox-reply-actions-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* Existing reply attachments carried forward while editing, shown read-only

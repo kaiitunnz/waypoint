@@ -13986,7 +13986,9 @@ html[data-theme="light"] .wp-hl {
   color: var(--accent);
 }
 
-.inbox-action.danger:hover:not(:disabled) {
+/* Own class, not the shared ``.danger`` button style (which carries padding,
+   a border, and a boxed hover fill) — this is a bare mono action. */
+.inbox-action-danger:hover:not(:disabled) {
   color: var(--danger);
 }
 
@@ -14099,6 +14101,12 @@ html[data-theme="light"] .wp-hl {
   .inbox-row-wrap:hover .inbox-row-delete {
     opacity: 1;
     pointer-events: auto;
+  }
+
+  /* The revealed delete button occupies the row's top-right corner, where the
+     unread dot sits — hide the dot on hover so the two don't collide. */
+  .inbox-row-wrap:hover .inbox-row-unread {
+    opacity: 0;
   }
 }
 
@@ -14353,11 +14361,11 @@ html[data-theme="light"] .wp-hl {
   color: var(--text);
 }
 
-.inbox-bulk-btn.danger {
+.inbox-bulk-btn-danger {
   color: var(--danger);
 }
 
-.inbox-bulk-btn.danger:hover:not(:disabled) {
+.inbox-bulk-btn-danger:hover:not(:disabled) {
   color: color-mix(in srgb, var(--danger) 78%, var(--text-strong));
 }
 

@@ -515,7 +515,7 @@ function InboxPageInner() {
                   {!selectMode && (status === "resolved" || status === "all") ? (
                     <button
                       type="button"
-                      className="inbox-action danger"
+                      className="inbox-action inbox-action-danger"
                       disabled={busy}
                       onClick={handleDeleteResolved}
                     >
@@ -586,7 +586,7 @@ function InboxPageInner() {
                 <span className="inbox-bulk-spacer" />
                 <button
                   type="button"
-                  className="inbox-bulk-btn danger"
+                  className="inbox-bulk-btn inbox-bulk-btn-danger"
                   disabled={busy || selectedIds.size === 0}
                   onClick={handleBatchDelete}
                 >

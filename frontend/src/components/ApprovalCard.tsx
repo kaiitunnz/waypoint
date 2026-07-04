@@ -11,7 +11,7 @@ import {
 } from "@/lib/events";
 import type { EventRecord } from "@/lib/types";
 
-interface SharedApprovalAction {
+export interface SharedApprovalAction {
   id: string;
   label: string;
   className: "primary" | "secondary";
@@ -31,7 +31,7 @@ interface SharedApprovalCardProps {
   timeLabel?: string;
 }
 
-function SharedApprovalCard({
+export function SharedApprovalCard({
   badge,
   children,
   actions = [],

@@ -23,7 +23,16 @@ CLI_TOKEN_FILENAME = "cli-token"
 
 
 class WaypointError(RuntimeError):
-    """Raised for transport failures and non-2xx API responses."""
+    """Raised for transport failures and non-2xx API responses.
+
+    ``status_code`` is the HTTP status for a non-2xx response, or ``None`` for
+    a transport-level failure (so callers can distinguish e.g. a 404 from an
+    unreachable server).
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def websocket_url(http_base_url: str, path: str, *, token: str) -> str:
@@ -160,7 +169,8 @@ class WaypointClient:
             raise WaypointError(f"{method} {path} failed: {exc}") from exc
         if response.status_code >= httpx.codes.BAD_REQUEST:
             raise WaypointError(
-                f"{method} {path} -> {response.status_code}: {response.text}"
+                f"{method} {path} -> {response.status_code}: {response.text}",
+                status_code=response.status_code,
             )
         return response
 
@@ -553,6 +563,101 @@ class WaypointClient:
             "PATCH", f"/api/board/{channel}/entries/{entry_id}", json=body
         ).json()["entry"]
         return data
+
+    # ── inbox ─────────────────────────────────────────────────────────
+
+    def post_inbox(
+        self,
+        subject: str,
+        blocks: list[dict[str, Any]],
+        *,
+        from_session_id: str | None = None,
+    ) -> dict[str, Any]:
+        body = {
+            "subject": subject,
+            "blocks": blocks,
+            "from_session_id": from_session_id,
+        }
+        data: dict[str, Any] = self._request("POST", "/api/inbox", json=body).json()[
+            "item"
+        ]
+        return data
+
+    def get_inbox(self, item_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request("GET", f"/api/inbox/{item_id}").json()[
+            "item"
+        ]
+        return data
+
+    def list_inbox(
+        self,
+        *,
+        status: str | None = None,
+        query: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if status is not None:
+            params["status"] = status
+        if query is not None:
+            params["q"] = query
+        if limit is not None:
+            params["limit"] = limit
+        if cursor is not None:
+            params["cursor"] = cursor
+        data: dict[str, Any] = self._request(
+            "GET", "/api/inbox", params=params or None
+        ).json()
+        return data
+
+    def submit_inbox_block(
+        self,
+        item_id: str,
+        block_id: str,
+        *,
+        answer: dict[str, Any] | None = None,
+        reply: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"answer": answer, "reply": reply}
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/inbox/{item_id}/blocks/{block_id}", json=body
+        ).json()["item"]
+        return data
+
+    def mark_inbox_read(self, item_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/inbox/{item_id}/read"
+        ).json()["item"]
+        return data
+
+    def delete_inbox(self, item_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request("DELETE", f"/api/inbox/{item_id}").json()
+        return data
+
+    def unresolved_inbox_count(self) -> int:
+        data: dict[str, Any] = self._request(
+            "GET", "/api/inbox/unresolved-count"
+        ).json()
+        return int(data["unresolved_count"])
+
+    async def stream_inbox_envelopes(
+        self, item_id: str
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Yield decoded envelopes from the per-item inbox WebSocket.
+
+        The server pushes an ``inbox_update`` envelope on connect (the full
+        item, or a terminal ``deleted`` frame if the item is already gone),
+        then one ``inbox_update`` per change until it closes.
+        """
+        url = websocket_url(
+            str(self._client.base_url),
+            f"/ws/inbox/{item_id}",
+            token=self.token(),
+        )
+        async with ws_connect(url) as connection:
+            async for message in connection:
+                yield json.loads(message)
 
     # ── schedules ───────────────────────────────────────────────────────
 

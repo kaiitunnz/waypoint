@@ -5,11 +5,11 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime, timedelta
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, NamedTuple, Protocol, cast
 
 import click
 import typer
@@ -53,6 +53,12 @@ FOLLOW_TERMINAL_STATUSES: frozenset[str] = frozenset(
 # Conventional "timeout" exit code (matches GNU coreutils `timeout`).
 WAIT_TIMEOUT_EXIT_CODE = 124
 WAIT_POLL_INTERVAL_SECONDS = 2.0
+# ``inbox wait`` outcomes. ``resolved``/``update`` exit 0; timeout reuses 124;
+# ``gone`` (the item was deleted while waiting) gets its own code — 3, chosen to
+# avoid Typer/Click's usage-error code 2 and the timeout code 124 — so a waiting
+# lead can branch on a withdrawn ask.
+INBOX_WAIT_UNTIL_CHOICES: frozenset[str] = frozenset({"resolved", "update"})
+INBOX_GONE_EXIT_CODE = 3
 
 
 def _backend_choices() -> list[str]:
@@ -125,6 +131,10 @@ board_app = typer.Typer(
     help="Blackboard messaging shared across sessions.",
     no_args_is_help=True,
 )
+inbox_app = typer.Typer(
+    help="Durable human-facing inbox for lead-initiated checkpoints.",
+    no_args_is_help=True,
+)
 schedule_app = typer.Typer(
     help="Manage scheduled session launches on a running Waypoint server.",
     no_args_is_help=True,
@@ -142,6 +152,7 @@ app.add_typer(session_app, name="session")
 app.add_typer(sessions_app, name="sessions")
 sessions_app.add_typer(attachments_app, name="attachments")
 app.add_typer(board_app, name="board")
+app.add_typer(inbox_app, name="inbox")
 app.add_typer(schedule_app, name="schedule")
 schedule_app.add_typer(schedule_message_app, name="message")
 app.add_typer(maintenance_app, name="maintenance")
@@ -714,6 +725,157 @@ def _emit_ndjson(payload: Any) -> None:
     by ``sessions events --follow`` so each event is consumable as it arrives.
     """
     print(json.dumps(payload, separators=(",", ":")), flush=True)
+
+
+def parse_inbox_wait_until(raw: str | None) -> frozenset[str]:
+    """Parse the inbox ``--until`` list into ``{resolved, update}``.
+
+    Distinct from ``parse_wait_until`` (which validates session statuses);
+    ``None`` defaults to ``resolved`` — the final gate.
+    """
+    if raw is None:
+        return frozenset({"resolved"})
+    requested = {item.strip() for item in raw.split(",") if item.strip()}
+    if not requested:
+        raise typer.BadParameter("--until needs one of: resolved, update")
+    unknown = sorted(requested - INBOX_WAIT_UNTIL_CHOICES)
+    if unknown:
+        raise typer.BadParameter(f"--until has unknown value(s): {', '.join(unknown)}")
+    return frozenset(requested)
+
+
+class _InboxWaitClient(Protocol):
+    """The slice of ``WaypointClient`` the wait engine needs (so tests can
+    substitute a fake without depending on the whole client)."""
+
+    def stream_inbox_envelopes(self, item_id: str) -> AsyncIterator[dict[str, Any]]: ...
+
+    def get_inbox(self, item_id: str) -> dict[str, Any]: ...
+
+
+class _InboxWaitResult(NamedTuple):
+    outcome: str  # resolved | update | gone | timeout
+    item: dict[str, Any] | None
+
+
+def inbox_wait_exit_code(outcome: str) -> int:
+    if outcome == "timeout":
+        return WAIT_TIMEOUT_EXIT_CODE
+    if outcome == "gone":
+        return INBOX_GONE_EXIT_CODE
+    return 0
+
+
+def _inbox_condition_met(
+    item: dict[str, Any], until: frozenset[str], baseline: int
+) -> str | None:
+    """Return the satisfied outcome (``resolved``/``update``) or ``None``.
+
+    Evaluated against a snapshot — including the hydration frame — so an
+    already-satisfied wait returns immediately instead of hanging.
+    """
+    if "resolved" in until and item.get("status") == "resolved":
+        return "resolved"
+    if "update" in until and int(item.get("version", 0)) > baseline:
+        return "update"
+    return None
+
+
+def _resolve_baseline(baseline: list[int | None], item: dict[str, Any]) -> int:
+    # First observed frame (WS hydration or first poll) fixes the ``update``
+    # baseline so it never self-triggers, and — because the holder is shared —
+    # a change seen by the WS path survives a WS→poll handoff instead of being
+    # re-baselined off a fresh fetch.
+    current = baseline[0]
+    if current is None:
+        current = int(item.get("version", 0))
+        baseline[0] = current
+    return current
+
+
+async def _await_inbox_via_ws(
+    client: _InboxWaitClient,
+    item_id: str,
+    until: frozenset[str],
+    baseline: list[int | None],
+) -> _InboxWaitResult | None:
+    """Block on the per-item WS stream until the condition is met or the item
+    is deleted. Returns ``None`` if the stream cannot connect (caller polls)."""
+    try:
+        async for envelope in client.stream_inbox_envelopes(item_id):
+            if envelope.get("type") != "inbox_update":
+                continue
+            payload = envelope.get("payload", {})
+            if payload.get("deleted"):
+                return _InboxWaitResult("gone", None)
+            item = payload.get("item")
+            if not isinstance(item, dict):
+                continue
+            outcome = _inbox_condition_met(
+                item, until, _resolve_baseline(baseline, item)
+            )
+            if outcome is not None:
+                return _InboxWaitResult(outcome, item)
+    except (OSError, WebSocketException):
+        return None
+    return None
+
+
+async def _await_inbox_via_poll(
+    client: _InboxWaitClient,
+    item_id: str,
+    until: frozenset[str],
+    baseline: list[int | None],
+) -> _InboxWaitResult:
+    while True:
+        try:
+            # Off the loop: get_inbox is sync httpx, so an inline call would
+            # block asyncio.timeout from firing.
+            item = await asyncio.to_thread(client.get_inbox, item_id)
+        except WaypointError as exc:
+            if exc.status_code == 404:
+                return _InboxWaitResult("gone", None)
+            if exc.status_code is not None and 400 <= exc.status_code < 500:
+                raise  # a genuine client error (e.g. 401) — don't spin on it
+            # Transient (connection refused → status_code None, or a 5xx while
+            # the backend restarts): a checkpoint is a durable gate, so keep
+            # polling within the --timeout budget instead of aborting the wait.
+            await asyncio.sleep(WAIT_POLL_INTERVAL_SECONDS)
+            continue
+        outcome = _inbox_condition_met(item, until, _resolve_baseline(baseline, item))
+        if outcome is not None:
+            return _InboxWaitResult(outcome, item)
+        await asyncio.sleep(WAIT_POLL_INTERVAL_SECONDS)
+
+
+async def _wait_for_inbox(
+    client: _InboxWaitClient,
+    item_id: str,
+    until: frozenset[str],
+    since: int | None,
+    timeout: float | None,
+) -> _InboxWaitResult:
+    """Block until the item meets ``until``, is deleted (``gone``), or times out.
+
+    Prefers the WS stream, falling back to polling if it cannot connect. The
+    ``update`` baseline is shared across both paths so a version bump seen just
+    before a WS drop is still reported after the poll takeover.
+    """
+    baseline: list[int | None] = [since]
+    try:
+        async with asyncio.timeout(timeout):
+            streamed = await _await_inbox_via_ws(client, item_id, until, baseline)
+            if streamed is not None:
+                return streamed
+            return await _await_inbox_via_poll(client, item_id, until, baseline)
+    except TimeoutError:
+        try:
+            item: dict[str, Any] | None = await asyncio.to_thread(
+                client.get_inbox, item_id
+            )
+        except WaypointError:
+            item = None
+        return _InboxWaitResult("timeout", item)
 
 
 async def _await_status_via_ws(
@@ -2240,6 +2402,197 @@ def board_set_meta(
         }
 
     _emit(_settings_from_ctx(ctx), _run)
+
+
+@inbox_app.command("post")
+def inbox_post(
+    ctx: typer.Context,
+    json_source: Annotated[
+        str,
+        typer.Option(
+            "--json",
+            help="Path to a JSON object body ({subject, blocks[]}), or - for stdin.",
+            metavar="FILE|-",
+        ),
+    ],
+    from_session_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WAYPOINT_SESSION_ID",
+            help="Requesting session; defaults to this session's id. Reply "
+            "attachments are pinned into this session's store.",
+        ),
+    ] = None,
+) -> None:
+    """Post an inbox item. The body is JSON because a multi-block item is
+    inherently structured; skills build the block list."""
+    body = _parse_json_object(json_source)
+    subject = body.get("subject")
+    blocks = body.get("blocks", [])
+    if not isinstance(subject, str) or not subject:
+        raise typer.BadParameter("--json must include a non-empty 'subject'")
+    if not isinstance(blocks, list):
+        raise typer.BadParameter("--json 'blocks' must be a list")
+    resolved_session = from_session_id or body.get("from_session_id")
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "item": c.post_inbox(subject, blocks, from_session_id=resolved_session)
+        },
+    )
+
+
+@inbox_app.command("get")
+def inbox_get(ctx: typer.Context, item_id: Annotated[str, typer.Argument()]) -> None:
+    """Read a single inbox item, including block answers and replies."""
+    _emit(_settings_from_ctx(ctx), lambda c: {"item": c.get_inbox(item_id)})
+
+
+@inbox_app.command("list")
+def inbox_list(
+    ctx: typer.Context,
+    status: Annotated[
+        str | None,
+        typer.Option("--status", help="Filter by status: open | resolved."),
+    ] = None,
+    q: Annotated[
+        str | None,
+        typer.Option("--q", help="Search subject + sender label."),
+    ] = None,
+    limit: Annotated[
+        int | None, typer.Option("--limit", help="Page size (default 20).")
+    ] = None,
+    cursor: Annotated[
+        str | None, typer.Option("--cursor", help="Load-more cursor from a prior page.")
+    ] = None,
+) -> None:
+    """List inbox items (status filter, subject/label search, load-more)."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: c.list_inbox(status=status, query=q, limit=limit, cursor=cursor),
+    )
+
+
+@inbox_app.command("answer")
+def inbox_answer(
+    ctx: typer.Context,
+    item_id: Annotated[str, typer.Argument()],
+    block_id: Annotated[str, typer.Argument()],
+    answer_json: Annotated[
+        str | None,
+        typer.Option(
+            "--answer-json",
+            help='JSON answer for the block, e.g. \'{"selected":["yes"]}\' '
+            'or \'{"decision":"approve"}\'.',
+        ),
+    ] = None,
+    notes: Annotated[
+        str | None,
+        typer.Option("--notes", help="Free-text reply note attached to the block."),
+    ] = None,
+    attach: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--attach",
+            help="Attach an existing blob as session_id:attachment_id. Repeatable.",
+        ),
+    ] = None,
+) -> None:
+    """Answer and/or reply to one block (scripting path; the UI is primary)."""
+    answer: dict[str, Any] | None = None
+    if answer_json is not None:
+        try:
+            parsed = json.loads(answer_json)
+        except json.JSONDecodeError as exc:
+            raise typer.BadParameter(f"--answer-json is not valid JSON: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise typer.BadParameter("--answer-json must be a JSON object")
+        answer = parsed
+    reply: dict[str, Any] | None = None
+    if notes is not None or attach:
+        attachments: list[dict[str, str]] = []
+        for item in attach or []:
+            session_part, sep, attachment_part = item.partition(":")
+            if not sep or not session_part or not attachment_part:
+                raise typer.BadParameter(
+                    f"--attach expects session_id:attachment_id, got: {item}"
+                )
+            attachments.append(
+                {"session_id": session_part, "attachment_id": attachment_part}
+            )
+        reply = {"notes": notes, "attachments": attachments}
+    if answer is None and reply is None:
+        raise typer.BadParameter("provide --answer-json and/or --notes/--attach")
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "item": c.submit_inbox_block(item_id, block_id, answer=answer, reply=reply)
+        },
+    )
+
+
+@inbox_app.command("read")
+def inbox_read(ctx: typer.Context, item_id: Annotated[str, typer.Argument()]) -> None:
+    """Mark an item read (resolves a no-action FYI item)."""
+    _emit(_settings_from_ctx(ctx), lambda c: {"item": c.mark_inbox_read(item_id)})
+
+
+@inbox_app.command("delete")
+def inbox_delete(ctx: typer.Context, item_id: Annotated[str, typer.Argument()]) -> None:
+    """Delete an inbox item (a waiting lead sees a terminal ``gone`` outcome)."""
+    _emit(_settings_from_ctx(ctx), lambda c: c.delete_inbox(item_id))
+
+
+@inbox_app.command("wait")
+def inbox_wait(
+    ctx: typer.Context,
+    item_id: Annotated[str, typer.Argument()],
+    until: Annotated[
+        str | None,
+        typer.Option(
+            "--until",
+            help="resolved (all required blocks answered) or update (first "
+            "change past --since). Defaults to resolved.",
+        ),
+    ] = None,
+    since: Annotated[
+        int | None,
+        typer.Option(
+            "--since",
+            help="Version baseline for --until update; defaults to the version "
+            "observed at connect.",
+        ),
+    ] = None,
+    timeout: Annotated[
+        str | None,
+        typer.Option(
+            "--timeout",
+            help="Give up after this duration (e.g. 5m, 2h); exit 124 on timeout.",
+        ),
+    ] = None,
+) -> None:
+    """Block until an item resolves, changes, or is deleted.
+
+    Emits ``{"outcome": ..., "item": ...}`` where outcome is resolved, update,
+    timeout, or gone. Exit codes: 0 on resolved/update, 124 on timeout, 3 on
+    gone — so a lead can branch in a shell chain. Prefers the WS stream,
+    falling back to polling.
+    """
+    until_set = parse_inbox_wait_until(until)
+    timeout_seconds = _parse_duration(timeout) if timeout is not None else None
+    outcomes: list[str] = []
+
+    def run(c: WaypointClient) -> dict[str, Any]:
+        result = asyncio.run(
+            _wait_for_inbox(c, item_id, until_set, since, timeout_seconds)
+        )
+        outcomes.append(result.outcome)
+        return {"outcome": result.outcome, "item": result.item}
+
+    _emit(_settings_from_ctx(ctx), run)
+    code = inbox_wait_exit_code(outcomes[0]) if outcomes else 1
+    if code:
+        raise typer.Exit(code=code)
 
 
 @schedule_app.command("list")

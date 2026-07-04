@@ -428,7 +428,8 @@ export interface SessionEnvelope {
     | "schedule_list_update"
     | "board_update"
     | "clipboard_copy"
-    | "side_question";
+    | "side_question"
+    | "inbox_update";
   payload: Record<string, unknown>;
 }
 
@@ -447,4 +448,92 @@ export interface SideQuestion {
   attempts: number;
   resumed: boolean;
   created_at: string;
+}
+
+// Lead-initiated human-checkpoint inbox. Field names mirror the wire
+// (snake_case), like the rest of the API surface.
+export type InboxStatus = "open" | "resolved";
+export type InboxBlockType = "markdown" | "attachment" | "question" | "approval";
+
+export interface InboxAttachmentRef {
+  session_id: string;
+  attachment_id: string;
+  // Denormalized by the backend at post/submit time so the name renders inline
+  // without a per-session lookup; null for an unresolvable ref (or legacy rows).
+  filename?: string | null;
+  kind?: AttachmentKind | null;
+}
+
+export interface InboxReply {
+  notes: string | null;
+  attachments: InboxAttachmentRef[];
+  created_at: string;
+}
+
+export interface InboxQuestionAnswer {
+  selected: string[];
+  other: string | null;
+}
+
+export interface InboxApprovalAnswer {
+  decision: string;
+}
+
+export interface InboxQuestionOption {
+  label: string;
+  description?: string | null;
+}
+
+interface InboxBlockBase {
+  id: string;
+  reply: InboxReply | null;
+}
+
+export interface InboxMarkdownBlock extends InboxBlockBase {
+  type: "markdown";
+  text: string;
+}
+
+export interface InboxAttachmentBlock extends InboxBlockBase {
+  type: "attachment";
+  ref: InboxAttachmentRef;
+}
+
+export interface InboxQuestionBlock extends InboxBlockBase {
+  type: "question";
+  header: string | null;
+  question: string;
+  options: InboxQuestionOption[];
+  multi: boolean;
+  required: boolean;
+  answer: InboxQuestionAnswer | null;
+  answered_at: string | null;
+}
+
+export interface InboxApprovalBlock extends InboxBlockBase {
+  type: "approval";
+  prompt: string;
+  options: string[];
+  required: boolean;
+  answer: InboxApprovalAnswer | null;
+  answered_at: string | null;
+}
+
+export type InboxBlock =
+  | InboxMarkdownBlock
+  | InboxAttachmentBlock
+  | InboxQuestionBlock
+  | InboxApprovalBlock;
+
+export interface InboxItem {
+  id: string;
+  from_session_id: string;
+  from_label: string | null;
+  subject: string;
+  status: InboxStatus;
+  read_at: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  blocks: InboxBlock[];
 }

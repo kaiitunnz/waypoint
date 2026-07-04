@@ -13874,3 +13874,819 @@ html[data-theme="light"] .wp-hl {
   justify-content: flex-end;
   gap: 0.6rem;
 }
+
+/* ─── Inbox ─── */
+.inbox-shell {
+  max-width: min(1180px, 100vw);
+  height: 100dvh;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  /* Fill toward the viewport bottom like a mail client: drop the inherited
+     40px page-shell floor to a tight margin so the split view doesn't leave a
+     dead band below it on desktop (mobile restores 40px in the width query). */
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+}
+
+/* Split view: two columns divided by a single hairline, no gap, independent
+   scroll. Mobile collapses to one column via the width query below. */
+.inbox-layout {
+  display: grid;
+  grid-template-columns: clamp(300px, 34%, 420px) minmax(0, 1fr);
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+/* ── List pane ── */
+.inbox-list-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  border-right: 1px solid var(--line);
+}
+
+.inbox-toolbar {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.inbox-tabs {
+  display: flex;
+  gap: 18px;
+  padding: 0 2px;
+}
+
+.inbox-tab {
+  padding: 3px 0;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--muted-soft);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    color 0.14s ease,
+    border-color 0.14s ease;
+}
+
+.inbox-tab:hover {
+  color: var(--muted);
+}
+
+.inbox-tab.active {
+  color: var(--accent);
+  border-bottom-color: currentColor;
+}
+
+.inbox-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── List rows: dense, hairline-separated, flat ── */
+/* Row wrapper hosts the swipe-reveal delete panel behind the row and the
+   hover/focus delete button above it — the row itself is a sibling, never a
+   parent of another button. */
+.inbox-row-wrap {
+  position: relative;
+  overflow: hidden;
+}
+
+.inbox-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  /* Opaque so it fully covers the delete panel until swiped. */
+  background: var(--bg-card);
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+  width: 100%;
+  touch-action: pan-y;
+  transition:
+    background 0.12s ease,
+    transform 0.18s ease;
+}
+
+.inbox-row.swiping {
+  transition: background 0.12s ease;
+}
+
+.inbox-row:hover {
+  background: var(--bg-card-soft);
+}
+
+.inbox-row.active {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+}
+
+/* Swipe-reveal panel (touch): a flat danger tint uncovered as the row slides
+   left. Visual only — the accessible control is .inbox-row-delete. */
+.inbox-row-delete-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  padding: 0 18px;
+  font-family: var(--font-mono-face);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg-card));
+}
+
+/* Keyboard/desktop delete: hidden until the row is hovered or the button is
+   focused, so it's reachable without the gesture. */
+.inbox-row-delete {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  z-index: 2;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+/* Hover-reveal only on real pointer devices. On touch, :hover is sticky — the
+   first tap would reveal the button instead of opening the item (double-tap
+   trap); there, deletion is the swipe gesture. Keyboard focus reveals it
+   everywhere for a11y. */
+@media (hover: hover) and (pointer: fine) {
+  .inbox-row-wrap:hover .inbox-row-delete {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* During a swipe the pointer still hovers the row, which would reveal the
+   hover button on top of the swipe panel (two trash affordances at once);
+   suppress it while dragging. Ordered after the hover rule to win at equal
+   specificity. */
+.inbox-row-wrap.swiping .inbox-row-delete {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.inbox-row-delete:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.inbox-row-delete:hover,
+.inbox-row-delete:focus-visible {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inbox-row {
+    transition: background 0.12s ease;
+  }
+}
+
+.inbox-lamp {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+
+.inbox-row .inbox-lamp {
+  margin-top: 5px;
+}
+
+.inbox-status-open {
+  color: var(--accent);
+}
+
+.inbox-status-resolved {
+  color: var(--muted-soft);
+}
+
+.inbox-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.inbox-row-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.inbox-row-from {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+}
+
+.inbox-row-time {
+  flex: none;
+  color: var(--muted-soft);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.inbox-row-subject {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+.inbox-row.unread .inbox-row-subject {
+  color: var(--text-strong);
+}
+
+.inbox-row-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 1px;
+}
+
+.inbox-row-tag {
+  font-family: var(--font-mono);
+  font-size: 0.63rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.inbox-row-tag.pending {
+  color: var(--accent);
+}
+
+.inbox-row-unread {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+
+.inbox-load-more {
+  margin: 12px auto;
+  padding: 6px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-soft);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    border-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.inbox-load-more:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.inbox-load-more:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ── Skeleton (loading) ── */
+.inbox-row-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.inbox-skel-bar {
+  height: 9px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--muted-soft) 22%, transparent);
+}
+
+.inbox-skel-bar.short {
+  width: 35%;
+}
+
+.inbox-skel-bar.wide {
+  width: 80%;
+}
+
+/* ── Empty states ── */
+.inbox-empty {
+  color: var(--muted-soft);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+.inbox-empty p {
+  margin: 0;
+}
+
+.inbox-empty-list,
+.inbox-empty-select {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 20px;
+}
+
+/* ── Content pane ── */
+.inbox-item-pane {
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 24px 26px;
+  display: flex;
+  flex-direction: column;
+}
+
+.inbox-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: 0;
+}
+
+.inbox-doc-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.inbox-doc-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.inbox-doc-from {
+  color: var(--accent);
+}
+
+.inbox-doc-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inbox-doc-read,
+.inbox-doc-time {
+  color: var(--muted-soft);
+}
+
+.inbox-doc-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.inbox-doc-subject {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  line-height: 1.25;
+  color: var(--text-strong);
+  min-width: 0;
+}
+
+/* Header action cluster: the "Open session" link and Delete ride the trailing
+   edge of the mono meta strip (a masthead control line), so the serif subject
+   below runs full width instead of competing with them. */
+.inbox-doc-actions {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Faint middot pairs the two actions without reading as more metadata; only
+   drawn when Delete follows the link (single-action cases get no separator). */
+.inbox-doc-actions .inbox-doc-delete:not(:first-child)::before {
+  content: "·";
+  margin-right: 12px;
+  color: color-mix(in srgb, var(--muted-soft) 55%, transparent);
+}
+
+.inbox-doc-delete,
+.inbox-doc-action-link {
+  flex: none;
+  border: none;
+  background: none;
+  padding: 2px 0;
+  color: var(--muted-soft);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.14s ease;
+}
+
+.inbox-doc-delete:hover {
+  color: var(--danger);
+}
+
+.inbox-doc-action-link:hover {
+  color: var(--accent);
+}
+
+.inbox-doc-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── Blocks ── */
+.inbox-block {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card-soft);
+  min-width: 0;
+}
+
+.inbox-block.pending {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-card));
+}
+
+.inbox-block-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.inbox-block-tag {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.inbox-block-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.inbox-block-state.pending {
+  color: var(--accent);
+}
+
+.inbox-block-state.answered {
+  color: var(--muted-soft);
+}
+
+.inbox-block-echo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+}
+
+.inbox-block-content {
+  min-width: 0;
+}
+
+/* Flatten the shared approval panel inside an inbox block: the block already
+   supplies the surface, border, and radius, so drop the panel's own chrome
+   rather than editing the shared .approval/.panel rules. */
+.inbox-block-content .approval {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  gap: 10px;
+}
+
+/* ── Submitted reply echo ── */
+.inbox-reply-shown {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+
+.inbox-reply-shown-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted-soft);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.inbox-reply-shown-notes {
+  margin: 0 0 8px;
+  color: var(--text);
+}
+
+/* ── Reply composer (collapsed to a trigger until engaged) ── */
+.inbox-block-foot {
+  min-width: 0;
+}
+
+.inbox-reply-trigger {
+  border: none;
+  background: none;
+  padding: 2px 0;
+  color: var(--muted-soft);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.14s ease;
+}
+
+.inbox-reply-trigger:hover {
+  color: var(--accent);
+}
+
+.inbox-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-radius: var(--radius-sm);
+}
+
+/* Drag-active feedback while dropping an image onto the reply — a flat token
+   tint over the opaque block, no glass/shadow. */
+.inbox-reply.dragging {
+  outline: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 3px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.inbox-reply-input {
+  width: 100%;
+  resize: vertical;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+}
+
+.inbox-reply-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.inbox-reply-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Cancel + Save travel together as one trailing group, so a narrow row wraps
+   the pair below Attach instead of stranding Save on its own line. */
+.inbox-reply-actions-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Compact the reply-action buttons to the inbox's flat vocabulary — the app's
+   40px primary/secondary read oversized beside the mono triggers and option
+   chips. Scoped to the reply row only, so the approval card's decision buttons
+   (also primary/secondary, but nested in the block content) are untouched;
+   weight/colors/radius inherit from the base rules, keeping Save's primary
+   emphasis and both themes correct. */
+.inbox-reply-actions .primary,
+.inbox-reply-actions .secondary {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 0.82rem;
+}
+
+/* Existing reply attachments carried forward while editing, shown read-only
+   above the editable note so the user sees what's preserved. */
+.inbox-reply-carried {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inbox-attach-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inbox-block-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.8rem;
+}
+
+.inbox-mobile-back {
+  display: none;
+  margin-bottom: 12px;
+}
+
+.inbox-single-pane {
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 22px 24px;
+}
+
+/* Bottom-left glass floater with the unresolved-count badge — the only glass
+   surface in the inbox feature (mirrors .assistant-fab, flipped to the left). */
+.inbox-dock {
+  position: fixed;
+  left: max(20px, env(safe-area-inset-left));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 18px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-line);
+  background: var(--glass-bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    var(--shadow);
+  backdrop-filter: var(--glass-blur);
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease;
+}
+
+.inbox-dock:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--glass-line));
+}
+
+.inbox-dock-glyph {
+  display: inline-flex;
+  color: var(--accent-strong);
+}
+
+.inbox-dock-count {
+  flex: none;
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 720px) {
+  /* Desktop traps scroll inside a fixed-100dvh shell with independent per-pane
+     overflow — which fights the mobile URL-bar collapse and double-scrolls. On
+     mobile, release the cap and let the document scroll as one; the single
+     visible pane grows with its content. The document scrolls as one here, so
+     keep the fuller trailing margin the desktop split view trims away. */
+  .inbox-shell {
+    height: auto;
+    overflow: visible;
+    grid-template-rows: auto;
+    padding-bottom: calc(40px + env(safe-area-inset-bottom));
+  }
+
+  .inbox-item-pane,
+  .inbox-list,
+  .inbox-single-pane {
+    overflow: visible;
+  }
+
+  .inbox-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .inbox-layout .wp-mobile-hidden {
+    display: none;
+  }
+
+  .inbox-mobile-back {
+    display: inline-flex;
+  }
+
+  /* The meta strip stacks on mobile, so the actions wrap to their own line;
+     left-align them with the rest of the metadata instead of floating to the
+     right edge (the desktop margin-left:auto reads as disconnected here). */
+  .inbox-doc-actions {
+    margin-left: 0;
+  }
+
+  .inbox-dock {
+    padding: 0;
+    width: 52px;
+    height: 52px;
+    justify-content: center;
+  }
+
+  .inbox-dock-label {
+    display: none;
+  }
+
+  .inbox-dock-count {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    background: var(--accent);
+    color: var(--bg-base);
+  }
+}

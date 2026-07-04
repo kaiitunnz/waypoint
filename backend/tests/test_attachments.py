@@ -63,8 +63,12 @@ def test_save_dedupes_colliding_filenames(tmp_path: Path) -> None:
     assert path_second.name == "report (1).pdf"
     assert path_first.read_bytes() == b"one"
     assert path_second.read_bytes() == b"two"
-    # The display filename is unchanged for both.
-    assert first.filename == second.filename == "report.pdf"
+    # The display filename now matches the de-duplicated on-disk name, so what
+    # the user sees is unique and collision-free.
+    assert first.filename == "report.pdf"
+    assert second.filename == "report (1).pdf"
+    assert first.filename == path_first.name
+    assert second.filename == path_second.name
 
 
 def test_entries_orders_newest_first_and_skips_non_sidecars(tmp_path: Path) -> None:

@@ -40,9 +40,46 @@ export interface ToolPair {
   sequence: number;
 }
 
-interface AskQuestionOption {
+export interface AskQuestionOption {
   label: string;
   description?: string;
+}
+
+// The selectable option list shared by the transcript's AskUserQuestion card
+// and the inbox question block, so both render options identically.
+export function AskQuestionOptions({
+  options,
+  selected,
+  onToggle,
+  disabled = false,
+}: {
+  options: AskQuestionOption[];
+  selected: Set<string>;
+  onToggle: (label: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <ul className="ask-question-options">
+      {options.map((option) => {
+        const isSelected = selected.has(option.label);
+        return (
+          <li key={option.label}>
+            <button
+              type="button"
+              className={`ask-option ${isSelected ? "selected" : ""}`}
+              onClick={() => onToggle(option.label)}
+              disabled={disabled}
+            >
+              <span className="ask-option-label">{option.label}</span>
+              {option.description ? (
+                <span className="ask-option-desc">{option.description}</span>
+              ) : null}
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 interface AskUserQuestion {
@@ -953,30 +990,14 @@ function AskUserQuestionCard({
                 <span className="meta">multi-select</span>
               ) : null}
             </div>
-            <ul className="ask-question-options">
-              {entry.options.map((option) => {
-                const selected = selections.has(option.label);
-                return (
-                  <li key={option.label}>
-                    <button
-                      type="button"
-                      className={`ask-option ${selected ? "selected" : ""}`}
-                      onClick={() =>
-                        toggleOption(index, option.label, entry.multiSelect ?? false)
-                      }
-                      disabled={!interactive}
-                    >
-                      <span className="ask-option-label">{option.label}</span>
-                      {option.description ? (
-                        <span className="ask-option-desc">
-                          {option.description}
-                        </span>
-                      ) : null}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            <AskQuestionOptions
+              options={entry.options}
+              selected={selections}
+              onToggle={(label) =>
+                toggleOption(index, label, entry.multiSelect ?? false)
+              }
+              disabled={!interactive}
+            />
             {interactive ? (
               notesOpen[index] ? (
                 <div className="ask-question-note">

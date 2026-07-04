@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AssistantMark } from "@/components/AssistantMark";
 import { BackendSwitcher } from "@/components/BackendSwitcher";
 import { BoardPanel } from "@/components/BoardPanel";
+import { InboxDock } from "@/components/InboxDock";
 import { LaunchPanel } from "@/components/LaunchPanel";
 import { LoginForm } from "@/components/LoginForm";
 import { SchedulePanel } from "@/components/SchedulePanel";
@@ -1053,6 +1054,7 @@ export default function HomePage() {
           <span className="assistant-fab-label">Assistant</span>
         </Link>
       ) : null}
+      {token ? <InboxDock host={host} token={token} /> : null}
       {connectPrompt ? (
         <SshConnectModal
           targetName={connectPrompt.target.name}

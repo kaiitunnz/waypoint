@@ -54,6 +54,9 @@ interface UseAttachmentsArgs {
   token: string;
   sessionId: string;
   onError?: (message: string) => void;
+  // Pin uploads at creation time (inbox reply blobs), so the requesting
+  // session can read them back after the orphan TTL sweep.
+  pin?: boolean;
 }
 
 let attachmentSeq = 0;
@@ -82,6 +85,7 @@ export function useAttachments({
   token,
   sessionId,
   onError,
+  pin = false,
 }: UseAttachmentsArgs) {
   const [items, setItems] = useState<PendingAttachment[]>([]);
   // Object URLs created for image previews, revoked on removal/unmount.
@@ -144,7 +148,7 @@ export function useAttachments({
     (localId: string) => {
       const file = filesRef.current.get(localId);
       if (!file) return;
-      uploadAttachment(host, token, sessionId, file)
+      uploadAttachment(host, token, sessionId, file, { pin })
         .then((spec) => {
           setItems((prev) =>
             prev.map((item) =>
@@ -167,7 +171,7 @@ export function useAttachments({
           onError?.(message);
         });
     },
-    [host, token, sessionId, onError],
+    [host, token, sessionId, onError, pin],
   );
 
   const addFiles = useCallback(

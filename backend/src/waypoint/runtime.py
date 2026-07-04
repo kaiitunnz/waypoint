@@ -43,6 +43,14 @@ from waypoint.schemas import (
     EventKind,
     EventRecord,
     EventsPageResponse,
+    InboxAttachmentBlockInput,
+    InboxAttachmentRef,
+    InboxBlockInput,
+    InboxItem,
+    InboxListResponse,
+    InboxPostRequest,
+    InboxReplyInput,
+    InboxStatus,
     LaunchMode,
     SessionApprovalRequest,
     SessionAttachRequest,
@@ -148,6 +156,12 @@ class BroadcastHub:
         self.session_queues: dict[str, set[asyncio.Queue[dict[str, Any]]]] = (
             defaultdict(set)
         )
+        # Per-inbox-item streams for ``/ws/inbox/{id}`` (drives ``inbox wait``).
+        # A third keyed set alongside the session queues; ``publish`` stays
+        # generic — it just fans onto whichever keyed set the caller names.
+        self.inbox_queues: dict[str, set[asyncio.Queue[dict[str, Any]]]] = defaultdict(
+            set
+        )
 
     def subscribe_global(self) -> asyncio.Queue[dict[str, Any]]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -157,6 +171,11 @@ class BroadcastHub:
     def subscribe_session(self, session_id: str) -> asyncio.Queue[dict[str, Any]]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.session_queues[session_id].add(queue)
+        return queue
+
+    def subscribe_inbox(self, item_id: str) -> asyncio.Queue[dict[str, Any]]:
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self.inbox_queues[item_id].add(queue)
         return queue
 
     def unsubscribe_global(self, queue: asyncio.Queue[dict[str, Any]]) -> None:
@@ -169,14 +188,27 @@ class BroadcastHub:
         if not self.session_queues[session_id]:
             self.session_queues.pop(session_id, None)
 
+    def unsubscribe_inbox(
+        self, item_id: str, queue: asyncio.Queue[dict[str, Any]]
+    ) -> None:
+        self.inbox_queues[item_id].discard(queue)
+        if not self.inbox_queues[item_id]:
+            self.inbox_queues.pop(item_id, None)
+
     async def publish(
-        self, message: SessionEnvelope, session_id: str | None = None
+        self,
+        message: SessionEnvelope,
+        session_id: str | None = None,
+        inbox_id: str | None = None,
     ) -> None:
         payload = message.model_dump(mode="json")
         for queue in list(self.global_queues):
             await queue.put(payload)
         if session_id is not None:
             for queue in list(self.session_queues.get(session_id, set())):
+                await queue.put(payload)
+        if inbox_id is not None:
+            for queue in list(self.inbox_queues.get(inbox_id, set())):
                 await queue.put(payload)
 
 
@@ -1585,6 +1617,143 @@ class SessionRuntime:
         # delete pruned posts across channels); clients refetch what they show.
         await self.broadcast.publish(
             SessionEnvelope(type="board_update", payload={"channel": channel})
+        )
+
+    # ───────────────────────────── Inbox ─────────────────────────────
+
+    def _enrich_inbox_ref(self, ref: InboxAttachmentRef) -> InboxAttachmentRef:
+        # Denormalize the display name/kind from the resolved spec so the UI
+        # renders it inline (no per-session lookup). Backend-authoritative:
+        # overwrite whatever the client sent, and clear both fields when the
+        # attachment can't be resolved so a bogus ref can't carry a fake label.
+        match = self.attachments.resolve(ref.session_id, ref.attachment_id)
+        spec = match[0] if match is not None else None
+        return ref.model_copy(
+            update={
+                "filename": spec.filename if spec else None,
+                "kind": spec.kind if spec else None,
+            }
+        )
+
+    async def post_inbox_item(self, request: InboxPostRequest) -> InboxItem:
+        from_label: str | None = None
+        if request.from_session_id is not None:
+            session = self.storage.get_session(request.from_session_id)
+            if session is not None:
+                from_label = session.title
+        blocks: list[InboxBlockInput] = [
+            (
+                block.model_copy(update={"ref": self._enrich_inbox_ref(block.ref)})
+                if isinstance(block, InboxAttachmentBlockInput)
+                else block
+            )
+            for block in request.blocks
+        ]
+        item = self.storage.create_inbox_item(
+            from_session_id=request.from_session_id or "",
+            from_label=from_label,
+            subject=request.subject,
+            blocks=blocks,
+        )
+        await self._publish_inbox_update(item)
+        return item
+
+    def get_inbox_item(self, item_id: str) -> InboxItem | None:
+        return self.storage.get_inbox_item(item_id)
+
+    def list_inbox_items(
+        self,
+        *,
+        status: InboxStatus | None = None,
+        query: str | None = None,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> InboxListResponse:
+        items, has_more, next_cursor = self.storage.list_inbox_items(
+            status=status, query=query, limit=limit, cursor=cursor
+        )
+        return InboxListResponse(items=items, has_more=has_more, cursor=next_cursor)
+
+    async def submit_inbox_block(
+        self,
+        item_id: str,
+        block_id: str,
+        *,
+        answer: dict[str, Any] | None = None,
+        reply: InboxReplyInput | None = None,
+    ) -> InboxItem | None:
+        if reply is not None:
+            reply = reply.model_copy(
+                update={
+                    "attachments": [
+                        self._enrich_inbox_ref(ref) for ref in reply.attachments
+                    ]
+                }
+            )
+        result = self.storage.submit_inbox_block(
+            item_id, block_id, answer=answer, reply=reply
+        )
+        if result is None:
+            return None
+        item, changed = result
+        # A no-op submit (neither answer nor reply) leaves the item untouched;
+        # don't re-broadcast to every client.
+        if changed:
+            await self._publish_inbox_update(item)
+        return item
+
+    async def mark_inbox_read(self, item_id: str) -> InboxItem | None:
+        result = self.storage.mark_inbox_read(item_id)
+        if result is None:
+            return None
+        item, changed = result
+        # A repeat read is a no-op; don't re-broadcast to every client.
+        if changed:
+            await self._publish_inbox_update(item)
+        return item
+
+    async def delete_inbox_item(self, item_id: str) -> bool:
+        deleted = self.storage.delete_inbox_item(item_id)
+        if deleted:
+            await self._publish_inbox_deleted(item_id)
+        return deleted
+
+    def unresolved_inbox_count(self) -> int:
+        return self.storage.unresolved_inbox_count()
+
+    async def _publish_inbox_update(self, item: InboxItem) -> None:
+        # Two channels: a global ``inbox_update`` carrying the fresh unresolved
+        # count (drives the cross-session badge) plus the full item on the
+        # per-item stream so a connected ``inbox wait`` resumes.
+        count = self.storage.unresolved_inbox_count()
+        await self.broadcast.publish(
+            SessionEnvelope(
+                type="inbox_update",
+                payload={
+                    "item_id": item.id,
+                    "unresolved_count": count,
+                    "deleted": False,
+                    "item": item.model_dump(mode="json"),
+                },
+            ),
+            inbox_id=item.id,
+        )
+
+    async def _publish_inbox_deleted(self, item_id: str) -> None:
+        # Deletion is a terminal outcome for a waiter (``gone``); publish on both
+        # the global badge channel and the per-item stream.
+        count = self.storage.unresolved_inbox_count()
+        await self.broadcast.publish(
+            SessionEnvelope(
+                type="inbox_update",
+                payload={
+                    "item_id": item_id,
+                    "unresolved_count": count,
+                    "deleted": True,
+                    "item": None,
+                },
+            ),
+            inbox_id=item_id,
         )
 
     async def set_permission_mode(self, session_id: str, mode: str) -> SessionRecord:

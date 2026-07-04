@@ -14282,6 +14282,11 @@ html[data-theme="light"] .wp-hl {
   color: var(--bg-base);
 }
 
+.inbox-check:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 /* A selected row reads like the active row but in the accent, independent of
    which item is open in the pane. */
 .inbox-row.selected {

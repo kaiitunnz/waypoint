@@ -431,7 +431,7 @@ function InboxPageInner() {
     if (
       typeof window !== "undefined" &&
       !window.confirm(
-        "Delete all resolved inbox items? This cannot be undone.",
+        "Delete every resolved inbox item, including any hidden by the current search? This cannot be undone.",
       )
     ) {
       return;
@@ -512,14 +512,16 @@ function InboxPageInner() {
                   >
                     {selectMode ? "Done" : "Select"}
                   </button>
-                  <button
-                    type="button"
-                    className="inbox-action danger"
-                    disabled={busy}
-                    onClick={handleDeleteResolved}
-                  >
-                    Delete resolved
-                  </button>
+                  {!selectMode && (status === "resolved" || status === "all") ? (
+                    <button
+                      type="button"
+                      className="inbox-action danger"
+                      disabled={busy}
+                      onClick={handleDeleteResolved}
+                    >
+                      Delete resolved
+                    </button>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -563,7 +565,7 @@ function InboxPageInner() {
                 </button>
               ) : null}
             </div>
-            {selectMode && selectedIds.size > 0 ? (
+            {selectMode ? (
               <div className="inbox-bulk-bar" role="toolbar" aria-label="Bulk actions">
                 <button
                   type="button"
@@ -573,6 +575,7 @@ function InboxPageInner() {
                   role="checkbox"
                   aria-checked={allSelected ? true : someSelected ? "mixed" : false}
                   aria-label="Select all loaded items"
+                  disabled={items.length === 0}
                   onClick={toggleSelectAll}
                 >
                   {allSelected ? <BulkCheckGlyph /> : someSelected ? <DashGlyph /> : null}
@@ -584,7 +587,7 @@ function InboxPageInner() {
                 <button
                   type="button"
                   className="inbox-bulk-btn danger"
-                  disabled={busy}
+                  disabled={busy || selectedIds.size === 0}
                   onClick={handleBatchDelete}
                 >
                   Delete

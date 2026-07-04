@@ -14556,6 +14556,22 @@ html[data-theme="light"] .wp-hl {
 }
 
 @media (max-width: 720px) {
+  /* Desktop traps scroll inside a fixed-100dvh shell with independent per-pane
+     overflow — which fights the mobile URL-bar collapse and double-scrolls. On
+     mobile, release the cap and let the document scroll as one; the single
+     visible pane grows with its content. */
+  .inbox-shell {
+    height: auto;
+    overflow: visible;
+    grid-template-rows: auto;
+  }
+
+  .inbox-item-pane,
+  .inbox-list,
+  .inbox-single-pane {
+    overflow: visible;
+  }
+
   .inbox-layout {
     grid-template-columns: 1fr;
   }

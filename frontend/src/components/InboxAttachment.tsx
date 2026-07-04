@@ -1,15 +1,54 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { attachmentUrl } from "@/lib/api";
-import type { InboxAttachmentRef } from "@/lib/types";
+import { attachmentUrl, fetchSessionAttachments } from "@/lib/api";
+import type { InboxAttachmentRef, SessionAttachment } from "@/lib/types";
 
-// Renders an inbox attachment ref (a {session_id, attachment_id} pointer into
-// the requesting session's store). Mirrors AttachmentTray's MessageAttachmentCard
-// markup, but sourced from a bare ref rather than an EventRecord: no spec is
-// available, so it optimistically renders a thumbnail and falls back to a file
-// glyph link when the blob is not an image (or is gone).
+// One fetch per (host, session) shared across every attachment instance: an
+// inbox ref is only {session_id, attachment_id}, so the filename/kind are
+// resolved from the session's attachment specs. The cached promise resolves to
+// an empty map on error (e.g. the requester session is gone) so consumers fall
+// back to the id without an unhandled rejection.
+const specCache = new Map<string, Promise<Map<string, SessionAttachment>>>();
+
+function loadSpecs(
+  host: string,
+  token: string,
+  sessionId: string,
+): Promise<Map<string, SessionAttachment>> {
+  const key = `${host}::${sessionId}`;
+  let entry = specCache.get(key);
+  if (!entry) {
+    entry = fetchSessionAttachments(host, token, sessionId)
+      .then((list) => new Map(list.map((spec) => [spec.id, spec])))
+      .catch(() => new Map<string, SessionAttachment>());
+    specCache.set(key, entry);
+  }
+  return entry;
+}
+
+function useAttachmentSpec(
+  host: string,
+  token: string,
+  ref: InboxAttachmentRef,
+): SessionAttachment | undefined {
+  const [spec, setSpec] = useState<SessionAttachment | undefined>(undefined);
+  useEffect(() => {
+    let active = true;
+    loadSpecs(host, token, ref.session_id).then((specs) => {
+      if (active) setSpec(specs.get(ref.attachment_id));
+    });
+    return () => {
+      active = false;
+    };
+  }, [host, token, ref.session_id, ref.attachment_id]);
+  return spec;
+}
+
+// Renders an inbox attachment ref, resolving the uploaded filename and kind
+// from the session's attachment specs (falling back to the id + an optimistic
+// thumbnail while unresolved). Mirrors AttachmentTray's MessageAttachmentCard.
 export function InboxAttachment({
   host,
   token,
@@ -20,13 +59,16 @@ export function InboxAttachment({
   attachmentRef: InboxAttachmentRef;
 }) {
   const [imageBroken, setImageBroken] = useState(false);
+  const spec = useAttachmentSpec(host, token, attachmentRef);
   const url = attachmentUrl(
     host,
     token,
     attachmentRef.session_id,
     attachmentRef.attachment_id,
   );
-  const name = attachmentRef.attachment_id;
+  const name = spec?.filename ?? attachmentRef.attachment_id;
+  // Glyph for a known non-image, or when an optimistic image fails to load.
+  const showGlyph = imageBroken || (spec != null && spec.kind !== "image");
 
   return (
     <a
@@ -36,7 +78,7 @@ export function InboxAttachment({
       className="message-attachment-file"
       title={name}
     >
-      {imageBroken ? (
+      {showGlyph ? (
         <span className="attachment-tile" aria-hidden="true">
           <FileGlyph />
         </span>

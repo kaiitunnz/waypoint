@@ -10,8 +10,10 @@ import { InboxRow } from "@/components/InboxRow";
 import { SearchInput } from "@/components/SearchInput";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
+  batchDeleteInboxItems,
   connectSessionsSocket,
   deleteInboxItem,
+  deleteResolvedInboxItems,
   fetchInboxList,
   isAuthError,
 } from "@/lib/api";
@@ -127,6 +129,41 @@ function EnvelopeGlyph() {
   );
 }
 
+function BulkCheckGlyph() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="12"
+      height="12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
+function DashGlyph() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="12"
+      height="12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M6 12h12" />
+    </svg>
+  );
+}
+
 export default function InboxPage() {
   return (
     <Suspense fallback={null}>
@@ -150,6 +187,9 @@ function InboxPageInner() {
   const [debouncedQ, setDebouncedQ] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<"list" | "item">("list");
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
   const didInit = useRef(false);
   const filterRef = useRef({ status, q: debouncedQ });
 
@@ -312,6 +352,104 @@ function InboxPageInner() {
     [host, token, selectedId, handleDeleted, handleAuthFailure],
   );
 
+  // Leaving the current filter/search invalidates any in-flight selection.
+  useEffect(() => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }, [status, debouncedQ]);
+
+  // Keep the selection to ids still present (WS deletions, load-more churn).
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const present = new Set(items.map((it) => it.id));
+      const next = new Set<string>();
+      for (const id of prev) if (present.has(id)) next.add(id);
+      return next.size === prev.size ? prev : next;
+    });
+  }, [items]);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const exitSelect = useCallback(() => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const allSelected = items.length > 0 && selectedIds.size === items.length;
+  const someSelected = selectedIds.size > 0 && !allSelected;
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds((prev) =>
+      prev.size === items.length ? new Set() : new Set(items.map((it) => it.id)),
+    );
+  }, [items]);
+
+  const handleBatchDelete = useCallback(async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0 || busy) return;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Delete ${ids.length} selected inbox item${ids.length > 1 ? "s" : ""}? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const deleted = await batchDeleteInboxItems(host, token, ids);
+      const gone = new Set(deleted);
+      setItems((prev) => prev.filter((it) => !gone.has(it.id)));
+      if (selectedId && gone.has(selectedId)) handleDeleted();
+      exitSelect();
+    } catch (err) {
+      if (isAuthError(err)) handleAuthFailure();
+    } finally {
+      setBusy(false);
+    }
+  }, [
+    selectedIds,
+    busy,
+    host,
+    token,
+    selectedId,
+    handleDeleted,
+    exitSelect,
+    handleAuthFailure,
+  ]);
+
+  const handleDeleteResolved = useCallback(async () => {
+    if (busy) return;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        "Delete all resolved inbox items? This cannot be undone.",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const deleted = await deleteResolvedInboxItems(host, token);
+      const gone = new Set(deleted);
+      setItems((prev) => prev.filter((it) => !gone.has(it.id)));
+      if (selectedId && gone.has(selectedId)) handleDeleted();
+      exitSelect();
+    } catch (err) {
+      if (isAuthError(err)) handleAuthFailure();
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, host, token, selectedId, handleDeleted, exitSelect, handleAuthFailure]);
+
   return (
     <div className="page-shell inbox-shell">
       <header className="app-bar">
@@ -350,18 +488,39 @@ function InboxPageInner() {
                 placeholder="Search inbox…"
                 showStatusExample={false}
               />
-              <div className="inbox-tabs" role="group" aria-label="Filter inbox">
-                {STATUS_FILTERS.map((filter) => (
+              <div className="inbox-controls">
+                <div className="inbox-tabs" role="group" aria-label="Filter inbox">
+                  {STATUS_FILTERS.map((filter) => (
+                    <button
+                      key={filter.id}
+                      type="button"
+                      aria-pressed={status === filter.id}
+                      className={`inbox-tab${status === filter.id ? " active" : ""}`}
+                      onClick={() => setStatus(filter.id)}
+                    >
+                      {filter.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="inbox-actions">
                   <button
-                    key={filter.id}
                     type="button"
-                    aria-pressed={status === filter.id}
-                    className={`inbox-tab${status === filter.id ? " active" : ""}`}
-                    onClick={() => setStatus(filter.id)}
+                    className={`inbox-action${selectMode ? " active" : ""}`}
+                    aria-pressed={selectMode}
+                    disabled={!selectMode && items.length === 0}
+                    onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
                   >
-                    {filter.label}
+                    {selectMode ? "Done" : "Select"}
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    className="inbox-action danger"
+                    disabled={busy}
+                    onClick={handleDeleteResolved}
+                  >
+                    Delete resolved
+                  </button>
+                </div>
               </div>
             </div>
             <div className="inbox-list" role="list">
@@ -388,6 +547,9 @@ function InboxPageInner() {
                   timeLabel={relativeTime(item.updated_at)}
                   onSelect={select}
                   onDelete={handleRowDelete}
+                  selectMode={selectMode}
+                  selected={selectedIds.has(item.id)}
+                  onToggleSelect={toggleSelect}
                 />
               ))}
               {hasMore ? (
@@ -401,6 +563,41 @@ function InboxPageInner() {
                 </button>
               ) : null}
             </div>
+            {selectMode && selectedIds.size > 0 ? (
+              <div className="inbox-bulk-bar" role="toolbar" aria-label="Bulk actions">
+                <button
+                  type="button"
+                  className={`inbox-check inbox-check-all${
+                    allSelected ? " checked" : someSelected ? " mixed" : ""
+                  }`}
+                  role="checkbox"
+                  aria-checked={allSelected ? true : someSelected ? "mixed" : false}
+                  aria-label="Select all loaded items"
+                  onClick={toggleSelectAll}
+                >
+                  {allSelected ? <BulkCheckGlyph /> : someSelected ? <DashGlyph /> : null}
+                </button>
+                <span className="inbox-bulk-count">
+                  {selectedIds.size} selected
+                </span>
+                <span className="inbox-bulk-spacer" />
+                <button
+                  type="button"
+                  className="inbox-bulk-btn danger"
+                  disabled={busy}
+                  onClick={handleBatchDelete}
+                >
+                  Delete
+                </button>
+                <button
+                  type="button"
+                  className="inbox-bulk-btn"
+                  onClick={exitSelect}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : null}
           </div>
 
           <div

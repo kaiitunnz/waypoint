@@ -14,6 +14,7 @@ from typing import Annotated, Any, NamedTuple, Protocol, cast
 import click
 import typer
 import uvicorn
+from fastapi import HTTPException
 from websockets.exceptions import WebSocketException
 
 from waypoint.api import AppContext, create_app
@@ -26,10 +27,11 @@ from waypoint.client import (
     write_cli_token,
 )
 from waypoint.launch_env import validate_launch_env
+from waypoint.presets import resolve_session_create_request
 from waypoint.schemas import (
     LaunchMode,
     SessionAttachRequest,
-    SessionCreateRequest,
+    SessionLaunchRequest,
     SessionStatus,
 )
 from waypoint.settings import Settings, load_settings
@@ -148,6 +150,10 @@ maintenance_app = typer.Typer(
     help="Maintenance commands for the Waypoint server data.",
     no_args_is_help=True,
 )
+presets_app = typer.Typer(
+    help="Manage reusable session-launch presets on a running Waypoint server.",
+    no_args_is_help=True,
+)
 app.add_typer(backends_app, name="backends")
 app.add_typer(session_app, name="session")
 app.add_typer(sessions_app, name="sessions")
@@ -157,6 +163,7 @@ app.add_typer(inbox_app, name="inbox")
 app.add_typer(schedule_app, name="schedule")
 schedule_app.add_typer(schedule_message_app, name="message")
 app.add_typer(maintenance_app, name="maintenance")
+app.add_typer(presets_app, name="presets")
 
 
 def _version_callback(value: bool) -> None:
@@ -370,8 +377,26 @@ def help_(
 @session_app.command("start")
 def session_start(
     ctx: typer.Context,
-    backend: BackendOption,
-    cwd: Annotated[str, typer.Option(help="Working directory for the session.")],
+    backend: Annotated[
+        str | None,
+        typer.Option(callback=_validate_backend, autocompletion=_complete_backend),
+    ] = None,
+    cwd: Annotated[
+        str | None, typer.Option(help="Working directory for the session.")
+    ] = None,
+    preset: Annotated[
+        str | None,
+        typer.Option(
+            "--preset", help="Apply a session preset (by id or name) before launch."
+        ),
+    ] = None,
+    no_preset: Annotated[
+        bool,
+        typer.Option(
+            "--no-preset",
+            help="Do not apply the default preset when --preset is unset.",
+        ),
+    ] = False,
     launch_target_id: Annotated[str | None, typer.Option()] = None,
     launch_mode: Annotated[
         LaunchMode | None,
@@ -409,6 +434,8 @@ def session_start(
             _settings_from_ctx(ctx),
             backend=backend,
             cwd=cwd,
+            preset=preset,
+            no_preset=no_preset,
             launch_target_id=launch_target_id,
             launch_mode=launch_mode,
             transport=transport,
@@ -442,8 +469,10 @@ def session_attach(
 async def _session_start(
     settings: Settings,
     *,
-    backend: str,
-    cwd: str,
+    backend: str | None,
+    cwd: str | None,
+    preset: str | None,
+    no_preset: bool,
     launch_target_id: str | None,
     launch_mode: LaunchMode | None,
     transport: str | None,
@@ -455,12 +484,15 @@ async def _session_start(
     context.settings.ensure_dirs()
     try:
         request_fields: dict[str, Any] = {
-            "backend": backend,
-            "cwd": cwd,
             "launch_target_id": launch_target_id,
             "title": title,
             "args": list(args),
         }
+        # Only send backend/cwd when supplied; a preset may fill them in.
+        if backend is not None:
+            request_fields["backend"] = backend
+        if cwd is not None:
+            request_fields["cwd"] = cwd
         if launch_env is not None:
             request_fields["launch_env"] = launch_env
         # Omit launch_mode when unset so the request model's AUTO default applies.
@@ -470,8 +502,20 @@ async def _session_start(
         # today's launch_mode-derived behavior.
         if transport is not None:
             request_fields["transport"] = transport
+        if preset is not None:
+            request_fields["preset_id"] = preset
+        elif not no_preset:
+            request_fields["use_default_preset"] = True
+        try:
+            resolved, matched = resolve_session_create_request(
+                context.storage, SessionLaunchRequest(**request_fields)
+            )
+        except HTTPException as exc:
+            raise typer.BadParameter(str(exc.detail)) from exc
         session = await context.runtime.create_session(
-            SessionCreateRequest(**request_fields)
+            resolved,
+            preset_id=matched.id if matched else None,
+            preset_name=matched.name if matched else None,
         )
         typer.echo(json.dumps({"session": session.model_dump(mode="json")}, indent=2))
     finally:
@@ -1508,11 +1552,56 @@ def _validate_launch_permission_mode(
         )
 
 
+def _preset_spec_for_warnings(
+    client: WaypointClient, preset_ref: str | None, use_default: bool
+) -> dict[str, Any]:
+    """Fetch the applicable preset's redacted spec, for computing the effective
+    launch values the model/permission warnings run against.
+
+    Best-effort only: any discovery failure yields ``{}`` so warnings degrade to
+    the explicit-flag behavior instead of erroring."""
+    try:
+        if preset_ref is not None:
+            preset = client.get_session_preset(preset_ref)
+        elif use_default:
+            listing = client.list_session_presets()
+            default_id = listing.get("default_preset_id")
+            if not default_id:
+                return {}
+            preset = client.get_session_preset(default_id)
+        else:
+            return {}
+    except WaypointError:
+        return {}
+    spec = preset.get("spec")
+    return spec if isinstance(spec, dict) else {}
+
+
 @sessions_app.command("start")
 def sessions_start(
     ctx: typer.Context,
-    backend: BackendOption,
-    cwd: Annotated[str, typer.Option(help="Working directory for the session.")],
+    backend: Annotated[
+        str | None,
+        typer.Option(callback=_validate_backend, autocompletion=_complete_backend),
+    ] = None,
+    cwd: Annotated[
+        str | None, typer.Option(help="Working directory for the session.")
+    ] = None,
+    preset: Annotated[
+        str | None,
+        typer.Option(
+            "--preset",
+            help="Apply a session preset (by id or name) before launch. Explicit "
+            "flags override preset values.",
+        ),
+    ] = None,
+    no_preset: Annotated[
+        bool,
+        typer.Option(
+            "--no-preset",
+            help="Do not apply the default preset when --preset is unset.",
+        ),
+    ] = False,
     launch_target_id: Annotated[str | None, typer.Option()] = None,
     launch_mode: Annotated[
         LaunchMode | None,
@@ -1578,19 +1667,33 @@ def sessions_start(
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
     """Launch a new session on the running server."""
+    use_default = preset is None and not no_preset
     effective_cwd = cwd
     worktree_path: str | None = None
     if worktree is not None:
+        if cwd is None:
+            raise typer.BadParameter(
+                "--cwd is required with --worktree", param_hint="--cwd"
+            )
         worktree_path = _create_worktree(worktree, worktree_base, cwd)
         effective_cwd = worktree_path
     tags = _parse_tags(tag)
     launch_env_map = _parse_launch_env(launch_env) if launch_env is not None else None
 
     def _run(c: WaypointClient) -> dict[str, Any]:
-        if permission_mode is not None:
-            _validate_launch_permission_mode(c, backend, permission_mode)
-        if model is not None:
-            _warn_unknown_model(c, backend, model, launch_target_id)
+        # Compute the effective backend/model/permission after the preset would
+        # apply (explicit flag wins) so the warnings still fire for stale preset
+        # values even when the user passes only --preset.
+        spec = _preset_spec_for_warnings(c, preset, use_default)
+        eff_backend = backend or spec.get("backend")
+        eff_model = model or spec.get("model")
+        eff_permission = permission_mode or spec.get("permission_mode")
+        eff_target = launch_target_id or spec.get("launch_target_id")
+        if eff_backend:
+            if eff_permission is not None:
+                _validate_launch_permission_mode(c, eff_backend, eff_permission)
+            if eff_model is not None:
+                _warn_unknown_model(c, eff_backend, eff_model, eff_target)
         return {
             "session": c.create_session(
                 backend=backend,
@@ -1607,6 +1710,8 @@ def sessions_start(
                 args=list(args or []),
                 tags=tags,
                 launch_env=launch_env_map,
+                preset_id=preset,
+                use_default_preset=use_default,
             )
         }
 
@@ -2658,8 +2763,28 @@ def schedule_list(ctx: typer.Context) -> None:
 @schedule_app.command("create")
 def schedule_create(
     ctx: typer.Context,
-    backend: BackendOption,
-    cwd: Annotated[str, typer.Option(help="Working directory for the session.")],
+    backend: Annotated[
+        str | None,
+        typer.Option(callback=_validate_backend, autocompletion=_complete_backend),
+    ] = None,
+    cwd: Annotated[
+        str | None, typer.Option(help="Working directory for the session.")
+    ] = None,
+    preset: Annotated[
+        str | None,
+        typer.Option(
+            "--preset",
+            help="Apply a session preset (by id or name) before scheduling. "
+            "Explicit flags override preset values.",
+        ),
+    ] = None,
+    no_preset: Annotated[
+        bool,
+        typer.Option(
+            "--no-preset",
+            help="Do not apply the default preset when --preset is unset.",
+        ),
+    ] = False,
     launch_target_id: Annotated[str | None, typer.Option()] = None,
     launch_mode: Annotated[str | None, typer.Option()] = None,
     transport: Annotated[
@@ -2701,10 +2826,22 @@ def schedule_create(
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
     """Schedule a session launch on the running server."""
+    use_default = preset is None and not no_preset
     launch_env_map = _parse_launch_env(launch_env) if launch_env is not None else None
-    _emit(
-        _settings_from_ctx(ctx),
-        lambda c: {
+
+    def _run(c: WaypointClient) -> dict[str, Any]:
+        # Preserve the launch warnings on the values the preset would resolve to.
+        spec = _preset_spec_for_warnings(c, preset, use_default)
+        eff_backend = backend or spec.get("backend")
+        eff_model = model or spec.get("model")
+        eff_permission = permission_mode or spec.get("permission_mode")
+        eff_target = launch_target_id or spec.get("launch_target_id")
+        if eff_backend:
+            if eff_permission is not None:
+                _validate_launch_permission_mode(c, eff_backend, eff_permission)
+            if eff_model is not None:
+                _warn_unknown_model(c, eff_backend, eff_model, eff_target)
+        return {
             "schedule": c.create_schedule(
                 backend=backend,
                 cwd=cwd,
@@ -2720,9 +2857,12 @@ def schedule_create(
                 delay_seconds=delay_seconds,
                 scheduled_at=scheduled_at,
                 launch_env=launch_env_map,
+                preset_id=preset,
+                use_default_preset=use_default,
             )
-        },
-    )
+        }
+
+    _emit(_settings_from_ctx(ctx), _run)
 
 
 @schedule_app.command("delete")
@@ -2740,6 +2880,227 @@ def schedule_delete(
 def schedule_clear_history(ctx: typer.Context) -> None:
     """Remove completed/cancelled schedule records."""
     _emit(_settings_from_ctx(ctx), lambda c: c.clear_schedule_history())
+
+
+def _preset_spec_payload(
+    *,
+    backend: str | None,
+    cwd: str | None,
+    launch_target_id: str | None,
+    launch_mode: str | None,
+    transport: str | None,
+    title: str | None,
+    model: str | None,
+    effort: str | None,
+    permission_mode: str | None,
+    args: list[str] | None,
+    config_override: list[str] | None,
+    launch_env: list[str] | None,
+    tag: list[str] | None,
+) -> dict[str, Any]:
+    """Build a preset spec body from launch options, including only the fields the
+    caller supplied so update PATCH-merges instead of clobbering omitted fields."""
+    spec: dict[str, Any] = {}
+    for key, value in (
+        ("backend", backend),
+        ("cwd", cwd),
+        ("launch_target_id", launch_target_id),
+        ("launch_mode", launch_mode),
+        ("transport", transport),
+        ("title", title),
+        ("model", model),
+        ("effort", effort),
+        ("permission_mode", permission_mode),
+    ):
+        if value is not None:
+            spec[key] = value
+    if args is not None:
+        spec["args"] = list(args)
+    if config_override is not None:
+        spec["config_overrides"] = list(config_override)
+    if launch_env is not None:
+        spec["launch_env"] = _parse_launch_env(launch_env)
+    if tag is not None:
+        spec["tags"] = _parse_tags(tag)
+    return spec
+
+
+_PresetBackendOption = Annotated[
+    str | None, typer.Option(help="Backend id for the preset.")
+]
+_PresetLaunchEnvOption = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--launch-env",
+        help="Environment variable as KEY=VALUE. Repeatable; values may contain '='.",
+    ),
+]
+_PresetConfigOverrideOption = Annotated[
+    list[str] | None,
+    typer.Option("--config-override", help="Backend config override. Repeatable."),
+]
+_PresetTagOption = Annotated[
+    list[str] | None,
+    typer.Option("--tag", help="Tag as key=value (or a bare key). Repeatable."),
+]
+
+
+@presets_app.command("list")
+def presets_list(ctx: typer.Context) -> None:
+    """List session presets (env values redacted)."""
+    _emit(_settings_from_ctx(ctx), lambda c: c.list_session_presets())
+
+
+@presets_app.command("show")
+def presets_show(
+    ctx: typer.Context,
+    ref: Annotated[str, typer.Argument(help="Preset id or name.")],
+    show_secrets: Annotated[
+        bool,
+        typer.Option("--show-secrets", help="Include launch_env values in output."),
+    ] = False,
+) -> None:
+    """Show a single preset. Env values are redacted unless --show-secrets."""
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "preset": c.get_session_preset(ref, include_secret_values=show_secrets)
+        },
+    )
+
+
+@presets_app.command("create")
+def presets_create(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Option(help="Unique preset name.")],
+    description: Annotated[str | None, typer.Option()] = None,
+    default: Annotated[
+        bool, typer.Option("--default", help="Mark this preset as the default.")
+    ] = False,
+    backend: _PresetBackendOption = None,
+    cwd: Annotated[str | None, typer.Option()] = None,
+    launch_target_id: Annotated[str | None, typer.Option()] = None,
+    launch_mode: Annotated[str | None, typer.Option()] = None,
+    transport: Annotated[str | None, typer.Option()] = None,
+    title: Annotated[str | None, typer.Option()] = None,
+    model: Annotated[str | None, typer.Option()] = None,
+    effort: Annotated[str | None, typer.Option()] = None,
+    permission_mode: Annotated[str | None, typer.Option()] = None,
+    launch_env: _PresetLaunchEnvOption = None,
+    config_override: _PresetConfigOverrideOption = None,
+    tag: _PresetTagOption = None,
+    args: Annotated[list[str] | None, typer.Argument()] = None,
+) -> None:
+    """Create a session preset from launch options."""
+    spec = _preset_spec_payload(
+        backend=backend,
+        cwd=cwd,
+        launch_target_id=launch_target_id,
+        launch_mode=launch_mode,
+        transport=transport,
+        title=title,
+        model=model,
+        effort=effort,
+        permission_mode=permission_mode,
+        args=args,
+        config_override=config_override,
+        launch_env=launch_env,
+        tag=tag,
+    )
+    body: dict[str, Any] = {"name": name, "spec": spec, "is_default": default}
+    if description is not None:
+        body["description"] = description
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"preset": c.create_session_preset(body)},
+    )
+
+
+@presets_app.command("update")
+def presets_update(
+    ctx: typer.Context,
+    ref: Annotated[str, typer.Argument(help="Preset id or name.")],
+    name: Annotated[str | None, typer.Option()] = None,
+    description: Annotated[str | None, typer.Option()] = None,
+    backend: _PresetBackendOption = None,
+    cwd: Annotated[str | None, typer.Option()] = None,
+    launch_target_id: Annotated[str | None, typer.Option()] = None,
+    launch_mode: Annotated[str | None, typer.Option()] = None,
+    transport: Annotated[str | None, typer.Option()] = None,
+    title: Annotated[str | None, typer.Option()] = None,
+    model: Annotated[str | None, typer.Option()] = None,
+    effort: Annotated[str | None, typer.Option()] = None,
+    permission_mode: Annotated[str | None, typer.Option()] = None,
+    launch_env: _PresetLaunchEnvOption = None,
+    config_override: _PresetConfigOverrideOption = None,
+    tag: _PresetTagOption = None,
+    args: Annotated[list[str] | None, typer.Argument()] = None,
+) -> None:
+    """Update a preset. Only the fields you pass change; the rest are preserved."""
+    spec = _preset_spec_payload(
+        backend=backend,
+        cwd=cwd,
+        launch_target_id=launch_target_id,
+        launch_mode=launch_mode,
+        transport=transport,
+        title=title,
+        model=model,
+        effort=effort,
+        permission_mode=permission_mode,
+        args=args,
+        config_override=config_override,
+        launch_env=launch_env,
+        tag=tag,
+    )
+    body: dict[str, Any] = {}
+    if name is not None:
+        body["name"] = name
+    if description is not None:
+        body["description"] = description
+    if spec:
+        body["spec"] = spec
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {"preset": c.update_session_preset(ref, body)},
+    )
+
+
+@presets_app.command("delete")
+def presets_delete(
+    ctx: typer.Context,
+    ref: Annotated[str, typer.Argument(help="Preset id or name.")],
+) -> None:
+    """Delete a preset. Sessions/schedules created from it are unaffected."""
+    _emit(_settings_from_ctx(ctx), lambda c: c.delete_session_preset(ref))
+
+
+@presets_app.command("default")
+def presets_default(
+    ctx: typer.Context,
+    ref: Annotated[
+        str | None,
+        typer.Argument(help="Preset id or name. Omit to show the current default."),
+    ] = None,
+) -> None:
+    """Set the default preset, or show the current default when no id is given."""
+    if ref is None:
+        _emit(
+            _settings_from_ctx(ctx),
+            lambda c: {
+                "default_preset_id": c.list_session_presets().get("default_preset_id")
+            },
+        )
+    else:
+        _emit(
+            _settings_from_ctx(ctx),
+            lambda c: {"preset": c.set_default_session_preset(ref)},
+        )
+
+
+@presets_app.command("clear-default")
+def presets_clear_default(ctx: typer.Context) -> None:
+    """Clear the default preset (leaves all presets in place)."""
+    _emit(_settings_from_ctx(ctx), lambda c: c.clear_default_session_preset())
 
 
 @schedule_message_app.command("list")

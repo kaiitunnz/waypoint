@@ -102,9 +102,12 @@ def test_help_json_is_structured() -> None:
     by_path = {entry["command"]: entry for entry in commands}
     start = by_path["sessions start"]
     backend = next(o for o in start["options"] if "--backend" in o["flags"])
-    assert backend["required"] is True
+    # --backend is optional: a --preset (or the default preset) may supply it,
+    # with required-field validation happening after preset resolution.
+    assert backend["required"] is False
     assert backend["type"] == "text"
     assert any("--launch-env" in o["flags"] for o in start["options"])
+    assert any("--preset" in o["flags"] for o in start["options"])
     schedule_create = by_path["schedule create"]
     assert any("--launch-env" in o["flags"] for o in schedule_create["options"])
 

@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from waypoint import settings as settings_module
 from waypoint.backends.claude_code.plugin import ClaudeCodePluginConfig
+from waypoint.launch_env import validate_launch_env
 from waypoint.settings import DEFAULT_CONFIG_PATH, load_settings
 
 
@@ -143,6 +144,46 @@ def test_load_settings_parses_plugin_configs(
     assert claude_config.default_model_id == "opus"
     assert claude_config.local_bin is None
     assert [model.id for model in claude_config.models] == ["opus"]
+
+
+def test_load_settings_parses_launch_env_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "waypoint.yaml"
+    config_file.write_text(
+        "\n".join(
+            [
+                "plugin_configs:",
+                "  codex:",
+                "    env:",
+                "      OPENAI_API_KEY: local-secret",
+                "ssh_targets:",
+                "  - id: devbox",
+                "    name: Devbox",
+                "    ssh_destination: dev@example.com",
+                "    plugin_configs:",
+                "      codex:",
+                "        env:",
+                "          OPENAI_API_KEY: remote-secret",
+                "          FEATURE_FLAG: enabled",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings_module, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.delenv("WAYPOINT_CONFIG_PATH", raising=False)
+    settings = load_settings()
+    assert settings.plugin_config("codex").env == {"OPENAI_API_KEY": "local-secret"}
+    target = settings.ssh_targets[0]
+    assert target.plugin_config("codex").env == {
+        "OPENAI_API_KEY": "remote-secret",
+        "FEATURE_FLAG": "enabled",
+    }
+
+
+def test_launch_env_rejects_nul_in_values() -> None:
+    with pytest.raises(ValueError, match="cannot contain NUL"):
+        validate_launch_env({"TOKEN": "abc\x00def"})
 
 
 def test_assistant_defaults_to_none_when_block_absent(

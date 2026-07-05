@@ -50,6 +50,14 @@ def _unsupported(action: str) -> Never:
     )
 
 
+def _default_launch_env(
+    runtime: "SessionRuntime",
+    backend: str,
+    launch_target: SshLaunchTargetConfig | None,
+) -> dict[str, str]:
+    return runtime._default_launch_env(backend, launch_target)
+
+
 class TmuxPluginConfig(PluginConfig):
     """Tmux fallback plugin configuration block.
 
@@ -436,6 +444,7 @@ class TmuxPlugin:
                 session.cwd,
                 allocate_tty=True,
                 session_id=session.id,
+                launch_env=session.launch_env,
             )
         except HTTPException as exc:
             await runtime._record_system_event(
@@ -782,6 +791,7 @@ class TmuxPlugin:
             request.cwd,
             allocate_tty=True,
             session_id=session_id,
+            launch_env=request.launch_env,
         )
         try:
             target = await runtime.tmux.start_managed_session(
@@ -827,6 +837,7 @@ class TmuxPlugin:
             permission_mode=persisted_permission_mode,
             model=resolved_model,
             effort=persisted_effort,
+            launch_env=request.launch_env,
         )
         runtime.storage.create_session(session)
         await runtime._record_system_event(
@@ -850,6 +861,7 @@ class TmuxPlugin:
         cwd: str,
         launch_target_id: str | None,
         title: str,
+        launch_env: dict[str, str] | None = None,
     ) -> SessionRecord:
         """Create a tmux-wrapped session that resumes an existing thread.
 
@@ -862,6 +874,11 @@ class TmuxPlugin:
         """
         inner = self._agent_launch(runtime, backend)
         launch_target = runtime._find_launch_target(launch_target_id)
+        effective_launch_env = (
+            dict(launch_env)
+            if launch_env is not None
+            else _default_launch_env(runtime, backend, launch_target)
+        )
         if not await inner.conversation_exists(thread_id, cwd, launch_target):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -880,6 +897,7 @@ class TmuxPlugin:
                 cwd,
                 allocate_tty=True,
                 session_id=session_id,
+                launch_env=effective_launch_env,
             )
         except HTTPException:
             raise
@@ -930,6 +948,7 @@ class TmuxPlugin:
             raw_log_path=str(raw_log),
             structured_log_path=str(structured_log),
             transport_state=transport_state,
+            launch_env=effective_launch_env,
         )
         runtime.storage.create_session(session)
         await runtime._record_system_event(

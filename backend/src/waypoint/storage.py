@@ -208,6 +208,7 @@ class Storage:
                 effort TEXT,
                 args TEXT NOT NULL DEFAULT '[]',
                 config_overrides TEXT NOT NULL DEFAULT '[]',
+                launch_env TEXT NOT NULL DEFAULT '{}',
                 context_usage TEXT,
                 rate_limit_usage TEXT
             );
@@ -245,6 +246,7 @@ class Storage:
                 title TEXT,
                 args TEXT NOT NULL DEFAULT '[]',
                 config_overrides TEXT NOT NULL DEFAULT '[]',
+                launch_env TEXT NOT NULL DEFAULT '{}',
                 initial_prompt TEXT,
                 permission_mode TEXT,
                 scheduled_at TEXT NOT NULL,
@@ -331,6 +333,7 @@ class Storage:
         self._ensure_column(
             "sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
         )
+        self._ensure_column("sessions", "launch_env", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column("sessions", "launch_mode", "TEXT NOT NULL DEFAULT 'auto'")
         self._ensure_column("sessions", "context_usage", "TEXT")
         self._ensure_column("sessions", "rate_limit_usage", "TEXT")
@@ -340,6 +343,9 @@ class Storage:
         self._ensure_column("sessions", "tags", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column(
             "scheduled_sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
+        )
+        self._ensure_column(
+            "scheduled_sessions", "launch_env", "TEXT NOT NULL DEFAULT '{}'"
         )
         # Additive migration for the inbox table on databases that predate it.
         # (No-ops on a fresh DB where the CREATE TABLE above already made the
@@ -377,9 +383,9 @@ class Storage:
                 launch_mode, repo_name, branch, status, created_at, updated_at,
                 last_event_at, raw_log_path, structured_log_path, transport_state,
                 pinned_at, spawner_session_id, worktree_path, permission_mode, model,
-                resolved_model, effort, args, config_overrides, context_usage,
+                resolved_model, effort, args, config_overrides, launch_env, context_usage,
                 rate_limit_usage, tags
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -408,6 +414,7 @@ class Storage:
                 session.effort,
                 json.dumps(list(session.args)),
                 json.dumps(list(session.config_overrides)),
+                json.dumps(session.launch_env),
                 (
                     json.dumps(session.context_usage.model_dump(mode="json"))
                     if session.context_usage is not None
@@ -1351,9 +1358,9 @@ class Storage:
             """
             INSERT INTO scheduled_sessions (
                 id, backend, cwd, launch_target_id, launch_mode, transport, title, args,
-                config_overrides, initial_prompt, permission_mode, model, effort, scheduled_at,
+                config_overrides, launch_env, initial_prompt, permission_mode, model, effort, scheduled_at,
                 created_at, status, session_id, failure_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 schedule.id,
@@ -1365,6 +1372,7 @@ class Storage:
                 schedule.title,
                 json.dumps(list(schedule.args)),
                 json.dumps(list(schedule.config_overrides)),
+                json.dumps(schedule.launch_env),
                 schedule.initial_prompt,
                 schedule.permission_mode,
                 schedule.model,
@@ -1720,6 +1728,14 @@ class Storage:
         payload["config_overrides"] = (
             parsed_overrides if isinstance(parsed_overrides, list) else []
         )
+        raw_launch_env = payload.get("launch_env") or "{}"
+        try:
+            parsed_launch_env = json.loads(raw_launch_env)
+        except json.JSONDecodeError:
+            parsed_launch_env = {}
+        payload["launch_env"] = (
+            parsed_launch_env if isinstance(parsed_launch_env, dict) else {}
+        )
         raw_tags = payload.get("tags") or "{}"
         try:
             parsed_tags = json.loads(raw_tags)
@@ -1771,6 +1787,14 @@ class Storage:
             parsed_overrides = []
         payload["config_overrides"] = (
             parsed_overrides if isinstance(parsed_overrides, list) else []
+        )
+        raw_launch_env = payload.get("launch_env") or "{}"
+        try:
+            parsed_launch_env = json.loads(raw_launch_env)
+        except json.JSONDecodeError:
+            parsed_launch_env = {}
+        payload["launch_env"] = (
+            parsed_launch_env if isinstance(parsed_launch_env, dict) else {}
         )
         return ScheduledSessionRecord.model_validate(payload)
 

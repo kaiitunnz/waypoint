@@ -59,6 +59,7 @@ def _apply_codex_args(
     base: ClientFactory | None,
     cli_args: tuple[str, ...],
     config_overrides: tuple[str, ...],
+    launch_env: dict[str, str] | None = None,
 ) -> ClientFactory | None:
     """Wrap *base* so it injects *cli_args* / *config_overrides* into local launches.
 
@@ -72,7 +73,7 @@ def _apply_codex_args(
     ourselves so the raw flags reach codex; otherwise we use the simpler
     ``config_overrides`` slot.
     """
-    if not cli_args and not config_overrides:
+    if not cli_args and not config_overrides and not launch_env:
         return base
     if base is not None:
         # Remote factory — args were baked in at construction; return as-is.
@@ -89,6 +90,7 @@ def _apply_codex_args(
                 config=CodexConfig(
                     launch_args_override=tuple(argv),
                     cwd=cwd,
+                    env=launch_env,
                     client_name="waypoint",
                     client_title="Waypoint",
                 ),
@@ -100,6 +102,7 @@ def _apply_codex_args(
                 client_name="waypoint",
                 client_title="Waypoint",
                 config_overrides=config_overrides,
+                env=launch_env,
             ),
             approval_handler=approval_handler,
         )
@@ -166,11 +169,13 @@ class CodexAppServerAdapter:
         effort: str | None = None,
         custom_args: list[str] | None = None,
         config_overrides: list[str] | None = None,
+        launch_env: dict[str, str] | None = None,
     ) -> str:
         effective_factory = _apply_codex_args(
             client_factory_override,
             tuple(custom_args or []),
             tuple(config_overrides or []),
+            launch_env or {},
         )
         state = await self._spawn_session(
             session_id,
@@ -203,11 +208,13 @@ class CodexAppServerAdapter:
         effort: str | None = None,
         custom_args: list[str] | None = None,
         config_overrides: list[str] | None = None,
+        launch_env: dict[str, str] | None = None,
     ) -> None:
         effective_factory = _apply_codex_args(
             client_factory_override,
             tuple(custom_args or []),
             tuple(config_overrides or []),
+            launch_env or {},
         )
         state = await self._spawn_session(
             session_id,
@@ -230,11 +237,13 @@ class CodexAppServerAdapter:
         effort: str | None = None,
         custom_args: list[str] | None = None,
         config_overrides: list[str] | None = None,
+        launch_env: dict[str, str] | None = None,
     ) -> str:
         effective_factory = _apply_codex_args(
             client_factory_override,
             tuple(custom_args or []),
             tuple(config_overrides or []),
+            launch_env or {},
         )
         state = await self._spawn_session(
             session_id,

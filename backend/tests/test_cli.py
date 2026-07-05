@@ -104,6 +104,9 @@ def test_help_json_is_structured() -> None:
     backend = next(o for o in start["options"] if "--backend" in o["flags"])
     assert backend["required"] is True
     assert backend["type"] == "text"
+    assert any("--launch-env" in o["flags"] for o in start["options"])
+    schedule_create = by_path["schedule create"]
+    assert any("--launch-env" in o["flags"] for o in schedule_create["options"])
 
 
 def _walk_leaf_paths(group: click.Group, prefix: str) -> list[str]:
@@ -804,6 +807,56 @@ def test_sessions_import_reads_json_file_and_emits_session(
     assert state["import_body"] == {"thread_id": "thread-1", "cwd": "/tmp/repo"}
 
 
+def test_sessions_import_launch_env_overrides_json_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload_path = tmp_path / "thread.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "thread_id": "thread-1",
+                "launch_env": {"FROM_JSON": "old"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    state: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/backends/claude_code/sessions/import":
+            state["import_body"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "imported-env"}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "import",
+            "claude_code",
+            "--json",
+            str(payload_path),
+            "--launch-env",
+            "FROM_FLAG=new",
+            "--launch-env",
+            "HAS_EQUALS=a=b",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == {"session": {"id": "imported-env"}}
+    assert state["import_body"] == {
+        "thread_id": "thread-1",
+        "launch_env": {"FROM_FLAG": "new", "HAS_EQUALS": "a=b"},
+    }
+
+
 def test_sessions_import_reads_stdin_when_dash(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1105,9 +1158,12 @@ def test_schedule_create_rejects_unknown_backend(tmp_path: Path) -> None:
 def test_schedule_create_emits_schedule(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    state: dict[str, object] = {}
+
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/schedules" and request.method == "POST":
             payload = json.loads(request.content)
+            state["payload"] = payload
             return httpx.Response(200, json={"schedule": {"id": "sc1", **payload}})
         return httpx.Response(404, json={"detail": "unexpected"})
 
@@ -1129,6 +1185,10 @@ def test_schedule_create_emits_schedule(
             "/tmp",
             "--prompt",
             "hello",
+            "--launch-env",
+            "FOO=bar",
+            "--launch-env",
+            "HAS_EQUALS=a=b",
             "--delay-seconds",
             "60",
         ],
@@ -1138,6 +1198,9 @@ def test_schedule_create_emits_schedule(
     assert out["schedule"]["id"] == "sc1"
     assert out["schedule"]["initial_prompt"] == "hello"
     assert out["schedule"]["delay_seconds"] == 60
+    payload = state["payload"]
+    assert isinstance(payload, dict)
+    assert payload["launch_env"] == {"FOO": "bar", "HAS_EQUALS": "a=b"}
 
 
 def test_parse_wait_until_defaults_and_validates() -> None:
@@ -1440,6 +1503,65 @@ def test_sessions_start_worktree_creates_worktree_and_sets_cwd(
     assert isinstance(body, dict)
     assert body["worktree_path"] == worktree_dir
     assert body["cwd"] == worktree_dir
+
+
+def test_sessions_start_launch_env_sends_request_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions" and request.method == "POST":
+            body = json.loads(request.content)
+            state["create_body"] = body
+            return httpx.Response(200, json={"session": {"id": "new", **body}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "start",
+            "--backend",
+            "codex",
+            "--cwd",
+            "/tmp/repo",
+            "--launch-env",
+            "FOO=bar",
+            "--launch-env",
+            "HAS_EQUALS=a=b",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    body = state["create_body"]
+    assert isinstance(body, dict)
+    assert body["launch_env"] == {"FOO": "bar", "HAS_EQUALS": "a=b"}
+
+
+def test_sessions_start_rejects_malformed_launch_env(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "start",
+            "--backend",
+            "codex",
+            "--cwd",
+            "/tmp/repo",
+            "--launch-env",
+            "NOT_KEY_VALUE",
+        ],
+    )
+    assert result.exit_code == 2
 
 
 def test_sessions_start_worktree_git_failure_exits_one(

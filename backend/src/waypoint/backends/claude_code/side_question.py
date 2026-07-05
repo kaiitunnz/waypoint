@@ -612,6 +612,7 @@ async def fork_aside(
             effort=session.effort,
             args=session.args,
             config_overrides=session.config_overrides,
+            launch_env=session.launch_env,
         )
         runtime.storage.create_session(new_session)
         created = True

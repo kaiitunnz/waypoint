@@ -844,6 +844,9 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         adapter = self._require_adapter()
 
         async def _bring_up(new_session: SessionRecord, fork_thread_id: str) -> None:
+            process_env = runtime._agent_process_env(
+                self.id, session.launch_env, session_id=new_session.id
+            )
             await adapter.restore_session(
                 new_session.id,
                 session.cwd,
@@ -852,6 +855,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
                 permission_mode=session.permission_mode,
                 model=session.model,
                 effort=session.effort,
+                launch_env=process_env,
             )
 
         return await _sq.fork_aside(
@@ -996,6 +1000,9 @@ class ClaudeCodePlugin(DefaultLaunchContract):
 
         new_claude_session_id = self.generate_session_id()
         try:
+            process_env = runtime._agent_process_env(
+                self.id, session.launch_env, session_id=new_session_id
+            )
             await self.adapter.start_session(
                 new_session_id,
                 session.cwd,
@@ -1008,6 +1015,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
                     runtime, session.launch_target_id, session.args
                 ),
                 fork_from_claude_session_id=thread_id,
+                launch_env=process_env,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(
@@ -1045,6 +1053,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             effort=session.effort,
             args=session.args,
             config_overrides=session.config_overrides,
+            launch_env=session.launch_env,
         )
         runtime.storage.create_session(new_session)
         runtime.storage.clone_events(session.id, new_session_id)
@@ -1097,6 +1106,9 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             )
             return
         try:
+            process_env = runtime._agent_process_env(
+                self.id, session.launch_env, session_id=session.id
+            )
             await self.adapter.restore_session(
                 session.id,
                 session.cwd,
@@ -1108,6 +1120,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
                 custom_args=self._effective_args(
                     runtime, session.launch_target_id, session.args
                 ),
+                launch_env=process_env,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception(
@@ -1381,9 +1394,13 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             model=resolved_model,
             effort=resolved_effort,
             args=request.args,
+            launch_env=request.launch_env,
         )
         runtime.storage.create_session(session)
         try:
+            process_env = runtime._agent_process_env(
+                self.id, session.launch_env, session_id=session.id
+            )
             await self.adapter.start_session(
                 session_id,
                 request.cwd,
@@ -1395,6 +1412,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
                 custom_args=self._effective_args(
                     runtime, session.launch_target_id, session.args
                 ),
+                launch_env=process_env,
             )
         except (ClaudeCliError, FileNotFoundError, OSError) as exc:
             runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
@@ -1485,6 +1503,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
                 cwd=cwd,
                 launch_target_id=request.launch_target_id,
                 title=info.title,
+                launch_env=request.launch_env,
             )
         # Direct (structured-SDK) path requires the adapter.
         if self.adapter is None:
@@ -1516,9 +1535,13 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             structured_log_path=str(structured_log),
             transport_state={"thread_id": info.id},
             permission_mode="default",
+            launch_env=request.launch_env,
         )
         runtime.storage.create_session(session)
         try:
+            process_env = runtime._agent_process_env(
+                self.id, session.launch_env, session_id=session.id
+            )
             await self.adapter.restore_session(
                 session.id,
                 cwd,
@@ -1527,6 +1550,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
                 permission_mode=session.permission_mode,
                 model=session.model,
                 effort=session.effort,
+                launch_env=process_env,
             )
         except (ClaudeCliError, FileNotFoundError, OSError) as exc:
             log.exception(

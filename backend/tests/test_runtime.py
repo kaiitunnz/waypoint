@@ -145,6 +145,7 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         model: str | None = None,
         effort: str | None = None,
         custom_args: list[str] | None = None,
+        launch_env: dict[str, str] | None = None,
     ) -> None:
         self.restore_calls.append(
             (
@@ -172,6 +173,7 @@ class FakeClaudeAdapter(FakeStructuredAdapter):
         model: str | None = None,
         effort: str | None = None,
         custom_args: list[str] | None = None,
+        launch_env: dict[str, str] | None = None,
     ) -> str:
         self.start_calls.append(
             (
@@ -258,6 +260,7 @@ class FakeCodexRuntimeAdapter(FakeStructuredAdapter):
         effort: str | None = None,
         custom_args: list[str] | None = None,
         config_overrides: list[str] | None = None,
+        launch_env: dict[str, str] | None = None,
     ) -> None:
         self.restore_calls.append(
             (session_id, cwd, thread_id, client_factory_override, model, effort)
@@ -342,6 +345,37 @@ def test_command_for_backend_injects_session_id(tmp_path) -> None:
     assert "WAYPOINT_SESSION_ID=codex-1234" in command
     cli_idx = command.index("codex")
     assert command[cli_idx:] == ["codex", "resume", "abc"]
+
+
+def test_command_for_backend_merges_launch_env_without_overriding_runtime_keys(
+    tmp_path,
+) -> None:
+    runtime, _, _ = make_runtime(tmp_path)
+    command = runtime._command_for_backend(
+        "claude_code",
+        ["--session-id", "abc"],
+        session_id="claude-1234",
+        launch_env={
+            "ANTHROPIC_AUTH_TOKEN": "secret",
+            "CLAUDE_CODE_NO_FLICKER": "user",
+            "WAYPOINT_SESSION_ID": "user",
+        },
+    )
+    assert command[0] == "env"
+    assert "ANTHROPIC_AUTH_TOKEN=secret" in command
+    assert "CLAUDE_CODE_NO_FLICKER=1" in command
+    assert "CLAUDE_CODE_NO_FLICKER=user" not in command
+    assert "WAYPOINT_SESSION_ID=claude-1234" in command
+    assert "WAYPOINT_SESSION_ID=user" not in command
+
+
+def test_session_record_excludes_launch_env_from_public_dump(tmp_path) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    session = make_session(settings, id="secret-env", launch_env={"TOKEN": "secret"})
+    storage.create_session(session)
+    stored = runtime.get_session("secret-env")
+    assert stored.launch_env == {"TOKEN": "secret"}
+    assert "launch_env" not in stored.model_dump(mode="json")
 
 
 def test_effective_permission_mode_inherits_same_backend(tmp_path) -> None:
@@ -612,6 +646,7 @@ def make_session(settings: Settings, **overrides) -> SessionRecord:
         raw_log_path=str(session_dir / "raw.log"),
         structured_log_path=str(session_dir / "events.jsonl"),
         permission_mode=overrides.get("permission_mode"),
+        launch_env=overrides.get("launch_env", {}),
     )
 
 
@@ -1304,10 +1339,19 @@ async def test_reattach_terminates_before_restoring_codex(tmp_path) -> None:
             effort: str | None = None,
             custom_args: list[str] | None = None,
             config_overrides: list[str] | None = None,
+            launch_env: dict[str, str] | None = None,
         ) -> None:
             self._log.append(f"restore:{session_id}")
             await super().restore_session(
-                session_id, cwd, thread_id, client_factory_override, model, effort
+                session_id,
+                cwd,
+                thread_id,
+                client_factory_override,
+                model,
+                effort,
+                custom_args,
+                config_overrides,
+                launch_env,
             )
 
     timeline: list[str] = []
@@ -3046,7 +3090,7 @@ async def test_import_claude_thread_terminal_supersedes_launch_mode(
     resume_calls: list[str] = []
 
     async def _fake_resume(
-        _runtime, *, backend, thread_id, cwd, launch_target_id, title
+        _runtime, *, backend, thread_id, cwd, launch_target_id, title, launch_env=None
     ):
         resume_calls.append(backend)
         session = make_session(
@@ -3354,6 +3398,7 @@ async def test_runtime_fork_codex_session_uses_codex_plugin(tmp_path) -> None:
             effort: str | None = None,
             custom_args: list[str] | None = None,
             config_overrides: list[str] | None = None,
+            launch_env: dict[str, str] | None = None,
         ) -> str:
             assert session_id.startswith("codex-")
             assert (cwd, thread_id) == ("/tmp/project", "thread-1")
@@ -3386,6 +3431,7 @@ async def test_fork_codex_plan_session_persists_pre_plan_mode(tmp_path) -> None:
             effort: str | None = None,
             custom_args: list[str] | None = None,
             config_overrides: list[str] | None = None,
+            launch_env: dict[str, str] | None = None,
         ) -> str:
             assert (session_id, cwd, thread_id) == (
                 "forked",

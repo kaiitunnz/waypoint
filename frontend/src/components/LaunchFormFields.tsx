@@ -14,7 +14,11 @@ import {
   useTransportForAgent,
 } from "@/components/AgentTransportPicker";
 import { EffortPicker } from "@/components/EffortPicker";
-import { LaunchOptionsDetails } from "@/components/LaunchOptions";
+import {
+  formatLaunchEnv,
+  LaunchOptionsDetails,
+  parseLaunchEnv,
+} from "@/components/LaunchOptions";
 import { ModelPicker } from "@/components/ModelPicker";
 import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
 import type { BackendCatalog } from "@/lib/backends";
@@ -29,6 +33,7 @@ interface UseLaunchFormParams {
   defaultBackend: Backend;
   defaultCwd: string;
   launchTargetId: string | null;
+  defaultLaunchEnvByBackend: Record<Backend, Record<string, string>>;
   catalog: BackendCatalog;
 }
 
@@ -55,6 +60,8 @@ export interface LaunchForm {
   setCustomArgsText: (value: string) => void;
   configOverridesText: string;
   setConfigOverridesText: (value: string) => void;
+  launchEnvText: string;
+  setLaunchEnvText: (value: string) => void;
   modelInfo: BackendModelListResponse | null;
   permissionOptions: ReturnType<typeof permissionModesFor>;
   supportsCustomArgs: boolean;
@@ -63,13 +70,18 @@ export interface LaunchForm {
   effortOptions: string[];
   changeBackend: (backend: Backend) => void;
   handleModelsLoaded: (response: BackendModelListResponse) => void;
-  collectArgs: () => { args: string[]; configOverrides: string[] };
+  collectArgs: () => {
+    args: string[];
+    configOverrides: string[];
+    launchEnv: Record<string, string>;
+  };
 }
 
 export function useLaunchForm({
   defaultBackend,
   defaultCwd,
   launchTargetId,
+  defaultLaunchEnvByBackend,
   catalog,
 }: UseLaunchFormParams): LaunchForm {
   const [backend, setBackend] = useState<Backend>(defaultBackend);
@@ -81,6 +93,9 @@ export function useLaunchForm({
   const [permissionMode, setPermissionMode] = useState<string>("default");
   const [customArgsText, setCustomArgsText] = useState("");
   const [configOverridesText, setConfigOverridesText] = useState("");
+  const [launchEnvText, setLaunchEnvText] = useState(() =>
+    formatLaunchEnv(defaultLaunchEnvByBackend[defaultBackend]),
+  );
   const [modelInfo, setModelInfo] = useState<BackendModelListResponse | null>(null);
 
   const permissionOptions = useMemo(
@@ -101,14 +116,16 @@ export function useLaunchForm({
     setModel("");
     setEffort("");
     setModelInfo(null);
-  }, []);
+    setLaunchEnvText(formatLaunchEnv(defaultLaunchEnvByBackend[nextBackend]));
+  }, [defaultLaunchEnvByBackend]);
 
   useEffect(() => {
     setBackend(defaultBackend);
     setModel("");
     setEffort("");
     setModelInfo(null);
-  }, [defaultBackend]);
+    setLaunchEnvText(formatLaunchEnv(defaultLaunchEnvByBackend[defaultBackend]));
+  }, [defaultBackend, defaultLaunchEnvByBackend]);
 
   useEffect(() => {
     setCwd(defaultCwd);
@@ -126,7 +143,8 @@ export function useLaunchForm({
     setEffort("");
     setModel("");
     setModelInfo(null);
-  }, [backend, launchTargetId]);
+    setLaunchEnvText(formatLaunchEnv(defaultLaunchEnvByBackend[backend]));
+  }, [backend, launchTargetId, defaultLaunchEnvByBackend]);
 
   const effortOptions = useMemo(() => {
     if (!modelInfo) return [];
@@ -168,8 +186,15 @@ export function useLaunchForm({
     const configOverrides = supportsConfigOverrides
       ? configOverridesText.split("\n").map((value) => value.trim()).filter(Boolean)
       : [];
-    return { args, configOverrides };
-  }, [supportsCustomArgs, supportsConfigOverrides, customArgsText, configOverridesText]);
+    const launchEnv = parseLaunchEnv(launchEnvText);
+    return { args, configOverrides, launchEnv };
+  }, [
+    supportsCustomArgs,
+    supportsConfigOverrides,
+    customArgsText,
+    configOverridesText,
+    launchEnvText,
+  ]);
 
   return {
     backend,
@@ -189,6 +214,8 @@ export function useLaunchForm({
     setCustomArgsText,
     configOverridesText,
     setConfigOverridesText,
+    launchEnvText,
+    setLaunchEnvText,
     modelInfo,
     permissionOptions,
     supportsCustomArgs,
@@ -307,6 +334,8 @@ export function LaunchFormFields({
         onCustomArgsChange={form.setCustomArgsText}
         configOverridesText={form.configOverridesText}
         onConfigOverridesChange={form.setConfigOverridesText}
+        launchEnvText={form.launchEnvText}
+        onLaunchEnvChange={form.setLaunchEnvText}
         formBusy={busy}
       />
     </>

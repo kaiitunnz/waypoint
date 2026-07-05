@@ -109,6 +109,9 @@ class Scheduler:
             title=request.title,
             args=list(request.args),
             config_overrides=list(request.config_overrides),
+            launch_env=self._runtime._effective_launch_env_for_request(
+                request, launch_target
+            ),
             initial_prompt=request.initial_prompt,
             permission_mode=permission_mode,
             model=request.model or None,
@@ -330,6 +333,7 @@ class Scheduler:
                     title=schedule.title,
                     args=schedule.args,
                     config_overrides=schedule.config_overrides,
+                    launch_env=schedule.launch_env,
                     source_mode=SessionSource.MANAGED,
                     permission_mode=schedule.permission_mode,
                     model=schedule.model,

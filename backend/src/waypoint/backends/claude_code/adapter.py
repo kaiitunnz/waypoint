@@ -245,7 +245,18 @@ EmitEvent = Callable[
 InitCallback = Callable[[str, dict[str, Any]], None]
 SessionUpdateCallback = Callable[[str, dict[str, Any], bool], Awaitable[Any]]
 LaunchFactory = Callable[
-    [str, str, str, bool, str, str | None, str | None, list[str], str | None],
+    [
+        str,
+        str,
+        str,
+        bool,
+        str,
+        str | None,
+        str | None,
+        list[str],
+        str | None,
+        dict[str, str],
+    ],
     "ClaudeLaunchSpec",
 ]
 
@@ -342,6 +353,8 @@ class ClaudeSessionState:
     # Carried across set_effort respawns so user-supplied args survive
     # mid-session effort changes.
     custom_args: list[str] = field(default_factory=list)
+    # Effective user-editable launch environment, carried across respawns.
+    launch_env: dict[str, str] = field(default_factory=dict)
     # Captures the launch_factory used to spawn this session so set_effort
     # can respawn through the same factory (local vs. remote SSH) without
     # re-resolving target config.
@@ -388,6 +401,7 @@ class ClaudeCliAdapter:
         effort: str | None = None,
         custom_args: list[str] | None = None,
         fork_from_claude_session_id: str | None = None,
+        launch_env: dict[str, str] | None = None,
     ) -> str:
         state = await self._spawn(
             session_id,
@@ -400,6 +414,7 @@ class ClaudeCliAdapter:
             effort=effort,
             custom_args=custom_args or [],
             fork_from_claude_session_id=fork_from_claude_session_id,
+            launch_env=launch_env or {},
         )
         return state.claude_session_id
 
@@ -413,6 +428,7 @@ class ClaudeCliAdapter:
         model: str | None = None,
         effort: str | None = None,
         custom_args: list[str] | None = None,
+        launch_env: dict[str, str] | None = None,
     ) -> None:
         await self._spawn(
             session_id,
@@ -424,6 +440,7 @@ class ClaudeCliAdapter:
             model=model,
             effort=effort,
             custom_args=custom_args or [],
+            launch_env=launch_env or {},
         )
 
     async def set_permission_mode(self, session_id: str, mode: str) -> None:
@@ -523,6 +540,7 @@ class ClaudeCliAdapter:
         model = previous.model
         custom_args = previous.custom_args
         launch_factory = previous.launch_factory
+        launch_env = dict(previous.launch_env)
         await self.terminate_session(session_id)
         await self._spawn(
             session_id,
@@ -534,6 +552,7 @@ class ClaudeCliAdapter:
             model=model,
             effort=effort or None,
             custom_args=custom_args,
+            launch_env=launch_env,
         )
 
     def session_effort(self, session_id: str) -> str | None:
@@ -1211,12 +1230,14 @@ class ClaudeCliAdapter:
         effort: str | None = None,
         custom_args: list[str] | None = None,
         fork_from_claude_session_id: str | None = None,
+        launch_env: dict[str, str] | None = None,
     ) -> ClaudeSessionState:
         resolved_mode = (
             permission_mode if permission_mode in CLAUDE_PERMISSION_MODES else "default"
         )
         cli_mode = claude_cli_mode_for(resolved_mode)
         effective_custom_args = custom_args or []
+        effective_launch_env = launch_env or {}
         launch_factory = launch_factory_override or self._launch_factory
         if launch_factory is None:
             spec = self._build_local_launch_spec(
@@ -1229,6 +1250,7 @@ class ClaudeCliAdapter:
                 effort,
                 effective_custom_args,
                 fork_from_claude_session_id,
+                effective_launch_env,
             )
         else:
             spec = launch_factory(
@@ -1241,6 +1263,7 @@ class ClaudeCliAdapter:
                 effort,
                 effective_custom_args,
                 fork_from_claude_session_id,
+                effective_launch_env,
             )
         process = await asyncio.create_subprocess_exec(
             *spec.args,
@@ -1264,6 +1287,7 @@ class ClaudeCliAdapter:
             effort=effort or None,
             custom_args=list(effective_custom_args),
             launch_factory=launch_factory,
+            launch_env=dict(effective_launch_env),
         )
         state.stdout_task = asyncio.create_task(self._read_stdout(state))
         state.stderr_task = asyncio.create_task(self._read_stderr(state))
@@ -1308,6 +1332,7 @@ class ClaudeCliAdapter:
         effort: str | None = None,
         custom_args: list[str] | None = None,
         fork_from_claude_session_id: str | None = None,
+        launch_env: dict[str, str] | None = None,
     ) -> ClaudeLaunchSpec:
         binary = self._binary or shutil.which("claude")
         if binary is None:
@@ -1350,6 +1375,7 @@ class ClaudeCliAdapter:
             args.extend(custom_args)
         env = {
             **os.environ,
+            **(launch_env or {}),
             # Enable the dynamic-workflow feature so the Workflow tool is
             # available and routes its approval through `can_use_tool`.
             "CLAUDE_CODE_WORKFLOWS": "1",

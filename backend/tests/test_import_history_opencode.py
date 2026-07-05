@@ -272,7 +272,7 @@ async def test_import_thread_seeds_history_before_the_imported_note() -> None:
     ):
         return fake_adapter
 
-    plugin._get_or_create_adapter = fake_get_or_create_adapter  # type: ignore[method-assign]
+    cast(Any, plugin)._get_or_create_adapter = fake_get_or_create_adapter
 
     class FakeStorage:
         def __init__(self) -> None:
@@ -307,6 +307,15 @@ async def test_import_thread_seeds_history_before_the_imported_note() -> None:
             path.mkdir(parents=True, exist_ok=True)
             return path
 
+        def _agent_process_env(
+            self,
+            backend: str,
+            launch_env: dict[str, str],
+            *,
+            session_id: str | None = None,
+        ) -> dict[str, str]:
+            return dict(launch_env)
+
         async def _record_system_event(self, *args: Any, **kwargs: Any) -> None:
             calls.append("note")
 
@@ -329,6 +338,7 @@ async def test_import_thread_seeds_history_before_the_imported_note() -> None:
             "launch_target_id": None,
             "cwd": "/repo",
             "import_history": True,
+            "launch_env": {},
         },
     )()
 
@@ -365,7 +375,7 @@ async def test_import_thread_skips_history_when_disabled() -> None:
     ):
         return fake_adapter
 
-    plugin._get_or_create_adapter = fake_get_or_create_adapter  # type: ignore[method-assign]
+    cast(Any, plugin)._get_or_create_adapter = fake_get_or_create_adapter
 
     class FakeStorage:
         def __init__(self) -> None:
@@ -397,6 +407,15 @@ async def test_import_thread_skips_history_when_disabled() -> None:
             path.mkdir(parents=True, exist_ok=True)
             return path
 
+        def _agent_process_env(
+            self,
+            backend: str,
+            launch_env: dict[str, str],
+            *,
+            session_id: str | None = None,
+        ) -> dict[str, str]:
+            return dict(launch_env)
+
         async def _record_system_event(self, *args: Any, **kwargs: Any) -> None:
             return None
 
@@ -416,6 +435,7 @@ async def test_import_thread_skips_history_when_disabled() -> None:
             "launch_target_id": None,
             "cwd": "/repo",
             "import_history": False,
+            "launch_env": {},
         },
     )()
 

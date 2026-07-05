@@ -32,6 +32,8 @@ interface LaunchOptionsDetailsProps {
   mode: "new" | "resume";
   supportsCustomArgs?: boolean;
   supportsConfigOverrides?: boolean;
+  launchEnvText?: string;
+  onLaunchEnvChange?: (value: string) => void;
   customArgsText?: string;
   onCustomArgsChange?: (value: string) => void;
   configOverridesText?: string;
@@ -43,6 +45,8 @@ export function LaunchOptionsDetails({
   mode,
   supportsCustomArgs,
   supportsConfigOverrides,
+  launchEnvText,
+  onLaunchEnvChange,
   customArgsText,
   onCustomArgsChange,
   configOverridesText,
@@ -50,12 +54,13 @@ export function LaunchOptionsDetails({
   formBusy,
 }: LaunchOptionsDetailsProps) {
   const [open, setOpen] = useState(false);
+  const showLaunchEnv = launchEnvText !== undefined && Boolean(onLaunchEnvChange);
   const showCustomArgs = mode === "new" && Boolean(supportsCustomArgs);
   const showConfigOverrides = mode === "new" && Boolean(supportsConfigOverrides);
-  const showWarning = showCustomArgs || showConfigOverrides;
+  const showWarning = showLaunchEnv || showCustomArgs || showConfigOverrides;
 
   // Nothing to configure — don't render an empty Advanced toggle.
-  if (!showCustomArgs && !showConfigOverrides) {
+  if (!showLaunchEnv && !showCustomArgs && !showConfigOverrides) {
     return null;
   }
 
@@ -73,6 +78,22 @@ export function LaunchOptionsDetails({
       </button>
       <div className="advanced-body">
         <div className="advanced-body-inner">
+          {showLaunchEnv ? (
+            <label className="field advanced-args-field">
+              <span>Environment variables</span>
+              <textarea
+                rows={3}
+                value={launchEnvText ?? ""}
+                onChange={(e) => onLaunchEnvChange?.(e.target.value)}
+                placeholder={"One per line, e.g.\nOPENAI_API_KEY=sk-..."}
+                disabled={formBusy}
+                spellCheck={false}
+                autoCapitalize="none"
+                autoComplete="off"
+                autoCorrect="off"
+              />
+            </label>
+          ) : null}
           {showCustomArgs ? (
             <label className="field advanced-args-field">
               <span>Custom CLI args</span>
@@ -114,4 +135,28 @@ export function LaunchOptionsDetails({
       </div>
     </div>
   );
+}
+
+export function formatLaunchEnv(env: Record<string, string> | undefined): string {
+  return Object.entries(env ?? {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+}
+
+export function parseLaunchEnv(text: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const eq = line.indexOf("=");
+    if (eq === -1) {
+      env[line] = "";
+      continue;
+    }
+    const key = line.slice(0, eq).trim();
+    if (!key) continue;
+    env[key] = line.slice(eq + 1);
+  }
+  return env;
 }

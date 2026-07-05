@@ -509,6 +509,7 @@ class ClaudeTtyPlugin:
                 request.cwd,
                 allocate_tty=True,
                 session_id=session_id,
+                launch_env=request.launch_env,
             )
         except HTTPException:
             raise
@@ -558,6 +559,7 @@ class ClaudeTtyPlugin:
             model=resolved_model,
             effort=resolved_effort,
             args=request.args,
+            launch_env=request.launch_env,
         )
         runtime.storage.create_session(session)
         await runtime._record_system_event(
@@ -629,6 +631,7 @@ class ClaudeTtyPlugin:
                 session.cwd,
                 allocate_tty=True,
                 session_id=session.id,
+                launch_env=session.launch_env,
             )
         except HTTPException as exc:
             await runtime._record_system_event(
@@ -730,6 +733,7 @@ class ClaudeTtyPlugin:
                 session.cwd,
                 allocate_tty=True,
                 session_id=new_session_id,
+                launch_env=session.launch_env,
             )
         except HTTPException:
             raise
@@ -778,6 +782,7 @@ class ClaudeTtyPlugin:
             model=session.model,
             effort=session.effort,
             args=session.args,
+            launch_env=session.launch_env,
         )
         runtime.storage.create_session(new_session)
         await runtime._record_system_event(
@@ -914,6 +919,7 @@ class ClaudeTtyPlugin:
             session.cwd,
             allocate_tty=True,
             session_id=session.id,
+            launch_env=session.launch_env,
         )
         raw_log = Path(session.raw_log_path)
         with suppress(OSError):
@@ -1043,6 +1049,7 @@ class ClaudeTtyPlugin:
             new_session.cwd,
             allocate_tty=True,
             session_id=new_session.id,
+            launch_env=parent.launch_env,
         )
         raw_log = Path(new_session.raw_log_path)
         raw_log.parent.mkdir(parents=True, exist_ok=True)
@@ -1268,6 +1275,7 @@ class ClaudeTtyPlugin:
                 cwd,
                 allocate_tty=True,
                 session_id=session_id,
+                launch_env=request.launch_env,
             )
         except HTTPException:
             raise
@@ -1306,6 +1314,7 @@ class ClaudeTtyPlugin:
                 "thread_id": request.thread_id,
                 "launch_args": launch_args,
             },
+            launch_env=request.launch_env,
         )
         runtime.storage.create_session(session)
 

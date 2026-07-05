@@ -15,10 +15,13 @@ def build_remote_serve_args(
     opencode_bin: str,
     cwd: str | None = None,
     extra_args: tuple[str, ...] = (),
+    launch_env: dict[str, str] | None = None,
 ) -> tuple[str, ...]:
     # Pass cwd as $1 so the script's clean (rcfile-free) subshell can cd
     # itself — outer-shell cd is fragile when user rcfiles wrap `cd`
     # (oh-my-bash plugins do). Extra CLI args follow as $2…$# and the
     # script `shift`s the cwd off so $@ ends up holding only those flags.
     cmd = ["bash", "-c", REMOTE_SERVE_SCRIPT, opencode_bin, cwd or "", *extra_args]
-    return with_ssh_keepalive(target.build_remote_exec_args(cmd, None))
+    return with_ssh_keepalive(
+        target.build_remote_exec_args(cmd, None, extra_env=launch_env)
+    )

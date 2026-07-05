@@ -263,6 +263,7 @@ export interface BackendDescriptor {
   default_transport: SessionTransport;
   label: string;
   badges: Record<string, string>;
+  default_launch_env?: Record<string, string>;
   // The flat union, kept for back-compat; prefer composing `agent_capabilities`
   // with `transport_capabilities` via `capsFor()` for an (agent, transport) pair.
   capabilities: BackendCapabilities;
@@ -323,6 +324,7 @@ export interface LaunchTargetSummary {
   default_cwd?: string | null;
   auth?: "key" | "password";
   connected?: boolean;
+  default_launch_env_by_backend?: Record<Backend, Record<string, string>>;
 }
 
 export type ScheduleStatus = "pending" | "launched" | "cancelled" | "failed";
@@ -359,6 +361,7 @@ export interface ScheduleCreateRequest {
   title?: string | null;
   args?: string[];
   config_overrides?: string[];
+  launch_env?: Record<string, string>;
   initial_prompt?: string | null;
   permission_mode?: string | null;
   model?: string | null;

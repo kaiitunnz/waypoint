@@ -53,6 +53,15 @@ def _session(**overrides: Any) -> SessionRecord:
     )
 
 
+def _passthrough_agent_process_env(
+    backend: str,
+    launch_env: dict[str, str],
+    *,
+    session_id: str | None = None,
+) -> dict[str, str]:
+    return dict(launch_env)
+
+
 def test_serialize_question_answers_preserves_choices_and_notes() -> None:
     plugin = OpenCodePlugin()
 
@@ -164,6 +173,7 @@ async def test_create_plan_session_persists_plan_agent_state(tmp_path) -> None:
         storage=storage,
         settings=SimpleNamespace(plugin_config=lambda _id: OpenCodePluginConfig()),
         _find_launch_target=lambda _id: None,
+        _agent_process_env=_passthrough_agent_process_env,
         get_session=lambda session_id: storage.sessions[session_id],
     )
     request = SessionCreateRequest(
@@ -219,6 +229,7 @@ async def test_list_command_completions_reads_opencode_commands(tmp_path) -> Non
     runtime: Any = SimpleNamespace(
         settings=Settings(data_dir=tmp_path / "data"),
         _find_launch_target=lambda _id: None,
+        _agent_process_env=_passthrough_agent_process_env,
     )
 
     completions = await plugin.list_command_completions(
@@ -285,6 +296,15 @@ async def test_maybe_handle_input_routes_manual_opencode_command(tmp_path) -> No
 
         def _find_launch_target(self, launch_target_id: str | None) -> None:
             return None
+
+        def _agent_process_env(
+            self,
+            backend: str,
+            launch_env: dict[str, str],
+            *,
+            session_id: str | None = None,
+        ) -> dict[str, str]:
+            return dict(launch_env)
 
         def cached_command_completion(
             self, session_id: str, *, trigger: str, name: str
@@ -497,8 +517,8 @@ async def test_transport_routes_calls_by_session_launch_target() -> None:
     plugin._adapters = cast(
         Any,
         {
-            (None, "/tmp", ()): default_adapter,
-            ("ssh-1", "/tmp", ()): remote_adapter,
+            (None, "/tmp", (), ()): default_adapter,
+            ("ssh-1", "/tmp", (), ()): remote_adapter,
         },
     )
 
@@ -506,6 +526,7 @@ async def test_transport_routes_calls_by_session_launch_target() -> None:
         Any,
         SimpleNamespace(
             _find_launch_target=lambda _id: None,
+            _agent_process_env=_passthrough_agent_process_env,
             settings=SimpleNamespace(
                 plugin_config=lambda _id: SimpleNamespace(cli_args=[])
             ),
@@ -571,8 +592,8 @@ async def test_delete_thread_routes_to_launch_target_adapter() -> None:
     plugin._adapters = cast(
         Any,
         {
-            (None, "/tmp", ()): local,
-            ("ssh-1", "/tmp", ()): remote,
+            (None, "/tmp", (), ()): local,
+            ("ssh-1", "/tmp", (), ()): remote,
         },
     )
 
@@ -590,8 +611,8 @@ async def test_delete_thread_tries_every_adapter_until_one_deletes() -> None:
     plugin._adapters = cast(
         Any,
         {
-            (None, "/a", ()): first,
-            (None, "/b", ()): second,
+            (None, "/a", (), ()): first,
+            (None, "/b", (), ()): second,
         },
     )
 
@@ -608,8 +629,8 @@ async def test_delete_thread_short_circuits_after_first_success() -> None:
     plugin._adapters = cast(
         Any,
         {
-            (None, "/a", ()): first,
-            (None, "/b", ()): second,
+            (None, "/a", (), ()): first,
+            (None, "/b", (), ()): second,
         },
     )
 
@@ -622,7 +643,7 @@ async def test_delete_thread_short_circuits_after_first_success() -> None:
 async def test_delete_thread_returns_false_when_no_adapter_has_it() -> None:
     plugin = OpenCodePlugin()
     only = _DeleteAdapter(set())
-    plugin._adapters = cast(Any, {(None, "/tmp", ()): only})
+    plugin._adapters = cast(Any, {(None, "/tmp", (), ()): only})
 
     assert await plugin.delete_thread(cast(Any, None), "missing", None) is False
     assert only.calls == ["missing"]
@@ -644,6 +665,7 @@ async def test_get_or_create_adapter_keys_by_cwd(
             on_server_died=None,
             workdir=None,
             extra_args=(),
+            launch_env=None,
         ) -> None:
             self.workdir = workdir
 
@@ -690,6 +712,7 @@ async def test_get_or_create_adapter_normalizes_equivalent_cwds(
             on_server_died=None,
             workdir=None,
             extra_args=(),
+            launch_env=None,
         ) -> None:
             self.workdir = workdir
 
@@ -748,8 +771,8 @@ async def test_list_models_uses_target_adapter_independent_of_cwd() -> None:
     plugin._adapters = cast(
         Any,
         {
-            ("ssh-1", "/repo-a"): stale_adapter,
-            ("ssh-1", "/repo-b"): healthy_adapter,
+            ("ssh-1", "/repo-a", (), ()): stale_adapter,
+            ("ssh-1", "/repo-b", (), ()): healthy_adapter,
         },
     )
 
@@ -784,7 +807,7 @@ async def test_list_threads_ignores_cwd_and_dedupes_by_launch_target() -> None:
     plugin._adapters = cast(
         Any,
         {
-            ("ssh-1", "/repo-a"): FakeAdapter(
+            ("ssh-1", "/repo-a", (), ()): FakeAdapter(
                 [
                     {
                         "id": "ses_1",
@@ -794,7 +817,7 @@ async def test_list_threads_ignores_cwd_and_dedupes_by_launch_target() -> None:
                     }
                 ]
             ),
-            ("ssh-1", "/repo-b"): FakeAdapter(
+            ("ssh-1", "/repo-b", (), ()): FakeAdapter(
                 [
                     {
                         "id": "ses_1",
@@ -869,7 +892,7 @@ async def test_list_threads_sorts_by_updated_at_after_merging_adapters() -> None
     plugin._adapters = cast(
         Any,
         {
-            ("ssh-1", "/repo-a"): FakeAdapter(
+            ("ssh-1", "/repo-a", (), ()): FakeAdapter(
                 [
                     {
                         "id": "ses_a",
@@ -879,7 +902,7 @@ async def test_list_threads_sorts_by_updated_at_after_merging_adapters() -> None
                     }
                 ]
             ),
-            ("ssh-1", "/repo-b"): FakeAdapter(
+            ("ssh-1", "/repo-b", (), ()): FakeAdapter(
                 [
                     {
                         "id": "ses_b",
@@ -941,7 +964,7 @@ async def test_reconnect_restore_rehydrates_pre_plan_mode(tmp_path) -> None:
             return True
 
     fake_adapter = FakeAdapter()
-    key = (None, "/repo", ())
+    key = (None, "/repo", (), ())
     plugin._adapters = cast(Any, {key: fake_adapter})
     plugin._reconnect_targets[key] = {"sess"}
 
@@ -1035,6 +1058,7 @@ async def test_fork_plan_session_persists_pre_plan_mode(tmp_path) -> None:
         storage=storage,
         settings=SimpleNamespace(plugin_config=lambda _id: OpenCodePluginConfig()),
         _find_launch_target=lambda _id: None,
+        _agent_process_env=_passthrough_agent_process_env,
         _record_system_event=record_system_event,
         get_session=lambda session_id: storage.sessions[session_id],
     )
@@ -1082,13 +1106,19 @@ async def test_import_thread_preserves_launch_target_id() -> None:
     fake_adapter = FakeAdapter()
 
     async def fake_get_or_create_adapter(
-        runtime, launch_target_id, cwd, custom_args=(), *, user_initiated=False
+        runtime,
+        launch_target_id,
+        cwd,
+        custom_args=(),
+        launch_env=None,
+        *,
+        user_initiated=False,
     ):
         assert launch_target_id == "ssh-1"
         assert cwd == "/repo"
         return fake_adapter
 
-    plugin._get_or_create_adapter = fake_get_or_create_adapter  # type: ignore[method-assign]
+    cast(Any, plugin)._get_or_create_adapter = fake_get_or_create_adapter
 
     class FakeStorage:
         def __init__(self) -> None:
@@ -1120,6 +1150,15 @@ async def test_import_thread_preserves_launch_target_id() -> None:
             path.mkdir(parents=True, exist_ok=True)
             return path
 
+        def _agent_process_env(
+            self,
+            backend: str,
+            launch_env: dict[str, str],
+            *,
+            session_id: str | None = None,
+        ) -> dict[str, str]:
+            return dict(launch_env)
+
         async def _record_system_event(self, *args, **kwargs) -> None:
             return None
 
@@ -1144,6 +1183,7 @@ async def test_import_thread_preserves_launch_target_id() -> None:
             "launch_target_id": "ssh-1",
             "cwd": "/repo",
             "import_history": False,
+            "launch_env": {},
         },
     )()
 
@@ -1183,12 +1223,18 @@ async def test_import_thread_keys_adapter_by_session_directory() -> None:
     cwds_seen: list[str | None] = []
 
     async def fake_get_or_create_adapter(
-        runtime, launch_target_id, cwd, custom_args=(), *, user_initiated=False
+        runtime,
+        launch_target_id,
+        cwd,
+        custom_args=(),
+        launch_env=None,
+        *,
+        user_initiated=False,
     ):
         cwds_seen.append(cwd)
         return fake_adapter
 
-    plugin._get_or_create_adapter = fake_get_or_create_adapter  # type: ignore[method-assign]
+    cast(Any, plugin)._get_or_create_adapter = fake_get_or_create_adapter
 
     class FakeStorage:
         def __init__(self) -> None:
@@ -1220,6 +1266,15 @@ async def test_import_thread_keys_adapter_by_session_directory() -> None:
             path.mkdir(parents=True, exist_ok=True)
             return path
 
+        def _agent_process_env(
+            self,
+            backend: str,
+            launch_env: dict[str, str],
+            *,
+            session_id: str | None = None,
+        ) -> dict[str, str]:
+            return dict(launch_env)
+
         async def _record_system_event(self, *args, **kwargs) -> None:
             return None
 
@@ -1244,6 +1299,7 @@ async def test_import_thread_keys_adapter_by_session_directory() -> None:
             "launch_target_id": "ssh-1",
             "cwd": "/repo/requested",
             "import_history": False,
+            "launch_env": {},
         },
     )()
 
@@ -1255,6 +1311,115 @@ async def test_import_thread_keys_adapter_by_session_directory() -> None:
     # The final adapter lookup must be keyed by /repo/actual so future
     # _require_adapter calls (which key by session.cwd) hit a live adapter.
     assert "/repo/actual" in cwds_seen
+
+
+@pytest.mark.asyncio
+async def test_import_thread_fetches_through_existing_target_adapter() -> None:
+    plugin = OpenCodePlugin()
+
+    class FetchAdapter:
+        async def get_session(self, session_id: str) -> dict[str, object] | None:
+            return {
+                "id": session_id,
+                "title": "Imported",
+                "directory": "/repo/actual",
+            }
+
+    class DriveAdapter:
+        async def restore_session(
+            self,
+            session_id: str,
+            cwd: str,
+            opencode_session_id: str,
+            model: str | None = None,
+            agent: str | None = None,
+            effort: str | None = None,
+        ) -> None:
+            return None
+
+    plugin._adapters = cast(Any, {("ssh-1", "/already-live", (), ()): FetchAdapter()})
+    adapter_calls: list[tuple[str | None, dict[str, str] | None]] = []
+    drive_adapter = DriveAdapter()
+
+    async def fake_get_or_create_adapter(
+        runtime,
+        launch_target_id,
+        cwd,
+        custom_args=(),
+        launch_env=None,
+        *,
+        user_initiated=False,
+    ):
+        adapter_calls.append((cwd, launch_env))
+        return drive_adapter
+
+    cast(Any, plugin)._get_or_create_adapter = fake_get_or_create_adapter
+
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.sessions: list[SessionRecord] = []
+
+        def list_sessions(self) -> list[SessionRecord]:
+            return list(self.sessions)
+
+        def create_session(self, session: SessionRecord) -> None:
+            self.sessions.append(session)
+
+        def update_session(self, session_id: str, **kwargs) -> SessionRecord:
+            session = self.sessions[-1]
+            for key, value in kwargs.items():
+                setattr(session, key, value)
+            return session
+
+    class FakeRuntime:
+        def __init__(self) -> None:
+            self.storage = FakeStorage()
+
+        def _agent_process_env(
+            self,
+            backend: str,
+            launch_env: dict[str, str],
+            *,
+            session_id: str | None = None,
+        ) -> dict[str, str]:
+            return {**launch_env, "RUNTIME": "1"}
+
+        def _generate_session_id(self, backend_id: str) -> str:
+            return f"{backend_id}-1"
+
+        def _session_dir(self, session_id: str):
+            from pathlib import Path
+
+            path = Path("/tmp") / session_id
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+
+        async def _record_system_event(self, *args, **kwargs) -> None:
+            return None
+
+        async def seed_thread_history(self, session_id, reader, *, enabled) -> int:
+            return 0
+
+        def get_session(self, session_id: str) -> SessionRecord:
+            return self.storage.sessions[-1]
+
+    runtime: Any = FakeRuntime()
+    request = type(
+        "Req",
+        (),
+        {
+            "thread_id": "ses_1",
+            "launch_target_id": "ssh-1",
+            "cwd": "/repo/requested",
+            "import_history": False,
+            "launch_env": {"USER": "1"},
+        },
+    )()
+
+    result = await plugin.import_thread(runtime, request)
+
+    assert result.cwd == "/repo/actual"
+    assert adapter_calls == [("/repo/actual", {"USER": "1", "RUNTIME": "1"})]
 
 
 @pytest.mark.asyncio

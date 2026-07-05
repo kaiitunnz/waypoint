@@ -25,6 +25,7 @@ from waypoint.client import (
     session_status_from_envelope,
     write_cli_token,
 )
+from waypoint.launch_env import validate_launch_env
 from waypoint.schemas import (
     LaunchMode,
     SessionAttachRequest,
@@ -390,6 +391,16 @@ def session_start(
         ),
     ] = None,
     title: Annotated[str | None, typer.Option()] = None,
+    launch_env: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--launch-env",
+            help=(
+                "Environment variable for the agent process as KEY=VALUE. "
+                "Repeatable; values may contain '='."
+            ),
+        ),
+    ] = None,
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
     """Start a session in-process and print it as JSON."""
@@ -402,6 +413,9 @@ def session_start(
             launch_mode=launch_mode,
             transport=transport,
             title=title,
+            launch_env=(
+                _parse_launch_env(launch_env) if launch_env is not None else None
+            ),
             args=args or [],
         )
     )
@@ -434,6 +448,7 @@ async def _session_start(
     launch_mode: LaunchMode | None,
     transport: str | None,
     title: str | None,
+    launch_env: dict[str, str] | None,
     args: list[str],
 ) -> None:
     context = AppContext(settings)
@@ -446,6 +461,8 @@ async def _session_start(
             "title": title,
             "args": list(args),
         }
+        if launch_env is not None:
+            request_fields["launch_env"] = launch_env
         # Omit launch_mode when unset so the request model's AUTO default applies.
         if launch_mode is not None:
             request_fields["launch_mode"] = launch_mode.value
@@ -533,6 +550,19 @@ def _parse_meta(items: list[str] | None) -> dict[str, str]:
             raise typer.BadParameter(f"--meta expects key=value, got: {item}")
         metadata[key] = value
     return metadata
+
+
+def _parse_launch_env(items: list[str] | None) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for item in items or []:
+        key, sep, value = item.partition("=")
+        if not sep:
+            raise typer.BadParameter(f"--launch-env expects KEY=VALUE, got: {item}")
+        env[key] = value
+    try:
+        return validate_launch_env(env)
+    except (TypeError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _parse_tags(items: list[str] | None) -> dict[str, str]:
@@ -1535,6 +1565,16 @@ def sessions_start(
             "Filter later with `sessions list --tag` / `reap --tag`.",
         ),
     ] = None,
+    launch_env: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--launch-env",
+            help=(
+                "Environment variable for the agent process as KEY=VALUE. "
+                "Repeatable; values may contain '='."
+            ),
+        ),
+    ] = None,
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
     """Launch a new session on the running server."""
@@ -1544,6 +1584,7 @@ def sessions_start(
         worktree_path = _create_worktree(worktree, worktree_base, cwd)
         effective_cwd = worktree_path
     tags = _parse_tags(tag)
+    launch_env_map = _parse_launch_env(launch_env) if launch_env is not None else None
 
     def _run(c: WaypointClient) -> dict[str, Any]:
         if permission_mode is not None:
@@ -1565,6 +1606,7 @@ def sessions_start(
                 worktree_path=worktree_path,
                 args=list(args or []),
                 tags=tags,
+                launch_env=launch_env_map,
             )
         }
 
@@ -2023,6 +2065,16 @@ def sessions_import(
             ),
         ),
     ] = None,
+    launch_env: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--launch-env",
+            help=(
+                "Environment variable for the agent process as KEY=VALUE. "
+                "Repeatable; values may contain '='."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Import a backend-native thread into Waypoint.
 
@@ -2034,6 +2086,8 @@ def sessions_import(
         body["thread_id"] = thread_id
     if import_history is not None:
         body["import_history"] = import_history
+    if launch_env is not None:
+        body["launch_env"] = _parse_launch_env(launch_env)
     if not body.get("thread_id"):
         raise typer.BadParameter("pass --thread-id or a --json body with thread_id")
     _emit(
@@ -2626,6 +2680,16 @@ def schedule_create(
         str | None,
         typer.Option("--prompt", help="Initial prompt sent to the session on launch."),
     ] = None,
+    launch_env: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--launch-env",
+            help=(
+                "Environment variable for the agent process as KEY=VALUE. "
+                "Repeatable; values may contain '='."
+            ),
+        ),
+    ] = None,
     delay_seconds: Annotated[
         int | None,
         typer.Option(help="Launch this many seconds from now."),
@@ -2637,6 +2701,7 @@ def schedule_create(
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
     """Schedule a session launch on the running server."""
+    launch_env_map = _parse_launch_env(launch_env) if launch_env is not None else None
     _emit(
         _settings_from_ctx(ctx),
         lambda c: {
@@ -2654,6 +2719,7 @@ def schedule_create(
                 args=list(args or []),
                 delay_seconds=delay_seconds,
                 scheduled_at=scheduled_at,
+                launch_env=launch_env_map,
             )
         },
     )

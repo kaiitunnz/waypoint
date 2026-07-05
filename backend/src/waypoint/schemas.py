@@ -5,6 +5,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
 
+from waypoint.launch_env import LaunchEnv
+
 
 def _validate_backend_id(value: Any) -> str:
     if isinstance(value, StrEnum):
@@ -217,6 +219,10 @@ class SessionRecord(BaseModel):
     # Codex uses this for ``--config K=V`` entries; other backends ignore
     # the field. Empty list = none.
     config_overrides: list[str] = Field(default_factory=list)
+    # Environment variables applied when the agent process was launched.
+    # Excluded from public dumps because values commonly contain secrets; the
+    # runtime still uses the field internally for restore/relaunch.
+    launch_env: LaunchEnv = Field(default_factory=dict, exclude=True)
     context_usage: SessionContextUsage | None = None
     rate_limit_usage: SessionRateLimitUsage | None = None
     # Free-form user/agent labels for grouping and selective teardown, e.g.
@@ -303,6 +309,10 @@ class LaunchTargetSummary(BaseModel):
     auth: Literal["key", "password"] = "key"
     # Live ControlMaster state; only meaningful when ``auth == "password"``.
     connected: bool = False
+    # Effective launch-env defaults keyed by backend id for this target.
+    default_launch_env_by_backend: dict[BackendId, LaunchEnv] = Field(
+        default_factory=dict
+    )
 
 
 class LaunchTargetConnectRequest(BaseModel):
@@ -389,6 +399,8 @@ class SessionCreateRequest(BaseModel):
     title: str | None = None
     args: list[str] = Field(default_factory=list)
     config_overrides: list[str] = Field(default_factory=list)
+    # Private in responses; schedule rows are public over the same list API.
+    launch_env: LaunchEnv = Field(default_factory=dict, exclude=True)
     source_mode: SessionSource = SessionSource.MANAGED
     # Set by the CLI from ``WAYPOINT_SESSION_ID`` when an agent inside a session
     # spawns this one. When ``permission_mode`` is unset and the spawner shares
@@ -509,6 +521,7 @@ class ScheduledSessionRecord(BaseModel):
     title: str | None = None
     args: list[str] = Field(default_factory=list)
     config_overrides: list[str] = Field(default_factory=list)
+    launch_env: LaunchEnv = Field(default_factory=dict, exclude=True)
     initial_prompt: str | None = None
     permission_mode: str | None = None
     model: str | None = None
@@ -532,6 +545,7 @@ class ScheduleCreateRequest(BaseModel):
     title: str | None = None
     args: list[str] = Field(default_factory=list)
     config_overrides: list[str] = Field(default_factory=list)
+    launch_env: LaunchEnv = Field(default_factory=dict)
     initial_prompt: str | None = None
     permission_mode: str | None = None
     model: str | None = None

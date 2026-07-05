@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AssistantMark } from "@/components/AssistantMark";
 import { BackendSwitcher } from "@/components/BackendSwitcher";
@@ -187,6 +187,17 @@ export default function HomePage() {
     ? (activeLaunchTarget?.default_backend ?? defaultBackend)
     : launchableBackends[0] ?? supportedBackends[0];
   const effectiveDefaultCwd = activeLaunchTarget?.default_cwd ?? defaultCwd;
+  const defaultLaunchEnvByBackend = useMemo(() => {
+    const defaults: Record<Backend, Record<string, string>> = {};
+    for (const descriptor of backendDescriptors ?? []) {
+      defaults[descriptor.id] = { ...(descriptor.default_launch_env ?? {}) };
+    }
+    const targetDefaults = activeLaunchTarget?.default_launch_env_by_backend ?? {};
+    for (const [backend, env] of Object.entries(targetDefaults)) {
+      defaults[backend] = { ...env };
+    }
+    return defaults;
+  }, [activeLaunchTarget, backendDescriptors]);
 
   const resetAuthState = useCallback((message: string) => {
     clearToken();
@@ -545,6 +556,7 @@ export default function HomePage() {
     transport: SessionTransport | null = null,
     args: string[] = [],
     configOverrides: string[] = [],
+    launchEnv: Record<string, string> = {},
     permissionMode: string | null = null,
   ) {
     setCwdError(null);
@@ -558,6 +570,7 @@ export default function HomePage() {
         source_mode: "managed",
         args,
         config_overrides: configOverrides,
+        launch_env: launchEnv,
         model,
         effort,
         permission_mode: permissionMode,
@@ -602,6 +615,7 @@ export default function HomePage() {
               transport,
               args,
               configOverrides,
+              launchEnv,
               permissionMode,
             ),
         });
@@ -651,6 +665,7 @@ export default function HomePage() {
     cwd: string,
     transport: SessionTransport | null,
     importHistory: boolean,
+    launchEnv: Record<string, string>,
   ) {
     try {
       const payload = {
@@ -661,6 +676,7 @@ export default function HomePage() {
         // pin the chosen transport and leave the launch mode on "auto".
         launch_mode: "auto",
         transport: transport || null,
+        launch_env: launchEnv,
         // Replay the thread's prior conversation into the new session's
         // transcript; false starts empty and only resumes the agent's context.
         import_history: importHistory,
@@ -991,6 +1007,7 @@ export default function HomePage() {
           token={token}
           defaultBackend={effectiveDefaultBackend}
           defaultCwd={effectiveDefaultCwd}
+          defaultLaunchEnvByBackend={defaultLaunchEnvByBackend}
           targetLabel={activeLaunchTarget?.name ?? null}
           launchTargetId={activeLaunchTargetId || null}
           recentCwds={recentCwds}

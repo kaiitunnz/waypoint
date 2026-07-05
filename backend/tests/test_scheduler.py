@@ -66,6 +66,23 @@ async def test_create_schedule_with_delay_persists_pending(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_schedule_persists_launch_env_privately(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+    schedule = runtime.scheduler.create_schedule(
+        ScheduleCreateRequest(
+            backend="codex",
+            cwd="/tmp/project",
+            delay_seconds=60,
+            launch_env={"OPENAI_API_KEY": "secret"},
+        )
+    )
+    stored = runtime.storage.get_schedule(schedule.id)
+    assert stored is not None
+    assert stored.launch_env == {"OPENAI_API_KEY": "secret"}
+    assert "launch_env" not in stored.model_dump(mode="json")
+
+
+@pytest.mark.asyncio
 async def test_create_schedule_requires_time_input(tmp_path) -> None:
     runtime = make_runtime(tmp_path)
     with pytest.raises(HTTPException) as exc:
@@ -255,6 +272,35 @@ async def test_fire_passes_permission_mode_to_create_session(
     await runtime.scheduler._fire_due_schedules()
 
     assert captured == ["acceptEdits"]
+
+
+@pytest.mark.asyncio
+async def test_fire_passes_launch_env_to_create_session(tmp_path, monkeypatch) -> None:
+    runtime = make_runtime(tmp_path)
+    schedule = runtime.scheduler.create_schedule(
+        ScheduleCreateRequest(
+            backend="codex",
+            cwd="/tmp/project",
+            delay_seconds=0,
+            launch_env={"OPENAI_API_KEY": "secret"},
+        )
+    )
+    runtime.storage.update_schedule(
+        schedule.id, scheduled_at=datetime.now(UTC) - timedelta(seconds=1)
+    )
+    created_session = make_session(runtime.settings, "codex-env")
+    runtime.storage.create_session(created_session)
+    captured: list[dict[str, str]] = []
+
+    async def fake_create_session(request) -> SessionRecord:
+        captured.append(request.launch_env)
+        return created_session
+
+    monkeypatch.setattr(runtime, "create_session", fake_create_session)
+
+    await runtime.scheduler._fire_due_schedules()
+
+    assert captured == [{"OPENAI_API_KEY": "secret"}]
 
 
 @pytest.mark.asyncio

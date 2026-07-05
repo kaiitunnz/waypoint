@@ -34,6 +34,12 @@ cors_origins: []
 # against the plugin's `config_schema` (see `backends/<id>/plugin.py`).
 # Keys here must match a registered plugin; unknown ids fail
 # validation. Omit a block to use the schema's defaults.
+#
+# `env` values reach the agent process directly for the structured local
+# transports (claude_code, codex, and opencode adapters). For the tmux /
+# claude_tty and SSH-remote transports they are rendered into the launch
+# command line, so on a shared host another user can read them via `ps`.
+# Prefer host/SSH environment over `env` for secrets on those transports.
 plugin_configs:
   codex:
     # default_model_id: gpt-5

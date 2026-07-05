@@ -305,6 +305,69 @@ export interface MeResponse {
   launch_targets: LaunchTargetSummary[];
   backends?: BackendDescriptor[];
   assistant?: AssistantSummary | null;
+  session_presets?: SessionPresetSummary[];
+  default_preset_id?: string | null;
+}
+
+// Full preset spec (with launch_env values); returned only from the
+// include_secret_values single-preset fetch and used to hydrate the form.
+// cwd and title are intentionally absent — they are per-launch specifics, not
+// reusable launch defaults, so the launch surfaces always supply them directly.
+export interface SessionPresetSpec {
+  backend?: Backend | null;
+  launch_target_id?: string | null;
+  launch_mode?: LaunchMode | null;
+  transport?: SessionTransport | null;
+  args?: string[];
+  config_overrides?: string[];
+  launch_env?: Record<string, string>;
+  permission_mode?: string | null;
+  model?: string | null;
+  effort?: string | null;
+  tags?: Record<string, string>;
+}
+
+// Redacted spec used on list / bootstrap surfaces: env values are omitted,
+// only the keys are exposed.
+export interface SessionPresetSpecSummary {
+  backend?: Backend | null;
+  launch_target_id?: string | null;
+  launch_mode?: LaunchMode | null;
+  transport?: SessionTransport | null;
+  args?: string[];
+  config_overrides?: string[];
+  launch_env_keys?: string[];
+  permission_mode?: string | null;
+  model?: string | null;
+  effort?: string | null;
+  tags?: Record<string, string>;
+}
+
+export interface SessionPresetSummary {
+  id: string;
+  name: string;
+  description?: string | null;
+  spec: SessionPresetSpecSummary;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SessionPreset {
+  id: string;
+  name: string;
+  description?: string | null;
+  spec: SessionPresetSpec;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SessionPresetWriteRequest {
+  name?: string;
+  description?: string | null;
+  spec?: SessionPresetSpec;
+  is_default?: boolean;
 }
 
 export interface EventsPage {
@@ -368,6 +431,9 @@ export interface ScheduleCreateRequest {
   effort?: string | null;
   delay_seconds?: number | null;
   scheduled_at?: string | null;
+  // Provenance only — the frontend submits already-resolved fields; sending the
+  // selected preset id lets the server stamp it onto the scheduled record.
+  preset_id?: string | null;
 }
 
 export interface BackendModelOption {

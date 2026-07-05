@@ -32,6 +32,11 @@ from waypoint.backends.tmux.renderer import (
     SyncFrameTracker,
     make_renderer,
 )
+from waypoint.presets import (
+    redact_preset,
+    resolve_schedule_create_request,
+    resolve_session_create_request,
+)
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     AssistantAttachRequest,
@@ -48,19 +53,22 @@ from waypoint.schemas import (
     LaunchTargetConnectResponse,
     LoginRequest,
     MeResponse,
-    ScheduleCreateRequest,
     ScheduledMessageCreateRequest,
+    ScheduleLaunchRequest,
     SessionAnswerQuestionRequest,
     SessionApprovalRequest,
     SessionAttachRequest,
     SessionCompletionsResponse,
-    SessionCreateRequest,
     SessionEffortRequest,
     SessionEnvelope,
     SessionInputRequest,
+    SessionLaunchRequest,
     SessionModelRequest,
     SessionPermissionModeRequest,
     SessionPlanApprovalRequest,
+    SessionPresetCreateRequest,
+    SessionPresetListResponse,
+    SessionPresetUpdateRequest,
     SessionRecord,
     SessionStatus,
     SessionTagsUpdateRequest,
@@ -168,6 +176,11 @@ def _backend_descriptors(
     return payload
 
 
+def _default_preset_id(context: "AppContext") -> str | None:
+    default = context.runtime.presets.default()
+    return default.id if default is not None else None
+
+
 class AppContext:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or load_settings()
@@ -225,6 +238,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             launch_targets=context.runtime.launch_target_summaries(),
             backends=_backend_descriptors(context.runtime.registry, context.settings),
             assistant=context.runtime.assistant_summary(),
+            session_presets=[
+                redact_preset(preset) for preset in context.runtime.presets.list()
+            ],
+            default_preset_id=_default_preset_id(context),
         )
 
     @app.post(
@@ -381,10 +398,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/sessions")
     async def create_session(
-        request: SessionCreateRequest,
+        request: SessionLaunchRequest,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        session = await context.runtime.create_session(request)
+        resolved, preset = resolve_session_create_request(context.storage, request)
+        session = await context.runtime.create_session(
+            resolved,
+            preset_id=preset.id if preset else None,
+            preset_name=preset.name if preset else None,
+        )
         return {"session": session.model_dump(mode="json")}
 
     @app.post("/api/backends/{backend}/sessions/import")
@@ -1304,10 +1326,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/schedules")
     async def create_schedule(
-        request: ScheduleCreateRequest,
+        request: ScheduleLaunchRequest,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        schedule = context.runtime.scheduler.create_schedule(request)
+        resolved, preset = resolve_schedule_create_request(context.storage, request)
+        schedule = context.runtime.scheduler.create_schedule(
+            resolved,
+            preset_id=preset.id if preset else None,
+            preset_name=preset.name if preset else None,
+        )
         return {"schedule": schedule.model_dump(mode="json")}
 
     @app.delete("/api/schedules/{schedule_id}")
@@ -1324,6 +1351,78 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         removed = context.runtime.scheduler.clear_history()
         return {"removed": removed}
+
+    # ── Session presets ──────────────────────────────────────────────────
+    @app.get("/api/session-presets", response_model=SessionPresetListResponse)
+    async def list_session_presets(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> SessionPresetListResponse:
+        presets = context.runtime.presets.list()
+        return SessionPresetListResponse(
+            presets=[redact_preset(preset) for preset in presets],
+            default_preset_id=next(
+                (preset.id for preset in presets if preset.is_default), None
+            ),
+        )
+
+    @app.post("/api/session-presets")
+    async def create_session_preset(
+        request: SessionPresetCreateRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        preset = context.runtime.presets.create(request)
+        return {"preset": redact_preset(preset).model_dump(mode="json")}
+
+    # Registered before ``/{preset_id}`` so "default" is not captured as an id.
+    @app.delete("/api/session-presets/default")
+    async def clear_default_session_preset(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        context.runtime.presets.set_default(None)
+        return {"default_preset_id": None}
+
+    @app.get("/api/session-presets/{preset_id}")
+    async def get_session_preset(
+        preset_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+        include_secret_values: bool = Query(default=False),
+    ) -> Any:
+        preset = context.runtime.presets.require_ref(preset_id)
+        if include_secret_values:
+            return {"preset": preset.model_dump(mode="json")}
+        return {"preset": redact_preset(preset).model_dump(mode="json")}
+
+    @app.patch("/api/session-presets/{preset_id}")
+    async def update_session_preset(
+        preset_id: str,
+        request: SessionPresetUpdateRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        preset = context.runtime.presets.update(preset_id, request)
+        return {"preset": redact_preset(preset).model_dump(mode="json")}
+
+    @app.delete("/api/session-presets/{preset_id}")
+    async def delete_session_preset(
+        preset_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        deleted = context.runtime.presets.delete(preset_id)
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"unknown preset: {preset_id!r}",
+            )
+        return {"deleted": True}
+
+    @app.post("/api/session-presets/{preset_id}/default")
+    async def set_default_session_preset(
+        preset_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        preset = context.runtime.presets.set_default(preset_id)
+        return {
+            "preset": redact_preset(preset).model_dump(mode="json") if preset else None
+        }
 
     @app.get("/api/message-schedules")
     async def list_message_schedules(

@@ -289,8 +289,8 @@ class WaypointClient:
     def create_session(
         self,
         *,
-        backend: str,
-        cwd: str,
+        backend: str | None = None,
+        cwd: str | None = None,
         launch_target_id: str | None = None,
         launch_mode: str | None = None,
         transport: str | None = None,
@@ -301,32 +301,42 @@ class WaypointClient:
         spawner_session_id: str | None = None,
         worktree_path: str | None = None,
         args: list[str] | None = None,
+        config_overrides: list[str] | None = None,
         tags: dict[str, str] | None = None,
         launch_env: dict[str, str] | None = None,
+        preset_id: str | None = None,
+        use_default_preset: bool = False,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {
-            "backend": backend,
-            "cwd": cwd,
-            "launch_target_id": launch_target_id,
-            "title": title,
-            "model": model,
-            "effort": effort,
-            "permission_mode": permission_mode,
-            "spawner_session_id": spawner_session_id,
-            "worktree_path": worktree_path,
-            "args": args or [],
-            "tags": tags or {},
-        }
-        # Omit launch_mode when unset: it is a non-optional-with-default enum
-        # field, so an explicit null is a 422 (mirrors create_schedule).
-        if launch_mode is not None:
-            body["launch_mode"] = launch_mode
-        # Omit transport when unset so the request model's None default keeps
-        # today's launch_mode-derived behavior.
-        if transport is not None:
-            body["transport"] = transport
+        # Unset/empty fields are omitted, not sent as null: an omitted field is
+        # left to the preset (or the server default), while a present value is
+        # treated as an explicit override. Sending null would defeat preset merge.
+        body: dict[str, Any] = {}
+        for key, value in (
+            ("backend", backend),
+            ("cwd", cwd),
+            ("launch_target_id", launch_target_id),
+            ("title", title),
+            ("model", model),
+            ("effort", effort),
+            ("permission_mode", permission_mode),
+            ("spawner_session_id", spawner_session_id),
+            ("worktree_path", worktree_path),
+            ("launch_mode", launch_mode),
+            ("transport", transport),
+            ("preset_id", preset_id),
+        ):
+            if value is not None:
+                body[key] = value
+        if args:
+            body["args"] = args
+        if config_overrides:
+            body["config_overrides"] = config_overrides
+        if tags:
+            body["tags"] = tags
         if launch_env is not None:
             body["launch_env"] = launch_env
+        if use_default_preset:
+            body["use_default_preset"] = True
         data: dict[str, Any] = self._request("POST", "/api/sessions", json=body).json()[
             "session"
         ]
@@ -673,8 +683,8 @@ class WaypointClient:
     def create_schedule(
         self,
         *,
-        backend: str,
-        cwd: str,
+        backend: str | None = None,
+        cwd: str | None = None,
         launch_target_id: str | None = None,
         launch_mode: str | None = None,
         transport: str | None = None,
@@ -684,16 +694,20 @@ class WaypointClient:
         permission_mode: str | None = None,
         initial_prompt: str | None = None,
         args: list[str] | None = None,
+        config_overrides: list[str] | None = None,
         delay_seconds: int | None = None,
         scheduled_at: str | None = None,
         launch_env: dict[str, str] | None = None,
+        preset_id: str | None = None,
+        use_default_preset: bool = False,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {"backend": backend, "cwd": cwd, "args": args or []}
-        # Omit unset optionals so the server's model defaults apply. Sending an
-        # explicit null for a non-optional-with-default field like launch_mode
-        # is a 422 (it is validated against the enum, default or not). transport
-        # is optional-with-None, so omit it to keep the launch_mode behavior.
+        # Omit unset/empty optionals so a preset (or the server's model defaults)
+        # applies; a present value is an explicit override. Sending an explicit
+        # null for a non-optional-with-default field like launch_mode is a 422.
+        body: dict[str, Any] = {}
         optional = {
+            "backend": backend,
+            "cwd": cwd,
             "launch_target_id": launch_target_id,
             "launch_mode": launch_mode,
             "transport": transport,
@@ -705,10 +719,17 @@ class WaypointClient:
             "delay_seconds": delay_seconds,
             "scheduled_at": scheduled_at,
             "launch_env": launch_env,
+            "preset_id": preset_id,
         }
         body.update(
             {key: value for key, value in optional.items() if value is not None}
         )
+        if args:
+            body["args"] = args
+        if config_overrides:
+            body["config_overrides"] = config_overrides
+        if use_default_preset:
+            body["use_default_preset"] = True
         data: dict[str, Any] = self._request(
             "POST", "/api/schedules", json=body
         ).json()["schedule"]
@@ -723,6 +744,53 @@ class WaypointClient:
     def clear_schedule_history(self) -> dict[str, Any]:
         data: dict[str, Any] = self._request(
             "POST", "/api/schedules/clear-history"
+        ).json()
+        return data
+
+    # ── session presets ──────────────────────────────────────────────────
+
+    def list_session_presets(self) -> dict[str, Any]:
+        data: dict[str, Any] = self._request("GET", "/api/session-presets").json()
+        return data
+
+    def get_session_preset(
+        self, preset_id: str, *, include_secret_values: bool = False
+    ) -> dict[str, Any]:
+        params = {"include_secret_values": "true"} if include_secret_values else None
+        data: dict[str, Any] = self._request(
+            "GET", f"/api/session-presets/{preset_id}", params=params
+        ).json()["preset"]
+        return data
+
+    def create_session_preset(self, body: dict[str, Any]) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", "/api/session-presets", json=body
+        ).json()["preset"]
+        return data
+
+    def update_session_preset(
+        self, preset_id: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "PATCH", f"/api/session-presets/{preset_id}", json=body
+        ).json()["preset"]
+        return data
+
+    def delete_session_preset(self, preset_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "DELETE", f"/api/session-presets/{preset_id}"
+        ).json()
+        return data
+
+    def set_default_session_preset(self, preset_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "POST", f"/api/session-presets/{preset_id}/default"
+        ).json()["preset"]
+        return data
+
+    def clear_default_session_preset(self) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "DELETE", "/api/session-presets/default"
         ).json()
         return data
 

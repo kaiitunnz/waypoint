@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -26,6 +27,7 @@ import { permissionModesFor } from "@/lib/backends";
 import {
   Backend,
   BackendModelListResponse,
+  SessionPresetSpec,
   SessionTransport,
 } from "@/lib/types";
 
@@ -69,6 +71,7 @@ export interface LaunchForm {
   effortSupported: boolean;
   effortOptions: string[];
   changeBackend: (backend: Backend) => void;
+  applyPreset: (spec: SessionPresetSpec) => void;
   handleModelsLoaded: (response: BackendModelListResponse) => void;
   collectArgs: () => {
     args: string[];
@@ -146,6 +149,46 @@ export function useLaunchForm({
     setLaunchEnvText(formatLaunchEnv(defaultLaunchEnvByBackend[backend]));
   }, [backend, launchTargetId, defaultLaunchEnvByBackend]);
 
+  // Applying a preset that changes the backend triggers the reset effect above,
+  // which clears model/effort/env (and useTransportForAgent resets transport).
+  // So backend-scoped fields are stashed here and re-applied once, after those
+  // resets settle, by the effect below. Same-backend applies run inline.
+  const pendingPresetRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    const pending = pendingPresetRef.current;
+    if (pending) {
+      pendingPresetRef.current = null;
+      pending();
+    }
+  }, [backend]);
+
+  const applyPreset = useCallback(
+    (spec: SessionPresetSpec) => {
+      const nextBackend = (spec.backend as Backend | null | undefined) ?? backend;
+      // Presets carry launch defaults only — cwd and title are per-launch and
+      // deliberately left as the user set them.
+      if (spec.permission_mode) setPermissionMode(spec.permission_mode);
+      setCustomArgsText((spec.args ?? []).join("\n"));
+      setConfigOverridesText((spec.config_overrides ?? []).join("\n"));
+      // Backend-scoped fields: model/effort/env/transport are wiped by the
+      // backend-change resets, so apply them after those run.
+      const applyScoped = () => {
+        setModel(spec.model ?? "");
+        setEffort(spec.effort ?? "");
+        setLaunchEnvText(formatLaunchEnv(spec.launch_env ?? {}));
+        if (spec.transport) setTransport(spec.transport);
+      };
+      if (nextBackend !== backend) {
+        pendingPresetRef.current = applyScoped;
+        setBackend(nextBackend);
+      } else {
+        applyScoped();
+      }
+    },
+    [backend, setTransport],
+  );
+
   const effortOptions = useMemo(() => {
     if (!modelInfo) return [];
 
@@ -168,12 +211,15 @@ export function useLaunchForm({
     return Array.from(union);
   }, [modelInfo, model]);
 
-  // Drop the picked level if the new model doesn't support it.
+  // Drop the picked level if the loaded model doesn't support it. Gated on
+  // modelInfo: while models are still loading (modelInfo === null) the option
+  // list is empty and we can't yet tell a valid level from an invalid one —
+  // clamping then would wipe a preset-applied effort before its model arrives.
   useEffect(() => {
-    if (effort && !effortOptions.includes(effort)) {
+    if (modelInfo && effort && !effortOptions.includes(effort)) {
       setEffort("");
     }
-  }, [effort, effortOptions]);
+  }, [effort, effortOptions, modelInfo]);
 
   const handleModelsLoaded = useCallback((response: BackendModelListResponse) => {
     setModelInfo(response);
@@ -223,6 +269,7 @@ export function useLaunchForm({
     effortSupported,
     effortOptions,
     changeBackend,
+    applyPreset,
     handleModelsLoaded,
     collectArgs,
   };

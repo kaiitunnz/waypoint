@@ -230,6 +230,11 @@ class SessionRecord(BaseModel):
     # empty value). Set at launch or via ``sessions tag``; filtered by
     # ``sessions list --tag`` / ``sessions reap --tag``.
     tags: dict[str, str] = Field(default_factory=dict)
+    # Provenance for launches created from a session preset. Audit/display hints
+    # only — the resolved launch settings are snapshotted onto the record, so
+    # later preset edits/deletes do not affect an existing session.
+    preset_id: str | None = None
+    preset_name: str | None = None
 
 
 class EventRecord(BaseModel):
@@ -362,6 +367,92 @@ class AssistantAttachRequest(BaseModel):
     launch_target_id: str | None = None
 
 
+PresetName = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+
+
+class SessionPresetSpec(BaseModel):
+    # Reusable launch defaults. All fields are optional so partial presets can
+    # exist; a resolved launch must still satisfy the non-null request rules.
+    # ``backend``/``transport`` are plain strings (not registry-validated ids) so
+    # a preset stays listable/editable/deletable after a plugin is removed or
+    # renamed; the resolver validates them only when applying the preset.
+    #
+    # Deliberately excludes ``cwd`` and ``title``: those are per-launch specifics
+    # (which repo, what to call this run), not reusable launch defaults, so the
+    # launch surfaces always supply them explicitly. ``extra="ignore"`` (Pydantic
+    # default) means presets persisted with older cwd/title keys drop them on load.
+    backend: str | None = None
+    launch_target_id: str | None = None
+    launch_mode: LaunchMode | None = None
+    transport: str | None = None
+    args: list[str] = Field(default_factory=list)
+    config_overrides: list[str] = Field(default_factory=list)
+    launch_env: LaunchEnv = Field(default_factory=dict)
+    permission_mode: str | None = None
+    model: str | None = None
+    effort: str | None = None
+    tags: dict[str, str] = Field(default_factory=dict)
+
+
+class SessionPresetRecord(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    spec: SessionPresetSpec
+    is_default: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class SessionPresetSpecSummary(BaseModel):
+    # Redacted spec for read surfaces: ``launch_env`` values are omitted and only
+    # the keys are exposed, so preset secrets never ride in list / bootstrap
+    # payloads. Full values come from GET .../{id}?include_secret_values=true.
+    backend: str | None = None
+    launch_target_id: str | None = None
+    launch_mode: LaunchMode | None = None
+    transport: str | None = None
+    args: list[str] = Field(default_factory=list)
+    config_overrides: list[str] = Field(default_factory=list)
+    launch_env_keys: list[str] = Field(default_factory=list)
+    permission_mode: str | None = None
+    model: str | None = None
+    effort: str | None = None
+    tags: dict[str, str] = Field(default_factory=dict)
+
+
+class SessionPresetSummary(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    spec: SessionPresetSpecSummary
+    is_default: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class SessionPresetCreateRequest(BaseModel):
+    name: PresetName
+    description: str | None = None
+    spec: SessionPresetSpec = Field(default_factory=SessionPresetSpec)
+    is_default: bool = False
+
+
+class SessionPresetUpdateRequest(BaseModel):
+    # PATCH semantics: only fields present in the body change. A provided ``spec``
+    # is merged field-by-field using its ``model_fields_set``, so fields the
+    # client omits (e.g. ``tags``) are preserved on the stored preset.
+    name: PresetName | None = None
+    description: str | None = None
+    spec: SessionPresetSpec | None = None
+    is_default: bool | None = None
+
+
+class SessionPresetListResponse(BaseModel):
+    presets: list[SessionPresetSummary] = Field(default_factory=list)
+    default_preset_id: str | None = None
+
+
 class MeResponse(BaseModel):
     authenticated: bool = True
     default_backend: BackendId = "codex"
@@ -374,6 +465,10 @@ class MeResponse(BaseModel):
     # The personal-assistant singleton, when enabled. The frontend uses
     # this to locate and render the dedicated assistant page.
     assistant: AssistantSummary | None = None
+    # Redacted session presets + the default preset id, so the launch panel can
+    # populate its selector without a second round-trip. Env values are omitted.
+    session_presets: list[SessionPresetSummary] = Field(default_factory=list)
+    default_preset_id: str | None = None
 
 
 class EventsPageResponse(BaseModel):
@@ -411,6 +506,25 @@ class SessionCreateRequest(BaseModel):
     model: str | None = None
     effort: str | None = None
     tags: dict[str, str] = Field(default_factory=dict)
+    # Apply a session preset before validation: ``preset_id`` names a specific
+    # preset; ``use_default_preset`` applies the deployment default. Explicit
+    # request fields always win over preset values. Resolution happens at the
+    # request boundary (API / in-process CLI); the runtime stays preset-agnostic.
+    preset_id: str | None = None
+    use_default_preset: bool = False
+
+
+class SessionLaunchRequest(SessionCreateRequest):
+    # Boundary input for POST /api/sessions and the in-process CLI launch:
+    # ``backend`` may be omitted when a preset (or the default) supplies it.
+    # ``cwd`` is never a preset field, so it stays effectively required — an
+    # omitted cwd fails re-validation with a clean 400. Both are optional here
+    # only so the resolver can merge and re-validate rather than 422 up-front.
+    # Widening the parent's required fields to optional is an intentional Pydantic
+    # subclass override; mypy flags it as an LSP violation, which does not apply
+    # here (this type is only ever an input, never used where the parent is).
+    backend: BackendId | None = None  # type: ignore[assignment]
+    cwd: str | None = None  # type: ignore[assignment]
 
 
 class SessionTagsUpdateRequest(BaseModel):
@@ -531,6 +645,9 @@ class ScheduledSessionRecord(BaseModel):
     status: ScheduleStatus = ScheduleStatus.PENDING
     session_id: str | None = None
     failure_reason: str | None = None
+    # Preset provenance snapshotted at schedule-creation time (see SessionRecord).
+    preset_id: str | None = None
+    preset_name: str | None = None
 
 
 class ScheduleCreateRequest(BaseModel):
@@ -552,6 +669,17 @@ class ScheduleCreateRequest(BaseModel):
     effort: str | None = None
     delay_seconds: int | None = None
     scheduled_at: datetime | None = None
+    # See SessionCreateRequest — apply a preset before validation. Explicit
+    # request fields win; schedule timing/prompt fields are never taken from a
+    # preset.
+    preset_id: str | None = None
+    use_default_preset: bool = False
+
+
+class ScheduleLaunchRequest(ScheduleCreateRequest):
+    # Boundary input for POST /api/schedules — see SessionLaunchRequest.
+    backend: BackendId | None = None  # type: ignore[assignment]
+    cwd: str | None = None  # type: ignore[assignment]
 
 
 class SessionEnvelope(BaseModel):

@@ -2,6 +2,8 @@
 
 import {
   FormEvent,
+  useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -11,12 +13,17 @@ import {
   LaunchFormFields,
   useLaunchForm,
 } from "@/components/LaunchFormFields";
+import { PresetSaveActions, PresetSelect } from "@/components/PresetBar";
 import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
 import type { BackendCatalog } from "@/lib/backends";
 import { humaniseBackend } from "@/lib/backends";
 import {
   Backend,
   ScheduleCreateRequest,
+  SessionPreset,
+  SessionPresetSpec,
+  SessionPresetSummary,
+  SessionPresetWriteRequest,
   SessionTransport,
 } from "@/lib/types";
 
@@ -59,6 +66,7 @@ interface LaunchPanelProps {
     configOverrides: string[],
     launchEnv: Record<string, string>,
     permissionMode: string | null,
+    presetId: string | null,
   ) => Promise<void>;
   onAttach: (
     target: string,
@@ -83,6 +91,15 @@ interface LaunchPanelProps {
   // The cwd the backend rejected as nonexistent on the last New launch, or null.
   cwdError?: string | null;
   onClearCwdError?: () => void;
+  presets: SessionPresetSummary[];
+  defaultPresetId: string | null;
+  onFetchPresetSpec: (presetId: string) => Promise<SessionPreset>;
+  onSavePreset: (
+    payload: SessionPresetWriteRequest,
+    presetId: string | null,
+  ) => Promise<void>;
+  onSetDefaultPreset: (presetId: string) => Promise<void>;
+  onDeletePreset: (presetId: string) => Promise<void>;
 }
 
 export function LaunchPanel({
@@ -106,6 +123,12 @@ export function LaunchPanel({
   onAuthFailure,
   cwdError,
   onClearCwdError,
+  presets,
+  defaultPresetId,
+  onFetchPresetSpec,
+  onSavePreset,
+  onSetDefaultPreset,
+  onDeletePreset,
 }: LaunchPanelProps) {
   const [mode, setMode] = useState<PanelMode>("new");
   const form = useLaunchForm({
@@ -115,6 +138,44 @@ export function LaunchPanel({
     launchTargetId,
     catalog,
   });
+  const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
+  const presetHydratedRef = useRef(false);
+
+  const applyPresetById = useCallback(
+    async (id: string | null) => {
+      setSelectedPresetId(id);
+      if (!id) return;
+      const summary = presets.find((preset) => preset.id === id);
+      if (!summary) return;
+      try {
+        // A preset with env vars needs the full (unredacted) spec before hydrating.
+        if ((summary.spec.launch_env_keys?.length ?? 0) > 0) {
+          const full = await onFetchPresetSpec(id);
+          form.applyPreset(full.spec);
+        } else {
+          // No env values to fetch; the redacted summary spec carries every
+          // other field, and applyPreset ignores launch_env_keys.
+          form.applyPreset(summary.spec as unknown as SessionPresetSpec);
+        }
+      } catch {
+        // The full (env-carrying) spec couldn't load. Deselect rather than leave
+        // a half-hydrated selection: an Update against it would otherwise
+        // overwrite the preset's env with the form's empty env.
+        setSelectedPresetId(null);
+      }
+    },
+    [presets, onFetchPresetSpec, form],
+  );
+
+  // Hydrate the default preset into the shared form once on first load. Wait
+  // for the id to actually arrive (bootstrap resolves after mount) before
+  // consuming the once-guard, otherwise the first null run would disable it.
+  useEffect(() => {
+    if (presetHydratedRef.current) return;
+    if (!defaultPresetId) return;
+    presetHydratedRef.current = true;
+    void applyPresetById(defaultPresetId);
+  }, [defaultPresetId, applyPresetById]);
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [prompt, setPrompt] = useState("");
   const [scheduleTiming, setScheduleTiming] = useState<ScheduleTiming>("delay");
@@ -139,6 +200,7 @@ export function LaunchPanel({
         configOverrides,
         launchEnv,
         form.permissionMode || null,
+        selectedPresetId,
       );
       form.setTitle("");
     } finally {
@@ -177,6 +239,9 @@ export function LaunchPanel({
       args,
       config_overrides: configOverrides,
       launch_env: launchEnv,
+      // Record which preset seeded this schedule (provenance only; the fields
+      // above are the resolved values the server persists).
+      preset_id: selectedPresetId,
     };
     if (scheduleTiming === "delay") {
       const minutes = Number.parseFloat(delayMinutes);
@@ -227,6 +292,13 @@ export function LaunchPanel({
 
       {mode === "new" ? (
         <form className="launch-body" onSubmit={submitCreate}>
+          <PresetSelect
+            presets={presets}
+            selectedPresetId={selectedPresetId}
+            onSelectPreset={(id) => void applyPresetById(id)}
+            supportedBackends={supportedBackends}
+            deletePreset={onDeletePreset}
+          />
           <LaunchFormFields
             form={form}
             host={host}
@@ -241,6 +313,14 @@ export function LaunchPanel({
             cwdError={cwdError}
             onClearCwdError={onClearCwdError}
           />
+          <PresetSaveActions
+            form={form}
+            presets={presets}
+            selectedPresetId={selectedPresetId}
+            launchTargetId={launchTargetId}
+            savePreset={onSavePreset}
+            setDefaultPreset={onSetDefaultPreset}
+          />
           <div className="launch-actions">
             <span className="grow" />
             <button className="primary" disabled={formBusy} type="submit">
@@ -252,6 +332,13 @@ export function LaunchPanel({
 
       {mode === "schedule" ? (
         <form className="launch-body" onSubmit={submitSchedule}>
+          <PresetSelect
+            presets={presets}
+            selectedPresetId={selectedPresetId}
+            onSelectPreset={(id) => void applyPresetById(id)}
+            supportedBackends={supportedBackends}
+            deletePreset={onDeletePreset}
+          />
           <LaunchFormFields
             form={form}
             host={host}
@@ -311,6 +398,14 @@ export function LaunchPanel({
             </label>
           )}
           {scheduleError ? <p className="error">{scheduleError}</p> : null}
+          <PresetSaveActions
+            form={form}
+            presets={presets}
+            selectedPresetId={selectedPresetId}
+            launchTargetId={launchTargetId}
+            savePreset={onSavePreset}
+            setDefaultPreset={onSetDefaultPreset}
+          />
           <div className="launch-actions">
             <span className="grow" />
             <button className="primary" disabled={formBusy} type="submit">

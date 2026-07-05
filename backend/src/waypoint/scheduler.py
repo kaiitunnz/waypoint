@@ -81,7 +81,13 @@ class Scheduler:
     def list_schedules(self) -> list[ScheduledSessionRecord]:
         return self._runtime.storage.list_schedules()
 
-    def create_schedule(self, request: ScheduleCreateRequest) -> ScheduledSessionRecord:
+    def create_schedule(
+        self,
+        request: ScheduleCreateRequest,
+        *,
+        preset_id: str | None = None,
+        preset_name: str | None = None,
+    ) -> ScheduledSessionRecord:
         scheduled_at = self._resolve_scheduled_at(request)
         permission_mode = self._resolve_permission_mode(request)
         # Validate launch target and transport up-front so the user gets
@@ -119,6 +125,8 @@ class Scheduler:
             scheduled_at=scheduled_at,
             created_at=now,
             status=ScheduleStatus.PENDING,
+            preset_id=preset_id,
+            preset_name=preset_name,
         )
         self._runtime.storage.create_schedule(record)
         self._wakeup.set()
@@ -338,7 +346,9 @@ class Scheduler:
                     permission_mode=schedule.permission_mode,
                     model=schedule.model,
                     effort=schedule.effort,
-                )
+                ),
+                preset_id=schedule.preset_id,
+                preset_name=schedule.preset_name,
             )
             self._runtime.storage.update_schedule(
                 schedule.id,

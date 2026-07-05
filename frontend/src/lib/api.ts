@@ -25,6 +25,9 @@ import {
   SessionCommandInvocation,
   SessionAttachment,
   SessionEnvelope,
+  SessionPreset,
+  SessionPresetSummary,
+  SessionPresetWriteRequest,
   SessionRecord,
   UsageDashboardResponse,
 } from "@/lib/types";
@@ -620,6 +623,101 @@ export async function clearScheduleHistory(host: string, token: string): Promise
   await ensureOk(response, "failed to clear schedule history");
   const payload = (await response.json()) as { removed?: number };
   return payload.removed ?? 0;
+}
+
+// ── Session presets ──────────────────────────────────────────────────────
+
+// Fetch one preset. Pass includeSecretValues to get launch_env values back
+// (required before hydrating a form from a preset that has env vars); the
+// list/bootstrap payloads are always redacted.
+export async function fetchSessionPreset(
+  host: string,
+  token: string,
+  presetId: string,
+  includeSecretValues = false,
+): Promise<SessionPreset> {
+  const query = includeSecretValues ? "?include_secret_values=true" : "";
+  const response = await fetch(
+    `${host}/api/session-presets/${presetId}${query}`,
+    { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
+  );
+  await ensureOk(response, "failed to fetch preset");
+  const body = await response.json();
+  return body.preset as SessionPreset;
+}
+
+export async function createSessionPreset(
+  host: string,
+  token: string,
+  payload: SessionPresetWriteRequest,
+): Promise<SessionPresetSummary> {
+  const response = await fetch(`${host}/api/session-presets`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  await ensureOk(response, "failed to create preset");
+  const body = await response.json();
+  return body.preset as SessionPresetSummary;
+}
+
+export async function updateSessionPreset(
+  host: string,
+  token: string,
+  presetId: string,
+  payload: SessionPresetWriteRequest,
+): Promise<SessionPresetSummary> {
+  const response = await fetch(`${host}/api/session-presets/${presetId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  await ensureOk(response, "failed to update preset");
+  const body = await response.json();
+  return body.preset as SessionPresetSummary;
+}
+
+export async function deleteSessionPreset(
+  host: string,
+  token: string,
+  presetId: string,
+): Promise<void> {
+  const response = await fetch(`${host}/api/session-presets/${presetId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, "failed to delete preset");
+}
+
+export async function setDefaultSessionPreset(
+  host: string,
+  token: string,
+  presetId: string,
+): Promise<SessionPresetSummary> {
+  const response = await fetch(
+    `${host}/api/session-presets/${presetId}/default`,
+    { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+  );
+  await ensureOk(response, "failed to set default preset");
+  const body = await response.json();
+  return body.preset as SessionPresetSummary;
+}
+
+export async function clearDefaultSessionPreset(
+  host: string,
+  token: string,
+): Promise<void> {
+  const response = await fetch(`${host}/api/session-presets/default`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, "failed to clear default preset");
 }
 
 export async function fetchMessageSchedules(

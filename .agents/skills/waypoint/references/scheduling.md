@@ -40,10 +40,11 @@ cancelled | failed`; once launched it carries the new `session_id`, and a
 
 `schedule create` also honors `--preset <id-or-name>` (and `--no-preset` to skip
 the default) exactly like `sessions start` — the preset supplies the launch
-defaults, and `--backend` / `--cwd` become optional when it does; see the Presets
-subsection in `references/sessions-launch.md`. A preset carries only launch
-defaults, **not** the schedule's initial `--prompt` or its `--scheduled-at` /
-`--delay-seconds` timing — set those on `schedule create` itself.
+defaults, and `--backend` becomes optional when it does (`--cwd` is never a
+preset field, so keep passing it); see the Presets subsection in
+`references/sessions-launch.md`. A preset carries only launch defaults, **not**
+the schedule's initial `--prompt` or its `--scheduled-at` / `--delay-seconds`
+timing — set those on `schedule create` itself.
 
 ## Scheduled messages
 

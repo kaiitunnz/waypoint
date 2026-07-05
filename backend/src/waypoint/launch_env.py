@@ -16,7 +16,10 @@ def validate_launch_env(value: Any) -> dict[str, str]:
             raise ValueError(f"invalid launch env variable name: {raw_key!r}")
         if raw_value is None:
             raise ValueError(f"launch env variable {raw_key!r} cannot be null")
-        env[raw_key] = str(raw_value)
+        coerced = str(raw_value)
+        if "\x00" in coerced:
+            raise ValueError(f"launch env variable {raw_key!r} cannot contain NUL")
+        env[raw_key] = coerced
     return env
 
 

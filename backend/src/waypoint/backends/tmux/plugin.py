@@ -55,10 +55,7 @@ def _default_launch_env(
     backend: str,
     launch_target: SshLaunchTargetConfig | None,
 ) -> dict[str, str]:
-    resolver = getattr(runtime, "_default_launch_env", None)
-    if callable(resolver):
-        return resolver(backend, launch_target)
-    return {}
+    return runtime._default_launch_env(backend, launch_target)
 
 
 class TmuxPluginConfig(PluginConfig):

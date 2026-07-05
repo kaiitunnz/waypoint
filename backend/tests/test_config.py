@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from waypoint import settings as settings_module
 from waypoint.backends.claude_code.plugin import ClaudeCodePluginConfig
+from waypoint.launch_env import validate_launch_env
 from waypoint.settings import DEFAULT_CONFIG_PATH, load_settings
 
 
@@ -178,6 +179,11 @@ def test_load_settings_parses_launch_env_defaults(
         "OPENAI_API_KEY": "remote-secret",
         "FEATURE_FLAG": "enabled",
     }
+
+
+def test_launch_env_rejects_nul_in_values() -> None:
+    with pytest.raises(ValueError, match="cannot contain NUL"):
+        validate_launch_env({"TOKEN": "abc\x00def"})
 
 
 def test_assistant_defaults_to_none_when_block_absent(

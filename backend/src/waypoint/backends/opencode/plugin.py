@@ -118,10 +118,7 @@ def _ruleset_for_mode(mode: str | None) -> list[dict[str, str]] | None:
 def _agent_process_env(
     runtime: "SessionRuntime", backend: str, launch_env: dict[str, str]
 ) -> dict[str, str]:
-    merger = getattr(runtime, "_agent_process_env", None)
-    if callable(merger):
-        return merger(backend, launch_env)
-    return dict(launch_env)
+    return runtime._agent_process_env(backend, launch_env)
 
 
 class OpenCodePluginConfig(PluginConfig):
@@ -1561,19 +1558,21 @@ class OpenCodePlugin(DefaultLaunchContract):
                     detail="session already imported",
                 )
 
-        request_launch_env = getattr(request, "launch_env", {})
+        request_launch_env = request.launch_env
         process_env = _agent_process_env(runtime, self.id, request_launch_env)
-        # Fetch the session first so the adapter we cache and the
-        # SessionRecord we persist agree on cwd. The session already exists
-        # on the OpenCode server with whatever directory it was created in;
-        # keying the adapter by `requested_cwd` here would orphan it from
-        # later `_require_adapter(..., session.cwd)` lookups.
-        fetch_adapter = await self._get_or_create_adapter(
-            runtime,
-            launch_target_id,
-            requested_cwd,
-            launch_env=process_env,
-        )
+        # Fetch through any live adapter for this target first. The OpenCode
+        # session already exists on that server with whatever directory it was
+        # created in; after fetching metadata we cache the driving adapter
+        # under the actual session cwd so later _require_adapter(...,
+        # session.cwd) lookups find it.
+        fetch_adapter = self._find_adapter_for_launch_target(launch_target_id)
+        if fetch_adapter is None:
+            fetch_adapter = await self._get_or_create_adapter(
+                runtime,
+                launch_target_id,
+                requested_cwd,
+                launch_env=process_env,
+            )
         sess = await fetch_adapter.get_session(opencode_session_id)
         if not sess:
             raise HTTPException(

@@ -200,6 +200,9 @@ class _FakeRuntime:
     def _find_launch_target(self, _lt_id: str | None) -> None:
         return None
 
+    def _default_launch_env(self, backend: str, launch_target: Any) -> dict[str, str]:
+        return {}
+
     def _command_for_backend(
         self,
         backend: str,

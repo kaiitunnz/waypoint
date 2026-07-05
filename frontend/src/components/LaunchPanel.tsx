@@ -165,13 +165,14 @@ export function LaunchPanel({
     [presets, onFetchPresetSpec, form],
   );
 
-  // Hydrate the default preset into the shared form once on first load.
+  // Hydrate the default preset into the shared form once on first load. Wait
+  // for the id to actually arrive (bootstrap resolves after mount) before
+  // consuming the once-guard, otherwise the first null run would disable it.
   useEffect(() => {
     if (presetHydratedRef.current) return;
+    if (!defaultPresetId) return;
     presetHydratedRef.current = true;
-    if (defaultPresetId) {
-      void applyPresetById(defaultPresetId);
-    }
+    void applyPresetById(defaultPresetId);
   }, [defaultPresetId, applyPresetById]);
   const [tmuxTarget, setTmuxTarget] = useState("");
   const [prompt, setPrompt] = useState("");

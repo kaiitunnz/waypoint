@@ -8731,14 +8731,6 @@ html[data-theme="light"] .preset-select {
   gap: 8px 12px;
 }
 
-.preset-save-label {
-  font-family: var(--font-mono);
-  font-size: 0.62rem;
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
-  color: var(--muted);
-}
-
 .preset-save-actions {
   display: flex;
   gap: 8px;
@@ -8752,19 +8744,21 @@ html[data-theme="light"] .preset-select {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 
+/* Brief confirmation after an in-place Update. */
+.preset-save-actions .secondary.preset-flash {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  transition: color 140ms ease, border-color 140ms ease;
+}
+
 .preset-save-error {
   flex-basis: 100%;
   margin: 0;
   font-size: 0.8rem;
 }
 
-/* Spec summary: the backend rides an owner-hue badge, everything else is a
-   muted mono chip separated by a small dot — the badge/status register. */
-.preset-bar-detail {
-  min-height: 1.1rem;
-  animation: preset-detail-in 200ms ease;
-}
-
+/* Spec summary (save-sheet captures readout): the backend rides an owner-hue
+   badge, everything else is a muted mono chip separated by a small dot. */
 .preset-summary {
   display: inline-flex;
   align-items: center;
@@ -8790,26 +8784,9 @@ html[data-theme="light"] .preset-select {
   opacity: 0.7;
 }
 
-.preset-bar-hint {
-  margin: 0;
-  font-size: 0.78rem;
-  color: var(--muted);
-}
-
 .preset-bar-error {
   margin: 0;
   font-size: 0.8rem;
-}
-
-@keyframes preset-detail-in {
-  from {
-    opacity: 0;
-    transform: translateY(-2px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 /* The save sheet is floating chrome: the app's modal recipe (flat opaque card
@@ -8863,7 +8840,6 @@ html[data-theme="light"] .preset-modal-overlay {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .preset-bar-detail,
   .preset-modal-overlay,
   .preset-modal {
     animation: none;
@@ -8964,9 +8940,18 @@ html[data-theme="light"] .preset-modal-overlay {
 /* Secondary one-line help beneath a ``.field`` control (e.g. the selected
    Interface's description, the Reasoning-effort hint). Rides ``--muted`` so it
    adapts across themes without an override. */
-.field-hint {
+/* A descriptive hint under a field control is prose, not a label, so it must
+   undo the uppercase mono `.field span` applies to every span in a field. The
+   `.field span.field-hint` specificity (0,2,1) beats `.field span` (0,2,0) so
+   the hint reads as sentence-case body text and wraps cleanly. */
+.field-hint,
+.field span.field-hint {
   font-size: 0.78rem;
-  line-height: 1.4;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: normal;
+  font-family: inherit;
+  color: var(--muted);
 }
 
 .terminal pre {

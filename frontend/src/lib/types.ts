@@ -311,13 +311,13 @@ export interface MeResponse {
 
 // Full preset spec (with launch_env values); returned only from the
 // include_secret_values single-preset fetch and used to hydrate the form.
+// cwd and title are intentionally absent — they are per-launch specifics, not
+// reusable launch defaults, so the launch surfaces always supply them directly.
 export interface SessionPresetSpec {
   backend?: Backend | null;
-  cwd?: string | null;
   launch_target_id?: string | null;
   launch_mode?: LaunchMode | null;
   transport?: SessionTransport | null;
-  title?: string | null;
   args?: string[];
   config_overrides?: string[];
   launch_env?: Record<string, string>;
@@ -331,11 +331,9 @@ export interface SessionPresetSpec {
 // only the keys are exposed.
 export interface SessionPresetSpecSummary {
   backend?: Backend | null;
-  cwd?: string | null;
   launch_target_id?: string | null;
   launch_mode?: LaunchMode | null;
   transport?: SessionTransport | null;
-  title?: string | null;
   args?: string[];
   config_overrides?: string[];
   launch_env_keys?: string[];

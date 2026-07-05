@@ -166,9 +166,8 @@ export function useLaunchForm({
   const applyPreset = useCallback(
     (spec: SessionPresetSpec) => {
       const nextBackend = (spec.backend as Backend | null | undefined) ?? backend;
-      // Fields untouched by the backend-reset can be set immediately.
-      if (spec.cwd != null) setCwd(spec.cwd);
-      if (spec.title != null) setTitle(spec.title);
+      // Presets carry launch defaults only — cwd and title are per-launch and
+      // deliberately left as the user set them.
       if (spec.permission_mode) setPermissionMode(spec.permission_mode);
       setCustomArgsText((spec.args ?? []).join("\n"));
       setConfigOverridesText((spec.config_overrides ?? []).join("\n"));

@@ -14,6 +14,7 @@ import type {
 
 // A compact key=value summary of what a preset spec pins, in the badge/mono
 // vocabulary: the backend rides an owner-hue badge, the rest are muted chips.
+// Used only in the save sheet's captures readout.
 function SpecSummary({ spec }: { spec: SessionPresetSummary["spec"] }) {
   const chips: string[] = [];
   if (spec.model) chips.push(spec.model);
@@ -47,7 +48,8 @@ function selectedOf(
   return presets.find((p) => p.id === id) ?? null;
 }
 
-// Build a spec snapshot of the current launch form — the payload a save captures.
+// A spec snapshot of the current launch form — the payload a save/update
+// captures. Excludes cwd and title: those are per-launch, not preset defaults.
 function formSpec(
   form: LaunchForm,
   launchTargetId: string | null,
@@ -55,10 +57,8 @@ function formSpec(
   const { args, configOverrides, launchEnv } = form.collectArgs();
   return {
     backend: form.backend,
-    cwd: form.cwd || null,
     launch_target_id: launchTargetId,
     transport: form.transport || null,
-    title: form.title.trim() || null,
     model: form.model.trim() || null,
     effort: form.effortSupported ? form.effort.trim() || null : null,
     permission_mode: form.permissionMode || null,
@@ -76,9 +76,9 @@ interface PresetSelectProps {
   deletePreset: (presetId: string) => Promise<void>;
 }
 
-// Top-of-panel selector: pick a saved launch profile and hydrate the form. The
-// default carries the dog-ear fold (default is a pin), the spec rides an
-// owner-hue badge + mono summary, and Delete manages the current selection.
+// Top-of-panel selector: pick a saved launch profile and hydrate the form.
+// Minimal by design — just the picker, a Delete affordance for the current
+// selection, and the dog-ear fold marking the default (default is a pin).
 export function PresetSelect({
   presets,
   selectedPresetId,
@@ -149,20 +149,10 @@ export function PresetSelect({
           </button>
         ) : null}
       </div>
-      {selected ? (
-        <div className="preset-bar-detail">
-          <SpecSummary spec={selected.spec} />
-        </div>
-      ) : (
-        <p className="preset-bar-hint">
-          Reuse a launch profile, or configure the form and save it as one below.
-        </p>
-      )}
       {backendUnsupported ? (
         <p className="error preset-bar-error" role="alert">
           This preset&apos;s backend ({humaniseBackend(presetBackend as Backend)})
-          isn&apos;t available on the current launch target — change the backend or
-          target before launching.
+          isn&apos;t available here — change the backend or launch target.
         </p>
       ) : null}
       {error ? (
@@ -187,9 +177,9 @@ interface PresetSaveActionsProps {
 }
 
 // Bottom-of-panel capture actions: these snapshot the fully-configured form, so
-// they live next to Launch rather than with the selector. Save opens the sheet;
-// Set-default marks the selected preset (or, with none selected, saves the
-// current form as a new default).
+// they sit next to Launch. Update overwrites the selected preset in place; Save
+// as new opens the create sheet; Set default marks the selection (or, with none
+// selected, saves the current form as a new default).
 export function PresetSaveActions({
   form,
   presets,
@@ -202,9 +192,31 @@ export function PresetSaveActions({
   const [error, setError] = useState<string | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
   const [seedDefault, setSeedDefault] = useState(false);
+  const [flashed, setFlashed] = useState(false);
 
   const selected = selectedOf(presets, selectedPresetId);
   const isDefault = selected?.is_default ?? false;
+
+  useEffect(() => {
+    if (!flashed) return;
+    const t = window.setTimeout(() => setFlashed(false), 1600);
+    return () => window.clearTimeout(t);
+  }, [flashed]);
+
+  async function handleUpdate(): Promise<void> {
+    if (!selected) return;
+    setError(null);
+    setBusy(true);
+    try {
+      // PATCH the spec only; name/description (and tags) are preserved server-side.
+      await savePreset({ spec: formSpec(form, launchTargetId) }, selected.id);
+      setFlashed(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed to update preset");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleSetDefault(): Promise<void> {
     setError(null);
@@ -226,19 +238,42 @@ export function PresetSaveActions({
 
   return (
     <div className="preset-save">
-      <span className="preset-save-label">Save this configuration</span>
       <div className="preset-save-actions">
-        <button
-          type="button"
-          className="secondary"
-          disabled={busy}
-          onClick={() => {
-            setSeedDefault(false);
-            setSaveOpen(true);
-          }}
-        >
-          {selected ? "Save preset…" : "Save as preset…"}
-        </button>
+        {selected ? (
+          <>
+            <button
+              type="button"
+              className={`secondary${flashed ? " preset-flash" : ""}`}
+              disabled={busy}
+              onClick={() => void handleUpdate()}
+            >
+              {flashed ? "Updated ✓" : "Update"}
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => {
+                setSeedDefault(false);
+                setSaveOpen(true);
+              }}
+            >
+              Save as new…
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={() => {
+              setSeedDefault(false);
+              setSaveOpen(true);
+            }}
+          >
+            Save as preset…
+          </button>
+        )}
         <button
           type="button"
           className={`secondary${isDefault ? " preset-default-on" : ""}`}
@@ -246,7 +281,7 @@ export function PresetSaveActions({
           title={isDefault ? "This preset is the default" : undefined}
           onClick={() => void handleSetDefault()}
         >
-          {isDefault ? "✓ Default" : "Set as default"}
+          {isDefault ? "✓ Default" : "Set default"}
         </button>
       </div>
       {error ? (
@@ -256,15 +291,14 @@ export function PresetSaveActions({
       ) : null}
       {saveOpen ? (
         <PresetSaveModal
-          selected={selected}
           seedDefault={seedDefault}
           spec={formSpec(form, launchTargetId)}
           onClose={() => setSaveOpen(false)}
-          onSave={async (payload, presetId) => {
+          onSave={async (payload) => {
             setBusy(true);
             setError(null);
             try {
-              await savePreset(payload, presetId);
+              await savePreset(payload, null);
               setSaveOpen(false);
             } catch (err) {
               setError(err instanceof Error ? err.message : "failed to save preset");
@@ -279,29 +313,24 @@ export function PresetSaveActions({
 }
 
 interface PresetSaveModalProps {
-  selected: SessionPresetSummary | null;
   seedDefault: boolean;
   spec: SessionPresetSpec;
   onClose: () => void;
-  onSave: (
-    payload: SessionPresetWriteRequest,
-    presetId: string | null,
-  ) => Promise<void>;
+  onSave: (payload: SessionPresetWriteRequest) => Promise<void>;
 }
 
-// Portaled save sheet, mirroring ScheduleMessageModal's conventions: rendered to
-// document.body, Escape to close, focus trap, focus restored on unmount, and a
-// body-scroll lock. Leads with a captures readout so the user sees exactly what
-// the preset will pin.
+// Portaled create sheet, mirroring ScheduleMessageModal's conventions: rendered
+// to document.body, Escape to close, focus trap, focus restored on unmount, and
+// a body-scroll lock. Leads with a captures readout so the user sees exactly
+// what the new preset will pin.
 function PresetSaveModal({
-  selected,
   seedDefault,
   spec,
   onClose,
   onSave,
 }: PresetSaveModalProps) {
-  const [name, setName] = useState(selected?.name ?? "");
-  const [description, setDescription] = useState(selected?.description ?? "");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [asDefault, setAsDefault] = useState(seedDefault);
   const modalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -318,7 +347,6 @@ function PresetSaveModal({
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
     inputRef.current?.focus();
-    inputRef.current?.select();
     return () => previouslyFocused?.focus();
   }, []);
 
@@ -359,24 +387,17 @@ function PresetSaveModal({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  function submit(presetId: string | null) {
-    if (presetId === null && !name.trim()) return;
-    onSave(
-      {
-        name: name.trim() || undefined,
-        description: description.trim() || null,
-        spec,
-        ...(presetId === null ? { is_default: asDefault } : {}),
-      },
-      presetId,
-    ).catch(() => {
-      /* surfaced by the actions bar */
-    });
-  }
-
   function onSubmitForm(event: FormEvent) {
     event.preventDefault();
-    submit(null);
+    if (!name.trim()) return;
+    onSave({
+      name: name.trim(),
+      description: description.trim() || null,
+      spec,
+      is_default: asDefault,
+    }).catch(() => {
+      /* surfaced by the actions bar */
+    });
   }
 
   return createPortal(
@@ -392,14 +413,14 @@ function PresetSaveModal({
         className="preset-modal"
         role="dialog"
         aria-modal="true"
-        aria-label={selected ? "Save preset" : "New preset"}
+        aria-label="New preset"
       >
         <div className="preset-modal-header">
           <span className="preset-modal-title">
             <span className="preset-modal-glyph" aria-hidden="true">
               ƒ
             </span>
-            {selected ? "Save preset" : "New preset"}
+            New preset
           </span>
           <button
             type="button"
@@ -432,39 +453,21 @@ function PresetSaveModal({
             <span className="preset-modal-captures-label">Captures</span>
             <SpecSummary spec={summarySpec} />
           </div>
-          {!selected ? (
-            <label className="preset-modal-check">
-              <input
-                type="checkbox"
-                checked={asDefault}
-                onChange={(event) => setAsDefault(event.target.checked)}
-              />
-              <span>Make this the default preset</span>
-            </label>
-          ) : null}
+          <label className="preset-modal-check">
+            <input
+              type="checkbox"
+              checked={asDefault}
+              onChange={(event) => setAsDefault(event.target.checked)}
+            />
+            <span>Make this the default preset</span>
+          </label>
           <div className="preset-modal-actions">
             <button type="button" className="secondary" onClick={onClose}>
               Cancel
             </button>
-            {selected ? (
-              <>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={!name.trim()}
-                  onClick={() => submit(selected.id)}
-                >
-                  Update &quot;{selected.name}&quot;
-                </button>
-                <button type="submit" className="primary" disabled={!name.trim()}>
-                  Save as new
-                </button>
-              </>
-            ) : (
-              <button type="submit" className="primary" disabled={!name.trim()}>
-                Create preset
-              </button>
-            )}
+            <button type="submit" className="primary" disabled={!name.trim()}>
+              Create preset
+            </button>
           </div>
         </form>
       </div>

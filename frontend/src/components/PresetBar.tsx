@@ -12,29 +12,9 @@ import type {
   SessionPresetWriteRequest,
 } from "@/lib/types";
 
-interface PresetBarProps {
-  form: LaunchForm;
-  presets: SessionPresetSummary[];
-  selectedPresetId: string | null;
-  // Controlled by the panel so selection + hydration survive mode switches.
-  onSelectPreset: (id: string | null) => void;
-  supportedBackends: Backend[];
-  launchTargetId: string | null;
-  savePreset: (
-    payload: SessionPresetWriteRequest,
-    presetId: string | null,
-  ) => Promise<void>;
-  setDefaultPreset: (presetId: string) => Promise<void>;
-  deletePreset: (presetId: string) => Promise<void>;
-}
-
 // A compact key=value summary of what a preset spec pins, in the badge/mono
 // vocabulary: the backend rides an owner-hue badge, the rest are muted chips.
-function SpecSummary({
-  spec,
-}: {
-  spec: SessionPresetSummary["spec"];
-}) {
+function SpecSummary({ spec }: { spec: SessionPresetSummary["spec"] }) {
   const chips: string[] = [];
   if (spec.model) chips.push(spec.model);
   if (spec.effort) chips.push(spec.effort);
@@ -60,66 +40,60 @@ function SpecSummary({
   );
 }
 
-// Flat, in-flow preset control above the shared launch form. Reuses the app's
-// instrument vocabulary: an owner-hue backend badge + mono spec summary, the
-// session-card action-chips (with the pin control standing in for "set
-// default"), and a dog-ear fold marking the default — the same marker pinned
-// cards carry. Only the save dialog floats (portaled glass sheet).
-export function PresetBar({
-  form,
+function selectedOf(
+  presets: SessionPresetSummary[],
+  id: string | null,
+): SessionPresetSummary | null {
+  return presets.find((p) => p.id === id) ?? null;
+}
+
+// Build a spec snapshot of the current launch form — the payload a save captures.
+function formSpec(
+  form: LaunchForm,
+  launchTargetId: string | null,
+): SessionPresetSpec {
+  const { args, configOverrides, launchEnv } = form.collectArgs();
+  return {
+    backend: form.backend,
+    cwd: form.cwd || null,
+    launch_target_id: launchTargetId,
+    transport: form.transport || null,
+    title: form.title.trim() || null,
+    model: form.model.trim() || null,
+    effort: form.effortSupported ? form.effort.trim() || null : null,
+    permission_mode: form.permissionMode || null,
+    args,
+    config_overrides: configOverrides,
+    launch_env: launchEnv,
+  };
+}
+
+interface PresetSelectProps {
+  presets: SessionPresetSummary[];
+  selectedPresetId: string | null;
+  onSelectPreset: (id: string | null) => void;
+  supportedBackends: Backend[];
+  deletePreset: (presetId: string) => Promise<void>;
+}
+
+// Top-of-panel selector: pick a saved launch profile and hydrate the form. The
+// default carries the dog-ear fold (default is a pin), the spec rides an
+// owner-hue badge + mono summary, and Delete manages the current selection.
+export function PresetSelect({
   presets,
   selectedPresetId,
   onSelectPreset,
   supportedBackends,
-  launchTargetId,
-  savePreset,
-  setDefaultPreset,
   deletePreset,
-}: PresetBarProps) {
+}: PresetSelectProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saveOpen, setSaveOpen] = useState(false);
 
-  const selected = presets.find((p) => p.id === selectedPresetId) ?? null;
+  const selected = selectedOf(presets, selectedPresetId);
   const isDefault = selected?.is_default ?? false;
   const presetBackend = selected?.spec.backend ?? null;
   const backendUnsupported =
     !!presetBackend && !supportedBackends.includes(presetBackend as Backend);
-
-  function currentSpec(): SessionPresetSpec {
-    const { args, configOverrides, launchEnv } = form.collectArgs();
-    return {
-      backend: form.backend,
-      cwd: form.cwd || null,
-      launch_target_id: launchTargetId,
-      transport: form.transport || null,
-      title: form.title.trim() || null,
-      model: form.model.trim() || null,
-      effort: form.effortSupported ? form.effort.trim() || null : null,
-      permission_mode: form.permissionMode || null,
-      args,
-      config_overrides: configOverrides,
-      launch_env: launchEnv,
-    };
-  }
-
-  async function handleSetDefault(): Promise<void> {
-    setError(null);
-    if (!selectedPresetId) {
-      // Nothing selected — offer to save the current form as a default preset.
-      setSaveOpen(true);
-      return;
-    }
-    if (isDefault) return;
-    setBusy(true);
-    try {
-      await setDefaultPreset(selectedPresetId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "failed to set default");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function handleDelete(): Promise<void> {
     if (!selected) return;
@@ -164,33 +138,16 @@ export function PresetBar({
             ))}
           </select>
         </div>
-        <div className="preset-bar-actions">
-          <button
-            type="button"
-            className="link-button action-chip"
-            disabled={busy}
-            onClick={() => setSaveOpen(true)}
-          >
-            {selected ? "Save…" : "Save preset…"}
-          </button>
-          <button
-            type="button"
-            className={`link-button action-chip pin-link${isDefault ? " active" : ""}`}
-            disabled={busy || isDefault}
-            title={isDefault ? "This is the default preset" : "Make default"}
-            onClick={() => void handleSetDefault()}
-          >
-            {isDefault ? "✓ Default" : "Set default"}
-          </button>
+        {selected ? (
           <button
             type="button"
             className="link-button action-chip danger-link"
-            disabled={busy || !selected}
+            disabled={busy}
             onClick={() => void handleDelete()}
           >
             Delete
           </button>
-        </div>
+        ) : null}
       </div>
       {selected ? (
         <div className="preset-bar-detail">
@@ -198,7 +155,7 @@ export function PresetBar({
         </div>
       ) : (
         <p className="preset-bar-hint">
-          Reuse a launch profile, or save the current form as one.
+          Reuse a launch profile, or configure the form and save it as one below.
         </p>
       )}
       {backendUnsupported ? (
@@ -213,9 +170,95 @@ export function PresetBar({
           {error}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+interface PresetSaveActionsProps {
+  form: LaunchForm;
+  presets: SessionPresetSummary[];
+  selectedPresetId: string | null;
+  launchTargetId: string | null;
+  savePreset: (
+    payload: SessionPresetWriteRequest,
+    presetId: string | null,
+  ) => Promise<void>;
+  setDefaultPreset: (presetId: string) => Promise<void>;
+}
+
+// Bottom-of-panel capture actions: these snapshot the fully-configured form, so
+// they live next to Launch rather than with the selector. Save opens the sheet;
+// Set-default marks the selected preset (or, with none selected, saves the
+// current form as a new default).
+export function PresetSaveActions({
+  form,
+  presets,
+  selectedPresetId,
+  launchTargetId,
+  savePreset,
+  setDefaultPreset,
+}: PresetSaveActionsProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [seedDefault, setSeedDefault] = useState(false);
+
+  const selected = selectedOf(presets, selectedPresetId);
+  const isDefault = selected?.is_default ?? false;
+
+  async function handleSetDefault(): Promise<void> {
+    setError(null);
+    if (!selectedPresetId) {
+      setSeedDefault(true);
+      setSaveOpen(true);
+      return;
+    }
+    if (isDefault) return;
+    setBusy(true);
+    try {
+      await setDefaultPreset(selectedPresetId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed to set default");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="preset-save">
+      <span className="preset-save-label">Save this configuration</span>
+      <div className="preset-save-actions">
+        <button
+          type="button"
+          className="secondary"
+          disabled={busy}
+          onClick={() => {
+            setSeedDefault(false);
+            setSaveOpen(true);
+          }}
+        >
+          {selected ? "Save preset…" : "Save as preset…"}
+        </button>
+        <button
+          type="button"
+          className={`secondary${isDefault ? " preset-default-on" : ""}`}
+          disabled={busy || isDefault}
+          title={isDefault ? "This preset is the default" : undefined}
+          onClick={() => void handleSetDefault()}
+        >
+          {isDefault ? "✓ Default" : "Set as default"}
+        </button>
+      </div>
+      {error ? (
+        <p className="error preset-save-error" role="alert">
+          {error}
+        </p>
+      ) : null}
       {saveOpen ? (
         <PresetSaveModal
           selected={selected}
+          seedDefault={seedDefault}
+          spec={formSpec(form, launchTargetId)}
           onClose={() => setSaveOpen(false)}
           onSave={async (payload, presetId) => {
             setBusy(true);
@@ -229,7 +272,6 @@ export function PresetBar({
               setBusy(false);
             }
           }}
-          currentSpec={currentSpec}
         />
       ) : null}
     </div>
@@ -238,31 +280,32 @@ export function PresetBar({
 
 interface PresetSaveModalProps {
   selected: SessionPresetSummary | null;
+  seedDefault: boolean;
+  spec: SessionPresetSpec;
   onClose: () => void;
   onSave: (
     payload: SessionPresetWriteRequest,
     presetId: string | null,
   ) => Promise<void>;
-  currentSpec: () => SessionPresetSpec;
 }
 
 // Portaled save sheet, mirroring ScheduleMessageModal's conventions: rendered to
 // document.body, Escape to close, focus trap, focus restored on unmount, and a
-// body-scroll lock. Leads with a captures-preview so the user sees exactly what
+// body-scroll lock. Leads with a captures readout so the user sees exactly what
 // the preset will pin.
 function PresetSaveModal({
   selected,
+  seedDefault,
+  spec,
   onClose,
   onSave,
-  currentSpec,
 }: PresetSaveModalProps) {
   const [name, setName] = useState(selected?.name ?? "");
   const [description, setDescription] = useState(selected?.description ?? "");
-  const [asDefault, setAsDefault] = useState(false);
+  const [asDefault, setAsDefault] = useState(seedDefault);
   const modalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const spec = currentSpec();
   const summarySpec: SessionPresetSummary["spec"] = {
     backend: spec.backend,
     model: spec.model,
@@ -327,7 +370,7 @@ function PresetSaveModal({
       },
       presetId,
     ).catch(() => {
-      /* surfaced by the bar */
+      /* surfaced by the actions bar */
     });
   }
 

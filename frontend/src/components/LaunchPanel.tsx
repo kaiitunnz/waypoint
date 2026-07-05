@@ -13,7 +13,7 @@ import {
   LaunchFormFields,
   useLaunchForm,
 } from "@/components/LaunchFormFields";
-import { PresetBar } from "@/components/PresetBar";
+import { PresetSaveActions, PresetSelect } from "@/components/PresetBar";
 import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
 import type { BackendCatalog } from "@/lib/backends";
 import { humaniseBackend } from "@/lib/backends";
@@ -289,15 +289,11 @@ export function LaunchPanel({
 
       {mode === "new" ? (
         <form className="launch-body" onSubmit={submitCreate}>
-          <PresetBar
-            form={form}
+          <PresetSelect
             presets={presets}
             selectedPresetId={selectedPresetId}
             onSelectPreset={(id) => void applyPresetById(id)}
             supportedBackends={supportedBackends}
-            launchTargetId={launchTargetId}
-            savePreset={onSavePreset}
-            setDefaultPreset={onSetDefaultPreset}
             deletePreset={onDeletePreset}
           />
           <LaunchFormFields
@@ -314,6 +310,14 @@ export function LaunchPanel({
             cwdError={cwdError}
             onClearCwdError={onClearCwdError}
           />
+          <PresetSaveActions
+            form={form}
+            presets={presets}
+            selectedPresetId={selectedPresetId}
+            launchTargetId={launchTargetId}
+            savePreset={onSavePreset}
+            setDefaultPreset={onSetDefaultPreset}
+          />
           <div className="launch-actions">
             <span className="grow" />
             <button className="primary" disabled={formBusy} type="submit">
@@ -325,15 +329,11 @@ export function LaunchPanel({
 
       {mode === "schedule" ? (
         <form className="launch-body" onSubmit={submitSchedule}>
-          <PresetBar
-            form={form}
+          <PresetSelect
             presets={presets}
             selectedPresetId={selectedPresetId}
             onSelectPreset={(id) => void applyPresetById(id)}
             supportedBackends={supportedBackends}
-            launchTargetId={launchTargetId}
-            savePreset={onSavePreset}
-            setDefaultPreset={onSetDefaultPreset}
             deletePreset={onDeletePreset}
           />
           <LaunchFormFields
@@ -395,6 +395,14 @@ export function LaunchPanel({
             </label>
           )}
           {scheduleError ? <p className="error">{scheduleError}</p> : null}
+          <PresetSaveActions
+            form={form}
+            presets={presets}
+            selectedPresetId={selectedPresetId}
+            launchTargetId={launchTargetId}
+            savePreset={onSavePreset}
+            setDefaultPreset={onSetDefaultPreset}
+          />
           <div className="launch-actions">
             <span className="grow" />
             <button className="primary" disabled={formBusy} type="submit">

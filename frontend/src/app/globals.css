@@ -8722,17 +8722,40 @@ html[data-theme="light"] .preset-select {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
-.preset-bar-actions {
+/* Bottom-of-panel capture actions: they snapshot the whole configured form, so
+   they sit just above Launch with a mono caption stating what they act on. */
+.preset-save {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.preset-save-label {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+
+.preset-save-actions {
+  display: flex;
+  gap: 8px;
   flex-wrap: wrap;
   margin-left: auto;
 }
 
-/* The default action-chip lights gold when the selection IS the default —
-   the pinned state, matching the dog-ear fold. */
-.preset-bar-actions .action-chip.pin-link.active {
+/* The default button reads as a settled state, not an action, once it's on. */
+.preset-save-actions .secondary.preset-default-on {
   color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.preset-save-error {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.8rem;
 }
 
 /* Spec summary: the backend rides an owner-hue badge, everything else is a
@@ -8890,22 +8913,22 @@ html[data-theme="light"] .preset-modal-overlay {
   gap: 14px;
 }
 
-/* The captures preview: what this preset will pin, in the same summary
-   vocabulary as the bar, so save and select read identically. */
+/* The captures readout: what this preset will pin. Borderless with a faint warm
+   inset so it reads as a derived receipt, not another input box competing with
+   the fields above it. A leading hairline separates it from the description. */
 .preset-modal-captures {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 8px 10px;
-  padding: 10px 12px;
-  background: var(--bg-card-soft);
-  border: 1px solid var(--line);
+  gap: 6px 10px;
+  padding: 11px 12px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-card-soft));
   border-radius: var(--radius-sm);
 }
 
 .preset-modal-captures-label {
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   text-transform: uppercase;
   letter-spacing: 0.16em;
   color: var(--muted);
@@ -8914,13 +8937,20 @@ html[data-theme="light"] .preset-modal-overlay {
 .preset-modal-check {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   font-size: 0.85rem;
   color: var(--muted);
+  cursor: pointer;
 }
 
+/* Theme the native checkbox to the accent so it stops reading as a stray
+   OS-blue against the warm dark palette. */
 .preset-modal-check input {
-  width: auto;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .preset-modal-actions {

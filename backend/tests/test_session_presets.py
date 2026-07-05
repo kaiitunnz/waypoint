@@ -361,7 +361,10 @@ async def test_api_default_lifecycle_and_me(tmp_path: Path) -> None:
             await client.post(
                 "/api/session-presets",
                 headers=_auth(token),
-                json={"name": "A", "spec": {"backend": "codex"}},
+                json={
+                    "name": "A",
+                    "spec": {"backend": "codex", "launch_env": {"K": "v"}},
+                },
             )
         ).json()["preset"]["id"]
         await client.post(f"/api/session-presets/{a}/default", headers=_auth(token))
@@ -369,6 +372,10 @@ async def test_api_default_lifecycle_and_me(tmp_path: Path) -> None:
         body = me.json()
         assert body["default_preset_id"] == a
         assert len(body["session_presets"]) == 1
+        # /api/me must redact env values, exposing only keys (same as list).
+        me_spec = body["session_presets"][0]["spec"]
+        assert "launch_env" not in me_spec
+        assert me_spec["launch_env_keys"] == ["K"]
         # Clearing the default.
         await client.delete("/api/session-presets/default", headers=_auth(token))
         me2 = await client.get("/api/me", headers=_auth(token))

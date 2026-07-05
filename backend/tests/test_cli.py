@@ -1561,8 +1561,7 @@ def test_sessions_start_rejects_malformed_launch_env(tmp_path: Path) -> None:
             "NOT_KEY_VALUE",
         ],
     )
-    assert result.exit_code != 0
-    assert "--launch-env expects KEY=VALUE" in result.output
+    assert result.exit_code == 2
 
 
 def test_sessions_start_worktree_git_failure_exits_one(

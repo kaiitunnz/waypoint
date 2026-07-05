@@ -212,12 +212,15 @@ export function useLaunchForm({
     return Array.from(union);
   }, [modelInfo, model]);
 
-  // Drop the picked level if the new model doesn't support it.
+  // Drop the picked level if the loaded model doesn't support it. Gated on
+  // modelInfo: while models are still loading (modelInfo === null) the option
+  // list is empty and we can't yet tell a valid level from an invalid one —
+  // clamping then would wipe a preset-applied effort before its model arrives.
   useEffect(() => {
-    if (effort && !effortOptions.includes(effort)) {
+    if (modelInfo && effort && !effortOptions.includes(effort)) {
       setEffort("");
     }
-  }, [effort, effortOptions]);
+  }, [effort, effortOptions, modelInfo]);
 
   const handleModelsLoaded = useCallback((response: BackendModelListResponse) => {
     setModelInfo(response);

@@ -66,6 +66,7 @@ interface LaunchPanelProps {
     configOverrides: string[],
     launchEnv: Record<string, string>,
     permissionMode: string | null,
+    presetId: string | null,
   ) => Promise<void>;
   onAttach: (
     target: string,
@@ -196,6 +197,7 @@ export function LaunchPanel({
         configOverrides,
         launchEnv,
         form.permissionMode || null,
+        selectedPresetId,
       );
       form.setTitle("");
     } finally {

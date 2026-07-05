@@ -569,6 +569,7 @@ export default function HomePage() {
     configOverrides: string[] = [],
     launchEnv: Record<string, string> = {},
     permissionMode: string | null = null,
+    presetId: string | null = null,
   ) {
     setCwdError(null);
     try {
@@ -585,6 +586,8 @@ export default function HomePage() {
         model,
         effort,
         permission_mode: permissionMode,
+        // Provenance only — the fields above are already resolved.
+        preset_id: presetId,
       });
       setSessions((current) => [
         session,
@@ -628,6 +631,7 @@ export default function HomePage() {
               configOverrides,
               launchEnv,
               permissionMode,
+              presetId,
             ),
         });
         return;

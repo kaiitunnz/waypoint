@@ -117,6 +117,19 @@ def test_manager_create_and_default(tmp_path: Path) -> None:
     assert exc.value.status_code == 409
 
 
+def test_preset_spec_excludes_cwd_and_title() -> None:
+    # cwd/title are per-launch specifics, not preset fields; a spec built from a
+    # payload carrying them (e.g. an older persisted preset) silently drops them.
+    spec = SessionPresetSpec.model_validate(
+        {"backend": "codex", "cwd": "/x", "title": "t", "model": "m"}
+    )
+    assert not hasattr(spec, "cwd")
+    assert not hasattr(spec, "title")
+    assert spec.model == "m"
+    assert "cwd" not in spec.model_dump()
+    assert "title" not in spec.model_dump()
+
+
 def test_manager_rejects_reserved_default_name(tmp_path: Path) -> None:
     manager = PresetManager(_storage(tmp_path))
     with pytest.raises(HTTPException) as exc:

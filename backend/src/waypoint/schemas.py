@@ -376,12 +376,15 @@ class SessionPresetSpec(BaseModel):
     # ``backend``/``transport`` are plain strings (not registry-validated ids) so
     # a preset stays listable/editable/deletable after a plugin is removed or
     # renamed; the resolver validates them only when applying the preset.
+    #
+    # Deliberately excludes ``cwd`` and ``title``: those are per-launch specifics
+    # (which repo, what to call this run), not reusable launch defaults, so the
+    # launch surfaces always supply them explicitly. ``extra="ignore"`` (Pydantic
+    # default) means presets persisted with older cwd/title keys drop them on load.
     backend: str | None = None
-    cwd: str | None = None
     launch_target_id: str | None = None
     launch_mode: LaunchMode | None = None
     transport: str | None = None
-    title: str | None = None
     args: list[str] = Field(default_factory=list)
     config_overrides: list[str] = Field(default_factory=list)
     launch_env: LaunchEnv = Field(default_factory=dict)
@@ -406,11 +409,9 @@ class SessionPresetSpecSummary(BaseModel):
     # the keys are exposed, so preset secrets never ride in list / bootstrap
     # payloads. Full values come from GET .../{id}?include_secret_values=true.
     backend: str | None = None
-    cwd: str | None = None
     launch_target_id: str | None = None
     launch_mode: LaunchMode | None = None
     transport: str | None = None
-    title: str | None = None
     args: list[str] = Field(default_factory=list)
     config_overrides: list[str] = Field(default_factory=list)
     launch_env_keys: list[str] = Field(default_factory=list)

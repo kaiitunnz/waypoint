@@ -2885,11 +2885,9 @@ def schedule_clear_history(ctx: typer.Context) -> None:
 def _preset_spec_payload(
     *,
     backend: str | None,
-    cwd: str | None,
     launch_target_id: str | None,
     launch_mode: str | None,
     transport: str | None,
-    title: str | None,
     model: str | None,
     effort: str | None,
     permission_mode: str | None,
@@ -2899,15 +2897,16 @@ def _preset_spec_payload(
     tag: list[str] | None,
 ) -> dict[str, Any]:
     """Build a preset spec body from launch options, including only the fields the
-    caller supplied so update PATCH-merges instead of clobbering omitted fields."""
+    caller supplied so update PATCH-merges instead of clobbering omitted fields.
+
+    Presets deliberately omit cwd/title (per-launch specifics), so those are not
+    accepted here — they stay on ``sessions start`` / ``schedule create``."""
     spec: dict[str, Any] = {}
     for key, value in (
         ("backend", backend),
-        ("cwd", cwd),
         ("launch_target_id", launch_target_id),
         ("launch_mode", launch_mode),
         ("transport", transport),
-        ("title", title),
         ("model", model),
         ("effort", effort),
         ("permission_mode", permission_mode),
@@ -2978,11 +2977,9 @@ def presets_create(
         bool, typer.Option("--default", help="Mark this preset as the default.")
     ] = False,
     backend: _PresetBackendOption = None,
-    cwd: Annotated[str | None, typer.Option()] = None,
     launch_target_id: Annotated[str | None, typer.Option()] = None,
     launch_mode: Annotated[str | None, typer.Option()] = None,
     transport: Annotated[str | None, typer.Option()] = None,
-    title: Annotated[str | None, typer.Option()] = None,
     model: Annotated[str | None, typer.Option()] = None,
     effort: Annotated[str | None, typer.Option()] = None,
     permission_mode: Annotated[str | None, typer.Option()] = None,
@@ -2991,14 +2988,12 @@ def presets_create(
     tag: _PresetTagOption = None,
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
-    """Create a session preset from launch options."""
+    """Create a session preset from launch options (cwd/title are per-launch)."""
     spec = _preset_spec_payload(
         backend=backend,
-        cwd=cwd,
         launch_target_id=launch_target_id,
         launch_mode=launch_mode,
         transport=transport,
-        title=title,
         model=model,
         effort=effort,
         permission_mode=permission_mode,
@@ -3023,11 +3018,9 @@ def presets_update(
     name: Annotated[str | None, typer.Option()] = None,
     description: Annotated[str | None, typer.Option()] = None,
     backend: _PresetBackendOption = None,
-    cwd: Annotated[str | None, typer.Option()] = None,
     launch_target_id: Annotated[str | None, typer.Option()] = None,
     launch_mode: Annotated[str | None, typer.Option()] = None,
     transport: Annotated[str | None, typer.Option()] = None,
-    title: Annotated[str | None, typer.Option()] = None,
     model: Annotated[str | None, typer.Option()] = None,
     effort: Annotated[str | None, typer.Option()] = None,
     permission_mode: Annotated[str | None, typer.Option()] = None,
@@ -3039,11 +3032,9 @@ def presets_update(
     """Update a preset. Only the fields you pass change; the rest are preserved."""
     spec = _preset_spec_payload(
         backend=backend,
-        cwd=cwd,
         launch_target_id=launch_target_id,
         launch_mode=launch_mode,
         transport=transport,
-        title=title,
         model=model,
         effort=effort,
         permission_mode=permission_mode,

@@ -117,6 +117,13 @@ def test_manager_create_and_default(tmp_path: Path) -> None:
     assert exc.value.status_code == 409
 
 
+def test_manager_rejects_reserved_default_name(tmp_path: Path) -> None:
+    manager = PresetManager(_storage(tmp_path))
+    with pytest.raises(HTTPException) as exc:
+        manager.create(SessionPresetCreateRequest(name="Default"))
+    assert exc.value.status_code == 400
+
+
 def test_manager_update_preserves_omitted_spec_fields(tmp_path: Path) -> None:
     manager = PresetManager(_storage(tmp_path))
     manager.create(

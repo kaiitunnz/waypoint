@@ -99,6 +99,16 @@ class PresetManager:
     def _new_id() -> str:
         return f"preset-{secrets.token_hex(4)}"
 
+    @staticmethod
+    def _reject_reserved_name(name: str | None) -> None:
+        # "default" is a route segment on /api/session-presets/{id}; a preset by
+        # that name would be unreachable by name for GET/PATCH/DELETE.
+        if name is not None and name.strip().lower() == "default":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="'default' is a reserved preset name",
+            )
+
     def resolve_ref(self, ref: str) -> SessionPresetRecord | None:
         """Look a preset up by id, falling back to its (unique) name."""
         return self._storage.get_session_preset(
@@ -121,6 +131,7 @@ class PresetManager:
         return self._storage.get_default_session_preset()
 
     def create(self, request: SessionPresetCreateRequest) -> SessionPresetRecord:
+        self._reject_reserved_name(request.name)
         now = datetime.now(UTC)
         record = SessionPresetRecord(
             id=self._new_id(),
@@ -150,6 +161,7 @@ class PresetManager:
         fields: dict[str, object] = {}
         given = request.model_fields_set
         if "name" in given and request.name is not None:
+            self._reject_reserved_name(request.name)
             fields["name"] = request.name
         if "description" in given:
             fields["description"] = request.description

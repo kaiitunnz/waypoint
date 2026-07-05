@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -26,6 +27,7 @@ import { permissionModesFor } from "@/lib/backends";
 import {
   Backend,
   BackendModelListResponse,
+  SessionPresetSpec,
   SessionTransport,
 } from "@/lib/types";
 
@@ -69,6 +71,7 @@ export interface LaunchForm {
   effortSupported: boolean;
   effortOptions: string[];
   changeBackend: (backend: Backend) => void;
+  applyPreset: (spec: SessionPresetSpec) => void;
   handleModelsLoaded: (response: BackendModelListResponse) => void;
   collectArgs: () => {
     args: string[];
@@ -145,6 +148,47 @@ export function useLaunchForm({
     setModelInfo(null);
     setLaunchEnvText(formatLaunchEnv(defaultLaunchEnvByBackend[backend]));
   }, [backend, launchTargetId, defaultLaunchEnvByBackend]);
+
+  // Applying a preset that changes the backend triggers the reset effect above,
+  // which clears model/effort/env (and useTransportForAgent resets transport).
+  // So backend-scoped fields are stashed here and re-applied once, after those
+  // resets settle, by the effect below. Same-backend applies run inline.
+  const pendingPresetRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    const pending = pendingPresetRef.current;
+    if (pending) {
+      pendingPresetRef.current = null;
+      pending();
+    }
+  }, [backend]);
+
+  const applyPreset = useCallback(
+    (spec: SessionPresetSpec) => {
+      const nextBackend = (spec.backend as Backend | null | undefined) ?? backend;
+      // Fields untouched by the backend-reset can be set immediately.
+      if (spec.cwd != null) setCwd(spec.cwd);
+      if (spec.title != null) setTitle(spec.title);
+      if (spec.permission_mode) setPermissionMode(spec.permission_mode);
+      setCustomArgsText((spec.args ?? []).join("\n"));
+      setConfigOverridesText((spec.config_overrides ?? []).join("\n"));
+      // Backend-scoped fields: model/effort/env/transport are wiped by the
+      // backend-change resets, so apply them after those run.
+      const applyScoped = () => {
+        setModel(spec.model ?? "");
+        setEffort(spec.effort ?? "");
+        setLaunchEnvText(formatLaunchEnv(spec.launch_env ?? {}));
+        if (spec.transport) setTransport(spec.transport);
+      };
+      if (nextBackend !== backend) {
+        pendingPresetRef.current = applyScoped;
+        setBackend(nextBackend);
+      } else {
+        applyScoped();
+      }
+    },
+    [backend, setTransport],
+  );
 
   const effortOptions = useMemo(() => {
     if (!modelInfo) return [];
@@ -223,6 +267,7 @@ export function useLaunchForm({
     effortSupported,
     effortOptions,
     changeBackend,
+    applyPreset,
     handleModelsLoaded,
     collectArgs,
   };

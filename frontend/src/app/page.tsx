@@ -26,8 +26,10 @@ import {
   connectSessionsSocket,
   createSchedule as createScheduleRequest,
   createSession,
+  createSessionPreset,
   deleteMessageSchedule as deleteMessageScheduleRequest,
   deleteSession as deleteSessionRequest,
+  deleteSessionPreset,
   deleteThread,
   disconnectLaunchTarget,
   fetchBackendThreads,
@@ -36,13 +38,16 @@ import {
   fetchMe,
   fetchMessageSchedules,
   fetchSchedules,
+  fetchSessionPreset,
   fetchSessions,
   importBackendThread,
   isAuthError,
   login,
   postAction,
+  setDefaultSessionPreset,
   setSessionPinned,
   setSessionTitle,
+  updateSessionPreset,
   SSH_MASTER_REQUIRED_DETAIL,
   CWD_NOT_FOUND_DETAIL,
 } from "@/lib/api";
@@ -69,6 +74,8 @@ import {
   ScheduleCreateRequest,
   ScheduledSession,
   SessionEnvelope,
+  SessionPresetSummary,
+  SessionPresetWriteRequest,
   SessionRecord,
   SessionTransport,
 } from "@/lib/types";
@@ -136,6 +143,8 @@ export default function HomePage() {
   const [defaultBackend, setDefaultBackend] = useState<Backend>("codex");
   const [defaultCwd, setDefaultCwd] = useState("~/");
   const [launchTargets, setLaunchTargets] = useState<LaunchTargetSummary[]>([]);
+  const [sessionPresets, setSessionPresets] = useState<SessionPresetSummary[]>([]);
+  const [defaultPresetId, setDefaultPresetId] = useState<string | null>(null);
   const [activeLaunchTargetId, setActiveLaunchTargetId] = useState("");
   // Password-auth SSH connect prompt. ``retry`` re-runs the launch that hit a
   // 409 once the ControlMaster is up; ``null`` when the prompt was opened
@@ -282,6 +291,8 @@ export default function HomePage() {
         if (me.backends && me.backends.length > 0) {
           setBackendDescriptors(me.backends);
         }
+        setSessionPresets(me.session_presets ?? []);
+        setDefaultPresetId(me.default_preset_id ?? null);
         setSchedules(scheduleItems);
         setMessageSchedules(messageItems);
         const storedTargetId = readLaunchTarget(host);
@@ -627,6 +638,40 @@ export default function HomePage() {
           : "failed to create session",
       );
     }
+  }
+
+  async function refreshPresets() {
+    try {
+      const me = await fetchMe(host, token);
+      setSessionPresets(me.session_presets ?? []);
+      setDefaultPresetId(me.default_preset_id ?? null);
+    } catch (refreshError) {
+      if (isAuthError(refreshError)) {
+        resetAuthState("Session expired. Log in again.");
+      }
+    }
+  }
+
+  async function handleSavePreset(
+    payload: SessionPresetWriteRequest,
+    presetId: string | null,
+  ) {
+    if (presetId) {
+      await updateSessionPreset(host, token, presetId, payload);
+    } else {
+      await createSessionPreset(host, token, payload);
+    }
+    await refreshPresets();
+  }
+
+  async function handleSetDefaultPreset(presetId: string) {
+    await setDefaultSessionPreset(host, token, presetId);
+    await refreshPresets();
+  }
+
+  async function handleDeletePreset(presetId: string) {
+    await deleteSessionPreset(host, token, presetId);
+    await refreshPresets();
   }
 
   async function handleAttach(
@@ -1023,6 +1068,14 @@ export default function HomePage() {
           onAuthFailure={handleAuthFailure}
           cwdError={cwdError}
           onClearCwdError={() => setCwdError(null)}
+          presets={sessionPresets}
+          defaultPresetId={defaultPresetId}
+          onFetchPresetSpec={(presetId) =>
+            fetchSessionPreset(host, token, presetId, true)
+          }
+          onSavePreset={handleSavePreset}
+          onSetDefaultPreset={handleSetDefaultPreset}
+          onDeletePreset={handleDeletePreset}
         />
       ) : null}
       {token ? (

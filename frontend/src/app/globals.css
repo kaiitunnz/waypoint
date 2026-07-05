@@ -8642,6 +8642,95 @@ html[data-theme="light"] .term-compose-send {
   font-size: 0.82rem;
 }
 
+/* ─── Session presets ─── */
+/* In-flow bar above the shared launch form: flat token surface, no glass — it
+   belongs to the launch card's in-flow content, not the floating chrome. */
+.preset-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg-card-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.preset-bar-select {
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+
+.preset-bar-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.preset-bar-error {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+/* The save dialog is floating chrome, so it takes the app's modal recipe
+   (flat opaque card over a blurred scrim), matching ScheduleMessageModal. */
+.preset-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 6, 10, 0.55);
+  backdrop-filter: blur(3px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+html[data-theme="light"] .preset-modal-overlay {
+  background: rgba(30, 26, 18, 0.28);
+}
+
+.preset-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 20px;
+  width: 100%;
+  max-width: 460px;
+  box-shadow: var(--shadow);
+}
+
+.preset-modal form {
+  display: grid;
+  gap: 14px;
+}
+
+.preset-modal h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+
+.preset-modal-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.preset-modal-check input {
+  width: auto;
+}
+
+.preset-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 /* ─── Form field hints ─── */
 /* Secondary one-line help beneath a ``.field`` control (e.g. the selected
    Interface's description, the Reasoning-effort hint). Rides ``--muted`` so it

@@ -31,6 +31,7 @@ from waypoint.builtin_completions import waypoint_builtin_completions
 from waypoint.git_meta import resolve_git_meta
 from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.perf import debug_timer
+from waypoint.presets import PresetManager
 from waypoint.scheduler import Scheduler
 from waypoint.schemas import (
     AssistantSummary,
@@ -278,6 +279,7 @@ class SessionRuntime:
         }
         for plugin in self.registry.all():
             plugin.setup(self)
+        self.presets = PresetManager(storage)
         self.scheduler = Scheduler(self)
 
     def transport_for(self, session: SessionRecord) -> TransportAdapter:
@@ -433,7 +435,13 @@ class SessionRuntime:
             env["WAYPOINT_SESSION_ID"] = session_id
         return env
 
-    async def create_session(self, request: SessionCreateRequest) -> SessionRecord:
+    async def create_session(
+        self,
+        request: SessionCreateRequest,
+        *,
+        preset_id: str | None = None,
+        preset_name: str | None = None,
+    ) -> SessionRecord:
         if request.source_mode != SessionSource.MANAGED:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -599,6 +607,12 @@ class SessionRuntime:
         # backend picks them up without a per-plugin launch-site edit.
         if request.tags:
             session = self.storage.update_session(session.id, tags=request.tags)
+        # Preset provenance is opaque display metadata — stamped the same generic
+        # way as tags so the runtime never inspects the preset spec.
+        if preset_id is not None or preset_name is not None:
+            session = self.storage.update_session(
+                session.id, preset_id=preset_id, preset_name=preset_name
+            )
         self._warm_command_completions(session)
         self._start_context_usage_source(session)
         return session

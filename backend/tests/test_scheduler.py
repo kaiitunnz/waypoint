@@ -155,7 +155,7 @@ async def test_fire_due_schedules_creates_session_and_sends_prompt(
     runtime.storage.create_session(created_session)
     inputs: list[tuple[str, str]] = []
 
-    async def fake_create_session(request) -> SessionRecord:
+    async def fake_create_session(request, **_kwargs) -> SessionRecord:
         return created_session
 
     async def fake_handle_input(session_id: str, request) -> SessionRecord:
@@ -184,7 +184,7 @@ async def test_fire_due_schedules_records_failure(tmp_path, monkeypatch) -> None
         schedule.id, scheduled_at=datetime.now(UTC) - timedelta(seconds=1)
     )
 
-    async def fake_create_session(_request) -> SessionRecord:
+    async def fake_create_session(_request, **_kwargs) -> SessionRecord:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(runtime, "create_session", fake_create_session)
@@ -263,7 +263,7 @@ async def test_fire_passes_permission_mode_to_create_session(
     runtime.storage.create_session(created_session)
     captured: list[str | None] = []
 
-    async def fake_create_session(request) -> SessionRecord:
+    async def fake_create_session(request, **_kwargs) -> SessionRecord:
         captured.append(request.permission_mode)
         return created_session
 
@@ -292,7 +292,7 @@ async def test_fire_passes_launch_env_to_create_session(tmp_path, monkeypatch) -
     runtime.storage.create_session(created_session)
     captured: list[dict[str, str]] = []
 
-    async def fake_create_session(request) -> SessionRecord:
+    async def fake_create_session(request, **_kwargs) -> SessionRecord:
         captured.append(request.launch_env)
         return created_session
 
@@ -321,7 +321,7 @@ async def test_fire_passes_launch_mode_to_create_session(tmp_path, monkeypatch) 
     runtime.storage.create_session(created_session)
     captured: list[LaunchMode] = []
 
-    async def fake_create_session(request) -> SessionRecord:
+    async def fake_create_session(request, **_kwargs) -> SessionRecord:
         captured.append(request.launch_mode)
         return created_session
 
@@ -399,7 +399,7 @@ async def test_fire_passes_transport_to_create_session(tmp_path, monkeypatch) ->
     runtime.storage.create_session(created_session)
     captured: list[str | None] = []
 
-    async def fake_create_session(request) -> SessionRecord:
+    async def fake_create_session(request, **_kwargs) -> SessionRecord:
         captured.append(request.transport)
         return created_session
 

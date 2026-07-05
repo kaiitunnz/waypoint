@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { LaunchForm } from "@/components/LaunchFormFields";
+import { humaniseBackend } from "@/lib/backends";
 import type {
   Backend,
   SessionPresetSpec,
@@ -27,10 +28,43 @@ interface PresetBarProps {
   deletePreset: (presetId: string) => Promise<void>;
 }
 
-// Flat, in-flow preset control that sits above the shared launch form: a
-// selector that hydrates the form from a preset, plus save / set-default /
-// delete actions. Only the save dialog floats (glass modal); the bar itself is
-// flat token chrome to match the launch card.
+// A compact key=value summary of what a preset spec pins, in the badge/mono
+// vocabulary: the backend rides an owner-hue badge, the rest are muted chips.
+function SpecSummary({
+  spec,
+}: {
+  spec: SessionPresetSummary["spec"];
+}) {
+  const chips: string[] = [];
+  if (spec.model) chips.push(spec.model);
+  if (spec.effort) chips.push(spec.effort);
+  if (spec.permission_mode) chips.push(spec.permission_mode);
+  const envCount = spec.launch_env_keys?.length ?? 0;
+  if (envCount) chips.push(`${envCount} env`);
+  const argsCount = spec.args?.length ?? 0;
+  if (argsCount) chips.push(`${argsCount} arg${argsCount > 1 ? "s" : ""}`);
+  return (
+    <span className="preset-summary">
+      {spec.backend ? (
+        <span className={`badge ${spec.backend}`}>
+          {humaniseBackend(spec.backend as Backend)}
+        </span>
+      ) : null}
+      {chips.map((chip, i) => (
+        <span key={`${i}-${chip}`} className="preset-summary-chip">
+          {i > 0 || spec.backend ? <span className="preset-summary-dot" /> : null}
+          {chip}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+// Flat, in-flow preset control above the shared launch form. Reuses the app's
+// instrument vocabulary: an owner-hue backend badge + mono spec summary, the
+// session-card action-chips (with the pin control standing in for "set
+// default"), and a dog-ear fold marking the default — the same marker pinned
+// cards carry. Only the save dialog floats (portaled glass sheet).
 export function PresetBar({
   form,
   presets,
@@ -47,6 +81,7 @@ export function PresetBar({
   const [saveOpen, setSaveOpen] = useState(false);
 
   const selected = presets.find((p) => p.id === selectedPresetId) ?? null;
+  const isDefault = selected?.is_default ?? false;
   const presetBackend = selected?.spec.backend ?? null;
   const backendUnsupported =
     !!presetBackend && !supportedBackends.includes(presetBackend as Backend);
@@ -75,6 +110,7 @@ export function PresetBar({
       setSaveOpen(true);
       return;
     }
+    if (isDefault) return;
     setBusy(true);
     try {
       await setDefaultPreset(selectedPresetId);
@@ -108,56 +144,75 @@ export function PresetBar({
   }
 
   return (
-    <div className="preset-bar">
-      <label className="preset-bar-select field">
-        <span>Preset</span>
-        <select
-          value={selectedPresetId ?? ""}
-          disabled={busy}
-          onChange={(event) => onSelectPreset(event.target.value || null)}
-        >
-          <option value="">No preset</option>
-          {presets.map((preset) => (
-            <option key={preset.id} value={preset.id}>
-              {preset.name}
-              {preset.is_default ? " · Default" : ""}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="preset-bar-actions">
-        <button
-          type="button"
-          className="secondary"
-          disabled={busy}
-          onClick={() => setSaveOpen(true)}
-        >
-          Save…
-        </button>
-        <button
-          type="button"
-          className="secondary"
-          disabled={busy}
-          onClick={() => void handleSetDefault()}
-        >
-          {selected?.is_default ? "Default ✓" : "Set default"}
-        </button>
-        <button
-          type="button"
-          className="danger"
-          disabled={busy || !selected}
-          onClick={() => void handleDelete()}
-        >
-          Delete
-        </button>
+    <div className={`preset-bar${isDefault ? " is-default" : ""}`}>
+      <div className="preset-bar-row">
+        <span className="preset-bar-label">Preset</span>
+        <div className="preset-bar-picker">
+          <select
+            className="preset-select"
+            value={selectedPresetId ?? ""}
+            disabled={busy}
+            aria-label="Session preset"
+            onChange={(event) => onSelectPreset(event.target.value || null)}
+          >
+            <option value="">No preset</option>
+            {presets.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.name}
+                {preset.is_default ? "  ·  default" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="preset-bar-actions">
+          <button
+            type="button"
+            className="link-button action-chip"
+            disabled={busy}
+            onClick={() => setSaveOpen(true)}
+          >
+            {selected ? "Save…" : "Save preset…"}
+          </button>
+          <button
+            type="button"
+            className={`link-button action-chip pin-link${isDefault ? " active" : ""}`}
+            disabled={busy || isDefault}
+            title={isDefault ? "This is the default preset" : "Make default"}
+            onClick={() => void handleSetDefault()}
+          >
+            {isDefault ? "✓ Default" : "Set default"}
+          </button>
+          <button
+            type="button"
+            className="link-button action-chip danger-link"
+            disabled={busy || !selected}
+            onClick={() => void handleDelete()}
+          >
+            Delete
+          </button>
+        </div>
       </div>
+      {selected ? (
+        <div className="preset-bar-detail">
+          <SpecSummary spec={selected.spec} />
+        </div>
+      ) : (
+        <p className="preset-bar-hint">
+          Reuse a launch profile, or save the current form as one.
+        </p>
+      )}
       {backendUnsupported ? (
-        <p className="error preset-bar-error">
-          This preset&apos;s backend ({presetBackend}) isn&apos;t available on the
-          current launch target. Change the backend or target before launching.
+        <p className="error preset-bar-error" role="alert">
+          This preset&apos;s backend ({humaniseBackend(presetBackend as Backend)})
+          isn&apos;t available on the current launch target — change the backend or
+          target before launching.
         </p>
       ) : null}
-      {error ? <p className="error preset-bar-error">{error}</p> : null}
+      {error ? (
+        <p className="error preset-bar-error" role="alert">
+          {error}
+        </p>
+      ) : null}
       {saveOpen ? (
         <PresetSaveModal
           selected={selected}
@@ -191,6 +246,10 @@ interface PresetSaveModalProps {
   currentSpec: () => SessionPresetSpec;
 }
 
+// Portaled save sheet, mirroring ScheduleMessageModal's conventions: rendered to
+// document.body, Escape to close, focus trap, focus restored on unmount, and a
+// body-scroll lock. Leads with a captures-preview so the user sees exactly what
+// the preset will pin.
 function PresetSaveModal({
   selected,
   onClose,
@@ -200,58 +259,115 @@ function PresetSaveModal({
   const [name, setName] = useState(selected?.name ?? "");
   const [description, setDescription] = useState(selected?.description ?? "");
   const [asDefault, setAsDefault] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
+  const spec = currentSpec();
+  const summarySpec: SessionPresetSummary["spec"] = {
+    backend: spec.backend,
+    model: spec.model,
+    effort: spec.effort,
+    permission_mode: spec.permission_mode,
+    launch_env_keys: Object.keys(spec.launch_env ?? {}),
+    args: spec.args,
+  };
+
   useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
     inputRef.current?.focus();
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+    inputRef.current?.select();
+    return () => previouslyFocused?.focus();
+  }, []);
+
+  useEffect(() => {
+    const original = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = original;
+    };
+  }, []);
+
+  useEffect(() => {
+    function onKey(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const root = modalRef.current;
+      if (!root) return;
+      const focusable = root.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !root.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !root.contains(active))) {
+        event.preventDefault();
+        first.focus();
+      }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  function submitNew(event: FormEvent) {
-    event.preventDefault();
-    if (!name.trim()) return;
-    void onSave(
-      {
-        name: name.trim(),
-        description: description.trim() || null,
-        spec: currentSpec(),
-        is_default: asDefault,
-      },
-      null,
-    );
-  }
-
-  function submitUpdate() {
-    if (!selected) return;
-    void onSave(
+  function submit(presetId: string | null) {
+    if (presetId === null && !name.trim()) return;
+    onSave(
       {
         name: name.trim() || undefined,
         description: description.trim() || null,
-        spec: currentSpec(),
+        spec,
+        ...(presetId === null ? { is_default: asDefault } : {}),
       },
-      selected.id,
-    );
+      presetId,
+    ).catch(() => {
+      /* surfaced by the bar */
+    });
+  }
+
+  function onSubmitForm(event: FormEvent) {
+    event.preventDefault();
+    submit(null);
   }
 
   return createPortal(
     <div
       className="preset-modal-overlay"
+      role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <div
+        ref={modalRef}
         className="preset-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="Save preset"
+        aria-label={selected ? "Save preset" : "New preset"}
       >
-        <form onSubmit={submitNew}>
-          <h3>{selected ? "Save preset" : "New preset"}</h3>
+        <div className="preset-modal-header">
+          <span className="preset-modal-title">
+            <span className="preset-modal-glyph" aria-hidden="true">
+              ƒ
+            </span>
+            {selected ? "Save preset" : "New preset"}
+          </span>
+          <button
+            type="button"
+            className="preset-modal-close"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <form onSubmit={onSubmitForm}>
           <label className="field">
             <span>Name</span>
             <input
@@ -269,14 +385,20 @@ function PresetSaveModal({
               placeholder="Optional"
             />
           </label>
-          <label className="preset-modal-check">
-            <input
-              type="checkbox"
-              checked={asDefault}
-              onChange={(event) => setAsDefault(event.target.checked)}
-            />
-            <span>Make this the default preset</span>
-          </label>
+          <div className="preset-modal-captures">
+            <span className="preset-modal-captures-label">Captures</span>
+            <SpecSummary spec={summarySpec} />
+          </div>
+          {!selected ? (
+            <label className="preset-modal-check">
+              <input
+                type="checkbox"
+                checked={asDefault}
+                onChange={(event) => setAsDefault(event.target.checked)}
+              />
+              <span>Make this the default preset</span>
+            </label>
+          ) : null}
           <div className="preset-modal-actions">
             <button type="button" className="secondary" onClick={onClose}>
               Cancel
@@ -286,8 +408,8 @@ function PresetSaveModal({
                 <button
                   type="button"
                   className="secondary"
-                  onClick={submitUpdate}
-                  disabled={!!selected && !name.trim()}
+                  disabled={!name.trim()}
+                  onClick={() => submit(selected.id)}
                 >
                   Update &quot;{selected.name}&quot;
                 </button>

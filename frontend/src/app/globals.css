@@ -8643,38 +8643,154 @@ html[data-theme="light"] .term-compose-send {
 }
 
 /* ─── Session presets ─── */
-/* In-flow bar above the shared launch form: flat token surface, no glass — it
-   belongs to the launch card's in-flow content, not the floating chrome. */
+/* In-flow bar above the shared launch form: a flat token instrument, not glass.
+   It reuses the app's badge/mono + action-chip vocabulary so it reads as part
+   of the launch card rather than a bolted-on control. */
 .preset-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 10px;
-  padding: 12px;
+  position: relative;
+  display: grid;
+  gap: 8px;
+  padding: 11px 13px;
   background: var(--bg-card-soft);
   border: 1px solid var(--line);
   border-radius: var(--radius);
 }
 
-.preset-bar-select {
-  flex: 1 1 220px;
-  min-width: 180px;
+/* The default preset carries the same dog-ear fold as a pinned card — default
+   is a pin. The corner beneath the fold is squared so it reads as intentional. */
+.preset-bar.is-default {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  border-top-right-radius: 0;
+}
+
+.preset-bar.is-default::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  border-top: 13px solid var(--accent);
+  border-left: 13px solid transparent;
+}
+
+.preset-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Mono micro-label, same register as a badge caption. */
+.preset-bar-label {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+  flex: none;
+}
+
+.preset-bar-picker {
+  flex: 1 1 200px;
+  min-width: 160px;
+}
+
+/* Matches the ``.field select`` instrument (custom chevron, same metrics) so
+   the preset picker lines up with the form controls below it. */
+.preset-select {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+  color: var(--text);
+  padding: 9px 34px 9px 12px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2.5 4.5l3.5 3.5 3.5-3.5' fill='none' stroke='%23a09380' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  background-size: 12px 12px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+html[data-theme="light"] .preset-select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2.5 4.5l3.5 3.5 3.5-3.5' fill='none' stroke='%236e6356' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
+
+.preset-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .preset-bar-actions {
   display: flex;
-  gap: 8px;
+  gap: 2px;
   flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* The default action-chip lights gold when the selection IS the default —
+   the pinned state, matching the dog-ear fold. */
+.preset-bar-actions .action-chip.pin-link.active {
+  color: var(--accent);
+}
+
+/* Spec summary: the backend rides an owner-hue badge, everything else is a
+   muted mono chip separated by a small dot — the badge/status register. */
+.preset-bar-detail {
+  min-height: 1.1rem;
+  animation: preset-detail-in 200ms ease;
+}
+
+.preset-summary {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.preset-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.preset-summary-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--muted-soft, var(--muted));
+  opacity: 0.7;
+}
+
+.preset-bar-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
 }
 
 .preset-bar-error {
-  flex-basis: 100%;
   margin: 0;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
 }
 
-/* The save dialog is floating chrome, so it takes the app's modal recipe
-   (flat opaque card over a blurred scrim), matching ScheduleMessageModal. */
+@keyframes preset-detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* The save sheet is floating chrome: the app's modal recipe (flat opaque card
+   over a blurred scrim), mirroring ScheduleMessageModal for consistency. */
 .preset-modal-overlay {
   position: fixed;
   inset: 0;
@@ -8685,6 +8801,7 @@ html[data-theme="light"] .term-compose-send {
   align-items: center;
   justify-content: center;
   padding: 24px;
+  animation: preset-modal-fade 160ms ease;
 }
 
 html[data-theme="light"] .preset-modal-overlay {
@@ -8699,6 +8816,73 @@ html[data-theme="light"] .preset-modal-overlay {
   width: 100%;
   max-width: 460px;
   box-shadow: var(--shadow);
+  animation: preset-modal-pop 200ms cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+
+@keyframes preset-modal-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes preset-modal-pop {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preset-bar-detail,
+  .preset-modal-overlay,
+  .preset-modal {
+    animation: none;
+  }
+}
+
+.preset-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.preset-modal-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+
+/* The ƒ glyph is the preset mark — the same family as the ⁂ board glyph. */
+.preset-modal-glyph {
+  font-family: var(--font-mono);
+  font-style: italic;
+  color: var(--accent);
+  font-size: 1.05rem;
+}
+
+.preset-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.preset-modal-close:hover {
+  color: var(--text);
 }
 
 .preset-modal form {
@@ -8706,10 +8890,25 @@ html[data-theme="light"] .preset-modal-overlay {
   gap: 14px;
 }
 
-.preset-modal h3 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-weight: 600;
+/* The captures preview: what this preset will pin, in the same summary
+   vocabulary as the bar, so save and select read identically. */
+.preset-modal-captures {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  background: var(--bg-card-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.preset-modal-captures-label {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted);
 }
 
 .preset-modal-check {

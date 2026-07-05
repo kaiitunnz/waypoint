@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/kaiitunnz/waypoint/compare/v0.5.1...v0.6.0) (2026-07-05)
+
+
+### Features
+
+* add session creation presets ([#224](https://github.com/kaiitunnz/waypoint/issues/224)) ([6886eff](https://github.com/kaiitunnz/waypoint/commit/6886eff24f97ca2a7f96facb2219920790175091))
+
 ## [0.5.1](https://github.com/kaiitunnz/waypoint/compare/v0.5.0...v0.5.1) (2026-07-05)
 
 

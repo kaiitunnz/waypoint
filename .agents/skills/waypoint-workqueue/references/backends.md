@@ -37,6 +37,15 @@ it is the right fit for the job, **ask the user** (use the ask-question tool if
 your harness has one) rather than guessing. The user is the fallback — never pick
 a backend or model blindly.
 
+A **preset** can pin a whole worker profile — backend, model, transport, effort,
+and permission mode — so a crew's workers spawn from one named default instead of
+re-deriving each field per task (`waypoint presets list`, then `sessions start
+--preset <id>`; see `waypoint-subagents`'s `references/spawn-and-poll.md`). A
+preset is a convenience layer, not a substitute for the discovery above: still
+run `waypoint backends` / `waypoint models` when creating or overriding one so the
+ids it pins are real, and confirm its permission posture before trusting it for
+unattended workers.
+
 ## The harnesses
 
 - **`claude_code`** — wraps the Claude Code CLI (Claude models). Structured;

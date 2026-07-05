@@ -16,6 +16,14 @@ git -C "$repo" switch -c "wq/$job" "$base"
 Assign — for each free worker and each `todo` task, give it a worktree and send
 it off. Pre-spawn checklist, all settled **before** the `sessions start`:
 
+- **Preset (preferred).** Run `waypoint presets list` first. If the user has a
+  worker preset for this crew (or a suitable default), spawn with `--preset <id>`
+  and let it supply backend/model/effort/permission — you still pass the
+  per-worker `--cwd` / `--worktree` / `--title` / `--spawner-session-id`, and any
+  explicit flag overrides the preset. Confirm the preset's model and permission
+  posture (`waypoint presets show <id>`) satisfy the two checks below; don't
+  assume a preset auto-approves. With no fitting preset, set the fields
+  explicitly as follows.
 - **Model.** Run `waypoint models <backend>` and pass an id **verbatim** — never
   guess from memory (a wrong id spawns fine and only dies on turn 1). Unsure
   which tier fits? Ask the user. `sessions start` warns if the id isn't in the

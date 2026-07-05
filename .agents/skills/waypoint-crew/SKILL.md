@@ -114,6 +114,10 @@ than producing nothing (see `references/lifecycle.md`).
 - **Be inquisitive about environmental choices.** Settle each role's model and an
   auto-approving permission mode before spawning — a guessed mode stalls the
   session on its first approval and a wrong model id dies on turn 1. Pass ids verbatim from `waypoint
-  models` / `waypoint backends`, and ask the user when unsure.
+  models` / `waypoint backends`, and ask the user when unsure. A role session can
+  be **seeded from a preset** (`waypoint presets list`, then `sessions start
+  --preset <id>`) that pins its backend/model/permission profile — but inspect the
+  preset (`waypoint presets show <id>`) rather than trusting the name, and ask the
+  user when its permission posture is ambiguous for unattended work.
 - **Check the shipped product, not just green tests.** Before a phase or the
   product is called done, exercise the real running app, not only unit tests.

@@ -64,6 +64,13 @@ posture — but widening is a deliberate act, not a default. Guidance:
   `default` and discovering the stall later. Leaving it on `default` is only the
   right default when you will be **interactively servicing** the child's approvals
   yourself.
+- **A preset can carry a `permission_mode`, but do not assume it auto-approves.**
+  When you spawn with `--preset`, inspect it (`waypoint presets show <id>`) rather
+  than trusting the name — a preset whose posture is `default`, or that carries no
+  mode at all, leaves an unattended child stalling on its first approval just as a
+  bare spawn would. If the preset's permission posture is ambiguous for
+  unattended work, pass an explicit auto-approving `--permission-mode` (it
+  overrides the preset) or ask the user before spawning.
 
 ## Fix a posture without respawning
 

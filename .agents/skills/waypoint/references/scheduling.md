@@ -38,6 +38,13 @@ manual `sessions start` has no flag for. A record moves `pending → launched |
 cancelled | failed`; once launched it carries the new `session_id`, and a
 `failure_reason` on failure.
 
+`schedule create` also honors `--preset <id-or-name>` (and `--no-preset` to skip
+the default) exactly like `sessions start` — the preset supplies the launch
+defaults, and `--backend` / `--cwd` become optional when it does; see the Presets
+subsection in `references/sessions-launch.md`. A preset carries only launch
+defaults, **not** the schedule's initial `--prompt` or its `--scheduled-at` /
+`--delay-seconds` timing — set those on `schedule create` itself.
+
 ## Scheduled messages
 
 ```bash

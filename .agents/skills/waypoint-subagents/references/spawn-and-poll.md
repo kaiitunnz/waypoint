@@ -36,6 +36,24 @@ waypoint sessions start \
   `--permission-mode` only to override this. See `references/permissions.md`.
 - Capture the returned session id. Keep it for the rest of the turn.
 
+### Spawn from a preset
+
+If the user has a **preset** for this worker role, spawn from it instead of
+re-specifying backend/model/permission each time — the preset supplies those
+defaults and any explicit flag still overrides them. Run `waypoint presets list`
+first to see what exists (and the default); still keep the `subagent:` title and
+`--spawner-session-id` so the child is recognizable and owner-scoped:
+
+```bash
+waypoint sessions start --preset worker-codex-high \
+  --cwd "$repo" --worktree "wq/$job-t$n" --worktree-base "wq/$job" \
+  --title "subagent:wq-$job-$n" --spawner-session-id "$lead"
+```
+
+`--backend` becomes optional when the preset supplies it. Don't assume a preset
+auto-approves: see `references/permissions.md` before relying on it for an
+unattended child.
+
 Then send the task as the first input:
 
 ```bash

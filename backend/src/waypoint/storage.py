@@ -33,6 +33,7 @@ from waypoint.schemas import (
     ScheduleStatus,
     SessionCommandInvocation,
     SessionInputItem,
+    SessionPresetRecord,
     SessionRecord,
     SessionStatus,
 )
@@ -314,6 +315,26 @@ class Storage:
                 updated_at TEXT NOT NULL,
                 blocks TEXT NOT NULL DEFAULT '[]'
             );
+
+            -- Reusable launch defaults applied at session/schedule request
+            -- boundaries. ``spec`` is the JSON-serialized SessionPresetSpec.
+            CREATE TABLE IF NOT EXISTS session_presets (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                spec TEXT NOT NULL DEFAULT '{}',
+                is_default INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            -- At most one default preset per deployment; names are unique
+            -- case-insensitively.
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_session_presets_default
+                ON session_presets(is_default)
+                WHERE is_default = 1;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_session_presets_name_nocase
+                ON session_presets(LOWER(name));
             """)
         # Register any channels that predate the board_channels table.
         self.connection.execute(
@@ -341,12 +362,16 @@ class Storage:
         self._ensure_column("sessions", "worktree_path", "TEXT")
         self._ensure_column("sessions", "resolved_model", "TEXT")
         self._ensure_column("sessions", "tags", "TEXT NOT NULL DEFAULT '{}'")
+        self._ensure_column("sessions", "preset_id", "TEXT")
+        self._ensure_column("sessions", "preset_name", "TEXT")
         self._ensure_column(
             "scheduled_sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
         )
         self._ensure_column(
             "scheduled_sessions", "launch_env", "TEXT NOT NULL DEFAULT '{}'"
         )
+        self._ensure_column("scheduled_sessions", "preset_id", "TEXT")
+        self._ensure_column("scheduled_sessions", "preset_name", "TEXT")
         # Additive migration for the inbox table on databases that predate it.
         # (No-ops on a fresh DB where the CREATE TABLE above already made the
         # complete table; only load-bearing for columns added in a later release.)
@@ -384,8 +409,8 @@ class Storage:
                 last_event_at, raw_log_path, structured_log_path, transport_state,
                 pinned_at, spawner_session_id, worktree_path, permission_mode, model,
                 resolved_model, effort, args, config_overrides, launch_env, context_usage,
-                rate_limit_usage, tags
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                rate_limit_usage, tags, preset_id, preset_name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -426,6 +451,8 @@ class Storage:
                     else None
                 ),
                 json.dumps(session.tags),
+                session.preset_id,
+                session.preset_name,
             ),
         )
         self.connection.commit()
@@ -1359,8 +1386,8 @@ class Storage:
             INSERT INTO scheduled_sessions (
                 id, backend, cwd, launch_target_id, launch_mode, transport, title, args,
                 config_overrides, launch_env, initial_prompt, permission_mode, model, effort, scheduled_at,
-                created_at, status, session_id, failure_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, status, session_id, failure_reason, preset_id, preset_name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 schedule.id,
@@ -1382,6 +1409,8 @@ class Storage:
                 schedule.status,
                 schedule.session_id,
                 schedule.failure_reason,
+                schedule.preset_id,
+                schedule.preset_name,
             ),
         )
         self.connection.commit()
@@ -1450,6 +1479,129 @@ class Storage:
         )
         self.connection.commit()
         return cursor.rowcount or 0
+
+    # ── Session presets ──────────────────────────────────────────────────
+    @_synchronized
+    def create_session_preset(self, preset: SessionPresetRecord) -> SessionPresetRecord:
+        self.connection.execute(
+            """
+            INSERT INTO session_presets (
+                id, name, description, spec, is_default, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                preset.id,
+                preset.name,
+                preset.description,
+                json.dumps(preset.spec.model_dump(mode="json")),
+                1 if preset.is_default else 0,
+                preset.created_at.isoformat(),
+                preset.updated_at.isoformat(),
+            ),
+        )
+        self.connection.commit()
+        return preset
+
+    @_synchronized
+    def list_session_presets(self) -> list[SessionPresetRecord]:
+        rows = self.connection.execute(
+            "SELECT * FROM session_presets ORDER BY LOWER(name) ASC"
+        ).fetchall()
+        return [self._preset_from_row(row) for row in rows]
+
+    @_synchronized
+    def get_session_preset(self, preset_id: str) -> SessionPresetRecord | None:
+        row = self.connection.execute(
+            "SELECT * FROM session_presets WHERE id = ?", (preset_id,)
+        ).fetchone()
+        return self._preset_from_row(row) if row is not None else None
+
+    @_synchronized
+    def get_session_preset_by_name(self, name: str) -> SessionPresetRecord | None:
+        row = self.connection.execute(
+            "SELECT * FROM session_presets WHERE LOWER(name) = LOWER(?)", (name,)
+        ).fetchone()
+        return self._preset_from_row(row) if row is not None else None
+
+    @_synchronized
+    def get_default_session_preset(self) -> SessionPresetRecord | None:
+        row = self.connection.execute(
+            "SELECT * FROM session_presets WHERE is_default = 1"
+        ).fetchone()
+        return self._preset_from_row(row) if row is not None else None
+
+    @_synchronized
+    def update_session_preset(
+        self, preset_id: str, **fields: Any
+    ) -> SessionPresetRecord:
+        # ``is_default`` is intentionally not updatable here — the default
+        # invariant is managed exclusively by ``set_default_session_preset`` so
+        # the partial unique index is never violated by a raw column write.
+        fields.pop("is_default", None)
+        fields.setdefault("updated_at", datetime.now(UTC))
+        assignments = ", ".join(f"{name} = ?" for name in fields)
+        values = [self._serialize_field(value) for value in fields.values()]
+        values.append(preset_id)
+        if _SUPPORTS_RETURNING:
+            row = self.connection.execute(
+                f"UPDATE session_presets SET {assignments} WHERE id = ? RETURNING *",
+                values,
+            ).fetchone()
+            self.connection.commit()
+            if row is None:
+                raise KeyError(preset_id)
+            return self._preset_from_row(row)
+        if self.get_session_preset(preset_id) is None:
+            raise KeyError(preset_id)
+        self.connection.execute(
+            f"UPDATE session_presets SET {assignments} WHERE id = ?", values
+        )
+        self.connection.commit()
+        updated = self.get_session_preset(preset_id)
+        assert updated is not None
+        return updated
+
+    @_synchronized
+    def delete_session_preset(self, preset_id: str) -> bool:
+        cursor = self.connection.execute(
+            "DELETE FROM session_presets WHERE id = ?", (preset_id,)
+        )
+        self.connection.commit()
+        return (cursor.rowcount or 0) > 0
+
+    @_synchronized
+    def set_default_session_preset(self, preset_id: str | None) -> None:
+        # Clear the current default and (optionally) set a new one in one
+        # transaction so the ``is_default = 1`` partial unique index always holds.
+        ts = datetime.now(UTC).isoformat()
+        self.connection.execute(
+            "UPDATE session_presets SET is_default = 0, updated_at = ? "
+            "WHERE is_default = 1",
+            (ts,),
+        )
+        if preset_id is not None:
+            cursor = self.connection.execute(
+                "UPDATE session_presets SET is_default = 1, updated_at = ? "
+                "WHERE id = ?",
+                (ts, preset_id),
+            )
+            if (cursor.rowcount or 0) == 0:
+                self.connection.rollback()
+                raise KeyError(preset_id)
+        self.connection.commit()
+
+    def _preset_from_row(self, row: sqlite3.Row) -> SessionPresetRecord:
+        payload = dict(row)
+        for field_name in ("created_at", "updated_at"):
+            payload[field_name] = datetime.fromisoformat(payload[field_name])
+        payload["is_default"] = bool(payload.get("is_default", 0))
+        raw_spec = payload.get("spec") or "{}"
+        try:
+            parsed_spec = json.loads(raw_spec)
+        except json.JSONDecodeError:
+            parsed_spec = {}
+        payload["spec"] = parsed_spec if isinstance(parsed_spec, dict) else {}
+        return SessionPresetRecord.model_validate(payload)
 
     @_synchronized
     def create_scheduled_message(

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/kaiitunnz/waypoint/compare/v0.5.0...v0.5.1) (2026-07-05)
+
+
+### Bug Fixes
+
+* add launch environment variables ([#222](https://github.com/kaiitunnz/waypoint/issues/222)) ([5fb7677](https://github.com/kaiitunnz/waypoint/commit/5fb7677e825af019860c36a4efea374388dc2089))
+
 ## [0.5.0](https://github.com/kaiitunnz/waypoint/compare/v0.4.1...v0.5.0) (2026-07-04)
 
 

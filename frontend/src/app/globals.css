@@ -8724,31 +8724,59 @@ html[data-theme="light"] .preset-select {
 
 /* Bottom-of-panel capture actions: they snapshot the whole configured form, so
    they sit just above Launch with a mono caption stating what they act on. */
+/* Preset save actions: a quiet labelled toolbar of bare mono chips (the
+   session-card action vocabulary), not boxed buttons — so the gold Launch
+   stays the single primary CTA below them instead of one of four peers. */
 .preset-save {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px 12px;
+  gap: 6px 10px;
+}
+
+.preset-save-label {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+  flex: none;
 }
 
 .preset-save-actions {
   display: flex;
-  gap: 8px;
+  gap: 2px;
   flex-wrap: wrap;
   margin-left: auto;
 }
 
-/* The default button reads as a settled state, not an action, once it's on. */
-.preset-save-actions .secondary.preset-default-on {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+.preset-act {
+  background: transparent;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease;
 }
 
-/* Brief confirmation after an in-place Update. */
-.preset-save-actions .secondary.preset-flash {
+.preset-act:hover:not(:disabled) {
+  color: var(--text);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.preset-act:disabled {
+  cursor: default;
+}
+
+/* ✓ Default (settled) and the brief post-Update flash both light gold. */
+.preset-act.preset-default-on,
+.preset-act.preset-default-on:disabled,
+.preset-act.preset-flash {
   color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-  transition: color 140ms ease, border-color 140ms ease;
 }
 
 .preset-save-error {

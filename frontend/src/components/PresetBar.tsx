@@ -238,12 +238,13 @@ export function PresetSaveActions({
 
   return (
     <div className="preset-save">
+      <span className="preset-save-label">Preset</span>
       <div className="preset-save-actions">
         {selected ? (
           <>
             <button
               type="button"
-              className={`secondary${flashed ? " preset-flash" : ""}`}
+              className={`preset-act${flashed ? " preset-flash" : ""}`}
               disabled={busy}
               onClick={() => void handleUpdate()}
             >
@@ -251,7 +252,7 @@ export function PresetSaveActions({
             </button>
             <button
               type="button"
-              className="secondary"
+              className="preset-act"
               disabled={busy}
               onClick={() => {
                 setSeedDefault(false);
@@ -264,7 +265,7 @@ export function PresetSaveActions({
         ) : (
           <button
             type="button"
-            className="secondary"
+            className="preset-act"
             disabled={busy}
             onClick={() => {
               setSeedDefault(false);
@@ -276,7 +277,7 @@ export function PresetSaveActions({
         )}
         <button
           type="button"
-          className={`secondary${isDefault ? " preset-default-on" : ""}`}
+          className={`preset-act${isDefault ? " preset-default-on" : ""}`}
           disabled={busy || isDefault}
           title={isDefault ? "This preset is the default" : undefined}
           onClick={() => void handleSetDefault()}

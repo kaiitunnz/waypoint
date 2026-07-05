@@ -302,6 +302,7 @@ class WaypointClient:
         worktree_path: str | None = None,
         args: list[str] | None = None,
         tags: dict[str, str] | None = None,
+        launch_env: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "backend": backend,
@@ -324,6 +325,8 @@ class WaypointClient:
         # today's launch_mode-derived behavior.
         if transport is not None:
             body["transport"] = transport
+        if launch_env is not None:
+            body["launch_env"] = launch_env
         data: dict[str, Any] = self._request("POST", "/api/sessions", json=body).json()[
             "session"
         ]
@@ -683,6 +686,7 @@ class WaypointClient:
         args: list[str] | None = None,
         delay_seconds: int | None = None,
         scheduled_at: str | None = None,
+        launch_env: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"backend": backend, "cwd": cwd, "args": args or []}
         # Omit unset optionals so the server's model defaults apply. Sending an
@@ -700,6 +704,7 @@ class WaypointClient:
             "initial_prompt": initial_prompt,
             "delay_seconds": delay_seconds,
             "scheduled_at": scheduled_at,
+            "launch_env": launch_env,
         }
         body.update(
             {key: value for key, value in optional.items() if value is not None}

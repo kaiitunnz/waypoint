@@ -158,8 +158,10 @@ export function LaunchPanel({
           form.applyPreset(summary.spec as unknown as SessionPresetSpec);
         }
       } catch {
-        // Surfaced by the bar's own error handling on user actions; a failed
-        // hydrate simply leaves the form as-is.
+        // The full (env-carrying) spec couldn't load. Deselect rather than leave
+        // a half-hydrated selection: an Update against it would otherwise
+        // overwrite the preset's env with the form's empty env.
+        setSelectedPresetId(null);
       }
     },
     [presets, onFetchPresetSpec, form],

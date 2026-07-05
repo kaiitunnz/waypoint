@@ -515,10 +515,11 @@ class SessionCreateRequest(BaseModel):
 
 
 class SessionLaunchRequest(SessionCreateRequest):
-    # Boundary input for POST /api/sessions and the in-process CLI launch: when a
-    # preset (or the default) supplies them, ``backend``/``cwd`` may be omitted.
-    # The preset resolver merges preset + explicit request fields and re-validates
-    # the result into a strict ``SessionCreateRequest`` before the runtime sees it.
+    # Boundary input for POST /api/sessions and the in-process CLI launch:
+    # ``backend`` may be omitted when a preset (or the default) supplies it.
+    # ``cwd`` is never a preset field, so it stays effectively required — an
+    # omitted cwd fails re-validation with a clean 400. Both are optional here
+    # only so the resolver can merge and re-validate rather than 422 up-front.
     # Widening the parent's required fields to optional is an intentional Pydantic
     # subclass override; mypy flags it as an LSP violation, which does not apply
     # here (this type is only ever an input, never used where the parent is).

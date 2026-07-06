@@ -97,14 +97,10 @@ export function PresetSelect({
 
   async function handleDelete(): Promise<void> {
     if (!selected) return;
-    if (
-      selected.is_default &&
-      !window.confirm(
-        `Delete the default preset "${selected.name}"? There will be no default afterwards.`,
-      )
-    ) {
-      return;
-    }
+    const message = selected.is_default
+      ? `Delete the default preset "${selected.name}"? There will be no default afterwards. This cannot be undone.`
+      : `Delete the preset "${selected.name}"? This cannot be undone.`;
+    if (!window.confirm(message)) return;
     setError(null);
     setBusy(true);
     try {
@@ -390,6 +386,11 @@ function PresetSaveModal({
 
   function onSubmitForm(event: FormEvent) {
     event.preventDefault();
+    // This dialog is portaled to <body> but instantiated inside the launch/
+    // schedule form; React bubbles synthetic events through the component tree,
+    // so without this the save would also fire the enclosing form's submit and
+    // launch a session.
+    event.stopPropagation();
     if (!name.trim()) return;
     onSave({
       name: name.trim(),

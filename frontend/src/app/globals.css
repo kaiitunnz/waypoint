@@ -1296,6 +1296,13 @@ html[data-theme="light"] .clipboard-prompt__arrow {
   overflow-wrap: anywhere;
 }
 
+.session-header-cwd-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
 .session-header-cwd {
   margin: 0;
   font-family: var(--font-mono);
@@ -1308,6 +1315,10 @@ html[data-theme="light"] .clipboard-prompt__arrow {
   gap: 0;
   overflow-wrap: anywhere;
   min-width: 0;
+}
+
+.session-header-cwd-row .session-header-cwd {
+  flex: 0 1 auto;
 }
 
 .session-header-cwd .cwd-segment {
@@ -1327,6 +1338,43 @@ html[data-theme="light"] .clipboard-prompt__arrow {
 .session-header-target {
   color: var(--accent-cool);
   margin-left: 4px;
+}
+
+.session-cwd-copy {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-soft);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease;
+}
+
+.session-cwd-copy:hover,
+.session-cwd-copy:focus-visible {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
+  color: var(--text);
+}
+
+.session-cwd-copy:focus-visible {
+  outline: none;
+}
+
+.session-cwd-copy.copied {
+  color: var(--success);
 }
 
 .session-header-tags {
@@ -9012,11 +9060,49 @@ html[data-theme="light"] .preset-modal-overlay {
   width: 100%;
   position: relative;
   overflow: hidden;
+  isolation: isolate;
   transition: border-color 140ms ease;
 }
 
 .session-card:hover {
   border-color: var(--line-strong);
+}
+
+.session-card-hit-target {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+}
+
+.session-card-hit-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.session-card-hit-target:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.session-card > :not(.session-card-hit-target) {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.session-card-selectable {
+  user-select: text;
+  cursor: text;
+}
+
+.session-card .session-card-selectable,
+.session-card button,
+.session-card input {
+  pointer-events: auto;
 }
 
 .session-card h3 {
@@ -9074,6 +9160,8 @@ html[data-theme="light"] .preset-modal-overlay {
   position: absolute;
   top: 0;
   right: 0;
+  z-index: 2;
+  pointer-events: none;
   border-top: 15px solid var(--accent);
   border-left: 15px solid transparent;
 }
@@ -9136,6 +9224,15 @@ html[data-theme="light"] .preset-modal-overlay {
 
 .session-card-title-row .session-card-title {
   flex-grow: 1;
+}
+
+.session-card-title-row,
+.session-card-path,
+.session-card-meta,
+.session-card-actions {
+  justify-self: start;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .inline-title-input {

@@ -204,6 +204,24 @@ function SessionIdCopy({ id }: { id: string }) {
   );
 }
 
+function SessionCwdCopy({ cwd }: { cwd: string }) {
+  const { copied, markCopied } = useCopied();
+  return (
+    <button
+      type="button"
+      className={`session-cwd-copy${copied ? " copied" : ""}`}
+      title={copied ? "Copied" : `Copy working directory: ${cwd}`}
+      aria-label={copied ? "Working directory copied" : `Copy working directory ${cwd}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (copyTextSync(cwd)) markCopied();
+      }}
+    >
+      <span aria-hidden>{copied ? "✓" : "⎘"}</span>
+    </button>
+  );
+}
+
 // WebKit (desktop Safari + every iOS browser, since the App Store
 // requires WebKit) gates ``navigator.clipboard.readText()`` behind a
 // system "Paste" banner that the user must click to authorize. Other
@@ -4061,17 +4079,20 @@ function SessionHeader({
       {/* cwd / transport / source frame a task session; for the persistent
           assistant they're noise — keep just which backend + model answers. */}
       {!assistant ? (
-        <p className="session-header-cwd" title={session.cwd}>
-          {cwdSegments.map((segment, index) => (
-            <span key={index}>
-              {index > 0 ? <span className="cwd-sep" aria-hidden>/</span> : null}
-              <span className={index === cwdSegments.length - 1 ? "cwd-leaf" : "cwd-segment"}>
-                {segment}
+        <div className="session-header-cwd-row">
+          <p className="session-header-cwd" title={session.cwd}>
+            {cwdSegments.map((segment, index) => (
+              <span key={index}>
+                {index > 0 ? <span className="cwd-sep" aria-hidden>/</span> : null}
+                <span className={index === cwdSegments.length - 1 ? "cwd-leaf" : "cwd-segment"}>
+                  {segment}
+                </span>
               </span>
-            </span>
-          ))}
-          {target ? <span className="session-header-target"> · {target}</span> : null}
-        </p>
+            ))}
+            {target ? <span className="session-header-target"> · {target}</span> : null}
+          </p>
+          <SessionCwdCopy cwd={session.cwd} />
+        </div>
       ) : null}
       <div className="session-header-tags">
         <span className={`badge ${headerAgent}`}>
@@ -4273,4 +4294,3 @@ function stripAnsi(text: string): string {
     .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
     .replace(/\u001B[@-_]/g, "");
 }
-

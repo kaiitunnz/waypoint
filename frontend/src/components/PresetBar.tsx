@@ -97,14 +97,10 @@ export function PresetSelect({
 
   async function handleDelete(): Promise<void> {
     if (!selected) return;
-    if (
-      selected.is_default &&
-      !window.confirm(
-        `Delete the default preset "${selected.name}"? There will be no default afterwards.`,
-      )
-    ) {
-      return;
-    }
+    const message = selected.is_default
+      ? `Delete the default preset "${selected.name}"? There will be no default afterwards. This cannot be undone.`
+      : `Delete the preset "${selected.name}"? This cannot be undone.`;
+    if (!window.confirm(message)) return;
     setError(null);
     setBusy(true);
     try {
@@ -172,8 +168,9 @@ interface PresetSaveActionsProps {
   savePreset: (
     payload: SessionPresetWriteRequest,
     presetId: string | null,
-  ) => Promise<void>;
+  ) => Promise<string | null>;
   setDefaultPreset: (presetId: string) => Promise<void>;
+  onSelectPreset: (id: string | null) => void;
 }
 
 // Bottom-of-panel capture actions: these snapshot the fully-configured form, so
@@ -187,6 +184,7 @@ export function PresetSaveActions({
   launchTargetId,
   savePreset,
   setDefaultPreset,
+  onSelectPreset,
 }: PresetSaveActionsProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -299,7 +297,10 @@ export function PresetSaveActions({
             setBusy(true);
             setError(null);
             try {
-              await savePreset(payload, null);
+              // Select the freshly created preset. The form already holds its
+              // spec, so switch the selection without re-hydrating.
+              const createdId = await savePreset(payload, null);
+              if (createdId) onSelectPreset(createdId);
               setSaveOpen(false);
             } catch (err) {
               setError(err instanceof Error ? err.message : "failed to save preset");
@@ -390,6 +391,11 @@ function PresetSaveModal({
 
   function onSubmitForm(event: FormEvent) {
     event.preventDefault();
+    // This dialog is portaled to <body> but instantiated inside the launch/
+    // schedule form; React bubbles synthetic events through the component tree,
+    // so without this the save would also fire the enclosing form's submit and
+    // launch a session.
+    event.stopPropagation();
     if (!name.trim()) return;
     onSave({
       name: name.trim(),

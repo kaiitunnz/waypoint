@@ -97,7 +97,7 @@ interface LaunchPanelProps {
   onSavePreset: (
     payload: SessionPresetWriteRequest,
     presetId: string | null,
-  ) => Promise<void>;
+  ) => Promise<string | null>;
   onSetDefaultPreset: (presetId: string) => Promise<void>;
   onDeletePreset: (presetId: string) => Promise<void>;
 }
@@ -320,6 +320,7 @@ export function LaunchPanel({
             launchTargetId={launchTargetId}
             savePreset={onSavePreset}
             setDefaultPreset={onSetDefaultPreset}
+            onSelectPreset={setSelectedPresetId}
           />
           <div className="launch-actions">
             <span className="grow" />
@@ -405,6 +406,7 @@ export function LaunchPanel({
             launchTargetId={launchTargetId}
             savePreset={onSavePreset}
             setDefaultPreset={onSetDefaultPreset}
+            onSelectPreset={setSelectedPresetId}
           />
           <div className="launch-actions">
             <span className="grow" />

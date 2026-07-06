@@ -659,13 +659,16 @@ export default function HomePage() {
   async function handleSavePreset(
     payload: SessionPresetWriteRequest,
     presetId: string | null,
-  ) {
+  ): Promise<string | null> {
+    let createdId: string | null = null;
     if (presetId) {
       await updateSessionPreset(host, token, presetId, payload);
     } else {
-      await createSessionPreset(host, token, payload);
+      const created = await createSessionPreset(host, token, payload);
+      createdId = created.id;
     }
     await refreshPresets();
+    return createdId;
   }
 
   async function handleSetDefaultPreset(presetId: string) {

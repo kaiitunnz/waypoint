@@ -9091,11 +9091,18 @@ html[data-theme="light"] .preset-modal-overlay {
 .session-card > :not(.session-card-hit-target) {
   position: relative;
   z-index: 1;
+  pointer-events: none;
 }
 
 .session-card-selectable {
   user-select: text;
   cursor: text;
+}
+
+.session-card .session-card-selectable,
+.session-card button,
+.session-card input {
+  pointer-events: auto;
 }
 
 .session-card h3 {

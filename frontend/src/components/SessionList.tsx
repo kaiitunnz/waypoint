@@ -197,7 +197,14 @@ export function SessionList({
     const showTransport =
       agentDefault !== null && session.transport !== agentDefault;
     return (
-      <Link className="panel session-card" href={`/session/${session.id}`} key={session.id}>
+      <article className="panel session-card" key={session.id}>
+        <Link
+          className="session-card-hit-target"
+          href={`/session/${session.id}`}
+          aria-label={`Open session ${session.title}`}
+        >
+          <span aria-hidden className="session-card-hit-label" />
+        </Link>
         <div className="session-row">
           <div className="session-card-badges">
             <span className={`badge ${agent}`}>
@@ -239,7 +246,7 @@ export function SessionList({
             />
           ) : (
             <>
-              <h3 className="session-card-title">{session.title}</h3>
+              <h3 className="session-card-title session-card-selectable">{session.title}</h3>
               {onSetTitle ? (
                 <button
                   className="link-button edit-title-btn"
@@ -254,11 +261,11 @@ export function SessionList({
             </>
           )}
         </div>
-        <p className="muted session-card-path">
+        <p className="muted session-card-path session-card-selectable">
           {session.cwd}
         </p>
         <div className="session-card-meta">
-          <p className="meta">
+          <p className="meta session-card-selectable">
             {session.repo_name ?? "No repo"}
             {session.branch ? ` · ${session.branch}` : null}
             {session.source === "managed" ? " · managed" : " · attached"}
@@ -294,7 +301,7 @@ export function SessionList({
             </button>
           ) : null}
         </div>
-      </Link>
+      </article>
     );
   }
 

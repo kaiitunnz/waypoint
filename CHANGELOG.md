@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/kaiitunnz/waypoint/compare/v0.6.0...v0.6.1) (2026-07-06)
+
+
+### Bug Fixes
+
+* support session path copying ([#226](https://github.com/kaiitunnz/waypoint/issues/226)) ([d9c4017](https://github.com/kaiitunnz/waypoint/commit/d9c4017eeb19084e6a691968b31c46c78c49d452))
+
 ## [0.6.0](https://github.com/kaiitunnz/waypoint/compare/v0.5.1...v0.6.0) (2026-07-05)
 
 

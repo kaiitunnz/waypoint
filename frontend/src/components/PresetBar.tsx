@@ -168,8 +168,9 @@ interface PresetSaveActionsProps {
   savePreset: (
     payload: SessionPresetWriteRequest,
     presetId: string | null,
-  ) => Promise<void>;
+  ) => Promise<string | null>;
   setDefaultPreset: (presetId: string) => Promise<void>;
+  onSelectPreset: (id: string | null) => void;
 }
 
 // Bottom-of-panel capture actions: these snapshot the fully-configured form, so
@@ -183,6 +184,7 @@ export function PresetSaveActions({
   launchTargetId,
   savePreset,
   setDefaultPreset,
+  onSelectPreset,
 }: PresetSaveActionsProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -295,7 +297,10 @@ export function PresetSaveActions({
             setBusy(true);
             setError(null);
             try {
-              await savePreset(payload, null);
+              // Select the freshly created preset. The form already holds its
+              // spec, so switch the selection without re-hydrating.
+              const createdId = await savePreset(payload, null);
+              if (createdId) onSelectPreset(createdId);
               setSaveOpen(false);
             } catch (err) {
               setError(err instanceof Error ? err.message : "failed to save preset");

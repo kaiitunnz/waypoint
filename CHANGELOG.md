@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/kaiitunnz/waypoint/compare/v0.6.1...v0.6.2) (2026-07-06)
+
+
+### Bug Fixes
+
+* confirm preset deletion and stop preset save from launching a session ([#228](https://github.com/kaiitunnz/waypoint/issues/228)) ([6e61c43](https://github.com/kaiitunnz/waypoint/commit/6e61c438b079edcebe3f5130f791fa16bbec88dc))
+
 ## [0.6.1](https://github.com/kaiitunnz/waypoint/compare/v0.6.0...v0.6.1) (2026-07-06)
 
 

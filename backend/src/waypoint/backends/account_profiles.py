@@ -14,7 +14,7 @@ Public payloads expose only ``{id, label, config_dir_key}`` — never the
 ``config_dir`` path, ``expected_account_key``, or ``transcript_policy``.
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from waypoint.backends.plugin_config import AccountProfileConfig
 from waypoint.backends.registry import get_registry
@@ -34,7 +34,7 @@ def backend_hosts_account_profiles(settings: "Settings", backend: str) -> bool:
     return "account_profiles" in type(settings.plugin_config(backend)).model_fields
 
 
-def _profiles_of(config: object) -> dict[str, AccountProfileConfig]:
+def _profiles_of(config: Any) -> dict[str, AccountProfileConfig]:
     # ``account_profiles`` lives only on the agent config subclasses; the
     # getattr default covers configs that don't host it.
     return dict(getattr(config, "account_profiles", {}))

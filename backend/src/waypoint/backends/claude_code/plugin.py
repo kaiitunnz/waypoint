@@ -214,7 +214,7 @@ class ClaudeCodeLaunchTargetConfig(PluginLaunchTargetConfig):
     # Deprecated no-op; see ``ClaudeCodePluginConfig.hook_timeout_seconds``.
     hook_timeout_seconds: int | None = Field(default=None, ge=1)
     # Target-level profiles merge field-by-field over the global set by id and
-    # may introduce target-only ids (see runtime._resolved_account_profiles).
+    # may introduce target-only ids (see account_profiles.resolve_account_profiles).
     account_profiles: dict[str, AccountProfileConfig] = Field(default_factory=dict)
 
 

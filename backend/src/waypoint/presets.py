@@ -50,6 +50,7 @@ _SCALAR_FIELDS = (
     "permission_mode",
     "model",
     "effort",
+    "account_profile_id",
 )
 _LIST_FIELDS = ("args", "config_overrides")
 _MAP_FIELDS = ("launch_env", "tags")
@@ -73,6 +74,7 @@ def redact_preset(record: SessionPresetRecord) -> SessionPresetSummary:
         model=spec.model,
         effort=spec.effort,
         tags=dict(spec.tags),
+        account_profile_id=spec.account_profile_id,
     )
     return SessionPresetSummary(
         id=record.id,

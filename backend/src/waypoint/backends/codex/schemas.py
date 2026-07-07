@@ -43,6 +43,9 @@ class CodexThreadImportRequest(BaseModel):
     # rejects mismatches with 400).
     transport: SessionTransportId | None = None
     launch_env: LaunchEnv = Field(default_factory=dict)
+    # Account/config-dir profile used to list/import this thread; persisted so a
+    # later resume/delete/history-read uses the same state root.
+    account_profile_id: str | None = None
     # When true (default), the prior conversation is replayed into the new
     # session's transcript at import time; when false the transcript starts
     # empty and only the underlying agent resumes its own context.

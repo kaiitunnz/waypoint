@@ -101,6 +101,14 @@ class Scheduler:
             self._runtime._validate_supported_transport(
                 request.backend, request.transport
             )
+        # Validate the account profile up-front and capture its label; the
+        # config-dir is resolved from the profile at fire time (not snapshotted),
+        # so the schedule launches under the profile as it exists when it fires.
+        account_profile_label = None
+        if request.account_profile_id is not None:
+            account_profile_label = self._runtime._require_account_profile(
+                request.backend, request.account_profile_id, launch_target
+            ).label
         cwd = request.cwd
         if launch_target is not None and not cwd:
             cwd = launch_target.default_cwd
@@ -127,6 +135,8 @@ class Scheduler:
             status=ScheduleStatus.PENDING,
             preset_id=preset_id,
             preset_name=preset_name,
+            account_profile_id=request.account_profile_id,
+            account_profile_label=account_profile_label,
         )
         self._runtime.storage.create_schedule(record)
         self._wakeup.set()
@@ -346,6 +356,7 @@ class Scheduler:
                     permission_mode=schedule.permission_mode,
                     model=schedule.model,
                     effort=schedule.effort,
+                    account_profile_id=schedule.account_profile_id,
                 ),
                 preset_id=schedule.preset_id,
                 preset_name=schedule.preset_name,

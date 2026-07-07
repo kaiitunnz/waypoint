@@ -788,6 +788,8 @@ class ClaudeTtyPlugin:
             effort=session.effort,
             args=session.args,
             launch_env=session.launch_env,
+            account_profile_id=session.account_profile_id,
+            account_profile_label=session.account_profile_label,
         )
         runtime.storage.create_session(new_session)
         await runtime._record_system_event(

@@ -235,6 +235,11 @@ class SessionRecord(BaseModel):
     # later preset edits/deletes do not affect an existing session.
     preset_id: str | None = None
     preset_name: str | None = None
+    # Account/config-dir profile this session was launched under. Non-secret
+    # display/audit hints; the profile's config-dir is snapshotted into the
+    # private launch_env, so the account is bound even if config changes later.
+    account_profile_id: str | None = None
+    account_profile_label: str | None = None
 
 
 class EventRecord(BaseModel):
@@ -410,6 +415,9 @@ class SessionPresetSpec(BaseModel):
     model: str | None = None
     effort: str | None = None
     tags: dict[str, str] = Field(default_factory=dict)
+    # Preset the account/config-dir profile to launch under. Applying the preset
+    # selects this profile first, so model/thread lists are fetched profile-scoped.
+    account_profile_id: str | None = None
 
 
 class SessionPresetRecord(BaseModel):
@@ -437,6 +445,7 @@ class SessionPresetSpecSummary(BaseModel):
     model: str | None = None
     effort: str | None = None
     tags: dict[str, str] = Field(default_factory=dict)
+    account_profile_id: str | None = None
 
 
 class SessionPresetSummary(BaseModel):
@@ -530,6 +539,10 @@ class SessionCreateRequest(BaseModel):
     # request boundary (API / in-process CLI); the runtime stays preset-agnostic.
     preset_id: str | None = None
     use_default_preset: bool = False
+    # Launch under a named account/config-dir profile. Resolved at launch: the
+    # profile owns its config-dir env key (it wins over any raw launch_env value
+    # for that key). Unknown ids are rejected. Label is derived server-side.
+    account_profile_id: str | None = None
 
 
 class SessionLaunchRequest(SessionCreateRequest):
@@ -666,6 +679,10 @@ class ScheduledSessionRecord(BaseModel):
     # Preset provenance snapshotted at schedule-creation time (see SessionRecord).
     preset_id: str | None = None
     preset_name: str | None = None
+    # Account/config-dir profile snapshotted at schedule-creation time; the
+    # schedule fires under this profile (see SessionRecord).
+    account_profile_id: str | None = None
+    account_profile_label: str | None = None
 
 
 class ScheduleCreateRequest(BaseModel):
@@ -692,6 +709,8 @@ class ScheduleCreateRequest(BaseModel):
     # preset.
     preset_id: str | None = None
     use_default_preset: bool = False
+    # Launch under a named account/config-dir profile (see SessionCreateRequest).
+    account_profile_id: str | None = None
 
 
 class ScheduleLaunchRequest(ScheduleCreateRequest):

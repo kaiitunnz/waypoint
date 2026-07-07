@@ -1068,6 +1068,8 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             args=session.args,
             config_overrides=session.config_overrides,
             launch_env=session.launch_env,
+            account_profile_id=session.account_profile_id,
+            account_profile_label=session.account_profile_label,
         )
         runtime.storage.create_session(new_session)
         runtime.storage.clone_events(session.id, new_session_id)

@@ -73,7 +73,11 @@ from waypoint.backends.claude_tty.pane_dialog import (
     shows_blocking_dialog,
 )
 from waypoint.backends.completions import static_slash_completions
-from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
+from waypoint.backends.plugin_config import (
+    AccountProfileConfig,
+    PluginConfig,
+    PluginLaunchTargetConfig,
+)
 from waypoint.backends.tmux.plugin import TmuxPlugin
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
@@ -198,6 +202,10 @@ class ClaudeCodePluginConfig(PluginConfig):
     # the `can_use_tool` control protocol, which has no network timeout.
     # Retained so existing configs that still set it keep loading.
     hook_timeout_seconds: int = Field(default=3600, ge=1)
+    # Named account/config-dir profiles (mapped to CLAUDE_CONFIG_DIR). Only
+    # backends that own a config-dir env var carry this field; the base config
+    # model rejects it for other backends via extra="forbid".
+    account_profiles: dict[str, AccountProfileConfig] = Field(default_factory=dict)
 
 
 class ClaudeCodeLaunchTargetConfig(PluginLaunchTargetConfig):
@@ -205,6 +213,9 @@ class ClaudeCodeLaunchTargetConfig(PluginLaunchTargetConfig):
 
     # Deprecated no-op; see ``ClaudeCodePluginConfig.hook_timeout_seconds``.
     hook_timeout_seconds: int | None = Field(default=None, ge=1)
+    # Target-level profiles merge field-by-field over the global set by id and
+    # may introduce target-only ids (see runtime._resolved_account_profiles).
+    account_profiles: dict[str, AccountProfileConfig] = Field(default_factory=dict)
 
 
 class ClaudeCodePlugin(DefaultLaunchContract):
@@ -254,6 +265,9 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         badges={"glyph": "C", "color": "#a78bfa"},
         cli_binary="claude",
         target_aliases=("claude",),
+        config_dir_env_var="CLAUDE_CONFIG_DIR",
+        native_thread_store="projects",
+        supports_launch_settings_with_restart=True,
     )
 
     def __init__(self) -> None:

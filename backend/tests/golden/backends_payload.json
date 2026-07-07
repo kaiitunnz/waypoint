@@ -14,6 +14,7 @@
       "color": "#a78bfa"
     },
     "default_launch_env": {},
+    "account_profiles": [],
     "capabilities": {
       "is_structured": true,
       "supports_resume": false,
@@ -24,6 +25,7 @@
       "supports_set_effort_with_restart": true,
       "supports_set_permission_mode_inline": true,
       "settings_change_interrupts_turn": false,
+      "supports_launch_settings_with_restart": true,
       "live_terminal": false,
       "has_terminal_pane": false,
       "terminal_interactive": false,
@@ -137,6 +139,8 @@
       "supports_custom_cli_args": true,
       "supports_config_overrides": false,
       "cli_binary": "claude",
+      "config_dir_env_var": "CLAUDE_CONFIG_DIR",
+      "native_thread_store": "projects",
       "target_aliases": [
         "claude"
       ],
@@ -257,7 +261,9 @@
       "badges": {
         "glyph": "C",
         "color": "#a78bfa"
-      }
+      },
+      "config_dir_env_var": "CLAUDE_CONFIG_DIR",
+      "native_thread_store": "projects"
     },
     "transport_capabilities": {
       "is_structured": true,
@@ -269,6 +275,7 @@
       "supports_set_effort_with_restart": true,
       "supports_set_permission_mode_inline": true,
       "settings_change_interrupts_turn": false,
+      "supports_launch_settings_with_restart": true,
       "live_terminal": false,
       "has_terminal_pane": false,
       "terminal_interactive": false,
@@ -290,6 +297,7 @@
       "color": "#a78bfa"
     },
     "default_launch_env": {},
+    "account_profiles": [],
     "capabilities": {
       "is_structured": true,
       "supports_resume": true,
@@ -300,6 +308,7 @@
       "supports_set_effort_with_restart": true,
       "supports_set_permission_mode_inline": true,
       "settings_change_interrupts_turn": true,
+      "supports_launch_settings_with_restart": true,
       "live_terminal": false,
       "has_terminal_pane": true,
       "terminal_interactive": false,
@@ -413,6 +422,8 @@
       "supports_custom_cli_args": true,
       "supports_config_overrides": false,
       "cli_binary": "claude",
+      "config_dir_env_var": "CLAUDE_CONFIG_DIR",
+      "native_thread_store": "projects",
       "target_aliases": [
         "claude_tty"
       ],
@@ -533,7 +544,9 @@
       "badges": {
         "glyph": "C",
         "color": "#a78bfa"
-      }
+      },
+      "config_dir_env_var": "CLAUDE_CONFIG_DIR",
+      "native_thread_store": "projects"
     },
     "transport_capabilities": {
       "is_structured": true,
@@ -545,6 +558,7 @@
       "supports_set_effort_with_restart": true,
       "supports_set_permission_mode_inline": true,
       "settings_change_interrupts_turn": true,
+      "supports_launch_settings_with_restart": true,
       "live_terminal": false,
       "has_terminal_pane": true,
       "terminal_interactive": false,
@@ -567,6 +581,7 @@
       "color": "#34d399"
     },
     "default_launch_env": {},
+    "account_profiles": [],
     "capabilities": {
       "is_structured": true,
       "supports_resume": false,
@@ -577,6 +592,7 @@
       "supports_set_effort_with_restart": false,
       "supports_set_permission_mode_inline": true,
       "settings_change_interrupts_turn": false,
+      "supports_launch_settings_with_restart": true,
       "live_terminal": false,
       "has_terminal_pane": false,
       "terminal_interactive": false,
@@ -643,6 +659,8 @@
       "supports_custom_cli_args": true,
       "supports_config_overrides": true,
       "cli_binary": "codex",
+      "config_dir_env_var": "CODEX_HOME",
+      "native_thread_store": "sessions",
       "target_aliases": [
         "codex"
       ],
@@ -716,7 +734,9 @@
       "badges": {
         "glyph": "X",
         "color": "#34d399"
-      }
+      },
+      "config_dir_env_var": "CODEX_HOME",
+      "native_thread_store": "sessions"
     },
     "transport_capabilities": {
       "is_structured": true,
@@ -728,6 +748,7 @@
       "supports_set_effort_with_restart": false,
       "supports_set_permission_mode_inline": true,
       "settings_change_interrupts_turn": false,
+      "supports_launch_settings_with_restart": true,
       "live_terminal": false,
       "has_terminal_pane": false,
       "terminal_interactive": false,
@@ -750,6 +771,7 @@
       "color": "#cbd5e1"
     },
     "default_launch_env": {},
+    "account_profiles": [],
     "capabilities": {
       "is_structured": true,
       "supports_resume": false,
@@ -760,6 +782,7 @@
       "supports_set_effort_with_restart": false,
       "supports_set_permission_mode_inline": true,
       "settings_change_interrupts_turn": false,
+      "supports_launch_settings_with_restart": false,
       "live_terminal": false,
       "has_terminal_pane": false,
       "terminal_interactive": false,
@@ -832,6 +855,8 @@
       "supports_custom_cli_args": true,
       "supports_config_overrides": false,
       "cli_binary": "opencode",
+      "config_dir_env_var": null,
+      "native_thread_store": null,
       "target_aliases": [
         "opencode"
       ],
@@ -911,7 +936,9 @@
       "badges": {
         "glyph": "O",
         "color": "#cbd5e1"
-      }
+      },
+      "config_dir_env_var": null,
+      "native_thread_store": null
     },
     "transport_capabilities": {
       "is_structured": true,
@@ -923,6 +950,7 @@
       "supports_set_effort_with_restart": false,
       "supports_set_permission_mode_inline": true,
       "settings_change_interrupts_turn": false,
+      "supports_launch_settings_with_restart": false,
       "live_terminal": false,
       "has_terminal_pane": false,
       "terminal_interactive": false,
@@ -944,6 +972,7 @@
       "color": "#94a3b8"
     },
     "default_launch_env": {},
+    "account_profiles": [],
     "capabilities": {
       "is_structured": false,
       "supports_resume": true,
@@ -954,6 +983,7 @@
       "supports_set_effort_with_restart": false,
       "supports_set_permission_mode_inline": false,
       "settings_change_interrupts_turn": false,
+      "supports_launch_settings_with_restart": false,
       "live_terminal": true,
       "has_terminal_pane": true,
       "terminal_interactive": true,
@@ -978,6 +1008,8 @@
       "supports_custom_cli_args": false,
       "supports_config_overrides": false,
       "cli_binary": null,
+      "config_dir_env_var": null,
+      "native_thread_store": null,
       "target_aliases": [],
       "is_fallback_for_managed_launch": true
     },
@@ -1005,7 +1037,9 @@
       "badges": {
         "glyph": "T",
         "color": "#94a3b8"
-      }
+      },
+      "config_dir_env_var": null,
+      "native_thread_store": null
     },
     "transport_capabilities": {
       "is_structured": false,
@@ -1017,6 +1051,7 @@
       "supports_set_effort_with_restart": false,
       "supports_set_permission_mode_inline": false,
       "settings_change_interrupts_turn": false,
+      "supports_launch_settings_with_restart": false,
       "live_terminal": true,
       "has_terminal_pane": true,
       "terminal_interactive": true,

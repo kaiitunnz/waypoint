@@ -26,6 +26,7 @@ from fastapi.responses import FileResponse
 
 from waypoint.auth import TokenStore, require_token
 from waypoint.backends import BackendRegistry
+from waypoint.backends.account_profiles import redacted_profile_metadata
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.backends.tmux.renderer import (
     Osc52Extractor,
@@ -162,6 +163,11 @@ def _backend_descriptors(
                 "label": plugin.label,
                 "badges": dict(caps.badges),
                 "default_launch_env": dict(settings.plugin_config(plugin.id).env),
+                # Redacted global account-profile metadata ({id, label,
+                # config_dir_key} only). Non-empty for agent backends that host
+                # profiles (claude_code, codex); empty otherwise. Target-merged
+                # profiles live on GET /api/me per launch target.
+                "account_profiles": redacted_profile_metadata(settings, plugin.id),
                 # The flat ``capabilities`` object stays byte-identical for
                 # existing consumers; the split sub-objects are emitted
                 # alongside it so the frontend can migrate to the (agent,

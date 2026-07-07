@@ -53,7 +53,11 @@ from waypoint.backends.codex.schemas import (
     CodexThreadSummary,
 )
 from waypoint.backends.completions import static_slash_completions
-from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
+from waypoint.backends.plugin_config import (
+    AccountProfileConfig,
+    PluginConfig,
+    PluginLaunchTargetConfig,
+)
 from waypoint.backends.tmux.plugin import TmuxPlugin
 from waypoint.git_meta import GitMeta
 from waypoint.launch_targets import SshLaunchTargetConfig
@@ -116,6 +120,10 @@ class CodexPluginConfig(PluginConfig):
     """
 
     config_overrides: list[str] = Field(default_factory=list)
+    # Named account/config-dir profiles (mapped to CODEX_HOME). Only backends
+    # that own a config-dir env var carry this field; the base config model
+    # rejects it for other backends via extra="forbid".
+    account_profiles: dict[str, AccountProfileConfig] = Field(default_factory=dict)
 
 
 class CodexLaunchTargetConfig(PluginLaunchTargetConfig):
@@ -127,6 +135,9 @@ class CodexLaunchTargetConfig(PluginLaunchTargetConfig):
     """
 
     config_overrides: list[str] = Field(default_factory=list)
+    # Target-level profiles merge field-by-field over the global set by id and
+    # may introduce target-only ids (see runtime._resolved_account_profiles).
+    account_profiles: dict[str, AccountProfileConfig] = Field(default_factory=dict)
 
 
 class CodexPlugin(DefaultLaunchContract):
@@ -176,6 +187,9 @@ class CodexPlugin(DefaultLaunchContract):
         badges={"glyph": "X", "color": "#34d399"},
         cli_binary="codex",
         target_aliases=("codex",),
+        config_dir_env_var="CODEX_HOME",
+        native_thread_store="sessions",
+        supports_launch_settings_with_restart=True,
     )
 
     def __init__(self) -> None:

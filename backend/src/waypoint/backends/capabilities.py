@@ -56,6 +56,14 @@ class AgentCapabilities(_FrozenModel):
     cli_binary: str | None = None
     target_aliases: tuple[str, ...] = ()
     badges: dict[str, str] = Field(default_factory=dict)
+    # The env var this agent's CLI reads for its config/state root
+    # (``CLAUDE_CONFIG_DIR`` / ``CODEX_HOME``). ``None`` means the agent has no
+    # config-dir concept and cannot participate in account-profile switching.
+    config_dir_env_var: str | None = None
+    # Human label for where this agent keeps its resumable native thread under
+    # the config-dir root (e.g. ``projects`` for Claude, ``sessions`` for
+    # Codex). ``None`` when the agent exposes no resumable native store.
+    native_thread_store: str | None = None
 
 
 class TransportCapabilities(_FrozenModel):
@@ -78,6 +86,11 @@ class TransportCapabilities(_FrozenModel):
     supports_set_effort_with_restart: bool = False
     supports_set_permission_mode_inline: bool = False
     settings_change_interrupts_turn: bool = False
+    # The transport can apply restart-scoped launch-settings edits (env, args,
+    # config overrides, account profile) by terminating and restoring the
+    # session, not just the inline model/effort/permission knobs. Requires
+    # ``supports_reattach_after_exit``.
+    supports_launch_settings_with_restart: bool = False
     # The transport drives the agent in a live terminal pane (a pty). The
     # runtime tails its raw log to scrape session state, and the frontend can
     # mirror the pane over the terminal websocket. True for the generic tmux
@@ -142,6 +155,10 @@ class BackendCapabilities(_FrozenModel):
     # so every swap kills the pane and respawns ``--resume``. The frontend
     # reads this to warn before changing settings on a running session.
     settings_change_interrupts_turn: bool = False
+    # The transport can apply restart-scoped launch-settings edits (env, args,
+    # config overrides, account profile) via terminate+restore. Requires
+    # supports_reattach_after_exit. Drives the live launch-settings API.
+    supports_launch_settings_with_restart: bool = False
     # The transport drives the agent in a live terminal pane (a pty): the
     # runtime tails its raw log to scrape state and the frontend can mirror the
     # pane over the terminal websocket. True for the generic tmux wrapper only.
@@ -189,6 +206,12 @@ class BackendCapabilities(_FrozenModel):
     # passed through as raw flags. Only codex sets this today.
     supports_config_overrides: bool = False
     cli_binary: str | None = None
+    # The env var this agent's CLI reads for its config/state root
+    # (CLAUDE_CONFIG_DIR / CODEX_HOME); None when it has no config-dir concept.
+    config_dir_env_var: str | None = None
+    # Label for where this agent keeps its resumable native thread under the
+    # config-dir root (projects for Claude, sessions for Codex); None if absent.
+    native_thread_store: str | None = None
     # Substrings (case-insensitive) used to infer a backend from a tmux
     # target name when the user attaches to an existing pane without
     # specifying which CLI is running there.
@@ -200,6 +223,19 @@ class BackendCapabilities(_FrozenModel):
     # one registered plugin should set this to ``True``; today only
     # the tmux fallback does.
     is_fallback_for_managed_launch: bool = False
+
+    @property
+    def supports_account_profile_with_restart(self) -> bool:
+        """Account-profile switching is the product of the two axes.
+
+        Derived, not declared: the composed ``(agent, transport)`` session
+        supports it iff the agent owns a config-dir env var and the transport
+        can apply restart-scoped launch-settings edits. Kept a property (not a
+        field) so it stays off the flat/axis partition.
+        """
+        return (
+            bool(self.config_dir_env_var) and self.supports_launch_settings_with_restart
+        )
 
     def agent_capabilities(self) -> AgentCapabilities:
         """Project the agent-axis subset (CLI/protocol traits)."""
@@ -222,6 +258,8 @@ class BackendCapabilities(_FrozenModel):
             cli_binary=self.cli_binary,
             target_aliases=self.target_aliases,
             badges=self.badges,
+            config_dir_env_var=self.config_dir_env_var,
+            native_thread_store=self.native_thread_store,
         )
 
     def transport_capabilities(self) -> TransportCapabilities:
@@ -236,6 +274,7 @@ class BackendCapabilities(_FrozenModel):
             supports_set_effort_with_restart=self.supports_set_effort_with_restart,
             supports_set_permission_mode_inline=self.supports_set_permission_mode_inline,
             settings_change_interrupts_turn=self.settings_change_interrupts_turn,
+            supports_launch_settings_with_restart=self.supports_launch_settings_with_restart,
             live_terminal=self.live_terminal,
             has_terminal_pane=self.has_terminal_pane,
             terminal_interactive=self.terminal_interactive,

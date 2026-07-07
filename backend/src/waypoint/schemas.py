@@ -304,6 +304,18 @@ class LoginResponse(BaseModel):
     expires_at: datetime
 
 
+class AccountProfileMeta(BaseModel):
+    """Public, redacted account-profile metadata.
+
+    Display id/label plus the config-dir env var key the profile maps to. Never
+    carries the config-dir path, expected account key, or transcript policy.
+    """
+
+    id: str
+    label: str
+    config_dir_key: str
+
+
 class LaunchTargetSummary(BaseModel):
     id: str
     name: str
@@ -316,6 +328,12 @@ class LaunchTargetSummary(BaseModel):
     connected: bool = False
     # Effective launch-env defaults keyed by backend id for this target.
     default_launch_env_by_backend: dict[BackendId, LaunchEnv] = Field(
+        default_factory=dict
+    )
+    # Target-merged redacted account-profile metadata keyed by agent backend id.
+    # Only backends that host profiles (claude_code, codex) appear; each entry is
+    # {id, label, config_dir_key} — no paths, keys, or transcript policy.
+    account_profiles_by_backend: dict[BackendId, list[AccountProfileMeta]] = Field(
         default_factory=dict
     )
 

@@ -13,9 +13,11 @@ import pytest
 from fastapi import HTTPException
 
 from waypoint.backends.codex.schemas import CodexThreadImportRequest
+from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.presets import resolve_session_create_request
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
+    ScheduleCreateRequest,
     SessionLaunchRequest,
     SessionPresetRecord,
     SessionPresetSpec,
@@ -126,6 +128,17 @@ def test_overlay_rejects_unknown_profile(tmp_path: Path) -> None:
     assert exc.value.status_code == 400
 
 
+def test_overlay_rejects_tilde_config_dir_on_remote(tmp_path: Path) -> None:
+    # ``~`` can't be expanded to the remote home yet and won't be shell-expanded
+    # in the injected env, so a remote profile with a ``~`` config_dir is
+    # rejected rather than silently launching under a literal ``~`` dir.
+    runtime, _ = _runtime(tmp_path, codex=_codex_profiles())
+    target = SshLaunchTargetConfig(id="d", name="d", ssh_destination="u@d")
+    with pytest.raises(HTTPException) as exc:
+        runtime._apply_account_profile_env("codex", {}, "work", target)
+    assert exc.value.status_code == 400
+
+
 # ── Preset carry ────────────────────────────────────────────────────────────
 
 
@@ -167,3 +180,33 @@ def test_explicit_request_profile_wins_over_preset(tmp_path: Path) -> None:
 def test_import_request_accepts_profile() -> None:
     req = CodexThreadImportRequest(thread_id="t", account_profile_id="work")
     assert req.account_profile_id == "work"
+
+
+# ── Schedule ────────────────────────────────────────────────────────────────
+
+
+async def test_schedule_persists_and_validates_profile(tmp_path: Path) -> None:
+    # create_schedule arms an asyncio fire-timer, so it needs a running loop.
+    runtime, storage = _runtime(tmp_path, codex=_codex_profiles())
+    record = runtime.scheduler.create_schedule(
+        ScheduleCreateRequest(
+            backend="codex", cwd="/tmp", delay_seconds=60, account_profile_id="work"
+        )
+    )
+    stored = storage.get_schedule(record.id)
+    assert stored is not None
+    # Selection persisted; label resolved at create time. The config-dir itself
+    # is resolved from the profile at fire time, not snapshotted here.
+    assert stored.account_profile_id == "work"
+    assert stored.account_profile_label == "Work"
+
+
+def test_schedule_rejects_unknown_profile(tmp_path: Path) -> None:
+    runtime, _ = _runtime(tmp_path, codex=_codex_profiles())
+    with pytest.raises(HTTPException) as exc:
+        runtime.scheduler.create_schedule(
+            ScheduleCreateRequest(
+                backend="codex", cwd="/tmp", delay_seconds=60, account_profile_id="nope"
+            )
+        )
+    assert exc.value.status_code == 400

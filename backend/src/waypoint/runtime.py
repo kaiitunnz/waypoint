@@ -473,10 +473,22 @@ class SessionRuntime:
             )
         config_dir = profile.config_dir
         # Expand ``~`` for local launches (the config dir is a path on this
-        # host). Remote targets keep it verbatim — remote-home expansion lands
-        # with the remote transcript/probe work.
+        # host). Remote-home expansion isn't supported yet, and env values are
+        # injected shell-quoted so a remote shell won't expand ``~`` either —
+        # rather than silently launch under a literal ``~`` dir (wrong account),
+        # reject a ``~``-relative remote config_dir until that lands. Absolute
+        # remote paths are fine.
         if launch_target is None:
             config_dir = os.path.expanduser(config_dir)
+        elif config_dir.startswith("~"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"account profile {account_profile_id!r} uses a '~'-relative "
+                    "config_dir on a remote launch target; use an absolute path "
+                    "(remote home expansion is not yet supported)"
+                ),
+            )
         env = dict(launch_env)
         env[config_dir_key] = config_dir
         return env, profile.label

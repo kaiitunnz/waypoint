@@ -1392,10 +1392,12 @@ def test_delete_fork_file_local_honors_config_dir(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_one_shot_local_passes_env() -> None:
+async def test_run_one_shot_local_passes_env(monkeypatch: Any) -> None:
     # The one-shot must run under the session's env so CLAUDE_CONFIG_DIR (a
     # profile's) reaches the resumed claude; else it resumes the wrong account's
-    # thread and the side-question errors.
+    # thread and the side-question errors. Stub which() so the test doesn't
+    # depend on claude being installed (it isn't in CI).
+    monkeypatch.setattr(sq_module.shutil, "which", lambda _name: "/usr/bin/claude")
     captured: dict[str, Any] = {}
 
     async def fake_exec(*args: Any, **kwargs: Any) -> Any:

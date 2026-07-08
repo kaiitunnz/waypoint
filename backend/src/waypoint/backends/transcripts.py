@@ -79,11 +79,17 @@ def copy_thread_artifacts(
     for artifact in artifacts:
         rel = artifact.relative_to(src_root)
         dest = dst_root / rel
+        # Lock only the dirs this copy creates to 0700; leave pre-existing ones
+        # (including the config root) untouched. The transcript is copied with
+        # its metadata (shutil.copy2) then pinned to 0600 as a backstop.
+        new_dirs = [
+            dst_root / parent
+            for parent in reversed(rel.parents)
+            if (dst_root / parent) != dst_root and not (dst_root / parent).exists()
+        ]
         dest.parent.mkdir(parents=True, exist_ok=True)
-        # Keep created dirs owner-only; the transcript itself is copied with its
-        # metadata (shutil.copy2) and then pinned to 0600 as a backstop.
-        for parent in reversed(dest.relative_to(dst_root).parents):
-            (dst_root / parent).chmod(0o700)
+        for created in new_dirs:
+            created.chmod(0o700)
         shutil.copy2(artifact, dest)
         dest.chmod(0o600)
 

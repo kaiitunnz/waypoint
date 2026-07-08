@@ -114,6 +114,30 @@ def test_copy_thread_on_switch_copies_codex_rollout(tmp_path: Path) -> None:
     assert _plugin("codex").native_thread_artifacts(_session("codex"), str(target))
 
 
+def test_copy_thread_on_switch_leaves_preexisting_dirs_untouched(
+    tmp_path: Path,
+) -> None:
+    current = tmp_path / "current"
+    target = tmp_path / "target"
+    _write_codex_rollout(current)
+    # A pre-existing target config root with a non-0700 mode must not be
+    # re-chmod'd by the copy — only newly-created dirs are locked down.
+    target.mkdir()
+    target.chmod(0o755)
+    ensure_thread_available(
+        _plugin("codex"),
+        _session("codex"),
+        current_config_dir=str(current),
+        target_config_dir=str(target),
+        policy="copy_thread_on_switch",
+        shared_transcript_dir=None,
+        native_thread_store="sessions",
+    )
+    assert oct(target.stat().st_mode)[-3:] == "755"
+    # ...but a dir this copy created is owner-only.
+    assert oct((target / "sessions").stat().st_mode)[-3:] == "700"
+
+
 def test_copy_thread_on_switch_rejects_when_source_missing(tmp_path: Path) -> None:
     with pytest.raises(TranscriptUnavailableError, match="not found to copy"):
         ensure_thread_available(

@@ -63,11 +63,34 @@ policy decides how:
 - **`require_existing`** (default) — verify the target config dir already has the
   thread; never touch files. Use when profiles share a config dir, or you manage
   the transcript trees yourself.
-- **`symlink_shared`** — point the target's native transcript store at a shared
-  directory (requires `shared_transcript_dir`), so every profile sees the same
-  threads.
+- **`symlink_shared`** — make the target profile's native transcript store a
+  symlink to a shared directory (requires `shared_transcript_dir`), so every
+  profile pointed at that directory reads and writes the same threads. See below.
 - **`copy_thread_on_switch`** — copy just the current thread's artifacts into the
   target config dir on the switch. Use for fully independent config dirs.
+
+#### How `symlink_shared` resolves transcripts
+
+Each agent keeps its transcripts under a fixed subdirectory of its config dir —
+its *native store*: `projects` for Claude (`$CLAUDE_CONFIG_DIR/projects/…`),
+`sessions` for Codex (`$CODEX_HOME/sessions/…`). On the first switch onto a
+`symlink_shared` profile whose target can't already see the thread, Waypoint
+makes `<config_dir>/<native-store>` a symlink to `shared_transcript_dir`. Point
+every such profile's `shared_transcript_dir` at the **same** directory and they
+all resolve to one physical transcript tree, so a thread written under one
+profile is immediately visible under another — no copy.
+
+The conversion is idempotent and **non-destructive**: a missing store directory
+is created as the symlink, the correct symlink already in place is left alone,
+and an *empty* store directory is replaced — but a store directory that already
+holds real transcripts is refused rather than moved (migrate it into the shared
+directory first). So point profiles at a shared directory on fresh or empty
+config dirs. If the thread still isn't visible after linking, the switch is
+rejected before the session is touched.
+
+The tradeoff versus `copy_thread_on_switch`: one shared tree means the accounts
+have **no transcript isolation** — every profile sees every thread — whereas
+copying keeps independent trees and duplicates only the switched thread.
 
 ## Using profiles from the CLI
 

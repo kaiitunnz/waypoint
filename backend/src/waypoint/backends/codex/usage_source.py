@@ -50,10 +50,6 @@ def find_codex_rollout(thread_id: str, codex_home: str | None = None) -> Path | 
     return next(sessions_dir.glob(f"*/*/*/rollout-*{suffix}"), None)
 
 
-def _find_rollout_path(thread_id: str) -> Path | None:
-    return find_codex_rollout(thread_id)
-
-
 def _parse_token_count_record(record: dict[str, Any]) -> SessionContextUsage | None:
     """Extract a SessionContextUsage from a rollout ``token_count`` event_msg.
 
@@ -99,9 +95,17 @@ def _parse_token_count_record(record: dict[str, Any]) -> SessionContextUsage | N
 class CodexRolloutUsageSource(ContextUsageSource):
     """Tails a Codex rollout JSONL and publishes context usage for tmux sessions."""
 
-    def __init__(self, session_id: str, runtime: "SessionRuntime") -> None:
+    def __init__(
+        self,
+        session_id: str,
+        runtime: "SessionRuntime",
+        codex_home: str | None = None,
+    ) -> None:
         self._session_id = session_id
         self._runtime = runtime
+        # The session's CODEX_HOME (an account profile's), so the rollout is
+        # found under the profile dir rather than the default ~/.codex.
+        self._codex_home = codex_home
         self._offset = 0
         self._context_usage_signature: tuple[int, int | None] | None = None
 
@@ -159,7 +163,9 @@ class CodexRolloutUsageSource(ContextUsageSource):
 
             path: Path | None = None
             while path is None:
-                path = await asyncio.to_thread(_find_rollout_path, thread_id)
+                path = await asyncio.to_thread(
+                    find_codex_rollout, thread_id, self._codex_home
+                )
                 if path is None:
                     await asyncio.sleep(_POLL_INTERVAL)
 

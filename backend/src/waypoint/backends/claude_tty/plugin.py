@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 
+from waypoint.backends.base import config_dir_for
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
 from waypoint.backends.claude_code import side_question as _sq
 from waypoint.backends.claude_code.commands import list_claude_command_completions
@@ -443,8 +444,7 @@ class ClaudeTtyPlugin:
 
     def _config_dir_from_env(self, launch_env: dict[str, str]) -> str | None:
         """The CLAUDE_CONFIG_DIR override carried in a launch env, if any."""
-        key = self._claude.capabilities.config_dir_env_var
-        return launch_env.get(key) if key else None
+        return config_dir_for(self._claude.capabilities, launch_env)
 
     def _config_dir(self, session: SessionRecord) -> str | None:
         """The session's CLAUDE_CONFIG_DIR override, if any.

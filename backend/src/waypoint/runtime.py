@@ -21,6 +21,7 @@ from waypoint.assistant_assets import AssistantAssetError, ensure_assistant_asse
 from waypoint.attachments import AttachmentStore, ResolvedAttachment
 from waypoint.backends import BackendRegistry, get_registry
 from waypoint.backends.account_profiles import (
+    probe_account,
     redacted_profile_metadata,
     resolve_account_profiles,
 )
@@ -31,6 +32,10 @@ from waypoint.backends.tmux.normalize import (
     TMUX_CONTENT_KINDS,
     NormalizedChunk,
     TerminalNormalizer,
+)
+from waypoint.backends.transcripts import (
+    TranscriptUnavailableError,
+    ensure_thread_available,
 )
 from waypoint.builtin_completions import waypoint_builtin_completions
 from waypoint.git_meta import resolve_git_meta
@@ -58,6 +63,8 @@ from waypoint.schemas import (
     InboxReplyInput,
     InboxStatus,
     LaunchMode,
+    LaunchSettingsResponse,
+    LaunchSettingsUpdateRequest,
     SessionApprovalRequest,
     SessionAttachRequest,
     SessionCommandInvocation,
@@ -254,6 +261,10 @@ class SessionRuntime:
         # cancelled on session exit alongside the other per-session tasks.
         self._context_usage_sources: dict[str, asyncio.Task[None]] = {}
         self._restore_tasks: set[asyncio.Task[None]] = set()
+        # Serializes disruptive per-session lifecycle ops (a launch-settings
+        # switch is a terminate→restore sequence that must not interleave with
+        # another switch/reattach/terminate on the same session).
+        self._session_locks: dict[str, asyncio.Lock] = {}
         self._completion_cache: dict[CompletionCacheKey, list[CommandCompletion]] = {}
         self._completion_cache_updated_at: dict[CompletionCacheKey, float] = {}
         self._completion_refresh_tasks: dict[
@@ -1632,6 +1643,265 @@ class SessionRuntime:
             )
         self._start_context_usage_source(refreshed)
         return refreshed
+
+    def _session_lock(self, session_id: str) -> asyncio.Lock:
+        lock = self._session_locks.get(session_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[session_id] = lock
+        return lock
+
+    def get_launch_settings(self, session_id: str) -> LaunchSettingsResponse:
+        session = self.get_session(session_id)
+        plugin = self.registry.plugin_for(session)
+        caps = plugin.capabilities
+        launch_target = self._find_launch_target(session.launch_target_id)
+        profiles = redacted_profile_metadata(
+            self.settings, session.backend, launch_target
+        )
+        return LaunchSettingsResponse(
+            backend=session.backend,
+            transport=session.transport,
+            launch_target_id=session.launch_target_id,
+            account_profile_id=session.account_profile_id,
+            account_profile_label=session.account_profile_label,
+            account_profiles=[cast(Any, meta) for meta in profiles],
+            args=list(session.args),
+            config_overrides=list(session.config_overrides),
+            # Redacted: only the env keys, never their (possibly secret) values.
+            launch_env_keys=sorted(session.launch_env.keys()),
+            supports_custom_args=caps.supports_custom_cli_args,
+            supports_config_overrides=caps.supports_config_overrides,
+            supports_account_profile_with_restart=(
+                caps.supports_account_profile_with_restart
+            ),
+            requires_restart=True,
+        )
+
+    async def update_launch_settings(
+        self, session_id: str, request: LaunchSettingsUpdateRequest
+    ) -> SessionRecord:
+        """Apply restart-scoped launch-settings edits via terminate → restore.
+
+        Serialized per session. When the account profile changes it flushes any
+        running turn, ensures the target profile can see the native transcript,
+        and probes the target account before terminating; after restore it
+        re-probes and rolls back to the prior settings if the account didn't
+        actually change. See the RFC (docs/… issue #230) for the state machine.
+        """
+        lock = self._session_lock(session_id)
+        if lock.locked():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="another lifecycle operation is in progress for this session",
+            )
+        async with lock:
+            return await self._update_launch_settings_locked(session_id, request)
+
+    async def _update_launch_settings_locked(
+        self, session_id: str, request: LaunchSettingsUpdateRequest
+    ) -> SessionRecord:
+        session = self.get_session(session_id)
+        plugin = self.registry.plugin_for(session)
+        caps = plugin.capabilities
+        if session.status == SessionStatus.STARTING:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="cannot change launch settings while the session is STARTING",
+            )
+        if not (
+            caps.supports_launch_settings_with_restart
+            and caps.supports_reattach_after_exit
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{session.backend} does not support restart-applied launch settings",
+            )
+        if not request.restart:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="restart must be true to change a running session's launch settings",
+            )
+
+        launch_target = self._find_launch_target(session.launch_target_id)
+        fields = request.model_fields_set
+        selected_profile_id = (
+            request.account_profile_id
+            if "account_profile_id" in fields
+            else session.account_profile_id
+        )
+        profile_changing = (
+            "account_profile_id" in fields
+            and request.account_profile_id != session.account_profile_id
+            and request.account_profile_id is not None
+        )
+        if profile_changing and not caps.supports_account_profile_with_restart:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{session.backend} does not support account-profile switching",
+            )
+
+        new_args = (
+            list(request.args) if request.args is not None else list(session.args)
+        )
+        new_config_overrides = (
+            list(request.config_overrides)
+            if request.config_overrides is not None
+            else list(session.config_overrides)
+        )
+        new_env = dict(session.launch_env)
+        for key in request.env_unset:
+            if key == "WAYPOINT_SESSION_ID":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="cannot unset WAYPOINT_SESSION_ID",
+                )
+            new_env.pop(key, None)
+        new_env.update(request.env_set)
+        # Profile owns its config-dir env key (strips any raw value); re-applied
+        # even when unchanged so an env edit can't shadow it.
+        new_env, resolved_label = self._apply_account_profile_env(
+            session.backend, new_env, selected_profile_id, launch_target
+        )
+        new_profile_label = resolved_label if selected_profile_id is not None else None
+
+        # Snapshot the prior settings for rollback (restore rebuilds env from the
+        # persisted record, so rollback = re-persist the old triple + restore).
+        old_launch_env = dict(session.launch_env)
+        old = {
+            "args": list(session.args),
+            "config_overrides": list(session.config_overrides),
+            "launch_env": old_launch_env,
+            "account_profile_id": session.account_profile_id,
+            "account_profile_label": session.account_profile_label,
+        }
+
+        config_dir_key = caps.config_dir_env_var
+        pre_probe = None
+        if profile_changing:
+            profile = self._require_account_profile(
+                session.backend, cast(str, request.account_profile_id), launch_target
+            )
+            # Flush a running turn to the native store before the transcript step.
+            if session.status in {SessionStatus.RUNNING, SessionStatus.WAITING_INPUT}:
+                await self.transport_for(session).interrupt(session)
+                session = self.storage.update_session(
+                    session.id, status=SessionStatus.INTERRUPTED
+                )
+            if launch_target is None and config_dir_key:
+                current_config_dir = old_launch_env.get(
+                    config_dir_key
+                ) or os.environ.get(config_dir_key)
+                target_config_dir = new_env.get(config_dir_key)
+                if (
+                    profile.transcript_policy == "copy_thread_on_switch"
+                    and not current_config_dir
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="cannot determine the current config dir to copy the thread from",
+                    )
+                if target_config_dir:
+                    try:
+                        ensure_thread_available(
+                            plugin,
+                            session,
+                            current_config_dir=current_config_dir or target_config_dir,
+                            target_config_dir=target_config_dir,
+                            policy=profile.transcript_policy,
+                            shared_transcript_dir=profile.shared_transcript_dir,
+                            native_thread_store=caps.native_thread_store,
+                        )
+                    except TranscriptUnavailableError as exc:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"cannot switch account profile: {exc}",
+                        ) from exc
+            # Verify the target account before we terminate anything.
+            pre_probe = await probe_account(
+                self,
+                session.backend,
+                new_env,
+                launch_target=launch_target,
+                cwd=session.cwd,
+            )
+            if pre_probe is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="could not verify the target account before switching",
+                )
+            if (
+                profile.expected_account_key
+                and pre_probe.account_key != profile.expected_account_key
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"target account {pre_probe.account_key!r} does not match the "
+                        f"profile's expected account {profile.expected_account_key!r}"
+                    ),
+                )
+
+        # Terminate → persist new settings → restore. terminate/restore cycle
+        # the rate-limit watcher; restore rebuilds env from the persisted record.
+        await plugin.terminate_session(self, session)
+        await self._cancel_context_usage_source(session.id)
+        self.storage.update_session(
+            session.id,
+            args=new_args,
+            config_overrides=new_config_overrides,
+            launch_env=new_env,
+            account_profile_id=selected_profile_id,
+            account_profile_label=new_profile_label,
+        )
+        await plugin.restore_session(self, self.get_session(session.id))
+        refreshed = self.get_session(session.id)
+        if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
+            # Restore failed: keep the new settings on the record (per the RFC —
+            # a rollback here could flip back to an already-rate-limited account)
+            # and surface the terminal state so the user can reattach.
+            await self._broadcast_session_list()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"restore failed after applying launch settings "
+                    f"({refreshed.status}); settings kept, reattach to retry"
+                ),
+            )
+        if profile_changing and pre_probe is not None:
+            post_probe = await probe_account(
+                self,
+                refreshed.backend,
+                refreshed.launch_env,
+                launch_target=launch_target,
+                cwd=refreshed.cwd,
+            )
+            if post_probe is None or post_probe.account_key != pre_probe.account_key:
+                # Healthy process but wrong account: roll back to the prior
+                # settings and restore, leaving the session on its old account.
+                await plugin.terminate_session(self, refreshed)
+                self.storage.update_session(session.id, **old)
+                await plugin.restore_session(self, self.get_session(session.id))
+                self._start_context_usage_source(self.get_session(session.id))
+                await self._record_system_event(
+                    session.id,
+                    "Account switch rolled back: post-restore account did not "
+                    "match the target; restored the prior profile.",
+                )
+                await self._broadcast_session_list()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="post-restore account did not match the target; rolled back",
+                )
+        self._start_context_usage_source(refreshed)
+        note = (
+            f"Session restarted with account profile {new_profile_label}"
+            if selected_profile_id is not None and profile_changing
+            else "Session restarted with new launch settings"
+        )
+        await self._record_system_event(session.id, note)
+        await self._broadcast_session_list()
+        return self.get_session(session.id)
 
     async def delete(
         self, session_id: str, *, force: bool = False, prune_branches: bool = False

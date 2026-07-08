@@ -321,6 +321,20 @@ class AccountProfileMeta(BaseModel):
     config_dir_key: str
 
 
+class AccountProbeResult(BaseModel):
+    """The account a backend authenticates as under a given config dir.
+
+    ``account_key`` is the stable identity the runtime uses to accept a profile
+    switch and match a profile's ``expected_account_key``; ``account_label`` is
+    a human display string. Produced by probing the account's rate-limit
+    endpoint and mapping the snapshot to an account via the plugin.
+    """
+
+    account_key: str
+    account_label: str | None = None
+    source: Literal["oauth", "api", "cli", "unknown"] = "oauth"
+
+
 class LaunchTargetSummary(BaseModel):
     id: str
     name: str
@@ -609,6 +623,42 @@ class SessionModelRequest(BaseModel):
 
 class SessionEffortRequest(BaseModel):
     effort: str | None = None
+
+
+class LaunchSettingsUpdateRequest(BaseModel):
+    """PATCH body for a session's restart-applied launch settings.
+
+    Omitted ``args``/``config_overrides`` are left unchanged; when present they
+    replace. ``env_set``/``env_unset`` patch the private launch env. When
+    ``account_profile_id`` is set it owns the config-dir env key (any value for
+    that key in ``env_set`` is dropped). ``restart`` must be true for a running
+    session in phase 1.
+    """
+
+    account_profile_id: str | None = None
+    args: list[str] | None = None
+    config_overrides: list[str] | None = None
+    env_set: dict[str, str] = Field(default_factory=dict)
+    env_unset: list[str] = Field(default_factory=list)
+    restart: bool = False
+
+
+class LaunchSettingsResponse(BaseModel):
+    """GET view of a session's restart-applied launch settings (redacted env)."""
+
+    backend: BackendId
+    transport: SessionTransportId
+    launch_target_id: str | None = None
+    account_profile_id: str | None = None
+    account_profile_label: str | None = None
+    account_profiles: list[AccountProfileMeta] = Field(default_factory=list)
+    args: list[str] = Field(default_factory=list)
+    config_overrides: list[str] = Field(default_factory=list)
+    launch_env_keys: list[str] = Field(default_factory=list)
+    supports_custom_args: bool = False
+    supports_config_overrides: bool = False
+    supports_account_profile_with_restart: bool = False
+    requires_restart: bool = True
 
 
 class BackendModelOption(BaseModel):

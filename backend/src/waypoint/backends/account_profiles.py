@@ -18,9 +18,11 @@ from typing import TYPE_CHECKING, Any
 
 from waypoint.backends.plugin_config import AccountProfileConfig
 from waypoint.backends.registry import get_registry
+from waypoint.schemas import AccountProbeResult
 
 if TYPE_CHECKING:
     from waypoint.launch_targets import SshLaunchTargetConfig
+    from waypoint.runtime import SessionRuntime
     from waypoint.settings import Settings
 
 
@@ -92,3 +94,37 @@ def redacted_profile_metadata(
         {"id": pid, "label": profile.label, "config_dir_key": config_dir_key}
         for pid, profile in profiles.items()
     ]
+
+
+async def probe_account(
+    runtime: "SessionRuntime",
+    backend: str,
+    launch_env: dict[str, str],
+    *,
+    launch_target: "SshLaunchTargetConfig | None" = None,
+    cwd: str = ".",
+) -> AccountProbeResult | None:
+    """Identify the account a ``backend`` authenticates as under ``launch_env``.
+
+    Composes the account rate-limit probe (run with the target ``launch_env`` so
+    it authenticates as that config dir's account, ``force`` to bypass any TTL
+    cache) with the plugin's ``rate_limit_account`` mapping. Returns ``None``
+    when the backend can't probe or can't produce a stable account key — the
+    runtime treats that as "cannot verify" and refuses a switch. Dispatches
+    through the registry; no per-backend branching.
+    """
+    plugin = get_registry().get(backend)
+    probe = getattr(plugin, "probe_account_rate_limit", None)
+    account_of = getattr(plugin, "rate_limit_account", None)
+    if probe is None or account_of is None:
+        return None
+    snapshot = await probe(
+        runtime, launch_target, cwd=cwd, launch_env=launch_env, force=True
+    )
+    if snapshot is None:
+        return None
+    account = account_of(snapshot)
+    if account is None:
+        return None
+    key, label = account
+    return AccountProbeResult(account_key=key, account_label=label)

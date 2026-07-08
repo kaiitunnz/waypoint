@@ -86,13 +86,18 @@ def setup_transcripts_symlink(store_dir: Path, shared_dir: Path) -> list[str]:
     the actions taken (for reporting); raises :class:`TranscriptUnavailableError`
     on a same-named conflict or a symlink pointing elsewhere.
 
-    For the populated case the sequence is data-safe: (1) a conflict pre-flight
-    refuses before touching anything if any top-level entry already exists under
-    ``shared``; (2) contents are copied into a temp sibling of ``shared`` and
-    renamed into place only after the full copy succeeds, so a mid-copy failure
-    leaves both ``store`` and ``shared`` intact and a re-run stays clean; (3) the
-    original ``store`` is renamed to a timestamped backup (a complete snapshot,
-    not an emptied husk); (4) ``store`` becomes the symlink.
+    For the populated case the sequence is data-safe against loss: (1) a conflict
+    pre-flight refuses before touching anything if any top-level entry already
+    exists under ``shared``; (2) contents are copied into a temp sibling of
+    ``shared`` (removed on failure) and then renamed into place, so a mid-copy
+    failure leaves both ``store`` and ``shared`` intact; (3) the original
+    ``store`` is renamed to a timestamped backup (a complete snapshot, not an
+    emptied husk); (4) ``store`` becomes the symlink. The original ``store`` is
+    never touched until every entry is safely in ``shared``, so no transcript is
+    lost. The per-entry rename in step 2 is not a single atomic commit, so a
+    process death partway through can leave some entries already under ``shared``;
+    a re-run then reports those as conflicts and the operator finishes the move by
+    hand — the original data is still intact in ``store``.
     """
     shared_dir = shared_dir.expanduser()
     if store_dir.is_symlink() and store_dir.resolve() == shared_dir.resolve():
@@ -116,15 +121,18 @@ def _migrate_populated_store(store_dir: Path, shared_dir: Path) -> list[str]:
         )
 
     # Copy into a temp sibling first, then rename each entry into place, so a
-    # failed copy never leaves partial entries under the shared dir.
+    # failed copy never leaves partial entries under the shared dir. The staging
+    # dir is removed on any failure so a re-run isn't blocked by an orphan.
     staging = shared_dir.parent / f".wp-migrate-{_timestamp()}"
     if staging.exists():
         raise TranscriptUnavailableError(f"migration staging dir {staging} exists")
-    shutil.copytree(store_dir, staging, symlinks=True)
-    _pin_tree_perms(staging)
-    for entry in sorted(staging.iterdir(), key=lambda p: p.name):
-        entry.rename(shared_dir / entry.name)
-    staging.rmdir()
+    try:
+        shutil.copytree(store_dir, staging, symlinks=True)
+        _pin_tree_perms(staging)
+        for entry in sorted(staging.iterdir(), key=lambda p: p.name):
+            entry.rename(shared_dir / entry.name)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
     backup = store_dir.parent / f"{store_dir.name}.bak-{_timestamp()}"
     store_dir.rename(backup)

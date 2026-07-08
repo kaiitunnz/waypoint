@@ -536,7 +536,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         launch_target_id: Annotated[str | None, Query()] = None,
     ) -> Any:
         _require_profile_hosting_backend(backend)
-        actions = context.runtime.setup_account_transcripts(
+        # The migration is synchronous filesystem work (a copytree of the native
+        # store); run it off the event loop so a large store doesn't stall it.
+        actions = await asyncio.to_thread(
+            context.runtime.setup_account_transcripts,
             backend,
             profile,
             launch_target_id=launch_target_id,

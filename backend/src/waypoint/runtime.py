@@ -580,6 +580,32 @@ class SessionRuntime:
         if resolved:
             self._remote_home_cache[cache_key] = resolved
 
+    async def _warm_remote_home_for_profile(
+        self,
+        launch_target: SshLaunchTargetConfig | None,
+        backend: str,
+        profile_id: str | None,
+    ) -> None:
+        """Warm the remote-home cache for a profile's tilde prefix before the
+        synchronous ``_apply_account_profile_env`` read on the same code path.
+
+        No-op locally. Every path that applies a profile env for a remote
+        target (switch, create, import, probe) must call this first, or a
+        ``~``-relative remote ``config_dir`` hits a cold cache and 400s. Bare
+        ``~`` covers a non-``~`` / unknown / unresolvable profile, since the
+        cache read is a no-op for an absolute ``config_dir``.
+        """
+        if launch_target is None:
+            return
+        tilde_prefix = "~"
+        if profile_id is not None:
+            candidate = resolve_account_profiles(
+                self.settings, backend, launch_target
+            ).get(profile_id)
+            if candidate is not None and candidate.config_dir.startswith("~"):
+                tilde_prefix, _ = self._split_tilde_config_dir(candidate.config_dir)
+        await self._ensure_remote_home_cached(launch_target, tilde_prefix)
+
     def _ensure_profile_config_dir_ready(
         self,
         backend: str,
@@ -688,6 +714,7 @@ class SessionRuntime:
         launch_target = self._resolve_launch_target(launch_target_id, backend)
         if launch_target is not None:
             await self._require_live_master(launch_target)
+        await self._warm_remote_home_for_profile(launch_target, backend, profile_id)
         env = self._profile_launch_env(backend, profile_id, launch_target)
         result = await probe_account(
             self, backend, env, launch_target=launch_target, cwd=cwd
@@ -927,6 +954,9 @@ class SessionRuntime:
             request.launch_target_id, request.backend
         )
         await self._require_live_master(launch_target)
+        await self._warm_remote_home_for_profile(
+            launch_target, request.backend, request.account_profile_id
+        )
         # Local cwd is fed to subprocess.Popen / tmux new-session, neither of
         # which expand `~`. Resolve it before storing/launching. The remote
         # cwd is left verbatim so the remote shell can do its own expansion.
@@ -1384,6 +1414,9 @@ class SessionRuntime:
             else self._default_launch_env(backend, launch_target)
         )
         account_profile_id = getattr(request, "account_profile_id", None)
+        await self._warm_remote_home_for_profile(
+            launch_target, backend, account_profile_id
+        )
         launch_env, account_profile_label = self._apply_account_profile_env(
             backend, launch_env, account_profile_id, launch_target
         )
@@ -2157,18 +2190,9 @@ class SessionRuntime:
             # Clean 409 ``ssh-master-required`` for a dead password master
             # before any destructive step (the frontend prompts + retries).
             await self._require_live_master(launch_target)
-            # Warm the remote-home cache for the selected profile's tilde
-            # prefix before the synchronous ``_apply_account_profile_env``
-            # read below — bare ``~`` covers a non-``~`` or unresolvable
-            # profile too, since it's a harmless no-op there.
-            tilde_prefix = "~"
-            if selected_profile_id is not None:
-                candidate = resolve_account_profiles(
-                    self.settings, session.backend, launch_target
-                ).get(selected_profile_id)
-                if candidate is not None and candidate.config_dir.startswith("~"):
-                    tilde_prefix, _ = self._split_tilde_config_dir(candidate.config_dir)
-            await self._ensure_remote_home_cached(launch_target, tilde_prefix)
+            await self._warm_remote_home_for_profile(
+                launch_target, session.backend, selected_profile_id
+            )
 
         if request.args is not None and not caps.supports_custom_cli_args:
             raise HTTPException(
@@ -2302,7 +2326,12 @@ class SessionRuntime:
                         else RemoteTranscriptFilesystem(launch_target)
                     )
                     try:
-                        ensure_thread_available(
+                        # Off-thread: the remote fs does blocking SSH I/O
+                        # (~8-15 round-trips), which would freeze the event
+                        # loop for every other session; the local fs is fast
+                        # but wrapping uniformly keeps one code path.
+                        await asyncio.to_thread(
+                            ensure_thread_available,
                             plugin,
                             session,
                             current_config_dir=current_config_dir or target_config_dir,

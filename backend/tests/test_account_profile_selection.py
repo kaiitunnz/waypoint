@@ -149,6 +149,35 @@ async def test_overlay_expands_tilde_config_dir_on_remote_with_warm_cache(
     assert label == "Work"
 
 
+async def test_warm_remote_home_for_profile_lets_overlay_expand_tilde(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The helper every non-switch entry point (create/import/probe) calls
+    # before the synchronous overlay warms the profile's tilde prefix, so a
+    # ``~``-relative remote config_dir resolves instead of 400ing on a cold
+    # cache — the regression the review caught.
+    runtime, _ = _runtime(tmp_path, codex=_codex_profiles())
+    target = SshLaunchTargetConfig(id="d", name="d", ssh_destination="u@d")
+
+    async def fake_ssh_capture(self: SshLaunchTargetConfig, remote_cmd: str) -> str:
+        return "/home/alice\n"
+
+    monkeypatch.setattr(SshLaunchTargetConfig, "ssh_capture", fake_ssh_capture)
+    await runtime._warm_remote_home_for_profile(target, "codex", "work")
+
+    env, _ = runtime._apply_account_profile_env("codex", {}, "work", target)
+    assert env["CODEX_HOME"] == "/home/alice/.codex-work"
+
+
+async def test_warm_remote_home_for_profile_noop_for_local_target(
+    tmp_path: Path,
+) -> None:
+    runtime, _ = _runtime(tmp_path, codex=_codex_profiles())
+    # No SSH, no cache write; a local target is a plain no-op.
+    await runtime._warm_remote_home_for_profile(None, "codex", "work")
+    assert runtime._remote_home_cache == {}
+
+
 def test_overlay_rejects_tilde_config_dir_on_remote_with_cold_cache(
     tmp_path: Path,
 ) -> None:

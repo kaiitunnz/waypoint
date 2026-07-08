@@ -89,7 +89,7 @@ def setup_transcripts_symlink(store_dir: Path, shared_dir: Path) -> list[str]:
     For the populated case the sequence is data-safe against loss: (1) a conflict
     pre-flight refuses before touching anything if any top-level entry already
     exists under ``shared``; (2) contents are copied into a temp sibling of
-    ``shared`` (removed on failure) and then renamed into place, so a mid-copy
+    ``shared`` (removed afterward) and then renamed into place, so a mid-copy
     failure leaves both ``store`` and ``shared`` intact; (3) the original
     ``store`` is renamed to a timestamped backup (a complete snapshot, not an
     emptied husk); (4) ``store`` becomes the symlink. The original ``store`` is

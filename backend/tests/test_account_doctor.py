@@ -232,6 +232,8 @@ async def test_doctor_endpoint_reports_profiles(
     assert {"supported", "config_dir_exists", "ready", "transcript_setup"} <= names
     match = next(c for c in report["checks"] if c["name"] == "account_matches_expected")
     assert match["ok"] is True
+    # The matched key stays out of the detail without --show-key.
+    assert "claude_code:acme" not in (match["detail"] or "")
 
 
 @pytest.mark.asyncio

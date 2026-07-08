@@ -1077,8 +1077,16 @@ class SessionRuntime:
         else:
             driver = agent_plugin
             # No pinned transport: import resumes over the agent's structured
-            # (headless) path unless the caller forces the tmux wrapper.
-            if getattr(request, "launch_mode", None) == LaunchMode.TMUX_WRAPPER:
+            # (headless) path unless it falls through to the tmux wrapper — the
+            # caller forced it, or AUTO can't use the structured adapter. Mirror
+            # the plugin's own resume-wrapper predicate so the guard sees the
+            # transport the session will actually run on.
+            launch_mode = getattr(request, "launch_mode", None)
+            uses_wrapper = launch_mode == LaunchMode.TMUX_WRAPPER or (
+                launch_mode == LaunchMode.AUTO
+                and not agent_plugin.is_available_for_managed_launch(self)
+            )
+            if uses_wrapper:
                 fallback = self.registry.fallback_for_managed_launch()
                 transport_caps = (fallback or agent_plugin).capabilities
             else:

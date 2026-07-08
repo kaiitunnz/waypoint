@@ -366,7 +366,17 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             return
 
         async def _probe() -> SessionRateLimitUsage | None:
-            return await probe_claude_usage_shared()
+            # Probe the account the session actually runs as: its launch_env
+            # carries the profile's CLAUDE_CONFIG_DIR, which selects the
+            # credentials/account (and the shared probe's cache key). Looked up
+            # per probe so it tracks a live settings change.
+            session = runtime.storage.get_session(session_id)
+            env = (
+                runtime.account_lookup_env(self.id, session.launch_env)
+                if session is not None
+                else None
+            )
+            return await probe_claude_usage_shared(env=env)
 
         await self.adapter.register_rate_limit_probe(
             session_id, _probe, refresh_interval_seconds=300.0
@@ -429,6 +439,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         launch_target: SshLaunchTargetConfig | None,
         *,
         cwd: str | None = None,
+        launch_env: dict[str, str] | None = None,
         force: bool = False,
     ) -> SessionRateLimitUsage | None:
         """Fetch the account's current rate-limit snapshot without a session.
@@ -444,7 +455,12 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         """
         _ = cwd
         if launch_target is None:
-            return await probe_claude_usage_shared(force=force)
+            env = (
+                runtime.account_lookup_env(self.id, launch_env)
+                if launch_env is not None
+                else None
+            )
+            return await probe_claude_usage_shared(env=env, force=force)
         return await probe_claude_usage_remote_shared(launch_target, force=force)
 
     def rate_limit_account(

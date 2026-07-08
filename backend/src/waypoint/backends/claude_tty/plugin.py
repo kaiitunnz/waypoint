@@ -286,10 +286,11 @@ class ClaudeTtyPlugin:
         launch_target: SshLaunchTargetConfig | None,
         *,
         cwd: str | None = None,
+        launch_env: dict[str, str] | None = None,
         force: bool = False,
     ) -> SessionRateLimitUsage | None:
         return await self._claude.probe_account_rate_limit(
-            runtime, launch_target, cwd=cwd, force=force
+            runtime, launch_target, cwd=cwd, launch_env=launch_env, force=force
         )
 
     def validate_permission_mode(self, mode: str | None) -> str | None:

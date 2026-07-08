@@ -342,8 +342,16 @@ class TmuxPlugin:
         # The account-level probe is uniform across agents; ``cwd`` is
         # always supplied (codex's ``/status`` PTY fallback needs it, the
         # others ignore it) so no per-backend call shape is needed here.
+        # ``launch_env`` carries the session's profile config-dir so the probe
+        # reads the account this wrapped session actually runs as.
         try:
-            snapshot = await probe(runtime, launch_target, cwd=session.cwd, force=force)
+            snapshot = await probe(
+                runtime,
+                launch_target,
+                cwd=session.cwd,
+                launch_env=session.launch_env,
+                force=force,
+            )
         except Exception:  # noqa: BLE001
             log.exception(
                 "tmux rate-limit probe failed",

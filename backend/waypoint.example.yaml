@@ -51,6 +51,15 @@ plugin_configs:
     #   - "--verbose"
     # config_overrides:                      # codex-only; each entry → `codex --config K=V`
     #   - 'model_reasoning_effort="high"'
+    # account_profiles:                      # named CODEX_HOME profiles; see docs/account_profiles.md
+    #   personal:
+    #     label: Personal
+    #     config_dir: ~/.codex
+    #   work:
+    #     label: Work
+    #     config_dir: ~/.codex-work
+    #     transcript_policy: copy_thread_on_switch  # require_existing | symlink_shared | copy_thread_on_switch
+    #     expected_account_key: codex:work@example.com   # gate the switch to this account (optional)
   claude_code:
     # default_model_id: opus
     # default_effort: high
@@ -63,6 +72,15 @@ plugin_configs:
     #   - id: opus
     #     label: Opus 4.7
     #     is_default: true
+    # account_profiles:                      # named CLAUDE_CONFIG_DIR profiles; see docs/account_profiles.md
+    #   personal:
+    #     label: Personal
+    #     config_dir: ~/.claude
+    #   work:
+    #     label: Work
+    #     config_dir: ~/.claude-work
+    #     transcript_policy: copy_thread_on_switch  # require_existing | symlink_shared | copy_thread_on_switch
+    #     expected_account_key: claude_code:acme-corp   # gate the switch to this account (optional)
   opencode:
     # default_model_id: anthropic/claude-sonnet-4-6
     # default_effort: high

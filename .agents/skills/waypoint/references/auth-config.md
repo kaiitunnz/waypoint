@@ -16,3 +16,11 @@ Environment overrides may affect data dir, host, port, and password.
 
 If the server is unreachable, inspect the stack with the `waypointctl` skill
 rather than guessing.
+
+## Account / config profiles
+
+Claude and Codex sessions can run under named account/config-dir profiles and
+switch between them without restarting the service. List them with `waypoint
+accounts list`, pick one at launch with `--account-profile`, and switch a running
+session with `waypoint sessions set-account <session-id> <profile>`. Full
+configuration and behavior: [`docs/account_profiles.md`](../../../../docs/account_profiles.md).

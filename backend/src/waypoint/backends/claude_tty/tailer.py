@@ -83,7 +83,7 @@ class TranscriptTailer:
         self._path = transcript_path(cwd, session_uuid, config_dir)
         self._runtime = runtime
         self._plugin = plugin
-        self._normalizer = TranscriptNormalizer()
+        self._normalizer = TranscriptNormalizer(config_dir)
         self._pane_check_elapsed = 0.0
         self._dialog_check_elapsed = 0.0
         self._offset = (

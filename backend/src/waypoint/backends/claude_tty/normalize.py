@@ -73,7 +73,10 @@ class TranscriptNormalizer:
     ``process_record``.  Usage deduplication state is accumulated across calls.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, config_dir: str | None = None) -> None:
+        # The session's CLAUDE_CONFIG_DIR (an account profile's), so plan-file
+        # detection anchors to the profile's plans/ dir rather than the default.
+        self._config_dir = config_dir
         self._seen_message_ids: set[str] = set()
         self._task_tracker: TaskListTracker = TaskListTracker()
         self._pending_task_creates: dict[str, dict[str, Any]] = {}
@@ -330,7 +333,7 @@ class TranscriptNormalizer:
         transcript, never read off disk — which would fail for remote sessions.
         """
         path = str(tool_input.get("file_path") or "")
-        if not _is_plan_file_path(path):
+        if not _is_plan_file_path(path, self._config_dir):
             return
         self.last_plan_path = path
         if tool_name == "Write":

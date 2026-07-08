@@ -20,6 +20,7 @@ from fastapi import HTTPException, status
 from waypoint.assistant_assets import AssistantAssetError, ensure_assistant_assets
 from waypoint.attachments import AttachmentStore, ResolvedAttachment
 from waypoint.backends import BackendRegistry, get_registry
+from waypoint.backends.account_profiles import redacted_profile_metadata
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
 from waypoint.backends.tmux.normalize import (
@@ -2078,6 +2079,17 @@ class SessionRuntime:
                     "default_launch_env_by_backend": {
                         backend: self._default_launch_env(backend, target)
                         for backend in target.supported_plugins()
+                    },
+                    # Only agent backends that host profiles produce a non-empty
+                    # list, so transports/opencode are omitted (agent-ids only).
+                    "account_profiles_by_backend": {
+                        backend: profiles
+                        for backend in target.supported_plugins()
+                        if (
+                            profiles := redacted_profile_metadata(
+                                self.settings, backend, target
+                            )
+                        )
                     },
                 }
             )

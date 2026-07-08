@@ -147,6 +147,7 @@ class ClaudeTtyPlugin:
         supports_set_effort_with_restart=True,
         supports_set_permission_mode_inline=True,
         settings_change_interrupts_turn=True,
+        supports_launch_settings_with_restart=True,
         supports_custom_cli_args=True,
         supports_thread_discovery=True,
         supports_thread_import=True,
@@ -154,6 +155,10 @@ class ClaudeTtyPlugin:
         model_source=ModelSource.STATIC,
         permission_modes=ClaudeCodePlugin.capabilities.permission_modes,
         slash_commands=ClaudeCodePlugin.capabilities.slash_commands,
+        # Agent-axis fields sourced from the wrapped claude_code agent so the
+        # two backends can't drift on the config-dir/thread-store contract.
+        config_dir_env_var=ClaudeCodePlugin.capabilities.config_dir_env_var,
+        native_thread_store=ClaudeCodePlugin.capabilities.native_thread_store,
         badges={"glyph": "C", "color": "#a78bfa"},
         has_terminal_pane=True,
         terminal_interactive=False,

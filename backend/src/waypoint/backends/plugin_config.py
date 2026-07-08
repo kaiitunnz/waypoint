@@ -16,9 +16,47 @@ the registry-aware validators on ``Settings`` and
 errors surface at startup rather than first runtime access.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from waypoint.launch_env import LaunchEnv
+
+TranscriptPolicy = Literal[
+    "require_existing", "symlink_shared", "copy_thread_on_switch"
+]
+
+
+class AccountProfileConfig(BaseModel):
+    """A named account/config-dir profile for a coding-agent backend.
+
+    Resolves to the backend's config-dir env var (``CLAUDE_CONFIG_DIR`` /
+    ``CODEX_HOME``) plus the transcript-availability policy used when a running
+    session is switched onto this profile. Only backends that own a config-dir
+    env var accept these (``claude_code``/``codex``); the base config models
+    stay ``extra="forbid"`` so other backends reject an ``account_profiles``
+    block at parse time. Path fields keep ``~`` verbatim and are expanded only
+    where consumed, so parsing stays filesystem-free.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    config_dir: str
+    transcript_policy: TranscriptPolicy = "require_existing"
+    shared_transcript_dir: str | None = None
+    expected_account_key: str | None = None
+
+    @model_validator(mode="after")
+    def _require_shared_dir_for_symlink(self) -> "AccountProfileConfig":
+        if (
+            self.transcript_policy == "symlink_shared"
+            and not self.shared_transcript_dir
+        ):
+            raise ValueError(
+                "transcript_policy 'symlink_shared' requires 'shared_transcript_dir'"
+            )
+        return self
 
 
 class PluginConfig(BaseModel):

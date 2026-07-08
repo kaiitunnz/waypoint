@@ -1296,7 +1296,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         # otherwise the shell expands the default ``$HOME/.claude``. ``$HOME``
         # / ``$CLAUDE_CONFIG_DIR`` stay outside the quoted needle so the remote
         # shell expands them; quoting the whole path would look for a literal.
-        root = f"{shlex.quote(config_dir)}" if config_dir else "$HOME/.claude"
+        root = shlex.quote(config_dir) if config_dir else "$HOME/.claude"
         stdout = await launch_target.ssh_capture(
             f"ls {root}/projects/*/{shlex.quote(needle)} 2>/dev/null | head -n 1",
         )

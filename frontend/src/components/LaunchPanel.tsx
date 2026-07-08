@@ -18,6 +18,7 @@ import { ResumeThreadPanel } from "@/components/ResumeThreadPanel";
 import type { BackendCatalog } from "@/lib/backends";
 import { humaniseBackend } from "@/lib/backends";
 import {
+  AccountProfile,
   Backend,
   ScheduleCreateRequest,
   SessionPreset,
@@ -48,6 +49,7 @@ interface LaunchPanelProps {
   defaultBackend: Backend;
   defaultCwd: string;
   defaultLaunchEnvByBackend: Record<Backend, Record<string, string>>;
+  accountProfilesByBackend: Record<Backend, AccountProfile[]>;
   targetLabel: string | null;
   launchTargetId: string | null;
   recentCwds: string[];
@@ -67,6 +69,7 @@ interface LaunchPanelProps {
     launchEnv: Record<string, string>,
     permissionMode: string | null,
     presetId: string | null,
+    accountProfileId: string | null,
   ) => Promise<void>;
   onAttach: (
     target: string,
@@ -108,6 +111,7 @@ export function LaunchPanel({
   defaultBackend,
   defaultCwd,
   defaultLaunchEnvByBackend,
+  accountProfilesByBackend,
   targetLabel,
   launchTargetId,
   recentCwds,
@@ -135,6 +139,7 @@ export function LaunchPanel({
     defaultBackend,
     defaultCwd,
     defaultLaunchEnvByBackend,
+    accountProfilesByBackend,
     launchTargetId,
     catalog,
   });
@@ -201,6 +206,7 @@ export function LaunchPanel({
         launchEnv,
         form.permissionMode || null,
         selectedPresetId,
+        form.accountProfileId || null,
       );
       form.setTitle("");
     } finally {
@@ -242,6 +248,7 @@ export function LaunchPanel({
       // Record which preset seeded this schedule (provenance only; the fields
       // above are the resolved values the server persists).
       preset_id: selectedPresetId,
+      account_profile_id: form.accountProfileId || null,
     };
     if (scheduleTiming === "delay") {
       const minutes = Number.parseFloat(delayMinutes);

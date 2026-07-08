@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import shlex
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -412,12 +413,17 @@ class CodexPlugin(DefaultLaunchContract):
         thread_id: str,
         cwd: str,
         launch_target: SshLaunchTargetConfig | None,
+        config_dir: str | None = None,
     ) -> bool:
-        # $CODEX_HOME/sessions/YYYY/MM/DD/rollout-*-<uuid>.jsonl
+        # <codex-home>/sessions/YYYY/MM/DD/rollout-*-<uuid>.jsonl.
+        # ``config_dir`` (the session's CODEX_HOME, e.g. a switched account
+        # profile's) overrides the default ~/.codex.
         _ = cwd
         needle = f"-{thread_id}.jsonl"
         if launch_target is None:
-            home = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
+            home = Path(
+                config_dir or os.environ.get("CODEX_HOME") or "~/.codex"
+            ).expanduser()
             sessions_dir = home / "sessions"
             if not sessions_dir.is_dir():
                 return False
@@ -425,9 +431,11 @@ class CodexPlugin(DefaultLaunchContract):
                 entry.name.endswith(needle)
                 for entry in sessions_dir.glob("*/*/*/rollout-*.jsonl")
             )
+        root = (
+            shlex.quote(config_dir) if config_dir else '"${CODEX_HOME:-$HOME/.codex}"'
+        )
         stdout = await launch_target.ssh_capture(
-            f'ls "${{CODEX_HOME:-$HOME/.codex}}/sessions/"*/*/*/rollout-*{needle} '
-            "2>/dev/null | head -n 1",
+            f"ls {root}/sessions/*/*/*/rollout-*{needle} 2>/dev/null | head -n 1",
         )
         return bool(stdout.strip())
 

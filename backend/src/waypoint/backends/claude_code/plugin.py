@@ -61,6 +61,7 @@ from waypoint.backends.claude_code.support import (
 from waypoint.backends.claude_code.threads import (
     UUID_RE,
     ClaudeThreadInfo,
+    claude_projects_root,
     delete_local_claude_thread,
     find_local_claude_thread,
     list_local_claude_threads,
@@ -1276,25 +1277,28 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         thread_id: str,
         cwd: str,
         launch_target: SshLaunchTargetConfig | None,
+        config_dir: str | None = None,
     ) -> bool:
-        # ~/.claude/projects/<dashed-absolute-cwd>/<uuid>.jsonl — but the
+        # <config-dir>/projects/<dashed-absolute-cwd>/<uuid>.jsonl — but the
         # dashed key uses claude's view of the absolute cwd, which may not
         # match what we have on hand (SSH sessions carry the raw ``~/foo``
         # form; ``cd`` symlinks resolve on the remote). UUIDs are globally
         # unique under projects/, so glob across all project dirs and pick
-        # the file by name.
+        # the file by name. ``config_dir`` (the session's CLAUDE_CONFIG_DIR,
+        # e.g. a switched account profile's) overrides the default ~/.claude.
         needle = f"{thread_id}.jsonl"
         if launch_target is None:
-            projects = Path.home() / ".claude" / "projects"
+            projects = claude_projects_root(config_dir)
             if not projects.is_dir():
                 return False
             return any(projects.glob(f"*/{needle}"))
-        # ``$HOME`` must be left *outside* the quoted needle so the remote
-        # shell expands it; shlex-quoting the whole path would single-quote
-        # the dollar and look for a literal ``$HOME`` directory.
+        # A remote CLAUDE_CONFIG_DIR (unusual, but honor it) roots the search;
+        # otherwise the shell expands the default ``$HOME/.claude``. ``$HOME``
+        # / ``$CLAUDE_CONFIG_DIR`` stay outside the quoted needle so the remote
+        # shell expands them; quoting the whole path would look for a literal.
+        root = shlex.quote(config_dir) if config_dir else "$HOME/.claude"
         stdout = await launch_target.ssh_capture(
-            f"ls $HOME/.claude/projects/*/{shlex.quote(needle)} "
-            "2>/dev/null | head -n 1",
+            f"ls {root}/projects/*/{shlex.quote(needle)} 2>/dev/null | head -n 1",
         )
         return bool(stdout.strip())
 

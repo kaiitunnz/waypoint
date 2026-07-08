@@ -442,9 +442,16 @@ class TmuxPlugin:
         # ``codex resume <uuid>``: no rollout file means no thread to
         # resume. Fall back to verbatim launch args in that case.
         launch_target = runtime._find_launch_target(session.launch_target_id)
+        # Scope the resume check to the session's config dir (a switched account
+        # profile's CLAUDE_CONFIG_DIR/CODEX_HOME), else it reads the default root,
+        # never finds the thread, and relaunches into a fresh conversation.
+        config_dir_key = runtime.registry.get(
+            session.backend
+        ).capabilities.config_dir_env_var
+        config_dir = session.launch_env.get(config_dir_key) if config_dir_key else None
         effective_thread_id: str | None = None
         if thread_id and await inner.conversation_exists(
-            thread_id, session.cwd, launch_target
+            thread_id, session.cwd, launch_target, config_dir
         ):
             effective_thread_id = thread_id
         launch_args = (
@@ -895,7 +902,13 @@ class TmuxPlugin:
             if launch_env is not None
             else _default_launch_env(runtime, backend, launch_target)
         )
-        if not await inner.conversation_exists(thread_id, cwd, launch_target):
+        config_dir_key = runtime.registry.get(backend).capabilities.config_dir_env_var
+        config_dir = (
+            effective_launch_env.get(config_dir_key) if config_dir_key else None
+        )
+        if not await inner.conversation_exists(
+            thread_id, cwd, launch_target, config_dir
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(

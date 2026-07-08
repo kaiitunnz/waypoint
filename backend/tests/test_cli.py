@@ -3007,3 +3007,440 @@ def test_schedule_message_clear_history_with_session_id(
     )
     assert result.exit_code == 0
     assert state["params"]["session_id"] == "s1"
+
+
+# ── account-profile launch surfaces ───────────────────────────────────────────
+
+
+def test_sessions_start_account_profile_sends_request_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions" and request.method == "POST":
+            body = json.loads(request.content)
+            state["create_body"] = body
+            return httpx.Response(200, json={"session": {"id": "new", **body}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "start",
+            "--backend",
+            "codex",
+            "--cwd",
+            "/tmp/repo",
+            "--account-profile",
+            "work",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    body = state["create_body"]
+    assert isinstance(body, dict)
+    assert body["account_profile_id"] == "work"
+
+
+def test_sessions_start_omits_account_profile_when_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions" and request.method == "POST":
+            body = json.loads(request.content)
+            state["create_body"] = body
+            return httpx.Response(200, json={"session": {"id": "new", **body}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "start",
+            "--backend",
+            "codex",
+            "--cwd",
+            "/tmp/repo",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    body = state["create_body"]
+    assert isinstance(body, dict)
+    # Omitted, not sent as null, so the preset/server default still applies.
+    assert "account_profile_id" not in body
+
+
+def test_schedule_create_account_profile_sends_request_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/schedules" and request.method == "POST":
+            body = json.loads(request.content)
+            state["schedule_body"] = body
+            return httpx.Response(200, json={"schedule": {"id": "sc1", **body}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "schedule",
+            "create",
+            "--backend",
+            "codex",
+            "--cwd",
+            "/tmp/repo",
+            "--delay-seconds",
+            "60",
+            "--account-profile",
+            "work",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    body = state["schedule_body"]
+    assert isinstance(body, dict)
+    assert body["account_profile_id"] == "work"
+
+
+def test_presets_create_account_profile_in_spec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/session-presets" and request.method == "POST":
+            body = json.loads(request.content)
+            state["preset_body"] = body
+            return httpx.Response(200, json={"preset": {"id": "p1", **body}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "presets",
+            "create",
+            "--name",
+            "work-preset",
+            "--backend",
+            "codex",
+            "--account-profile",
+            "work",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    body = state["preset_body"]
+    assert isinstance(body, dict)
+    assert body["spec"]["account_profile_id"] == "work"
+
+
+def test_sessions_import_account_profile_in_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/backends/codex/sessions/import":
+            body = json.loads(request.content)
+            state["import_body"] = body
+            return httpx.Response(200, json={"session": {"id": "new", **body}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "import",
+            "codex",
+            "--thread-id",
+            "11111111-1111-1111-1111-111111111111",
+            "--account-profile",
+            "work",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    body = state["import_body"]
+    assert isinstance(body, dict)
+    assert body["account_profile_id"] == "work"
+
+
+def test_sessions_set_account_patches_launch_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if (
+            request.url.path == "/api/sessions/s1/launch-settings"
+            and request.method == "PATCH"
+        ):
+            body = json.loads(request.content)
+            state["patch_body"] = body
+            return httpx.Response(
+                200,
+                json={"session": {"id": "s1", "account_profile_id": "work"}},
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "set-account",
+            "s1",
+            "work",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert state["patch_body"] == {"restart": True, "account_profile_id": "work"}
+    assert json.loads(result.stdout)["session"]["account_profile_id"] == "work"
+
+
+def test_sessions_set_account_no_restart_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions/s1/launch-settings":
+            state["patch_body"] = json.loads(request.content)
+            return httpx.Response(200, json={"session": {"id": "s1"}})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "set-account",
+            "s1",
+            "work",
+            "--no-restart",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    body = state["patch_body"]
+    assert isinstance(body, dict)
+    assert body["restart"] is False
+
+
+def test_sessions_launch_settings_emits_get(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if (
+            request.url.path == "/api/sessions/s1/launch-settings"
+            and request.method == "GET"
+        ):
+            return httpx.Response(
+                200,
+                json={
+                    "backend": "codex",
+                    "transport": "codex_app_server",
+                    "account_profile_id": "work",
+                    "launch_env_keys": ["CODEX_HOME"],
+                },
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "launch-settings",
+            "s1",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["account_profile_id"] == "work"
+    assert payload["launch_env_keys"] == ["CODEX_HOME"]
+
+
+def test_accounts_list_from_backends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/backends":
+            return httpx.Response(
+                200,
+                json={
+                    "backends": [
+                        {
+                            "id": "codex",
+                            "account_profiles": [
+                                {
+                                    "id": "work",
+                                    "label": "Work",
+                                    "config_dir_key": "CODEX_HOME",
+                                }
+                            ],
+                        },
+                        {"id": "opencode", "account_profiles": []},
+                    ]
+                },
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "accounts", "list"],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    # Backends without profiles are dropped.
+    assert payload == {
+        "accounts": [
+            {
+                "backend": "codex",
+                "profiles": [
+                    {"id": "work", "label": "Work", "config_dir_key": "CODEX_HOME"}
+                ],
+            }
+        ]
+    }
+
+
+def test_accounts_list_filter_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/backends":
+            return httpx.Response(
+                200,
+                json={
+                    "backends": [
+                        {
+                            "id": "codex",
+                            "account_profiles": [
+                                {
+                                    "id": "work",
+                                    "label": "W",
+                                    "config_dir_key": "CODEX_HOME",
+                                }
+                            ],
+                        },
+                        {
+                            "id": "claude_code",
+                            "account_profiles": [
+                                {
+                                    "id": "personal",
+                                    "label": "P",
+                                    "config_dir_key": "CLAUDE_CONFIG_DIR",
+                                }
+                            ],
+                        },
+                    ]
+                },
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = runner.invoke(
+        app,
+        ["--config", str(_config(tmp_path)), "accounts", "list", "--backend", "codex"],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert [a["backend"] for a in payload["accounts"]] == ["codex"]
+
+
+def test_accounts_list_launch_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/me":
+            return httpx.Response(
+                200,
+                json={
+                    "launch_targets": [
+                        {
+                            "id": "ssh-box",
+                            "account_profiles_by_backend": {
+                                "codex": [
+                                    {
+                                        "id": "work",
+                                        "label": "Work",
+                                        "config_dir_key": "CODEX_HOME",
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "accounts",
+            "list",
+            "--launch-target-id",
+            "ssh-box",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["accounts"] == [
+        {
+            "backend": "codex",
+            "profiles": [
+                {"id": "work", "label": "Work", "config_dir_key": "CODEX_HOME"}
+            ],
+        }
+    ]
+
+
+def test_accounts_list_unknown_launch_target_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/me":
+            return httpx.Response(200, json={"launch_targets": []})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", _fake_client_factory(handler))
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "accounts",
+            "list",
+            "--launch-target-id",
+            "nope",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "unknown launch target" in result.output

@@ -154,6 +154,10 @@ presets_app = typer.Typer(
     help="Manage reusable session-launch presets on a running Waypoint server.",
     no_args_is_help=True,
 )
+accounts_app = typer.Typer(
+    help="Inspect configured account/config-profile switching options.",
+    no_args_is_help=True,
+)
 app.add_typer(backends_app, name="backends")
 app.add_typer(session_app, name="session")
 app.add_typer(sessions_app, name="sessions")
@@ -164,6 +168,7 @@ app.add_typer(schedule_app, name="schedule")
 schedule_app.add_typer(schedule_message_app, name="message")
 app.add_typer(maintenance_app, name="maintenance")
 app.add_typer(presets_app, name="presets")
+app.add_typer(accounts_app, name="accounts")
 
 
 def _version_callback(value: bool) -> None:
@@ -1664,6 +1669,14 @@ def sessions_start(
             ),
         ),
     ] = None,
+    account_profile: Annotated[
+        str | None,
+        typer.Option(
+            "--account-profile",
+            help="Launch under this account/config profile (agent backends that "
+            "host profiles only; see `accounts list`).",
+        ),
+    ] = None,
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
     """Launch a new session on the running server."""
@@ -1710,6 +1723,7 @@ def sessions_start(
                 args=list(args or []),
                 tags=tags,
                 launch_env=launch_env_map,
+                account_profile_id=account_profile,
                 preset_id=preset,
                 use_default_preset=use_default,
             )
@@ -1956,6 +1970,43 @@ def sessions_set_permission_mode(
     _emit(_settings_from_ctx(ctx), _run)
 
 
+@sessions_app.command("launch-settings")
+def sessions_launch_settings(
+    ctx: typer.Context, session_id: Annotated[str, typer.Argument()]
+) -> None:
+    """Show a session's restart-applied launch settings (redacted env)."""
+    _emit(_settings_from_ctx(ctx), lambda c: c.get_launch_settings(session_id))
+
+
+@sessions_app.command("set-account")
+def sessions_set_account(
+    ctx: typer.Context,
+    session_id: Annotated[str, typer.Argument()],
+    account_profile_id: Annotated[str, typer.Argument()],
+    restart: Annotated[
+        bool,
+        typer.Option(
+            "--restart/--no-restart",
+            help="Restart the session to apply the switch (required in phase 1).",
+        ),
+    ] = True,
+) -> None:
+    """Switch a session's account/config profile via restart-and-resume.
+
+    Only structured transports whose agent maps a config-dir env var accept the
+    switch; others are rejected. The session terminates and resumes its thread
+    under the new profile's config dir.
+    """
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: {
+            "session": c.update_launch_settings(
+                session_id, account_profile_id=account_profile_id, restart=restart
+            )
+        },
+    )
+
+
 @sessions_app.command("interrupt")
 def sessions_interrupt(
     ctx: typer.Context, session_id: Annotated[str, typer.Argument()]
@@ -2180,6 +2231,14 @@ def sessions_import(
             ),
         ),
     ] = None,
+    account_profile: Annotated[
+        str | None,
+        typer.Option(
+            "--account-profile",
+            help="Import (list + resume) under this account/config profile "
+            "(see `accounts list`).",
+        ),
+    ] = None,
 ) -> None:
     """Import a backend-native thread into Waypoint.
 
@@ -2193,6 +2252,8 @@ def sessions_import(
         body["import_history"] = import_history
     if launch_env is not None:
         body["launch_env"] = _parse_launch_env(launch_env)
+    if account_profile is not None:
+        body["account_profile_id"] = account_profile
     if not body.get("thread_id"):
         raise typer.BadParameter("pass --thread-id or a --json body with thread_id")
     _emit(
@@ -2823,6 +2884,14 @@ def schedule_create(
         str | None,
         typer.Option(help="ISO 8601 datetime at which to launch the session."),
     ] = None,
+    account_profile: Annotated[
+        str | None,
+        typer.Option(
+            "--account-profile",
+            help="Launch under this account/config profile (agent backends that "
+            "host profiles only; see `accounts list`).",
+        ),
+    ] = None,
     args: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
     """Schedule a session launch on the running server."""
@@ -2857,6 +2926,7 @@ def schedule_create(
                 delay_seconds=delay_seconds,
                 scheduled_at=scheduled_at,
                 launch_env=launch_env_map,
+                account_profile_id=account_profile,
                 preset_id=preset,
                 use_default_preset=use_default,
             )
@@ -2891,6 +2961,7 @@ def _preset_spec_payload(
     model: str | None,
     effort: str | None,
     permission_mode: str | None,
+    account_profile_id: str | None,
     args: list[str] | None,
     config_override: list[str] | None,
     launch_env: list[str] | None,
@@ -2910,6 +2981,7 @@ def _preset_spec_payload(
         ("model", model),
         ("effort", effort),
         ("permission_mode", permission_mode),
+        ("account_profile_id", account_profile_id),
     ):
         if value is not None:
             spec[key] = value
@@ -2941,6 +3013,13 @@ _PresetConfigOverrideOption = Annotated[
 _PresetTagOption = Annotated[
     list[str] | None,
     typer.Option("--tag", help="Tag as key=value (or a bare key). Repeatable."),
+]
+_PresetAccountProfileOption = Annotated[
+    str | None,
+    typer.Option(
+        "--account-profile",
+        help="Account/config profile to launch under (see `accounts list`).",
+    ),
 ]
 
 
@@ -2983,6 +3062,7 @@ def presets_create(
     model: Annotated[str | None, typer.Option()] = None,
     effort: Annotated[str | None, typer.Option()] = None,
     permission_mode: Annotated[str | None, typer.Option()] = None,
+    account_profile: _PresetAccountProfileOption = None,
     launch_env: _PresetLaunchEnvOption = None,
     config_override: _PresetConfigOverrideOption = None,
     tag: _PresetTagOption = None,
@@ -2997,6 +3077,7 @@ def presets_create(
         model=model,
         effort=effort,
         permission_mode=permission_mode,
+        account_profile_id=account_profile,
         args=args,
         config_override=config_override,
         launch_env=launch_env,
@@ -3024,6 +3105,7 @@ def presets_update(
     model: Annotated[str | None, typer.Option()] = None,
     effort: Annotated[str | None, typer.Option()] = None,
     permission_mode: Annotated[str | None, typer.Option()] = None,
+    account_profile: _PresetAccountProfileOption = None,
     launch_env: _PresetLaunchEnvOption = None,
     config_override: _PresetConfigOverrideOption = None,
     tag: _PresetTagOption = None,
@@ -3038,6 +3120,7 @@ def presets_update(
         model=model,
         effort=effort,
         permission_mode=permission_mode,
+        account_profile_id=account_profile,
         args=args,
         config_override=config_override,
         launch_env=launch_env,
@@ -3092,6 +3175,61 @@ def presets_default(
 def presets_clear_default(ctx: typer.Context) -> None:
     """Clear the default preset (leaves all presets in place)."""
     _emit(_settings_from_ctx(ctx), lambda c: c.clear_default_session_preset())
+
+
+@accounts_app.command("list")
+def accounts_list(
+    ctx: typer.Context,
+    backend: Annotated[
+        str | None,
+        typer.Option(
+            callback=_validate_backend,
+            autocompletion=_complete_backend,
+            help="Only list profiles for this backend.",
+        ),
+    ] = None,
+    launch_target_id: Annotated[
+        str | None,
+        typer.Option(
+            help="Resolve target-merged profiles for a launch target (e.g. a "
+            "remote host) rather than the local defaults."
+        ),
+    ] = None,
+) -> None:
+    """List configured account/config profiles (redacted; ids, labels, config-dir keys).
+
+    Only agent backends that host profiles (claude_code, codex) appear. With a
+    launch target the profiles are target-merged; without one they are the local
+    defaults from the backend catalogue.
+    """
+
+    def run(c: WaypointClient) -> Any:
+        if launch_target_id is not None:
+            profiles_by_backend: dict[str, list[dict[str, Any]]] = {}
+            for target in c.get_me().get("launch_targets", []):
+                if target.get("id") == launch_target_id:
+                    profiles_by_backend = target.get("account_profiles_by_backend", {})
+                    break
+            else:
+                raise WaypointError(f"unknown launch target: {launch_target_id}")
+            accounts = [
+                {"backend": backend_id, "profiles": profiles}
+                for backend_id, profiles in profiles_by_backend.items()
+                if backend is None or backend_id == backend
+            ]
+        else:
+            accounts = [
+                {
+                    "backend": descriptor["id"],
+                    "profiles": descriptor["account_profiles"],
+                }
+                for descriptor in c.list_backends()
+                if descriptor.get("account_profiles")
+                and (backend is None or descriptor["id"] == backend)
+            ]
+        return {"accounts": accounts}
+
+    _emit(_settings_from_ctx(ctx), run)
 
 
 @schedule_message_app.command("list")

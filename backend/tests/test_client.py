@@ -41,6 +41,18 @@ def _make_handler(state: dict) -> "httpx.MockTransport":
         if request.url.path == "/api/sessions/s1/tags" and request.method == "PATCH":
             state["tags_body"] = json.loads(request.content)
             return httpx.Response(200, json={"session": {"id": "s1", "tags": {}}})
+        if request.url.path == "/api/sessions/s1/launch-settings":
+            if request.method == "GET":
+                return httpx.Response(
+                    200,
+                    json={"backend": "codex", "account_profile_id": "work"},
+                )
+            if request.method == "PATCH":
+                state["launch_settings_body"] = json.loads(request.content)
+                return httpx.Response(
+                    200,
+                    json={"session": {"id": "s1", "account_profile_id": "work"}},
+                )
         if request.url.path == "/api/backends" and request.method == "GET":
             return httpx.Response(
                 200, json={"backends": [{"id": "claude_code"}, {"id": "codex"}]}
@@ -421,6 +433,43 @@ def test_create_session_posts_payload(
         session = client.create_session(backend="codex", cwd="/tmp", model="gpt-5")
     assert session["backend"] == "codex"
     assert session["model"] == "gpt-5"
+
+
+def test_create_session_includes_account_profile_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        client.create_session(backend="codex", account_profile_id="work")
+    assert state["session_create"]["account_profile_id"] == "work"
+
+
+def test_get_launch_settings_returns_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        settings = client.get_launch_settings("s1")
+    assert settings == {"backend": "codex", "account_profile_id": "work"}
+
+
+def test_update_launch_settings_sends_only_set_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
+    state: dict = {}
+    with _client(_settings(tmp_path), state) as client:
+        session = client.update_launch_settings(
+            "s1", account_profile_id="work", restart=True
+        )
+    # Unset args/config_overrides/env are omitted so the PATCH is a true partial.
+    assert state["launch_settings_body"] == {
+        "restart": True,
+        "account_profile_id": "work",
+    }
+    assert session["account_profile_id"] == "work"
 
 
 def test_send_input_uploads_attachments_and_sends_ids(

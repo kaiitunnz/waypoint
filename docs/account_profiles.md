@@ -129,6 +129,54 @@ waypoint accounts list --backend codex
 waypoint accounts list --launch-target-id my-ssh-host
 ```
 
+### Verifying, diagnosing, and setting up a profile
+
+Three companion commands verify a profile from the CLI instead of discovering
+breakage at launch/switch time.
+
+**`probe`** resolves a profile, authenticates as its config dir, and prints the
+verified account. The label shows by default; the private-class `account_key`
+(what you put in `expected_account_key`) is hidden unless you ask for it:
+
+```bash
+waypoint accounts probe claude_code work
+waypoint accounts probe claude_code work --show-key    # reveal account_key
+```
+
+**`doctor`** runs a per-profile checklist — config dir exists, readiness
+(claude onboarding / codex `auth.json`), transcript-policy setup, expected-account
+match, and backend support — and **exits non-zero** if any check fails, so it is
+scriptable in CI. It renders a table by default and structured JSON with `--json`;
+config-dir paths stay hidden unless `--show-paths`:
+
+```bash
+waypoint accounts doctor                       # all profile-hosting backends
+waypoint accounts doctor --backend codex
+waypoint accounts doctor --json                # machine-readable report
+```
+
+`waypoint doctor` (the top-level diagnostic) also appends a short per-profile
+summary from the same checklist, minus the live account probe — run
+`accounts doctor` for the account-match verification.
+
+**`setup-transcripts`** performs the guarded conversion a `symlink_shared`
+profile needs: it makes `<config_dir>/<native-store>` a symlink to the shared
+dir, and when a populated real directory is already there it migrates the
+contents in (refusing same-named conflicts, keeping a timestamped backup of the
+original) before replacing it with the symlink. It is idempotent on a correct
+symlink and never runs implicitly during a switch:
+
+```bash
+waypoint accounts setup-transcripts claude_code work
+waypoint accounts setup-transcripts codex work --shared-dir ~/.waypoint/codex-sessions
+```
+
+Each command has an HTTP endpoint behind it
+(`GET .../accounts/{profile}/probe`, `GET .../accounts/doctor`,
+`POST .../accounts/{profile}/setup-transcripts`) so the web UI can surface the
+same diagnostics. Remote (SSH launch target) `setup-transcripts` is not yet
+supported; `doctor` reports its filesystem checks as skipped there.
+
 Launch, schedule, or preset a session under a profile with `--account-profile`:
 
 ```bash

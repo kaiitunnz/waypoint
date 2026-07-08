@@ -1051,6 +1051,28 @@ def test_plan_file_write_captures_body_and_still_surfaces_tool_call() -> None:
     assert len(tool_calls) == 1 and tool_calls[0].metadata["tool_name"] == "Write"
 
 
+def test_plan_file_capture_honors_profile_config_dir() -> None:
+    # A profile-scoped session writes its plan under the profile's config dir;
+    # the normalizer must recognize it there, not only under the default ~/.claude.
+    path = "/home/u/.claude-work/plans/make-a-plan.md"
+    plan = "# Plan"
+    record = _assistant_record(
+        "msg1",
+        [_tool_use_block("w1", "Write", {"file_path": path, "content": plan})],
+        stop_reason="tool_use",
+    )
+    # Default normalizer (no config dir) does not recognize the profile path.
+    assert TranscriptNormalizer().process_record(record) is not None
+    default_norm = TranscriptNormalizer()
+    default_norm.process_record(record)
+    assert default_norm.last_plan_path is None
+    # Scoped to the profile config dir, it captures the plan.
+    scoped = TranscriptNormalizer("/home/u/.claude-work")
+    scoped.process_record(record)
+    assert scoped.last_plan_path == path
+    assert scoped.last_plan_content == plan
+
+
 def test_non_plan_file_write_does_not_capture_plan() -> None:
     norm = TranscriptNormalizer()
     norm.process_record(

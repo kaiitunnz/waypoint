@@ -335,6 +335,36 @@ class AccountProbeResult(BaseModel):
     source: Literal["oauth", "api", "cli", "unknown"] = "oauth"
 
 
+class ProfileCheck(BaseModel):
+    """One line of an ``accounts doctor`` per-profile checklist.
+
+    ``ok`` is the pass/fail verdict; ``detail`` is a terse human explanation.
+    A check may be reported ``ok=True`` with a ``detail`` of ``"n/a"`` /
+    ``"skipped"`` when it doesn't apply (e.g. a transcript check on a
+    non-``symlink_shared`` profile, or a filesystem check on a remote target).
+    """
+
+    name: str
+    ok: bool
+    detail: str | None = None
+
+
+class ProfileDoctorReport(BaseModel):
+    """The ``accounts doctor`` verdict for a single account profile.
+
+    ``ok`` is the conjunction of every check. Config-dir paths and account keys
+    appear in check details only when the caller asked for them via the
+    diagnostic flags (``show_paths`` / ``show_key``); otherwise they stay
+    redacted per the phase-1 rules.
+    """
+
+    backend: str
+    profile: str
+    label: str
+    ok: bool
+    checks: list[ProfileCheck]
+
+
 class LaunchTargetSummary(BaseModel):
     id: str
     name: str

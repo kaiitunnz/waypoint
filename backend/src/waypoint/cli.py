@@ -18,6 +18,11 @@ from fastapi import HTTPException
 from websockets.exceptions import WebSocketException
 
 from waypoint.api import AppContext, create_app
+from waypoint.backends.account_profiles import (
+    account_profile_static_checks,
+    backend_hosts_account_profiles,
+    resolve_account_profiles,
+)
 from waypoint.backends.registry import get_registry
 from waypoint.client import (
     WaypointClient,
@@ -3232,6 +3237,161 @@ def accounts_list(
     _emit(_settings_from_ctx(ctx), run)
 
 
+@accounts_app.command("probe")
+def accounts_probe(
+    ctx: typer.Context,
+    backend: Annotated[
+        str,
+        typer.Argument(callback=_validate_backend, autocompletion=_complete_backend),
+    ],
+    profile: Annotated[str, typer.Argument(help="Account profile id.")],
+    launch_target_id: Annotated[
+        str | None,
+        typer.Option(help="Probe the profile as resolved for this launch target."),
+    ] = None,
+    show_key: Annotated[
+        bool,
+        typer.Option(
+            "--show-key",
+            help="Include the private-class account_key (hidden by default).",
+        ),
+    ] = False,
+) -> None:
+    """Probe the account a profile authenticates as (verified label; key hidden).
+
+    The canonical way to read a profile's exact account_key for
+    ``expected_account_key`` — pass ``--show-key`` to reveal it.
+    """
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: c.probe_account(
+            backend, profile, launch_target_id=launch_target_id, show_key=show_key
+        ),
+    )
+
+
+def _profile_hosting_backends(c: WaypointClient, backend: str | None) -> list[str]:
+    return [
+        descriptor["id"]
+        for descriptor in c.list_backends()
+        if descriptor.get("account_profiles")
+        and (backend is None or descriptor["id"] == backend)
+    ]
+
+
+@accounts_app.command("doctor")
+def accounts_doctor(
+    ctx: typer.Context,
+    backend: Annotated[
+        str | None,
+        typer.Option(
+            callback=_validate_backend,
+            autocompletion=_complete_backend,
+            help="Only diagnose this backend's profiles.",
+        ),
+    ] = None,
+    launch_target_id: Annotated[
+        str | None,
+        typer.Option(help="Diagnose profiles as resolved for this launch target."),
+    ] = None,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Emit the structured report as JSON.")
+    ] = False,
+    show_paths: Annotated[
+        bool,
+        typer.Option("--show-paths", help="Include config-dir paths in details."),
+    ] = False,
+    show_key: Annotated[
+        bool,
+        typer.Option(
+            "--show-key",
+            help="Include private-class account keys in the match check detail.",
+        ),
+    ] = False,
+) -> None:
+    """Diagnose account profiles per backend; exits non-zero on any failing check.
+
+    Runs a checklist (config dir, readiness, transcript setup, expected-account
+    match, support) for each profile. Human table by default; ``--json`` emits a
+    machine-readable report.
+    """
+
+    def run(c: WaypointClient) -> list[dict[str, Any]]:
+        reports: list[dict[str, Any]] = []
+        for backend_id in _profile_hosting_backends(c, backend):
+            reports.extend(
+                c.account_doctor(
+                    backend_id,
+                    launch_target_id=launch_target_id,
+                    show_paths=show_paths,
+                    show_key=show_key,
+                )
+            )
+        return reports
+
+    reports = _run_client(_settings_from_ctx(ctx), run)
+    if json_output:
+        typer.echo(json.dumps(reports, indent=2))
+    else:
+        _render_doctor_reports(reports)
+    if any(not report["ok"] for report in reports):
+        raise typer.Exit(code=1)
+
+
+def _render_doctor_reports(reports: list[dict[str, Any]]) -> None:
+    if not reports:
+        typer.echo("no account profiles configured")
+        return
+    for report in reports:
+        mark = "OK" if report["ok"] else "FAIL"
+        typer.echo(
+            f"[{mark}] {report['backend']}/{report['profile']} ({report['label']})"
+        )
+        for check in report["checks"]:
+            check_mark = "ok  " if check["ok"] else "FAIL"
+            detail = f" — {check['detail']}" if check.get("detail") else ""
+            typer.echo(f"    {check_mark} {check['name']}{detail}")
+
+
+@accounts_app.command("setup-transcripts")
+def accounts_setup_transcripts(
+    ctx: typer.Context,
+    backend: Annotated[
+        str,
+        typer.Argument(callback=_validate_backend, autocompletion=_complete_backend),
+    ],
+    profile: Annotated[str, typer.Argument(help="Account profile id.")],
+    launch_target_id: Annotated[
+        str | None,
+        typer.Option(help="Reserved; remote setup-transcripts is not yet supported."),
+    ] = None,
+    shared_dir: Annotated[
+        str | None,
+        typer.Option(help="Override the profile's shared_transcript_dir."),
+    ] = None,
+    policy: Annotated[
+        str | None,
+        typer.Option(help="Override the transcript policy (only symlink_shared)."),
+    ] = None,
+) -> None:
+    """Set up a profile's shared transcript symlink (migrating existing content).
+
+    Idempotent on a correct symlink; migrates a populated native store into the
+    shared dir (refusing same-named conflicts, keeping a backup) before replacing
+    it with the symlink. Never runs implicitly during a switch.
+    """
+    _emit(
+        _settings_from_ctx(ctx),
+        lambda c: c.setup_account_transcripts(
+            backend,
+            profile,
+            launch_target_id=launch_target_id,
+            shared_dir=shared_dir,
+            policy=policy,
+        ),
+    )
+
+
 @schedule_message_app.command("list")
 def schedule_message_list(
     ctx: typer.Context,
@@ -3626,7 +3786,34 @@ def run_doctor(settings: Settings | None = None) -> None:
             continue
         checks[binary] = shutil.which(binary)
     checks["config_path"] = str(settings.config_path) if settings.config_path else None
+    checks["account_profiles"] = _account_profile_doctor_summary(settings)
     print(json.dumps(checks, indent=2))
+
+
+def _account_profile_doctor_summary(settings: Settings) -> list[dict[str, Any]]:
+    """Server-free per-profile summary for the root ``doctor`` report.
+
+    Runs the shared static checklist (config dir, readiness, transcript setup,
+    support) locally — the live ``account_matches_expected`` check needs the
+    running server, so ``waypoint accounts doctor`` is the way to verify accounts.
+    """
+    summary: list[dict[str, Any]] = []
+    for backend in sorted(get_registry().backends()):
+        if not backend_hosts_account_profiles(settings, backend):
+            continue
+        for profile_id, profile in resolve_account_profiles(settings, backend).items():
+            checks = account_profile_static_checks(
+                settings, backend, profile_id, profile, local=True
+            )
+            summary.append(
+                {
+                    "backend": backend,
+                    "profile": profile_id,
+                    "ok": all(c.ok for c in checks),
+                    "checks": [c.model_dump(mode="json") for c in checks],
+                }
+            )
+    return summary
 
 
 def main() -> None:

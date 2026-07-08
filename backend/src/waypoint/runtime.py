@@ -21,6 +21,7 @@ from waypoint.assistant_assets import AssistantAssetError, ensure_assistant_asse
 from waypoint.attachments import AttachmentStore, ResolvedAttachment
 from waypoint.backends import BackendRegistry, get_registry
 from waypoint.backends.account_profiles import (
+    account_profile_static_checks,
     probe_account,
     redacted_profile_metadata,
     resolve_account_profiles,
@@ -42,6 +43,7 @@ from waypoint.backends.tmux.normalize import (
 from waypoint.backends.transcripts import (
     TranscriptUnavailableError,
     ensure_thread_available,
+    setup_transcripts_symlink,
 )
 from waypoint.builtin_completions import waypoint_builtin_completions
 from waypoint.git_meta import resolve_git_meta
@@ -50,6 +52,7 @@ from waypoint.perf import debug_timer
 from waypoint.presets import PresetManager
 from waypoint.scheduler import Scheduler
 from waypoint.schemas import (
+    AccountProbeResult,
     AssistantSummary,
     AttachmentSpec,
     BoardChannel,
@@ -71,6 +74,8 @@ from waypoint.schemas import (
     LaunchMode,
     LaunchSettingsResponse,
     LaunchSettingsUpdateRequest,
+    ProfileCheck,
+    ProfileDoctorReport,
     SessionApprovalRequest,
     SessionAttachRequest,
     SessionCommandInvocation,
@@ -581,6 +586,209 @@ class SessionRuntime:
         """
         plugin = self.registry.get(backend)
         return {**os.environ, **launch_env, **plugin.extra_env}
+
+    def _profile_launch_env(
+        self,
+        backend: str,
+        profile_id: str,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> dict[str, str]:
+        """Build the launch env a profile resolves to, outside any session.
+
+        Mirrors the switch path: the backend's default env with the profile's
+        ``config_dir`` overlaid on the config-dir env var. Raises 400 for an
+        unknown profile or a backend without a config-dir env var.
+        """
+        env = self._default_launch_env(backend, launch_target)
+        env, _ = self._apply_account_profile_env(
+            backend, env, profile_id, launch_target
+        )
+        return env
+
+    async def probe_account_profile(
+        self,
+        backend: str,
+        profile_id: str,
+        *,
+        launch_target_id: str | None = None,
+        cwd: str = ".",
+    ) -> AccountProbeResult:
+        """Probe the account an account profile authenticates as.
+
+        Resolves the profile's launch env exactly as a switch would and runs the
+        account probe against it — the canonical way to read a profile's verified
+        ``account_key``/``label`` (e.g. to fill in ``expected_account_key``).
+        Raises 400 when the account can't be verified.
+        """
+        launch_target = self._resolve_launch_target(launch_target_id, backend)
+        if launch_target is not None:
+            await self._require_live_master(launch_target)
+        env = self._profile_launch_env(backend, profile_id, launch_target)
+        result = await probe_account(
+            self, backend, env, launch_target=launch_target, cwd=cwd
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"could not verify the account for profile {profile_id!r} "
+                    f"on backend {backend}"
+                ),
+            )
+        return result
+
+    async def account_doctor(
+        self,
+        *,
+        backend: str,
+        launch_target_id: str | None = None,
+        show_paths: bool = False,
+        show_key: bool = False,
+    ) -> list[ProfileDoctorReport]:
+        """Run the per-profile ``accounts doctor`` checklist for one backend.
+
+        Static checks (config dir, readiness, transcript setup, support) come
+        from the shared server-free checklist; a live ``account_matches_expected``
+        check is added when the profile declares an ``expected_account_key`` and
+        the target is probeable. A profile with any failing check reports
+        ``ok=False`` so the CLI can exit non-zero. Account keys stay out of the
+        check details unless ``show_key`` is set (phase-1 redaction rules).
+        """
+        launch_target = self._resolve_launch_target(launch_target_id, backend)
+        local = launch_target is None
+        probe_blocked = self.remote_probe_blocked(launch_target_id)
+        profiles = resolve_account_profiles(self.settings, backend, launch_target)
+        reports: list[ProfileDoctorReport] = []
+        for profile_id, profile in profiles.items():
+            checks = account_profile_static_checks(
+                self.settings,
+                backend,
+                profile_id,
+                profile,
+                local=local,
+                show_paths=show_paths,
+            )
+            checks.append(
+                await self._account_matches_check(
+                    backend,
+                    profile_id,
+                    profile,
+                    launch_target,
+                    probe_blocked,
+                    show_key=show_key,
+                )
+            )
+            reports.append(
+                ProfileDoctorReport(
+                    backend=backend,
+                    profile=profile_id,
+                    label=profile.label,
+                    ok=all(c.ok for c in checks),
+                    checks=checks,
+                )
+            )
+        return reports
+
+    async def _account_matches_check(
+        self,
+        backend: str,
+        profile_id: str,
+        profile: AccountProfileConfig,
+        launch_target: SshLaunchTargetConfig | None,
+        probe_blocked: bool,
+        *,
+        show_key: bool,
+    ) -> ProfileCheck:
+        name = "account_matches_expected"
+        if not profile.expected_account_key:
+            return ProfileCheck(
+                name=name, ok=True, detail="n/a: no expected_account_key set"
+            )
+        if probe_blocked:
+            return ProfileCheck(
+                name=name,
+                ok=True,
+                detail="skipped: launch target needs an SSH master to probe",
+            )
+        try:
+            env = self._profile_launch_env(backend, profile_id, launch_target)
+            probe = await probe_account(self, backend, env, launch_target=launch_target)
+        except HTTPException as exc:
+            return ProfileCheck(name=name, ok=False, detail=str(exc.detail))
+        if probe is None:
+            return ProfileCheck(name=name, ok=False, detail="could not verify account")
+        if probe.account_key != profile.expected_account_key:
+            detail = (
+                f"authenticates as {probe.account_key!r}, expected "
+                f"{profile.expected_account_key!r}"
+                if show_key
+                else "authenticates as a different account than expected "
+                "(pass --show-key for the keys)"
+            )
+            return ProfileCheck(name=name, ok=False, detail=detail)
+        detail = (
+            f"matches {profile.expected_account_key!r}"
+            if show_key
+            else "matches the expected account"
+        )
+        return ProfileCheck(name=name, ok=True, detail=detail)
+
+    def setup_account_transcripts(
+        self,
+        backend: str,
+        profile_id: str,
+        *,
+        launch_target_id: str | None = None,
+        shared_dir: str | None = None,
+        policy: str | None = None,
+    ) -> list[str]:
+        """Perform the guarded transcript symlink setup for a profile (local only).
+
+        Migrates a populated native store into the shared transcript dir and
+        replaces it with a symlink, per the profile's ``symlink_shared`` policy.
+        Never runs implicitly during a switch. Raises 400 for a remote target,
+        an unsupported policy, a missing shared dir, or a migration conflict.
+        """
+        launch_target = self._resolve_launch_target(launch_target_id, backend)
+        if launch_target is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="remote setup-transcripts is not supported yet",
+            )
+        profile = self._require_account_profile(backend, profile_id, None)
+        effective_policy = policy or profile.transcript_policy
+        if effective_policy != "symlink_shared":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"setup-transcripts only applies to the 'symlink_shared' "
+                    f"policy, not {effective_policy!r}"
+                ),
+            )
+        effective_shared = shared_dir or profile.shared_transcript_dir
+        if not effective_shared:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "symlink_shared requires a shared dir; set "
+                    "shared_transcript_dir on the profile or pass --shared-dir"
+                ),
+            )
+        native_store = self.registry.get(backend).capabilities.native_thread_store
+        if native_store is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"backend {backend} has no native transcript store",
+            )
+        store_dir = Path(profile.config_dir).expanduser() / native_store
+        try:
+            return setup_transcripts_symlink(
+                store_dir, Path(effective_shared).expanduser()
+            )
+        except TranscriptUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
 
     async def create_session(
         self,

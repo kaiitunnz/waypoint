@@ -14,11 +14,14 @@ Public payloads expose only ``{id, label, config_dir_key}`` — never the
 ``config_dir`` path, ``expected_account_key``, or ``transcript_policy``.
 """
 
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from waypoint.backends.base import ConfigDirReadinessReporting
 from waypoint.backends.plugin_config import AccountProfileConfig
 from waypoint.backends.registry import get_registry
-from waypoint.schemas import AccountProbeResult
+from waypoint.schemas import AccountProbeResult, ProfileCheck
 
 if TYPE_CHECKING:
     from waypoint.launch_targets import SshLaunchTargetConfig
@@ -94,6 +97,157 @@ def redacted_profile_metadata(
         {"id": pid, "label": profile.label, "config_dir_key": config_dir_key}
         for pid, profile in profiles.items()
     ]
+
+
+def _redact_path(path: str, show_paths: bool) -> str:
+    return path if show_paths else "<hidden; pass --show-paths>"
+
+
+def account_profile_static_checks(
+    settings: "Settings",
+    backend: str,
+    profile_id: str,
+    profile: AccountProfileConfig,
+    *,
+    local: bool,
+    show_paths: bool = False,
+) -> list[ProfileCheck]:
+    """The server-free portion of an ``accounts doctor`` checklist for a profile.
+
+    Pure filesystem + registry lookups — no runtime, no live probe — so both the
+    ``accounts doctor`` endpoint and the root ``waypoint doctor`` (which runs
+    without the server) share it. The live ``account_matches_expected`` check is
+    appended separately by the runtime path, which owns the probe.
+
+    ``local`` is ``False`` for a remote launch target, where the config dir can't
+    be stat'd here; filesystem checks are then reported as skipped rather than
+    failed (remote diagnostics are a later phase). Config-dir paths surface in
+    details only when ``show_paths`` is set.
+    """
+    plugin = get_registry().get(backend)
+    caps = plugin.capabilities
+    config_dir = profile.config_dir
+    checks: list[ProfileCheck] = []
+
+    checks.append(
+        ProfileCheck(
+            name="supported",
+            ok=bool(caps.config_dir_env_var),
+            detail=(
+                f"hosts account profiles via {caps.config_dir_env_var}; live "
+                "switching also needs a restart-capable transport"
+                if caps.config_dir_env_var
+                else "backend has no config-dir env var"
+            ),
+        )
+    )
+
+    if not local:
+        for name in ("config_dir_exists", "ready", "transcript_setup"):
+            checks.append(
+                ProfileCheck(
+                    name=name,
+                    ok=True,
+                    detail="skipped: unsupported on a remote launch target",
+                )
+            )
+        return checks
+
+    expanded = Path(config_dir).expanduser()
+    checks.append(
+        ProfileCheck(
+            name="config_dir_exists",
+            ok=expanded.is_dir(),
+            detail=(
+                f"config dir {_redact_path(str(expanded), show_paths)} "
+                + ("exists" if expanded.is_dir() else "is missing")
+            ),
+        )
+    )
+
+    if isinstance(plugin, ConfigDirReadinessReporting):
+        readiness = plugin.config_dir_readiness(config_dir)
+        checks.append(
+            ProfileCheck(
+                name="ready",
+                ok=readiness.ready,
+                detail=readiness.reason if not readiness.ready else "ready",
+            )
+        )
+    else:
+        checks.append(
+            ProfileCheck(
+                name="ready",
+                ok=True,
+                detail="n/a: agent reports no readiness signal",
+            )
+        )
+
+    checks.append(
+        _transcript_setup_check(
+            caps.native_thread_store, profile, show_paths=show_paths
+        )
+    )
+    return checks
+
+
+def _transcript_setup_check(
+    native_thread_store: str | None,
+    profile: AccountProfileConfig,
+    *,
+    show_paths: bool,
+) -> ProfileCheck:
+    name = "transcript_setup"
+    if profile.transcript_policy != "symlink_shared":
+        return ProfileCheck(
+            name=name,
+            ok=True,
+            detail=f"n/a: transcript_policy is {profile.transcript_policy!r}",
+        )
+    shared = profile.shared_transcript_dir
+    if not shared:
+        return ProfileCheck(
+            name=name, ok=False, detail="symlink_shared requires shared_transcript_dir"
+        )
+    shared_path = Path(shared).expanduser()
+    if not shared_path.is_dir():
+        return ProfileCheck(
+            name=name,
+            ok=False,
+            detail=(
+                f"shared_transcript_dir {_redact_path(str(shared_path), show_paths)} "
+                "is missing; run 'waypoint accounts setup-transcripts'"
+            ),
+        )
+    if native_thread_store is None:
+        return ProfileCheck(
+            name=name, ok=False, detail="backend has no native transcript store"
+        )
+    store = Path(profile.config_dir).expanduser() / native_thread_store
+    if not store.is_symlink():
+        return ProfileCheck(
+            name=name,
+            ok=False,
+            detail=(
+                f"{_redact_path(str(store), show_paths)} is not a symlink; run "
+                "'waypoint accounts setup-transcripts' to set it up"
+            ),
+        )
+    if store.resolve() != shared_path.resolve():
+        return ProfileCheck(
+            name=name,
+            ok=False,
+            detail=(
+                f"{_redact_path(str(store), show_paths)} links to "
+                f"{_redact_path(os.readlink(store), show_paths)}, not "
+                f"{_redact_path(str(shared_path), show_paths)}"
+            ),
+        )
+    return ProfileCheck(
+        name=name,
+        ok=True,
+        detail=f"linked to {_redact_path(str(shared_path), show_paths)}",
+    )
 
 
 async def probe_account(

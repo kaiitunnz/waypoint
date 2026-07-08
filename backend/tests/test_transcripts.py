@@ -16,6 +16,7 @@ from waypoint.backends.transcripts import (
     TranscriptUnavailableError,
     ensure_symlink_shared,
     ensure_thread_available,
+    setup_transcripts_symlink,
 )
 from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
 
@@ -230,3 +231,82 @@ def test_symlink_shared_rechecks_and_rejects_when_shared_lacks_thread(
             shared_transcript_dir=str(tmp_path / "shared"),
             native_thread_store="projects",
         )
+
+
+# ── setup_transcripts_symlink (accounts setup-transcripts) ──────────────────
+
+
+def test_setup_creates_symlink_when_store_missing(tmp_path: Path) -> None:
+    store = tmp_path / "config" / "projects"
+    shared = tmp_path / "shared"
+    actions = setup_transcripts_symlink(store, shared)
+    assert store.is_symlink()
+    assert store.resolve() == shared.resolve()
+    assert any("linked" in a for a in actions)
+
+
+def test_setup_is_noop_on_correct_symlink(tmp_path: Path) -> None:
+    store = tmp_path / "config" / "projects"
+    shared = tmp_path / "shared"
+    setup_transcripts_symlink(store, shared)
+    actions = setup_transcripts_symlink(store, shared)
+    assert store.is_symlink()
+    assert any("already links" in a for a in actions)
+
+
+def test_setup_rejects_symlink_to_other_target(tmp_path: Path) -> None:
+    store = tmp_path / "config" / "projects"
+    other = tmp_path / "other"
+    other.mkdir()
+    store.parent.mkdir(parents=True)
+    store.symlink_to(other)
+    with pytest.raises(TranscriptUnavailableError, match="not the configured"):
+        setup_transcripts_symlink(store, tmp_path / "shared")
+
+
+def test_setup_replaces_empty_real_dir(tmp_path: Path) -> None:
+    store = tmp_path / "config" / "projects"
+    store.mkdir(parents=True)
+    shared = tmp_path / "shared"
+    setup_transcripts_symlink(store, shared)
+    assert store.is_symlink()
+    assert store.resolve() == shared.resolve()
+
+
+def test_setup_migrates_populated_dir_with_backup(tmp_path: Path) -> None:
+    store = tmp_path / "config" / "projects"
+    (store / "proj").mkdir(parents=True)
+    (store / "proj" / "a.jsonl").write_text("thread-a")
+    (store / "top.jsonl").write_text("thread-top")
+    shared = tmp_path / "shared"
+
+    actions = setup_transcripts_symlink(store, shared)
+
+    # Store is now the symlink; contents are visible through it and in shared.
+    assert store.is_symlink()
+    assert (store / "proj" / "a.jsonl").read_text() == "thread-a"
+    assert sorted(p.name for p in shared.iterdir()) == ["proj", "top.jsonl"]
+    # Perms pinned: 0700 dirs, 0600 files.
+    assert (shared / "proj").stat().st_mode & 0o777 == 0o700
+    assert (shared / "top.jsonl").stat().st_mode & 0o777 == 0o600
+    # A complete backup of the original dir is kept.
+    backups = [p for p in store.parent.iterdir() if p.name.startswith("projects.bak-")]
+    assert len(backups) == 1
+    assert (backups[0] / "top.jsonl").read_text() == "thread-top"
+    assert any("backed up" in a for a in actions)
+
+
+def test_setup_refuses_conflict_and_does_not_mutate(tmp_path: Path) -> None:
+    store = tmp_path / "config" / "projects"
+    (store / "dup").mkdir(parents=True)
+    (store / "dup" / "f.jsonl").write_text("orig")
+    shared = tmp_path / "shared"
+    (shared / "dup").mkdir(parents=True)
+
+    with pytest.raises(TranscriptUnavailableError, match="dup"):
+        setup_transcripts_symlink(store, shared)
+
+    # Nothing moved: store is still the original real dir, no symlink, no backup.
+    assert store.is_dir() and not store.is_symlink()
+    assert (store / "dup" / "f.jsonl").read_text() == "orig"
+    assert not any(p.name.startswith("projects.bak-") for p in store.parent.iterdir())

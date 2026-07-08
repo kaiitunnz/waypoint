@@ -18,6 +18,7 @@ to a 400 (nothing is terminated when it fires).
 import logging
 import os
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -66,6 +67,77 @@ def ensure_symlink_shared(store_dir: Path, shared_dir: Path) -> None:
         store_dir.rmdir()
     store_dir.parent.mkdir(parents=True, exist_ok=True)
     store_dir.symlink_to(shared_dir, target_is_directory=True)
+
+
+def _pin_tree_perms(root: Path) -> None:
+    """Lock a copied transcript tree to 0700 dirs / 0600 files."""
+    root.chmod(0o700)
+    for path in root.rglob("*"):
+        path.chmod(0o700 if path.is_dir() else 0o600)
+
+
+def setup_transcripts_symlink(store_dir: Path, shared_dir: Path) -> list[str]:
+    """Make ``store_dir`` a symlink to ``shared_dir``, migrating existing content.
+
+    The action counterpart to :func:`ensure_symlink_shared`'s guard: it performs
+    the one case the guard refuses — a populated real store dir — by migrating
+    its contents into the shared dir before replacing it with the symlink. The
+    other five cases delegate to :func:`ensure_symlink_shared`. Returns a list of
+    the actions taken (for reporting); raises :class:`TranscriptUnavailableError`
+    on a same-named conflict or a symlink pointing elsewhere.
+
+    For the populated case the sequence is data-safe: (1) a conflict pre-flight
+    refuses before touching anything if any top-level entry already exists under
+    ``shared``; (2) contents are copied into a temp sibling of ``shared`` and
+    renamed into place only after the full copy succeeds, so a mid-copy failure
+    leaves both ``store`` and ``shared`` intact and a re-run stays clean; (3) the
+    original ``store`` is renamed to a timestamped backup (a complete snapshot,
+    not an emptied husk); (4) ``store`` becomes the symlink.
+    """
+    shared_dir = shared_dir.expanduser()
+    if store_dir.is_symlink() and store_dir.resolve() == shared_dir.resolve():
+        return [f"{store_dir} already links to {shared_dir}"]
+    if not store_dir.is_symlink() and store_dir.is_dir() and any(store_dir.iterdir()):
+        return _migrate_populated_store(store_dir, shared_dir)
+    ensure_symlink_shared(store_dir, shared_dir)
+    return [f"linked {store_dir} -> {shared_dir}"]
+
+
+def _migrate_populated_store(store_dir: Path, shared_dir: Path) -> list[str]:
+    shared_dir.mkdir(parents=True, exist_ok=True)
+    shared_dir.chmod(0o700)
+
+    entries = sorted(store_dir.iterdir(), key=lambda p: p.name)
+    conflicts = [e.name for e in entries if (shared_dir / e.name).exists()]
+    if conflicts:
+        raise TranscriptUnavailableError(
+            f"cannot migrate {store_dir} into {shared_dir}: these entries already "
+            f"exist in the shared dir: {', '.join(sorted(conflicts))}"
+        )
+
+    # Copy into a temp sibling first, then rename each entry into place, so a
+    # failed copy never leaves partial entries under the shared dir.
+    staging = shared_dir.parent / f".wp-migrate-{_timestamp()}"
+    if staging.exists():
+        raise TranscriptUnavailableError(f"migration staging dir {staging} exists")
+    shutil.copytree(store_dir, staging, symlinks=True)
+    _pin_tree_perms(staging)
+    for entry in sorted(staging.iterdir(), key=lambda p: p.name):
+        entry.rename(shared_dir / entry.name)
+    staging.rmdir()
+
+    backup = store_dir.parent / f"{store_dir.name}.bak-{_timestamp()}"
+    store_dir.rename(backup)
+    store_dir.symlink_to(shared_dir, target_is_directory=True)
+    return [
+        f"migrated {len(entries)} entries from {store_dir} into {shared_dir}",
+        f"backed up the original dir to {backup}",
+        f"linked {store_dir} -> {shared_dir}",
+    ]
+
+
+def _timestamp() -> str:
+    return datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
 
 
 def copy_thread_artifacts(

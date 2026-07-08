@@ -234,6 +234,37 @@ async def test_update_rejects_noop_account_switch(
     assert "same account" in str(getattr(exc.value, "detail", ""))
 
 
+async def test_switch_marks_exited_before_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: a pane-wrapping transport (claude_tty) only relaunches on an
+    # EXITED reattach, so the switch must persist EXITED before restore — else
+    # restore keeps the dead pane and the next input fails "can't find pane".
+    # An env-only edit reaches terminate→persist→restore without the
+    # account-probe branch.
+    runtime = _runtime(tmp_path)
+    _session(runtime, status=SessionStatus.IDLE)
+    plugin = runtime.registry.plugin_for(runtime.get_session("s1"))
+    seen: dict[str, Any] = {}
+
+    async def fake_terminate(*_a: Any, **_k: Any) -> None:
+        return None
+
+    async def fake_restore(_self_rt: Any, session: SessionRecord) -> None:
+        # Capture the status the transport is asked to restore from, then
+        # simulate a healthy relaunch so the post-restore gate passes.
+        seen["restore_status"] = session.status
+        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+
+    monkeypatch.setattr(plugin, "terminate_session", fake_terminate)
+    monkeypatch.setattr(plugin, "restore_session", fake_restore)
+
+    await runtime.update_launch_settings(
+        "s1", LaunchSettingsUpdateRequest(env_set={"FOO": "bar"}, restart=True)
+    )
+    assert seen["restore_status"] == SessionStatus.EXITED
+
+
 async def test_update_rejects_config_overrides_when_unsupported(
     tmp_path: Path,
 ) -> None:

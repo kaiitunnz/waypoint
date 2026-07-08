@@ -1881,11 +1881,17 @@ class SessionRuntime:
 
         # Terminate → persist new settings → restore. terminate/restore cycle the
         # rate-limit watcher; restore rebuilds env from the persisted record, so
-        # the account is fixed by the (already-verified) launch_env.
+        # the account is fixed by the (already-verified) launch_env. Mark the
+        # record EXITED before restore: the process is gone, and a pane-wrapping
+        # transport (claude_tty) only relaunches on an EXITED reattach — without
+        # this it would take the boot-time branch, keep the dead pane, and reject
+        # the next input with "can't find pane". Native transports (claude_cli,
+        # codex) relaunch unconditionally, so this is a no-op for them.
         await plugin.terminate_session(self, session)
         await self._cancel_context_usage_source(session.id)
         self.storage.update_session(
             session.id,
+            status=SessionStatus.EXITED,
             args=new_args,
             config_overrides=new_config_overrides,
             launch_env=new_env,

@@ -403,6 +403,8 @@ export interface SessionLaunchSettings {
   supports_custom_args: boolean;
   supports_config_overrides: boolean;
   supports_account_profile_with_restart: boolean;
+  // Whether applying a change requires restarting the session (true in phase 1).
+  requires_restart: boolean;
 }
 
 // PATCH body for the same endpoint; omitted fields are left unchanged. `restart`

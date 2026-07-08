@@ -525,6 +525,13 @@ class CodexPlugin(DefaultLaunchContract):
         rollout = find_codex_rollout(thread_id, config_dir)
         return [rollout] if rollout is not None else []
 
+    def native_thread_artifact_glob(self, session: SessionRecord) -> str | None:
+        # Same needle as conversation_exists: <config_dir>/sessions/*/*/*/rollout-*-<uuid>.jsonl.
+        thread_id = self.native_thread_id(session)
+        if thread_id is None or not _UUID_RE.match(thread_id):
+            return None
+        return f"sessions/*/*/*/rollout-*-{thread_id}.jsonl"
+
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

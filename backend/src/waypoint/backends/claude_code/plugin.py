@@ -516,6 +516,13 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             return []
         return local_claude_thread_artifacts(thread_id, config_dir)
 
+    def native_thread_artifact_glob(self, session: SessionRecord) -> str | None:
+        # Same needle as conversation_exists: <config_dir>/projects/*/<uuid>.jsonl.
+        thread_id = self.native_thread_id(session)
+        if thread_id is None or not UUID_RE.match(thread_id):
+            return None
+        return f"projects/*/{thread_id}.jsonl"
+
     def config_dir_readiness(self, config_dir: str) -> ConfigDirReadiness:
         # Setting CLAUDE_CONFIG_DIR moves .claude.json into the profile dir; if
         # that copy hasn't completed onboarding the CLI relaunches into its

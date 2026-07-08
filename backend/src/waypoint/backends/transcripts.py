@@ -2,27 +2,33 @@
 
 Before a config-dir profile switch can resume, the target profile's state root
 must be able to see the session's native thread transcript. This applies the
-profile's ``transcript_policy`` locally:
+profile's ``transcript_policy``:
 
 - ``require_existing`` — verify the target already has it; never mutate files.
 - ``symlink_shared`` — point the target's native store dir at a shared dir.
 - ``copy_thread_on_switch`` — copy only the current thread's artifact set.
 
 The runtime drives the locate → check → apply → re-check sequence via
-:func:`ensure_thread_available`; per-backend path logic stays in each plugin's
-``native_thread_artifacts``. Local launch targets only — remote (over SSH) is a
-later phase. Raises :class:`TranscriptUnavailableError`, which the runtime maps
-to a 400 (nothing is terminated when it fires).
+:func:`ensure_thread_available`; per-backend path knowledge stays in each
+plugin's ``native_thread_artifact_glob``. All IO goes through the
+:class:`~waypoint.backends.transcript_fs.TranscriptFilesystem` seam
+(:mod:`waypoint.backends.transcript_fs`), defaulting to
+``LocalTranscriptFilesystem`` — a remote implementation (over SSH) plugs into
+the same policy code unchanged. Raises :class:`TranscriptUnavailableError`,
+which the runtime maps to a 400 (nothing is terminated when it fires).
 """
 
 import logging
-import os
 import shutil
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from waypoint.backends.plugin_config import TranscriptPolicy
+from waypoint.backends.transcript_fs import (
+    LocalTranscriptFilesystem,
+    TranscriptFilesystem,
+)
 from waypoint.schemas import SessionRecord
 
 if TYPE_CHECKING:
@@ -30,12 +36,19 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("waypoint.backends.transcripts")
 
+_LOCAL_FS = LocalTranscriptFilesystem()
+
 
 class TranscriptUnavailableError(Exception):
     """The target profile cannot see the native thread and policy can't fix it."""
 
 
-def ensure_symlink_shared(store_dir: Path, shared_dir: Path) -> None:
+def ensure_symlink_shared(
+    store_dir: Path,
+    shared_dir: Path,
+    *,
+    fs: TranscriptFilesystem = _LOCAL_FS,
+) -> None:
     """Ensure ``store_dir`` is a symlink to ``shared_dir`` (guarded).
 
     Idempotent and non-destructive: a real, populated store dir is refused
@@ -44,29 +57,31 @@ def ensure_symlink_shared(store_dir: Path, shared_dir: Path) -> None:
     symlink → no-op; a symlink elsewhere → error; an empty real dir → replace;
     a non-empty real dir → error.
     """
-    shared_dir.mkdir(parents=True, exist_ok=True)
-    shared_dir.chmod(0o700)
-    if store_dir.is_symlink():
-        if store_dir.resolve() == shared_dir.resolve():
+    store, shared = str(store_dir), str(shared_dir)
+    fs.mkdir(shared, parents=True, exist_ok=True)
+    fs.chmod(shared, 0o700)
+    if fs.is_symlink(store):
+        target = fs.readlink(store)
+        if target == shared:
             return
         raise TranscriptUnavailableError(
-            f"{store_dir} is a symlink to {os.readlink(store_dir)!r}, "
+            f"{store_dir} is a symlink to {target!r}, "
             f"not the configured shared_transcript_dir {shared_dir}"
         )
-    if store_dir.exists():
-        if not store_dir.is_dir():
+    if fs.exists(store):
+        if not fs.is_dir(store):
             raise TranscriptUnavailableError(
                 f"{store_dir} exists and is not a directory"
             )
-        if any(store_dir.iterdir()):
+        if fs.listdir(store):
             raise TranscriptUnavailableError(
                 f"{store_dir} is a non-empty directory; run "
                 "'waypoint accounts setup-transcripts' to migrate it into the "
                 "shared dir before switching"
             )
-        store_dir.rmdir()
-    store_dir.parent.mkdir(parents=True, exist_ok=True)
-    store_dir.symlink_to(shared_dir, target_is_directory=True)
+        fs.rmdir(store)
+    fs.mkdir(str(store_dir.parent), parents=True, exist_ok=True)
+    fs.symlink(store, shared)
 
 
 def _pin_tree_perms(root: Path) -> None:
@@ -85,6 +100,13 @@ def setup_transcripts_symlink(store_dir: Path, shared_dir: Path) -> list[str]:
     other five cases delegate to :func:`ensure_symlink_shared`. Returns a list of
     the actions taken (for reporting); raises :class:`TranscriptUnavailableError`
     on a same-named conflict or a symlink pointing elsewhere.
+
+    This is the local-only migration CLI (``waypoint accounts
+    setup-transcripts``), not part of the account-profile switch flow that
+    goes remote — its data-safe migration (staged copy, atomic rename,
+    timestamped backup) has no remote counterpart in scope, so it stays on
+    ``pathlib``/``shutil`` directly rather than the ``TranscriptFilesystem``
+    seam.
 
     For the populated case the sequence is data-safe against loss: (1) a conflict
     pre-flight refuses before touching anything if any top-level entry already
@@ -149,29 +171,33 @@ def _timestamp() -> str:
 
 
 def copy_thread_artifacts(
-    artifacts: list[Path], src_root: Path, dst_root: Path
+    artifacts: list[str],
+    src_root: str,
+    dst_root: str,
+    *,
+    fs: TranscriptFilesystem = _LOCAL_FS,
 ) -> None:
     """Copy each artifact from under ``src_root`` to the same relative path
     under ``dst_root``, preserving restrictive permissions.
 
     Only the passed artifact set is copied — never whole history directories.
     """
+    src, dst = PurePosixPath(src_root), PurePosixPath(dst_root)
     for artifact in artifacts:
-        rel = artifact.relative_to(src_root)
-        dest = dst_root / rel
+        rel = PurePosixPath(artifact).relative_to(src)
+        dest = dst / rel
         # Lock only the dirs this copy creates to 0700; leave pre-existing ones
         # (including the config root) untouched. The transcript is copied with
-        # its metadata (shutil.copy2) then pinned to 0600 as a backstop.
+        # its metadata then pinned to 0600 as a backstop.
         new_dirs = [
-            dst_root / parent
+            dst / parent
             for parent in reversed(rel.parents)
-            if (dst_root / parent) != dst_root and not (dst_root / parent).exists()
+            if (dst / parent) != dst and not fs.exists(str(dst / parent))
         ]
-        dest.parent.mkdir(parents=True, exist_ok=True)
+        fs.mkdir(str(dest.parent), parents=True, exist_ok=True)
         for created in new_dirs:
-            created.chmod(0o700)
-        shutil.copy2(artifact, dest)
-        dest.chmod(0o600)
+            fs.chmod(str(created), 0o700)
+        fs.copy_file(artifact, str(dest), 0o600)
 
 
 def ensure_thread_available(
@@ -183,15 +209,17 @@ def ensure_thread_available(
     policy: TranscriptPolicy,
     shared_transcript_dir: str | None,
     native_thread_store: str | None,
+    fs: TranscriptFilesystem = _LOCAL_FS,
 ) -> None:
     """Make the session's native thread visible under ``target_config_dir``.
 
     No-op when it's already visible. Otherwise applies ``policy`` and re-checks;
     raises :class:`TranscriptUnavailableError` (before any process is touched)
-    when the thread still isn't available.
+    when the thread still isn't available. All filesystem access — local by
+    default via ``fs`` — goes through the ``TranscriptFilesystem`` seam.
     """
     target = str(Path(target_config_dir).expanduser())
-    if plugin.native_thread_artifacts(session, target):
+    if fs.glob_artifacts(session, plugin, target):
         return
 
     if policy == "require_existing":
@@ -211,19 +239,20 @@ def ensure_thread_available(
         ensure_symlink_shared(
             Path(target) / native_thread_store,
             Path(shared_transcript_dir).expanduser(),
+            fs=fs,
         )
     elif policy == "copy_thread_on_switch":
         current = str(Path(current_config_dir).expanduser())
-        artifacts = plugin.native_thread_artifacts(session, current)
+        artifacts = fs.glob_artifacts(session, plugin, current)
         if not artifacts:
             raise TranscriptUnavailableError(
                 "source native thread artifact not found to copy"
             )
-        copy_thread_artifacts(artifacts, Path(current), Path(target))
+        copy_thread_artifacts(artifacts, current, target, fs=fs)
     else:  # pragma: no cover - exhaustive over TranscriptPolicy
         raise TranscriptUnavailableError(f"unknown transcript policy {policy!r}")
 
-    if not plugin.native_thread_artifacts(session, target):
+    if not fs.glob_artifacts(session, plugin, target):
         raise TranscriptUnavailableError(
             "native thread still unavailable in the target profile after "
             f"applying transcript_policy {policy!r}"

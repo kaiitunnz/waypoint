@@ -223,6 +223,9 @@ class ClaudeTtyPlugin:
         # the config-dir/thread-store path logic, so delegate to it.
         return self._claude.native_thread_artifacts(session, config_dir)
 
+    def native_thread_artifact_glob(self, session: SessionRecord) -> str | None:
+        return self._claude.native_thread_artifact_glob(session)
+
     def pane_ready_for_input(self, pane_text: str) -> bool:
         return pane_dialog.composer_ready(pane_text)
 

@@ -66,12 +66,14 @@ class TranscriptFilesystem(Protocol):
 
     def expanduser(self, path: str) -> str:
         """Expand a leading ``~`` against the home of the filesystem the path
-        lives on.
+        lives on, returning an absolute path.
 
-        Local expands against this host; the remote implementation leaves the
-        path untouched so the remote shell/interpreter expands it against the
-        *remote* home — expanding a remote path against the backend host's home
-        would glob the wrong directory.
+        Local expands against this host; the remote implementation resolves it
+        against the *remote* home (over SSH) — expanding a remote path against
+        the backend host's home would glob the wrong directory, and returning
+        it unexpanded would leave a ``~`` base that later ``relative_to`` /
+        symlink-target comparisons can't match against the absolute paths the
+        other ops produce. An absolute path is returned unchanged.
         """
         ...
 

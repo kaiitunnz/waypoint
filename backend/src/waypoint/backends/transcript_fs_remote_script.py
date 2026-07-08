@@ -46,33 +46,41 @@ def emit(payload):
     sys.stdout.flush()
 
 
+def _u(path):
+    # Expand a leading ``~`` against the remote home. Every path arg is run
+    # through this so a ``~``-relative config_dir/shared dir resolves on the
+    # remote host, not the backend host that built the command.
+    return os.path.expanduser(path)
+
+
 def op_exists(path):
-    emit({"exists": os.path.exists(path)})
+    emit({"exists": os.path.exists(_u(path))})
 
 
 def op_is_dir(path):
-    emit({"is_dir": os.path.isdir(path)})
+    emit({"is_dir": os.path.isdir(_u(path))})
 
 
 def op_is_symlink(path):
-    emit({"is_symlink": os.path.islink(path)})
+    emit({"is_symlink": os.path.islink(_u(path))})
 
 
 def op_readlink(path):
     try:
-        emit({"target": os.readlink(path)})
+        emit({"target": os.readlink(_u(path))})
     except OSError as exc:
         emit({"error": str(exc)})
 
 
 def op_listdir(path):
     try:
-        emit({"entries": os.listdir(path)})
+        emit({"entries": os.listdir(_u(path))})
     except OSError as exc:
         emit({"error": str(exc)})
 
 
 def op_mkdir(path, parents, exist_ok):
+    path = _u(path)
     want_parents = parents == "1"
     want_exist_ok = exist_ok == "1"
     try:
@@ -94,7 +102,7 @@ def op_mkdir(path, parents, exist_ok):
 
 def op_chmod(path, mode):
     try:
-        os.chmod(path, int(mode))
+        os.chmod(_u(path), int(mode))
     except OSError as exc:
         emit({"error": str(exc)})
         return
@@ -103,7 +111,7 @@ def op_chmod(path, mode):
 
 def op_rmdir(path):
     try:
-        os.rmdir(path)
+        os.rmdir(_u(path))
     except OSError as exc:
         emit({"error": str(exc)})
         return
@@ -112,7 +120,7 @@ def op_rmdir(path):
 
 def op_symlink(path, target):
     try:
-        os.symlink(target, path)
+        os.symlink(_u(target), _u(path))
     except OSError as exc:
         emit({"error": str(exc)})
         return
@@ -121,8 +129,8 @@ def op_symlink(path, target):
 
 def op_copy_file(src, dst, mode):
     try:
-        shutil.copy2(src, dst)
-        os.chmod(dst, int(mode))
+        shutil.copy2(_u(src), _u(dst))
+        os.chmod(_u(dst), int(mode))
     except OSError as exc:
         emit({"error": str(exc)})
         return

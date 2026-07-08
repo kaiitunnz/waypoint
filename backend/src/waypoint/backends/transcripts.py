@@ -218,7 +218,7 @@ def ensure_thread_available(
     when the thread still isn't available. All filesystem access — local by
     default via ``fs`` — goes through the ``TranscriptFilesystem`` seam.
     """
-    target = str(Path(target_config_dir).expanduser())
+    target = fs.expanduser(target_config_dir)
     if fs.glob_artifacts(session, plugin, target):
         return
 
@@ -238,11 +238,11 @@ def ensure_thread_available(
             )
         ensure_symlink_shared(
             Path(target) / native_thread_store,
-            Path(shared_transcript_dir).expanduser(),
+            Path(fs.expanduser(shared_transcript_dir)),
             fs=fs,
         )
     elif policy == "copy_thread_on_switch":
-        current = str(Path(current_config_dir).expanduser())
+        current = fs.expanduser(current_config_dir)
         artifacts = fs.glob_artifacts(session, plugin, current)
         if not artifacts:
             raise TranscriptUnavailableError(

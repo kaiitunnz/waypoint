@@ -8,6 +8,7 @@ only the :class:`TranscriptFilesystem` implementation differs, never the
 policy branching.
 """
 
+import os
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -63,6 +64,17 @@ class TranscriptFilesystem(Protocol):
         """Copy the file ``src`` to ``dst`` and set ``dst``'s mode."""
         ...
 
+    def expanduser(self, path: str) -> str:
+        """Expand a leading ``~`` against the home of the filesystem the path
+        lives on.
+
+        Local expands against this host; the remote implementation leaves the
+        path untouched so the remote shell/interpreter expands it against the
+        *remote* home — expanding a remote path against the backend host's home
+        would glob the wrong directory.
+        """
+        ...
+
     def glob_artifacts(
         self, session: SessionRecord, plugin: "BackendPlugin", config_dir: str
     ) -> list[str]:
@@ -113,6 +125,9 @@ class LocalTranscriptFilesystem:
     def copy_file(self, src: str, dst: str, mode: int) -> None:
         shutil.copy2(src, dst)
         Path(dst).chmod(mode)
+
+    def expanduser(self, path: str) -> str:
+        return os.path.expanduser(path)
 
     def glob_artifacts(
         self, session: SessionRecord, plugin: "BackendPlugin", config_dir: str

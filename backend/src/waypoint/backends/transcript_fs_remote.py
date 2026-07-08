@@ -123,6 +123,11 @@ class RemoteTranscriptFilesystem:
     def copy_file(self, src: str, dst: str, mode: int) -> None:
         self._mutate("copy_file", src, dst, str(mode))
 
+    def expanduser(self, path: str) -> str:
+        # Leave ``~`` intact: the remote helper script expands it against the
+        # remote home per op. Expanding here would use the backend host's home.
+        return path
+
     # -- transport --------------------------------------------------------
 
     def _run(self, op: str, *args: str) -> dict[str, Any]:

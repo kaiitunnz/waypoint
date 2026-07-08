@@ -411,7 +411,12 @@ def test_ensure_thread_available_dispatches_through_custom_fs(tmp_path: Path) ->
         native_thread_store="projects",
         fs=fs,
     )
-    assert fs.calls == [("glob_artifacts", (session, plugin, str(target)))]
+    # Config-dir expansion also dispatches through the seam (so a remote fs
+    # expands against the remote home, not the backend host's), then discovery.
+    assert fs.calls == [
+        ("expanduser", (str(target),)),
+        ("glob_artifacts", (session, plugin, str(target))),
+    ]
 
 
 def test_copy_thread_on_switch_through_custom_fs_matches_default(

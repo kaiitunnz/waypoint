@@ -343,3 +343,28 @@ def test_remote_glob_artifacts_degrades_to_empty_on_transport_failure(
             native_thread_store="projects",
             fs=fs,
         )
+
+
+def test_remote_expanduser_leaves_tilde_intact() -> None:
+    # The remote fs must NOT expand ``~`` against the backend host — the remote
+    # helper script expands it against the remote home per op instead.
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    assert fs.expanduser("~/.codex-work") == "~/.codex-work"
+    assert fs.expanduser("~alice/x") == "~alice/x"
+    assert fs.expanduser("/abs/path") == "/abs/path"
+
+
+def test_remote_script_ops_expand_tilde_against_the_running_host() -> None:
+    # Ops resolve ``~`` on the host that runs the script (the remote one in
+    # production; here the test host stands in), so a ``~``-relative config_dir
+    # reaches the right directory.
+    import json
+    import os
+
+    payload = _dispatch_script("exists", (os.path.expanduser("~"),))
+    line = payload.decode().split(script_mod.SENTINEL, 1)[1]
+    assert json.loads(line) == {"exists": True}
+    # A bare ``~`` must resolve the same way, not stat a literal "~" entry.
+    payload_tilde = _dispatch_script("exists", ("~",))
+    line_tilde = payload_tilde.decode().split(script_mod.SENTINEL, 1)[1]
+    assert json.loads(line_tilde) == {"exists": True}

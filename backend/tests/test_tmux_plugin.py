@@ -743,6 +743,7 @@ class _InnerPluginStub:
     def __init__(self) -> None:
         self.calls = 0
         self.forces: list[bool] = []
+        self.launch_envs: list[dict[str, str] | None] = []
 
     async def probe_account_rate_limit(
         self,
@@ -750,10 +751,12 @@ class _InnerPluginStub:
         _launch_target: Any,
         *,
         cwd: str | None = None,
+        launch_env: dict[str, str] | None = None,
         force: bool = False,
     ) -> Any:
         self.calls += 1
         self.forces.append(force)
+        self.launch_envs.append(launch_env)
         from waypoint.schemas import SessionRateLimitUsage
 
         return SessionRateLimitUsage(

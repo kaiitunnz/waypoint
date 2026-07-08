@@ -508,6 +508,24 @@ class SessionRuntime:
             env["WAYPOINT_SESSION_ID"] = session_id
         return env
 
+    def account_lookup_env(
+        self, backend: str, launch_env: dict[str, str]
+    ) -> dict[str, str]:
+        """Env for account-scoped *lookups* (rate-limit/thread/model probes).
+
+        The account a probe authenticates as is selected by the config-dir env
+        var (``CLAUDE_CONFIG_DIR``/``CODEX_HOME``), which a profile bakes into
+        ``launch_env``. Mirror the env the session process actually sees —
+        ``os.environ`` overlaid with the session's ``launch_env`` and the
+        backend's ``extra_env`` — so a lookup resolves the same account the
+        session runs as. Unlike ``_agent_process_env`` this never adds
+        runtime-only keys (e.g. ``WAYPOINT_SESSION_ID``); it's a read helper,
+        not a launch helper. Dispatches through the registry — no per-backend
+        branching.
+        """
+        plugin = self.registry.get(backend)
+        return {**os.environ, **launch_env, **plugin.extra_env}
+
     async def create_session(
         self,
         request: SessionCreateRequest,

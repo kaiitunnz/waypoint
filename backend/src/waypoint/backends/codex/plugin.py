@@ -250,7 +250,16 @@ class CodexPlugin(DefaultLaunchContract):
         )
 
         async def _probe() -> SessionRateLimitUsage | None:
-            return await probe_codex_status(cwd=cwd, binary=binary)
+            # Probe the account the session runs as: its launch_env carries the
+            # profile's CODEX_HOME, which selects the auth.json/config.toml the
+            # probe reads. Looked up per probe so it tracks a live change.
+            session = runtime.storage.get_session(session_id)
+            env = (
+                runtime.account_lookup_env(self.id, session.launch_env)
+                if session is not None
+                else None
+            )
+            return await probe_codex_status(cwd=cwd, binary=binary, env=env)
 
         await self.adapter.register_rate_limit_probe(
             session_id, _probe, refresh_interval_seconds=300.0
@@ -308,6 +317,7 @@ class CodexPlugin(DefaultLaunchContract):
         launch_target: SshLaunchTargetConfig | None,
         *,
         cwd: str,
+        launch_env: dict[str, str] | None = None,
         force: bool = False,
     ) -> SessionRateLimitUsage | None:
         """Fetch the account's current rate-limit snapshot without a session.
@@ -326,7 +336,12 @@ class CodexPlugin(DefaultLaunchContract):
                 or self.capabilities.cli_binary
                 or "codex"
             )
-            return await probe_codex_status(cwd=cwd, binary=binary)
+            env = (
+                runtime.account_lookup_env(self.id, launch_env)
+                if launch_env is not None
+                else None
+            )
+            return await probe_codex_status(cwd=cwd, binary=binary, env=env)
         binary = self.remote_executable(launch_target) or "codex"
         return await probe_codex_usage_remote(launch_target, binary=binary)
 

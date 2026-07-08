@@ -50,6 +50,7 @@ from waypoint.schemas import (
     InboxBlockSubmitRequest,
     InboxPostRequest,
     InboxStatus,
+    LaunchSettingsUpdateRequest,
     LaunchTargetConnectRequest,
     LaunchTargetConnectResponse,
     LoginRequest,
@@ -1254,6 +1255,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         session = await context.runtime.set_effort(session_id, body.effort)
+        return {"session": session.model_dump(mode="json")}
+
+    @app.get("/api/sessions/{session_id}/launch-settings")
+    async def session_get_launch_settings(
+        session_id: str,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        return context.runtime.get_launch_settings(session_id).model_dump(mode="json")
+
+    @app.patch("/api/sessions/{session_id}/launch-settings")
+    async def session_update_launch_settings(
+        session_id: str,
+        body: LaunchSettingsUpdateRequest,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        session = await context.runtime.update_launch_settings(session_id, body)
         return {"session": session.model_dump(mode="json")}
 
     @app.post("/api/sessions/{session_id}/side-questions/{sqid}/fork")

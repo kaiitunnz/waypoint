@@ -276,6 +276,10 @@ class SessionRuntime:
         # switch is a terminate→restore sequence that must not interleave with
         # another switch/reattach/terminate on the same session).
         self._session_locks: dict[str, asyncio.Lock] = {}
+        # Resolved remote ``$HOME`` (or ``~user``) per (target id, tilde prefix),
+        # so ``_apply_account_profile_env`` can expand a ``~``-relative remote
+        # config_dir without an SSH round-trip on its own (synchronous) path.
+        self._remote_home_cache: dict[tuple[str, str], str] = {}
         self._completion_cache: dict[CompletionCacheKey, list[CommandCompletion]] = {}
         self._completion_cache_updated_at: dict[CompletionCacheKey, float] = {}
         self._completion_refresh_tasks: dict[
@@ -495,25 +499,64 @@ class SessionRuntime:
             )
         config_dir = profile.config_dir
         # Expand ``~`` for local launches (the config dir is a path on this
-        # host). Remote-home expansion isn't supported yet, and env values are
-        # injected shell-quoted so a remote shell won't expand ``~`` either —
-        # rather than silently launch under a literal ``~`` dir (wrong account),
-        # reject a ``~``-relative remote config_dir until that lands. Absolute
-        # remote paths are fine.
+        # host) via the stdlib. Env values are injected shell-quoted so a
+        # remote shell won't expand ``~`` itself — a remote ``~``-relative
+        # config_dir is expanded here from the cached remote home instead
+        # (warmed ahead of this call by an async call site; this method stays
+        # synchronous and only reads the cache).
         if launch_target is None:
             config_dir = os.path.expanduser(config_dir)
         elif config_dir.startswith("~"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"account profile {account_profile_id!r} uses a '~'-relative "
-                    "config_dir on a remote launch target; use an absolute path "
-                    "(remote home expansion is not yet supported)"
-                ),
+            tilde_prefix, remainder = self._split_tilde_config_dir(config_dir)
+            resolved_home = self._remote_home_cache.get(
+                (launch_target.id, tilde_prefix)
             )
+            if not resolved_home:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "could not resolve remote home for expansion; use an "
+                        "absolute config_dir or ensure the target is reachable"
+                    ),
+                )
+            config_dir = resolved_home.rstrip("/") + remainder
         env = dict(launch_env)
         env[config_dir_key] = config_dir
         return env, profile.label
+
+    @staticmethod
+    def _split_tilde_config_dir(config_dir: str) -> tuple[str, str]:
+        """Split a ``~``-relative path into its tilde prefix and remainder.
+
+        ``"~/.codex-work"`` -> ``("~", "/.codex-work")``; ``"~alice/x"`` ->
+        ``("~alice", "/x")``; bare ``"~"`` -> ``("~", "")``. Mirrors how
+        ``os.path.expanduser`` scopes the expansion to the first path segment.
+        """
+        head, sep, tail = config_dir.partition("/")
+        return head, (sep + tail if sep else "")
+
+    async def _ensure_remote_home_cached(
+        self, launch_target: SshLaunchTargetConfig, tilde_prefix: str = "~"
+    ) -> None:
+        """Resolve and cache ``launch_target``'s remote home for ``tilde_prefix``.
+
+        Auth-agnostic: uses ``launch_target.ssh_capture`` (a plain SSH round
+        trip that transparently reuses the ControlMaster socket for
+        password-auth targets) rather than ``_require_live_master`` /
+        ``connect_launch_target``, both of which are password-only and would
+        never warm a key-auth target (the ``ssh_auth`` default). Bare ``~``
+        resolves via ``$HOME``; a ``~user`` prefix resolves via shell tilde
+        expansion for that user. No-op on cache hit; leaves the cache cold
+        (for the synchronous 400 in ``_apply_account_profile_env``) when the
+        target is unreachable or reports no home.
+        """
+        cache_key = (launch_target.id, tilde_prefix)
+        if cache_key in self._remote_home_cache:
+            return
+        remote_cmd = "echo $HOME" if tilde_prefix == "~" else f"echo {tilde_prefix}"
+        resolved = (await launch_target.ssh_capture(remote_cmd)).strip()
+        if resolved:
+            self._remote_home_cache[cache_key] = resolved
 
     def _ensure_profile_config_dir_ready(
         self,

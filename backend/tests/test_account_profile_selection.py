@@ -128,10 +128,33 @@ def test_overlay_rejects_unknown_profile(tmp_path: Path) -> None:
     assert exc.value.status_code == 400
 
 
-def test_overlay_rejects_tilde_config_dir_on_remote(tmp_path: Path) -> None:
-    # ``~`` can't be expanded to the remote home yet and won't be shell-expanded
-    # in the injected env, so a remote profile with a ``~`` config_dir is
-    # rejected rather than silently launching under a literal ``~`` dir.
+async def test_overlay_expands_tilde_config_dir_on_remote_with_warm_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A warm remote-home cache (populated by ``_ensure_remote_home_cached``,
+    # normally called eagerly by an async launch path) lets the synchronous
+    # overlay expand ``~`` against the remote home instead of rejecting it.
+    runtime, _ = _runtime(tmp_path, codex=_codex_profiles())
+    target = SshLaunchTargetConfig(id="d", name="d", ssh_destination="u@d")
+
+    async def fake_ssh_capture(self: SshLaunchTargetConfig, remote_cmd: str) -> str:
+        assert remote_cmd == "echo $HOME"
+        return "/home/alice\n"
+
+    monkeypatch.setattr(SshLaunchTargetConfig, "ssh_capture", fake_ssh_capture)
+    await runtime._ensure_remote_home_cached(target)
+
+    env, label = runtime._apply_account_profile_env("codex", {}, "work", target)
+    assert env["CODEX_HOME"] == "/home/alice/.codex-work"
+    assert label == "Work"
+
+
+def test_overlay_rejects_tilde_config_dir_on_remote_with_cold_cache(
+    tmp_path: Path,
+) -> None:
+    # No warm cache entry (target unreachable, or never resolved) still
+    # rejects a ``~``-relative remote config_dir rather than launching under
+    # a literal ``~`` dir.
     runtime, _ = _runtime(tmp_path, codex=_codex_profiles())
     target = SshLaunchTargetConfig(id="d", name="d", ssh_destination="u@d")
     with pytest.raises(HTTPException) as exc:

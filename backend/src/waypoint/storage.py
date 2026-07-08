@@ -2098,7 +2098,9 @@ class Storage:
             return value.isoformat()
         if isinstance(value, BaseModel):
             return json.dumps(value.model_dump(mode="json"))
-        if isinstance(value, dict):
+        if isinstance(value, (dict, list)):
+            # JSON TEXT columns (launch_env/tags dicts, args/config_overrides
+            # lists) round-trip through json; sqlite can't bind them directly.
             return json.dumps(value)
         return value
 

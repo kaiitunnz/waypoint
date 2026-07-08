@@ -134,6 +134,23 @@ def test_get_launch_settings_projection(tmp_path: Path) -> None:
     assert resp.supports_account_profile_with_restart is True
 
 
+def test_update_session_round_trips_list_columns(tmp_path: Path) -> None:
+    # The switch persists args/config_overrides (lists) via update_session; the
+    # generic serializer must JSON-encode lists (JSON TEXT columns), not just
+    # dicts, or sqlite rejects the bind.
+    runtime = _runtime(tmp_path)
+    _session(runtime)
+    updated = runtime.storage.update_session(
+        "s1", args=["--a", "--b"], config_overrides=['x="1"']
+    )
+    assert updated.args == ["--a", "--b"]
+    assert updated.config_overrides == ['x="1"']
+    reloaded = runtime.storage.get_session("s1")
+    assert reloaded is not None
+    assert reloaded.args == ["--a", "--b"]
+    assert reloaded.config_overrides == ['x="1"']
+
+
 # ── pre-termination gates ────────────────────────────────────────────────────
 
 

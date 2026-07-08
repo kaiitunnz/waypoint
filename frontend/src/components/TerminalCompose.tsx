@@ -23,6 +23,7 @@ import { CommandSuggestions } from "@/components/CommandSuggestions";
 import { FileMentions } from "@/components/FileMentions";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
 import { type TerminalSubmitResult } from "@/lib/composer";
+import { isModifiedEnterShortcut } from "@/lib/keyboard";
 import { useCommandCompletions } from "@/lib/composer-completions";
 import { useFileMentions } from "@/lib/use-file-mentions";
 
@@ -221,8 +222,7 @@ export function TerminalCompose({
         window.setTimeout(refocusTerminal, 0);
         return;
       }
-      if (event.key !== "Enter" || event.shiftKey) return;
-      if (!event.metaKey && !event.ctrlKey) return;
+      if (!isModifiedEnterShortcut(event)) return;
       event.preventDefault();
       send();
     },

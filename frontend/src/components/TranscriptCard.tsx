@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent,
 } from "react";
 
 import {
@@ -12,6 +13,7 @@ import {
   humaniseBackend,
   type BackendCatalog,
 } from "@/lib/backends";
+import { isModifiedEnterShortcut } from "@/lib/keyboard";
 import { EventRecord, SessionTransport } from "@/lib/types";
 import {
   normalizeToolName,
@@ -940,6 +942,18 @@ function AskUserQuestionCard({
   );
   const totalNotes = Object.values(notes).filter((value) => value.trim()).length;
   const interactive = Boolean(onAnswer) && !answered;
+  const canSubmit = interactive && !submitting && (totalPicked > 0 || totalNotes > 0);
+
+  function handleNoteKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (!isModifiedEnterShortcut(event)) {
+      return;
+    }
+    event.preventDefault();
+    if (!canSubmit) {
+      return;
+    }
+    void submit();
+  }
 
   return (
     <article className="panel transcript codex tool_call ask-user-question">
@@ -1010,9 +1024,11 @@ function AskUserQuestionCard({
                         [index]: e.target.value,
                       }))
                     }
+                    onKeyDown={handleNoteKeyDown}
                     placeholder="Type your own answer or add a note here…"
                     rows={2}
                     disabled={submitting}
+                    aria-keyshortcuts="Meta+Enter Control+Enter"
                   />
                   <button
                     type="button"
@@ -1062,7 +1078,7 @@ function AskUserQuestionCard({
           <button
             type="button"
             className="primary"
-            disabled={submitting || (totalPicked === 0 && totalNotes === 0)}
+            disabled={!canSubmit}
             onClick={() => void submit()}
           >
             {submitting ? "Sending…" : "Send answers"}

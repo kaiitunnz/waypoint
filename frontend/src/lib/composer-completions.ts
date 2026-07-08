@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { commandLabel } from "@/components/CommandSuggestions";
 import { fetchSessionCompletionsResponse } from "@/lib/api";
+import { isInlineMenuAcceptKey } from "@/lib/keyboard";
 import type {
   CommandCompletion,
   SessionCommandInvocation,
@@ -278,12 +279,7 @@ export function useCommandCompletions({
     event: KeyboardEvent<HTMLTextAreaElement>,
   ): boolean {
     if (!suggestionsOpen) return false;
-    if (
-      event.key === "Tab" ||
-      (event.key === "Enter" &&
-        !(event.metaKey || event.ctrlKey) &&
-        !event.shiftKey)
-    ) {
+    if (isInlineMenuAcceptKey(event)) {
       event.preventDefault();
       applySuggestion(activeIndex);
       return true;

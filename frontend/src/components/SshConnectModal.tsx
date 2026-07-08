@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { PasswordInput } from "@/components/PasswordInput";
+import { trapTabFocus } from "@/lib/keyboard";
 
 interface SshConnectModalProps {
   targetName: string;
@@ -42,29 +43,7 @@ export function SshConnectModal({
         onCancel();
         return;
       }
-      if (event.key !== "Tab") {
-        return;
-      }
-      const root = modalRef.current;
-      if (!root) {
-        return;
-      }
-      const focusable = root.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      );
-      if (focusable.length === 0) {
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement;
-      if (event.shiftKey && (active === first || !root.contains(active))) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && (active === last || !root.contains(active))) {
-        event.preventDefault();
-        first.focus();
-      }
+      trapTabFocus(event, modalRef.current);
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);

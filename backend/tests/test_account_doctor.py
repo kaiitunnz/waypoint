@@ -23,10 +23,14 @@ from waypoint.backends.account_profiles import (
 )
 from waypoint.backends.base import ConfigDirReadinessReporting
 from waypoint.backends.bootstrap import build_default_registry
+from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
 from waypoint.cli import app
 from waypoint.client import WaypointClient
+from waypoint.launch_targets import SshLaunchTargetConfig
+from waypoint.runtime import SessionRuntime
 from waypoint.schemas import AccountProbeResult
 from waypoint.settings import Settings
+from waypoint.storage import Storage
 
 runner = CliRunner()
 
@@ -173,6 +177,93 @@ def test_static_checks_skip_filesystem_when_remote(tmp_path: Path) -> None:
     assert _check(checks, "config_dir_exists").detail == (
         "skipped: unsupported on a remote launch target"
     )
+
+
+# ── remote doctor: do-not-regress readiness surface ─────────────────────────
+#
+# ``account_profile_static_checks`` can't stat a remote dir (no launch
+# target), so it skips its filesystem checks entirely for a remote profile.
+# ``SessionRuntime.account_doctor`` fills that gap with a real, best-effort
+# remote existence check (see ``_remote_config_dir_check``) — the do-not-
+# regress surface for a remote switch, while the interactive-onboarding
+# readiness verdict stays a documented follow-up (no remote implementation).
+
+
+def _runtime_with_target(
+    tmp_path: Path, profiles: dict[str, Any], target: SshLaunchTargetConfig
+) -> SessionRuntime:
+    settings = Settings.model_validate(
+        {
+            "data_dir": str(tmp_path / "data"),
+            "plugin_configs": {"claude_code": {"account_profiles": profiles}},
+            "ssh_targets": [target.model_dump()],
+        }
+    )
+    return SessionRuntime(settings, Storage(settings.database_path))
+
+
+def _target(target_id: str = "d") -> SshLaunchTargetConfig:
+    return SshLaunchTargetConfig(id=target_id, name=target_id, ssh_destination="u@d")
+
+
+async def test_remote_doctor_reports_existing_config_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = _target()
+    runtime = _runtime_with_target(
+        tmp_path,
+        {"work": {"label": "Work", "config_dir": "/remote/.claude-work"}},
+        target,
+    )
+    monkeypatch.setattr(RemoteTranscriptFilesystem, "exists", lambda self, path: True)
+
+    reports = await runtime.account_doctor(backend="claude_code", launch_target_id="d")
+    check = _check(reports[0].checks, "remote_config_dir_exists")
+    assert check.ok is True
+    assert "exists" in (check.detail or "")
+
+
+async def test_remote_doctor_flags_missing_config_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = _target()
+    runtime = _runtime_with_target(
+        tmp_path,
+        {"work": {"label": "Work", "config_dir": "/remote/.claude-work"}},
+        target,
+    )
+    monkeypatch.setattr(RemoteTranscriptFilesystem, "exists", lambda self, path: False)
+
+    reports = await runtime.account_doctor(backend="claude_code", launch_target_id="d")
+    check = _check(reports[0].checks, "remote_config_dir_exists")
+    assert check.ok is False
+    assert "missing" in (check.detail or "")
+
+
+async def test_remote_doctor_flags_unresolved_tilde_config_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The cache is never warmed here (no call to ``_ensure_remote_home_cached``),
+    # mirroring an unreachable target — the check must fail closed rather than
+    # guess at a literal ``~`` path, and must not even attempt the remote stat.
+    target = _target()
+    runtime = _runtime_with_target(
+        tmp_path, {"work": {"label": "Work", "config_dir": "~/.claude-work"}}, target
+    )
+    called = False
+
+    def _unexpected_exists(self: RemoteTranscriptFilesystem, path: str) -> bool:
+        nonlocal called
+        called = True
+        return True
+
+    monkeypatch.setattr(RemoteTranscriptFilesystem, "exists", _unexpected_exists)
+
+    reports = await runtime.account_doctor(backend="claude_code", launch_target_id="d")
+    check = _check(reports[0].checks, "remote_config_dir_exists")
+    assert check.ok is False
+    assert "resolve remote home" in (check.detail or "")
+    assert called is False
 
 
 # ── HTTP endpoints ──────────────────────────────────────────────────────────

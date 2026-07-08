@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from waypoint.backends.base import (
     ConfigDirNotReadyError,
+    ConfigDirReadiness,
     DefaultLaunchContract,
     config_dir_for,
 )
@@ -515,16 +516,25 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             return []
         return local_claude_thread_artifacts(thread_id, config_dir)
 
-    def ensure_config_dir_ready(self, config_dir: str) -> None:
+    def config_dir_readiness(self, config_dir: str) -> ConfigDirReadiness:
         # Setting CLAUDE_CONFIG_DIR moves .claude.json into the profile dir; if
         # that copy hasn't completed onboarding the CLI relaunches into its
-        # first-run wizard, which a tmux/tty-driven turn can't dismiss (it hangs)
-        # — reject up front instead. See ConfigDirValidating.
-        if not claude_onboarding_complete(config_dir):
-            raise ConfigDirNotReadyError(
+        # first-run wizard, which a tmux/tty-driven turn can't dismiss (it hangs).
+        # See ConfigDirReadinessReporting / ConfigDirValidating.
+        if claude_onboarding_complete(config_dir):
+            return ConfigDirReadiness(ready=True)
+        return ConfigDirReadiness(
+            ready=False,
+            reason=(
                 "claude onboarding is incomplete in its config dir; open a "
                 "claude session there once to finish setup"
-            )
+            ),
+        )
+
+    def ensure_config_dir_ready(self, config_dir: str) -> None:
+        readiness = self.config_dir_readiness(config_dir)
+        if not readiness.ready:
+            raise ConfigDirNotReadyError(readiness.reason)
 
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord

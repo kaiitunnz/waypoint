@@ -45,6 +45,38 @@ class ConfigDirNotReadyError(Exception):
     """
 
 
+class ConfigDirReadiness(BaseModel):
+    """A non-raising verdict on whether an account profile's config dir is set up.
+
+    ``ready`` is the same signal :class:`ConfigDirValidating` enforces at
+    launch/switch, but reported instead of raised so ``accounts doctor`` can
+    surface it alongside the other checks. ``reason`` is a terse, user-facing
+    explanation when ``ready`` is ``False`` (``None`` when ready).
+    """
+
+    ready: bool
+    reason: str | None = None
+
+
+@runtime_checkable
+class ConfigDirReadinessReporting(Protocol):
+    """An agent that can report (without raising) whether a config dir is set up.
+
+    The diagnostic sibling of :class:`ConfigDirValidating`. Every agent that owns
+    a config-dir env var can implement this so ``accounts doctor`` reports a
+    readiness verdict per profile — including codex, which deliberately does
+    *not* implement :class:`ConfigDirValidating` (its app-server transport fails
+    fast on an unset home rather than hanging, so it needs no launch/switch
+    guard) but still benefits from a doctor readiness line based on ``auth.json``
+    presence.
+    """
+
+    def config_dir_readiness(self, config_dir: str) -> ConfigDirReadiness:
+        """Report whether launching/resuming under ``config_dir`` is set up,
+        without raising."""
+        ...
+
+
 @runtime_checkable
 class ConfigDirValidating(Protocol):
     """An agent that can pre-flight an account profile's config dir.
@@ -60,7 +92,10 @@ class ConfigDirValidating(Protocol):
 
     The runtime narrows to this protocol (``isinstance``) when resolving a
     profile's config-dir env for a *local* launch or switch, and rejects up
-    front rather than launching into a hang.
+    front rather than launching into a hang. An implementer typically also
+    implements :class:`ConfigDirReadinessReporting` and defines
+    ``ensure_config_dir_ready`` in terms of it (compute the verdict once, raise
+    when not ready).
     """
 
     def ensure_config_dir_ready(self, config_dir: str) -> None:

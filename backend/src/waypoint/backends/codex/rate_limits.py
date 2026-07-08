@@ -611,6 +611,16 @@ def _codex_auth_path(env: dict[str, str]) -> Path:
     return root / "auth.json"
 
 
+def codex_auth_present(config_dir: str) -> bool:
+    """Whether ``<config_dir>/auth.json`` holds parseable Codex credentials.
+
+    The readiness signal for a codex account profile: unlike claude there is no
+    onboarding wizard, so "set up" means the CLI has written credentials via
+    ``codex login``. Returns ``False`` on a missing/unreadable/unparsable file.
+    """
+    return _load_oauth_credentials({"CODEX_HOME": config_dir}) is not None
+
+
 def _resolve_usage_url(env: dict[str, str]) -> str:
     base_url = _resolve_chatgpt_base_url(env)
     normalized = _normalize_chatgpt_base_url(base_url)

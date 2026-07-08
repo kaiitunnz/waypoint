@@ -24,7 +24,11 @@ from fastapi import HTTPException, status
 from openai_codex.client import CodexClient
 from pydantic import BaseModel, Field
 
-from waypoint.backends.base import DefaultLaunchContract, config_dir_for
+from waypoint.backends.base import (
+    ConfigDirReadiness,
+    DefaultLaunchContract,
+    config_dir_for,
+)
 from waypoint.backends.capabilities import (
     BackendCapabilities,
     ModelSource,
@@ -45,6 +49,7 @@ from waypoint.backends.codex.permission_modes import (
     codex_turn_params_for,
 )
 from waypoint.backends.codex.rate_limits import (
+    codex_auth_present,
     probe_codex_status,
     probe_codex_usage_remote,
 )
@@ -486,6 +491,23 @@ class CodexPlugin(DefaultLaunchContract):
         # claude_code behaviour.
         if self.adapter is not None:
             await self.adapter.terminate_session(session.id)
+
+    def config_dir_readiness(self, config_dir: str) -> ConfigDirReadiness:
+        # Codex has no onboarding wizard: "set up" means ``codex login`` has
+        # written parseable credentials to ``<CODEX_HOME>/auth.json``. Reported
+        # for ``accounts doctor`` only — codex deliberately does not implement
+        # ConfigDirValidating (its app-server transport fails fast on an
+        # unauthenticated home rather than hanging), so this never guards a
+        # launch or switch.
+        if codex_auth_present(config_dir):
+            return ConfigDirReadiness(ready=True)
+        return ConfigDirReadiness(
+            ready=False,
+            reason=(
+                "codex auth.json is missing or unreadable in its config dir; "
+                "run 'CODEX_HOME=<dir> codex login' to set it up"
+            ),
+        )
 
     def native_thread_id(self, session: SessionRecord) -> str | None:
         thread_id = session.transport_state.get("thread_id")

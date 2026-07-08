@@ -68,6 +68,7 @@ import {
 } from "@/lib/backends";
 import { clearToken } from "@/lib/store";
 import { type TerminalSubmitResult } from "@/lib/composer";
+import { isModifiedEnterShortcut } from "@/lib/keyboard";
 import { useCommandCompletions } from "@/lib/composer-completions";
 import { useFileMentions } from "@/lib/use-file-mentions";
 import { useCopied } from "@/lib/use-copied";
@@ -2791,12 +2792,7 @@ const ReplyComposer = memo(function ReplyComposer({
     if (handleSuggestionKey(event)) {
       return;
     }
-    // Treat Cmd+Enter (mac) and Ctrl+Enter (windows/linux) as the send
-    // shortcut. Plain Enter inserts a newline as expected.
-    if (event.key !== "Enter" || event.shiftKey) {
-      return;
-    }
-    if (!event.metaKey && !event.ctrlKey) {
+    if (!isModifiedEnterShortcut(event)) {
       return;
     }
     event.preventDefault();

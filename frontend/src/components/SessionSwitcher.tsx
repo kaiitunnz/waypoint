@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { connectSessionsSocket, fetchSessions } from "@/lib/api";
+import { trapTabFocus } from "@/lib/keyboard";
 import { matchesQuery, parseQuery } from "@/lib/search";
 import { SessionEnvelope, SessionRecord } from "@/lib/types";
 import { SearchInput } from "@/components/SearchInput";
@@ -173,25 +174,7 @@ export function SessionSwitcher({ host, token, currentSession, onAuthFailure, on
     }
 
     if (e.key === "Tab") {
-      const root = modalRef.current;
-      if (!root) return;
-      const focusable = root.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      );
-      if (focusable.length === 0) {
-        e.preventDefault();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement;
-      if (e.shiftKey && (active === first || !root.contains(active))) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && (active === last || !root.contains(active))) {
-        e.preventDefault();
-        first.focus();
-      }
+      trapTabFocus(e, modalRef.current, { preventWhenEmpty: true });
       return;
     }
 

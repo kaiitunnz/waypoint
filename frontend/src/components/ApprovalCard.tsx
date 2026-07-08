@@ -1,5 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 
+import { isModifiedEnterShortcut } from "@/lib/keyboard";
 import { DiffPreview } from "@/components/DiffPreview";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { CopyMessageButton } from "@/components/CopyMessageButton";
@@ -67,6 +74,22 @@ export function SharedApprovalCard({
     }
   }
 
+  function handleNoteKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (!isModifiedEnterShortcut(event)) {
+      return;
+    }
+    event.preventDefault();
+    if (pendingAction) {
+      return;
+    }
+    const primaryAction =
+      actions.find((action) => action.className === "primary") ?? actions[0];
+    if (!primaryAction) {
+      return;
+    }
+    void handleAction(primaryAction);
+  }
+
   const cardClassName = `panel approval${className ? ` ${className}` : ""}`;
 
   return (
@@ -84,8 +107,10 @@ export function SharedApprovalCard({
               className="ask-question-note-input"
               value={noteText}
               onChange={(event) => setNoteText(event.target.value)}
+              onKeyDown={handleNoteKeyDown}
               placeholder={notePlaceholder}
               rows={2}
+              aria-keyshortcuts="Meta+Enter Control+Enter"
             />
             <button
               type="button"

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { wordRangeAt } from "@/lib/composer-completions";
 import { fetchSessionAttachments } from "@/lib/api";
+import { isInlineMenuAcceptKey } from "@/lib/keyboard";
 import type { SessionAttachment } from "@/lib/types";
 
 interface UseFileMentionsOptions {
@@ -133,12 +134,7 @@ export function useFileMentions({
 
   function handleKey(event: KeyboardEvent<HTMLTextAreaElement>): boolean {
     if (!open) return false;
-    if (
-      event.key === "Tab" ||
-      (event.key === "Enter" &&
-        !(event.metaKey || event.ctrlKey) &&
-        !event.shiftKey)
-    ) {
+    if (isInlineMenuAcceptKey(event)) {
       event.preventDefault();
       apply(activeIndex);
       return true;

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 
 import type { LaunchForm } from "@/components/LaunchFormFields";
 import { humaniseBackend } from "@/lib/backends";
+import { trapTabFocus } from "@/lib/keyboard";
 import type {
   Backend,
   SessionPresetSpec,
@@ -369,23 +370,7 @@ function PresetSaveModal({
         onClose();
         return;
       }
-      if (event.key !== "Tab") return;
-      const root = modalRef.current;
-      if (!root) return;
-      const focusable = root.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      );
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement;
-      if (event.shiftKey && (active === first || !root.contains(active))) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && (active === last || !root.contains(active))) {
-        event.preventDefault();
-        first.focus();
-      }
+      trapTabFocus(event, modalRef.current);
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

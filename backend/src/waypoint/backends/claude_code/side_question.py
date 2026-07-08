@@ -45,6 +45,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
 
+from waypoint.backends.claude_code.threads import claude_projects_root
 from waypoint.launch_targets import (
     SshLaunchTargetConfig,
     _resolve_local_binary,
@@ -146,9 +147,21 @@ async def _broadcast_remove(
     )
 
 
-def _delete_fork_file_local(fork_thread_id: str) -> None:
-    """Delete ``<fork_thread_id>.jsonl`` from ``~/.claude/projects/``."""
-    projects = Path.home() / ".claude" / "projects"
+def _session_config_dir(session: SessionRecord) -> str | None:
+    """The session's CLAUDE_CONFIG_DIR override, if any.
+
+    Side-questions drive the claude_code CLI, whose config-dir env var is
+    ``CLAUDE_CONFIG_DIR``; a profile-scoped session carries its dir in
+    ``launch_env``. The one-shot fork query and fork-file cleanup must act on
+    that dir, not the default ~/.claude, or they resume/clean up the wrong
+    account's projects tree.
+    """
+    return session.launch_env.get("CLAUDE_CONFIG_DIR")
+
+
+def _delete_fork_file_local(fork_thread_id: str, config_dir: str | None = None) -> None:
+    """Delete ``<fork_thread_id>.jsonl`` from the profile's ``projects/`` dir."""
+    projects = claude_projects_root(config_dir)
     if not projects.is_dir():
         return
     for p in projects.glob(f"*/{fork_thread_id}.jsonl"):
@@ -163,10 +176,11 @@ async def _delete_fork_file(
     fork_thread_id: str,
     launch_target_id: str | None,
     runtime: "SessionRuntime",
+    config_dir: str | None = None,
 ) -> None:
     """Delete the forked thread file locally or via SSH."""
     if launch_target_id is None:
-        await asyncio.to_thread(_delete_fork_file_local, fork_thread_id)
+        await asyncio.to_thread(_delete_fork_file_local, fork_thread_id, config_dir)
         return
     launch_target = runtime._find_launch_target(launch_target_id)
     if launch_target is None:
@@ -199,8 +213,14 @@ async def _run_one_shot_local(
     thread_id: str,
     fork_id: str,
     cwd: str,
+    env: dict[str, str] | None = None,
 ) -> str:
-    """Run a one-shot fork-query locally and return the answer text."""
+    """Run a one-shot fork-query locally and return the answer text.
+
+    ``env`` is the session's process env (``os.environ`` + its ``launch_env``);
+    it carries ``CLAUDE_CONFIG_DIR`` so a profile-scoped session resumes its
+    thread under the right config dir. ``None`` inherits the parent env.
+    """
     binary = shutil.which("claude")
     if binary is None:
         raise RuntimeError("claude binary not found on PATH")
@@ -222,6 +242,7 @@ async def _run_one_shot_local(
     proc = await asyncio.create_subprocess_exec(
         *args,
         cwd=str(cwd_path),
+        env=env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -387,10 +408,15 @@ async def _run_side_question_bg(
             ]
             _write_side_questions(runtime, session_id, qs)
 
+        config_dir = _session_config_dir(session)
         try:
             if launch_target is None:
                 answer = await _run_one_shot_local(
-                    question, thread_id, fork_id, session.cwd
+                    question,
+                    thread_id,
+                    fork_id,
+                    session.cwd,
+                    env=runtime.account_lookup_env(session.backend, session.launch_env),
                 )
             else:
                 claude_bin = plugin.remote_executable(launch_target) or "claude"
@@ -409,7 +435,7 @@ async def _run_side_question_bg(
                 extra={"session_id": session_id, "sqid": sqid},
             )
             # The one-shot may have created <E>.jsonl before failing; clean it up.
-            await _delete_fork_file(fork_id, launch_target_id, runtime)
+            await _delete_fork_file(fork_id, launch_target_id, runtime, config_dir)
             await _mark_error(runtime, session_id, sqid, str(exc))
             return
 
@@ -440,7 +466,9 @@ async def _run_side_question_bg(
                     _write_side_questions(runtime, session_id, qs)
 
         if fork_file_to_cleanup is not None:
-            await _delete_fork_file(fork_file_to_cleanup, launch_target_id, runtime)
+            await _delete_fork_file(
+                fork_file_to_cleanup, launch_target_id, runtime, config_dir
+            )
             return
 
         if updated is not None:
@@ -630,7 +658,12 @@ async def fork_aside(
             runtime.storage.delete_session(new_session_id)
         restored = await _restore_claimed_aside(runtime, session.id, sq)
         if not restored and fork_thread_id:
-            await _delete_fork_file(fork_thread_id, session.launch_target_id, runtime)
+            await _delete_fork_file(
+                fork_thread_id,
+                session.launch_target_id,
+                runtime,
+                _session_config_dir(session),
+            )
         if isinstance(exc, HTTPException):
             raise
         raise HTTPException(
@@ -709,7 +742,12 @@ async def dismiss_aside(
         _write_side_questions(runtime, session.id, qs)
 
     if fork_thread_id:
-        await _delete_fork_file(fork_thread_id, session.launch_target_id, runtime)
+        await _delete_fork_file(
+            fork_thread_id,
+            session.launch_target_id,
+            runtime,
+            _session_config_dir(session),
+        )
     await _broadcast_remove(runtime, session.id, side_question_id)
 
 
@@ -746,7 +784,10 @@ async def recover_pending_side_questions(
             for sq in questions:
                 if sq.fork_thread_id:
                     await _delete_fork_file(
-                        sq.fork_thread_id, session.launch_target_id, runtime
+                        sq.fork_thread_id,
+                        session.launch_target_id,
+                        runtime,
+                        _session_config_dir(session),
                     )
             async with _lock_for(session.id):
                 fresh = runtime.storage.get_session(session.id)
@@ -819,7 +860,10 @@ async def recover_pending_side_questions(
                 # Async I/O and task scheduling outside the lock.
                 if stale_fork_id:
                     await _delete_fork_file(
-                        stale_fork_id, session.launch_target_id, runtime
+                        stale_fork_id,
+                        session.launch_target_id,
+                        runtime,
+                        _session_config_dir(session),
                     )
                 if to_broadcast is not None:
                     await _broadcast_upsert(runtime, session.id, to_broadcast)
@@ -856,4 +900,9 @@ async def delete_session_side_questions(
             runtime.storage.update_session(session.id, transport_state=state)
 
     for fork_thread_id in fork_ids:
-        await _delete_fork_file(fork_thread_id, session.launch_target_id, runtime)
+        await _delete_fork_file(
+            fork_thread_id,
+            session.launch_target_id,
+            runtime,
+            _session_config_dir(session),
+        )

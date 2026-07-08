@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -171,33 +172,47 @@ print(json.dumps([*custom_commands(), *user_skills(), *plugin_skills()]))
 """
 
 
+def _user_config_root(config_dir: str | None) -> Path:
+    """The session's account config dir (a profile's CLAUDE_CONFIG_DIR), else ~/.claude.
+
+    User commands/skills live under it, so completion for a profile-scoped
+    session must scan the profile's dir, not the default account's.
+    """
+    return Path(config_dir).expanduser() if config_dir else Path.home() / ".claude"
+
+
 async def list_claude_command_completions(
     *,
     cwd: str,
     claude_bin: str,
     prefix: str,
     launch_target: SshLaunchTargetConfig | None = None,
+    config_dir: str | None = None,
 ) -> list[CommandCompletion]:
     records = (
         await _list_remote_records(launch_target, cwd, claude_bin)
         if launch_target is not None
-        else await _list_local_records(cwd, claude_bin)
+        else await _list_local_records(cwd, claude_bin, config_dir)
     )
     return _records_to_completions(records, prefix)
 
 
-async def _list_local_records(cwd: str, claude_bin: str) -> list[dict[str, Any]]:
+async def _list_local_records(
+    cwd: str, claude_bin: str, config_dir: str | None = None
+) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
-    records.extend(_local_custom_commands(cwd))
-    records.extend(_local_user_skills(cwd))
-    records.extend(await _local_plugin_skills(claude_bin))
+    records.extend(_local_custom_commands(cwd, config_dir))
+    records.extend(_local_user_skills(cwd, config_dir))
+    records.extend(await _local_plugin_skills(claude_bin, config_dir))
     return records
 
 
-def _local_custom_commands(cwd: str) -> list[dict[str, Any]]:
+def _local_custom_commands(
+    cwd: str, config_dir: str | None = None
+) -> list[dict[str, Any]]:
     roots = [
         Path(cwd).expanduser() / ".claude" / "commands",
-        Path.home() / ".claude" / "commands",
+        _user_config_root(config_dir) / "commands",
     ]
     records: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -222,13 +237,13 @@ def _local_custom_commands(cwd: str) -> list[dict[str, Any]]:
     return records
 
 
-def _local_user_skills(cwd: str) -> list[dict[str, Any]]:
-    # Workspace `<cwd>/.claude/skills/` wins over `~/.claude/skills/` on
+def _local_user_skills(cwd: str, config_dir: str | None = None) -> list[dict[str, Any]]:
+    # Workspace `<cwd>/.claude/skills/` wins over the account `skills/` on
     # name collision, matching how the Claude CLI itself resolves
     # overlapping skill names.
     roots = [
         Path(cwd).expanduser() / ".claude" / "skills",
-        Path.home() / ".claude" / "skills",
+        _user_config_root(config_dir) / "skills",
     ]
     records: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -253,13 +268,20 @@ def _local_user_skills(cwd: str) -> list[dict[str, Any]]:
     return records
 
 
-async def _local_plugin_skills(claude_bin: str) -> list[dict[str, Any]]:
+async def _local_plugin_skills(
+    claude_bin: str, config_dir: str | None = None
+) -> list[dict[str, Any]]:
+    # `claude plugin list` reports the plugins enabled for a config dir, so run
+    # it under the session's CLAUDE_CONFIG_DIR (a profile's) rather than the
+    # backend's default account.
+    env = {**os.environ, "CLAUDE_CONFIG_DIR": config_dir} if config_dir else None
     try:
         proc = await asyncio.create_subprocess_exec(
             claude_bin,
             "plugin",
             "list",
             "--json",
+            env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

@@ -145,6 +145,7 @@ def _auto_approve_for_mode(
     mode: str,
     tool_name: object,
     tool_input: dict[str, Any] | None = None,
+    config_dir: str | None = None,
 ) -> dict[str, str] | None:
     if mode in CLAUDE_AUTO_APPROVE_MODES:
         return {
@@ -162,7 +163,7 @@ def _auto_approve_for_mode(
         and tool_input is not None
     ):
         path = str(tool_input.get("file_path") or "")
-        if _is_plan_file_path(path):
+        if _is_plan_file_path(path, config_dir):
             return {
                 "permissionDecision": "allow",
                 "permissionDecisionReason": (
@@ -220,9 +221,21 @@ def _apply_edit(content: str, edit: dict[str, Any]) -> str:
     return content.replace(old, new, count)
 
 
-def _is_plan_file_path(path: str) -> bool:
+def _is_plan_file_path(path: str, config_dir: str | None = None) -> bool:
+    """Whether ``path`` is Claude's plan file (``<config-dir>/plans/…``).
+
+    Claude writes plans under ``$CLAUDE_CONFIG_DIR/plans``; a profile-scoped
+    session relocates that, so match the session's config dir (default
+    ~/.claude) rather than a hardcoded ``/.claude/plans/`` substring, or plan
+    mode misfires (the plan Write isn't auto-approved and its content isn't
+    captured for the ExitPlanMode card).
+    """
     if not path:
         return False
+    # A profile relocates the config dir, so anchor to its plans/ dir; with no
+    # profile keep the home-agnostic default-config-dir match.
+    if config_dir:
+        return f"{Path(config_dir).expanduser() / 'plans'}/" in path
     return "/.claude/plans/" in path
 
 
@@ -920,7 +933,10 @@ class ClaudeCliAdapter:
                 auto = None
             else:
                 auto = _auto_approve_for_mode(
-                    state.permission_mode, tool_name, tool_input_dict
+                    state.permission_mode,
+                    tool_name,
+                    tool_input_dict,
+                    state.launch_env.get("CLAUDE_CONFIG_DIR"),
                 )
             if auto is not None:
                 # Stash the plan-file path so ExitPlanMode can echo it back
@@ -931,7 +947,9 @@ class ClaudeCliAdapter:
                     and tool_input_dict is not None
                 ):
                     path = str(tool_input_dict.get("file_path") or "")
-                    if _is_plan_file_path(path):
+                    if _is_plan_file_path(
+                        path, state.launch_env.get("CLAUDE_CONFIG_DIR")
+                    ):
                         state.last_plan_path = path
                         if tool_name == "Write":
                             content = tool_input_dict.get("content")

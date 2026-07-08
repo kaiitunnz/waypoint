@@ -7,6 +7,7 @@ and verify the side-effects on storage and the broadcast hub.
 """
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -71,6 +72,11 @@ class _FakeRuntime:
         if not launch_target_id:
             return None
         return self._launch_targets.get(launch_target_id)
+
+    def account_lookup_env(
+        self, backend: str, launch_env: dict[str, str]
+    ) -> dict[str, str]:
+        return {**os.environ, **launch_env}
 
     async def _record_user_event(
         self,
@@ -1359,3 +1365,61 @@ async def test_delete_session_side_questions_cleans_aside_absent_from_snapshot(
     fresh = runtime.storage.get_session(session.id)
     assert fresh is not None
     assert _read_side_questions(fresh) == []
+
+
+# ---------------------------------------------------------------------------
+# Account-profile config-dir scoping
+# ---------------------------------------------------------------------------
+
+
+def test_session_config_dir_reads_launch_env(runtime: Any) -> None:
+    session = _make_session(runtime.storage)
+    session = session.model_copy(update={"launch_env": {"CLAUDE_CONFIG_DIR": "/prof"}})
+    assert sq_module._session_config_dir(session) == "/prof"
+    plain = _make_session(runtime.storage, session_id="sess-2")
+    assert sq_module._session_config_dir(plain) is None
+
+
+def test_delete_fork_file_local_honors_config_dir(tmp_path: Path) -> None:
+    profile = tmp_path / "profile"
+    proj = profile / "projects" / "-tmp-project"
+    proj.mkdir(parents=True)
+    fork = "11111111-1111-1111-1111-111111111111"
+    target = proj / f"{fork}.jsonl"
+    target.write_text("{}")
+    sq_module._delete_fork_file_local(fork, str(profile))
+    assert not target.exists()
+
+
+@pytest.mark.asyncio
+async def test_run_one_shot_local_passes_env() -> None:
+    # The one-shot must run under the session's env so CLAUDE_CONFIG_DIR (a
+    # profile's) reaches the resumed claude; else it resumes the wrong account's
+    # thread and the side-question errors.
+    captured: dict[str, Any] = {}
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> Any:
+        captured["env"] = kwargs.get("env")
+
+        class _FakeProc:
+            returncode = 0
+
+            async def communicate(self) -> tuple[bytes, bytes]:
+                return (
+                    json.dumps(
+                        {"is_error": False, "result": "ok", "subtype": "success"}
+                    ).encode(),
+                    b"",
+                )
+
+            def kill(self) -> None:
+                pass
+
+        return _FakeProc()
+
+    with patch("asyncio.create_subprocess_exec", fake_exec):
+        out = await sq_module._run_one_shot_local(
+            "q", "t", "f", "/cwd", env={"CLAUDE_CONFIG_DIR": "/prof", "PATH": "/x"}
+        )
+    assert out == "ok"
+    assert captured["env"]["CLAUDE_CONFIG_DIR"] == "/prof"

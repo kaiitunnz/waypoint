@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
-from waypoint.backends.base import DefaultLaunchContract
+from waypoint.backends.base import DefaultLaunchContract, config_dir_for
 from waypoint.backends.capabilities import (
     BackendCapabilities,
     ModelSource,
@@ -790,6 +790,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
                 claude_bin=claude_bin,
                 prefix=prefix,
                 launch_target=launch_target,
+                config_dir=config_dir_for(self.capabilities, session.launch_env),
             )
         except Exception:
             return completions

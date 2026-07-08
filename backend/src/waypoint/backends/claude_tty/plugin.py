@@ -431,6 +431,7 @@ class ClaudeTtyPlugin:
                 claude_bin=claude_bin,
                 prefix=prefix,
                 launch_target=launch_target,
+                config_dir=self._config_dir(session),
             )
         except Exception:
             return completions

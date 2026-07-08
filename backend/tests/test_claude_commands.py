@@ -54,6 +54,35 @@ async def test_list_claude_command_completions_reads_user_commands(
 
 
 @pytest.mark.asyncio
+async def test_list_claude_command_completions_scopes_to_config_dir(
+    tmp_path, monkeypatch
+) -> None:
+    # A profile-scoped session's user commands live under its CLAUDE_CONFIG_DIR,
+    # not the default ~/.claude; completion must scan the profile dir.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))  # empty default account
+    profile = tmp_path / "profile"
+    command_dir = profile / "commands" / "team"
+    command_dir.mkdir(parents=True)
+    (command_dir / "ship.md").write_text(
+        "---\ndescription: Ship it\n---\nbody\n", encoding="utf-8"
+    )
+
+    default = await list_claude_command_completions(
+        cwd=str(tmp_path / "repo"),
+        claude_bin=str(tmp_path / "missing-claude"),
+        prefix="/team",
+    )
+    scoped = await list_claude_command_completions(
+        cwd=str(tmp_path / "repo"),
+        claude_bin=str(tmp_path / "missing-claude"),
+        prefix="/team",
+        config_dir=str(profile),
+    )
+    assert [item.name for item in default] == []
+    assert [item.name for item in scoped] == ["team/ship"]
+
+
+@pytest.mark.asyncio
 async def test_list_claude_command_completions_reads_plugin_skills(
     tmp_path, monkeypatch
 ) -> None:

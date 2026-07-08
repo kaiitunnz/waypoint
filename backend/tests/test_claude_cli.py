@@ -8,6 +8,7 @@ import pytest
 from waypoint.backends.claude_code.adapter import (
     ClaudeCliAdapter,
     ClaudeSessionState,
+    _is_plan_file_path,
     _read_stream_line,
     claude_cli_mode_for,
 )
@@ -17,6 +18,20 @@ from waypoint.backends.claude_code.models import (
 )
 from waypoint.backends.claude_code.plugin import ClaudeCodePluginConfig
 from waypoint.schemas import EventKind, SessionStatus
+
+
+def test_is_plan_file_path_honors_config_dir() -> None:
+    # Default config dir: home-agnostic /.claude/plans/ match (unchanged).
+    assert _is_plan_file_path("/Users/me/.claude/plans/p.md")
+    # A profile relocates plans/; without its config_dir the profile path is
+    # not recognized, with it is — and the default dir no longer matches.
+    assert not _is_plan_file_path("/home/me/.claude-work/plans/p.md")
+    assert _is_plan_file_path(
+        "/home/me/.claude-work/plans/p.md", "/home/me/.claude-work"
+    )
+    assert not _is_plan_file_path(
+        "/home/me/.claude/plans/p.md", "/home/me/.claude-work"
+    )
 
 
 class FakeStream:

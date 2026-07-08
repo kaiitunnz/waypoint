@@ -1948,6 +1948,9 @@ class SessionRuntime:
         if cleanup is not None and asyncio.iscoroutinefunction(cleanup):
             await cleanup(self, session)
         self.storage.delete_session(session_id)
+        # Drop the per-session lock along with the record so the registry
+        # doesn't grow unbounded over a long-lived server's session churn.
+        self._session_locks.pop(session_id, None)
         if session.worktree_path is not None:
             self._remove_worktree(session.worktree_path, prune_branches=prune_branches)
         # Reclaim the session's uploaded blobs, which can be large.

@@ -536,6 +536,7 @@ class AgentLaunchContract(Protocol):
         thread_id: str,
         cwd: str,
         launch_target: "SshLaunchTargetConfig | None",
+        config_dir: str | None = None,
     ) -> bool:
         """Whether the agent has persisted ``thread_id`` to disk yet.
 
@@ -543,7 +544,12 @@ class AgentLaunchContract(Protocol):
         input; resuming a never-written thread makes the CLI exit with "no
         conversation found", so callers gate resume on this. Checks the
         local filesystem, or the remote one over SSH when ``launch_target``
-        is set.
+        is set. ``config_dir`` overrides the agent's state root (the value of
+        its ``config_dir_env_var`` in the session's launch env, e.g.
+        ``CLAUDE_CONFIG_DIR``/``CODEX_HOME``); ``None`` uses the default. A
+        pane-wrapping transport that resumes under a switched account profile
+        must pass it, or the check reads the default root and the thread is
+        never found — forking a new conversation instead of resuming.
         """
         ...
 
@@ -596,6 +602,7 @@ class DefaultLaunchContract:
         thread_id: str,
         cwd: str,
         launch_target: "SshLaunchTargetConfig | None",
+        config_dir: str | None = None,
     ) -> bool:
         return False
 

@@ -441,19 +441,34 @@ class ClaudeTtyPlugin:
                 seen.add(key)
         return completions
 
+    def _config_dir(self, session: SessionRecord) -> str | None:
+        """The session's CLAUDE_CONFIG_DIR override, if any.
+
+        A session launched under (or switched to) an account profile carries
+        its config dir in ``launch_env``; the resume-existence check must look
+        there, not the default ~/.claude, or it never finds the thread and
+        relaunches into a fresh conversation.
+        """
+        key = self._claude.capabilities.config_dir_env_var
+        return session.launch_env.get(key) if key else None
+
     async def _conversation_exists(
         self,
         thread_id: str,
         cwd: str,
         launch_target: SshLaunchTargetConfig | None,
+        config_dir: str | None = None,
     ) -> bool:
         """Whether Claude has persisted ``thread_id`` to disk.
 
-        claude_tty stores transcripts in the same ``~/.claude/projects``
-        tree claude_code uses, so the existence check defers to the composed
-        claude_code agent's launch contract.
+        claude_tty stores transcripts in the same ``projects`` tree
+        claude_code uses, so the existence check defers to the composed
+        claude_code agent's launch contract. ``config_dir`` scopes it to the
+        session's (possibly profile-switched) CLAUDE_CONFIG_DIR.
         """
-        return await self._claude.conversation_exists(thread_id, cwd, launch_target)
+        return await self._claude.conversation_exists(
+            thread_id, cwd, launch_target, config_dir
+        )
 
     # ── Session lifecycle ────────────────────────────────────────────────────
 
@@ -625,7 +640,7 @@ class ClaudeTtyPlugin:
 
         effective_thread_id: str | None = None
         if thread_id and await self._conversation_exists(
-            thread_id, session.cwd, launch_target
+            thread_id, session.cwd, launch_target, self._config_dir(session)
         ):
             effective_thread_id = thread_id
 
@@ -924,7 +939,9 @@ class ClaudeTtyPlugin:
         # with `--resume` makes the CLI exit with "no conversation found" and kills
         # the pane. Reuse the same thread id via `--session-id` in that case so the
         # relaunch starts the (still-empty) conversation cleanly with the new flags.
-        resumed = await self._conversation_exists(thread_id, session.cwd, launch_target)
+        resumed = await self._conversation_exists(
+            thread_id, session.cwd, launch_target, self._config_dir(session)
+        )
         identity = ["--resume", thread_id] if resumed else ["--session-id", thread_id]
         launch_args = [*identity, *flag_pairs, *base_args]
         command = runtime._command_for_backend(

@@ -126,6 +126,31 @@ async def test_conversation_exists_local(
 
 
 @pytest.mark.asyncio
+async def test_conversation_exists_honors_config_dir(
+    plugin: ClaudeCodePlugin, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: a thread living under a switched account profile's
+    # CLAUDE_CONFIG_DIR must be found via the ``config_dir`` override, not the
+    # default ~/.claude — else a pane-wrapping transport resuming after a switch
+    # never finds it and forks a new conversation. HOME points at an *empty*
+    # default tree so a hit can only come from the override.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    profile_dir = tmp_path / "profile"
+    cwd = "/Users/me/proj"
+    project_dir = profile_dir / "projects" / cwd.replace("/", "-")
+    project_dir.mkdir(parents=True)
+    uuid_str = "00000000-0000-0000-0000-000000000042"
+    (project_dir / f"{uuid_str}.jsonl").write_text("")
+    # Default root (no override) can't see it.
+    assert await plugin.conversation_exists(uuid_str, cwd, None) is False
+    # Scoped to the profile's config dir, it does.
+    assert (
+        await plugin.conversation_exists(uuid_str, cwd, None, str(profile_dir)) is True
+    )
+
+
+@pytest.mark.asyncio
 async def test_conversation_exists_local_no_projects_dir(
     plugin: ClaudeCodePlugin, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

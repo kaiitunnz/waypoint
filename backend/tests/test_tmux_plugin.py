@@ -14,6 +14,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -47,6 +48,12 @@ class _FakeAgentPlugin:
     def __init__(self, *, pregenerates: bool, exists: bool = False) -> None:
         self._pregenerates = pregenerates
         self.exists = exists
+        # The reconnect path reads the agent's config-dir env key (via the
+        # registry plugin's capabilities) to scope the resume-existence check
+        # to a switched profile's config dir.
+        self.capabilities = SimpleNamespace(
+            config_dir_env_var="CLAUDE_CONFIG_DIR" if pregenerates else "CODEX_HOME"
+        )
 
     def launch_flags(
         self,
@@ -94,7 +101,11 @@ class _FakeAgentPlugin:
         return ["resume", thread_id, *scrubbed]
 
     async def conversation_exists(
-        self, thread_id: str, cwd: str, launch_target: Any
+        self,
+        thread_id: str,
+        cwd: str,
+        launch_target: Any,
+        config_dir: str | None = None,
     ) -> bool:
         return self.exists
 

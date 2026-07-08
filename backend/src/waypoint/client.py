@@ -239,6 +239,10 @@ class WaypointClient:
         ]
         return data
 
+    def get_me(self) -> dict[str, Any]:
+        data: dict[str, Any] = self._request("GET", "/api/me").json()
+        return data
+
     def list_models(
         self,
         backend: str,
@@ -304,6 +308,7 @@ class WaypointClient:
         config_overrides: list[str] | None = None,
         tags: dict[str, str] | None = None,
         launch_env: dict[str, str] | None = None,
+        account_profile_id: str | None = None,
         preset_id: str | None = None,
         use_default_preset: bool = False,
     ) -> dict[str, Any]:
@@ -323,6 +328,7 @@ class WaypointClient:
             ("worktree_path", worktree_path),
             ("launch_mode", launch_mode),
             ("transport", transport),
+            ("account_profile_id", account_profile_id),
             ("preset_id", preset_id),
         ):
             if value is not None:
@@ -451,6 +457,41 @@ class WaypointClient:
             "POST",
             f"/api/sessions/{session_id}/mode",
             json={"mode": mode},
+        ).json()["session"]
+        return data
+
+    def get_launch_settings(self, session_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = self._request(
+            "GET", f"/api/sessions/{session_id}/launch-settings"
+        ).json()
+        return data
+
+    def update_launch_settings(
+        self,
+        session_id: str,
+        *,
+        account_profile_id: str | None = None,
+        args: list[str] | None = None,
+        config_overrides: list[str] | None = None,
+        env_set: dict[str, str] | None = None,
+        env_unset: list[str] | None = None,
+        restart: bool = False,
+    ) -> dict[str, Any]:
+        # Omitted args/config_overrides are left unchanged server-side; only send
+        # the fields the caller set so the PATCH is a true partial update.
+        body: dict[str, Any] = {"restart": restart}
+        if account_profile_id is not None:
+            body["account_profile_id"] = account_profile_id
+        if args is not None:
+            body["args"] = args
+        if config_overrides is not None:
+            body["config_overrides"] = config_overrides
+        if env_set:
+            body["env_set"] = env_set
+        if env_unset:
+            body["env_unset"] = env_unset
+        data: dict[str, Any] = self._request(
+            "PATCH", f"/api/sessions/{session_id}/launch-settings", json=body
         ).json()["session"]
         return data
 
@@ -698,6 +739,7 @@ class WaypointClient:
         delay_seconds: int | None = None,
         scheduled_at: str | None = None,
         launch_env: dict[str, str] | None = None,
+        account_profile_id: str | None = None,
         preset_id: str | None = None,
         use_default_preset: bool = False,
     ) -> dict[str, Any]:
@@ -719,6 +761,7 @@ class WaypointClient:
             "delay_seconds": delay_seconds,
             "scheduled_at": scheduled_at,
             "launch_env": launch_env,
+            "account_profile_id": account_profile_id,
             "preset_id": preset_id,
         }
         body.update(

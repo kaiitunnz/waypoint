@@ -31,9 +31,10 @@ class TranscriptContextUsageSource(ContextUsageSource):
         session_uuid: str,
         cwd: str,
         runtime: "SessionRuntime",
+        config_dir: str | None = None,
     ) -> None:
         self._session_id = session_id
-        self._path = transcript_path(cwd, session_uuid)
+        self._path = transcript_path(cwd, session_uuid, config_dir)
         self._runtime = runtime
         self._offset = 0
         self._context_usage_signature: tuple[int, int | None] | None = None

@@ -6,8 +6,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from waypoint.backends.claude_tty.tailer import TranscriptTailer
+from waypoint.backends.claude_tty.tailer import TranscriptTailer, transcript_path
 from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
+
+
+def test_transcript_path_honors_config_dir() -> None:
+    # Regression: a profile-scoped claude_tty session writes its transcript
+    # under its CLAUDE_CONFIG_DIR; the tailer must resolve the same path, or it
+    # reads the default ~/.claude, sees no records, and the session hangs in
+    # "running" while the pane shows real output.
+    uuid = "00000000-0000-0000-0000-000000000001"
+    default = transcript_path("/repo/app", uuid)
+    scoped = transcript_path("/repo/app", uuid, "/home/me/.claude-work")
+    assert scoped != default
+    assert str(scoped).startswith("/home/me/.claude-work/projects/")
+    assert scoped.name == f"{uuid}.jsonl"
 
 
 def _make_session(session_id: str = "sess-1") -> SessionRecord:

@@ -3135,6 +3135,10 @@ const ReplyComposer = memo(function ReplyComposer({
                           {profile.label}
                         </option>
                       ))}
+                      {accountProfileId &&
+                      !accountProfiles.some((p) => p.id === accountProfileId) ? (
+                        <option value={accountProfileId}>{accountProfileId}</option>
+                      ) : null}
                     </select>
                   </label>
                 ) : null}

@@ -105,6 +105,21 @@ def test_guard_rejects_interactive_transport_when_unonboarded(tmp_path: Path) ->
     assert "not set up" in exc.value.detail
 
 
+def test_guard_rejects_generic_tmux_transport_when_unonboarded(tmp_path: Path) -> None:
+    # The generic tmux wrapper is agent-agnostic and carries no config-dir env
+    # var, so the config dir must be resolved off the agent, not the transport;
+    # otherwise a tmux-wrapped claude launch slips the guard and hangs.
+    runtime = _runtime(tmp_path)
+    caps = _caps(runtime, "tmux")
+    assert caps.has_terminal_pane is True
+    cfg = _unonboarded(tmp_path / "cfg")
+    with pytest.raises(HTTPException) as exc:
+        runtime._ensure_profile_config_dir_ready(
+            "claude_code", caps, {"CLAUDE_CONFIG_DIR": cfg}, "personal", None
+        )
+    assert exc.value.status_code == 400
+
+
 def test_guard_allows_interactive_transport_when_onboarded(tmp_path: Path) -> None:
     runtime = _runtime(tmp_path)
     cfg = _onboarded(tmp_path / "cfg")

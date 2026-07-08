@@ -535,11 +535,11 @@ class SessionRuntime:
         if not transport_caps.has_terminal_pane:
             return
         agent = self.registry.get(backend)
-        if not isinstance(agent, ConfigDirValidating):
-            return
-        # The composed transport caps carry the agent's config-dir env var too.
-        config_dir = config_dir_for(transport_caps, launch_env)
-        if config_dir is None:
+        # The config-dir env var is an agent-axis fact — read it off the agent,
+        # not the transport (the generic tmux wrapper is agent-agnostic and
+        # leaves it unset). ``has_terminal_pane`` above stays on the transport.
+        config_dir = config_dir_for(agent.capabilities, launch_env)
+        if config_dir is None or not isinstance(agent, ConfigDirValidating):
             return
         try:
             agent.ensure_config_dir_ready(config_dir)

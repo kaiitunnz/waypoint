@@ -54,6 +54,32 @@ Each profile accepts:
 | `shared_transcript_dir` | only for `symlink_shared` | The shared transcript directory the target's store is symlinked to. |
 | `expected_account_key` | no | The account the profile is asserted to authenticate as (e.g. `claude_code:<org>`, `codex:<email>`). When set, a switch is rejected unless the target actually authenticates as this key; when unset, a switch that would resolve to the *current* account is rejected as a no-op. |
 
+### A profile's `config_dir` must be a set-up config home
+
+`config_dir` becomes the agent's config-dir env var, and each agent keeps *all*
+of its per-config state under that dir. For Claude this includes the config file
+itself: with `CLAUDE_CONFIG_DIR` set, the CLI reads `<config_dir>/.claude.json`
+— **not** the unset-default home location `~/.claude.json`. So pointing a profile
+at `~/.claude` does *not* reuse your normal account: your onboarding, MCP servers,
+and permissions live in `~/.claude.json` (home), while `~/.claude/.claude.json`
+is a separate, usually un-onboarded file. Each profile dir must be a
+self-contained config home that has completed first-run setup.
+
+Set one up once, before selecting the profile:
+
+- **Claude** — run `CLAUDE_CONFIG_DIR=<config_dir> claude` interactively and finish
+  the first-run wizard (theme, login), or copy an already-onboarded
+  `~/.claude.json` into `<config_dir>/.claude.json`. Waypoint refuses to launch or
+  switch an **interactive** session (the `claude_tty` / tmux transports) onto a
+  profile whose `<config_dir>/.claude.json` hasn't completed onboarding — the TUI
+  would relaunch into the wizard and a headless-driven turn can't dismiss it, so it
+  would hang. The rejection is a 400 (`account profile '<id>' is not set up: …`).
+  The headless `claude --print` transport doesn't onboard and isn't blocked.
+- **Codex** — run `CODEX_HOME=<config_dir> codex login` to write `auth.json`. Codex
+  has no onboarding wizard: its default app-server transport fails fast on an
+  unauthenticated home (surfaced error, no hang), so profiles aren't guarded the
+  way Claude's are.
+
 ### Transcript policies
 
 When a running session switches onto a profile, its native thread must be

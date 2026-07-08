@@ -425,6 +425,21 @@ class BackendPlugin(Protocol):
         """
         ...
 
+    def native_thread_artifacts(
+        self, session: SessionRecord, config_dir: str | None = None
+    ) -> list[Path]:
+        """On-disk artifact file(s) needed to resume this session's native
+        thread, resolved under ``config_dir`` (the backend's config/state root,
+        e.g. a target account profile's ``CLAUDE_CONFIG_DIR``/``CODEX_HOME``).
+
+        ``config_dir=None`` resolves under the process default. Returns ``[]``
+        when the thread isn't present under that root — the signal that a
+        target profile can't yet see it — or when the backend has no resumable
+        native store. Used by account-profile switching to verify/copy the
+        transcript before restore.
+        """
+        ...
+
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

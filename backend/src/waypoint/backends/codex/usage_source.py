@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -26,13 +27,31 @@ log = logging.getLogger("waypoint.backends.codex")
 _POLL_INTERVAL = 1.0
 
 
-def _find_rollout_path(thread_id: str) -> Path | None:
-    codex_home = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
-    sessions_dir = codex_home / "sessions"
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-" r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def find_codex_rollout(thread_id: str, codex_home: str | None = None) -> Path | None:
+    """The rollout JSONL for ``thread_id`` under ``codex_home``.
+
+    An explicit ``codex_home`` (e.g. a target account profile's) wins, else
+    ``$CODEX_HOME`` / ``~/.codex``. Returns ``None`` when absent — the signal a
+    target profile can't yet see the thread.
+    """
+    # Codex thread ids are UUIDs; guard before it reaches a glob pattern.
+    if not _UUID_RE.match(thread_id):
+        return None
+    home = Path(codex_home or os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
+    sessions_dir = home / "sessions"
     if not sessions_dir.is_dir():
         return None
     suffix = f"-{thread_id}.jsonl"
     return next(sessions_dir.glob(f"*/*/*/rollout-*{suffix}"), None)
+
+
+def _find_rollout_path(thread_id: str) -> Path | None:
+    return find_codex_rollout(thread_id)
 
 
 def _parse_token_count_record(record: dict[str, Any]) -> SessionContextUsage | None:

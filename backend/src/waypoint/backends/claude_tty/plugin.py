@@ -215,6 +215,13 @@ class ClaudeTtyPlugin:
     def native_thread_id(self, session: SessionRecord) -> str | None:
         return self._tmux.native_thread_id(session)
 
+    def native_thread_artifacts(
+        self, session: SessionRecord, config_dir: str | None = None
+    ) -> list[Path]:
+        # The native transcript is Claude's (projects JSONL); the agent owns
+        # the config-dir/thread-store path logic, so delegate to it.
+        return self._claude.native_thread_artifacts(session, config_dir)
+
     def pane_ready_for_input(self, pane_text: str) -> bool:
         return pane_dialog.composer_ready(pane_text)
 

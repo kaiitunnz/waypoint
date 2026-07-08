@@ -49,6 +49,11 @@ class _StubPlugin:
     def native_thread_id(self, session: Any) -> str | None:
         return None
 
+    def native_thread_artifacts(
+        self, session: Any, config_dir: str | None = None
+    ) -> list[Any]:
+        return []
+
     def on_session_deleted(self, runtime: Any, session: Any) -> None:
         return None
 

@@ -20,6 +20,7 @@ function SpecSummary({ spec }: { spec: SessionPresetSummary["spec"] }) {
   if (spec.model) chips.push(spec.model);
   if (spec.effort) chips.push(spec.effort);
   if (spec.permission_mode) chips.push(spec.permission_mode);
+  if (spec.account_profile_id) chips.push(spec.account_profile_id);
   const envCount = spec.launch_env_keys?.length ?? 0;
   if (envCount) chips.push(`${envCount} env`);
   const argsCount = spec.args?.length ?? 0;
@@ -62,6 +63,7 @@ function formSpec(
     model: form.model.trim() || null,
     effort: form.effortSupported ? form.effort.trim() || null : null,
     permission_mode: form.permissionMode || null,
+    account_profile_id: form.accountProfileId || null,
     args,
     config_overrides: configOverrides,
     launch_env: launchEnv,

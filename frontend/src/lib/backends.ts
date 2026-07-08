@@ -24,6 +24,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { fetchBackends } from "@/lib/api";
 import type {
+  AccountProfile,
   AgentCapabilities,
   Backend,
   BackendCapabilities,
@@ -51,6 +52,9 @@ export interface BackendCatalog {
   // Pulled from `byId(id)?.label`, with a humane fallback so a backend
   // that disappears mid-session still renders something sensible.
   labelFor: (id: Backend) => string;
+  // Global (non-target-merged) account profiles a backend hosts; empty when it
+  // hosts none. A launch target's merged profiles override this at the panel.
+  accountProfilesFor: (id: Backend) => AccountProfile[];
 }
 
 const FALLBACK_LABELS: Record<string, string> = {
@@ -132,6 +136,7 @@ export function buildCatalog(descriptors: BackendDescriptor[]): BackendCatalog {
     all: () => [...descriptors],
     ids: () => descriptors.map((d) => d.id),
     labelFor: (id) => byIdMap.get(id)?.label ?? FALLBACK_LABELS[id] ?? id,
+    accountProfilesFor: (id) => byIdMap.get(id)?.account_profiles ?? [],
   };
 }
 

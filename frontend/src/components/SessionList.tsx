@@ -218,6 +218,11 @@ export function SessionList({
             {session.launch_target_id ? (
               <span className="badge neutral">{session.launch_target_id}</span>
             ) : null}
+            {session.account_profile_label ? (
+              <span className="badge account-profile">
+                {session.account_profile_label}
+              </span>
+            ) : null}
             <span className={`status ${session.status}`}>
               {session.status.replace("_", " ")}
             </span>

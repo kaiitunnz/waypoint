@@ -1848,6 +1848,12 @@ html[data-theme="light"] .badge.transport.opencode_http {
   text-transform: lowercase;
 }
 
+.badge.account-profile {
+  color: var(--accent-cool, var(--accent));
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
 .status {
   color: var(--success);
 }

@@ -100,6 +100,10 @@ export interface SessionRecord {
   rate_limit_usage?: SessionRateLimitUsage | null;
   args: string[];
   config_overrides: string[];
+  // The account/config profile the session launched under (and resumes under
+  // across a switch); null when the backend hosts no profiles.
+  account_profile_id?: string | null;
+  account_profile_label?: string | null;
 }
 
 export type AttachmentKind = "image" | "file";
@@ -133,6 +137,15 @@ export interface BackendPermissionMode {
   label: string;
   description?: string | null;
   requires_session_restart?: boolean;
+}
+
+// Redacted account/config-profile metadata. Never carries the config-dir path,
+// expected account key, or transcript policy — display id/label plus the
+// config-dir env key the profile maps to.
+export interface AccountProfile {
+  id: string;
+  label: string;
+  config_dir_key: string;
 }
 
 export interface BackendSlashCommand {
@@ -264,6 +277,9 @@ export interface BackendDescriptor {
   label: string;
   badges: Record<string, string>;
   default_launch_env?: Record<string, string>;
+  // Redacted account/config profiles this agent hosts (claude_code, codex);
+  // empty for backends that don't. Target-merged variants live on `/api/me`.
+  account_profiles?: AccountProfile[];
   // The flat union, kept for back-compat; prefer composing `agent_capabilities`
   // with `transport_capabilities` via `capsFor()` for an (agent, transport) pair.
   capabilities: BackendCapabilities;
@@ -325,6 +341,7 @@ export interface SessionPresetSpec {
   model?: string | null;
   effort?: string | null;
   tags?: Record<string, string>;
+  account_profile_id?: string | null;
 }
 
 // Redacted spec used on list / bootstrap surfaces: env values are omitted,
@@ -341,6 +358,7 @@ export interface SessionPresetSpecSummary {
   model?: string | null;
   effort?: string | null;
   tags?: Record<string, string>;
+  account_profile_id?: string | null;
 }
 
 export interface SessionPresetSummary {
@@ -370,6 +388,34 @@ export interface SessionPresetWriteRequest {
   is_default?: boolean;
 }
 
+// GET /api/sessions/{id}/launch-settings — a session's restart-applied launch
+// settings (env redacted to keys). Drives the running-session profile switch.
+export interface SessionLaunchSettings {
+  backend: Backend;
+  transport: SessionTransport;
+  launch_target_id?: string | null;
+  account_profile_id?: string | null;
+  account_profile_label?: string | null;
+  account_profiles: AccountProfile[];
+  args: string[];
+  config_overrides: string[];
+  launch_env_keys: string[];
+  supports_custom_args: boolean;
+  supports_config_overrides: boolean;
+  supports_account_profile_with_restart: boolean;
+}
+
+// PATCH body for the same endpoint; omitted fields are left unchanged. `restart`
+// must be true to switch a running session (phase 1).
+export interface LaunchSettingsUpdate {
+  account_profile_id?: string | null;
+  args?: string[];
+  config_overrides?: string[];
+  env_set?: Record<string, string>;
+  env_unset?: string[];
+  restart: boolean;
+}
+
 export interface EventsPage {
   events: EventRecord[];
   has_more: boolean;
@@ -388,6 +434,9 @@ export interface LaunchTargetSummary {
   auth?: "key" | "password";
   connected?: boolean;
   default_launch_env_by_backend?: Record<Backend, Record<string, string>>;
+  // Target-merged account profiles keyed by agent backend id; only backends
+  // that host profiles appear.
+  account_profiles_by_backend?: Record<Backend, AccountProfile[]>;
 }
 
 export type ScheduleStatus = "pending" | "launched" | "cancelled" | "failed";
@@ -411,6 +460,8 @@ export interface ScheduledSession {
   status: ScheduleStatus;
   session_id?: string | null;
   failure_reason?: string | null;
+  account_profile_id?: string | null;
+  account_profile_label?: string | null;
 }
 
 export interface ScheduleCreateRequest {
@@ -434,6 +485,7 @@ export interface ScheduleCreateRequest {
   // Provenance only — the frontend submits already-resolved fields; sending the
   // selected preset id lets the server stamp it onto the scheduled record.
   preset_id?: string | null;
+  account_profile_id?: string | null;
 }
 
 export interface BackendModelOption {

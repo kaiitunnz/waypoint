@@ -65,6 +65,7 @@ import {
 } from "@/lib/store";
 import { launchableAgents, useBackendCatalog } from "@/lib/backends";
 import {
+  AccountProfile,
   AssistantSummary,
   Backend,
   BackendDescriptor,
@@ -206,6 +207,21 @@ export default function HomePage() {
       defaults[backend] = { ...env };
     }
     return defaults;
+  }, [activeLaunchTarget, backendDescriptors]);
+
+  // Account profiles keyed by backend: the global per-backend catalogue,
+  // overridden by the active launch target's merged profiles (same shape as
+  // defaultLaunchEnvByBackend above).
+  const accountProfilesByBackend = useMemo(() => {
+    const profiles: Record<Backend, AccountProfile[]> = {};
+    for (const descriptor of backendDescriptors ?? []) {
+      profiles[descriptor.id] = descriptor.account_profiles ?? [];
+    }
+    const targetProfiles = activeLaunchTarget?.account_profiles_by_backend ?? {};
+    for (const [backend, list] of Object.entries(targetProfiles)) {
+      profiles[backend] = list;
+    }
+    return profiles;
   }, [activeLaunchTarget, backendDescriptors]);
 
   const resetAuthState = useCallback((message: string) => {
@@ -570,6 +586,7 @@ export default function HomePage() {
     launchEnv: Record<string, string> = {},
     permissionMode: string | null = null,
     presetId: string | null = null,
+    accountProfileId: string | null = null,
   ) {
     setCwdError(null);
     try {
@@ -586,6 +603,7 @@ export default function HomePage() {
         model,
         effort,
         permission_mode: permissionMode,
+        account_profile_id: accountProfileId,
         // Provenance only — the fields above are already resolved.
         preset_id: presetId,
       });
@@ -632,6 +650,7 @@ export default function HomePage() {
               launchEnv,
               permissionMode,
               presetId,
+              accountProfileId,
             ),
         });
         return;
@@ -1060,6 +1079,7 @@ export default function HomePage() {
           defaultBackend={effectiveDefaultBackend}
           defaultCwd={effectiveDefaultCwd}
           defaultLaunchEnvByBackend={defaultLaunchEnvByBackend}
+          accountProfilesByBackend={accountProfilesByBackend}
           targetLabel={activeLaunchTarget?.name ?? null}
           launchTargetId={activeLaunchTargetId || null}
           recentCwds={recentCwds}

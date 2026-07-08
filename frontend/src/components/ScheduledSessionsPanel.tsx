@@ -173,6 +173,14 @@ function ScheduleRow({
             {schedule.effort}
           </span>
         ) : null}
+        {schedule.account_profile_label ? (
+          <span
+            className="badge account-profile"
+            title={`Account: ${schedule.account_profile_label}`}
+          >
+            {schedule.account_profile_label}
+          </span>
+        ) : null}
         <span className="msg-row-right">
           <span className="msg-row-when">
             {relative ? <span className="msg-countdown">{relative}</span> : null}

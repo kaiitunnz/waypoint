@@ -25,6 +25,7 @@ import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
 import type { BackendCatalog } from "@/lib/backends";
 import { permissionModesFor } from "@/lib/backends";
 import {
+  AccountProfile,
   Backend,
   BackendModelListResponse,
   SessionPresetSpec,
@@ -36,6 +37,9 @@ interface UseLaunchFormParams {
   defaultCwd: string;
   launchTargetId: string | null;
   defaultLaunchEnvByBackend: Record<Backend, Record<string, string>>;
+  // Account/config profiles keyed by backend — target-merged when a launch
+  // target is active, else the global per-backend catalogue.
+  accountProfilesByBackend: Record<Backend, AccountProfile[]>;
   catalog: BackendCatalog;
 }
 
@@ -58,6 +62,9 @@ export interface LaunchForm {
   setTransport: Dispatch<SetStateAction<SessionTransport>>;
   permissionMode: string;
   setPermissionMode: (value: string) => void;
+  accountProfileId: string;
+  setAccountProfileId: (value: string) => void;
+  accountProfiles: AccountProfile[];
   customArgsText: string;
   setCustomArgsText: (value: string) => void;
   configOverridesText: string;
@@ -85,6 +92,7 @@ export function useLaunchForm({
   defaultCwd,
   launchTargetId,
   defaultLaunchEnvByBackend,
+  accountProfilesByBackend,
   catalog,
 }: UseLaunchFormParams): LaunchForm {
   const [backend, setBackend] = useState<Backend>(defaultBackend);
@@ -94,6 +102,7 @@ export function useLaunchForm({
   const [effort, setEffort] = useState("");
   const [transport, setTransport] = useTransportForAgent(backend, catalog);
   const [permissionMode, setPermissionMode] = useState<string>("default");
+  const [accountProfileId, setAccountProfileId] = useState("");
   const [customArgsText, setCustomArgsText] = useState("");
   const [configOverridesText, setConfigOverridesText] = useState("");
   const [launchEnvText, setLaunchEnvText] = useState(() =>
@@ -104,6 +113,11 @@ export function useLaunchForm({
   const permissionOptions = useMemo(
     () => permissionModesFor(backend, catalog),
     [backend, catalog],
+  );
+
+  const accountProfiles = useMemo(
+    () => accountProfilesByBackend[backend] ?? [],
+    [accountProfilesByBackend, backend],
   );
 
   const capabilities = catalog.byId(backend)?.capabilities;
@@ -119,6 +133,7 @@ export function useLaunchForm({
     setModel("");
     setEffort("");
     setModelInfo(null);
+    setAccountProfileId("");
     setLaunchEnvText(formatLaunchEnv(defaultLaunchEnvByBackend[nextBackend]));
   }, [defaultLaunchEnvByBackend]);
 
@@ -127,6 +142,7 @@ export function useLaunchForm({
     setModel("");
     setEffort("");
     setModelInfo(null);
+    setAccountProfileId("");
     setLaunchEnvText(formatLaunchEnv(defaultLaunchEnvByBackend[defaultBackend]));
   }, [defaultBackend, defaultLaunchEnvByBackend]);
 
@@ -146,6 +162,7 @@ export function useLaunchForm({
     setEffort("");
     setModel("");
     setModelInfo(null);
+    setAccountProfileId("");
     setLaunchEnvText(formatLaunchEnv(defaultLaunchEnvByBackend[backend]));
   }, [backend, launchTargetId, defaultLaunchEnvByBackend]);
 
@@ -176,6 +193,7 @@ export function useLaunchForm({
       const applyScoped = () => {
         setModel(spec.model ?? "");
         setEffort(spec.effort ?? "");
+        setAccountProfileId(spec.account_profile_id ?? "");
         setLaunchEnvText(formatLaunchEnv(spec.launch_env ?? {}));
         if (spec.transport) setTransport(spec.transport);
       };
@@ -221,6 +239,18 @@ export function useLaunchForm({
     }
   }, [effort, effortOptions, modelInfo]);
 
+  // Drop a selected profile the current backend/target doesn't offer (e.g. a
+  // preset carrying a profile valid elsewhere) so the launch never submits an
+  // id the server would reject; falls back to the "Default" option.
+  useEffect(() => {
+    if (
+      accountProfileId &&
+      !accountProfiles.some((profile) => profile.id === accountProfileId)
+    ) {
+      setAccountProfileId("");
+    }
+  }, [accountProfileId, accountProfiles]);
+
   const handleModelsLoaded = useCallback((response: BackendModelListResponse) => {
     setModelInfo(response);
   }, []);
@@ -256,6 +286,9 @@ export function useLaunchForm({
     setTransport,
     permissionMode,
     setPermissionMode,
+    accountProfileId,
+    setAccountProfileId,
+    accountProfiles,
     customArgsText,
     setCustomArgsText,
     configOverridesText,
@@ -345,6 +378,22 @@ export function LaunchFormFields({
                 {form.permissionOptions.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {form.accountProfiles.length > 0 ? (
+            <label className="field">
+              <span>Account</span>
+              <select
+                value={form.accountProfileId}
+                onChange={(event) => form.setAccountProfileId(event.target.value)}
+              >
+                <option value="">Default</option>
+                {form.accountProfiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.label}
                   </option>
                 ))}
               </select>

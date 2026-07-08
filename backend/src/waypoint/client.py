@@ -260,6 +260,70 @@ class WaypointClient:
         ).json()
         return data
 
+    def probe_account(
+        self,
+        backend: str,
+        profile: str,
+        *,
+        launch_target_id: str | None = None,
+        show_key: bool = False,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if launch_target_id is not None:
+            params["launch_target_id"] = launch_target_id
+        if show_key:
+            params["show_key"] = show_key
+        data: dict[str, Any] = self._request(
+            "GET",
+            f"/api/backends/{backend}/accounts/{profile}/probe",
+            params=params or None,
+        ).json()
+        return data
+
+    def account_doctor(
+        self,
+        backend: str,
+        *,
+        launch_target_id: str | None = None,
+        show_paths: bool = False,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {}
+        if launch_target_id is not None:
+            params["launch_target_id"] = launch_target_id
+        if show_paths:
+            params["show_paths"] = show_paths
+        data: list[dict[str, Any]] = self._request(
+            "GET", f"/api/backends/{backend}/accounts/doctor", params=params or None
+        ).json()
+        return data
+
+    def setup_account_transcripts(
+        self,
+        backend: str,
+        profile: str,
+        *,
+        launch_target_id: str | None = None,
+        shared_dir: str | None = None,
+        policy: str | None = None,
+    ) -> dict[str, Any]:
+        params = (
+            {"launch_target_id": launch_target_id}
+            if launch_target_id is not None
+            else None
+        )
+        body: dict[str, Any] = {}
+        if shared_dir is not None:
+            body["shared_dir"] = shared_dir
+        if policy is not None:
+            body["policy"] = policy
+        data: dict[str, Any] = self._request(
+            "POST",
+            f"/api/backends/{backend}/accounts/{profile}/setup-transcripts",
+            params=params,
+            json=body,
+        ).json()
+        return data
+
     def list_threads(
         self, backend: str, *, launch_target_id: str | None = None
     ) -> list[dict[str, Any]]:

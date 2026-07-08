@@ -17,10 +17,12 @@ import {
   InboxItem,
   InboxQuestionAnswer,
   InboxStatus,
+  LaunchSettingsUpdate,
   MeResponse,
   MessageSchedule,
   ScheduleCreateRequest,
   ScheduledSession,
+  SessionLaunchSettings,
   SessionCompletionsResponse,
   SessionCommandInvocation,
   SessionAttachment,
@@ -478,6 +480,41 @@ export async function setSessionPermissionMode(
     body: JSON.stringify({ mode }),
   });
   await ensureOk(response, "failed to update permission mode");
+  const body = await response.json();
+  return body.session as SessionRecord;
+}
+
+export async function fetchLaunchSettings(
+  host: string,
+  token: string,
+  sessionId: string,
+): Promise<SessionLaunchSettings> {
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/launch-settings`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  await ensureOk(response, "failed to load launch settings");
+  return (await response.json()) as SessionLaunchSettings;
+}
+
+export async function updateLaunchSettings(
+  host: string,
+  token: string,
+  sessionId: string,
+  update: LaunchSettingsUpdate,
+): Promise<SessionRecord> {
+  const response = await fetch(
+    `${host}/api/sessions/${sessionId}/launch-settings`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(update),
+    },
+  );
+  await ensureOk(response, "failed to update launch settings");
   const body = await response.json();
   return body.session as SessionRecord;
 }

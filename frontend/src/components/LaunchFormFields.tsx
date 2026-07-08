@@ -239,6 +239,18 @@ export function useLaunchForm({
     }
   }, [effort, effortOptions, modelInfo]);
 
+  // Drop a selected profile the current backend/target doesn't offer (e.g. a
+  // preset carrying a profile valid elsewhere) so the launch never submits an
+  // id the server would reject; falls back to the "Default" option.
+  useEffect(() => {
+    if (
+      accountProfileId &&
+      !accountProfiles.some((profile) => profile.id === accountProfileId)
+    ) {
+      setAccountProfileId("");
+    }
+  }, [accountProfileId, accountProfiles]);
+
   const handleModelsLoaded = useCallback((response: BackendModelListResponse) => {
     setModelInfo(response);
   }, []);

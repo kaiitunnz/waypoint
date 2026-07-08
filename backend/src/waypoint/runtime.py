@@ -1565,28 +1565,31 @@ class SessionRuntime:
         return self.storage.update_session(session.id, status=SessionStatus.RUNNING)
 
     async def terminate(self, session_id: str) -> SessionRecord:
-        session = self.get_session(session_id)
-        if session.source == SessionSource.ASSISTANT:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="the assistant session cannot be terminated",
+        # Serialized with the launch-settings switch and reattach so a terminate
+        # can't interleave their terminate→restore window on the same session.
+        async with self._session_lock(session_id):
+            session = self.get_session(session_id)
+            if session.source == SessionSource.ASSISTANT:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="the assistant session cannot be terminated",
+                )
+            if session.status == SessionStatus.EXITED:
+                return session
+            # Route through the plugin (not the transport) so a session whose
+            # adapter slot was never warmed in this process — e.g. an opencode
+            # session terminated while the user's active backend is codex —
+            # cleans up gracefully instead of 503'ing on `_require_adapter`.
+            # Plugin hooks already do soft `.get()` lookups and no-op when the
+            # adapter is missing.
+            plugin = self.registry.plugin_for(session)
+            await plugin.terminate_session(self, session)
+            await self._cancel_context_usage_source(session_id)
+            await self._record_system_event(
+                session.id, "Session terminated", status=SessionStatus.EXITED
             )
-        if session.status == SessionStatus.EXITED:
-            return session
-        # Route through the plugin (not the transport) so a session whose
-        # adapter slot was never warmed in this process — e.g. an opencode
-        # session terminated while the user's active backend is codex —
-        # cleans up gracefully instead of 503'ing on `_require_adapter`.
-        # Plugin hooks already do soft `.get()` lookups and no-op when the
-        # adapter is missing.
-        plugin = self.registry.plugin_for(session)
-        await plugin.terminate_session(self, session)
-        await self._cancel_context_usage_source(session_id)
-        await self._record_system_event(
-            session.id, "Session terminated", status=SessionStatus.EXITED
-        )
-        self._close_structured_log(session.id)
-        return self.storage.update_session(session.id, status=SessionStatus.EXITED)
+            self._close_structured_log(session.id)
+            return self.storage.update_session(session.id, status=SessionStatus.EXITED)
 
     async def reattach(self, session_id: str) -> SessionRecord:
         # Explicit "reconnect this session" without sending a message.
@@ -1611,38 +1614,42 @@ class SessionRuntime:
         # so `_spawn` does not overwrite a live state and orphan its
         # subprocess + background tasks. terminate_session is a no-op when
         # the session id is not tracked, so this is safe for clean EXITED
-        # paths too.
-        plugin = self.registry.plugin_for(session)
-        if not plugin.capabilities.supports_reattach_after_exit:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="this session cannot be reattached after exit",
+        # paths too. Serialized with terminate and the launch-settings switch.
+        async with self._session_lock(session.id):
+            # Re-read under the lock: a concurrent switch/terminate may have
+            # changed the record since the caller captured it.
+            session = self.get_session(session.id)
+            plugin = self.registry.plugin_for(session)
+            if not plugin.capabilities.supports_reattach_after_exit:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="this session cannot be reattached after exit",
+                )
+            await self._require_live_master(
+                self._find_launch_target(session.launch_target_id)
             )
-        await self._require_live_master(
-            self._find_launch_target(session.launch_target_id)
-        )
-        await plugin.terminate_session(self, session)
-        await self._cancel_context_usage_source(session.id)
-        # User-initiated retry: bypass any per-target cooldown / circuit
-        # breaker so the click takes effect immediately. Plugins without
-        # this opt-in hook ignore the call.
-        clear_cooldown = getattr(plugin, "clear_health_for_user_retry", None)
-        if clear_cooldown is not None:
-            clear_cooldown(self, session)
-        await plugin.restore_session(self, session)
-        # _restore_*_session swallows failures (it tags the session ERROR or
-        # EXITED and emits a system_note instead of raising). Re-read storage
-        # so the caller sees the post-restore status, and translate any
-        # terminal state into a 400 so the frontend surfaces a clear error
-        # rather than silently relaunching into a dead session.
-        refreshed = self.get_session(session.id)
-        if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"failed to reattach session ({refreshed.status})",
-            )
-        self._start_context_usage_source(refreshed)
-        return refreshed
+            await plugin.terminate_session(self, session)
+            await self._cancel_context_usage_source(session.id)
+            # User-initiated retry: bypass any per-target cooldown / circuit
+            # breaker so the click takes effect immediately. Plugins without
+            # this opt-in hook ignore the call.
+            clear_cooldown = getattr(plugin, "clear_health_for_user_retry", None)
+            if clear_cooldown is not None:
+                clear_cooldown(self, session)
+            await plugin.restore_session(self, session)
+            # _restore_*_session swallows failures (it tags the session ERROR or
+            # EXITED and emits a system_note instead of raising). Re-read storage
+            # so the caller sees the post-restore status, and translate any
+            # terminal state into a 400 so the frontend surfaces a clear error
+            # rather than silently relaunching into a dead session.
+            refreshed = self.get_session(session.id)
+            if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"failed to reattach session ({refreshed.status})",
+                )
+            self._start_context_usage_source(refreshed)
+            return refreshed
 
     def _session_lock(self, session_id: str) -> asyncio.Lock:
         lock = self._session_locks.get(session_id)
@@ -1741,6 +1748,16 @@ class SessionRuntime:
                 detail=f"{session.backend} does not support account-profile switching",
             )
 
+        if request.args is not None and not caps.supports_custom_cli_args:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{session.backend} does not support custom CLI args",
+            )
+        if request.config_overrides is not None and not caps.supports_config_overrides:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{session.backend} does not support config overrides",
+            )
         new_args = (
             list(request.args) if request.args is not None else list(session.args)
         )
@@ -1765,24 +1782,66 @@ class SessionRuntime:
         )
         new_profile_label = resolved_label if selected_profile_id is not None else None
 
-        # Snapshot the prior settings for rollback (restore rebuilds env from the
-        # persisted record, so rollback = re-persist the old triple + restore).
         old_launch_env = dict(session.launch_env)
-        old = {
-            "args": list(session.args),
-            "config_overrides": list(session.config_overrides),
-            "launch_env": old_launch_env,
-            "account_profile_id": session.account_profile_id,
-            "account_profile_label": session.account_profile_label,
-        }
-
         config_dir_key = caps.config_dir_env_var
-        pre_probe = None
         if profile_changing:
             profile = self._require_account_profile(
                 session.backend, cast(str, request.account_profile_id), launch_target
             )
-            # Flush a running turn to the native store before the transcript step.
+            # Verify the account *before* any destructive step. A probe
+            # authenticates from launch_env (not the live process), so the
+            # target account is fully knowable now — reject here, while the
+            # session is still untouched, rather than after terminating. (A
+            # post-restore re-probe would read the same launch_env and so is
+            # tautological; the account is fixed by the env we verify here.)
+            target_probe = await probe_account(
+                self,
+                session.backend,
+                new_env,
+                launch_target=launch_target,
+                cwd=session.cwd,
+            )
+            if target_probe is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="could not verify the target account before switching",
+                )
+            if profile.expected_account_key:
+                if target_probe.account_key != profile.expected_account_key:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"target account {target_probe.account_key!r} does not "
+                            f"match the profile's expected account "
+                            f"{profile.expected_account_key!r}"
+                        ),
+                    )
+            else:
+                # No expected key: refuse a switch that wouldn't actually change
+                # the account (e.g. macOS keeps credentials in the Keychain, so
+                # moving the config dir changes settings but not the account) —
+                # persisting it as a switch would be a false success.
+                current_probe = await probe_account(
+                    self,
+                    session.backend,
+                    old_launch_env,
+                    launch_target=launch_target,
+                    cwd=session.cwd,
+                )
+                if (
+                    current_probe is not None
+                    and current_probe.account_key == target_probe.account_key
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            "the target profile resolves to the same account as the "
+                            "current one, so switching its config dir would not change "
+                            "the account (set expected_account_key if this is intended)"
+                        ),
+                    )
+            # Account verified — now flush a running turn so the native
+            # transcript is complete before the transcript step / termination.
             if session.status in {SessionStatus.RUNNING, SessionStatus.WAITING_INPUT}:
                 await self.transport_for(session).interrupt(session)
                 session = self.storage.update_session(
@@ -1797,6 +1856,7 @@ class SessionRuntime:
                     profile.transcript_policy == "copy_thread_on_switch"
                     and not current_config_dir
                 ):
+                    await self._broadcast_session_list()
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="cannot determine the current config dir to copy the thread from",
@@ -1813,37 +1873,15 @@ class SessionRuntime:
                             native_thread_store=caps.native_thread_store,
                         )
                     except TranscriptUnavailableError as exc:
+                        await self._broadcast_session_list()
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
                             detail=f"cannot switch account profile: {exc}",
                         ) from exc
-            # Verify the target account before we terminate anything.
-            pre_probe = await probe_account(
-                self,
-                session.backend,
-                new_env,
-                launch_target=launch_target,
-                cwd=session.cwd,
-            )
-            if pre_probe is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="could not verify the target account before switching",
-                )
-            if (
-                profile.expected_account_key
-                and pre_probe.account_key != profile.expected_account_key
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        f"target account {pre_probe.account_key!r} does not match the "
-                        f"profile's expected account {profile.expected_account_key!r}"
-                    ),
-                )
 
-        # Terminate → persist new settings → restore. terminate/restore cycle
-        # the rate-limit watcher; restore rebuilds env from the persisted record.
+        # Terminate → persist new settings → restore. terminate/restore cycle the
+        # rate-limit watcher; restore rebuilds env from the persisted record, so
+        # the account is fixed by the (already-verified) launch_env.
         await plugin.terminate_session(self, session)
         await self._cancel_context_usage_source(session.id)
         self.storage.update_session(
@@ -1868,31 +1906,6 @@ class SessionRuntime:
                     f"({refreshed.status}); settings kept, reattach to retry"
                 ),
             )
-        if profile_changing and pre_probe is not None:
-            post_probe = await probe_account(
-                self,
-                refreshed.backend,
-                refreshed.launch_env,
-                launch_target=launch_target,
-                cwd=refreshed.cwd,
-            )
-            if post_probe is None or post_probe.account_key != pre_probe.account_key:
-                # Healthy process but wrong account: roll back to the prior
-                # settings and restore, leaving the session on its old account.
-                await plugin.terminate_session(self, refreshed)
-                self.storage.update_session(session.id, **old)
-                await plugin.restore_session(self, self.get_session(session.id))
-                self._start_context_usage_source(self.get_session(session.id))
-                await self._record_system_event(
-                    session.id,
-                    "Account switch rolled back: post-restore account did not "
-                    "match the target; restored the prior profile.",
-                )
-                await self._broadcast_session_list()
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="post-restore account did not match the target; rolled back",
-                )
         self._start_context_usage_source(refreshed)
         note = (
             f"Session restarted with account profile {new_profile_label}"

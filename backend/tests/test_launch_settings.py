@@ -183,6 +183,54 @@ async def test_update_rejects_unknown_profile(tmp_path: Path) -> None:
     assert getattr(exc.value, "status_code", None) == 400
 
 
+async def test_update_rejects_noop_account_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A profile with no expected_account_key that resolves to the current
+    # account is a no-op (e.g. macOS Keychain) — refuse rather than falsely
+    # report a switch.
+    profiles = {
+        "account_profiles": {
+            "personal": {
+                "label": "Personal",
+                "config_dir": "~/.codex-personal",
+                "transcript_policy": "require_existing",
+            }
+        }
+    }
+    runtime = _runtime(tmp_path, codex=profiles)
+    _session(runtime)
+    monkeypatch.setattr(
+        "waypoint.runtime.ensure_thread_available", lambda *a, **k: None
+    )
+
+    async def same_account(*_a: Any, **_k: Any) -> AccountProbeResult:
+        return AccountProbeResult(account_key="codex:same", account_label="same")
+
+    monkeypatch.setattr("waypoint.runtime.probe_account", same_account)
+    with pytest.raises(Exception) as exc:
+        await runtime.update_launch_settings(
+            "s1",
+            LaunchSettingsUpdateRequest(account_profile_id="personal", restart=True),
+        )
+    assert getattr(exc.value, "status_code", None) == 400
+    assert "same account" in str(getattr(exc.value, "detail", ""))
+
+
+async def test_update_rejects_config_overrides_when_unsupported(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime(tmp_path)
+    # claude_code advertises supports_config_overrides=False.
+    _session(runtime, backend="claude_code", transport="claude_cli")
+    with pytest.raises(Exception) as exc:
+        await runtime.update_launch_settings(
+            "s1", LaunchSettingsUpdateRequest(config_overrides=["x=1"], restart=True)
+        )
+    assert getattr(exc.value, "status_code", None) == 400
+    assert "config overrides" in str(getattr(exc.value, "detail", ""))
+
+
 async def test_update_rejects_expected_account_key_mismatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

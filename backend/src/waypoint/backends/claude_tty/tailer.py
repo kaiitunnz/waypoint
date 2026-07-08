@@ -40,15 +40,23 @@ _DIALOG_POLL_INTERVAL = 1.0  # seconds between live-pane dialog captures
 _DIALOG_STABLE_TICKS = 2  # consecutive identical captures before surfacing
 
 
-def transcript_path(cwd: str, session_uuid: str) -> Path:
+def transcript_path(cwd: str, session_uuid: str, config_dir: str | None = None) -> Path:
     """Return the Claude TUI's JSONL transcript path for the given session.
 
     Resolves the store root and the encoded project-dir name through the same
     helpers thread discovery uses, so the tailed path matches where the CLI
     actually writes — including for cwds with non-slash special characters
-    (hidden dirs, worktrees) and a non-default ``$CLAUDE_CONFIG_DIR``.
+    (hidden dirs, worktrees). ``config_dir`` is the session's
+    ``CLAUDE_CONFIG_DIR`` (e.g. an account profile's); pass it or the path
+    resolves under the default ``~/.claude`` and the tailer reads the wrong
+    file for a profile-scoped session — the session then never leaves
+    ``running`` because no transcript records reach the normalizer.
     """
-    return claude_projects_root() / encode_project_dir(cwd) / f"{session_uuid}.jsonl"
+    return (
+        claude_projects_root(config_dir)
+        / encode_project_dir(cwd)
+        / f"{session_uuid}.jsonl"
+    )
 
 
 class TranscriptTailer:
@@ -69,9 +77,10 @@ class TranscriptTailer:
         plugin: "ClaudeTtyPlugin",
         *,
         start_at_end: bool = False,
+        config_dir: str | None = None,
     ) -> None:
         self._session_id = session_id
-        self._path = transcript_path(cwd, session_uuid)
+        self._path = transcript_path(cwd, session_uuid, config_dir)
         self._runtime = runtime
         self._plugin = plugin
         self._normalizer = TranscriptNormalizer()

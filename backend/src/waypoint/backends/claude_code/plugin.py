@@ -538,6 +538,11 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             session_uuid=thread_id,
             cwd=session.cwd,
             runtime=runtime,
+            config_dir=(
+                session.launch_env.get(self.capabilities.config_dir_env_var)
+                if self.capabilities.config_dir_env_var
+                else None
+            ),
         )
 
     def register_routes(self, app: FastAPI, context: Any) -> None:

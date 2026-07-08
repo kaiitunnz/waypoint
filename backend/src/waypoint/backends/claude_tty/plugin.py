@@ -441,16 +441,21 @@ class ClaudeTtyPlugin:
                 seen.add(key)
         return completions
 
+    def _config_dir_from_env(self, launch_env: dict[str, str]) -> str | None:
+        """The CLAUDE_CONFIG_DIR override carried in a launch env, if any."""
+        key = self._claude.capabilities.config_dir_env_var
+        return launch_env.get(key) if key else None
+
     def _config_dir(self, session: SessionRecord) -> str | None:
         """The session's CLAUDE_CONFIG_DIR override, if any.
 
         A session launched under (or switched to) an account profile carries
-        its config dir in ``launch_env``; the resume-existence check must look
-        there, not the default ~/.claude, or it never finds the thread and
-        relaunches into a fresh conversation.
+        its config dir in ``launch_env``; the resume-existence check and the
+        transcript tailer must look there, not the default ~/.claude, or they
+        read the wrong path — resuming into a fresh conversation, or tailing a
+        file the CLI never writes so the session hangs in ``running``.
         """
-        key = self._claude.capabilities.config_dir_env_var
-        return session.launch_env.get(key) if key else None
+        return self._config_dir_from_env(session.launch_env)
 
     async def _conversation_exists(
         self,
@@ -480,6 +485,7 @@ class ClaudeTtyPlugin:
         cwd: str,
         *,
         start_at_end: bool = False,
+        config_dir: str | None = None,
     ) -> None:
         if session_id in self._tailer_tasks:
             return
@@ -490,6 +496,7 @@ class ClaudeTtyPlugin:
             runtime=runtime,
             plugin=self,
             start_at_end=start_at_end,
+            config_dir=config_dir,
         )
         self._tailer_tasks[session_id] = asyncio.create_task(tailer.run())
 
@@ -595,7 +602,13 @@ class ClaudeTtyPlugin:
             f"Claude TUI session started (thread {thread_id})",
             status=SessionStatus.IDLE,
         )
-        self._start_tailer(runtime, session.id, thread_id, request.cwd)
+        self._start_tailer(
+            runtime,
+            session.id,
+            thread_id,
+            request.cwd,
+            config_dir=self._config_dir_from_env(request.launch_env),
+        )
         self._spawn_rate_limit_watcher(runtime, session)
         return runtime.get_session(session.id)
 
@@ -616,6 +629,7 @@ class ClaudeTtyPlugin:
                     thread_id,
                     session.cwd,
                     start_at_end=True,
+                    config_dir=self._config_dir(session),
                 )
             else:
                 log.warning(
@@ -717,6 +731,7 @@ class ClaudeTtyPlugin:
             new_thread_id,
             session.cwd,
             start_at_end=effective_thread_id is not None,
+            config_dir=self._config_dir(session),
         )
         self._spawn_rate_limit_watcher(runtime, session)
 
@@ -820,7 +835,13 @@ class ClaudeTtyPlugin:
             f"Claude TUI forked from {session.title or session.id} (thread {new_thread_id})",
             status=SessionStatus.IDLE,
         )
-        self._start_tailer(runtime, new_session_id, new_thread_id, session.cwd)
+        self._start_tailer(
+            runtime,
+            new_session_id,
+            new_thread_id,
+            session.cwd,
+            config_dir=self._config_dir(new_session),
+        )
         self._spawn_rate_limit_watcher(runtime, new_session)
         return runtime.get_session(new_session_id)
 
@@ -1008,7 +1029,12 @@ class ClaudeTtyPlugin:
         # in the event DB) so tail from the end; a fresh --session-id thread
         # starts an empty file, so read from byte 0.
         self._start_tailer(
-            runtime, session.id, thread_id, session.cwd, start_at_end=resumed
+            runtime,
+            session.id,
+            thread_id,
+            session.cwd,
+            start_at_end=resumed,
+            config_dir=self._config_dir(session),
         )
         return True
 
@@ -1117,7 +1143,12 @@ class ClaudeTtyPlugin:
             # DB by fork_aside, so tail from the end and only pick up turns added
             # from here.
             self._start_tailer(
-                runtime, new_session.id, thread_id, new_session.cwd, start_at_end=True
+                runtime,
+                new_session.id,
+                thread_id,
+                new_session.cwd,
+                start_at_end=True,
+                config_dir=self._config_dir(new_session),
             )
             self._spawn_rate_limit_watcher(runtime, new_session)
         except Exception:
@@ -1369,7 +1400,12 @@ class ClaudeTtyPlugin:
         # seed above has already replayed them, from the on-disk transcript
         # directly rather than the live tail).
         self._start_tailer(
-            runtime, session.id, request.thread_id, cwd, start_at_end=True
+            runtime,
+            session.id,
+            request.thread_id,
+            cwd,
+            start_at_end=True,
+            config_dir=self._config_dir(session),
         )
         self._spawn_rate_limit_watcher(runtime, session)
         return runtime.get_session(session.id)

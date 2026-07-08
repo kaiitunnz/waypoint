@@ -364,6 +364,8 @@ class Storage:
         self._ensure_column("sessions", "tags", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column("sessions", "preset_id", "TEXT")
         self._ensure_column("sessions", "preset_name", "TEXT")
+        self._ensure_column("sessions", "account_profile_id", "TEXT")
+        self._ensure_column("sessions", "account_profile_label", "TEXT")
         self._ensure_column(
             "scheduled_sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
         )
@@ -372,6 +374,8 @@ class Storage:
         )
         self._ensure_column("scheduled_sessions", "preset_id", "TEXT")
         self._ensure_column("scheduled_sessions", "preset_name", "TEXT")
+        self._ensure_column("scheduled_sessions", "account_profile_id", "TEXT")
+        self._ensure_column("scheduled_sessions", "account_profile_label", "TEXT")
         # Additive migration for the inbox table on databases that predate it.
         # (No-ops on a fresh DB where the CREATE TABLE above already made the
         # complete table; only load-bearing for columns added in a later release.)
@@ -409,8 +413,9 @@ class Storage:
                 last_event_at, raw_log_path, structured_log_path, transport_state,
                 pinned_at, spawner_session_id, worktree_path, permission_mode, model,
                 resolved_model, effort, args, config_overrides, launch_env, context_usage,
-                rate_limit_usage, tags, preset_id, preset_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                rate_limit_usage, tags, preset_id, preset_name,
+                account_profile_id, account_profile_label
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -453,6 +458,8 @@ class Storage:
                 json.dumps(session.tags),
                 session.preset_id,
                 session.preset_name,
+                session.account_profile_id,
+                session.account_profile_label,
             ),
         )
         self.connection.commit()
@@ -1386,8 +1393,9 @@ class Storage:
             INSERT INTO scheduled_sessions (
                 id, backend, cwd, launch_target_id, launch_mode, transport, title, args,
                 config_overrides, launch_env, initial_prompt, permission_mode, model, effort, scheduled_at,
-                created_at, status, session_id, failure_reason, preset_id, preset_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, status, session_id, failure_reason, preset_id, preset_name,
+                account_profile_id, account_profile_label
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 schedule.id,
@@ -1411,6 +1419,8 @@ class Storage:
                 schedule.failure_reason,
                 schedule.preset_id,
                 schedule.preset_name,
+                schedule.account_profile_id,
+                schedule.account_profile_label,
             ),
         )
         self.connection.commit()

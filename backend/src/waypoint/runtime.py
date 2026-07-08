@@ -20,8 +20,12 @@ from fastapi import HTTPException, status
 from waypoint.assistant_assets import AssistantAssetError, ensure_assistant_assets
 from waypoint.attachments import AttachmentStore, ResolvedAttachment
 from waypoint.backends import BackendRegistry, get_registry
-from waypoint.backends.account_profiles import redacted_profile_metadata
+from waypoint.backends.account_profiles import (
+    redacted_profile_metadata,
+    resolve_account_profiles,
+)
 from waypoint.backends.completions import static_slash_completions
+from waypoint.backends.plugin_config import AccountProfileConfig
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
 from waypoint.backends.tmux.normalize import (
     TMUX_CONTENT_KINDS,
@@ -421,6 +425,74 @@ class SessionRuntime:
             return dict(request.launch_env)
         return self._default_launch_env(request.backend, launch_target)
 
+    def _require_account_profile(
+        self,
+        backend: str,
+        account_profile_id: str,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> AccountProfileConfig:
+        """Resolve a selected profile or raise 400 if the id is unknown."""
+        profiles = resolve_account_profiles(self.settings, backend, launch_target)
+        profile = profiles.get(account_profile_id)
+        if profile is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"unknown account profile {account_profile_id!r} "
+                    f"for backend {backend}"
+                ),
+            )
+        return profile
+
+    def _apply_account_profile_env(
+        self,
+        backend: str,
+        launch_env: dict[str, str],
+        account_profile_id: str | None,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> tuple[dict[str, str], str | None]:
+        """Overlay the selected account profile's config-dir env key.
+
+        Profile-owned: when a profile is selected its ``config_dir`` wins for the
+        backend's ``config_dir_env_var``, stripping any raw value the request
+        supplied for that key (profile-wins, never a 400 on disagreement).
+        Returns ``(launch_env, label)`` — the label for stamping — and is a no-op
+        returning ``(launch_env, None)`` when no profile is selected. Unknown
+        ids, or a backend without a config-dir env var, are rejected with 400.
+        """
+        if account_profile_id is None:
+            return launch_env, None
+        profile = self._require_account_profile(
+            backend, account_profile_id, launch_target
+        )
+        config_dir_key = self.registry.get(backend).capabilities.config_dir_env_var
+        if config_dir_key is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"backend {backend} does not support account profiles",
+            )
+        config_dir = profile.config_dir
+        # Expand ``~`` for local launches (the config dir is a path on this
+        # host). Remote-home expansion isn't supported yet, and env values are
+        # injected shell-quoted so a remote shell won't expand ``~`` either —
+        # rather than silently launch under a literal ``~`` dir (wrong account),
+        # reject a ``~``-relative remote config_dir until that lands. Absolute
+        # remote paths are fine.
+        if launch_target is None:
+            config_dir = os.path.expanduser(config_dir)
+        elif config_dir.startswith("~"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"account profile {account_profile_id!r} uses a '~'-relative "
+                    "config_dir on a remote launch target; use an absolute path "
+                    "(remote home expansion is not yet supported)"
+                ),
+            )
+        env = dict(launch_env)
+        env[config_dir_key] = config_dir
+        return env, profile.label
+
     def _agent_process_env(
         self,
         backend: str,
@@ -460,12 +532,17 @@ class SessionRuntime:
             local_cwd = request.cwd or launch_target.default_cwd
         else:
             local_cwd = require_existing_local_dir(request.cwd)
+        effective_env = self._effective_launch_env_for_request(request, launch_target)
+        effective_env, account_profile_label = self._apply_account_profile_env(
+            request.backend,
+            effective_env,
+            request.account_profile_id,
+            launch_target,
+        )
         request = request.model_copy(
             update={
                 "cwd": local_cwd,
-                "launch_env": self._effective_launch_env_for_request(
-                    request, launch_target
-                ),
+                "launch_env": effective_env,
             }
         )
         title = (
@@ -613,6 +690,15 @@ class SessionRuntime:
         if preset_id is not None or preset_name is not None:
             session = self.storage.update_session(
                 session.id, preset_id=preset_id, preset_name=preset_name
+            )
+        # Account-profile selection is opaque display/audit metadata; the
+        # profile's config-dir is already baked into launch_env above. Stamped
+        # generically like preset provenance.
+        if request.account_profile_id is not None:
+            session = self.storage.update_session(
+                session.id,
+                account_profile_id=request.account_profile_id,
+                account_profile_label=account_profile_label,
             )
         self._warm_command_completions(session)
         self._start_context_usage_source(session)
@@ -886,6 +972,10 @@ class SessionRuntime:
             if "launch_env" in request.model_fields_set
             else self._default_launch_env(backend, launch_target)
         )
+        account_profile_id = getattr(request, "account_profile_id", None)
+        launch_env, account_profile_label = self._apply_account_profile_env(
+            backend, launch_env, account_profile_id, launch_target
+        )
         request = request.model_copy(update={"launch_env": launch_env})
         transport = getattr(request, "transport", None)
         if transport is not None:
@@ -898,7 +988,16 @@ class SessionRuntime:
                 driver = agent_plugin
         else:
             driver = agent_plugin
-        return await driver.import_thread(self, request, agent=backend)
+        session = await driver.import_thread(self, request, agent=backend)
+        # Persist the profile used for listing/import so a later
+        # resume/delete/history-read uses the same state root.
+        if account_profile_id is not None:
+            session = self.storage.update_session(
+                session.id,
+                account_profile_id=account_profile_id,
+                account_profile_label=account_profile_label,
+            )
+        return session
 
     async def attach_assistant(
         self,

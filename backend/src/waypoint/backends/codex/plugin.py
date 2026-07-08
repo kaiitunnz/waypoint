@@ -479,6 +479,18 @@ class CodexPlugin(DefaultLaunchContract):
         thread_id = session.transport_state.get("thread_id")
         return thread_id if isinstance(thread_id, str) else None
 
+    def native_thread_artifacts(
+        self, session: SessionRecord, config_dir: str | None = None
+    ) -> list[Path]:
+        # Imported lazily to avoid the plugin ↔ usage_source ↔ adapter cycle.
+        from waypoint.backends.codex.usage_source import find_codex_rollout
+
+        thread_id = self.native_thread_id(session)
+        if thread_id is None:
+            return []
+        rollout = find_codex_rollout(thread_id, config_dir)
+        return [rollout] if rollout is not None else []
+
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

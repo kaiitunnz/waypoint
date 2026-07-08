@@ -56,14 +56,15 @@ class ClaudeThreadInfo:
     updated_at: datetime
 
 
-def claude_projects_root() -> Path:
+def claude_projects_root(config_dir: str | None = None) -> Path:
     """Directory under which Claude stores per-project session transcripts.
 
-    Mirrors the precedence the CLI uses: ``$CLAUDE_CONFIG_DIR`` overrides
-    the default ``~/.claude``.
+    Mirrors the precedence the CLI uses: an explicit ``config_dir`` (e.g. a
+    target account profile's) wins, else ``$CLAUDE_CONFIG_DIR`` overrides the
+    default ``~/.claude``.
     """
-    base = os.environ.get("CLAUDE_CONFIG_DIR")
-    root = Path(base) if base else Path.home() / ".claude"
+    base = config_dir or os.environ.get("CLAUDE_CONFIG_DIR")
+    root = Path(base).expanduser() if base else Path.home() / ".claude"
     return root / "projects"
 
 
@@ -96,6 +97,28 @@ def list_local_claude_threads() -> list[ClaudeThreadInfo]:
                 results.append(info)
     results.sort(key=lambda info: info.updated_at, reverse=True)
     return results
+
+
+def local_claude_thread_artifacts(
+    thread_id: str, config_dir: str | None = None
+) -> list[Path]:
+    """The on-disk transcript file(s) for ``thread_id`` under ``config_dir``.
+
+    Scans every encoded-cwd project dir (the encoding is lossy, so the exact
+    dir isn't derivable) for ``<thread_id>.jsonl``. Returns the matching paths
+    (normally one), or ``[]`` when the thread isn't present under this config
+    dir — the signal a target profile can't yet see it. UUID-guarded.
+    """
+    if not UUID_RE.match(thread_id):
+        return []
+    root = claude_projects_root(config_dir)
+    if not root.is_dir():
+        return []
+    return [
+        project_dir / f"{thread_id}.jsonl"
+        for project_dir in root.iterdir()
+        if project_dir.is_dir() and (project_dir / f"{thread_id}.jsonl").is_file()
+    ]
 
 
 def find_local_claude_thread(thread_id: str) -> ClaudeThreadInfo | None:

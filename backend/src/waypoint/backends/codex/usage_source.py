@@ -26,13 +26,23 @@ log = logging.getLogger("waypoint.backends.codex")
 _POLL_INTERVAL = 1.0
 
 
-def _find_rollout_path(thread_id: str) -> Path | None:
-    codex_home = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
-    sessions_dir = codex_home / "sessions"
+def find_codex_rollout(thread_id: str, codex_home: str | None = None) -> Path | None:
+    """The rollout JSONL for ``thread_id`` under ``codex_home``.
+
+    An explicit ``codex_home`` (e.g. a target account profile's) wins, else
+    ``$CODEX_HOME`` / ``~/.codex``. Returns ``None`` when absent — the signal a
+    target profile can't yet see the thread.
+    """
+    home = Path(codex_home or os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
+    sessions_dir = home / "sessions"
     if not sessions_dir.is_dir():
         return None
     suffix = f"-{thread_id}.jsonl"
     return next(sessions_dir.glob(f"*/*/*/rollout-*{suffix}"), None)
+
+
+def _find_rollout_path(thread_id: str) -> Path | None:
+    return find_codex_rollout(thread_id)
 
 
 def _parse_token_count_record(record: dict[str, Any]) -> SessionContextUsage | None:

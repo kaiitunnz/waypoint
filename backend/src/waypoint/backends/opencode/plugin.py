@@ -671,6 +671,12 @@ class OpenCodePlugin(DefaultLaunchContract):
         session_id = session.transport_state.get("opencode_session_id")
         return session_id if isinstance(session_id, str) else None
 
+    def native_thread_artifacts(
+        self, session: SessionRecord, config_dir: str | None = None
+    ) -> list[Path]:
+        # No config-dir env var / account-profile support in phase 1.
+        return []
+
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

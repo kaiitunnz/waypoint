@@ -64,6 +64,7 @@ from waypoint.backends.claude_code.threads import (
     delete_local_claude_thread,
     find_local_claude_thread,
     list_local_claude_threads,
+    local_claude_thread_artifacts,
 )
 from waypoint.backends.claude_code.threads_remote import RemoteClaudeThreadEnumerator
 from waypoint.backends.claude_code.version import detect_claude_cli_version
@@ -499,6 +500,14 @@ class ClaudeCodePlugin(DefaultLaunchContract):
     def native_thread_id(self, session: SessionRecord) -> str | None:
         thread_id = session.transport_state.get("thread_id")
         return thread_id if isinstance(thread_id, str) else None
+
+    def native_thread_artifacts(
+        self, session: SessionRecord, config_dir: str | None = None
+    ) -> list[Path]:
+        thread_id = self.native_thread_id(session)
+        if thread_id is None:
+            return []
+        return local_claude_thread_artifacts(thread_id, config_dir)
 
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord

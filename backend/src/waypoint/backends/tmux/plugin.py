@@ -186,6 +186,14 @@ class TmuxPlugin:
         thread_id = session.transport_state.get("thread_id")
         return thread_id if isinstance(thread_id, str) else None
 
+    def native_thread_artifacts(
+        self, session: SessionRecord, config_dir: str | None = None
+    ) -> list[Path]:
+        # The wrapper has no native store of its own; the resumable transcript
+        # belongs to the wrapped agent, which owns the artifact lookup and is
+        # dispatched via ``session.backend``. Nothing to contribute here.
+        return []
+
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -15,6 +16,24 @@ if TYPE_CHECKING:
     from waypoint.backends.context_usage_source import ContextUsageSource
     from waypoint.launch_targets import SshLaunchTargetConfig
     from waypoint.runtime import SessionRuntime
+
+
+def config_dir_for(
+    capabilities: BackendCapabilities, launch_env: Mapping[str, str]
+) -> str | None:
+    """The session's override for the agent's config-dir env var, if any.
+
+    The single resolver for "which config/account dir does this session use":
+    an account profile sets the agent's ``config_dir_env_var``
+    (``CLAUDE_CONFIG_DIR`` / ``CODEX_HOME``) in ``launch_env``. Every
+    per-session operation that touches on-disk agent state (transcript tailing,
+    thread lookup/resume, rollout discovery, side-questions, plan-file
+    detection) MUST resolve the dir through this — reading the process env or a
+    hardcoded default instead makes the op operate on the wrong account's dir
+    for a profile-scoped session (the failure mode behind PRs #241/#246).
+    """
+    key = capabilities.config_dir_env_var
+    return launch_env.get(key) if key else None
 
 
 @runtime_checkable

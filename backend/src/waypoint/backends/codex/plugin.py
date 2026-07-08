@@ -24,7 +24,7 @@ from fastapi import HTTPException, status
 from openai_codex.client import CodexClient
 from pydantic import BaseModel, Field
 
-from waypoint.backends.base import DefaultLaunchContract
+from waypoint.backends.base import DefaultLaunchContract, config_dir_for
 from waypoint.backends.capabilities import (
     BackendCapabilities,
     ModelSource,
@@ -370,7 +370,11 @@ class CodexPlugin(DefaultLaunchContract):
             return None
         from waypoint.backends.codex.usage_source import CodexRolloutUsageSource
 
-        return CodexRolloutUsageSource(session.id, runtime)
+        return CodexRolloutUsageSource(
+            session.id,
+            runtime,
+            codex_home=config_dir_for(self.capabilities, session.launch_env),
+        )
 
     def register_routes(self, app: Any, context: Any) -> None:
         return None
@@ -1107,13 +1111,24 @@ class CodexPlugin(DefaultLaunchContract):
         # opens an SSH connection per tick, so back off there.
         POLL_INTERVAL = 2.0 if launch_target is None else 10.0
         elapsed = 0.0
+        # Scope the local search to the session's profile CODEX_HOME; the CLI
+        # writes the rollout there, so reading the default ~/.codex would never
+        # find it (thread id never captured → the session can't resume).
+        watched = runtime.storage.get_session(session_id)
+        config_dir = (
+            config_dir_for(self.capabilities, watched.launch_env)
+            if watched is not None
+            else None
+        )
         try:
             while elapsed < DEADLINE:
                 # Probe before sleeping so we don't waste POLL_INTERVAL
                 # in the case where the user has already typed and the
                 # rollout file exists when this watcher starts.
                 if launch_target is None:
-                    uuid_found = self._find_codex_thread_id_local(cwd, since)
+                    uuid_found = self._find_codex_thread_id_local(
+                        cwd, since, config_dir
+                    )
                 else:
                     uuid_found = await self._find_codex_thread_id_remote(
                         cwd, since, launch_target
@@ -1139,8 +1154,12 @@ class CodexPlugin(DefaultLaunchContract):
         finally:
             runtime._thread_id_watchers.pop(session_id, None)
 
-    def _find_codex_thread_id_local(self, cwd: str, since: datetime) -> str | None:
-        codex_home = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
+    def _find_codex_thread_id_local(
+        self, cwd: str, since: datetime, config_dir: str | None = None
+    ) -> str | None:
+        codex_home = Path(
+            config_dir or os.environ.get("CODEX_HOME") or "~/.codex"
+        ).expanduser()
         sessions_dir = codex_home / "sessions"
         if not sessions_dir.is_dir():
             return None

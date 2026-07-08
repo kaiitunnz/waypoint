@@ -9,12 +9,33 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from waypoint.backends.base import config_dir_for
 from waypoint.backends.codex.plugin import CodexPlugin
 from waypoint.backends.codex.usage_source import (
     CodexRolloutUsageSource,
     _parse_token_count_record,
+    find_codex_rollout,
 )
 from waypoint.launch_targets import SshLaunchTargetConfig
+
+
+def test_config_dir_for_resolves_from_launch_env(plugin: CodexPlugin) -> None:
+    # The chokepoint every per-session on-disk op resolves the profile dir through.
+    assert config_dir_for(plugin.capabilities, {"CODEX_HOME": "/x"}) == "/x"
+    assert config_dir_for(plugin.capabilities, {}) is None
+
+
+def test_find_codex_rollout_honors_codex_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "default"))
+    profile = tmp_path / "profile"
+    sessions_dir = profile / "sessions" / "2026" / "05" / "16"
+    sessions_dir.mkdir(parents=True)
+    uuid = "55555555-5555-5555-5555-555555555555"
+    (sessions_dir / f"rollout-2026-05-16T12-00-00-{uuid}.jsonl").write_text("{}\n")
+    assert find_codex_rollout(uuid) is None
+    assert find_codex_rollout(uuid, str(profile)) is not None
 
 
 @pytest.fixture
@@ -135,6 +156,38 @@ def test_find_codex_thread_id_local_filters_by_cwd_and_since(
     assert found == newer_uuid
 
 
+def test_find_codex_thread_id_local_honors_config_dir(
+    plugin: CodexPlugin, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The rollout lives under a profile's CODEX_HOME; passing config_dir must
+    # find it even when the process env points elsewhere (else the thread id is
+    # never captured and the session can't resume).
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "default"))
+    profile = tmp_path / "profile"
+    sessions_dir = profile / "sessions" / "2026" / "05" / "16"
+    sessions_dir.mkdir(parents=True)
+    uuid = "44444444-4444-4444-4444-444444444444"
+    roll = sessions_dir / f"rollout-2026-05-16T12-00-00-{uuid}.jsonl"
+    roll.write_text(json.dumps({"cwd": "/repo"}) + "\n")
+    ts = datetime(2026, 5, 16, 12, 0, 0, tzinfo=UTC).timestamp()
+    os.utime(roll, (ts, ts))
+
+    assert (
+        plugin._find_codex_thread_id_local(
+            "/repo", datetime(2026, 5, 16, 11, 59, 59, tzinfo=UTC)
+        )
+        is None
+    )
+    assert (
+        plugin._find_codex_thread_id_local(
+            "/repo",
+            datetime(2026, 5, 16, 11, 59, 59, tzinfo=UTC),
+            str(profile),
+        )
+        == uuid
+    )
+
+
 @pytest.mark.asyncio
 async def test_find_codex_thread_id_remote_filters_by_cwd(
     plugin: CodexPlugin, monkeypatch: pytest.MonkeyPatch
@@ -172,6 +225,7 @@ async def test_capture_thread_id_pulls_uuid_from_filename(
 
     class _Session:
         transport_state: dict[str, object] = {}
+        launch_env: dict[str, str] = {}
 
     class _Storage:
         def get_session(self, _sid: str) -> _Session:

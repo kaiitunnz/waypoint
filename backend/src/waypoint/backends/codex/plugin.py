@@ -282,7 +282,13 @@ class CodexPlugin(DefaultLaunchContract):
         binary = self.remote_executable(launch_target) or "codex"
 
         async def _probe() -> SessionRateLimitUsage | None:
-            return await probe_codex_usage_remote(launch_target, binary=binary)
+            # Same reasoning as the local probe above: look up the session's
+            # launch_env per probe so it reads the profile's CODEX_HOME.
+            session = runtime.storage.get_session(session_id)
+            launch_env = session.launch_env if session is not None else None
+            return await probe_codex_usage_remote(
+                launch_target, binary=binary, launch_env=launch_env
+            )
 
         await self.adapter.register_rate_limit_probe(
             session_id, _probe, refresh_interval_seconds=300.0
@@ -349,7 +355,9 @@ class CodexPlugin(DefaultLaunchContract):
             )
             return await probe_codex_status(cwd=cwd, binary=binary, env=env)
         binary = self.remote_executable(launch_target) or "codex"
-        return await probe_codex_usage_remote(launch_target, binary=binary)
+        return await probe_codex_usage_remote(
+            launch_target, binary=binary, launch_env=launch_env
+        )
 
     def rate_limit_account(
         self, snapshot: SessionRateLimitUsage

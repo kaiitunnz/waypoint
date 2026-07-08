@@ -400,7 +400,14 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             return
 
         async def _probe() -> SessionRateLimitUsage | None:
-            return await probe_claude_usage_remote_shared(launch_target)
+            # Same reasoning as the local probe above: look up the session's
+            # launch_env per probe so it tracks a live profile switch, and
+            # scope the shared cache key to that profile's config dir.
+            session = runtime.storage.get_session(session_id)
+            launch_env = session.launch_env if session is not None else None
+            return await probe_claude_usage_remote_shared(
+                launch_target, launch_env=launch_env
+            )
 
         await self.adapter.register_rate_limit_probe(
             session_id, _probe, refresh_interval_seconds=300.0
@@ -434,7 +441,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         if launch_target is None:
             invalidate_shared_probe_local()
         else:
-            invalidate_shared_probe_remote(launch_target)
+            invalidate_shared_probe_remote(launch_target, session.launch_env)
         # Run the probe inline so the caller's HTTP response carries the
         # post-refresh snapshot — otherwise the response races the WS push
         # from the periodic loop and the UI sees stale data.
@@ -469,7 +476,9 @@ class ClaudeCodePlugin(DefaultLaunchContract):
                 else None
             )
             return await probe_claude_usage_shared(env=env, force=force)
-        return await probe_claude_usage_remote_shared(launch_target, force=force)
+        return await probe_claude_usage_remote_shared(
+            launch_target, launch_env=launch_env, force=force
+        )
 
     def rate_limit_account(
         self, snapshot: SessionRateLimitUsage

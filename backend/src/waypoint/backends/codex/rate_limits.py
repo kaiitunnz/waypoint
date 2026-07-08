@@ -173,9 +173,12 @@ async def probe_codex_usage_remote(
     launch_target: SshLaunchTargetConfig,
     *,
     binary: str = "codex",
+    launch_env: dict[str, str] | None = None,
     timeout_seconds: float = 30.0,
 ) -> SessionRateLimitUsage | None:
-    payload = await _run_remote_probe_script(launch_target, binary, timeout_seconds)
+    payload = await _run_remote_probe_script(
+        launch_target, binary, timeout_seconds, launch_env=launch_env
+    )
     if payload is None:
         return None
     error = payload.get("error")
@@ -206,9 +209,12 @@ async def _run_remote_probe_script(
     launch_target: SshLaunchTargetConfig,
     binary: str,
     timeout_seconds: float,
+    *,
+    launch_env: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
     argv = launch_target.build_remote_exec_args(
-        ["env", f"{_REMOTE_PROBE_CODEX_BIN_ENV}={binary}", "python3", "-"]
+        ["env", f"{_REMOTE_PROBE_CODEX_BIN_ENV}={binary}", "python3", "-"],
+        extra_env=launch_env,
     )
     try:
         proc = await asyncio.create_subprocess_exec(

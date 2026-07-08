@@ -26,7 +26,10 @@ from fastapi.responses import FileResponse
 
 from waypoint.auth import TokenStore, require_token
 from waypoint.backends import BackendRegistry
-from waypoint.backends.account_profiles import redacted_profile_metadata
+from waypoint.backends.account_profiles import (
+    backend_hosts_account_profiles,
+    redacted_profile_metadata,
+)
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.backends.tmux.renderer import (
     Osc52Extractor,
@@ -40,6 +43,7 @@ from waypoint.presets import (
 )
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
+    AccountProbeResult,
     AssistantAttachRequest,
     AssistantResetRequest,
     AssistantSummary,
@@ -55,6 +59,7 @@ from waypoint.schemas import (
     LaunchTargetConnectResponse,
     LoginRequest,
     MeResponse,
+    ProfileDoctorReport,
     ScheduledMessageCreateRequest,
     ScheduleLaunchRequest,
     SessionAnswerQuestionRequest,
@@ -469,6 +474,74 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 detail=f"no resumable thread {thread_id} for {backend}",
             )
         return {"deleted": thread_id}
+
+    def _require_profile_hosting_backend(backend: str) -> None:
+        if not context.runtime.registry.has_backend(backend):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"unknown backend: {backend}",
+            )
+        if not backend_hosts_account_profiles(context.settings, backend):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"backend {backend} does not host account profiles",
+            )
+
+    @app.get(
+        "/api/backends/{backend}/accounts/{profile}/probe",
+        response_model=AccountProbeResult,
+    )
+    async def probe_account_profile(
+        backend: str,
+        profile: str,
+        _: Annotated[str, Depends(token_dependency())],
+        launch_target_id: Annotated[str | None, Query()] = None,
+        show_key: Annotated[bool, Query()] = False,
+    ) -> AccountProbeResult:
+        _require_profile_hosting_backend(backend)
+        result = await context.runtime.probe_account_profile(
+            backend, profile, launch_target_id=launch_target_id
+        )
+        # Redact the private-class account key unless explicitly requested; the
+        # label is display-safe (phase-1 redaction rules).
+        if not show_key:
+            result = result.model_copy(update={"account_key": ""})
+        return result
+
+    @app.get(
+        "/api/backends/{backend}/accounts/doctor",
+        response_model=list[ProfileDoctorReport],
+    )
+    async def account_doctor(
+        backend: str,
+        _: Annotated[str, Depends(token_dependency())],
+        launch_target_id: Annotated[str | None, Query()] = None,
+        show_paths: Annotated[bool, Query()] = False,
+    ) -> list[ProfileDoctorReport]:
+        _require_profile_hosting_backend(backend)
+        return await context.runtime.account_doctor(
+            backend=backend,
+            launch_target_id=launch_target_id,
+            show_paths=show_paths,
+        )
+
+    @app.post("/api/backends/{backend}/accounts/{profile}/setup-transcripts")
+    async def setup_account_transcripts(
+        backend: str,
+        profile: str,
+        body: dict[str, Any],
+        _: Annotated[str, Depends(token_dependency())],
+        launch_target_id: Annotated[str | None, Query()] = None,
+    ) -> Any:
+        _require_profile_hosting_backend(backend)
+        actions = context.runtime.setup_account_transcripts(
+            backend,
+            profile,
+            launch_target_id=launch_target_id,
+            shared_dir=body.get("shared_dir"),
+            policy=body.get("policy"),
+        )
+        return {"actions": actions}
 
     @app.get("/api/sessions/{session_id}")
     async def get_session(

@@ -4113,6 +4113,14 @@ function SessionHeader({
             {session.effort}
           </span>
         ) : null}
+        {session.account_profile_label ? (
+          <span
+            className="badge account-profile"
+            title={`Account: ${session.account_profile_label}`}
+          >
+            {session.account_profile_label}
+          </span>
+        ) : null}
         {!assistant ? (
           <span className="session-header-meta">
             {sourceLabel}

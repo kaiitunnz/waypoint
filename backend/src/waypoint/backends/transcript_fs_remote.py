@@ -124,9 +124,21 @@ class RemoteTranscriptFilesystem:
         self._mutate("copy_file", src, dst, str(mode))
 
     def expanduser(self, path: str) -> str:
-        # Leave ``~`` intact: the remote helper script expands it against the
-        # remote home per op. Expanding here would use the backend host's home.
-        return path
+        # Resolve ``~`` against the *remote* home (never the backend host's).
+        # Absolute paths skip the round-trip. The policy logic downstream
+        # (``relative_to``, symlink-target comparison) needs the same absolute
+        # form the remote glob/symlink ops produce, so this must expand rather
+        # than leave ``~`` for per-op expansion.
+        if not path.startswith("~"):
+            return path
+        result = self._run("expanduser", path)
+        expanded = result.get("path")
+        if not isinstance(expanded, str) or expanded.startswith("~"):
+            raise TranscriptUnavailableError(
+                f"could not expand remote path {path!r}: "
+                f"{result.get('error', 'unknown error')}"
+            )
+        return expanded
 
     # -- transport --------------------------------------------------------
 

@@ -143,6 +143,13 @@ def op_glob(config_dir, pattern):
     emit({"paths": matches})
 
 
+def op_expanduser(path):
+    # Resolve ``~`` against the remote home so the caller's policy logic
+    # (relative_to, symlink-target comparison) works with absolute paths that
+    # match what glob/symlink produce on this host.
+    emit({"path": os.path.expanduser(path)})
+
+
 OPS: dict[str, Callable[..., None]] = {
     "exists": op_exists,
     "is_dir": op_is_dir,
@@ -155,6 +162,7 @@ OPS: dict[str, Callable[..., None]] = {
     "symlink": op_symlink,
     "copy_file": op_copy_file,
     "glob": op_glob,
+    "expanduser": op_expanduser,
 }
 
 

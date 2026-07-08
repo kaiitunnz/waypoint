@@ -345,13 +345,68 @@ def test_remote_glob_artifacts_degrades_to_empty_on_transport_failure(
         )
 
 
-def test_remote_expanduser_leaves_tilde_intact() -> None:
-    # The remote fs must NOT expand ``~`` against the backend host — the remote
-    # helper script expands it against the remote home per op instead.
+def test_remote_expanduser_resolves_against_remote_home(
+    tmp_path: Path, fake_remote: _FakeRemote, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ``~`` must resolve against the remote home (here tmp_path stands in), not
+    # the backend host, so downstream relative_to / symlink comparison see the
+    # same absolute form the glob/symlink ops produce. Absolute paths skip the
+    # round-trip entirely.
+    monkeypatch.setenv("HOME", str(tmp_path))
     fs = RemoteTranscriptFilesystem(_launch_target())
-    assert fs.expanduser("~/.codex-work") == "~/.codex-work"
-    assert fs.expanduser("~alice/x") == "~alice/x"
+    assert fs.expanduser("~/.codex-work") == str(tmp_path / ".codex-work")
     assert fs.expanduser("/abs/path") == "/abs/path"
+    assert ("expanduser", ("/abs/path",)) not in fake_remote.calls
+    assert ("expanduser", ("~/.codex-work",)) in fake_remote.calls
+
+
+def test_remote_copy_thread_on_switch_with_tilde_config_dir(
+    tmp_path: Path, fake_remote: _FakeRemote, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: a ~-relative remote config_dir under copy_thread_on_switch
+    # (codex's default) must not crash on relative_to — expanduser resolves the
+    # base to the same absolute form glob returns.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _write_codex_rollout(tmp_path / "cur")
+    ensure_thread_available(
+        _plugin("codex"),
+        _session("codex"),
+        current_config_dir="~/cur",
+        target_config_dir="~/tgt",
+        policy="copy_thread_on_switch",
+        shared_transcript_dir=None,
+        native_thread_store="sessions",
+        fs=RemoteTranscriptFilesystem(_launch_target()),
+    )
+    assert (tmp_path / "tgt" / "sessions").is_dir()
+
+
+def test_remote_symlink_shared_tilde_dir_matches_existing_symlink(
+    tmp_path: Path, fake_remote: _FakeRemote, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: with a ~-relative shared_transcript_dir and a pre-existing
+    # symlink already pointing at the (absolute) shared dir, the idempotency
+    # check must see them as equal — not raise the misleading "symlink to … not
+    # the configured shared_transcript_dir". The thread isn't in shared here, so
+    # the flow still ends in the honest "still unavailable", proving the
+    # comparison passed rather than tripping the mismatch.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / "shared").mkdir()
+    store = tmp_path / "target" / "projects"
+    store.parent.mkdir(parents=True)
+    store.symlink_to(tmp_path / "shared", target_is_directory=True)
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    with pytest.raises(TranscriptUnavailableError, match="still unavailable"):
+        ensure_thread_available(
+            _plugin("claude_code"),
+            _session("claude_code"),
+            current_config_dir="~/current",
+            target_config_dir=str(tmp_path / "target"),
+            policy="symlink_shared",
+            shared_transcript_dir="~/shared",
+            native_thread_store="projects",
+            fs=fs,
+        )
 
 
 def test_remote_script_ops_expand_tilde_against_the_running_host() -> None:

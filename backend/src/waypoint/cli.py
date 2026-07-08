@@ -3301,6 +3301,13 @@ def accounts_doctor(
         bool,
         typer.Option("--show-paths", help="Include config-dir paths in details."),
     ] = False,
+    show_key: Annotated[
+        bool,
+        typer.Option(
+            "--show-key",
+            help="Include private-class account keys in the match check detail.",
+        ),
+    ] = False,
 ) -> None:
     """Diagnose account profiles per backend; exits non-zero on any failing check.
 
@@ -3317,6 +3324,7 @@ def accounts_doctor(
                     backend_id,
                     launch_target_id=launch_target_id,
                     show_paths=show_paths,
+                    show_key=show_key,
                 )
             )
         return reports

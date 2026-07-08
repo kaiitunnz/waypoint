@@ -517,12 +517,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
         launch_target_id: Annotated[str | None, Query()] = None,
         show_paths: Annotated[bool, Query()] = False,
+        show_key: Annotated[bool, Query()] = False,
     ) -> list[ProfileDoctorReport]:
         _require_profile_hosting_backend(backend)
         return await context.runtime.account_doctor(
             backend=backend,
             launch_target_id=launch_target_id,
             show_paths=show_paths,
+            show_key=show_key,
         )
 
     @app.post("/api/backends/{backend}/accounts/{profile}/setup-transcripts")

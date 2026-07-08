@@ -643,6 +643,7 @@ class SessionRuntime:
         backend: str,
         launch_target_id: str | None = None,
         show_paths: bool = False,
+        show_key: bool = False,
     ) -> list[ProfileDoctorReport]:
         """Run the per-profile ``accounts doctor`` checklist for one backend.
 
@@ -650,7 +651,8 @@ class SessionRuntime:
         from the shared server-free checklist; a live ``account_matches_expected``
         check is added when the profile declares an ``expected_account_key`` and
         the target is probeable. A profile with any failing check reports
-        ``ok=False`` so the CLI can exit non-zero.
+        ``ok=False`` so the CLI can exit non-zero. Account keys stay out of the
+        check details unless ``show_key`` is set (phase-1 redaction rules).
         """
         launch_target = self._resolve_launch_target(launch_target_id, backend)
         local = launch_target is None
@@ -668,7 +670,12 @@ class SessionRuntime:
             )
             checks.append(
                 await self._account_matches_check(
-                    backend, profile_id, profile, launch_target, probe_blocked
+                    backend,
+                    profile_id,
+                    profile,
+                    launch_target,
+                    probe_blocked,
+                    show_key=show_key,
                 )
             )
             reports.append(
@@ -689,6 +696,8 @@ class SessionRuntime:
         profile: AccountProfileConfig,
         launch_target: SshLaunchTargetConfig | None,
         probe_blocked: bool,
+        *,
+        show_key: bool,
     ) -> ProfileCheck:
         name = "account_matches_expected"
         if not profile.expected_account_key:
@@ -709,17 +718,20 @@ class SessionRuntime:
         if probe is None:
             return ProfileCheck(name=name, ok=False, detail="could not verify account")
         if probe.account_key != profile.expected_account_key:
-            return ProfileCheck(
-                name=name,
-                ok=False,
-                detail=(
-                    f"authenticates as {probe.account_key!r}, expected "
-                    f"{profile.expected_account_key!r}"
-                ),
+            detail = (
+                f"authenticates as {probe.account_key!r}, expected "
+                f"{profile.expected_account_key!r}"
+                if show_key
+                else "authenticates as a different account than expected "
+                "(pass --show-key for the keys)"
             )
-        return ProfileCheck(
-            name=name, ok=True, detail=f"matches {profile.expected_account_key!r}"
+            return ProfileCheck(name=name, ok=False, detail=detail)
+        detail = (
+            f"matches {profile.expected_account_key!r}"
+            if show_key
+            else "matches the expected account"
         )
+        return ProfileCheck(name=name, ok=True, detail=detail)
 
     def setup_account_transcripts(
         self,

@@ -235,6 +235,35 @@ async def test_doctor_endpoint_reports_profiles(
 
 
 @pytest.mark.asyncio
+async def test_doctor_endpoint_redacts_account_key_by_default(
+    app_client: tuple[Any, dict[str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, headers = app_client
+
+    async def wrong_probe(*args: Any, **kwargs: Any) -> AccountProbeResult:
+        return AccountProbeResult(
+            account_key="claude_code:other", account_label="Other"
+        )
+
+    monkeypatch.setattr(runtime_module, "probe_account", wrong_probe)
+
+    def _match(resp: httpx.Response) -> dict[str, Any]:
+        checks = resp.json()[0]["checks"]
+        return next(c for c in checks if c["name"] == "account_matches_expected")
+
+    redacted = await _get(app, "/api/backends/claude_code/accounts/doctor", headers)
+    detail = _match(redacted)["detail"]
+    assert _match(redacted)["ok"] is False
+    assert "claude_code:other" not in detail
+    assert "claude_code:acme" not in detail
+
+    shown = await _get(
+        app, "/api/backends/claude_code/accounts/doctor?show_key=true", headers
+    )
+    assert "claude_code:acme" in _match(shown)["detail"]
+
+
+@pytest.mark.asyncio
 async def test_doctor_endpoint_rejects_non_hosting_backend(
     app_client: tuple[Any, dict[str, str]],
 ) -> None:

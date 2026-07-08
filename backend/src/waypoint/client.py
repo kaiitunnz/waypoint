@@ -286,12 +286,15 @@ class WaypointClient:
         *,
         launch_target_id: str | None = None,
         show_paths: bool = False,
+        show_key: bool = False,
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {}
         if launch_target_id is not None:
             params["launch_target_id"] = launch_target_id
         if show_paths:
             params["show_paths"] = show_paths
+        if show_key:
+            params["show_key"] = show_key
         data: list[dict[str, Any]] = self._request(
             "GET", f"/api/backends/{backend}/accounts/doctor", params=params or None
         ).json()

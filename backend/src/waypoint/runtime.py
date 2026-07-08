@@ -7,7 +7,7 @@ import secrets
 import shutil
 import subprocess
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -25,6 +25,12 @@ from waypoint.backends.account_profiles import (
     redacted_profile_metadata,
     resolve_account_profiles,
 )
+from waypoint.backends.base import (
+    ConfigDirNotReadyError,
+    ConfigDirValidating,
+    config_dir_for,
+)
+from waypoint.backends.capabilities import BackendCapabilities
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import AccountProfileConfig
 from waypoint.backends.tmux.adapter import TmuxAdapter, TmuxError
@@ -504,6 +510,45 @@ class SessionRuntime:
         env[config_dir_key] = config_dir
         return env, profile.label
 
+    def _ensure_profile_config_dir_ready(
+        self,
+        backend: str,
+        transport_caps: BackendCapabilities,
+        launch_env: Mapping[str, str],
+        account_profile_id: str | None,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> None:
+        """Reject a local profile whose config dir would strand this launch on an
+        interactive first-run prompt (e.g. claude onboarding), before the process
+        is spawned or a running session is destructively switched.
+
+        Two independent facts gate the check, kept on the axes that own them: the
+        *agent* (``registry.get(backend)`` — profiles are agent-owned) knows how
+        to judge readiness (:class:`ConfigDirValidating`); the resolved
+        *transport* knows whether an un-ready dir actually hangs — only an
+        interactive TUI in a terminal pane (``has_terminal_pane``) does, so a
+        headless transport (``claude --print``) is exempt and never rejected.
+        Remote dirs can't be stat'd here, so the check is local-only.
+        """
+        if account_profile_id is None or launch_target is not None:
+            return
+        if not transport_caps.has_terminal_pane:
+            return
+        agent = self.registry.get(backend)
+        # The config-dir env var is an agent-axis fact — read it off the agent,
+        # not the transport (the generic tmux wrapper is agent-agnostic and
+        # leaves it unset). ``has_terminal_pane`` above stays on the transport.
+        config_dir = config_dir_for(agent.capabilities, launch_env)
+        if config_dir is None or not isinstance(agent, ConfigDirValidating):
+            return
+        try:
+            agent.ensure_config_dir_ready(config_dir)
+        except ConfigDirNotReadyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"account profile {account_profile_id!r} is not set up: {exc}",
+            ) from exc
+
     def _agent_process_env(
         self,
         backend: str,
@@ -693,6 +738,15 @@ class SessionRuntime:
             fallback = self.registry.fallback_for_managed_launch()
             if fallback is not None:
                 plugin = fallback
+        # ``plugin`` is now the resolved (agent, transport) driver — its caps
+        # carry the transport axis (e.g. ``has_terminal_pane``) the guard needs.
+        self._ensure_profile_config_dir_ready(
+            request.backend,
+            plugin.capabilities,
+            effective_env,
+            request.account_profile_id,
+            launch_target,
+        )
         session = await plugin.create_session(
             self,
             request,
@@ -1009,14 +1063,37 @@ class SessionRuntime:
         transport = getattr(request, "transport", None)
         if transport is not None:
             self._validate_supported_transport(backend, transport)
-            driver = self.registry.resolve(backend, transport)
-            # resolve() returns the transport owner; for a wrapper transport
-            # (tmux) that owner cannot enumerate threads, so the agent plugin
-            # drives the resume-via-tmux path instead.
-            if not driver.capabilities.supports_thread_import:
-                driver = agent_plugin
+            resolved = self.registry.resolve(backend, transport)
+            # The resolved transport owner carries the transport axis (e.g.
+            # has_terminal_pane) for the readiness guard; below it may be swapped
+            # for the agent plugin as the import *mechanism* (a wrapper transport
+            # can't enumerate threads), but the session still runs on ``resolved``.
+            transport_caps = resolved.capabilities
+            driver = (
+                resolved
+                if resolved.capabilities.supports_thread_import
+                else agent_plugin
+            )
         else:
             driver = agent_plugin
+            # No pinned transport: import resumes over the agent's structured
+            # (headless) path unless it falls through to the tmux wrapper — the
+            # caller forced it, or AUTO can't use the structured adapter. Mirror
+            # the plugin's own resume-wrapper predicate so the guard sees the
+            # transport the session will actually run on.
+            launch_mode = getattr(request, "launch_mode", None)
+            uses_wrapper = launch_mode == LaunchMode.TMUX_WRAPPER or (
+                launch_mode == LaunchMode.AUTO
+                and not agent_plugin.is_available_for_managed_launch(self)
+            )
+            if uses_wrapper:
+                fallback = self.registry.fallback_for_managed_launch()
+                transport_caps = (fallback or agent_plugin).capabilities
+            else:
+                transport_caps = agent_plugin.capabilities
+        self._ensure_profile_config_dir_ready(
+            backend, transport_caps, launch_env, account_profile_id, launch_target
+        )
         session = await driver.import_thread(self, request, agent=backend)
         # Persist the profile used for listing/import so a later
         # resume/delete/history-read uses the same state root.
@@ -1781,6 +1858,12 @@ class SessionRuntime:
             session.backend, new_env, selected_profile_id, launch_target
         )
         new_profile_label = resolved_label if selected_profile_id is not None else None
+        # Reject before the destructive terminate/restore if the target profile's
+        # config dir would strand this session on an interactive first-run prompt
+        # (``caps`` is the session's composed transport capability).
+        self._ensure_profile_config_dir_ready(
+            session.backend, caps, new_env, selected_profile_id, launch_target
+        )
 
         old_launch_env = dict(session.launch_env)
         config_dir_key = caps.config_dir_env_var

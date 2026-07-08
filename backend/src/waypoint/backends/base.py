@@ -36,6 +36,40 @@ def config_dir_for(
     return launch_env.get(key) if key else None
 
 
+class ConfigDirNotReadyError(Exception):
+    """A profile's config dir isn't ready to launch/resume this agent headlessly.
+
+    Raised by :meth:`ConfigDirValidating.ensure_config_dir_ready` with a terse,
+    user-facing reason; the runtime maps it to a 400 before any launch or
+    destructive switch step.
+    """
+
+
+@runtime_checkable
+class ConfigDirValidating(Protocol):
+    """An agent that can pre-flight an account profile's config dir.
+
+    Pointing an agent's ``config_dir_env_var`` (``CLAUDE_CONFIG_DIR`` /
+    ``CODEX_HOME``) at a dir the CLI treats as first-run can strand a session on
+    an interactive setup prompt it can never dismiss headlessly — the claude TUI
+    onboarding wizard (theme/login) is the motivating case: a profile aimed at a
+    config dir whose ``.claude.json`` has not completed onboarding relaunches
+    into the wizard and the tmux/tty-driven turn hangs forever. Codex's default
+    app-server transport has no such prompt (an unset home fails fast), so it
+    simply does not implement this.
+
+    The runtime narrows to this protocol (``isinstance``) when resolving a
+    profile's config-dir env for a *local* launch or switch, and rejects up
+    front rather than launching into a hang.
+    """
+
+    def ensure_config_dir_ready(self, config_dir: str) -> None:
+        """Raise :class:`ConfigDirNotReadyError` if launching or resuming under
+        ``config_dir`` would block on an interactive first-run prompt this agent
+        cannot clear headlessly; return ``None`` when the dir is ready."""
+        ...
+
+
 @runtime_checkable
 class PaneSubmitConfirming(Protocol):
     """A plugin that can read its tmux-wrapped TUI's composer to drive input

@@ -20,7 +20,11 @@ from typing import TYPE_CHECKING, Any, Protocol
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
-from waypoint.backends.base import DefaultLaunchContract, config_dir_for
+from waypoint.backends.base import (
+    ConfigDirNotReadyError,
+    DefaultLaunchContract,
+    config_dir_for,
+)
 from waypoint.backends.capabilities import (
     BackendCapabilities,
     ModelSource,
@@ -61,6 +65,7 @@ from waypoint.backends.claude_code.support import (
 from waypoint.backends.claude_code.threads import (
     UUID_RE,
     ClaudeThreadInfo,
+    claude_onboarding_complete,
     claude_projects_root,
     delete_local_claude_thread,
     find_local_claude_thread,
@@ -509,6 +514,17 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         if thread_id is None:
             return []
         return local_claude_thread_artifacts(thread_id, config_dir)
+
+    def ensure_config_dir_ready(self, config_dir: str) -> None:
+        # Setting CLAUDE_CONFIG_DIR moves .claude.json into the profile dir; if
+        # that copy hasn't completed onboarding the CLI relaunches into its
+        # first-run wizard, which a tmux/tty-driven turn can't dismiss (it hangs)
+        # — reject up front instead. See ConfigDirValidating.
+        if not claude_onboarding_complete(config_dir):
+            raise ConfigDirNotReadyError(
+                "claude onboarding is incomplete in its config dir; open a "
+                "claude session there once to finish setup"
+            )
 
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord

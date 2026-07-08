@@ -68,6 +68,33 @@ def claude_projects_root(config_dir: str | None = None) -> Path:
     return root / "projects"
 
 
+def claude_config_file(config_dir: str) -> Path:
+    """Path to the config file the CLI uses when ``CLAUDE_CONFIG_DIR`` is set.
+
+    With ``CLAUDE_CONFIG_DIR`` exported the CLI keeps ``.claude.json`` *inside*
+    that dir (``<config_dir>/.claude.json``), not at the unset-default home
+    location ``~/.claude.json``. Account profiles always export the var, so a
+    profile's onboarding/config state lives here.
+    """
+    return Path(config_dir).expanduser() / ".claude.json"
+
+
+def claude_onboarding_complete(config_dir: str) -> bool:
+    """Whether ``<config_dir>/.claude.json`` marks first-run onboarding as done.
+
+    ``hasCompletedOnboarding`` is the flag the CLI sets once its first-run wizard
+    (theme picker, login method) is dismissed. A profile dir lacking it — missing
+    file, unreadable, or flag falsy — relaunches into that wizard, which a
+    tmux/tty-driven turn cannot dismiss and so hangs. Returns ``False`` on any
+    read/parse failure.
+    """
+    try:
+        data = json.loads(claude_config_file(config_dir).read_text())
+    except (OSError, ValueError):
+        return False
+    return bool(isinstance(data, dict) and data.get("hasCompletedOnboarding"))
+
+
 def encode_project_dir(cwd: str) -> str:
     """Encode a cwd to the project-dir name Claude stores transcripts under.
 

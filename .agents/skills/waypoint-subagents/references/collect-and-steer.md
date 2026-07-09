@@ -6,16 +6,18 @@ decide whether it is done or needs another turn.
 ## Read output
 
 ```bash
-waypoint sessions output <session-id> --messages 40
+waypoint sessions output <session-id> --messages 40 --compact
 waypoint sessions output <session-id> --messages 40 --text
-waypoint sessions events <session-id> --messages 40 --coalesce       # structured JSON
-waypoint sessions events <session-id> --before-sequence <sequence>   # page back JSON
+waypoint sessions events <session-id> --messages 40 --compact        # routine structured JSON
+waypoint sessions events <session-id> --before-sequence <sequence> --compact
+waypoint sessions events <session-id> --messages 40 --coalesce       # full metadata JSON
 ```
 
 Use `sessions output` for the child's normal answer, and add `--text` when you
-only need assistant text. Use `events --coalesce` for structured JSON reads,
-including tool context and pending approvals/questions. Use raw `events` only
-for exact stream debugging or transport/TUI artifacts such as
+only need assistant text. Use `events --compact` for routine structured JSON
+reads, including tool context and pending approvals/questions. Use
+`events --coalesce` when you need full event metadata. Use raw `events` only for
+exact stream debugging or transport/TUI artifacts such as
 `raw_terminal_chunk`.
 
 Quote only the minimum transcript text needed to justify your conclusion;

@@ -9,10 +9,10 @@ waypoint sessions approve <session-id> <decision> --text <message>
 ```
 
 Read the pending request from
-`waypoint sessions events <session-id> --messages 20 --coalesce` before
+`waypoint sessions events <session-id> --messages 20 --compact` before
 approving. If multiple approvals are pending, pass `--approval-id` when the
-transcript exposes one. Use raw `events` only if you need exact event ordering,
-duplicate diagnosis, or per-chunk metadata.
+transcript exposes one. Use `events --coalesce` or raw `events` only if you need
+full metadata, exact event ordering, duplicate diagnosis, or per-chunk metadata.
 
 Do not approve destructive, privileged, or unclear requests without user
 confirmation.

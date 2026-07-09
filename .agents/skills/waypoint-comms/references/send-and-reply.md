@@ -41,15 +41,17 @@ Poll the target to a settled status, then read its conversational output:
 
 ```bash
 waypoint sessions show <target-id>     # poll until idle / waiting_input / exited
+waypoint sessions output <target-id> --messages 20 --compact
 waypoint sessions output <target-id> --messages 20 --text
 ```
 
-Use `sessions output` for normal replies. If the reply seems missing, or the
-target is blocked on an approval/question, inspect
-`waypoint sessions events <target-id> --messages 20 --coalesce`. Use raw
-`events` only for exact stream debugging or transport/TUI artifacts such as
-`raw_terminal_chunk`. This path does not disturb your own turn: you choose when
-to look.
+Use `sessions output --compact` for normal structured replies, or `--text` when
+you only need assistant text. If the reply seems missing, or the target is
+blocked on an approval/question, inspect
+`waypoint sessions events <target-id> --messages 20 --compact`. Use
+`events --coalesce` or raw `events` only for full metadata, exact stream
+debugging, or transport/TUI artifacts such as `raw_terminal_chunk`. This path
+does not disturb your own turn: you choose when to look.
 
 ## Push: the answer arrives in your input (you set `reply-to`)
 

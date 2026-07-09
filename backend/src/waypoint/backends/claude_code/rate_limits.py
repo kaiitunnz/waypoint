@@ -144,9 +144,12 @@ async def probe_claude_usage(
 async def probe_claude_usage_remote(
     launch_target: SshLaunchTargetConfig,
     *,
+    launch_env: dict[str, str] | None = None,
     timeout_seconds: float = 30.0,
 ) -> SessionRateLimitUsage | None:
-    payload = await _run_remote_probe_script(launch_target, timeout_seconds)
+    payload = await _run_remote_probe_script(
+        launch_target, timeout_seconds, launch_env=launch_env
+    )
     if payload is None:
         return None
     error = payload.get("error")
@@ -293,8 +296,11 @@ def _local_probe_cache_key(env: dict[str, str]) -> str:
     return f"local:{env.get('CLAUDE_CONFIG_DIR') or '~'}"
 
 
-def _remote_probe_cache_key(launch_target: SshLaunchTargetConfig) -> str:
-    return f"remote:{launch_target.id}"
+def _remote_probe_cache_key(
+    launch_target: SshLaunchTargetConfig, launch_env: dict[str, str] | None = None
+) -> str:
+    config_dir = (launch_env or {}).get("CLAUDE_CONFIG_DIR") or "~"
+    return f"remote:{launch_target.id}:{config_dir}"
 
 
 async def probe_claude_usage_shared(
@@ -320,15 +326,17 @@ async def probe_claude_usage_shared(
 async def probe_claude_usage_remote_shared(
     launch_target: SshLaunchTargetConfig,
     *,
+    launch_env: dict[str, str] | None = None,
     timeout_seconds: float = 30.0,
     force: bool = False,
 ) -> SessionRateLimitUsage | None:
     """Account-shared variant of :func:`probe_claude_usage_remote`, keyed by
-    launch-target id."""
+    launch-target id and the profile's ``CLAUDE_CONFIG_DIR`` so two profiles
+    on one target don't alias to the same cached snapshot."""
     return await _SHARED_PROBE_CACHE.get_or_probe(
-        _remote_probe_cache_key(launch_target),
+        _remote_probe_cache_key(launch_target, launch_env),
         lambda: probe_claude_usage_remote(
-            launch_target, timeout_seconds=timeout_seconds
+            launch_target, launch_env=launch_env, timeout_seconds=timeout_seconds
         ),
         force=force,
     )
@@ -339,8 +347,10 @@ def invalidate_shared_probe_local(env: dict[str, str] | None = None) -> None:
     _SHARED_PROBE_CACHE.invalidate(_local_probe_cache_key(resolved_env))
 
 
-def invalidate_shared_probe_remote(launch_target: SshLaunchTargetConfig) -> None:
-    _SHARED_PROBE_CACHE.invalidate(_remote_probe_cache_key(launch_target))
+def invalidate_shared_probe_remote(
+    launch_target: SshLaunchTargetConfig, launch_env: dict[str, str] | None = None
+) -> None:
+    _SHARED_PROBE_CACHE.invalidate(_remote_probe_cache_key(launch_target, launch_env))
 
 
 def _string_list(value: Any) -> list[str]:
@@ -364,9 +374,12 @@ def _remote_probe_script_bytes() -> bytes:
 
 
 async def _run_remote_probe_script(
-    launch_target: SshLaunchTargetConfig, timeout_seconds: float
+    launch_target: SshLaunchTargetConfig,
+    timeout_seconds: float,
+    *,
+    launch_env: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
-    argv = launch_target.build_remote_exec_args(["python3", "-"])
+    argv = launch_target.build_remote_exec_args(["python3", "-"], extra_env=launch_env)
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,

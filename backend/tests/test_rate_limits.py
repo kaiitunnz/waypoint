@@ -611,7 +611,7 @@ def test_probe_claude_usage_remote_parses_messages_headers(
         "expires_at": None,
     }
 
-    async def _fake_runner(launch_target, timeout_seconds):
+    async def _fake_runner(launch_target, timeout_seconds, launch_env=None):
         assert launch_target.ssh_destination == "user@rover.lan"
         return payload
 
@@ -648,7 +648,7 @@ def test_probe_claude_usage_remote_parses_oauth_usage_payload(
         "expires_at": None,
     }
 
-    async def _fake_runner(launch_target, timeout_seconds):
+    async def _fake_runner(launch_target, timeout_seconds, launch_env=None):
         return payload
 
     monkeypatch.setattr(
@@ -668,7 +668,7 @@ def test_probe_claude_usage_remote_ignores_windowless_usage_payload(
     # The remote script only emits the usage variant when it carries a window,
     # but if a window-less usage payload ever arrives the backend returns None
     # cleanly rather than misrouting into the malformed-payload branch.
-    async def _fake_runner(launch_target, timeout_seconds):
+    async def _fake_runner(launch_target, timeout_seconds, launch_env=None):
         return {"usage": {}, "oauth_account_notes": ["org: lumid"], "expires_at": None}
 
     monkeypatch.setattr(
@@ -682,7 +682,7 @@ def test_probe_claude_usage_remote_ignores_windowless_usage_payload(
 def test_probe_claude_usage_remote_handles_expired_sentinel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _fake_runner(launch_target, timeout_seconds):
+    async def _fake_runner(launch_target, timeout_seconds, launch_env=None):
         return {
             "error": "expired",
             "expires_at": 1700000000.0,
@@ -707,7 +707,7 @@ def test_probe_claude_usage_remote_handles_expired_sentinel(
 def test_probe_claude_usage_remote_handles_no_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _fake_runner(launch_target, timeout_seconds):
+    async def _fake_runner(launch_target, timeout_seconds, launch_env=None):
         return {"error": "no_credentials"}
 
     monkeypatch.setattr(
@@ -721,7 +721,7 @@ def test_probe_claude_usage_remote_handles_no_credentials(
 def test_probe_claude_usage_remote_surfaces_401_as_expired(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _fake_runner(launch_target, timeout_seconds):
+    async def _fake_runner(launch_target, timeout_seconds, launch_env=None):
         return {
             "status": 401,
             "headers": {},
@@ -743,7 +743,7 @@ def test_probe_claude_usage_remote_surfaces_401_as_expired(
 def test_probe_codex_usage_remote_parses_oauth_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _fake_runner(launch_target, binary, timeout_seconds):
+    async def _fake_runner(launch_target, binary, timeout_seconds, launch_env=None):
         return {
             "payload": {
                 "plan_type": "pro",
@@ -780,7 +780,7 @@ def test_probe_codex_usage_remote_falls_back_to_status_text(
         "Weekly limit: 80% left, resets at 2026-05-11 00:00 UTC\n"
     )
 
-    async def _fake_runner(launch_target, binary, timeout_seconds):
+    async def _fake_runner(launch_target, binary, timeout_seconds, launch_env=None):
         return {"status_text": status_text}
 
     monkeypatch.setattr(
@@ -797,7 +797,7 @@ def test_probe_codex_usage_remote_falls_back_to_status_text(
 def test_probe_codex_usage_remote_returns_none_for_no_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _fake_runner(launch_target, binary, timeout_seconds):
+    async def _fake_runner(launch_target, binary, timeout_seconds, launch_env=None):
         return {"error": "no_data"}
 
     monkeypatch.setattr(
@@ -836,7 +836,7 @@ def test_probe_codex_usage_remote_falls_back_when_oauth_payload_is_empty(
 ) -> None:
     status_text = "5h limit: 12% used (resets in 1h)\nWeekly limit: 80% left\n"
 
-    async def _fake_runner(launch_target, binary, timeout_seconds):
+    async def _fake_runner(launch_target, binary, timeout_seconds, launch_env=None):
         return {
             "payload": {
                 "rate_limit": None,
@@ -864,8 +864,20 @@ def test_probe_cache_keys_distinguish_local_and_remote() -> None:
 
     assert local_default != local_scoped
     assert local_scoped == "local:/tmp/acct-a"
-    assert remote == "remote:rover"
+    assert remote == "remote:rover:~"
     assert remote != local_default and remote != local_scoped
+
+
+def test_remote_probe_cache_key_distinguishes_config_dirs_on_one_target() -> None:
+    target = _ssh_target()
+    default_key = _remote_probe_cache_key(target)
+    scoped_key = _remote_probe_cache_key(target, {"CLAUDE_CONFIG_DIR": "/team/alice"})
+    other_scoped_key = _remote_probe_cache_key(
+        target, {"CLAUDE_CONFIG_DIR": "/team/bob"}
+    )
+
+    assert default_key != scoped_key != other_scoped_key
+    assert scoped_key == "remote:rover:/team/alice"
 
 
 def _usage_snapshot(used: float) -> SessionRateLimitUsage:

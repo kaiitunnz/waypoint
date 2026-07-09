@@ -54,6 +54,9 @@ class _StubPlugin:
     ) -> list[Any]:
         return []
 
+    def native_thread_artifact_glob(self, session: Any) -> str | None:
+        return None
+
     def on_session_deleted(self, runtime: Any, session: Any) -> None:
         return None
 

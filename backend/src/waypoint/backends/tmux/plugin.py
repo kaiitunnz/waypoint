@@ -194,6 +194,13 @@ class TmuxPlugin:
         # dispatched via ``session.backend``. Nothing to contribute here.
         return []
 
+    def native_thread_artifact_glob(self, session: SessionRecord) -> str | None:
+        # Generic wrapper for any agent; it doesn't hold a reference to the
+        # wrapped agent's plugin, so it has no pattern to contribute. Moot in
+        # practice: this plugin's capabilities carry no config_dir_env_var, so
+        # account-profile switching (the only caller) never reaches this.
+        return None
+
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

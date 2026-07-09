@@ -677,6 +677,10 @@ class OpenCodePlugin(DefaultLaunchContract):
         # No config-dir env var / account-profile support in phase 1.
         return []
 
+    def native_thread_artifact_glob(self, session: SessionRecord) -> str | None:
+        # No config-dir env var / account-profile support in phase 1.
+        return None
+
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

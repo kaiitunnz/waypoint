@@ -528,6 +528,20 @@ class BackendPlugin(Protocol):
         """
         ...
 
+    def native_thread_artifact_glob(self, session: SessionRecord) -> str | None:
+        """Glob pattern, relative to a config dir, matching this session's
+        native thread artifact file(s) on disk (e.g.
+        ``projects/*/<uuid>.jsonl``).
+
+        Reuses the same needle :meth:`AgentLaunchContract.conversation_exists`
+        checks, so local and remote transcript-availability discovery
+        (:mod:`waypoint.backends.transcript_fs`) share one declared pattern
+        instead of re-deriving backend-specific path knowledge per IO backend.
+        ``None`` when the backend has no resumable native store, or the
+        session has no native thread id yet to search for.
+        """
+        ...
+
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:

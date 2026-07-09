@@ -40,6 +40,11 @@ from waypoint.backends.tmux.normalize import (
     NormalizedChunk,
     TerminalNormalizer,
 )
+from waypoint.backends.transcript_fs import (
+    LocalTranscriptFilesystem,
+    TranscriptFilesystem,
+)
+from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
 from waypoint.backends.transcripts import (
     TranscriptUnavailableError,
     ensure_thread_available,
@@ -276,6 +281,10 @@ class SessionRuntime:
         # switch is a terminate→restore sequence that must not interleave with
         # another switch/reattach/terminate on the same session).
         self._session_locks: dict[str, asyncio.Lock] = {}
+        # Resolved remote ``$HOME`` (or ``~user``) per (target id, tilde prefix),
+        # so ``_apply_account_profile_env`` can expand a ``~``-relative remote
+        # config_dir without an SSH round-trip on its own (synchronous) path.
+        self._remote_home_cache: dict[tuple[str, str], str] = {}
         self._completion_cache: dict[CompletionCacheKey, list[CommandCompletion]] = {}
         self._completion_cache_updated_at: dict[CompletionCacheKey, float] = {}
         self._completion_refresh_tasks: dict[
@@ -495,25 +504,107 @@ class SessionRuntime:
             )
         config_dir = profile.config_dir
         # Expand ``~`` for local launches (the config dir is a path on this
-        # host). Remote-home expansion isn't supported yet, and env values are
-        # injected shell-quoted so a remote shell won't expand ``~`` either —
-        # rather than silently launch under a literal ``~`` dir (wrong account),
-        # reject a ``~``-relative remote config_dir until that lands. Absolute
-        # remote paths are fine.
+        # host) via the stdlib. Env values are injected shell-quoted so a
+        # remote shell won't expand ``~`` itself — a remote ``~``-relative
+        # config_dir is expanded here from the cached remote home instead
+        # (warmed ahead of this call by an async call site; this method stays
+        # synchronous and only reads the cache).
         if launch_target is None:
             config_dir = os.path.expanduser(config_dir)
         elif config_dir.startswith("~"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"account profile {account_profile_id!r} uses a '~'-relative "
-                    "config_dir on a remote launch target; use an absolute path "
-                    "(remote home expansion is not yet supported)"
-                ),
-            )
+            resolved = self._expand_remote_config_dir(launch_target, config_dir)
+            if resolved is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "could not resolve remote home for expansion; use an "
+                        "absolute config_dir or ensure the target is reachable"
+                    ),
+                )
+            config_dir = resolved
         env = dict(launch_env)
         env[config_dir_key] = config_dir
         return env, profile.label
+
+    @staticmethod
+    def _split_tilde_config_dir(config_dir: str) -> tuple[str, str]:
+        """Split a ``~``-relative path into its tilde prefix and remainder.
+
+        ``"~/.codex-work"`` -> ``("~", "/.codex-work")``; ``"~alice/x"`` ->
+        ``("~alice", "/x")``; bare ``"~"`` -> ``("~", "")``. Mirrors how
+        ``os.path.expanduser`` scopes the expansion to the first path segment.
+        """
+        head, sep, tail = config_dir.partition("/")
+        return head, (sep + tail if sep else "")
+
+    def _expand_remote_config_dir(
+        self, launch_target: SshLaunchTargetConfig, config_dir: str
+    ) -> str | None:
+        """Expand a ``~``-relative remote ``config_dir`` from the warm cache.
+
+        Returns ``None`` on a cache miss (target unreachable, or
+        :meth:`_ensure_remote_home_cached` never called for this tilde prefix)
+        rather than raising, so both the raising overlay
+        (``_apply_account_profile_env``) and the non-raising doctor check can
+        share the same resolution. A non-``~`` ``config_dir`` is returned
+        unchanged.
+        """
+        if not config_dir.startswith("~"):
+            return config_dir
+        tilde_prefix, remainder = self._split_tilde_config_dir(config_dir)
+        resolved_home = self._remote_home_cache.get((launch_target.id, tilde_prefix))
+        if not resolved_home:
+            return None
+        return resolved_home.rstrip("/") + remainder
+
+    async def _ensure_remote_home_cached(
+        self, launch_target: SshLaunchTargetConfig, tilde_prefix: str = "~"
+    ) -> None:
+        """Resolve and cache ``launch_target``'s remote home for ``tilde_prefix``.
+
+        Auth-agnostic: uses ``launch_target.ssh_capture`` (a plain SSH round
+        trip that transparently reuses the ControlMaster socket for
+        password-auth targets) rather than ``_require_live_master`` /
+        ``connect_launch_target``, both of which are password-only and would
+        never warm a key-auth target (the ``ssh_auth`` default). Bare ``~``
+        resolves via ``$HOME``; a ``~user`` prefix resolves via shell tilde
+        expansion for that user. No-op on cache hit; leaves the cache cold
+        (for the synchronous 400 in ``_apply_account_profile_env``) when the
+        target is unreachable or reports no home.
+        """
+        cache_key = (launch_target.id, tilde_prefix)
+        if cache_key in self._remote_home_cache:
+            return
+        remote_cmd = "echo $HOME" if tilde_prefix == "~" else f"echo {tilde_prefix}"
+        resolved = (await launch_target.ssh_capture(remote_cmd)).strip()
+        if resolved:
+            self._remote_home_cache[cache_key] = resolved
+
+    async def _warm_remote_home_for_profile(
+        self,
+        launch_target: SshLaunchTargetConfig | None,
+        backend: str,
+        profile_id: str | None,
+    ) -> None:
+        """Warm the remote-home cache for a profile's tilde prefix before the
+        synchronous ``_apply_account_profile_env`` read on the same code path.
+
+        No-op locally. Every path that applies a profile env for a remote
+        target (switch, create, import, probe) must call this first, or a
+        ``~``-relative remote ``config_dir`` hits a cold cache and 400s. Bare
+        ``~`` covers a non-``~`` / unknown / unresolvable profile, since the
+        cache read is a no-op for an absolute ``config_dir``.
+        """
+        if launch_target is None:
+            return
+        tilde_prefix = "~"
+        if profile_id is not None:
+            candidate = resolve_account_profiles(
+                self.settings, backend, launch_target
+            ).get(profile_id)
+            if candidate is not None and candidate.config_dir.startswith("~"):
+                tilde_prefix, _ = self._split_tilde_config_dir(candidate.config_dir)
+        await self._ensure_remote_home_cached(launch_target, tilde_prefix)
 
     def _ensure_profile_config_dir_ready(
         self,
@@ -623,6 +714,7 @@ class SessionRuntime:
         launch_target = self._resolve_launch_target(launch_target_id, backend)
         if launch_target is not None:
             await self._require_live_master(launch_target)
+        await self._warm_remote_home_for_profile(launch_target, backend, profile_id)
         env = self._profile_launch_env(backend, profile_id, launch_target)
         result = await probe_account(
             self, backend, env, launch_target=launch_target, cwd=cwd
@@ -668,6 +760,12 @@ class SessionRuntime:
                 local=local,
                 show_paths=show_paths,
             )
+            if launch_target is not None:
+                checks.append(
+                    await self._remote_config_dir_check(
+                        launch_target, profile, probe_blocked, show_paths=show_paths
+                    )
+                )
             checks.append(
                 await self._account_matches_check(
                     backend,
@@ -688,6 +786,55 @@ class SessionRuntime:
                 )
             )
         return reports
+
+    async def _remote_config_dir_check(
+        self,
+        launch_target: SshLaunchTargetConfig,
+        profile: AccountProfileConfig,
+        probe_blocked: bool,
+        *,
+        show_paths: bool,
+    ) -> ProfileCheck:
+        """Best-effort remote existence check for a profile's config dir.
+
+        ``account_profile_static_checks`` skips its filesystem checks entirely
+        for a remote target (it has no launch target to reach over SSH); this
+        fills the do-not-regress gap by confirming the config dir actually
+        resolves and exists on the target, catching a typo'd/never-created
+        remote config dir before it surfaces as a launch-time 400 or (worse) a
+        silent onboarding hang. The interactive-onboarding readiness verdict
+        (``ConfigDirReadinessReporting``) reads local files and has no remote
+        implementation yet — a documented follow-up, not covered here.
+        """
+        name = "remote_config_dir_exists"
+        if probe_blocked:
+            return ProfileCheck(
+                name=name,
+                ok=True,
+                detail="skipped: launch target needs an SSH master to probe",
+            )
+        config_dir = profile.config_dir
+        if config_dir.startswith("~"):
+            tilde_prefix, _ = self._split_tilde_config_dir(config_dir)
+            await self._ensure_remote_home_cached(launch_target, tilde_prefix)
+        resolved = self._expand_remote_config_dir(launch_target, config_dir)
+        if resolved is None:
+            return ProfileCheck(
+                name=name,
+                ok=False,
+                detail=(
+                    "could not resolve remote home for '~' expansion; "
+                    "target may be unreachable"
+                ),
+            )
+        exists = RemoteTranscriptFilesystem(launch_target).exists(resolved)
+        shown = resolved if show_paths else "<hidden; pass --show-paths>"
+        return ProfileCheck(
+            name=name,
+            ok=exists,
+            detail=f"remote config dir {shown} "
+            + ("exists" if exists else "is missing"),
+        )
 
     async def _account_matches_check(
         self,
@@ -807,6 +954,9 @@ class SessionRuntime:
             request.launch_target_id, request.backend
         )
         await self._require_live_master(launch_target)
+        await self._warm_remote_home_for_profile(
+            launch_target, request.backend, request.account_profile_id
+        )
         # Local cwd is fed to subprocess.Popen / tmux new-session, neither of
         # which expand `~`. Resolve it before storing/launching. The remote
         # cwd is left verbatim so the remote shell can do its own expansion.
@@ -1264,6 +1414,9 @@ class SessionRuntime:
             else self._default_launch_env(backend, launch_target)
         )
         account_profile_id = getattr(request, "account_profile_id", None)
+        await self._warm_remote_home_for_profile(
+            launch_target, backend, account_profile_id
+        )
         launch_env, account_profile_label = self._apply_account_profile_env(
             backend, launch_env, account_profile_id, launch_target
         )
@@ -2033,6 +2186,14 @@ class SessionRuntime:
                 detail=f"{session.backend} does not support account-profile switching",
             )
 
+        if launch_target is not None:
+            # Clean 409 ``ssh-master-required`` for a dead password master
+            # before any destructive step (the frontend prompts + retries).
+            await self._require_live_master(launch_target)
+            await self._warm_remote_home_for_profile(
+                launch_target, session.backend, selected_profile_id
+            )
+
         if request.args is not None and not caps.supports_custom_cli_args:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -2138,11 +2299,17 @@ class SessionRuntime:
                 session = self.storage.update_session(
                     session.id, status=SessionStatus.INTERRUPTED
                 )
-            if launch_target is None and config_dir_key:
-                current_config_dir = old_launch_env.get(
-                    config_dir_key
-                ) or os.environ.get(config_dir_key)
-                target_config_dir = new_env.get(config_dir_key)
+            if config_dir_key:
+                # ``config_dir_for`` reads only launch_env — no ``os.environ``
+                # fallback for remote (the backend host's env is meaningless on
+                # the remote target); local keeps the existing host-env fallback
+                # for a session that never had an explicit override.
+                current_config_dir = config_dir_for(caps, old_launch_env)
+                if launch_target is None:
+                    current_config_dir = current_config_dir or os.environ.get(
+                        config_dir_key
+                    )
+                target_config_dir = config_dir_for(caps, new_env)
                 if (
                     profile.transcript_policy == "copy_thread_on_switch"
                     and not current_config_dir
@@ -2153,8 +2320,18 @@ class SessionRuntime:
                         detail="cannot determine the current config dir to copy the thread from",
                     )
                 if target_config_dir:
+                    fs: TranscriptFilesystem = (
+                        LocalTranscriptFilesystem()
+                        if launch_target is None
+                        else RemoteTranscriptFilesystem(launch_target)
+                    )
                     try:
-                        ensure_thread_available(
+                        # Off-thread: the remote fs does blocking SSH I/O
+                        # (~8-15 round-trips), which would freeze the event
+                        # loop for every other session; the local fs is fast
+                        # but wrapping uniformly keeps one code path.
+                        await asyncio.to_thread(
+                            ensure_thread_available,
                             plugin,
                             session,
                             current_config_dir=current_config_dir or target_config_dir,
@@ -2162,6 +2339,7 @@ class SessionRuntime:
                             policy=profile.transcript_policy,
                             shared_transcript_dir=profile.shared_transcript_dir,
                             native_thread_store=caps.native_thread_store,
+                            fs=fs,
                         )
                     except TranscriptUnavailableError as exc:
                         await self._broadcast_session_list()

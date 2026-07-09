@@ -1,17 +1,20 @@
 """Native transcript availability policies (Phase 3b).
 
-Exercises the per-backend artifact locator and the local require_existing /
+Exercises the per-backend artifact locator and the require_existing /
 symlink_shared / copy_thread_on_switch policies against real claude_code/codex
-plugins with temporary config dirs.
+plugins with temporary config dirs, through the TranscriptFilesystem seam
+(local by default; a recording fake proves the policy code is IO-agnostic).
 """
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from waypoint.backends.base import BackendPlugin
 from waypoint.backends.bootstrap import build_default_registry
+from waypoint.backends.transcript_fs import LocalTranscriptFilesystem
 from waypoint.backends.transcripts import (
     TranscriptUnavailableError,
     ensure_symlink_shared,
@@ -21,6 +24,28 @@ from waypoint.backends.transcripts import (
 from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
 
 TID = "11111111-1111-1111-1111-111111111111"
+
+
+class _RecordingFilesystem:
+    """Wraps ``LocalTranscriptFilesystem``, logging every call.
+
+    Proves ``transcripts.py`` policy logic dispatches through ``fs`` rather
+    than reaching for ``pathlib``/``shutil`` directly — the property a remote
+    implementation depends on.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...]]] = []
+        self._inner = LocalTranscriptFilesystem()
+
+    def __getattr__(self, name: str) -> Any:
+        target = getattr(self._inner, name)
+
+        def _recording(*args: Any, **kwargs: Any) -> Any:
+            self.calls.append((name, args))
+            return target(*args, **kwargs)
+
+        return _recording
 
 
 def _plugin(backend: str) -> BackendPlugin:
@@ -310,3 +335,134 @@ def test_setup_refuses_conflict_and_does_not_mutate(tmp_path: Path) -> None:
     assert store.is_dir() and not store.is_symlink()
     assert (store / "dup" / "f.jsonl").read_text() == "orig"
     assert not any(p.name.startswith("projects.bak-") for p in store.parent.iterdir())
+
+
+# ── native_thread_artifact_glob (discovery-pattern contract) ───────────────
+
+
+def test_native_thread_artifact_glob_claude() -> None:
+    pattern = _plugin("claude_code").native_thread_artifact_glob(
+        _session("claude_code")
+    )
+    assert pattern == f"projects/*/{TID}.jsonl"
+
+
+def test_native_thread_artifact_glob_codex() -> None:
+    pattern = _plugin("codex").native_thread_artifact_glob(_session("codex"))
+    assert pattern == f"sessions/*/*/*/rollout-*-{TID}.jsonl"
+
+
+def test_native_thread_artifact_glob_none_without_thread_id() -> None:
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="s1",
+        backend="claude_code",
+        source=SessionSource.MANAGED,
+        title="t",
+        cwd="/repo/app",
+        status=SessionStatus.IDLE,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="/r",
+        structured_log_path="/e",
+        transport_state={},
+    )
+    assert _plugin("claude_code").native_thread_artifact_glob(session) is None
+
+
+def test_native_thread_artifact_glob_opencode_always_none() -> None:
+    assert _plugin("opencode").native_thread_artifact_glob(_session("opencode")) is None
+
+
+def test_glob_artifacts_matches_native_thread_artifacts(tmp_path: Path) -> None:
+    # The pattern-driven Path.glob discovery LocalTranscriptFilesystem uses must
+    # find exactly what the per-backend native_thread_artifacts locator finds.
+    config_dir = tmp_path / "config"
+    src = _write_claude_thread(config_dir)
+    plugin = _plugin("claude_code")
+    session = _session("claude_code")
+    fs = LocalTranscriptFilesystem()
+    assert fs.glob_artifacts(session, plugin, str(config_dir)) == [str(src)]
+    assert [
+        str(p) for p in plugin.native_thread_artifacts(session, str(config_dir))
+    ] == [str(src)]
+
+
+# ── TranscriptFilesystem seam ───────────────────────────────────────────────
+
+
+def test_ensure_thread_available_dispatches_through_custom_fs(tmp_path: Path) -> None:
+    # A drop-in fs (a recorder here; a remote implementation in a later phase)
+    # must be able to drive the whole require_existing policy on its own —
+    # proof the policy code never falls back to pathlib/shutil directly.
+    target = tmp_path / "target"
+    _write_claude_thread(target)
+    fs = _RecordingFilesystem()
+    plugin = _plugin("claude_code")
+    session = _session("claude_code")
+    ensure_thread_available(
+        plugin,
+        session,
+        current_config_dir=str(tmp_path / "current"),
+        target_config_dir=str(target),
+        policy="require_existing",
+        shared_transcript_dir=None,
+        native_thread_store="projects",
+        fs=fs,
+    )
+    # Config-dir expansion also dispatches through the seam (so a remote fs
+    # expands against the remote home, not the backend host's), then discovery.
+    assert fs.calls == [
+        ("expanduser", (str(target),)),
+        ("glob_artifacts", (session, plugin, str(target))),
+    ]
+
+
+def test_copy_thread_on_switch_through_custom_fs_matches_default(
+    tmp_path: Path,
+) -> None:
+    current = tmp_path / "current"
+    target = tmp_path / "target"
+    src = _write_codex_rollout(current)
+    fs = _RecordingFilesystem()
+    ensure_thread_available(
+        _plugin("codex"),
+        _session("codex"),
+        current_config_dir=str(current),
+        target_config_dir=str(target),
+        policy="copy_thread_on_switch",
+        shared_transcript_dir=None,
+        native_thread_store="sessions",
+        fs=fs,
+    )
+    dest = target / src.relative_to(current)
+    assert dest.is_file()
+    assert oct(dest.stat().st_mode)[-3:] == "600"
+    # Every mutating op the policy performed went through the recorder, not a
+    # pathlib/shutil call the seam bypassed.
+    op_names = [name for name, _ in fs.calls]
+    assert "copy_file" in op_names
+    assert "mkdir" in op_names
+
+
+def test_symlink_shared_through_custom_fs_matches_default(tmp_path: Path) -> None:
+    shared = tmp_path / "shared"
+    (shared / "-repo-app").mkdir(parents=True)
+    (shared / "-repo-app" / f"{TID}.jsonl").write_text("{}")
+    target = tmp_path / "target"
+    fs = _RecordingFilesystem()
+    ensure_thread_available(
+        _plugin("claude_code"),
+        _session("claude_code"),
+        current_config_dir=str(tmp_path / "current"),
+        target_config_dir=str(target),
+        policy="symlink_shared",
+        shared_transcript_dir=str(shared),
+        native_thread_store="projects",
+        fs=fs,
+    )
+    assert (target / "projects").is_symlink()
+    op_names = [name for name, _ in fs.calls]
+    assert "symlink" in op_names
+    assert "is_symlink" in op_names

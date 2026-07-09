@@ -20,6 +20,7 @@ from typing import Any, cast
 import pytest
 
 from waypoint.backends.tmux.plugin import TmuxPlugin
+from waypoint.launch_targets import SshLaunchTargetConfig
 from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
 
 
@@ -54,6 +55,10 @@ class _FakeAgentPlugin:
         self.capabilities = SimpleNamespace(
             config_dir_env_var="CLAUDE_CONFIG_DIR" if pregenerates else "CODEX_HOME"
         )
+        # Records each ``conversation_exists`` call so remote-resume tests can
+        # assert the switched profile's config dir and launch target were
+        # threaded through, not silently dropped for a remote session.
+        self.conversation_exists_calls: list[dict[str, Any]] = []
 
     def launch_flags(
         self,
@@ -107,6 +112,13 @@ class _FakeAgentPlugin:
         launch_target: Any,
         config_dir: str | None = None,
     ) -> bool:
+        self.conversation_exists_calls.append(
+            {
+                "thread_id": thread_id,
+                "launch_target": launch_target,
+                "config_dir": config_dir,
+            }
+        )
         return self.exists
 
     async def capture_thread_id(
@@ -207,9 +219,13 @@ class _FakeRuntime:
         # via storage.get_session, so the storage stub returns whatever
         # is set on this map.
         self.sessions_by_id: dict[str, Any] = {}
+        # Remote-resume tests populate this so ``_find_launch_target``
+        # resolves a real launch target instead of the local (``None``)
+        # default.
+        self.launch_targets_by_id: dict[str, Any] = {}
 
-    def _find_launch_target(self, _lt_id: str | None) -> None:
-        return None
+    def _find_launch_target(self, lt_id: str | None) -> Any:
+        return self.launch_targets_by_id.get(lt_id) if lt_id else None
 
     def _default_launch_env(self, backend: str, launch_target: Any) -> dict[str, str]:
         return {}
@@ -218,7 +234,7 @@ class _FakeRuntime:
         self,
         backend: str,
         args: list[str],
-        _lt: Any,
+        launch_target: Any,
         _cwd: str,
         *,
         allocate_tty: bool = False,
@@ -229,6 +245,7 @@ class _FakeRuntime:
             {
                 "backend": backend,
                 "args": args,
+                "launch_target": launch_target,
                 "allocate_tty": allocate_tty,
                 "session_id": session_id,
                 "launch_env": launch_env,
@@ -352,6 +369,71 @@ async def test_restore_session_claude_keeps_thread_id_across_terminate_cycles(
     # Both cycles must request a remote PTY — otherwise the remote
     # claude flips to ``--print`` mode and errors on the missing stdin.
     assert [call["allocate_tty"] for call in runtime.command_calls] == [True, True]
+
+
+@pytest.mark.asyncio
+async def test_restore_session_remote_resume_uses_switched_config_dir(
+    plugin: TmuxPlugin,
+    tmp_path: Path,
+) -> None:
+    """Remote (agent, transport) resume: the switched profile's config dir
+    and the launch target must reach both the resume-existence check and the
+    rebuilt launch command — otherwise a remote reconnect reads the wrong
+    (default) config dir, never finds the thread, and relaunches into a
+    fresh conversation under the wrong account.
+
+    Mirrors the local two-cycle reconnect test above, but for a session
+    pinned to an SSH launch target with a switched ``CLAUDE_CONFIG_DIR``.
+    """
+    uuid_str = "00000000-0000-0000-0000-000000000002"
+    target = SshLaunchTargetConfig(id="d", name="d", ssh_destination="u@d")
+    agent = _FakeAgentPlugin(pregenerates=True, exists=True)
+    runtime = _FakeRuntime(inner_plugin=agent)
+    runtime.launch_targets_by_id["d"] = target
+
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="sess-remote",
+        backend="claude_code",
+        source=SessionSource.MANAGED,
+        transport="tmux",
+        title="t",
+        cwd="/Users/me/proj",
+        status=SessionStatus.EXITED,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        launch_target_id="d",
+        launch_env={"CLAUDE_CONFIG_DIR": "/home/alice/.claude-work"},
+        transport_state={
+            "tmux_session": "sess-remote-old",
+            "thread_id": uuid_str,
+            "launch_args": ["--session-id", uuid_str],
+        },
+        raw_log_path=str(tmp_path / "sess-remote.raw.log"),
+        structured_log_path=str(tmp_path / "sess-remote.events.jsonl"),
+    )
+    await plugin.restore_session(cast(Any, runtime), session)
+
+    # The existence check that decides --resume vs --session-id must be
+    # scoped to the target and the switched remote config dir.
+    exists_call = agent.conversation_exists_calls[-1]
+    assert exists_call["launch_target"] is target
+    assert exists_call["config_dir"] == "/home/alice/.claude-work"
+
+    # The rebuilt command must carry the same launch target (so it goes out
+    # over SSH) and a remote PTY (``-tt``, or the remote claude falls back to
+    # ``--print`` and errors on the missing stdin).
+    command_call = runtime.command_calls[-1]
+    assert command_call["launch_target"] is target
+    assert command_call["allocate_tty"] is True
+    assert command_call["launch_env"] == {
+        "CLAUDE_CONFIG_DIR": "/home/alice/.claude-work"
+    }
+
+    state = runtime.updates[-1]["transport_state"]
+    assert state["launch_args"] == ["--resume", uuid_str]
+    assert state["thread_id"] == uuid_str
 
 
 @pytest.mark.asyncio

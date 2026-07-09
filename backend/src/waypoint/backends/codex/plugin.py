@@ -282,7 +282,13 @@ class CodexPlugin(DefaultLaunchContract):
         binary = self.remote_executable(launch_target) or "codex"
 
         async def _probe() -> SessionRateLimitUsage | None:
-            return await probe_codex_usage_remote(launch_target, binary=binary)
+            # Same reasoning as the local probe above: look up the session's
+            # launch_env per probe so it reads the profile's CODEX_HOME.
+            session = runtime.storage.get_session(session_id)
+            launch_env = session.launch_env if session is not None else None
+            return await probe_codex_usage_remote(
+                launch_target, binary=binary, launch_env=launch_env
+            )
 
         await self.adapter.register_rate_limit_probe(
             session_id, _probe, refresh_interval_seconds=300.0
@@ -349,7 +355,9 @@ class CodexPlugin(DefaultLaunchContract):
             )
             return await probe_codex_status(cwd=cwd, binary=binary, env=env)
         binary = self.remote_executable(launch_target) or "codex"
-        return await probe_codex_usage_remote(launch_target, binary=binary)
+        return await probe_codex_usage_remote(
+            launch_target, binary=binary, launch_env=launch_env
+        )
 
     def rate_limit_account(
         self, snapshot: SessionRateLimitUsage
@@ -524,6 +532,13 @@ class CodexPlugin(DefaultLaunchContract):
             return []
         rollout = find_codex_rollout(thread_id, config_dir)
         return [rollout] if rollout is not None else []
+
+    def native_thread_artifact_glob(self, session: SessionRecord) -> str | None:
+        # Same needle as conversation_exists: <config_dir>/sessions/*/*/*/rollout-*-<uuid>.jsonl.
+        thread_id = self.native_thread_id(session)
+        if thread_id is None or not _UUID_RE.match(thread_id):
+            return None
+        return f"sessions/*/*/*/rollout-*-{thread_id}.jsonl"
 
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord

@@ -55,6 +55,10 @@ def _open_enum(enum_cls: type[Enum]) -> None:
             member._value_ = value
             cls._value2member_map_[value] = member
             cls._member_map_.setdefault(member._name_, member)
+            # Keep iteration (`list(cls)`) consistent with lookup so a
+            # fabricated member is a first-class value, not just resolvable.
+            if member._name_ not in cls._member_names_:
+                cls._member_names_.append(member._name_)
             return member
 
     enum_cls._missing_ = classmethod(_missing_)  # type: ignore[assignment]

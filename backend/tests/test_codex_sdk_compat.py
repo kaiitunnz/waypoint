@@ -29,6 +29,21 @@ def _load(name: str) -> dict:
     return json.loads((_FIXTURES / f"{name}.json").read_text())
 
 
+@pytest.fixture(autouse=True)
+def _restore_reasoning_effort() -> Any:
+    """Undo enum members fabricated by a test so the process-global enum
+    doesn't leak throwaway values into later tests."""
+    value_map = dict(ReasoningEffort._value2member_map_)
+    member_map = dict(ReasoningEffort._member_map_)
+    names = list(ReasoningEffort._member_names_)
+    yield
+    ReasoningEffort._value2member_map_.clear()
+    ReasoningEffort._value2member_map_.update(value_map)
+    ReasoningEffort._member_map_.clear()
+    ReasoningEffort._member_map_.update(member_map)
+    ReasoningEffort._member_names_[:] = names
+
+
 def test_model_list_with_unknown_efforts_validates_and_preserves_values() -> None:
     response = ModelListResponse.model_validate(_load("codex_model_list_0144"))
     efforts = {
@@ -50,6 +65,8 @@ def test_unknown_effort_resolves_to_string_preserving_member() -> None:
     assert ReasoningEffort("ultra").value == "ultra"
     # A value not seen before is tolerated too (future CLI additions).
     assert ReasoningEffort("hyper").value == "hyper"
+    # Fabricated members are first-class: iteration surfaces them.
+    assert ReasoningEffort("hyper") in list(ReasoningEffort)
 
 
 def test_shim_is_idempotent_and_identity_stable() -> None:

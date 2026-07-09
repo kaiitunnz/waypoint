@@ -8663,10 +8663,43 @@ html[data-theme="light"] .term-compose-send {
   min-width: 0;
 }
 
-.launch-body-grid {
+/* The launch form as a flat instrument panel: captioned field groups stacked
+   with a touch more air between sections than within, so context/subject/tuning
+   read as distinct without boxing them into nested cards. */
+.launch-sections {
   display: grid;
-  gap: 12px;
+  gap: 18px;
   min-width: 0;
+}
+
+.launch-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Same mono micro-label register as the preset bar's caption, one step up in
+   the hierarchy — the labels read as one series across the whole form. */
+.launch-section-caption {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+
+/* Compact target hint under the session-context row (remote launch targets). */
+.launch-section-hint {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  color: var(--muted-soft);
+}
+
+.launch-section-hint strong {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .field-grid-row {

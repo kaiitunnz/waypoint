@@ -84,48 +84,6 @@ export function TransportPicker({
   );
 }
 
-interface AgentTransportPickerProps {
-  agents: Backend[];
-  agent: Backend;
-  onAgentChange: (backend: Backend) => void;
-  transport: SessionTransport;
-  onTransportChange: (transport: SessionTransport) => void;
-  catalog: BackendCatalog;
-}
-
-// The shared agent-primary launch control: an agent dropdown followed by the
-// transport dropdown for the chosen agent. New, Resume, and Schedule all render
-// this so the launch vocabulary stays identical across panels.
-export function AgentTransportPicker({
-  agents,
-  agent,
-  onAgentChange,
-  transport,
-  onTransportChange,
-  catalog,
-}: AgentTransportPickerProps) {
-  const transports = useMemo(
-    () => agentTransports(agent, catalog),
-    [agent, catalog],
-  );
-  return (
-    <>
-      <AgentPicker
-        agents={agents}
-        value={agent}
-        onChange={onAgentChange}
-        catalog={catalog}
-      />
-      <TransportPicker
-        transports={transports}
-        value={transport}
-        onChange={onTransportChange}
-        catalog={catalog}
-      />
-    </>
-  );
-}
-
 // Transport state that tracks the selected agent: it defaults to the agent's
 // preferred transport and re-clamps whenever the agent changes so a transport
 // carried over from another agent never sticks. Returns the live transport set

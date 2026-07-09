@@ -10,10 +10,7 @@ import {
   useState,
 } from "react";
 
-import {
-  AgentTransportPicker,
-  useTransportForAgent,
-} from "@/components/AgentTransportPicker";
+import { useTransportForAgent } from "@/components/AgentTransportPicker";
 import { EffortPicker } from "@/components/EffortPicker";
 import {
   formatLaunchEnv,
@@ -21,6 +18,7 @@ import {
   parseLaunchEnv,
 } from "@/components/LaunchOptions";
 import { ModelPicker } from "@/components/ModelPicker";
+import { SessionContextFields } from "@/components/SessionContextFields";
 import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
 import type { BackendCatalog } from "@/lib/backends";
 import { permissionModesFor } from "@/lib/backends";
@@ -241,7 +239,7 @@ export function useLaunchForm({
 
   // Drop a selected profile the current backend/target doesn't offer (e.g. a
   // preset carrying a profile valid elsewhere) so the launch never submits an
-  // id the server would reject; falls back to the "Default" option.
+  // id the server would reject; falls back to the service-default option.
   useEffect(() => {
     if (
       accountProfileId &&
@@ -323,9 +321,12 @@ interface LaunchFormFieldsProps {
   onClearCwdError?: () => void;
 }
 
-// The shared input block for New and Schedule: agent/transport picker, the
-// working directory + title rows, the permission/model/effort row, and the
-// collapsible Advanced section.
+// The shared input block for New and Schedule, ordered by the settings
+// hierarchy: session context (agent/account profile/interface) selects the
+// agent namespace and config root, then session subject (cwd/title), then
+// runtime tuning (permission/model/effort) constrained by that context, then
+// the collapsible Advanced section. Mono section captions group the fields as
+// a flat instrument panel — not nested cards.
 export function LaunchFormFields({
   form,
   host,
@@ -341,16 +342,26 @@ export function LaunchFormFields({
   onClearCwdError,
 }: LaunchFormFieldsProps) {
   return (
-    <>
-      <AgentTransportPicker
-        agents={supportedBackends}
-        agent={form.backend}
-        onAgentChange={form.changeBackend}
-        transport={form.transport}
-        onTransportChange={form.setTransport}
-        catalog={catalog}
-      />
-      <div className="launch-body-grid">
+    <div className="launch-sections">
+      <section className="launch-section">
+        <span className="launch-section-caption">Session context</span>
+        <SessionContextFields
+          agents={supportedBackends}
+          agent={form.backend}
+          onAgentChange={form.changeBackend}
+          transport={form.transport}
+          onTransportChange={form.setTransport}
+          accountProfiles={form.accountProfiles}
+          accountProfileId={form.accountProfileId}
+          onAccountProfileChange={form.setAccountProfileId}
+          targetLabel={targetLabel}
+          catalog={catalog}
+          disabled={busy}
+        />
+      </section>
+
+      <section className="launch-section">
+        <span className="launch-section-caption">Session</span>
         <WorkingDirectoryField
           cwd={form.cwd}
           onChange={form.setCwd}
@@ -367,6 +378,10 @@ export function LaunchFormFields({
             placeholder="Optional"
           />
         </label>
+      </section>
+
+      <section className="launch-section">
+        <span className="launch-section-caption">Tuning</span>
         <div className="field-grid-row">
           {form.permissionOptions.length > 0 ? (
             <label className="field">
@@ -378,22 +393,6 @@ export function LaunchFormFields({
                 {form.permissionOptions.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {form.accountProfiles.length > 0 ? (
-            <label className="field">
-              <span>Account</span>
-              <select
-                value={form.accountProfileId}
-                onChange={(event) => form.setAccountProfileId(event.target.value)}
-              >
-                <option value="">Default</option>
-                {form.accountProfiles.map((profile) => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.label}
                   </option>
                 ))}
               </select>
@@ -421,7 +420,8 @@ export function LaunchFormFields({
             />
           ) : null}
         </div>
-      </div>
+      </section>
+
       <LaunchOptionsDetails
         mode="new"
         supportsCustomArgs={form.supportsCustomArgs}
@@ -434,6 +434,6 @@ export function LaunchFormFields({
         onLaunchEnvChange={form.setLaunchEnvText}
         formBusy={busy}
       />
-    </>
+    </div>
   );
 }

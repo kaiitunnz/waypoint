@@ -1,3 +1,6 @@
+from waypoint.backends.codex import (  # noqa: F401  (installs SDK enum tolerance on import)
+    _sdk_compat,
+)
 from waypoint.backends.codex.permission_modes import (
     CODEX_PERMISSION_MODE_SPECS,
     CODEX_PERMISSION_PRESETS,

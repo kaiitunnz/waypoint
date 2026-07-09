@@ -42,4 +42,4 @@ waypoint sessions terminate <session-id>
 ```
 
 After sending input or control signals, re-check state with `waypoint sessions
-show <session-id>` or `waypoint sessions events <session-id> --messages N`.
+show <session-id>` or `waypoint sessions events <session-id> --messages N --compact`.

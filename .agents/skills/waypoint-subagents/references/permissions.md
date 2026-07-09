@@ -89,23 +89,27 @@ for those, reap and respawn remains the only path.
 ## Service a child's approvals
 
 When a child sits in `waiting_input`, it may be blocked on an approval. Read it
-from the child's coalesced events, then decide:
+from the child's compact events, then decide:
 
 ```bash
-waypoint sessions events <child-id> --messages 20 --coalesce   # find the approval_request
+waypoint sessions events <child-id> --messages 20 --compact    # find the approval_request
 waypoint sessions approve <child-id> <decision> [--approval-id <id>]
 ```
 
-Use raw `events` only if you need exact event ordering, duplicate diagnosis, or
-per-chunk metadata.
+Use `events --coalesce` or raw `events` only if you need full metadata, exact
+event ordering, duplicate diagnosis, or per-chunk metadata.
 
-The `approval_request` event metadata tells you the kind:
+The compact `approval_request` event gives you the summary text, `tool`,
+`approval_id`, and status. If the summary is not enough to decide, rerun with
+`--coalesce` to inspect the full metadata before approving:
 
-- **Tool-use approval** (`method: can_use_tool`) — carries `tool_name`,
-  `tool_input`, and `approval_id`. Decide per the tool and its inputs.
+- **Tool-use approval** — compact output carries `tool` and `approval_id`;
+  coalesced metadata also carries `method: can_use_tool`, `tool_input`, and any
+  permission suggestions. Decide per the tool and its inputs.
 - **Plan approval** (backends with `supports_plan_approval`, e.g. codex) —
-  carries a plan to accept or reject; decisions include `acceptForSession` to
-  stop re-prompting for the rest of the session.
+  compact text summarizes the plan approval; coalesced metadata carries the
+  full backend details when needed. Decisions include `acceptForSession` to stop
+  re-prompting for the rest of the session.
 
 Valid `<decision>` values are backend-specific — take them from
 `approval_decisions` in `waypoint backends` (e.g. `approve`/`decline`, plus
@@ -118,15 +122,16 @@ Do not approve destructive, privileged, or unclear requests on a child's behalf
 ## Service a child's questions
 
 A child can also block on a **question** (an `AskUserQuestion` prompt), which is
-distinct from an approval and is serviced through a different command. It
-surfaces in the child's events as a `tool_call` whose metadata has
-`tool_name: AskUserQuestion` (carrying the question text and options under
-`payload.input.questions`); on some backends the child also reports
-`waiting_input`. There is no `approval_request` for it, so `sessions approve`
-will not release it.
+distinct from an approval and is serviced through a different command. In
+compact events it surfaces as a `tool_call` with `tool: AskUserQuestion`,
+readable question/options in `text`, and an `item_id` you can pass as
+`--tool-use-id` when needed. If you need the original structured question shape,
+rerun with `--coalesce` and inspect `payload.input.questions`. On some backends
+the child also reports `waiting_input`. There is no `approval_request` for it,
+so `sessions approve` will not release it.
 
 ```bash
-waypoint sessions events <child-id> --messages 20 --coalesce   # find the AskUserQuestion tool_call
+waypoint sessions events <child-id> --messages 20 --compact    # find the AskUserQuestion tool_call
 waypoint sessions answer-question <child-id> --answer "<your answer>"
 ```
 

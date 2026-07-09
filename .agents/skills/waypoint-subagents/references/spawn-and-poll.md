@@ -109,13 +109,14 @@ It maps the outcome to a process exit code so it composes in `&&` chains:
 
 ```bash
 waypoint sessions wait "$sid" --until exited,error --timeout 600 \
-  && waypoint sessions output "$sid" --messages 40
+  && waypoint sessions output "$sid" --messages 40 --compact
 ```
 
 After `wait`, use `sessions output` for the child's normal answer. If the child
-stopped in `waiting_input`, inspect `sessions events "$sid" --coalesce` for a
-pending approval or question. Use raw `events` only for exact stream debugging,
-missing output, or transport/TUI artifacts.
+stopped in `waiting_input`, inspect `sessions events "$sid" --compact` for a
+pending approval or question. Use `events --coalesce` when you need full
+metadata such as tool inputs or structured question payloads. Use raw `events`
+only for exact stream debugging, missing output, or transport/TUI artifacts.
 
 To watch a child's transcript live instead of blocking silently, stream events
 as NDJSON (one compact JSON object per line) until a terminal status or Ctrl+C:

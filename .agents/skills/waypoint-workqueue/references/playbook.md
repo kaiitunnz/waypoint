@@ -199,5 +199,5 @@ git (ground truth for code), the log is the narrative.
    resume steering them.
 
 > **`waypoint sessions send` may report a transport timeout even when the input
-> landed.** Confirm via `waypoint sessions events <sid>` before resending — a
-> duplicate message can cause a worker to execute a task twice.
+> landed.** Confirm via `waypoint sessions events <sid> --compact` before
+> resending — a duplicate message can cause a worker to execute a task twice.

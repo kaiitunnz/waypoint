@@ -174,7 +174,7 @@ Read logs and verify from git:
 
 ```bash
 waypoint board log "$channel"
-waypoint sessions events <sid>
+waypoint sessions events <sid> --compact
 git -C <agent-worktree> status --short
 git -C <agent-worktree> rev-parse HEAD
 ```

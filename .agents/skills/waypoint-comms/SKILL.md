@@ -67,5 +67,6 @@ without a prompt each time.
   exchange has what it needs.
 - The board is pull-based — read your channels at turn boundaries, or an entry
   sits unseen (see `references/blackboard.md`).
-- Ground every claim about a reply in `waypoint sessions events` output, and
+- Ground every claim about a reply in compact session events output
+  (`waypoint sessions events <id> --compact`), and
   every claim about shared state in `waypoint board read` output.

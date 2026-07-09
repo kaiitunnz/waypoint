@@ -1,0 +1,54 @@
+{
+  "thread": {
+    "id": "019f4850-3c73-7dd1-a69d-ee4c8b40f3ab",
+    "extra": null,
+    "sessionId": "019f4850-3c73-7dd1-a69d-ee4c8b40f3ab",
+    "forkedFromId": null,
+    "parentThreadId": null,
+    "preview": "",
+    "ephemeral": false,
+    "historyMode": "legacy",
+    "modelProvider": "openai",
+    "createdAt": 1783624646,
+    "updatedAt": 1783624646,
+    "recencyAt": 1783624646,
+    "status": {
+      "type": "idle"
+    },
+    "path": "/home/noppanat/.codex-nus/sessions/2026/07/10/rollout-2026-07-10T03-17-25-019f4850-3c73-7dd1-a69d-ee4c8b40f3ab.jsonl",
+    "cwd": "/home/noppanat/waypoint",
+    "cliVersion": "0.144.0",
+    "source": "vscode",
+    "threadSource": null,
+    "agentNickname": null,
+    "agentRole": null,
+    "gitInfo": null,
+    "name": null,
+    "turns": []
+  },
+  "model": "gpt-5.5",
+  "modelProvider": "openai",
+  "serviceTier": null,
+  "cwd": "/home/noppanat/waypoint",
+  "runtimeWorkspaceRoots": [
+    "/home/noppanat/waypoint"
+  ],
+  "instructionSources": [
+    "/home/noppanat/waypoint/AGENTS.md"
+  ],
+  "approvalPolicy": "on-request",
+  "approvalsReviewer": "user",
+  "sandbox": {
+    "type": "workspaceWrite",
+    "writableRoots": [],
+    "networkAccess": false,
+    "excludeTmpdirEnvVar": false,
+    "excludeSlashTmp": false
+  },
+  "activePermissionProfile": {
+    "id": ":workspace",
+    "extends": null
+  },
+  "reasoningEffort": "max",
+  "multiAgentMode": "explicitRequestOnly"
+}

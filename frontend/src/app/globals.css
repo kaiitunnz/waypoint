@@ -8716,6 +8716,11 @@ html[data-theme="light"] .term-compose-send {
   gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   min-width: 0;
+  /* Size each field to its own content so a taller cell (e.g. Interface, which
+     carries a field hint) doesn't stretch its siblings and drop their controls
+     below its own — every control shares the same top edge, the hint hangs
+     below. */
+  align-items: start;
 }
 
 .launch-body-col {

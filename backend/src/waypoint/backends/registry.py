@@ -1,4 +1,5 @@
 from waypoint.backends.base import BackendPlugin
+from waypoint.backends.capabilities import BackendCapabilities
 from waypoint.schemas import SessionRecord
 
 
@@ -83,6 +84,29 @@ class BackendRegistry:
 
     def plugin_for(self, session: SessionRecord) -> BackendPlugin:
         return self.resolve(session.backend, session.transport)
+
+    def capabilities_for(self, session: SessionRecord) -> BackendCapabilities:
+        """Compose the session's capabilities from its (agent, transport) axes.
+
+        ``plugin_for(session).capabilities`` reads the flat descriptor of
+        whichever plugin *owns* the transport — for a wrapped pair (e.g. a
+        Claude/Codex session driven over the generic ``tmux`` transport)
+        that's the wrapper, not the agent, so agent-axis fields like
+        ``config_dir_env_var`` read as unset even though the wrapped agent
+        has one. Compose instead: the agent axis comes from ``self.get
+        (session.backend)`` (the agent's own config-dir/thread-store/CLI
+        traits), the transport axis from ``self.for_transport
+        (session.transport)`` (the driver's resume/restart/terminal
+        story). For a native pair both lookups land on the same plugin, so
+        this equals the flat descriptor; for a wrapped pair it reflects
+        what the pair can actually do.
+        """
+        agent = self.get(session.backend)
+        transport_owner = self.for_transport(session.transport)
+        return BackendCapabilities.from_split(
+            agent.capabilities.agent_capabilities(),
+            transport_owner.capabilities.transport_capabilities(),
+        )
 
     def supported_transports(self, backend_id: str) -> tuple[str, ...]:
         """Transport ids the named agent declares it can be driven over."""

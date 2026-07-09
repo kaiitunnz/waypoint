@@ -18,7 +18,7 @@ dependencies = [
   "python-multipart>=0.0.9",
   "PyYAML>=6.0.0",
   "typer>=0.26.8",
-  "uvicorn>=0.35.0",
+  "uvicorn>=0.51.0",
   "websockets>=15.0.0",
 ]
 

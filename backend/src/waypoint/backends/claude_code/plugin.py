@@ -1431,10 +1431,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         account_profile_id: str | None = None,
     ) -> bool:
         if launch_target_id is None:
-            launch_target = runtime._resolve_launch_target(launch_target_id, self.id)
-            env = await runtime.discovery_env(
-                self.id, launch_target, account_profile_id
-            )
+            env = await runtime.discovery_env(self.id, None, account_profile_id)
             config_dir = config_dir_for(self.capabilities, env)
             return await asyncio.to_thread(
                 delete_local_claude_thread, thread_id, config_dir

@@ -8891,6 +8891,20 @@ html[data-theme="light"] .preset-select {
   color: var(--muted);
 }
 
+/* The account profile reads in its own hue everywhere it appears — here it
+   matches the header/list account-profile badge so a preset visibly captures
+   session identity, not just tuning. */
+.preset-summary-chip.is-profile {
+  color: var(--accent-cool, var(--accent));
+}
+
+/* A captured profile the current catalogue no longer offers: muted and struck
+   so it reads as unavailable, the same signal an unsupported backend gets. */
+.preset-summary-chip.is-unavailable {
+  color: var(--muted-soft);
+  text-decoration: line-through;
+}
+
 .preset-summary-dot {
   width: 3px;
   height: 3px;

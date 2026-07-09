@@ -600,8 +600,8 @@ async def test_reattach_reprobes_and_overwrites_stale_value(
 async def test_reattach_probe_raising_does_not_fail_reattach(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    runtime = _runtime(tmp_path)
-    session = _session(runtime)
+    runtime = _runtime(tmp_path, codex=_codex_profiles())
+    session = _session(runtime, account_profile_id="work", account_profile_label="Work")
     plugin = runtime.registry.plugin_for(session)
 
     async def fake_terminate(*_a: Any, **_k: Any) -> None:
@@ -624,6 +624,41 @@ async def test_reattach_probe_raising_does_not_fail_reattach(
     final = runtime.storage.get_session(session.id)
     assert final is not None
     assert final.verified_account_key is None
+
+
+async def test_reattach_without_profile_does_not_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Gated on a profile being set, same as launch/thread-import/boot-restore
+    # (a no-profile session has nothing to re-verify, and this avoids a live
+    # probe against every plain session's reattach).
+    runtime = _runtime(tmp_path)
+    session = _session(runtime)
+    plugin = runtime.registry.plugin_for(session)
+
+    async def fake_terminate(*_a: Any, **_k: Any) -> None:
+        return None
+
+    async def fake_restore(_rt: Any, s: SessionRecord) -> None:
+        runtime.storage.update_session(s.id, status=SessionStatus.IDLE)
+
+    monkeypatch.setattr(plugin, "terminate_session", fake_terminate)
+    monkeypatch.setattr(plugin, "restore_session", fake_restore)
+    calls: list[Any] = []
+    monkeypatch.setattr(
+        "waypoint.runtime.probe_account",
+        _fake_probe(
+            calls,
+            AccountProbeResult(account_key="codex:fresh@co", account_label="fresh@co"),
+        ),
+    )
+
+    refreshed = await runtime._reattach_session(session)
+    await runtime._drain_account_probe_tasks()
+    final = runtime.storage.get_session(refreshed.id)
+    assert final is not None
+    assert final.verified_account_key is None
+    assert calls == []
 
 
 # ── Boot-restore ─────────────────────────────────────────────────────────────
@@ -696,6 +731,39 @@ async def test_boot_restore_failed_probe_leaves_prior_value_untouched(
     assert final.verified_account_key == "codex:good@co"
     assert final.verified_account_label == "good@co"
     assert final.verified_account_probed_at == probed_at
+
+
+async def test_boot_restore_without_profile_does_not_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A no-profile session is stable across a restart: verified_account_*
+    # stays None rather than getting stamped only after the first restart,
+    # and boot doesn't mass-probe the provider for every plain session.
+    runtime = _runtime(tmp_path)
+    session = _session(runtime)
+    plugin = runtime.registry.plugin_for(session)
+
+    async def fake_restore(_rt: Any, s: SessionRecord) -> None:
+        runtime.storage.update_session(s.id, status=SessionStatus.IDLE)
+
+    monkeypatch.setattr(plugin, "restore_session", fake_restore)
+    monkeypatch.setattr(runtime, "_warm_command_completions", lambda *_a, **_k: None)
+    monkeypatch.setattr(runtime, "_start_context_usage_source", lambda *_a, **_k: None)
+    calls: list[Any] = []
+    monkeypatch.setattr(
+        "waypoint.runtime.probe_account",
+        _fake_probe(
+            calls,
+            AccountProbeResult(account_key="codex:fresh@co", account_label="fresh@co"),
+        ),
+    )
+
+    await runtime._restore_session_and_warm_completions(plugin, session)
+    await runtime._drain_account_probe_tasks()
+    final = runtime.storage.get_session(session.id)
+    assert final is not None
+    assert final.verified_account_key is None
+    assert calls == []
 
 
 async def test_boot_restore_skips_remote_launch_targets(

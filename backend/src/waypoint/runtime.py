@@ -1976,7 +1976,13 @@ class SessionRuntime:
             self._start_context_usage_source(refreshed)
             # Boot-restore re-probe is local-only, mirroring the completion
             # warming above (D3) — remote hosts aren't fanned out to at boot.
-            if refreshed.launch_target_id is None:
+            # Gated on a profile being set, same as launch/thread-import: an
+            # unconditional probe would mass-probe the provider's rate-limit
+            # endpoint for every no-profile session on every restart.
+            if (
+                refreshed.account_profile_id is not None
+                and refreshed.launch_target_id is None
+            ):
                 self._schedule_verified_account_probe(
                     refreshed.id,
                     refreshed.backend,
@@ -2227,14 +2233,17 @@ class SessionRuntime:
                     detail=f"failed to reattach session ({refreshed.status})",
                 )
             # Re-probe after the terminal-status check so a probe failure
-            # never converts a good reattach into a 400 (D3/D5).
-            self._schedule_verified_account_probe(
-                refreshed.id,
-                refreshed.backend,
-                refreshed.launch_env,
-                launch_target=self._find_launch_target(refreshed.launch_target_id),
-                cwd=refreshed.cwd,
-            )
+            # never converts a good reattach into a 400 (D3/D5). Gated on a
+            # profile being set, same as launch/thread-import/boot-restore —
+            # a no-profile session has nothing to re-verify.
+            if refreshed.account_profile_id is not None:
+                self._schedule_verified_account_probe(
+                    refreshed.id,
+                    refreshed.backend,
+                    refreshed.launch_env,
+                    launch_target=self._find_launch_target(refreshed.launch_target_id),
+                    cwd=refreshed.cwd,
+                )
             self._start_context_usage_source(refreshed)
             return refreshed
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.1](https://github.com/kaiitunnz/waypoint/compare/v0.7.0...v0.7.1) (2026-07-09)
+
+
+### Features
+
+* add compact session read output ([#267](https://github.com/kaiitunnz/waypoint/issues/267)) ([1d31e3a](https://github.com/kaiitunnz/waypoint/commit/1d31e3aee49bfd74fc62d1485ae225371209bdf5))
+* add waypoint research skill ([#266](https://github.com/kaiitunnz/waypoint/issues/266)) ([42b0523](https://github.com/kaiitunnz/waypoint/commit/42b0523ec0e3b94fe42a07807090095f071ec4a8))
+* switch account profiles on tmux-wrapped sessions ([#264](https://github.com/kaiitunnz/waypoint/issues/264)) ([2cfd9b3](https://github.com/kaiitunnz/waypoint/commit/2cfd9b34fe6faf4fa57409026ee6a5052e3b0eac))
+
+
+### Miscellaneous Chores
+
+* release 0.7.1 ([8e3362c](https://github.com/kaiitunnz/waypoint/commit/8e3362cbd6a4d417e2b1115434df740ab0426a3c))
+
 ## [0.7.0](https://github.com/kaiitunnz/waypoint/compare/v0.6.2...v0.7.0) (2026-07-09)
 
 

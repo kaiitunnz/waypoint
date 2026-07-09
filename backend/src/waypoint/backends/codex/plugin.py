@@ -67,7 +67,7 @@ from waypoint.backends.plugin_config import (
 )
 from waypoint.backends.tmux.plugin import TmuxPlugin
 from waypoint.git_meta import GitMeta
-from waypoint.launch_targets import SshLaunchTargetConfig
+from waypoint.launch_targets import SshLaunchTargetConfig, _resolve_local_binary
 from waypoint.schemas import (
     CommandCompletion,
     CompletionDispatch,
@@ -1384,11 +1384,21 @@ class CodexPlugin(DefaultLaunchContract):
     ) -> ClientFactory | None:
         launch_target = runtime._find_launch_target(launch_target_id)
         if launch_target is None:
+            configured_bin = self._config(runtime).local_bin
+            try:
+                resolved_bin = (
+                    _resolve_local_binary(configured_bin) if configured_bin else None
+                )
+            except FileNotFoundError as exc:
+                raise FileNotFoundError(
+                    f"codex local_bin not found: {configured_bin!r}"
+                ) from exc
             return _apply_codex_args(
                 None,
                 tuple(custom_args or ()),
                 tuple(custom_config_overrides or ()),
                 launch_env,
+                local_bin=resolved_bin,
             )
         return build_remote_codex_client_factory(
             launch_target,

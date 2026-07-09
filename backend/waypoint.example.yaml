@@ -44,7 +44,9 @@ plugin_configs:
   codex:
     # default_model_id: gpt-5
     # default_effort: high
-    # local_bin: /opt/codex/bin/codex   # path on the local host; falls back to `codex`
+    # local_bin: /opt/codex/bin/codex   # absolute path or PATH name (e.g. `codex`) of a
+    #                                    #   system codex to launch locally. Unset uses the
+    #                                    #   binary bundled with the pinned openai-codex SDK.
     # env:                              # editable defaults surfaced in the launch panel
     #   OPENAI_API_KEY: sk-your-key
     # cli_args:                              # raw flags for `codex …` before `app-server`

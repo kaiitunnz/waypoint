@@ -60,6 +60,7 @@ def _apply_codex_args(
     cli_args: tuple[str, ...],
     config_overrides: tuple[str, ...],
     launch_env: dict[str, str] | None = None,
+    local_bin: str | None = None,
 ) -> ClientFactory | None:
     """Wrap *base* so it injects *cli_args* / *config_overrides* into local launches.
 
@@ -72,8 +73,14 @@ def _apply_codex_args(
     we have to fall back to ``launch_args_override`` and assemble the argv
     ourselves so the raw flags reach codex; otherwise we use the simpler
     ``config_overrides`` slot.
+
+    *local_bin* is the resolved absolute path to a system codex binary
+    (already existence-checked by the caller). ``None`` means "use the binary
+    bundled with the pinned openai-codex SDK". A non-None value forces the
+    local factory to be built even with no other args so the configured
+    binary is honored.
     """
-    if not cli_args and not config_overrides and not launch_env:
+    if not cli_args and not config_overrides and not launch_env and not local_bin:
         return base
     if base is not None:
         # Remote factory — args were baked in at construction; return as-is.
@@ -81,7 +88,7 @@ def _apply_codex_args(
 
     def _local(cwd: str, approval_handler: ApprovalCallback) -> CodexClient:
         if cli_args:
-            argv: list[str] = [str(_resolve_codex_bin(CodexConfig()))]
+            argv: list[str] = [local_bin or str(_resolve_codex_bin(CodexConfig()))]
             argv.extend(cli_args)
             for kv in config_overrides:
                 argv.extend(["--config", kv])
@@ -98,6 +105,7 @@ def _apply_codex_args(
             )
         return CodexClient(
             config=CodexConfig(
+                codex_bin=local_bin,
                 cwd=cwd,
                 client_name="waypoint",
                 client_title="Waypoint",

@@ -302,12 +302,16 @@ def test_list_models_passes_params(
     state: dict = {}
     with _client(_settings(tmp_path), state) as client:
         payload = client.list_models(
-            "claude_code", launch_target_id="lt1", include_hidden=True
+            "claude_code",
+            launch_target_id="lt1",
+            include_hidden=True,
+            account_profile_id="work",
         )
     assert payload["backend"] == "claude_code"
     assert payload["default_model_id"] == "opus"
     assert state["models_params"]["launch_target_id"] == "lt1"
     assert state["models_params"]["include_hidden"] == "true"
+    assert state["models_params"]["account_profile_id"] == "work"
 
 
 def test_list_models_omits_default_params(
@@ -326,9 +330,14 @@ def test_list_threads_passes_params(
     monkeypatch.setenv("WAYPOINT_TOKEN", VALID_TOKEN)
     state: dict = {}
     with _client(_settings(tmp_path), state) as client:
-        threads = client.list_threads("claude_code", launch_target_id="lt1")
+        threads = client.list_threads(
+            "claude_code", launch_target_id="lt1", account_profile_id="work"
+        )
     assert threads == [{"id": "thread-1", "title": "Alpha", "cwd": "/tmp/repo"}]
-    assert state["threads_params"] == {"launch_target_id": "lt1"}
+    assert state["threads_params"] == {
+        "launch_target_id": "lt1",
+        "account_profile_id": "work",
+    }
 
 
 def test_import_thread_sends_raw_body(

@@ -187,6 +187,21 @@ waypoint presets create --name work-claude --backend claude_code --account-profi
 waypoint sessions import codex --thread-id <uuid> --account-profile work
 ```
 
+Discovery is profile-scoped too, so listing matches the account a session will
+launch under. Pass `--account-profile` to the two discovery commands (and it
+flows through `import`/thread-delete), otherwise they resolve the process-default
+store:
+
+```bash
+waypoint models claude_code --account-profile work            # models the profile's account offers
+waypoint backends threads claude_code --account-profile work  # resumable threads in the profile's store
+```
+
+In the web UI the launch/schedule panel re-scopes its model catalogue and
+resumable-thread list to the selected profile, and importing or resuming a listed
+thread carries that profile. Remote (SSH launch target) profile-scoped discovery
+is not yet wired — a remote list resolves the target's default store.
+
 Inspect a session's restart-applied launch settings (env is redacted to keys):
 
 ```bash

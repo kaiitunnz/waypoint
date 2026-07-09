@@ -22,7 +22,10 @@ rather than guessing.
 Claude and Codex sessions can run under named account/config-dir profiles and
 switch between them without restarting the service. List them with `waypoint
 accounts list`, pick one at launch with `--account-profile`, and switch a running
-session with `waypoint sessions set-account <session-id> <profile>`.
+session with `waypoint sessions set-account <session-id> <profile>`. Discovery is
+profile-scoped too: pass `--account-profile` to `waypoint models` and `waypoint
+backends threads` so the listed models/threads match the account a session will
+launch under (omit it for the process-default store).
 
 Verify and set up a profile from the CLI:
 

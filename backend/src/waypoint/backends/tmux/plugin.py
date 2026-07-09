@@ -238,6 +238,7 @@ class TmuxPlugin:
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
         include_hidden: bool = False,
+        account_profile_id: str | None = None,
     ) -> dict[str, Any]:
         return {
             "backend": self.id,
@@ -720,6 +721,7 @@ class TmuxPlugin:
         self,
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> list[Any]:
         return []
 
@@ -728,6 +730,7 @@ class TmuxPlugin:
         runtime: "SessionRuntime",
         thread_id: str,
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> bool:
         # No deletable transcript store; supports_thread_delete is False so the
         # API never routes here.

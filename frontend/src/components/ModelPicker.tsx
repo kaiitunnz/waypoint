@@ -10,6 +10,7 @@ interface ModelPickerProps {
   token: string;
   backend: Backend;
   launchTargetId: string | null;
+  accountProfileId?: string | null;
   value: string;
   onChange: (value: string) => void;
   onAuthFailure?: () => void;
@@ -29,6 +30,7 @@ export function ModelPicker({
   token,
   backend,
   launchTargetId,
+  accountProfileId,
   value,
   onChange,
   onAuthFailure,
@@ -42,7 +44,7 @@ export function ModelPicker({
 
   useEffect(() => {
     let cancelled = false;
-    fetchBackendModels(host, token, backend, { launchTargetId })
+    fetchBackendModels(host, token, backend, { launchTargetId, accountProfileId })
       .then((response) => {
         if (cancelled) return;
         setOptions(response.models);
@@ -61,7 +63,7 @@ export function ModelPicker({
     return () => {
       cancelled = true;
     };
-  }, [host, token, backend, launchTargetId, onAuthFailure, onModelsLoaded]);
+  }, [host, token, backend, launchTargetId, accountProfileId, onAuthFailure, onModelsLoaded]);
 
   // Surface a custom-named model the caller already has even if it's not in
   // the curated list — covers schedules / sessions cloned from older state.

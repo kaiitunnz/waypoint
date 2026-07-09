@@ -325,6 +325,7 @@ class ClaudeTtyPlugin:
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
         include_hidden: bool = False,
+        account_profile_id: str | None = None,
     ) -> dict[str, Any]:
         config = self._config(runtime)
         default_model = config.default_model_id
@@ -1275,11 +1276,15 @@ class ClaudeTtyPlugin:
         self,
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> list[ClaudeThreadSummary]:
         # Remote enumeration is a follow-up; only the local store is read here.
         if launch_target_id is not None:
             return []
-        infos = await asyncio.to_thread(list_local_claude_threads)
+        launch_target = runtime._resolve_launch_target(launch_target_id, self.id)
+        env = await runtime.discovery_env(self.id, launch_target, account_profile_id)
+        config_dir = config_dir_for(self.capabilities, env)
+        infos = await asyncio.to_thread(list_local_claude_threads, config_dir)
         imported = self._imported_thread_ids(runtime)
         return [self._thread_summary(info) for info in infos if info.id not in imported]
 
@@ -1288,6 +1293,7 @@ class ClaudeTtyPlugin:
         runtime: "SessionRuntime",
         thread_id: str,
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> bool:
         # Deletion is offered by the claude_code plugin; this tty-tail driver
         # leaves supports_thread_delete False so the API never routes here.
@@ -1309,7 +1315,10 @@ class ClaudeTtyPlugin:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="remote import not yet supported for claude_tty",
             )
-        info = await asyncio.to_thread(find_local_claude_thread, request.thread_id)
+        config_dir = self._config_dir_from_env(request.launch_env)
+        info = await asyncio.to_thread(
+            find_local_claude_thread, request.thread_id, config_dir
+        )
         if info is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

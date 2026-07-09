@@ -268,12 +268,24 @@ def backends_threads(
             "(e.g. a remote host or worktree)."
         ),
     ] = None,
+    account_profile: Annotated[
+        str | None,
+        typer.Option(
+            "--account-profile",
+            help="Resolve importable threads for this account/config profile "
+            "(agent backends that host profiles only; see `accounts list`).",
+        ),
+    ] = None,
 ) -> None:
     """List a backend's importable threads."""
     _emit(
         _settings_from_ctx(ctx),
         lambda c: {
-            "threads": c.list_threads(backend, launch_target_id=launch_target_id)
+            "threads": c.list_threads(
+                backend,
+                launch_target_id=launch_target_id,
+                account_profile_id=account_profile,
+            )
         },
     )
 
@@ -296,6 +308,14 @@ def models(
         bool,
         typer.Option("--include-hidden", help="Include models the backend hides."),
     ] = False,
+    account_profile: Annotated[
+        str | None,
+        typer.Option(
+            "--account-profile",
+            help="Resolve models for this account/config profile (agent "
+            "backends that host profiles only; see `accounts list`).",
+        ),
+    ] = None,
 ) -> None:
     """List the models a backend offers (its ids, labels, and reasoning efforts).
 
@@ -310,6 +330,7 @@ def models(
                 backend,
                 launch_target_id=launch_target_id,
                 include_hidden=include_hidden,
+                account_profile_id=account_profile,
             )
         catalogues: list[dict[str, Any]] = []
         for descriptor in c.list_backends():
@@ -322,6 +343,7 @@ def models(
                         backend_id,
                         launch_target_id=launch_target_id,
                         include_hidden=include_hidden,
+                        account_profile_id=account_profile,
                     )
                 )
             except WaypointError as exc:

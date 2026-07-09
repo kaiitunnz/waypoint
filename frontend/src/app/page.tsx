@@ -162,6 +162,21 @@ export default function HomePage() {
   const [threadsByBackend, setThreadsByBackend] = useState<
     Record<Backend, ThreadSummary[]>
   >({});
+  // The launch form's live (backend, accountProfileId) selection, reported by
+  // LaunchPanel — threads are fetched here app-globally, decoupled from the
+  // form, so this is how the active backend's fetch re-scopes to the
+  // selected profile.
+  const [activeFormBackend, setActiveFormBackend] = useState<Backend | null>(null);
+  const [activeFormAccountProfileId, setActiveFormAccountProfileId] = useState<
+    string | null
+  >(null);
+  const handleDiscoveryScopeChange = useCallback(
+    (backend: Backend, accountProfileId: string | null) => {
+      setActiveFormBackend(backend);
+      setActiveFormAccountProfileId(accountProfileId);
+    },
+    [],
+  );
   const [loadingByBackend, setLoadingByBackend] = useState<
     Record<Backend, boolean>
   >({});
@@ -453,18 +468,24 @@ export default function HomePage() {
     setThreadsByBackend((current) => {
       const next: Record<Backend, ThreadSummary[]> = {};
       for (const id of ids) {
-        next[id] = current[id] ?? [];
+        // The active form backend is re-scoping to (or away from) a
+        // profile — drop its stale list so a slow request can't show the
+        // previous profile's threads.
+        next[id] = id === activeFormBackend ? [] : current[id] ?? [];
       }
       return next;
     });
     for (const id of ids) {
       setLoadingByBackend((current) => ({ ...current, [id]: true }));
+      const accountProfileId =
+        id === activeFormBackend ? activeFormAccountProfileId || undefined : undefined;
       fetchBackendThreads<ThreadSummary>(
         host,
         token,
         id,
         {
           launchTargetId: activeLaunchTargetId || undefined,
+          accountProfileId,
         },
       )
         .then((threads) => {
@@ -498,6 +519,8 @@ export default function HomePage() {
     };
   }, [
     activeLaunchTargetId,
+    activeFormBackend,
+    activeFormAccountProfileId,
     host,
     launchTargets,
     discoveryBackendsKey,
@@ -742,6 +765,14 @@ export default function HomePage() {
       const payload = {
         thread_id: threadId,
         launch_target_id: activeLaunchTargetId || null,
+        // Import under the same account profile that scoped the resumable-thread
+        // list the user picked from — otherwise the runtime reads the default
+        // store and 404s on a profile-scoped thread. The runtime overlays the
+        // profile's config dir onto launch_env from this id (profile-wins).
+        account_profile_id:
+          backend === activeFormBackend
+            ? activeFormAccountProfileId || null
+            : null,
         cwd,
         // An explicit transport supersedes launch_mode at the import API, so
         // pin the chosen transport and leave the launch mode on "auto".
@@ -789,6 +820,9 @@ export default function HomePage() {
         backend,
         threadId,
         launchTargetId ?? activeLaunchTargetId ?? null,
+        // Delete from the same profile store the list was scoped to; without it
+        // the runtime resolves the default store and no thread matches (404).
+        backend === activeFormBackend ? activeFormAccountProfileId || null : null,
       );
       setThreadsByBackend((current) => ({
         ...current,
@@ -1087,6 +1121,7 @@ export default function HomePage() {
           catalog={catalog}
           threadsByBackend={threadsByBackend}
           loadingByBackend={loadingByBackend}
+          onDiscoveryScopeChange={handleDiscoveryScopeChange}
           onDeleteThread={handleDeleteThread}
           onAttach={handleAttach}
           onCreate={handleCreate}

@@ -84,6 +84,7 @@ class _StubPlugin:
         runtime: Any,
         launch_target_id: str | None = None,
         include_hidden: bool = False,
+        account_profile_id: str | None = None,
     ) -> dict[str, Any]:
         return {}
 
@@ -161,6 +162,7 @@ class _StubPlugin:
         self,
         runtime: Any,
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> list[Any]:
         return []
 
@@ -174,6 +176,7 @@ class _StubPlugin:
         runtime: Any,
         thread_id: str,
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> bool:
         return False
 

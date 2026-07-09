@@ -398,11 +398,12 @@ export function LaunchFormFields({
             </label>
           ) : null}
           <ModelPicker
-            key={`${form.backend}:${launchTargetId ?? "local"}`}
+            key={`${form.backend}:${launchTargetId ?? "local"}:${form.accountProfileId || "default"}`}
             host={host}
             token={token}
             backend={form.backend}
             launchTargetId={launchTargetId}
+            accountProfileId={form.accountProfileId}
             value={form.model}
             onChange={form.setModel}
             onAuthFailure={onAuthFailure}

@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import ANY
 
 import pytest
 from fastapi import HTTPException
@@ -1239,9 +1240,12 @@ async def test_handle_input_reattaches_exited_codex_session(tmp_path) -> None:
     )
 
     # Reattach uses the stored thread_id to resume the existing Codex thread,
-    # then the input forwards through the freshly attached client.
+    # then the input forwards through the freshly attached client. The
+    # factory slot (index 3) is now always a real env-carrying closure for
+    # local codex launches (previously ``None``, relying on the adapter to
+    # rebuild it) — see CodexPlugin.client_factory's local-env fix.
     assert fake.restore_calls == [
-        ("sess", "/tmp/project", "thread-resume", None, None, None)
+        ("sess", "/tmp/project", "thread-resume", ANY, None, None)
     ]
     # Stale adapter state is torn down before the respawn so we don't orphan
     # a client/process keyed under the same session id.
@@ -1269,7 +1273,7 @@ async def test_resume_reattaches_exited_session(tmp_path) -> None:
     # Relaunched via restore (no input forwarded), and never poked the dead pane.
     # Reattach leaves it IDLE (alive, ready), not RUNNING — no turn was started.
     assert fake.restore_calls == [
-        ("sess", "/tmp/project", "thread-resume", None, None, None)
+        ("sess", "/tmp/project", "thread-resume", ANY, None, None)
     ]
     assert fake.inputs == []
     assert updated.status == SessionStatus.IDLE
@@ -2622,6 +2626,7 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
         launch_target_id: str | None,
         *,
         include_turns: bool = False,
+        launch_env: dict[str, str] | None = None,
     ) -> Any:
         assert thread_id == "thread-9"
         assert launch_target_id == "devbox"
@@ -2703,7 +2708,7 @@ async def test_list_importable_claude_threads_filters_existing_session(
 
     monkeypatch.setattr(
         "waypoint.backends.claude_code.plugin.list_local_claude_threads",
-        lambda: [info_existing, info_new],
+        lambda config_dir=None: [info_existing, info_new],
     )
 
     threads = await runtime.registry.get("claude_code").list_threads(runtime)
@@ -2834,7 +2839,7 @@ async def test_import_claude_thread_creates_session_and_resumes(
 
     monkeypatch.setattr(
         "waypoint.backends.claude_code.plugin.find_local_claude_thread",
-        lambda thread_id: info if thread_id == info.id else None,
+        lambda thread_id, config_dir=None: info if thread_id == info.id else None,
     )
 
     session = await runtime.registry.get("claude_code").import_thread(
@@ -3083,7 +3088,7 @@ async def test_import_claude_thread_terminal_supersedes_launch_mode(
     )
     monkeypatch.setattr(
         "waypoint.backends.claude_code.plugin.find_local_claude_thread",
-        lambda thread_id: info if thread_id == info.id else None,
+        lambda thread_id, config_dir=None: info if thread_id == info.id else None,
     )
     tmux = runtime.registry.fallback_for_managed_launch()
     assert tmux is not None
@@ -3129,7 +3134,7 @@ async def test_import_claude_thread_native_supersedes_tmux_launch_mode(
     )
     monkeypatch.setattr(
         "waypoint.backends.claude_code.plugin.find_local_claude_thread",
-        lambda thread_id: info if thread_id == info.id else None,
+        lambda thread_id, config_dir=None: info if thread_id == info.id else None,
     )
     tmux = runtime.registry.fallback_for_managed_launch()
     assert tmux is not None
@@ -3166,7 +3171,7 @@ async def test_import_thread_transport_none_matches_default(
     )
     monkeypatch.setattr(
         "waypoint.backends.claude_code.plugin.find_local_claude_thread",
-        lambda thread_id: info if thread_id == info.id else None,
+        lambda thread_id, config_dir=None: info if thread_id == info.id else None,
     )
 
     session = await runtime.import_thread("claude_code", {"thread_id": info.id})
@@ -3237,7 +3242,7 @@ async def test_import_claude_thread_missing_returns_404(monkeypatch, tmp_path) -
     _claude_plugin(runtime).adapter = cast(Any, FakeClaudeAdapter())
     monkeypatch.setattr(
         "waypoint.backends.claude_code.plugin.find_local_claude_thread",
-        lambda _thread_id: None,
+        lambda _thread_id, config_dir=None: None,
     )
 
     from fastapi import HTTPException

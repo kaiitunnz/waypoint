@@ -849,12 +849,31 @@ class OpenCodePlugin(DefaultLaunchContract):
         # the announcement path entirely.
         return ""
 
+    async def _reject_account_profile(
+        self,
+        runtime: "SessionRuntime",
+        launch_target_id: str | None,
+        account_profile_id: str | None,
+    ) -> None:
+        # OpenCode has no config-dir env var, so a profile can't scope its
+        # server-owned store. Route a selected profile through the generic
+        # resolver so the rejection matches the launch path (400) rather than
+        # being silently ignored; ``None`` is a no-op.
+        if account_profile_id is None:
+            return
+        launch_target = runtime._resolve_launch_target(launch_target_id, self.id)
+        await runtime.discovery_env(self.id, launch_target, account_profile_id)
+
     async def list_models(
         self,
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
         include_hidden: bool = False,
+        account_profile_id: str | None = None,
     ) -> dict[str, Any]:
+        await self._reject_account_profile(
+            runtime, launch_target_id, account_profile_id
+        )
         adapters = list(reversed(self._adapters_for_launch_target(launch_target_id)))
         if not adapters:
             adapters = [
@@ -1463,7 +1482,11 @@ class OpenCodePlugin(DefaultLaunchContract):
         self,
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> list[OpenCodeThreadSummary]:
+        await self._reject_account_profile(
+            runtime, launch_target_id, account_profile_id
+        )
         adapters = self._adapters_for_launch_target(launch_target_id)
         if not adapters:
             adapters = [
@@ -1520,7 +1543,11 @@ class OpenCodePlugin(DefaultLaunchContract):
         runtime: "SessionRuntime",
         thread_id: str,
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> bool:
+        await self._reject_account_profile(
+            runtime, launch_target_id, account_profile_id
+        )
         # OpenCode keeps sessions in its server's own store, so deletion is a
         # `DELETE /session/{id}` against that server (the adapter routes it
         # locally or over SSH) rather than a transcript unlink. A launch target

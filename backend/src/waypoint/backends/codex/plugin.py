@@ -37,6 +37,7 @@ from waypoint.backends.capabilities import (
 from waypoint.backends.codex.adapter import (
     ClientFactory,
     CodexAppServerAdapter,
+    _apply_codex_args,
     default_client_factory,
 )
 from waypoint.backends.codex.history import turns_to_events
@@ -461,6 +462,7 @@ class CodexPlugin(DefaultLaunchContract):
         runtime: "SessionRuntime",
         thread_id: str,
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> bool:
         # Guard against malformed ids: a non-UUID can't match a rollout file
         # and must never be interpolated into the remote shell command.
@@ -468,7 +470,14 @@ class CodexPlugin(DefaultLaunchContract):
             return False
         needle = f"-{thread_id}.jsonl"
         if launch_target_id is None:
-            home = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
+            launch_target = runtime._resolve_launch_target(launch_target_id, self.id)
+            env = await runtime.discovery_env(
+                self.id, launch_target, account_profile_id
+            )
+            config_dir = config_dir_for(self.capabilities, env)
+            home = Path(
+                config_dir or os.environ.get("CODEX_HOME") or "~/.codex"
+            ).expanduser()
             sessions_dir = home / "sessions"
             if not sessions_dir.is_dir():
                 return False
@@ -1375,7 +1384,12 @@ class CodexPlugin(DefaultLaunchContract):
     ) -> ClientFactory | None:
         launch_target = runtime._find_launch_target(launch_target_id)
         if launch_target is None:
-            return None
+            return _apply_codex_args(
+                None,
+                tuple(custom_args or ()),
+                tuple(custom_config_overrides or ()),
+                launch_env,
+            )
         return build_remote_codex_client_factory(
             launch_target,
             cli_args=tuple(custom_args or ()),
@@ -1396,10 +1410,12 @@ class CodexPlugin(DefaultLaunchContract):
         runtime: "SessionRuntime",
         launch_target_id: str | None,
         operation: Callable[[CodexClient], Awaitable[Any]],
+        launch_env: dict[str, str] | None = None,
     ) -> Any:
         default_cwd = self.client_cwd(runtime, launch_target_id)
         client_factory: ClientFactory = (
-            self.client_factory(runtime, launch_target_id) or default_client_factory
+            self.client_factory(runtime, launch_target_id, launch_env=launch_env)
+            or default_client_factory
         )
         client = client_factory(default_cwd, _deny_approval)
         try:
@@ -1417,6 +1433,7 @@ class CodexPlugin(DefaultLaunchContract):
         launch_target_id: str | None,
         *,
         include_turns: bool = False,
+        launch_env: dict[str, str] | None = None,
     ) -> Any:
         runtime._resolve_launch_target(launch_target_id, self.id)
 
@@ -1428,7 +1445,7 @@ class CodexPlugin(DefaultLaunchContract):
 
         try:
             return await self.run_client_operation(
-                runtime, launch_target_id, operation=operation
+                runtime, launch_target_id, operation=operation, launch_env=launch_env
             )
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(
@@ -1469,8 +1486,10 @@ class CodexPlugin(DefaultLaunchContract):
         self,
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> list[CodexThreadSummary]:
-        runtime._resolve_launch_target(launch_target_id, self.id)
+        launch_target = runtime._resolve_launch_target(launch_target_id, self.id)
+        env = await runtime.discovery_env(self.id, launch_target, account_profile_id)
         imported: set[tuple[str | None, str]] = set()
         for session in runtime.storage.list_sessions():
             if session.backend != self.id:
@@ -1494,7 +1513,7 @@ class CodexPlugin(DefaultLaunchContract):
                 cursor = response.next_cursor
 
         threads = await self.run_client_operation(
-            runtime, launch_target_id, operation=operation
+            runtime, launch_target_id, operation=operation, launch_env=env
         )
         summaries = [
             self._thread_summary(thread)
@@ -1614,6 +1633,7 @@ class CodexPlugin(DefaultLaunchContract):
             request.thread_id,
             request.launch_target_id,
             include_turns=request.import_history,
+            launch_env=request.launch_env,
         )
         if thread.ephemeral:
             raise HTTPException(
@@ -1744,15 +1764,20 @@ class CodexPlugin(DefaultLaunchContract):
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
         include_hidden: bool = False,
+        account_profile_id: str | None = None,
     ) -> dict[str, Any]:
         config = self._config(runtime)
         default_model = config.default_model_id
         default_effort = config.default_effort
         cwd = self.client_cwd(runtime, launch_target_id)
+        launch_target = runtime._resolve_launch_target(launch_target_id, self.id)
+        env = await runtime.discovery_env(self.id, launch_target, account_profile_id)
         try:
             response = await self._require_adapter().list_models(
                 cwd=cwd,
-                client_factory_override=self.client_factory(runtime, launch_target_id),
+                client_factory_override=self.client_factory(
+                    runtime, launch_target_id, launch_env=env
+                ),
                 include_hidden=include_hidden,
             )
         except Exception as exc:  # noqa: BLE001

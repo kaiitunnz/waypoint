@@ -2465,6 +2465,7 @@ class SessionRuntime:
                 session = self.storage.update_session(
                     session.id, status=SessionStatus.INTERRUPTED
                 )
+                await self.transport_for(session).flush_before_restart(session)
             if config_dir_key:
                 # ``config_dir_for`` reads only launch_env — no ``os.environ``
                 # fallback for remote (the backend host's env is meaningless on

@@ -84,6 +84,15 @@ class TmuxPlugin:
         is_structured=False,
         supports_resume=True,
         supports_reattach_after_exit=True,
+        # The tmux transport can now apply restart-scoped launch-settings
+        # edits (including account-profile switching) — terminate, persist,
+        # and restore already relaunch the pane under the new launch_env
+        # (``restore_session`` above), and ``TmuxTransport.flush_before_
+        # restart`` confirms the pre-terminate turn settled first. This flag
+        # only ever surfaces on the *composed* (agent, transport) pair via
+        # ``BackendRegistry.capabilities_for`` — a pure attached-tmux session
+        # has no config-dir env var on its agent axis, so it stays refused.
+        supports_launch_settings_with_restart=True,
         supports_set_model_inline=False,
         supports_set_effort_inline=False,
         supports_set_permission_mode_inline=False,

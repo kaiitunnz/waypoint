@@ -88,6 +88,7 @@ import {
   PaperclipIcon,
   useAttachments,
 } from "@/components/AttachmentTray";
+import { AccountProfilePicker } from "@/components/AccountProfilePicker";
 import { ScheduleMessageModal } from "@/components/ScheduleMessageModal";
 import { ScheduledMessagesDock } from "@/components/ScheduledMessagesDock";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
@@ -683,26 +684,18 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     };
   }, [host, token, sessionId, sessionHostsProfiles, handleAuthFailure]);
 
+  // Restart the session under a different account profile. The destructive
+  // restart is confirmed explicitly by the composer's staged switch flow before
+  // this runs, so it performs the switch directly. Phase 1 switches between
+  // named profiles only; clearing back to the default config dir isn't a
+  // meaningful switch (it resolves to the same account and would be rejected),
+  // so an empty or unchanged pick is a no-op.
   const handleAccountProfileChange = useCallback(
     async (nextProfileId: string) => {
-      // Phase 1 offers switching between named profiles only; clearing back to
-      // the default config dir isn't a meaningful switch (it would resolve to
-      // the same account and be rejected), so an empty pick is a no-op.
       if (!session || !nextProfileId) {
         return;
       }
       if (nextProfileId === (session.account_profile_id ?? "")) {
-        return;
-      }
-      const label =
-        accountSettings?.account_profiles.find((p) => p.id === nextProfileId)
-          ?.label ?? nextProfileId;
-      if (
-        !window.confirm(
-          `Switch this session to the "${label}" account? It restarts and ` +
-            "resumes the current thread under the new config dir.",
-        )
-      ) {
         return;
       }
       setAccountBusy(true);
@@ -727,7 +720,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         setAccountBusy(false);
       }
     },
-    [host, token, session, accountSettings, handleAuthFailure],
+    [host, token, session, handleAuthFailure],
   );
 
   const flushPendingEvents = useCallback(() => {
@@ -2573,6 +2566,11 @@ const ReplyComposer = memo(function ReplyComposer({
   // — staged here until the user confirms via the Apply button. `null` means
   // no pending change.
   const [pendingEffort, setPendingEffort] = useState<string | null>(null);
+  // Account-profile switch, staged in the settings popover's session-context
+  // section: the pick lives here and is applied only after the explicit restart
+  // confirmation, never straight from a select change.
+  const [pendingAccountProfileId, setPendingAccountProfileId] =
+    useState<string | null>(null);
   // iMessage-style leading actions: ⊕ + 📎 collapse to a single ›-chevron via
   // CSS (:focus-within) so focusing the field never triggers a React re-render
   // that could drop focus mid-gesture. The chevron re-opens them by forcing
@@ -2705,6 +2703,14 @@ const ReplyComposer = memo(function ReplyComposer({
       window.removeEventListener("pointerdown", onPointer);
       window.removeEventListener("keydown", onKey);
     };
+  }, [tuneOpen]);
+
+  // Drop any staged profile pick when the settings popover closes, so reopening
+  // it always starts from the session's current profile.
+  useEffect(() => {
+    if (!tuneOpen) {
+      setPendingAccountProfileId(null);
+    }
   }, [tuneOpen]);
 
   async function handleSend() {
@@ -2856,7 +2862,26 @@ const ReplyComposer = memo(function ReplyComposer({
   };
 
   const hasAccountPicker = supportsAccountSwitch && accountProfiles.length > 0;
+  const currentProfileId = accountProfileId ?? "";
+  const profileSwitchValue = pendingAccountProfileId ?? currentProfileId;
+  // A switch is offered only to a named profile that isn't the current one —
+  // phase 1 doesn't switch back to the default (it resolves to the same
+  // account), so staging it shows no confirm.
+  const profileSwitchDiffers =
+    profileSwitchValue !== "" && profileSwitchValue !== currentProfileId;
+  const pendingProfileLabel =
+    accountProfiles.find((profile) => profile.id === profileSwitchValue)?.label ??
+    profileSwitchValue;
+  const confirmProfileSwitch = async () => {
+    if (!profileSwitchDiffers) return;
+    await onAccountChange(profileSwitchValue);
+    setTuneOpen(false);
+    setPendingAccountProfileId(null);
+  };
   const assistantOps = assistant ? assistantControls : null;
+  // The account profile lives in the settings popover as a separated
+  // session-context section (kept out of the quick-tuning summary), so it also
+  // makes the gear worth opening when no other tuning control exists.
   const tuneVisible =
     modeOptions.length > 0 ||
     hasModelPicker ||
@@ -2955,12 +2980,6 @@ const ReplyComposer = memo(function ReplyComposer({
     if (hasEffortPicker) {
       parts.push(currentEffort ? effortLabel(currentEffort) : "Default");
     }
-    if (hasAccountPicker) {
-      const matched = accountProfiles.find(
-        (profile) => profile.id === (accountProfileId ?? ""),
-      );
-      parts.push(matched?.label ?? "Default");
-    }
     return parts.join(" · ") || "Settings";
   })();
 
@@ -2994,6 +3013,46 @@ const ReplyComposer = memo(function ReplyComposer({
                 role="dialog"
                 aria-label="Session settings"
               >
+                {hasAccountPicker ? (
+                  <div className="composer-tune-context">
+                    <AccountProfilePicker
+                      profiles={accountProfiles}
+                      value={profileSwitchValue}
+                      onChange={(id) => setPendingAccountProfileId(id)}
+                      disabled={accountBusy}
+                      fieldClassName="composer-tune-field"
+                    />
+                    {profileSwitchDiffers ? (
+                      <div className="composer-tune-confirm">
+                        <p>
+                          Restart this session with{" "}
+                          <strong>{pendingProfileLabel}</strong>? The current
+                          turn is interrupted, the backend process restarts, and
+                          the session resumes from the selected profile&apos;s
+                          config and transcript store.
+                        </p>
+                        <div className="composer-tune-confirm-actions">
+                          <button
+                            type="button"
+                            className="composer-tune-confirm-cancel"
+                            onClick={() => setPendingAccountProfileId(null)}
+                            disabled={accountBusy}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            className="composer-tune-confirm-apply"
+                            onClick={() => void confirmProfileSwitch()}
+                            disabled={accountBusy}
+                          >
+                            {accountBusy ? "Restarting…" : "Restart session"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {assistantOps && session ? (
                   <label className="composer-tune-field">
                     <span>Agent</span>
@@ -3110,31 +3169,6 @@ const ReplyComposer = memo(function ReplyComposer({
                           {option.label}
                         </option>
                       ))}
-                    </select>
-                  </label>
-                ) : null}
-                {hasAccountPicker ? (
-                  <label className="composer-tune-field">
-                    <span>Account</span>
-                    <select
-                      value={accountProfileId ?? ""}
-                      onChange={(event) =>
-                        void onAccountChange(event.target.value)
-                      }
-                      disabled={accountBusy || disabled}
-                    >
-                      {accountProfileId ? null : (
-                        <option value="">Default</option>
-                      )}
-                      {accountProfiles.map((profile) => (
-                        <option key={profile.id} value={profile.id}>
-                          {profile.label}
-                        </option>
-                      ))}
-                      {accountProfileId &&
-                      !accountProfiles.some((p) => p.id === accountProfileId) ? (
-                        <option value={accountProfileId}>{accountProfileId}</option>
-                      ) : null}
                     </select>
                   </label>
                 ) : null}
@@ -4235,6 +4269,14 @@ function SessionHeader({
         <span className={`badge ${headerAgent}`}>
           {humaniseBackend(headerAgent, catalog)}
         </span>
+        {session.account_profile_label ? (
+          <span
+            className="badge account-profile"
+            title={`Account profile: ${session.account_profile_label}`}
+          >
+            {session.account_profile_label}
+          </span>
+        ) : null}
         {!assistant && showHeaderTransport ? (
           <span className={`badge transport ${session.transport}`}>
             {transportLabel(session.transport, catalog)}
@@ -4248,14 +4290,6 @@ function SessionHeader({
         {session.effort ? (
           <span className="badge effort" title={`Effort: ${session.effort}`}>
             {session.effort}
-          </span>
-        ) : null}
-        {session.account_profile_label ? (
-          <span
-            className="badge account-profile"
-            title={`Account: ${session.account_profile_label}`}
-          >
-            {session.account_profile_label}
           </span>
         ) : null}
         {!assistant ? (

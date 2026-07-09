@@ -176,7 +176,7 @@ function ScheduleRow({
         {schedule.account_profile_label ? (
           <span
             className="badge account-profile"
-            title={`Account: ${schedule.account_profile_label}`}
+            title={`Account profile: ${schedule.account_profile_label}`}
           >
             {schedule.account_profile_label}
           </span>

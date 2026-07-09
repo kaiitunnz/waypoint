@@ -7,25 +7,52 @@ import type { LaunchForm } from "@/components/LaunchFormFields";
 import { humaniseBackend } from "@/lib/backends";
 import { trapTabFocus } from "@/lib/keyboard";
 import type {
+  AccountProfile,
   Backend,
   SessionPresetSpec,
   SessionPresetSummary,
   SessionPresetWriteRequest,
 } from "@/lib/types";
 
+interface SummaryChip {
+  text: string;
+  className?: string;
+  title?: string;
+}
+
 // A compact key=value summary of what a preset spec pins, in the badge/mono
 // vocabulary: the backend rides an owner-hue badge, the rest are muted chips.
-// Used only in the save sheet's captures readout.
-function SpecSummary({ spec }: { spec: SessionPresetSummary["spec"] }) {
-  const chips: string[] = [];
-  if (spec.model) chips.push(spec.model);
-  if (spec.effort) chips.push(spec.effort);
-  if (spec.permission_mode) chips.push(spec.permission_mode);
-  if (spec.account_profile_id) chips.push(spec.account_profile_id);
+// The account profile rides the account hue (session identity, not tuning), and
+// resolves to its label from the current catalogue — an id no longer offered
+// falls back to the raw id marked unavailable. Used only in the save sheet's
+// captures readout.
+function SpecSummary({
+  spec,
+  profiles,
+}: {
+  spec: SessionPresetSummary["spec"];
+  profiles: AccountProfile[];
+}) {
+  const chips: SummaryChip[] = [];
+  if (spec.model) chips.push({ text: spec.model });
+  if (spec.effort) chips.push({ text: spec.effort });
+  if (spec.permission_mode) chips.push({ text: spec.permission_mode });
+  if (spec.account_profile_id) {
+    const matched = profiles.find((p) => p.id === spec.account_profile_id);
+    chips.push(
+      matched
+        ? { text: matched.label, className: "is-profile" }
+        : {
+            text: spec.account_profile_id,
+            className: "is-profile is-unavailable",
+            title: "Account profile no longer available",
+          },
+    );
+  }
   const envCount = spec.launch_env_keys?.length ?? 0;
-  if (envCount) chips.push(`${envCount} env`);
+  if (envCount) chips.push({ text: `${envCount} env` });
   const argsCount = spec.args?.length ?? 0;
-  if (argsCount) chips.push(`${argsCount} arg${argsCount > 1 ? "s" : ""}`);
+  if (argsCount) chips.push({ text: `${argsCount} arg${argsCount > 1 ? "s" : ""}` });
   return (
     <span className="preset-summary">
       {spec.backend ? (
@@ -34,9 +61,13 @@ function SpecSummary({ spec }: { spec: SessionPresetSummary["spec"] }) {
         </span>
       ) : null}
       {chips.map((chip, i) => (
-        <span key={`${i}-${chip}`} className="preset-summary-chip">
+        <span
+          key={`${i}-${chip.text}`}
+          className={`preset-summary-chip${chip.className ? ` ${chip.className}` : ""}`}
+          title={chip.title}
+        >
           {i > 0 || spec.backend ? <span className="preset-summary-dot" /> : null}
-          {chip}
+          {chip.text}
         </span>
       ))}
     </span>
@@ -295,6 +326,7 @@ export function PresetSaveActions({
         <PresetSaveModal
           seedDefault={seedDefault}
           spec={formSpec(form, launchTargetId)}
+          profiles={form.accountProfiles}
           onClose={() => setSaveOpen(false)}
           onSave={async (payload) => {
             setBusy(true);
@@ -320,6 +352,7 @@ export function PresetSaveActions({
 interface PresetSaveModalProps {
   seedDefault: boolean;
   spec: SessionPresetSpec;
+  profiles: AccountProfile[];
   onClose: () => void;
   onSave: (payload: SessionPresetWriteRequest) => Promise<void>;
 }
@@ -331,6 +364,7 @@ interface PresetSaveModalProps {
 function PresetSaveModal({
   seedDefault,
   spec,
+  profiles,
   onClose,
   onSave,
 }: PresetSaveModalProps) {
@@ -345,6 +379,7 @@ function PresetSaveModal({
     model: spec.model,
     effort: spec.effort,
     permission_mode: spec.permission_mode,
+    account_profile_id: spec.account_profile_id,
     launch_env_keys: Object.keys(spec.launch_env ?? {}),
     args: spec.args,
   };
@@ -444,8 +479,10 @@ function PresetSaveModal({
             />
           </label>
           <div className="preset-modal-captures">
-            <span className="preset-modal-captures-label">Captures</span>
-            <SpecSummary spec={summarySpec} />
+            <span className="preset-modal-captures-label">
+              Captures session context + tuning
+            </span>
+            <SpecSummary spec={summarySpec} profiles={profiles} />
           </div>
           <label className="preset-modal-check">
             <input

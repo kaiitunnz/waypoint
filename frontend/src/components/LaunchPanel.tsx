@@ -57,6 +57,10 @@ interface LaunchPanelProps {
   catalog: BackendCatalog;
   threadsByBackend: Record<Backend, ThreadSummary[]>;
   loadingByBackend: Record<Backend, boolean>;
+  // Reports the form's live (backend, accountProfileId) selection so the
+  // caller can re-scope the resumable-thread fetch to the selected profile —
+  // thread discovery is fetched app-globally, decoupled from this form.
+  onDiscoveryScopeChange?: (backend: Backend, accountProfileId: string | null) => void;
   onCreate: (
     backend: Backend,
     cwd: string,
@@ -119,6 +123,7 @@ export function LaunchPanel({
   catalog,
   threadsByBackend,
   loadingByBackend,
+  onDiscoveryScopeChange,
   onCreate,
   onAttach,
   onImportThread,
@@ -143,6 +148,11 @@ export function LaunchPanel({
     launchTargetId,
     catalog,
   });
+
+  useEffect(() => {
+    onDiscoveryScopeChange?.(form.backend, form.accountProfileId || null);
+  }, [form.backend, form.accountProfileId, onDiscoveryScopeChange]);
+
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const presetHydratedRef = useRef(false);
 

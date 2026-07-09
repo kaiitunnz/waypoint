@@ -78,11 +78,14 @@ export async function fetchBackendThreads<T = unknown>(
   host: string,
   token: string,
   backend: string,
-  options: { launchTargetId?: string | null } = {},
+  options: { launchTargetId?: string | null; accountProfileId?: string | null } = {},
 ): Promise<T[]> {
   const params = new URLSearchParams();
   if (options.launchTargetId) {
     params.set("launch_target_id", options.launchTargetId);
+  }
+  if (options.accountProfileId) {
+    params.set("account_profile_id", options.accountProfileId);
   }
   const suffix = params.size ? `?${params.toString()}` : "";
   const response = await fetch(
@@ -395,10 +398,14 @@ export async function deleteThread(
   backend: string,
   threadId: string,
   launchTargetId?: string | null,
+  accountProfileId?: string | null,
 ): Promise<void> {
   const params = new URLSearchParams();
   if (launchTargetId) {
     params.set("launch_target_id", launchTargetId);
+  }
+  if (accountProfileId) {
+    params.set("account_profile_id", accountProfileId);
   }
   const suffix = params.size ? `?${params.toString()}` : "";
   const response = await fetch(
@@ -564,6 +571,7 @@ export async function fetchBackendModels(
   options: {
     launchTargetId?: string | null;
     includeHidden?: boolean;
+    accountProfileId?: string | null;
   } = {},
 ): Promise<BackendModelListResponse> {
   const params = new URLSearchParams();
@@ -572,6 +580,9 @@ export async function fetchBackendModels(
   }
   if (options.includeHidden) {
     params.set("include_hidden", "true");
+  }
+  if (options.accountProfileId) {
+    params.set("account_profile_id", options.accountProfileId);
   }
   const suffix = params.size ? `?${params.toString()}` : "";
   const response = await fetch(`${host}/api/backends/${backend}/models${suffix}`, {

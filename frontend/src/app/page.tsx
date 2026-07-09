@@ -162,6 +162,21 @@ export default function HomePage() {
   const [threadsByBackend, setThreadsByBackend] = useState<
     Record<Backend, ThreadSummary[]>
   >({});
+  // The launch form's live (backend, accountProfileId) selection, reported by
+  // LaunchPanel — threads are fetched here app-globally, decoupled from the
+  // form, so this is how the active backend's fetch re-scopes to the
+  // selected profile.
+  const [activeFormBackend, setActiveFormBackend] = useState<Backend | null>(null);
+  const [activeFormAccountProfileId, setActiveFormAccountProfileId] = useState<
+    string | null
+  >(null);
+  const handleDiscoveryScopeChange = useCallback(
+    (backend: Backend, accountProfileId: string | null) => {
+      setActiveFormBackend(backend);
+      setActiveFormAccountProfileId(accountProfileId);
+    },
+    [],
+  );
   const [loadingByBackend, setLoadingByBackend] = useState<
     Record<Backend, boolean>
   >({});
@@ -453,18 +468,24 @@ export default function HomePage() {
     setThreadsByBackend((current) => {
       const next: Record<Backend, ThreadSummary[]> = {};
       for (const id of ids) {
-        next[id] = current[id] ?? [];
+        // The active form backend is re-scoping to (or away from) a
+        // profile — drop its stale list so a slow request can't show the
+        // previous profile's threads.
+        next[id] = id === activeFormBackend ? [] : current[id] ?? [];
       }
       return next;
     });
     for (const id of ids) {
       setLoadingByBackend((current) => ({ ...current, [id]: true }));
+      const accountProfileId =
+        id === activeFormBackend ? activeFormAccountProfileId || undefined : undefined;
       fetchBackendThreads<ThreadSummary>(
         host,
         token,
         id,
         {
           launchTargetId: activeLaunchTargetId || undefined,
+          accountProfileId,
         },
       )
         .then((threads) => {
@@ -498,6 +519,8 @@ export default function HomePage() {
     };
   }, [
     activeLaunchTargetId,
+    activeFormBackend,
+    activeFormAccountProfileId,
     host,
     launchTargets,
     discoveryBackendsKey,
@@ -1087,6 +1110,7 @@ export default function HomePage() {
           catalog={catalog}
           threadsByBackend={threadsByBackend}
           loadingByBackend={loadingByBackend}
+          onDiscoveryScopeChange={handleDiscoveryScopeChange}
           onDeleteThread={handleDeleteThread}
           onAttach={handleAttach}
           onCreate={handleCreate}

@@ -20,6 +20,7 @@ def _make_repo(
         "waypoint-workqueue",
         "waypoint-crew",
         "waypoint-worktree",
+        "waypoint-research",
     ),
 ) -> Path:
     (home / "backend").mkdir(parents=True)
@@ -151,8 +152,18 @@ def test_helper_default_installs_all_skills(tmp_path: Path) -> None:
         "waypoint-workqueue",
         "waypoint-crew",
         "waypoint-worktree",
+        "waypoint-research",
     ):
         assert (dest / skill).is_symlink()
+
+
+def test_repo_default_skills_exist(tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    dest = tmp_path / "dest"
+
+    result = _run_script(repo, "status", "--skill-dir", str(dest))
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_helper_install_is_idempotent(tmp_path: Path) -> None:

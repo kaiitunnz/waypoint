@@ -1,0 +1,4 @@
+interface:
+  display_name: "Waypoint Research"
+  short_description: "Run open-ended research over Waypoint sessions"
+  default_prompt: "Use waypoint-research to run an open-ended optimization search with a shepherd and isolated search agents."

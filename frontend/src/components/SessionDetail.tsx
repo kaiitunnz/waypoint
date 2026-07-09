@@ -4310,6 +4310,14 @@ function SessionHeader({
         <span className={`badge ${headerAgent}`}>
           {humaniseBackend(headerAgent, catalog)}
         </span>
+        {session.account_profile_label ? (
+          <span
+            className="badge account-profile"
+            title={`Account profile: ${session.account_profile_label}`}
+          >
+            {session.account_profile_label}
+          </span>
+        ) : null}
         {!assistant && showHeaderTransport ? (
           <span className={`badge transport ${session.transport}`}>
             {transportLabel(session.transport, catalog)}
@@ -4323,14 +4331,6 @@ function SessionHeader({
         {session.effort ? (
           <span className="badge effort" title={`Effort: ${session.effort}`}>
             {session.effort}
-          </span>
-        ) : null}
-        {session.account_profile_label ? (
-          <span
-            className="badge account-profile"
-            title={`Account: ${session.account_profile_label}`}
-          >
-            {session.account_profile_label}
           </span>
         ) : null}
         {!assistant ? (

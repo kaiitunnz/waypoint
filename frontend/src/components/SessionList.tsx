@@ -219,7 +219,10 @@ export function SessionList({
               <span className="badge neutral">{session.launch_target_id}</span>
             ) : null}
             {session.account_profile_label ? (
-              <span className="badge account-profile">
+              <span
+                className="badge account-profile"
+                title={`Account profile: ${session.account_profile_label}`}
+              >
                 {session.account_profile_label}
               </span>
             ) : null}

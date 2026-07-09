@@ -1,10 +1,10 @@
 """Server-owned ``verified_account_*`` provenance on ``SessionRecord``.
 
-Covers the RFC (`tmp/rfcs/rfc-verified-account-persistence.md`): the switch
-path already probes and verifies the account a profile authenticates as, but
-the result was discarded. These tests cover persistence at each population
-point (launch, thread-import, switch, reattach, boot-restore), redaction, and
-that clients can never set the fields themselves.
+The switch path already probes and verifies the account a profile
+authenticates as, but the result was discarded. These tests cover
+persistence at each population point (launch, thread-import, switch,
+reattach, boot-restore), redaction, and that clients can never set the
+fields themselves.
 """
 
 from datetime import UTC, datetime

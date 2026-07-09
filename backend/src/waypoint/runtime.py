@@ -291,7 +291,7 @@ class SessionRuntime:
             CompletionCacheKey, asyncio.Task[list[CommandCompletion]]
         ] = {}
         # Fire-and-forget verified-account probes (launch, thread-import,
-        # reattach, boot-restore — D5). Tracked so a task isn't GC'd mid-flight;
+        # reattach, boot-restore). Tracked so a task isn't GC'd mid-flight;
         # discarded on done.
         self._account_probe_tasks: set[asyncio.Task[None]] = set()
         self.file_offsets: dict[str, int] = {}
@@ -772,7 +772,7 @@ class SessionRuntime:
     def _stamp_verified_account(
         self, session_id: str, probe: AccountProbeResult, probed_at: datetime
     ) -> None:
-        """Persist the verified-account triple from a probe result (D4).
+        """Persist the verified-account triple from a probe result.
 
         Shared by every population point (switch, launch, thread-import,
         reattach, boot-restore) so the write is always the same three fields.
@@ -793,7 +793,7 @@ class SessionRuntime:
         launch_target: SshLaunchTargetConfig | None,
         cwd: str,
     ) -> None:
-        """Fire-and-forget probe+stamp of ``verified_account_*`` (D5).
+        """Fire-and-forget probe+stamp of ``verified_account_*``.
 
         ``probe_account`` is a live, uncached HTTP call with up to a 30s
         timeout, so this always runs off the launch/reattach/restore response
@@ -821,7 +821,7 @@ class SessionRuntime:
         # Wraps the whole probe+stamp: a raised probe (timeout) or a
         # post-probe storage write (session deleted mid-probe) must never
         # fail the launch/reattach/restore this runs alongside. A ``None``
-        # probe result leaves the prior value untouched (R4) rather than
+        # probe result leaves the prior value untouched rather than
         # clobbering good provenance with a transient failure.
         try:
             probe = await probe_account(
@@ -1253,7 +1253,7 @@ class SessionRuntime:
                 account_profile_id=request.account_profile_id,
                 account_profile_label=account_profile_label,
             )
-            # Fire-and-forget verified-account probe+stamp (D5) — a no-profile
+            # Fire-and-forget verified-account probe+stamp — a no-profile
             # launch leaves verified_account_* None.
             self._schedule_verified_account_probe(
                 session.id,
@@ -1585,7 +1585,7 @@ class SessionRuntime:
                 account_profile_id=account_profile_id,
                 account_profile_label=account_profile_label,
             )
-            # Fire-and-forget verified-account probe+stamp (D5), parity with
+            # Fire-and-forget verified-account probe+stamp, parity with
             # ``create_session``.
             self._schedule_verified_account_probe(
                 session.id,
@@ -1975,7 +1975,7 @@ class SessionRuntime:
             self._warm_command_completions(refreshed, include_remote=False)
             self._start_context_usage_source(refreshed)
             # Boot-restore re-probe is local-only, mirroring the completion
-            # warming above (D3) — remote hosts aren't fanned out to at boot.
+            # warming above — remote hosts aren't fanned out to at boot.
             # Gated on a profile being set, same as launch/thread-import: an
             # unconditional probe would mass-probe the provider's rate-limit
             # endpoint for every no-profile session on every restart.
@@ -2233,9 +2233,9 @@ class SessionRuntime:
                     detail=f"failed to reattach session ({refreshed.status})",
                 )
             # Re-probe after the terminal-status check so a probe failure
-            # never converts a good reattach into a 400 (D3/D5). Gated on a
-            # profile being set, same as launch/thread-import/boot-restore —
-            # a no-profile session has nothing to re-verify.
+            # never converts a good reattach into a 400. Gated on a profile
+            # being set, same as launch/thread-import/boot-restore — a
+            # no-profile session has nothing to re-verify.
             if refreshed.account_profile_id is not None:
                 self._schedule_verified_account_probe(
                     refreshed.id,
@@ -2418,8 +2418,8 @@ class SessionRuntime:
                     detail="could not verify the target account before switching",
                 )
             # Stamp verified_account_* from the probe already run above — no
-            # second probe (D5's switch exception: this is the only
-            # synchronous stamp).
+            # second probe. Unlike the other population points, which probe
+            # off the response path, this is the only synchronous stamp.
             verified_account_fields = {
                 "verified_account_key": target_probe.account_key,
                 "verified_account_label": target_probe.account_label,
@@ -2516,7 +2516,7 @@ class SessionRuntime:
                         ) from exc
 
         # Clearing the profile (set -> None) is not ``profile_changing``, but a
-        # de-profiled session must not keep stale provenance (D6), so null the
+        # de-profiled session must not keep stale provenance, so null the
         # triple explicitly here; ``profile_changing`` already set the triple
         # above from the probe just run, and any other update (model/args-only)
         # leaves it empty so the persisted values are untouched.

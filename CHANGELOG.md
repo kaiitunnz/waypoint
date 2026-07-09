@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.7.0](https://github.com/kaiitunnz/waypoint/compare/v0.6.2...v0.7.0) (2026-07-09)
+
+
+### Features
+
+* account-profile selection and display in the web UI ([#242](https://github.com/kaiitunnz/waypoint/issues/242)) ([55e3645](https://github.com/kaiitunnz/waypoint/commit/55e3645185ce0523cc4695103feeaf270b486d1a))
+* add account/config-dir profiles (config, capabilities, metadata) ([#231](https://github.com/kaiitunnz/waypoint/issues/231)) ([28a19b6](https://github.com/kaiitunnz/waypoint/commit/28a19b66297cafa6fb21e16ae2aacc71a5be8321))
+* add account/config-profile switching to the CLI ([#238](https://github.com/kaiitunnz/waypoint/issues/238)) ([f891e34](https://github.com/kaiitunnz/waypoint/commit/f891e34e698348def63f4b9ec06fd38676958c47))
+* add accounts probe/doctor/setup-transcripts CLI and endpoints ([#251](https://github.com/kaiitunnz/waypoint/issues/251)) ([35b5e6e](https://github.com/kaiitunnz/waypoint/commit/35b5e6e13470b5651e4436cc8b3a3ccd60af0c7d))
+* add native transcript availability for profile switching ([#236](https://github.com/kaiitunnz/waypoint/issues/236)) ([49f7117](https://github.com/kaiitunnz/waypoint/commit/49f711744c9efb59e2cf1c9b7048295c39360f11))
+* elevate account profile to session context in the web UI ([#260](https://github.com/kaiitunnz/waypoint/issues/260)) ([dd73734](https://github.com/kaiitunnz/waypoint/commit/dd737346dc9c48e90ea5429ebe49b8fdf8ca480d))
+* extend account-profile switching to SSH remote launch targets ([#259](https://github.com/kaiitunnz/waypoint/issues/259)) ([2ba3ff5](https://github.com/kaiitunnz/waypoint/commit/2ba3ff501e0ec0b6319c8df2e630181542976534))
+* live account/launch-settings switch via restart-and-resume ([#237](https://github.com/kaiitunnz/waypoint/issues/237)) ([2529995](https://github.com/kaiitunnz/waypoint/commit/2529995ff59f6884cba00cf431180de9119cffe6))
+* persist and apply account-profile selection at launch ([#234](https://github.com/kaiitunnz/waypoint/issues/234)) ([15037d1](https://github.com/kaiitunnz/waypoint/commit/15037d11364f66d5aa2e4e934077758378a4c50a))
+* persist verified-account provenance on sessions ([#263](https://github.com/kaiitunnz/waypoint/issues/263)) ([e8ef802](https://github.com/kaiitunnz/waypoint/commit/e8ef802ee29570ff89adb7e37f7ba84e1938ce3d))
+* reject account profiles whose config dir isn't set up ([#250](https://github.com/kaiitunnz/waypoint/issues/250)) ([947190c](https://github.com/kaiitunnz/waypoint/commit/947190c5180b14ac7416b54fc77f9ddf4a56cc9d))
+* scope discovery (models, threads, import, delete) to the account profile ([#261](https://github.com/kaiitunnz/waypoint/issues/261)) ([735d341](https://github.com/kaiitunnz/waypoint/commit/735d3416c67588413f5d32ba452122fbdfd03be9))
+* switch a running session's account profile from the composer ([#243](https://github.com/kaiitunnz/waypoint/issues/243)) ([8630325](https://github.com/kaiitunnz/waypoint/commit/8630325ada7d54bea561555e8e0e78795b9af779))
+
+
+### Bug Fixes
+
+* add transcript response submit shortcuts ([#240](https://github.com/kaiitunnz/waypoint/issues/240)) ([73913ff](https://github.com/kaiitunnz/waypoint/commit/73913ff658389ba160a261cb006ae136cd600679))
+* probe rate limits with the session's account env ([#235](https://github.com/kaiitunnz/waypoint/issues/235)) ([6e5492d](https://github.com/kaiitunnz/waypoint/commit/6e5492d2d42eeeb1c8202cef8292e2ae6c12f6ca))
+* relaunch the pane when switching launch settings on claude_tty ([#239](https://github.com/kaiitunnz/waypoint/issues/239)) ([4d3ecda](https://github.com/kaiitunnz/waypoint/commit/4d3ecdafdab2eb65337b0b5bdb3642026c279d3a))
+* resolve codex per-session ops against the profile CODEX_HOME ([#247](https://github.com/kaiitunnz/waypoint/issues/247)) ([5da8484](https://github.com/kaiitunnz/waypoint/commit/5da84846ceb8699fd4523cfa3c528430e1c9319e))
+* resume the same thread across an account switch on pane transports ([#241](https://github.com/kaiitunnz/waypoint/issues/241)) ([2861ebf](https://github.com/kaiitunnz/waypoint/commit/2861ebfc83edea3134c4b03fb6b455eba8dce5b4))
+* scope claude_code per-session ops to the profile config dir ([#248](https://github.com/kaiitunnz/waypoint/issues/248)) ([5d995e5](https://github.com/kaiitunnz/waypoint/commit/5d995e54b961f8a626fbab3d0bd9e313284e5db3))
+* scope claude_tty plan-file detection to the profile config dir ([#249](https://github.com/kaiitunnz/waypoint/issues/249)) ([92d7f5f](https://github.com/kaiitunnz/waypoint/commit/92d7f5f1f83025527373be3b0acda1179abbbe06))
+* tail the profile's config dir for claude_tty sessions ([#246](https://github.com/kaiitunnz/waypoint/issues/246)) ([45b5cd3](https://github.com/kaiitunnz/waypoint/commit/45b5cd37c2973531c7624533bbf8abf418a8ce6c))
+* top-align session-context field row so controls share an edge ([#262](https://github.com/kaiitunnz/waypoint/issues/262)) ([4f4f708](https://github.com/kaiitunnz/waypoint/commit/4f4f7086b9fe6b7a0212307b487383299d4e4521))
+
 ## [0.6.2](https://github.com/kaiitunnz/waypoint/compare/v0.6.1...v0.6.2) (2026-07-06)
 
 

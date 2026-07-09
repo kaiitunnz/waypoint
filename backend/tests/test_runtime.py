@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import ANY
 
 import pytest
 from fastapi import HTTPException
@@ -1239,9 +1240,12 @@ async def test_handle_input_reattaches_exited_codex_session(tmp_path) -> None:
     )
 
     # Reattach uses the stored thread_id to resume the existing Codex thread,
-    # then the input forwards through the freshly attached client.
+    # then the input forwards through the freshly attached client. The
+    # factory slot (index 3) is now always a real env-carrying closure for
+    # local codex launches (previously ``None``, relying on the adapter to
+    # rebuild it) — see CodexPlugin.client_factory's local-env fix.
     assert fake.restore_calls == [
-        ("sess", "/tmp/project", "thread-resume", None, None, None)
+        ("sess", "/tmp/project", "thread-resume", ANY, None, None)
     ]
     # Stale adapter state is torn down before the respawn so we don't orphan
     # a client/process keyed under the same session id.
@@ -1269,7 +1273,7 @@ async def test_resume_reattaches_exited_session(tmp_path) -> None:
     # Relaunched via restore (no input forwarded), and never poked the dead pane.
     # Reattach leaves it IDLE (alive, ready), not RUNNING — no turn was started.
     assert fake.restore_calls == [
-        ("sess", "/tmp/project", "thread-resume", None, None, None)
+        ("sess", "/tmp/project", "thread-resume", ANY, None, None)
     ]
     assert fake.inputs == []
     assert updated.status == SessionStatus.IDLE
@@ -2622,6 +2626,7 @@ async def test_import_codex_thread_for_remote_target_uses_thread_cwd(
         launch_target_id: str | None,
         *,
         include_turns: bool = False,
+        launch_env: dict[str, str] | None = None,
     ) -> Any:
         assert thread_id == "thread-9"
         assert launch_target_id == "devbox"

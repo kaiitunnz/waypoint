@@ -12,21 +12,37 @@ from waypoint.launch_targets import SshLaunchTargetConfig
 if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
 
-# The local delete path never touches the runtime; a typed null keeps mypy
-# happy without standing up a real SessionRuntime.
-_NO_RUNTIME = cast("SessionRuntime", None)
 
+def _runtime_resolving(
+    target: SshLaunchTargetConfig | None, discovery_env: dict[str, str] | None = None
+) -> "SessionRuntime":
+    """A minimal runtime whose ``_resolve_launch_target``/``discovery_env`` are stubbed.
 
-def _runtime_resolving(target: SshLaunchTargetConfig | None) -> "SessionRuntime":
-    """A minimal runtime whose ``_resolve_launch_target`` yields ``target``."""
+    The local delete path resolves ``discovery_env`` even when no profile is
+    selected (it falls back to the process default), so every test needs both
+    methods rather than a bare ``None`` runtime.
+    """
 
     class _Runtime:
         def _resolve_launch_target(
-            self, _launch_target_id: str, _backend: str
+            self, _launch_target_id: str | None, _backend: str
         ) -> SshLaunchTargetConfig | None:
             return target
 
+        async def discovery_env(
+            self,
+            _backend: str,
+            _launch_target: SshLaunchTargetConfig | None,
+            _account_profile_id: str | None,
+        ) -> dict[str, str]:
+            return discovery_env or {}
+
     return cast("SessionRuntime", _Runtime())
+
+
+# The local delete path with no profile selected falls back to the process
+# env, exactly like the pre-profile-scoping behavior these tests pin.
+_NO_RUNTIME = _runtime_resolving(None)
 
 
 @pytest.fixture
@@ -142,3 +158,28 @@ async def test_delete_thread_remote_rejects_non_uuid_without_ssh(
         is False
     )
     assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_delete_thread_local_scopes_to_profile_config_dir(
+    plugin: CodexPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A selected account profile must resolve rollouts from its own CODEX_HOME,
+    # not the process-default one the bare $CODEX_HOME env var points at.
+    default_home = tmp_path / "default"
+    profile_home = tmp_path / "profile"
+    default_home.mkdir()
+    profile_home.mkdir()
+    monkeypatch.setenv("CODEX_HOME", str(default_home))
+
+    thread_id = str(uuid.uuid4())
+    default_rollout = _make_rollout(default_home, thread_id)
+    profile_rollout = _make_rollout(profile_home, thread_id)
+
+    runtime = _runtime_resolving(None, discovery_env={"CODEX_HOME": str(profile_home)})
+
+    assert await plugin.delete_thread(runtime, thread_id, account_profile_id="acct-1")
+    assert not profile_rollout.exists()
+    assert default_rollout.exists()

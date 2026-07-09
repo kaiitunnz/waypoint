@@ -356,7 +356,6 @@ export function LaunchFormFields({
           onAccountProfileChange={form.setAccountProfileId}
           targetLabel={targetLabel}
           catalog={catalog}
-          disabled={busy}
         />
       </section>
 

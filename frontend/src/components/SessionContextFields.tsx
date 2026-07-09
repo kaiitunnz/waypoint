@@ -21,7 +21,6 @@ interface SessionContextFieldsProps {
   // hint so the context reads "which host / account / interface".
   targetLabel: string | null;
   catalog: BackendCatalog;
-  disabled?: boolean;
 }
 
 // The top-of-form session context: agent, account profile (only when the agent
@@ -40,7 +39,6 @@ export function SessionContextFields({
   onAccountProfileChange,
   targetLabel,
   catalog,
-  disabled,
 }: SessionContextFieldsProps) {
   const transports = useMemo(
     () => agentTransports(agent, catalog),
@@ -60,7 +58,6 @@ export function SessionContextFields({
             profiles={accountProfiles}
             value={accountProfileId}
             onChange={onAccountProfileChange}
-            disabled={disabled}
           />
         ) : null}
         <TransportPicker

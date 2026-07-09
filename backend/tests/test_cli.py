@@ -1054,6 +1054,110 @@ def test_sessions_output_text_prints_only_agent_output(
     assert result.stdout == "hello\n\n world"
 
 
+def test_sessions_output_compact_returns_messages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/sessions/s1/events":
+            return httpx.Response(
+                200,
+                json={
+                    "events": [
+                        {"kind": "status_update", "text": "busy", "sequence": 1},
+                        {"kind": "user_input", "text": "question", "sequence": 2},
+                        {
+                            "kind": "agent_output",
+                            "text": "answ",
+                            "sequence": 3,
+                            "metadata": {
+                                "item_id": "msg-1",
+                                "payload": {"verbose": True},
+                            },
+                        },
+                        {
+                            "kind": "agent_output",
+                            "text": "er",
+                            "sequence": 4,
+                            "metadata": {
+                                "item_id": "msg-1",
+                                "payload": {"verbose": True},
+                            },
+                        },
+                        {"kind": "tool_result", "text": "ignored", "sequence": 5},
+                    ],
+                    "has_more": True,
+                },
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    def fake_client(settings: Settings, **_: object) -> WaypointClient:
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://t")
+        return WaypointClient(settings, token="t", client=http)
+
+    monkeypatch.setattr("waypoint.cli.WaypointClient", fake_client)
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "output",
+            "s1",
+            "--compact",
+        ],
+    )
+    assert result.exit_code == 0
+
+    assert json.loads(result.stdout) == {
+        "messages": [
+            {"seq": 2, "role": "user", "text": "question"},
+            {
+                "seq": 4,
+                "role": "assistant",
+                "text": "answer",
+                "item_id": "msg-1",
+            },
+        ],
+        "has_more": True,
+    }
+
+
+def test_sessions_output_compact_rejects_text(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "output",
+            "s1",
+            "--compact",
+            "--text",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--compact cannot be combined with --text" in result.output
+
+
+def test_sessions_output_compact_rejects_raw(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(_config(tmp_path)),
+            "sessions",
+            "output",
+            "s1",
+            "--compact",
+            "--raw",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--compact cannot be combined with --raw" in result.output
+
+
 def test_answer_question_rejects_malformed_answers_json(tmp_path: Path) -> None:
     result = runner.invoke(
         app,

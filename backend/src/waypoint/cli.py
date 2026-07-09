@@ -1367,12 +1367,26 @@ def sessions_events(
             help="(--no-follow only) Coalesce streaming deltas into logical events.",
         ),
     ] = False,
+    compact: Annotated[
+        bool,
+        typer.Option(
+            "--compact",
+            help=(
+                "Print a compact agent-readable event view without raw backend "
+                "metadata. Implies --coalesce and cannot be combined with --follow."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Show a session's transcript, or stream live events with --follow.
 
     Pass one or more SESSION_IDs, or use --spawned-by / --mine with --follow
     to resolve the set dynamically from the running server.
     """
+    if compact and follow:
+        typer.echo("error: --compact is not supported with --follow yet", err=True)
+        raise typer.Exit(code=1)
+
     if follow:
         try:
             asyncio.run(
@@ -1400,10 +1414,12 @@ def sessions_events(
         page = c.get_events(
             session_id, messages=messages, before_sequence=before_sequence
         )
-        if coalesce:
+        if coalesce or compact:
             from waypoint.events import coalesce_events
 
             page["events"] = coalesce_events(page["events"])
+        if compact:
+            return _compact_events_page(page)
         return page
 
     _emit(
@@ -1415,6 +1431,71 @@ def sessions_events(
 def _conversation_events(events_page: dict[str, Any]) -> list[dict[str, Any]]:
     visible = {"user_input", "agent_output"}
     return [event for event in events_page["events"] if event.get("kind") in visible]
+
+
+_COMPACT_METADATA_KEYS: dict[str, str] = {
+    "item_id": "item_id",
+    "item_type": "item_type",
+    "tool_name": "tool",
+    "status": "status",
+    "approval_id": "approval_id",
+    "question_id": "question_id",
+}
+
+
+def _lift_compact_metadata(event: dict[str, Any], target: dict[str, Any]) -> None:
+    metadata = event.get("metadata")
+    if not isinstance(metadata, dict):
+        return
+    for source, dest in _COMPACT_METADATA_KEYS.items():
+        value = metadata.get(source)
+        if value not in (None, ""):
+            target[dest] = value
+
+
+def _compact_event(event: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {
+        "seq": event.get("sequence"),
+        "kind": event.get("kind"),
+        "text": event.get("text", ""),
+    }
+    _lift_compact_metadata(event, compact)
+    return {key: value for key, value in compact.items() if value is not None}
+
+
+def _compact_message(event: dict[str, Any]) -> dict[str, Any]:
+    role = "user" if event.get("kind") == "user_input" else "assistant"
+    compact: dict[str, Any] = {
+        "seq": event.get("sequence"),
+        "role": role,
+        "text": event.get("text", ""),
+    }
+    metadata = event.get("metadata")
+    if event.get("kind") == "agent_output" and isinstance(metadata, dict):
+        item_id = metadata.get("item_id")
+        if item_id not in (None, ""):
+            compact["item_id"] = item_id
+    return {key: value for key, value in compact.items() if value is not None}
+
+
+def _compact_events_page(events_page: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {
+        "events": [_compact_event(event) for event in events_page["events"]]
+    }
+    if "has_more" in events_page:
+        compact["has_more"] = events_page["has_more"]
+    return compact
+
+
+def _compact_transcript_page(events_page: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {
+        "messages": [
+            _compact_message(event) for event in _conversation_events(events_page)
+        ]
+    }
+    if "has_more" in events_page:
+        compact["has_more"] = events_page["has_more"]
+    return compact
 
 
 @sessions_app.command("wait")
@@ -2311,8 +2392,25 @@ def sessions_output(
             help="Return all raw event deltas without coalescing.",
         ),
     ] = False,
+    compact: Annotated[
+        bool,
+        typer.Option(
+            "--compact",
+            help=(
+                "Print a compact agent-readable transcript as messages without "
+                "raw backend metadata."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Show just the conversational transcript from a session."""
+    if compact and text:
+        typer.echo("error: --compact cannot be combined with --text", err=True)
+        raise typer.Exit(code=1)
+    if compact and raw:
+        typer.echo("error: --compact cannot be combined with --raw", err=True)
+        raise typer.Exit(code=1)
+
     if text:
         page = _run_client(
             _settings_from_ctx(ctx),
@@ -2337,6 +2435,8 @@ def sessions_output(
             from waypoint.events import coalesce_events
 
             page["events"] = coalesce_events(page["events"])
+        if compact:
+            return _compact_transcript_page(page)
         return {"events": _conversation_events(page)}
 
     _emit(

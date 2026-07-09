@@ -35,15 +35,23 @@ def account_bucket_for(
     *,
     session_id: str,
     registry: _PluginRegistry,
+    verified_account_key: str | None = None,
+    verified_account_label: str | None = None,
 ) -> tuple[str, str]:
     """Return ``(account_key, account_label)`` for a snapshot.
 
-    Dispatches the account-scoping decision to the snapshot's agent plugin
-    (``rate_limit_account``). Falls back to a session-scoped key labelled
-    with the plugin's human name when the plugin declines (no account info)
-    or is unknown, so probes without org/email metadata still surface as
-    their own bucket instead of collapsing together.
+    Prefers the session's persisted ``verified_account_key``/``label`` (last
+    probed at launch/switch/reattach) when present — it's already in the same
+    ``{backend}:{identity}`` shape ``rate_limit_account`` produces, since both
+    derive from the same probe. Otherwise dispatches the account-scoping
+    decision to the snapshot's agent plugin (``rate_limit_account``), falling
+    back to a session-scoped key labelled with the plugin's human name when
+    the plugin declines (no account info) or is unknown, so probes without
+    org/email metadata still surface as their own bucket instead of
+    collapsing together.
     """
+    if verified_account_key is not None:
+        return verified_account_key, verified_account_label or verified_account_key
     plugin = (
         registry.get(snapshot.source) if registry.has_backend(snapshot.source) else None
     )
@@ -80,7 +88,11 @@ def build_dashboard(
         if snapshot is None:
             continue
         key, label = account_bucket_for(
-            snapshot, session_id=session.id, registry=registry
+            snapshot,
+            session_id=session.id,
+            registry=registry,
+            verified_account_key=session.verified_account_key,
+            verified_account_label=session.verified_account_label,
         )
         existing = buckets.get(key)
         if existing is None:

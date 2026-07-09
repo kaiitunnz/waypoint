@@ -2865,7 +2865,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const currentProfileId = accountProfileId ?? "";
   const profileSwitchValue = pendingAccountProfileId ?? currentProfileId;
   // A switch is offered only to a named profile that isn't the current one —
-  // phase 1 doesn't switch back to the service default (it resolves to the same
+  // phase 1 doesn't switch back to the default (it resolves to the same
   // account), so staging it shows no confirm.
   const profileSwitchDiffers =
     profileSwitchValue !== "" && profileSwitchValue !== currentProfileId;
@@ -3013,6 +3013,46 @@ const ReplyComposer = memo(function ReplyComposer({
                 role="dialog"
                 aria-label="Session settings"
               >
+                {hasAccountPicker ? (
+                  <div className="composer-tune-context">
+                    <AccountProfilePicker
+                      profiles={accountProfiles}
+                      value={profileSwitchValue}
+                      onChange={(id) => setPendingAccountProfileId(id)}
+                      disabled={accountBusy}
+                      fieldClassName="composer-tune-field"
+                    />
+                    {profileSwitchDiffers ? (
+                      <div className="composer-tune-confirm">
+                        <p>
+                          Restart this session with{" "}
+                          <strong>{pendingProfileLabel}</strong>? The current
+                          turn is interrupted, the backend process restarts, and
+                          the session resumes from the selected profile&apos;s
+                          config and transcript store.
+                        </p>
+                        <div className="composer-tune-confirm-actions">
+                          <button
+                            type="button"
+                            className="composer-tune-confirm-cancel"
+                            onClick={() => setPendingAccountProfileId(null)}
+                            disabled={accountBusy}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            className="composer-tune-confirm-apply"
+                            onClick={() => void confirmProfileSwitch()}
+                            disabled={accountBusy}
+                          >
+                            {accountBusy ? "Restarting…" : "Restart session"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {assistantOps && session ? (
                   <label className="composer-tune-field">
                     <span>Agent</span>
@@ -3289,46 +3329,6 @@ const ReplyComposer = memo(function ReplyComposer({
                         </button>
                       </div>
                     </div>
-                  </div>
-                ) : null}
-                {hasAccountPicker ? (
-                  <div className="composer-tune-lifecycle">
-                    <AccountProfilePicker
-                      profiles={accountProfiles}
-                      value={profileSwitchValue}
-                      onChange={(id) => setPendingAccountProfileId(id)}
-                      disabled={accountBusy}
-                      fieldClassName="composer-tune-field"
-                    />
-                    {profileSwitchDiffers ? (
-                      <div className="composer-tune-confirm">
-                        <p>
-                          Restart this session with{" "}
-                          <strong>{pendingProfileLabel}</strong>? The current
-                          turn is interrupted, the backend process restarts, and
-                          the session resumes from the selected profile&apos;s
-                          config and transcript store.
-                        </p>
-                        <div className="composer-tune-confirm-actions">
-                          <button
-                            type="button"
-                            className="composer-tune-confirm-cancel"
-                            onClick={() => setPendingAccountProfileId(null)}
-                            disabled={accountBusy}
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="button"
-                            className="composer-tune-confirm-apply"
-                            onClick={() => void confirmProfileSwitch()}
-                            disabled={accountBusy}
-                          >
-                            {accountBusy ? "Restarting…" : "Restart session"}
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
                   </div>
                 ) : null}
               </div>

@@ -239,7 +239,7 @@ export function useLaunchForm({
 
   // Drop a selected profile the current backend/target doesn't offer (e.g. a
   // preset carrying a profile valid elsewhere) so the launch never submits an
-  // id the server would reject; falls back to the service-default option.
+  // id the server would reject; falls back to the default option.
   useEffect(() => {
     if (
       accountProfileId &&

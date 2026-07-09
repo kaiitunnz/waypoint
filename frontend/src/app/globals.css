@@ -6115,6 +6115,15 @@ html[data-theme="light"] .composer-tune-restart-apply {
   cursor: progress;
 }
 
+/* Session-context header at the top of the settings popover: the account
+   profile as session identity, divided from the quick-tuning fields below. */
+.composer-tune-context {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
 /* Assistant lifecycle footer (backend switch / clear context / terminate). */
 .composer-tune-lifecycle {
   display: grid;

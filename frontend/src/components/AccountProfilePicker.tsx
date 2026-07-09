@@ -7,10 +7,7 @@ interface AccountProfilePickerProps {
   value: string;
   onChange: (id: string) => void;
   disabled?: boolean;
-  // Copy for the no-profile option. "Account" overpromises (the frontend only
-  // knows the configured profile, not the verified account), and plain
-  // "Default" collides with default preset/model/effort — so callers name the
-  // fallback explicitly, e.g. "Service default".
+  // Copy for the no-profile option: the agent's default config/account.
   defaultLabel?: string;
   label?: string;
   // Wrapper class so the same control reads as a flat launch ``.field`` or a
@@ -26,7 +23,7 @@ export function AccountProfilePicker({
   value,
   onChange,
   disabled,
-  defaultLabel = "Service default",
+  defaultLabel = "Default",
   label = "Account profile",
   fieldClassName = "field",
 }: AccountProfilePickerProps) {

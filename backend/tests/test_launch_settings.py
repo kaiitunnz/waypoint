@@ -6,6 +6,7 @@ and is exercised end-to-end in the app). ``probe_account`` composition and the
 GET projection are covered directly.
 """
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,8 @@ from waypoint.schemas import (
 )
 from waypoint.settings import Settings
 from waypoint.storage import Storage
+
+TID = "11111111-1111-1111-1111-111111111111"
 
 
 def _codex_profiles() -> dict[str, object]:
@@ -49,9 +52,6 @@ def _session(runtime: SessionRuntime, **kw: Any) -> SessionRecord:
     base: dict[str, Any] = dict(
         id="s1",
         backend="codex",
-        # Structured transport: phase-1 restart-applied settings live on the
-        # agent/native transports; tmux-wrapped switching needs the agent×
-        # transport caps composition and is out of phase-4 scope.
         transport="codex_app_server",
         source=SessionSource.MANAGED,
         title="t",
@@ -301,3 +301,231 @@ async def test_update_rejects_expected_account_key_mismatch(
         )
     assert getattr(exc.value, "status_code", None) == 400
     assert "expected" in str(getattr(exc.value, "detail", ""))
+
+
+# ── tmux-wrapped account-profile switching (composed caps) ──────────────────
+#
+# These exercise the full real stack — composed capabilities gate the switch
+# (S1/S3), TmuxPlugin delegates the transcript-artifact lookup to the wrapped
+# agent (S2), and TmuxTransport.flush_before_restart runs after the interrupt
+# (S4) — with only terminate_session/restore_session/probe_account mocked
+# (as the native-transport tests above do), so a real terminate/restore cycle
+# never actually needs to spawn tmux.
+
+
+def _write_claude_thread(config_dir: Path, project: str = "-repo-app") -> Path:
+    proj = config_dir / "projects" / project
+    proj.mkdir(parents=True)
+    path = proj / f"{TID}.jsonl"
+    path.write_text("{}")
+    return path
+
+
+def _write_claude_onboarding_complete(config_dir: Path) -> None:
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / ".claude.json").write_text(
+        json.dumps({"hasCompletedOnboarding": True})
+    )
+
+
+def _write_codex_auth(config_dir: Path) -> None:
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "auth.json").write_text(
+        json.dumps(
+            {
+                "tokens": {
+                    "access_token": "access-token",
+                    "refresh_token": "refresh-token",
+                    "account_id": "account-123",
+                },
+                "last_refresh": "2026-05-01T12:34:56Z",
+            }
+        )
+    )
+
+
+async def test_update_switches_account_profile_for_tmux_wrapped_claude_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target_dir = tmp_path / "claude-target"
+    _write_claude_thread(target_dir)
+    _write_claude_onboarding_complete(target_dir)
+    profiles = {
+        "account_profiles": {
+            "work": {
+                "label": "Work",
+                "config_dir": str(target_dir),
+                "transcript_policy": "require_existing",
+                "expected_account_key": "claude:work@co",
+            }
+        }
+    }
+    runtime = _runtime(tmp_path, claude_code=profiles)
+    _session(
+        runtime,
+        backend="claude_code",
+        transport="tmux",
+        cwd="/repo/app",
+        launch_env={"CLAUDE_CONFIG_DIR": str(tmp_path / "claude-current")},
+    )
+    # A (claude_code, tmux) pair drives through the tmux transport-owning
+    # plugin (registry.resolve keys the pair to the transport owner), not the
+    # claude_code plugin directly.
+    plugin = runtime.registry.plugin_for(runtime.get_session("s1"))
+    assert plugin.id == "tmux"
+    seen: dict[str, Any] = {}
+
+    async def fake_terminate(*_a: Any, **_k: Any) -> None:
+        seen["terminated"] = True
+
+    async def fake_restore(_self_rt: Any, session: SessionRecord) -> None:
+        seen["restore_status"] = session.status
+        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+
+    monkeypatch.setattr(plugin, "terminate_session", fake_terminate)
+    monkeypatch.setattr(plugin, "restore_session", fake_restore)
+
+    async def fake_probe(*_a: Any, **_k: Any) -> AccountProbeResult:
+        return AccountProbeResult(account_key="claude:work@co", account_label="work@co")
+
+    monkeypatch.setattr("waypoint.runtime.probe_account", fake_probe)
+
+    updated = await runtime.update_launch_settings(
+        "s1", LaunchSettingsUpdateRequest(account_profile_id="work", restart=True)
+    )
+
+    assert seen["terminated"] is True
+    # Marked EXITED before restore — same regression coverage as the native
+    # pane-wrapping (claude_tty) case, now proven for the tmux pair too.
+    assert seen["restore_status"] == SessionStatus.EXITED
+    assert updated.account_profile_id == "work"
+    assert updated.launch_env["CLAUDE_CONFIG_DIR"] == str(target_dir)
+
+
+async def test_update_switches_account_profile_for_tmux_wrapped_codex(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current_dir = tmp_path / "codex-current"
+    target_dir = tmp_path / "codex-target"
+    day = current_dir / "sessions" / "2026" / "07" / "08"
+    day.mkdir(parents=True)
+    (day / f"rollout-2026-07-08T00-00-00-{TID}.jsonl").write_text("{}")
+    _write_codex_auth(target_dir)
+    profiles = {
+        "account_profiles": {
+            "work": {
+                "label": "Work",
+                "config_dir": str(target_dir),
+                # copy_thread_on_switch, unlike the claude case above, so this
+                # also covers the wrapper's delegated copy path.
+                "transcript_policy": "copy_thread_on_switch",
+                "expected_account_key": "codex:work@co",
+            }
+        }
+    }
+    runtime = _runtime(tmp_path, codex=profiles)
+    _session(
+        runtime,
+        backend="codex",
+        transport="tmux",
+        cwd="/repo/app",
+        launch_env={"CODEX_HOME": str(current_dir)},
+    )
+    plugin = runtime.registry.plugin_for(runtime.get_session("s1"))
+    assert plugin.id == "tmux"
+
+    async def fake_terminate(*_a: Any, **_k: Any) -> None:
+        return None
+
+    async def fake_restore(_self_rt: Any, session: SessionRecord) -> None:
+        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+
+    monkeypatch.setattr(plugin, "terminate_session", fake_terminate)
+    monkeypatch.setattr(plugin, "restore_session", fake_restore)
+
+    async def fake_probe(*_a: Any, **_k: Any) -> AccountProbeResult:
+        return AccountProbeResult(account_key="codex:work@co", account_label="work@co")
+
+    monkeypatch.setattr("waypoint.runtime.probe_account", fake_probe)
+
+    updated = await runtime.update_launch_settings(
+        "s1", LaunchSettingsUpdateRequest(account_profile_id="work", restart=True)
+    )
+
+    assert updated.launch_env["CODEX_HOME"] == str(target_dir)
+    # The wrapper delegated the copy to codex's real artifact locator: the
+    # rollout is now visible under the target dir too.
+    copied = (
+        target_dir
+        / day.relative_to(current_dir)
+        / f"rollout-2026-07-08T00-00-00-{TID}.jsonl"
+    )
+    assert copied.is_file()
+
+
+async def test_update_rejects_tmux_switch_for_a_pure_attached_pane(
+    tmp_path: Path,
+) -> None:
+    """A pure attached-tmux session (no agent axis, backend == 'tmux') has no
+    config-dir env var on its agent axis, so it stays refused after the
+    tmux transport's own restart-with-resume flag was flipped on — a
+    regression guard for the composed-caps gate."""
+    runtime = _runtime(tmp_path)
+    _session(runtime, backend="tmux", transport="tmux")
+    with pytest.raises(Exception) as exc:
+        await runtime.update_launch_settings(
+            "s1",
+            LaunchSettingsUpdateRequest(account_profile_id="work", restart=True),
+        )
+    assert getattr(exc.value, "status_code", None) == 400
+
+
+async def test_update_aborts_tmux_switch_before_terminate_when_transcript_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail-before-destroy: when the target profile can't see the native
+    thread (require_existing, nothing written under the target dir), the
+    switch must raise before terminate_session is ever called — the real
+    ensure_thread_available runs unmocked here."""
+    target_dir = tmp_path / "claude-target-empty"
+    _write_claude_onboarding_complete(target_dir)
+    profiles = {
+        "account_profiles": {
+            "work": {
+                "label": "Work",
+                "config_dir": str(target_dir),
+                "transcript_policy": "require_existing",
+                "expected_account_key": "claude:work@co",
+            }
+        }
+    }
+    runtime = _runtime(tmp_path, claude_code=profiles)
+    _session(
+        runtime,
+        backend="claude_code",
+        transport="tmux",
+        cwd="/repo/app",
+        launch_env={"CLAUDE_CONFIG_DIR": str(tmp_path / "claude-current")},
+    )
+    plugin = runtime.registry.plugin_for(runtime.get_session("s1"))
+    terminate_calls: list[str] = []
+
+    async def spy_terminate(*_a: Any, **_k: Any) -> None:
+        terminate_calls.append("terminated")
+
+    monkeypatch.setattr(plugin, "terminate_session", spy_terminate)
+
+    async def fake_probe(*_a: Any, **_k: Any) -> AccountProbeResult:
+        return AccountProbeResult(account_key="claude:work@co", account_label="work@co")
+
+    monkeypatch.setattr("waypoint.runtime.probe_account", fake_probe)
+
+    with pytest.raises(Exception) as exc:
+        await runtime.update_launch_settings(
+            "s1", LaunchSettingsUpdateRequest(account_profile_id="work", restart=True)
+        )
+
+    assert getattr(exc.value, "status_code", None) == 400
+    assert "cannot switch account profile" in str(getattr(exc.value, "detail", ""))
+    assert terminate_calls == []
+    assert runtime.get_session("s1").status != SessionStatus.EXITED

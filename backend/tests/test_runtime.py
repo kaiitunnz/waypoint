@@ -2703,7 +2703,7 @@ async def test_list_importable_claude_threads_filters_existing_session(
 
     monkeypatch.setattr(
         "waypoint.backends.claude_code.plugin.list_local_claude_threads",
-        lambda: [info_existing, info_new],
+        lambda config_dir=None: [info_existing, info_new],
     )
 
     threads = await runtime.registry.get("claude_code").list_threads(runtime)
@@ -2834,7 +2834,7 @@ async def test_import_claude_thread_creates_session_and_resumes(
 
     monkeypatch.setattr(
         "waypoint.backends.claude_code.plugin.find_local_claude_thread",
-        lambda thread_id: info if thread_id == info.id else None,
+        lambda thread_id, config_dir=None: info if thread_id == info.id else None,
     )
 
     session = await runtime.registry.get("claude_code").import_thread(
@@ -3083,7 +3083,7 @@ async def test_import_claude_thread_terminal_supersedes_launch_mode(
     )
     monkeypatch.setattr(
         "waypoint.backends.claude_code.plugin.find_local_claude_thread",
-        lambda thread_id: info if thread_id == info.id else None,
+        lambda thread_id, config_dir=None: info if thread_id == info.id else None,
     )
     tmux = runtime.registry.fallback_for_managed_launch()
     assert tmux is not None
@@ -3129,7 +3129,7 @@ async def test_import_claude_thread_native_supersedes_tmux_launch_mode(
     )
     monkeypatch.setattr(
         "waypoint.backends.claude_code.plugin.find_local_claude_thread",
-        lambda thread_id: info if thread_id == info.id else None,
+        lambda thread_id, config_dir=None: info if thread_id == info.id else None,
     )
     tmux = runtime.registry.fallback_for_managed_launch()
     assert tmux is not None
@@ -3166,7 +3166,7 @@ async def test_import_thread_transport_none_matches_default(
     )
     monkeypatch.setattr(
         "waypoint.backends.claude_code.plugin.find_local_claude_thread",
-        lambda thread_id: info if thread_id == info.id else None,
+        lambda thread_id, config_dir=None: info if thread_id == info.id else None,
     )
 
     session = await runtime.import_thread("claude_code", {"thread_id": info.id})
@@ -3237,7 +3237,7 @@ async def test_import_claude_thread_missing_returns_404(monkeypatch, tmp_path) -
     _claude_plugin(runtime).adapter = cast(Any, FakeClaudeAdapter())
     monkeypatch.setattr(
         "waypoint.backends.claude_code.plugin.find_local_claude_thread",
-        lambda _thread_id: None,
+        lambda _thread_id, config_dir=None: None,
     )
 
     from fastapi import HTTPException

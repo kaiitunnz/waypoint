@@ -1406,13 +1406,17 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             if not thread_id:
                 continue
             imported.add((session.launch_target_id, thread_id))
+        launch_target = runtime._resolve_launch_target(launch_target_id, self.id)
         if launch_target_id is None:
-            infos = await asyncio.to_thread(list_local_claude_threads)
+            env = await runtime.discovery_env(
+                self.id, launch_target, account_profile_id
+            )
+            config_dir = config_dir_for(self.capabilities, env)
+            infos = await asyncio.to_thread(list_local_claude_threads, config_dir)
         else:
-            target = runtime._resolve_launch_target(launch_target_id, self.id)
-            if target is None or self.thread_enumerator is None:
+            if launch_target is None or self.thread_enumerator is None:
                 return []
-            infos = await self.thread_enumerator.list(target)
+            infos = await self.thread_enumerator.list(launch_target)
         return [
             self._thread_summary(info)
             for info in infos
@@ -1427,7 +1431,14 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         account_profile_id: str | None = None,
     ) -> bool:
         if launch_target_id is None:
-            return await asyncio.to_thread(delete_local_claude_thread, thread_id)
+            launch_target = runtime._resolve_launch_target(launch_target_id, self.id)
+            env = await runtime.discovery_env(
+                self.id, launch_target, account_profile_id
+            )
+            config_dir = config_dir_for(self.capabilities, env)
+            return await asyncio.to_thread(
+                delete_local_claude_thread, thread_id, config_dir
+            )
         target = runtime._resolve_launch_target(launch_target_id, self.id)
         if target is None:
             return False
@@ -1546,7 +1557,10 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         # Resolve thread metadata first; cwd is needed for both the
         # direct (Claude SDK) and tmux_wrapper paths.
         if launch_target is None:
-            info = await asyncio.to_thread(find_local_claude_thread, request.thread_id)
+            config_dir = config_dir_for(self.capabilities, request.launch_env)
+            info = await asyncio.to_thread(
+                find_local_claude_thread, request.thread_id, config_dir
+            )
         else:
             if self.thread_enumerator is None:
                 raise HTTPException(

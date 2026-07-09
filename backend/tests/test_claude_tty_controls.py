@@ -510,10 +510,11 @@ async def test_list_threads_dedups_imported(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(
         plugin_mod,
         "list_local_claude_threads",
-        lambda: [_thread_info("t-a"), _thread_info("t-b")],
+        lambda config_dir=None: [_thread_info("t-a"), _thread_info("t-b")],
     )
     plugin = ClaudeTtyPlugin()
     runtime = MagicMock()
+    runtime.discovery_env = AsyncMock(return_value={})
     runtime.storage.list_sessions.return_value = [
         _make_session(session_id="s1", thread_id="t-a"),
     ]
@@ -590,7 +591,9 @@ async def test_import_thread_resumes_and_starts_tailer(
 ) -> None:
     info = _thread_info("imp-1")
     info.cwd = str(tmp_path)
-    monkeypatch.setattr(plugin_mod, "find_local_claude_thread", lambda thread_id: info)
+    monkeypatch.setattr(
+        plugin_mod, "find_local_claude_thread", lambda thread_id, config_dir=None: info
+    )
     plugin = ClaudeTtyPlugin()
     captured = _stub_lifecycle(plugin)
 
@@ -636,7 +639,9 @@ async def test_import_thread_persists_resolving_agent_backend(
     # driver's own id, while the transport stays claude_tty.
     info = _thread_info("imp-2")
     info.cwd = str(tmp_path)
-    monkeypatch.setattr(plugin_mod, "find_local_claude_thread", lambda thread_id: info)
+    monkeypatch.setattr(
+        plugin_mod, "find_local_claude_thread", lambda thread_id, config_dir=None: info
+    )
     plugin = ClaudeTtyPlugin()
     _stub_lifecycle(plugin)
 
@@ -668,7 +673,9 @@ async def test_import_thread_persists_resolving_agent_backend(
 async def test_import_thread_missing_raises_404(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(plugin_mod, "find_local_claude_thread", lambda thread_id: None)
+    monkeypatch.setattr(
+        plugin_mod, "find_local_claude_thread", lambda thread_id, config_dir=None: None
+    )
     plugin = ClaudeTtyPlugin()
     runtime = MagicMock()
 
@@ -683,7 +690,9 @@ async def test_import_thread_already_imported_raises_400(
 ) -> None:
     info = _thread_info("dup-1")
     info.cwd = str(tmp_path)
-    monkeypatch.setattr(plugin_mod, "find_local_claude_thread", lambda thread_id: info)
+    monkeypatch.setattr(
+        plugin_mod, "find_local_claude_thread", lambda thread_id, config_dir=None: info
+    )
     plugin = ClaudeTtyPlugin()
     runtime = MagicMock()
     runtime.storage.list_sessions.return_value = [

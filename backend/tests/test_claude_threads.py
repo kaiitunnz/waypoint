@@ -225,3 +225,84 @@ def test_delete_local_claude_thread_rejects_invalid_uuid(claude_root) -> None:
     assert delete_local_claude_thread("../etc/passwd") is False
     assert delete_local_claude_thread("not-a-uuid") is False
     assert other.exists()
+
+
+def test_list_local_claude_threads_config_dir_scopes_to_profile(
+    claude_root, tmp_path
+) -> None:
+    """A ``config_dir`` argument must scope discovery to that profile's store,
+    not the default ``CLAUDE_CONFIG_DIR`` — the default-store thread must not
+    leak into a profile-scoped listing, or vice versa."""
+    default_project = claude_root / "-tmp-default"
+    default_id = "11111111-1111-4111-8111-111111111111"
+    _write_transcript(
+        default_project / f"{default_id}.jsonl",
+        [_make_user_record(cwd="/tmp/default", text="default account")],
+    )
+
+    profile_dir = tmp_path / "profile-a"
+    profile_project = profile_dir / "projects" / "-tmp-profile"
+    profile_id = "22222222-2222-4222-8222-222222222222"
+    _write_transcript(
+        profile_project / f"{profile_id}.jsonl",
+        [_make_user_record(cwd="/tmp/profile", text="profile account")],
+    )
+
+    default_results = list_local_claude_threads()
+    assert [info.id for info in default_results] == [default_id]
+
+    profile_results = list_local_claude_threads(config_dir=str(profile_dir))
+    assert [info.id for info in profile_results] == [profile_id]
+
+
+def test_find_local_claude_thread_config_dir_scopes_to_profile(
+    claude_root, tmp_path
+) -> None:
+    default_id = "33333333-3333-4333-8333-333333333333"
+    _write_transcript(
+        claude_root / "-tmp-default" / f"{default_id}.jsonl",
+        [_make_user_record(cwd="/tmp/default", text="default account")],
+    )
+
+    profile_dir = tmp_path / "profile-b"
+    profile_id = "44444444-4444-4444-8444-444444444444"
+    _write_transcript(
+        profile_dir / "projects" / "-tmp-profile" / f"{profile_id}.jsonl",
+        [_make_user_record(cwd="/tmp/profile", text="profile account")],
+    )
+
+    assert find_local_claude_thread(profile_id) is None
+    found = find_local_claude_thread(profile_id, config_dir=str(profile_dir))
+    assert found is not None
+    assert found.id == profile_id
+
+    assert find_local_claude_thread(default_id, config_dir=str(profile_dir)) is None
+
+
+def test_delete_local_claude_thread_config_dir_targets_profile(
+    claude_root, tmp_path
+) -> None:
+    default_id = "55555555-5555-4555-8555-555555555555"
+    default_transcript = claude_root / "-tmp-default" / f"{default_id}.jsonl"
+    _write_transcript(
+        default_transcript,
+        [_make_user_record(cwd="/tmp/default", text="default account")],
+    )
+
+    profile_dir = tmp_path / "profile-c"
+    profile_id = "66666666-6666-4666-8666-666666666666"
+    profile_transcript = (
+        profile_dir / "projects" / "-tmp-profile" / f"{profile_id}.jsonl"
+    )
+    _write_transcript(
+        profile_transcript,
+        [_make_user_record(cwd="/tmp/profile", text="profile account")],
+    )
+
+    # Deleting the profile-scoped id without config_dir must not touch it.
+    assert delete_local_claude_thread(profile_id) is False
+    assert profile_transcript.exists()
+
+    assert delete_local_claude_thread(profile_id, config_dir=str(profile_dir)) is True
+    assert not profile_transcript.exists()
+    assert default_transcript.exists()

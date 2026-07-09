@@ -105,13 +105,13 @@ def encode_project_dir(cwd: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]", "-", cwd)
 
 
-def list_local_claude_threads() -> list[ClaudeThreadInfo]:
+def list_local_claude_threads(config_dir: str | None = None) -> list[ClaudeThreadInfo]:
     """Enumerate resumable Claude sessions on the local filesystem.
 
     Returns one entry per ``<uuid>.jsonl`` transcript that has at least
     one user prompt. Sorted by ``updated_at`` descending.
     """
-    root = claude_projects_root()
+    root = claude_projects_root(config_dir)
     if not root.is_dir():
         return []
     results: list[ClaudeThreadInfo] = []
@@ -148,12 +148,14 @@ def local_claude_thread_artifacts(
     ]
 
 
-def find_local_claude_thread(thread_id: str) -> ClaudeThreadInfo | None:
+def find_local_claude_thread(
+    thread_id: str, config_dir: str | None = None
+) -> ClaudeThreadInfo | None:
     """Locate a single transcript by its session UUID, regardless of which
     encoded-cwd directory it landed in."""
     if not UUID_RE.match(thread_id):
         return None
-    root = claude_projects_root()
+    root = claude_projects_root(config_dir)
     if not root.is_dir():
         return None
     for project_dir in root.iterdir():
@@ -168,13 +170,13 @@ def find_local_claude_thread(thread_id: str) -> ClaudeThreadInfo | None:
     return None
 
 
-def delete_local_claude_thread(thread_id: str) -> bool:
+def delete_local_claude_thread(thread_id: str, config_dir: str | None = None) -> bool:
     """Remove a single transcript by its session UUID, regardless of which
     encoded-cwd directory it landed in. The UUID check also guards against
     path/shell injection. Returns True iff a file was removed."""
     if not UUID_RE.match(thread_id):
         return False
-    root = claude_projects_root()
+    root = claude_projects_root(config_dir)
     if not root.is_dir():
         return False
     for project_dir in root.iterdir():

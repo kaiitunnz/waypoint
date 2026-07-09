@@ -275,8 +275,15 @@ class BackendPlugin(Protocol):
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
         include_hidden: bool = False,
+        account_profile_id: str | None = None,
     ) -> dict[str, Any]:
-        """Return the model catalogue payload served by ``/api/backends/{id}/models``."""
+        """Return the model catalogue payload served by ``/api/backends/{id}/models``.
+
+        ``account_profile_id`` scopes the discovery to a named account profile's
+        config dir (via ``runtime.discovery_env``) so a live catalogue reflects
+        the account the session will launch under; ``None`` uses the process
+        default. Backends with a static catalogue may ignore it.
+        """
         ...
 
     async def list_command_completions(
@@ -301,12 +308,15 @@ class BackendPlugin(Protocol):
         self,
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> list[Any]:
         """Return importable thread summaries for this backend.
 
         Each plugin returns its own summary type (CodexThreadSummary,
         ClaudeThreadSummary). The API serialises via ``model_dump`` so
-        the wire shape is plugin-controlled.
+        the wire shape is plugin-controlled. ``account_profile_id`` scopes the
+        enumeration to a named account profile's config dir (via
+        ``runtime.discovery_env``); ``None`` uses the process default.
         """
         ...
 
@@ -328,12 +338,15 @@ class BackendPlugin(Protocol):
         runtime: "SessionRuntime",
         thread_id: str,
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> bool:
         """Delete a resumable backend-side thread's on-disk transcript.
 
         Returns ``True`` when a transcript matching ``thread_id`` was found
         and removed, ``False`` when none matched. ``launch_target_id`` selects
-        the SSH target whose store to delete from (``None`` = local). Only
+        the SSH target whose store to delete from (``None`` = local);
+        ``account_profile_id`` scopes to a named account profile's config dir
+        (via ``runtime.discovery_env``), ``None`` = process default. Only
         invoked for plugins that advertise
         ``capabilities.supports_thread_delete``; the API gates on it first.
         """

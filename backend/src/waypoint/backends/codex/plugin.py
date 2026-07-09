@@ -461,6 +461,7 @@ class CodexPlugin(DefaultLaunchContract):
         runtime: "SessionRuntime",
         thread_id: str,
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> bool:
         # Guard against malformed ids: a non-UUID can't match a rollout file
         # and must never be interpolated into the remote shell command.
@@ -1469,6 +1470,7 @@ class CodexPlugin(DefaultLaunchContract):
         self,
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> list[CodexThreadSummary]:
         runtime._resolve_launch_target(launch_target_id, self.id)
         imported: set[tuple[str | None, str]] = set()
@@ -1744,6 +1746,7 @@ class CodexPlugin(DefaultLaunchContract):
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
         include_hidden: bool = False,
+        account_profile_id: str | None = None,
     ) -> dict[str, Any]:
         config = self._config(runtime)
         default_model = config.default_model_id

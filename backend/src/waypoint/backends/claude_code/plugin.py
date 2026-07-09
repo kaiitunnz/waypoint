@@ -751,6 +751,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
         include_hidden: bool = False,
+        account_profile_id: str | None = None,
     ) -> dict[str, Any]:
         config = self._config(runtime)
         default_model = config.default_model_id
@@ -1393,6 +1394,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         self,
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> list[ClaudeThreadSummary]:
         if self.adapter is None:
             return []
@@ -1422,6 +1424,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         runtime: "SessionRuntime",
         thread_id: str,
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> bool:
         if launch_target_id is None:
             return await asyncio.to_thread(delete_local_claude_thread, thread_id)

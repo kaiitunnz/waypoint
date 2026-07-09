@@ -386,6 +386,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         backend: str,
         _: Annotated[str, Depends(token_dependency())],
         launch_target_id: Annotated[str | None, Query()] = None,
+        account_profile_id: Annotated[str | None, Query()] = None,
     ) -> Any:
         if not context.runtime.registry.has_backend(backend):
             raise HTTPException(
@@ -404,7 +405,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return {"threads": []}
         threads = [
             thread.model_dump(mode="json")
-            for thread in await plugin.list_threads(context.runtime, launch_target_id)
+            for thread in await plugin.list_threads(
+                context.runtime, launch_target_id, account_profile_id
+            )
         ]
         return {"threads": threads}
 
@@ -439,6 +442,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         thread_id: str,
         _: Annotated[str, Depends(token_dependency())],
         launch_target_id: Annotated[str | None, Query()] = None,
+        account_profile_id: Annotated[str | None, Query()] = None,
     ) -> Any:
         if not context.runtime.registry.has_backend(backend):
             raise HTTPException(
@@ -466,7 +470,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     ),
                 )
         deleted = await plugin.delete_thread(
-            context.runtime, thread_id, launch_target_id
+            context.runtime, thread_id, launch_target_id, account_profile_id
         )
         if not deleted:
             raise HTTPException(
@@ -1377,6 +1381,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
         launch_target_id: Annotated[str | None, Query()] = None,
         include_hidden: Annotated[bool, Query()] = False,
+        account_profile_id: Annotated[str | None, Query()] = None,
     ) -> Any:
         if not context.runtime.registry.has_backend(backend):
             raise HTTPException(
@@ -1385,12 +1390,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         # Fall back to the local catalogue when the password-auth target isn't
         # connected, rather than SSHing to an unreachable host for model probes.
+        # Drop the profile with it: a profile scoped to the now-nulled remote
+        # target would mis-resolve against the local profile set.
         if context.runtime.remote_probe_blocked(launch_target_id):
             launch_target_id = None
+            account_profile_id = None
         return await context.runtime.list_backend_models(
             backend,
             launch_target_id=launch_target_id,
             include_hidden=include_hidden,
+            account_profile_id=account_profile_id,
         )
 
     @app.post("/api/sessions/{session_id}/pin")

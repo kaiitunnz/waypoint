@@ -678,6 +678,35 @@ class SessionRuntime:
         plugin = self.registry.get(backend)
         return {**os.environ, **launch_env, **plugin.extra_env}
 
+    async def discovery_env(
+        self,
+        backend: str,
+        launch_target: SshLaunchTargetConfig | None,
+        account_profile_id: str | None,
+    ) -> dict[str, str]:
+        """Env for session-less discovery (models, threads, import, delete).
+
+        Mirrors the launch overlay for the read side: the backend's default env
+        with the selected profile's ``config_dir`` overlaid on the config-dir
+        env var, returned as an ``account_lookup_env`` so a probe resolves the
+        same account a session would launch under. ``account_profile_id=None``
+        yields the process-default store (back-compat). Warms the remote-home
+        cache first so a ``~``-relative remote ``config_dir`` doesn't hit a cold
+        cache and 400 — remote profile scoping otherwise inherits the
+        remote-switching constraints (task #33). Unknown profile, or a backend
+        without a config-dir env var, are rejected with 400 via
+        ``_apply_account_profile_env``.
+        """
+        if account_profile_id is not None and launch_target is not None:
+            await self._warm_remote_home_for_profile(
+                launch_target, backend, account_profile_id
+            )
+        base = self._default_launch_env(backend, launch_target)
+        env, _ = self._apply_account_profile_env(
+            backend, base, account_profile_id, launch_target
+        )
+        return self.account_lookup_env(backend, env)
+
     def _profile_launch_env(
         self,
         backend: str,
@@ -2781,6 +2810,7 @@ class SessionRuntime:
         backend: str,
         launch_target_id: str | None = None,
         include_hidden: bool = False,
+        account_profile_id: str | None = None,
     ) -> dict[str, Any]:
         if not self.registry.has_backend(backend):
             raise HTTPException(
@@ -2792,6 +2822,7 @@ class SessionRuntime:
             self,
             launch_target_id=launch_target_id,
             include_hidden=include_hidden,
+            account_profile_id=account_profile_id,
         )
 
     async def set_title(self, session_id: str, title: str) -> SessionRecord:

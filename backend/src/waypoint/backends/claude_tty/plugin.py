@@ -325,6 +325,7 @@ class ClaudeTtyPlugin:
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
         include_hidden: bool = False,
+        account_profile_id: str | None = None,
     ) -> dict[str, Any]:
         config = self._config(runtime)
         default_model = config.default_model_id
@@ -1275,6 +1276,7 @@ class ClaudeTtyPlugin:
         self,
         runtime: "SessionRuntime",
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> list[ClaudeThreadSummary]:
         # Remote enumeration is a follow-up; only the local store is read here.
         if launch_target_id is not None:
@@ -1288,6 +1290,7 @@ class ClaudeTtyPlugin:
         runtime: "SessionRuntime",
         thread_id: str,
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> bool:
         # Deletion is offered by the claude_code plugin; this tty-tail driver
         # leaves supports_thread_delete False so the API never routes here.

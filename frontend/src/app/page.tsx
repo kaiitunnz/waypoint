@@ -765,6 +765,14 @@ export default function HomePage() {
       const payload = {
         thread_id: threadId,
         launch_target_id: activeLaunchTargetId || null,
+        // Import under the same account profile that scoped the resumable-thread
+        // list the user picked from — otherwise the runtime reads the default
+        // store and 404s on a profile-scoped thread. The runtime overlays the
+        // profile's config dir onto launch_env from this id (profile-wins).
+        account_profile_id:
+          backend === activeFormBackend
+            ? activeFormAccountProfileId || null
+            : null,
         cwd,
         // An explicit transport supersedes launch_mode at the import API, so
         // pin the chosen transport and leave the launch mode on "auto".
@@ -812,6 +820,9 @@ export default function HomePage() {
         backend,
         threadId,
         launchTargetId ?? activeLaunchTargetId ?? null,
+        // Delete from the same profile store the list was scoped to; without it
+        // the runtime resolves the default store and no thread matches (404).
+        backend === activeFormBackend ? activeFormAccountProfileId || null : null,
       );
       setThreadsByBackend((current) => ({
         ...current,

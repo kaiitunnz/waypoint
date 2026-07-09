@@ -327,15 +327,32 @@ describing the swap (Claude's restart-to-pick-up-new-effort path); return
 ### Discovery
 
 ```python
-async def list_models(self, runtime, launch_target_id=None, include_hidden=False) -> dict: ...
-async def list_threads(self, runtime, launch_target_id=None) -> list[Any]: ...
+async def list_models(self, runtime, launch_target_id=None, include_hidden=False, account_profile_id=None) -> dict: ...
+async def list_threads(self, runtime, launch_target_id=None, account_profile_id=None) -> list[Any]: ...
 async def import_thread(self, runtime, request) -> SessionRecord: ...
+async def delete_thread(self, runtime, thread_id, launch_target_id=None, account_profile_id=None) -> bool: ...
 ```
 
 `list_models` returns the same payload shape `/api/backends/{id}/models`
 serves to the frontend (`{models, default_model_id, default_model_label,
 default_effort, supports_free_text}`). `list_threads` returns plugin-specific
 summary objects; the API serialises via `model_dump`.
+
+The optional `account_profile_id` scopes this session-less discovery to a named
+account profile: the runtime resolves it to the profile's config-dir env via
+`runtime.discovery_env(backend, launch_target, account_profile_id)` — the
+read-side mirror of the launch overlay — and each plugin derives its own config
+dir from that env with `config_dir_for(self.capabilities, env)`, so a listing,
+import, or delete resolves the same store a session launched under that profile
+would. `import_thread` reads it off `request` (the runtime has already applied
+the profile env into `request.launch_env` before dispatch). `None` is the
+process default (back-compat). Resolution is generic — no per-backend branching
+in `runtime.py`/`api.py`; an agent without a `config_dir_env_var` rejects a
+non-`None` profile with 400, matching launch. Claude's model catalogue is static
+so scoping is a no-op there; Codex's is a live per-account RPC that runs under
+the resolved env. Remote (SSH launch target) profile scoping is not yet wired —
+the remote branches read the target's default store (see
+[`account_profiles.md`](account_profiles.md)).
 
 `import_thread` adopts an externally-created native thread into a brand-new
 session. When the import request's `import_history` flag is set (it defaults to

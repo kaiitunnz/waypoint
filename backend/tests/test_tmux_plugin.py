@@ -1037,3 +1037,126 @@ def test_create_context_usage_source_none_for_self_or_unknown_backend(
         plugin.create_context_usage_source(_ctx_session("codex"), cast(Any, runtime))
         is None
     )
+
+
+class _ArtifactRegistry:
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def has_backend(self, backend_id: str) -> bool:
+        return backend_id == "claude_code"
+
+    def get(self, _backend_id: str) -> Any:
+        return self._inner
+
+
+def _artifact_session(backend: str, thread_id: str | None = None) -> SessionRecord:
+    now = datetime.now(UTC)
+    return SessionRecord(
+        id="s-artifact",
+        backend=backend,
+        source=SessionSource.MANAGED,
+        transport="tmux",
+        title="t",
+        cwd="/proj",
+        status=SessionStatus.RUNNING,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        transport_state={"thread_id": thread_id} if thread_id else {},
+        raw_log_path="/tmp/s-artifact.raw.log",
+        structured_log_path="/tmp/s-artifact.events.jsonl",
+    )
+
+
+def test_native_thread_artifacts_delegates_to_wrapped_agent_via_module_registry(
+    plugin: TmuxPlugin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``native_thread_artifacts``/``native_thread_artifact_glob`` take no
+    ``runtime`` to read an injected ``SessionRuntime(registry=...)`` off of
+    (unlike ``create_context_usage_source`` above) — they must resolve the
+    wrapped agent from the module-level ``get_registry()`` singleton.
+    Monkeypatching that name (not any object passed to the plugin) is the
+    only way to observe/control the delegation, so this pins that the lookup
+    genuinely goes through the global registry.
+    """
+    captured: dict[str, Any] = {}
+
+    class _Inner:
+        def native_thread_artifacts(
+            self, session: Any, config_dir: str | None = None
+        ) -> list[Path]:
+            captured["artifacts_session"] = session
+            captured["config_dir"] = config_dir
+            return [Path("/fake/config/projects/x/thread.jsonl")]
+
+        def native_thread_artifact_glob(self, session: Any) -> str | None:
+            captured["glob_session"] = session
+            return "projects/*/thread.jsonl"
+
+    inner = _Inner()
+    monkeypatch.setattr(
+        "waypoint.backends.tmux.plugin.get_registry",
+        lambda: _ArtifactRegistry(inner),
+    )
+    session = _artifact_session("claude_code")
+
+    artifacts = plugin.native_thread_artifacts(session, "/fake/config")
+    glob = plugin.native_thread_artifact_glob(session)
+
+    assert artifacts == [Path("/fake/config/projects/x/thread.jsonl")]
+    assert glob == "projects/*/thread.jsonl"
+    assert captured["artifacts_session"] is session
+    assert captured["config_dir"] == "/fake/config"
+    assert captured["glob_session"] is session
+
+
+def test_native_thread_artifacts_empty_for_attached_tmux_and_unknown_backend(
+    plugin: TmuxPlugin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "waypoint.backends.tmux.plugin.get_registry",
+        lambda: _ArtifactRegistry(object()),
+    )
+    # The wrapper's own id: no wrapped agent to delegate to.
+    self_session = _artifact_session("tmux")
+    assert plugin.native_thread_artifacts(self_session) == []
+    assert plugin.native_thread_artifact_glob(self_session) is None
+    # A backend the registry doesn't have loaded: no delegation.
+    unknown_session = _artifact_session("codex")
+    assert plugin.native_thread_artifacts(unknown_session) == []
+    assert plugin.native_thread_artifact_glob(unknown_session) is None
+
+
+def test_native_thread_artifacts_delegates_to_real_claude_code_and_codex_plugins() -> (
+    None
+):
+    """Against the real default registry (no monkeypatching), a tmux-wrapped
+    claude_code/codex session's glob pattern matches what the wrapped
+    agent's own plugin would compute for the same thread id — the wrapper
+    contributes no path knowledge of its own."""
+    from waypoint.backends.registry import get_registry, reset_registry_for_tests
+
+    reset_registry_for_tests()
+    registry = get_registry()
+    plugin = TmuxPlugin()
+    thread_id = "11111111-1111-1111-1111-111111111111"
+
+    claude_session = _artifact_session("claude_code", thread_id)
+    assert plugin.native_thread_artifact_glob(claude_session) == registry.get(
+        "claude_code"
+    ).native_thread_artifact_glob(claude_session)
+    assert (
+        plugin.native_thread_artifact_glob(claude_session)
+        == f"projects/*/{thread_id}.jsonl"
+    )
+
+    codex_session = _artifact_session("codex", thread_id)
+    assert plugin.native_thread_artifact_glob(codex_session) == registry.get(
+        "codex"
+    ).native_thread_artifact_glob(codex_session)
+    assert (
+        plugin.native_thread_artifact_glob(codex_session)
+        == f"sessions/*/*/*/rollout-*-{thread_id}.jsonl"
+    )
+    reset_registry_for_tests()

@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
@@ -321,7 +322,7 @@ class _Confirmer:
         return pane_text == "DIALOG"
 
 
-def _transport(adapter: _FakeAdapter) -> TmuxTransport:
+def _transport(adapter: Any) -> TmuxTransport:
     return TmuxTransport(SimpleNamespace(tmux=adapter))  # type: ignore[arg-type]
 
 
@@ -515,3 +516,159 @@ def test_send_input_refuses_when_dialog_open() -> None:
     assert exc.value.status_code == 400
     assert not any(c[0] == "send_input" for c in adapter.calls)
     assert not any(c[0] == "submit" for c in adapter.calls)
+
+
+class _CaptureOnlyAdapter:
+    """Fake adapter for flush_before_restart's pane-idle fallback: records
+    every capture-pane call and replays snapshots from a caller-supplied
+    sequence function."""
+
+    def __init__(self, snapshot_fn) -> None:
+        self._snapshot_fn = snapshot_fn
+        self.calls = 0
+
+    async def capture_snapshot(self, target: str, start_line: int = -200) -> str:
+        self.calls += 1
+        return self._snapshot_fn(self.calls)
+
+
+class _ArtifactAgent:
+    """Fake wrapped-agent plugin for flush_before_restart's artifact-mtime
+    path: records the config_dir it was called with and returns a fixed
+    artifact path (or none)."""
+
+    def __init__(self, config_dir_env_var: str, artifact_path=None) -> None:
+        self.capabilities = SimpleNamespace(config_dir_env_var=config_dir_env_var)
+        self._artifact_path = artifact_path
+        self.config_dir_calls: list[str | None] = []
+
+    def native_thread_artifacts(self, session, config_dir=None):
+        self.config_dir_calls.append(config_dir)
+        return [self._artifact_path] if self._artifact_path is not None else []
+
+
+class _FlushRegistry:
+    def __init__(self, backend_id: str, agent) -> None:
+        self._backend_id = backend_id
+        self._agent = agent
+
+    def has_backend(self, backend_id: str) -> bool:
+        return backend_id == self._backend_id
+
+    def get(self, backend_id: str):
+        assert backend_id == self._backend_id
+        return self._agent
+
+
+def _flush_session(
+    backend: str = "claude_code",
+    launch_target_id: str | None = None,
+    launch_env: dict[str, str] | None = None,
+):
+    return SimpleNamespace(
+        id="sess-flush",
+        backend=backend,
+        launch_target_id=launch_target_id,
+        launch_env=launch_env or {},
+        transport_state={"tmux_pane": "%9"},
+    )
+
+
+def _fast_settle(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Real defaults (8s timeout / 0.3s poll) would make these tests slow;
+    # shrink both so a settled or timed-out loop completes in milliseconds.
+    monkeypatch.setattr(
+        "waypoint.backends.tmux.transport._FLUSH_SETTLE_TIMEOUT_SECONDS", 0.05
+    )
+    monkeypatch.setattr(
+        "waypoint.backends.tmux.transport._FLUSH_SETTLE_POLL_SECONDS", 0.01
+    )
+
+
+def test_flush_before_restart_settles_on_stable_artifact_mtime(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the wrapped agent already has a native artifact on disk, the
+    settle signal is its mtime, not the pane — a pane can keep re-rendering
+    (spinners, cursor blink) long after the transcript itself stopped
+    changing, so watching the artifact directly is the stronger signal."""
+    _fast_settle(monkeypatch)
+    artifact = tmp_path / "thread.jsonl"
+    artifact.write_text("{}")
+    agent = _ArtifactAgent("CLAUDE_CONFIG_DIR", artifact_path=artifact)
+    monkeypatch.setattr(
+        "waypoint.backends.tmux.transport.get_registry",
+        lambda: _FlushRegistry("claude_code", agent),
+    )
+    adapter = _CaptureOnlyAdapter(lambda n: "SHOULD NOT BE POLLED")
+    transport = _transport(adapter)
+    session = _flush_session(launch_env={"CLAUDE_CONFIG_DIR": "/profile/dir"})
+
+    asyncio.run(transport.flush_before_restart(session))
+
+    assert adapter.calls == 0  # settled on the artifact, never touched the pane
+    assert agent.config_dir_calls == ["/profile/dir"]
+
+
+def test_flush_before_restart_falls_back_to_pane_idle_without_an_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No native artifact yet (e.g. a not-yet-persisted first turn) falls
+    back to the pane's captured content length; a pane that stops changing
+    for two consecutive polls is treated as settled."""
+    _fast_settle(monkeypatch)
+    agent = _ArtifactAgent("CLAUDE_CONFIG_DIR", artifact_path=None)
+    monkeypatch.setattr(
+        "waypoint.backends.tmux.transport.get_registry",
+        lambda: _FlushRegistry("claude_code", agent),
+    )
+    adapter = _CaptureOnlyAdapter(lambda n: "IDLE PANE")
+    transport = _transport(adapter)
+
+    asyncio.run(transport.flush_before_restart(_flush_session()))
+
+    assert adapter.calls >= 2
+
+
+def test_flush_before_restart_skips_the_artifact_probe_for_a_remote_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A remote session's artifact lives on the remote host; stat-ing it
+    every poll tick would be an SSH round trip. The tmux pane itself is
+    always local (even for a remote session it's a local pane running
+    ``ssh ... <agent CLI>``), so a remote session always uses the pane-idle
+    signal, even when the registry would otherwise resolve an artifact."""
+    _fast_settle(monkeypatch)
+    agent = _ArtifactAgent("CODEX_HOME", artifact_path=object())
+    monkeypatch.setattr(
+        "waypoint.backends.tmux.transport.get_registry",
+        lambda: _FlushRegistry("codex", agent),
+    )
+    adapter = _CaptureOnlyAdapter(lambda n: "IDLE PANE")
+    transport = _transport(adapter)
+    session = _flush_session(backend="codex", launch_target_id="remote-1")
+
+    asyncio.run(transport.flush_before_restart(session))
+
+    assert adapter.calls >= 2
+    assert agent.config_dir_calls == []  # never asked for the artifact at all
+
+
+def test_flush_before_restart_times_out_and_proceeds_without_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pane that never stops changing (or a wrapped agent that never
+    settles) must not block or fail the switch — flush is best-effort;
+    fail-before-destroy is enforced later by the transcript step, not here."""
+    _fast_settle(monkeypatch)
+    monkeypatch.setattr(
+        "waypoint.backends.tmux.transport.get_registry",
+        lambda: _FlushRegistry("claude_code", _ArtifactAgent("CLAUDE_CONFIG_DIR")),
+    )
+    # Ever-growing snapshot: the settle signal never repeats.
+    adapter = _CaptureOnlyAdapter(lambda n: "x" * n)
+    transport = _transport(adapter)
+
+    asyncio.run(transport.flush_before_restart(_flush_session()))  # must not raise
+
+    assert adapter.calls >= 2

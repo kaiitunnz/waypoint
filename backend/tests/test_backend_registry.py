@@ -298,6 +298,110 @@ def test_registry_get_unknown_raises() -> None:
         registry.for_transport("unknown_transport")
 
 
+def _session_record(backend: str, transport: str) -> Any:
+    from datetime import UTC, datetime
+
+    from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
+
+    now = datetime.now(UTC)
+    return SessionRecord(
+        id="x",
+        backend=backend,
+        source=SessionSource.MANAGED,
+        title="t",
+        cwd="/",
+        status=SessionStatus.IDLE,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="raw",
+        structured_log_path="events",
+        transport=transport,
+    )
+
+
+def test_capabilities_for_matches_flat_caps_on_switch_fields_for_native_pairs() -> None:
+    """``capabilities_for`` agrees with the flat descriptor on every field the
+    account-profile switch path reads, for every pair driven by its own
+    plugin (native agents, claude_tty, and the pure tmux pair).
+
+    Scoped to the switch-path subset rather than full equality: claude_tty's
+    flat descriptor under-declares two *other* agent-axis fields
+    (``supports_thread_delete``, ``supports_approval_note``) relative to
+    claude_code's, since a claude_tty session is really the (claude_code
+    agent, claude_tty transport) pair — see
+    ``test_backend_capabilities_split.py`` for the full round-trip pin on a
+    plugin's own flat caps.
+    """
+    registry = get_registry()
+    switch_fields = (
+        "config_dir_env_var",
+        "native_thread_store",
+        "supports_custom_cli_args",
+        "supports_config_overrides",
+        "supports_launch_settings_with_restart",
+        "supports_reattach_after_exit",
+    )
+    pairs = [
+        ("claude_code", "claude_cli"),
+        ("codex", "codex_app_server"),
+        ("opencode", "opencode_http"),
+        ("claude_tty", "claude_tty"),
+        ("claude_code", "claude_tty"),
+        ("tmux", "tmux"),
+    ]
+    for backend, transport in pairs:
+        session = _session_record(backend, transport)
+        composed = registry.capabilities_for(session)
+        flat = registry.plugin_for(session).capabilities
+        for field in switch_fields:
+            assert getattr(composed, field) == getattr(flat, field), (
+                backend,
+                transport,
+                field,
+            )
+
+
+def test_capabilities_for_composes_agent_config_dir_over_tmux_wrapper() -> None:
+    """A tmux-wrapped agent's composed caps carry the *agent's*
+    ``config_dir_env_var``/``native_thread_store`` (not the tmux transport's
+    own, unset flat fields), while ``supports_account_profile_with_restart``
+    stays the product of that agent field and the tmux transport's own
+    ``supports_launch_settings_with_restart`` — whatever that is today. This
+    pins the composition mechanics without hardcoding a True/False that
+    depends on when the tmux transport flag is flipped.
+    """
+    registry = get_registry()
+    claude_agent_caps = registry.get("claude_code").capabilities
+    codex_agent_caps = registry.get("codex").capabilities
+    tmux_transport_caps = registry.for_transport("tmux").capabilities
+
+    claude_tmux = registry.capabilities_for(_session_record("claude_code", "tmux"))
+    codex_tmux = registry.capabilities_for(_session_record("codex", "tmux"))
+
+    assert claude_tmux.config_dir_env_var == claude_agent_caps.config_dir_env_var
+    assert claude_tmux.native_thread_store == claude_agent_caps.native_thread_store
+    assert codex_tmux.config_dir_env_var == codex_agent_caps.config_dir_env_var
+    assert codex_tmux.native_thread_store == codex_agent_caps.native_thread_store
+
+    for composed in (claude_tmux, codex_tmux):
+        assert composed.supports_account_profile_with_restart == (
+            bool(composed.config_dir_env_var)
+            and tmux_transport_caps.supports_launch_settings_with_restart
+        )
+
+
+def test_capabilities_for_refuses_switching_without_an_agent_config_dir() -> None:
+    """A pure attached-tmux pane (no agent axis) and an opencode-wrapped
+    tmux pair (opencode has no config-dir env var) both compose to
+    ``supports_account_profile_with_restart=False`` regardless of the tmux
+    transport's own ``supports_launch_settings_with_restart`` flag."""
+    registry = get_registry()
+    for backend, transport in [("tmux", "tmux"), ("opencode", "tmux")]:
+        composed = registry.capabilities_for(_session_record(backend, transport))
+        assert composed.supports_account_profile_with_restart is False
+
+
 def test_registry_capability_descriptors() -> None:
     registry = get_registry()
     cc = registry.get("claude_code").capabilities

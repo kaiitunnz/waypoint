@@ -2256,8 +2256,7 @@ class SessionRuntime:
 
     def get_launch_settings(self, session_id: str) -> LaunchSettingsResponse:
         session = self.get_session(session_id)
-        plugin = self.registry.plugin_for(session)
-        caps = plugin.capabilities
+        caps = self.registry.capabilities_for(session)
         launch_target = self._find_launch_target(session.launch_target_id)
         profiles = redacted_profile_metadata(
             self.settings, session.backend, launch_target
@@ -2306,7 +2305,7 @@ class SessionRuntime:
     ) -> SessionRecord:
         session = self.get_session(session_id)
         plugin = self.registry.plugin_for(session)
-        caps = plugin.capabilities
+        caps = self.registry.capabilities_for(session)
         if session.status == SessionStatus.STARTING:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -2466,6 +2465,7 @@ class SessionRuntime:
                 session = self.storage.update_session(
                     session.id, status=SessionStatus.INTERRUPTED
                 )
+                await self.transport_for(session).flush_before_restart(session)
             if config_dir_key:
                 # ``config_dir_for`` reads only launch_env — no ``os.environ``
                 # fallback for remote (the backend host's env is meaningless on

@@ -14,6 +14,7 @@ import pytest
 
 from waypoint.backends.base import BackendPlugin
 from waypoint.backends.bootstrap import build_default_registry
+from waypoint.backends.registry import reset_registry_for_tests
 from waypoint.backends.transcript_fs import LocalTranscriptFilesystem
 from waypoint.backends.transcripts import (
     TranscriptUnavailableError,
@@ -387,6 +388,127 @@ def test_glob_artifacts_matches_native_thread_artifacts(tmp_path: Path) -> None:
     assert [
         str(p) for p in plugin.native_thread_artifacts(session, str(config_dir))
     ] == [str(src)]
+
+
+# ── tmux-wrapped delegation (composed pair) ─────────────────────────────────
+#
+# The account-profile switch passes the *transport-owning* plugin to
+# ensure_thread_available (TmuxPlugin for a tmux-wrapped session), not the
+# wrapped agent's own plugin. These mirror the require_existing /
+# symlink_shared / copy_thread_on_switch tests above one-for-one, but with a
+# TmuxPlugin instance standing in for the agent plugin — proving the
+# delegation added to TmuxPlugin.native_thread_artifact_glob (which resolves
+# the wrapped agent off the module-level registry singleton) makes the three
+# transcript policies behave identically to a native session.
+
+
+def _tmux_plugin() -> BackendPlugin:
+    from waypoint.backends.tmux.plugin import TmuxPlugin
+
+    reset_registry_for_tests()
+    return TmuxPlugin()
+
+
+def _tmux_session(backend: str) -> SessionRecord:
+    now = datetime.now(UTC)
+    return SessionRecord(
+        id="s1",
+        backend=backend,
+        source=SessionSource.MANAGED,
+        transport="tmux",
+        title="t",
+        cwd="/repo/app",
+        status=SessionStatus.IDLE,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="/r",
+        structured_log_path="/e",
+        transport_state={"thread_id": TID},
+    )
+
+
+def test_tmux_wrapped_require_existing_noop_when_present(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    _write_claude_thread(target)
+    ensure_thread_available(
+        _tmux_plugin(),
+        _tmux_session("claude_code"),
+        current_config_dir=str(tmp_path / "current"),
+        target_config_dir=str(target),
+        policy="require_existing",
+        shared_transcript_dir=None,
+        native_thread_store="projects",
+    )
+
+
+def test_tmux_wrapped_require_existing_rejects_when_absent(tmp_path: Path) -> None:
+    with pytest.raises(TranscriptUnavailableError, match="require_existing"):
+        ensure_thread_available(
+            _tmux_plugin(),
+            _tmux_session("claude_code"),
+            current_config_dir=str(tmp_path / "current"),
+            target_config_dir=str(tmp_path / "target"),
+            policy="require_existing",
+            shared_transcript_dir=None,
+            native_thread_store="projects",
+        )
+
+
+def test_tmux_wrapped_copy_thread_on_switch_copies_codex_rollout(
+    tmp_path: Path,
+) -> None:
+    current = tmp_path / "current"
+    target = tmp_path / "target"
+    src = _write_codex_rollout(current)
+    ensure_thread_available(
+        _tmux_plugin(),
+        _tmux_session("codex"),
+        current_config_dir=str(current),
+        target_config_dir=str(target),
+        policy="copy_thread_on_switch",
+        shared_transcript_dir=None,
+        native_thread_store="sessions",
+    )
+    dest = target / src.relative_to(current)
+    assert dest.is_file()
+    assert oct(dest.stat().st_mode)[-3:] == "600"
+
+
+def test_tmux_wrapped_symlink_shared_end_to_end_makes_thread_visible(
+    tmp_path: Path,
+) -> None:
+    shared = tmp_path / "shared"
+    (shared / "-repo-app").mkdir(parents=True)
+    (shared / "-repo-app" / f"{TID}.jsonl").write_text("{}")
+    target = tmp_path / "target"
+    ensure_thread_available(
+        _tmux_plugin(),
+        _tmux_session("claude_code"),
+        current_config_dir=str(tmp_path / "current"),
+        target_config_dir=str(target),
+        policy="symlink_shared",
+        shared_transcript_dir=str(shared),
+        native_thread_store="projects",
+    )
+    assert (target / "projects").is_symlink()
+
+
+def test_tmux_wrapped_glob_delegates_for_claude_and_codex() -> None:
+    plugin = _tmux_plugin()
+    assert (
+        plugin.native_thread_artifact_glob(_tmux_session("claude_code"))
+        == f"projects/*/{TID}.jsonl"
+    )
+    assert (
+        plugin.native_thread_artifact_glob(_tmux_session("codex"))
+        == f"sessions/*/*/*/rollout-*-{TID}.jsonl"
+    )
+
+
+def test_tmux_wrapped_glob_none_for_attached_tmux_session() -> None:
+    # session.backend == "tmux" (no wrapped agent) keeps the empty result.
+    assert _tmux_plugin().native_thread_artifact_glob(_tmux_session("tmux")) is None
 
 
 # ── TranscriptFilesystem seam ───────────────────────────────────────────────

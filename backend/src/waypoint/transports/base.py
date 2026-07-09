@@ -50,3 +50,16 @@ class TransportAdapter(ABC):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"resume is not supported for {session.transport} sessions",
         )
+
+    async def flush_before_restart(self, session: SessionRecord) -> None:
+        """Wait for an in-flight turn to settle before the caller terminates
+        this session for a restart-applied launch-settings edit.
+
+        Called right after ``interrupt()`` in the account-profile switch
+        path. Structured transports already confirm the interrupted turn via
+        a structured turn-end event before returning from ``interrupt()``, so
+        the default here is a no-op; a transport with no such signal (the
+        generic ``tmux`` pane) overrides this to wait on a heuristic proxy
+        instead.
+        """
+        return None

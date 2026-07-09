@@ -23,6 +23,7 @@ from waypoint.backends.base import AgentLaunchContract
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
+from waypoint.backends.registry import get_registry
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.git_meta import GitMeta, resolve_git_meta
 from waypoint.launch_targets import SshLaunchTargetConfig
@@ -83,6 +84,15 @@ class TmuxPlugin:
         is_structured=False,
         supports_resume=True,
         supports_reattach_after_exit=True,
+        # The tmux transport can now apply restart-scoped launch-settings
+        # edits (including account-profile switching) — terminate, persist,
+        # and restore already relaunch the pane under the new launch_env
+        # (``restore_session`` above), and ``TmuxTransport.flush_before_
+        # restart`` confirms the pre-terminate turn settled first. This flag
+        # only ever surfaces on the *composed* (agent, transport) pair via
+        # ``BackendRegistry.capabilities_for`` — a pure attached-tmux session
+        # has no config-dir env var on its agent axis, so it stays refused.
+        supports_launch_settings_with_restart=True,
         supports_set_model_inline=False,
         supports_set_effort_inline=False,
         supports_set_permission_mode_inline=False,
@@ -190,16 +200,29 @@ class TmuxPlugin:
         self, session: SessionRecord, config_dir: str | None = None
     ) -> list[Path]:
         # The wrapper has no native store of its own; the resumable transcript
-        # belongs to the wrapped agent, which owns the artifact lookup and is
-        # dispatched via ``session.backend``. Nothing to contribute here.
-        return []
+        # belongs to the wrapped agent. Delegate via the module registry
+        # singleton — this method takes no ``runtime`` to read
+        # ``runtime.registry`` off of, mirroring ``account_profiles.py``. A
+        # pure attached-tmux session (``backend == self.id``) has no wrapped
+        # agent, so it keeps the empty result.
+        if session.backend == self.id:
+            return []
+        registry = get_registry()
+        if not registry.has_backend(session.backend):
+            return []
+        return registry.get(session.backend).native_thread_artifacts(
+            session, config_dir
+        )
 
     def native_thread_artifact_glob(self, session: SessionRecord) -> str | None:
-        # Generic wrapper for any agent; it doesn't hold a reference to the
-        # wrapped agent's plugin, so it has no pattern to contribute. Moot in
-        # practice: this plugin's capabilities carry no config_dir_env_var, so
-        # account-profile switching (the only caller) never reaches this.
-        return None
+        # Same delegation as native_thread_artifacts: the glob pattern is the
+        # wrapped agent's, not the generic wrapper's.
+        if session.backend == self.id:
+            return None
+        registry = get_registry()
+        if not registry.has_backend(session.backend):
+            return None
+        return registry.get(session.backend).native_thread_artifact_glob(session)
 
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord

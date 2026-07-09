@@ -2020,8 +2020,11 @@ def sessions_set_account(
 ) -> None:
     """Switch a session's account/config profile via restart-and-resume.
 
-    Only structured transports whose agent maps a config-dir env var accept the
-    switch; others are rejected. The session terminates and resumes its thread
+    Accepted when the session's agent maps a config-dir env var and its
+    transport can restart-and-resume — Claude's native and emulated transports,
+    Codex's app-server, and the generic tmux wrapper around either agent. A pure
+    attached-tmux pane (no wrapped agent) or a backend without a config-dir env
+    var (OpenCode) is rejected. The session terminates and resumes its thread
     under the new profile's config dir.
     """
     _emit(

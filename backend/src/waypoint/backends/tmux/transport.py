@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import suppress
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
@@ -9,6 +11,7 @@ from fastapi import HTTPException, status
 from waypoint.attachments import ResolvedAttachment, append_attachment_paths
 from waypoint.backends.approvals import is_approve_decision
 from waypoint.backends.base import PaneSubmitConfirming
+from waypoint.backends.registry import get_registry
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.schemas import (
     SessionInputRequest,
@@ -19,6 +22,15 @@ from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
+
+log = logging.getLogger("waypoint.backends.tmux")
+
+# Bounds for the pre-restart settle wait (flush_before_restart): how long to
+# wait overall and how often to poll, and how many consecutive unchanged
+# polls count as "settled". Best-effort only — see flush_before_restart.
+_FLUSH_SETTLE_TIMEOUT_SECONDS = 8.0
+_FLUSH_SETTLE_POLL_SECONDS = 0.3
+_FLUSH_SETTLE_STABLE_TICKS = 2
 
 
 class TmuxTransport(TransportAdapter):
@@ -144,6 +156,81 @@ class TmuxTransport(TransportAdapter):
 
     async def interrupt(self, session: SessionRecord) -> None:
         await self.adapter.interrupt(self._target(session))
+
+    async def flush_before_restart(self, session: SessionRecord) -> None:
+        """Best-effort wait for the just-interrupted turn to settle before
+        the account-profile switch tears down this session's pane.
+
+        A scraped pane has no structured turn-end event, so this polls the
+        strongest available proxy until it stops changing for
+        ``_FLUSH_SETTLE_STABLE_TICKS`` consecutive polls: the wrapped agent's
+        native transcript artifact's mtime, when one is already on disk (the
+        artifact is exactly what the resume needs, so waiting on it directly
+        beats a generic idle guess). Falls back to the pane's captured
+        content length when no artifact exists yet — a not-yet-persisted
+        first turn has no thread id to look up — or the session is remote (an
+        artifact stat there is an SSH round trip per poll tick; the tmux pane
+        itself is always local, even for a remote session — it's a local pane
+        running ``ssh ... <agent CLI>`` — so capturing it never leaves this
+        host).
+
+        Bounded by a timeout; on timeout this logs and returns rather than
+        raising. Fail-before-destroy is enforced by the transcript step
+        (``ensure_thread_available``) later in the switch, not here — a pane
+        that never settles must not block or abort the switch, since the
+        switch already tolerates resuming a partially-written thread.
+        """
+        target = self._target(session)
+        artifact_path = self._settle_artifact_path(session)
+
+        async def _read_signal() -> float | int | None:
+            if artifact_path is not None:
+                try:
+                    return artifact_path.stat().st_mtime
+                except OSError:
+                    return None
+            try:
+                snapshot = await self.adapter.capture_snapshot(target)
+            except TmuxError:
+                return None
+            return len(snapshot)
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _FLUSH_SETTLE_TIMEOUT_SECONDS
+        previous: float | int | None = None
+        stable_ticks = 0
+        while True:
+            current = await _read_signal()
+            if previous is not None and current == previous:
+                stable_ticks += 1
+                if stable_ticks >= _FLUSH_SETTLE_STABLE_TICKS:
+                    return
+            else:
+                stable_ticks = 0
+            previous = current
+            if loop.time() >= deadline:
+                log.info(
+                    "tmux flush-before-restart settle timed out; proceeding",
+                    extra={"session_id": session.id},
+                )
+                return
+            await asyncio.sleep(_FLUSH_SETTLE_POLL_SECONDS)
+
+    def _settle_artifact_path(self, session: SessionRecord) -> Path | None:
+        """The wrapped agent's on-disk transcript artifact to watch for the
+        settle signal, or ``None`` when there isn't one to watch yet (falls
+        back to pane-idle) — see ``flush_before_restart``.
+        """
+        if session.launch_target_id is not None:
+            return None
+        registry = get_registry()
+        if not registry.has_backend(session.backend):
+            return None
+        agent = registry.get(session.backend)
+        config_dir_key = agent.capabilities.config_dir_env_var
+        config_dir = session.launch_env.get(config_dir_key) if config_dir_key else None
+        artifacts = agent.native_thread_artifacts(session, config_dir)
+        return artifacts[0] if artifacts else None
 
     async def resume(self, session: SessionRecord) -> None:
         await self.adapter.resume(self._target(session))

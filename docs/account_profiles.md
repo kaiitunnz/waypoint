@@ -234,15 +234,31 @@ per the transcript policy, terminates the session, persists the new profile, and
 restores it — resuming the *same* thread under the new `CLAUDE_CONFIG_DIR` /
 `CODEX_HOME`.
 
-- It applies only to **structured transports** whose agent owns a config-dir env
-  var: Claude's native (`claude_cli`) and emulated (`claude_tty`) transports and
-  Codex's app-server transport. The generic `tmux` wrapper has no config-dir env
-  var and is refused.
+- Eligibility is derived from the session's **composed `(agent, transport)`
+  pair**, not from whichever plugin happens to own the transport: the agent
+  contributes the config-dir env var / native thread store, the transport
+  contributes the restart-with-resume story. Claude's native (`claude_cli`) and
+  emulated (`claude_tty`) transports, Codex's app-server transport, and the
+  generic `tmux` wrapper around Claude or Codex all support it — a
+  tmux-wrapped session inherits its agent's config-dir env var and resumes the
+  wrapped CLI (`claude --resume` / `codex resume`) under the switched profile,
+  same as the structured transports. `opencode` (no config-dir env var) and a
+  pure attached-tmux pane (`tmux` with no wrapped agent) stay refused
+  regardless of transport, as does macOS Claude (the Keychain is a single
+  global account).
+- A tmux-wrapped switch flushes a running turn before terminating the pane the
+  same way the structured transports do, but on a best-effort basis: a scraped
+  pane has no structured turn-end signal, so the flush polls the wrapped
+  agent's transcript (or the pane itself) until it settles, and proceeds
+  rather than aborting if it never does. The transcript-availability check
+  right after it is still the hard fail-before-destroy guard.
 - A switch that wouldn't change the account is rejected, so set
   `expected_account_key` when two profiles intentionally point at the same
   underlying account (e.g. a copied config dir).
-- Remote (SSH) `copy_thread_on_switch` and tmux-wrapped switching are not yet
-  supported.
+- tmux-wrapped switching works on both local and remote (SSH launch target)
+  sessions — the tmux pane itself is always local (for a remote target it
+  runs `ssh ... <agent CLI>` in that local pane), and the transcript step
+  already routes to the remote filesystem implementation by launch target.
 
 See issue [#230](https://github.com/kaiitunnz/waypoint/issues/230) for the
 original design.

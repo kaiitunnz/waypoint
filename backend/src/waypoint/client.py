@@ -249,12 +249,15 @@ class WaypointClient:
         *,
         launch_target_id: str | None = None,
         include_hidden: bool = False,
+        account_profile_id: str | None = None,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {}
         if launch_target_id is not None:
             params["launch_target_id"] = launch_target_id
         if include_hidden:
             params["include_hidden"] = include_hidden
+        if account_profile_id is not None:
+            params["account_profile_id"] = account_profile_id
         data: dict[str, Any] = self._request(
             "GET", f"/api/backends/{backend}/models", params=params or None
         ).json()
@@ -328,15 +331,19 @@ class WaypointClient:
         return data
 
     def list_threads(
-        self, backend: str, *, launch_target_id: str | None = None
+        self,
+        backend: str,
+        *,
+        launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        params = (
-            {"launch_target_id": launch_target_id}
-            if launch_target_id is not None
-            else None
-        )
+        params: dict[str, Any] = {}
+        if launch_target_id is not None:
+            params["launch_target_id"] = launch_target_id
+        if account_profile_id is not None:
+            params["account_profile_id"] = account_profile_id
         data: list[dict[str, Any]] = self._request(
-            "GET", f"/api/backends/{backend}/threads", params=params
+            "GET", f"/api/backends/{backend}/threads", params=params or None
         ).json()["threads"]
         return data
 

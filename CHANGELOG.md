@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.2](https://github.com/kaiitunnz/waypoint/compare/v0.7.1...v0.7.2) (2026-07-09)
+
+
+### Features
+
+* honor local_bin for local codex launches ([#268](https://github.com/kaiitunnz/waypoint/issues/268)) ([c933f00](https://github.com/kaiitunnz/waypoint/commit/c933f00ddd8121fede1452098f69b1d9b443766d))
+
+
+### Miscellaneous Chores
+
+* release 0.7.2 ([53226a2](https://github.com/kaiitunnz/waypoint/commit/53226a265c0e172dc4de124d520a94e087ba5772))
+
 ## [0.7.1](https://github.com/kaiitunnz/waypoint/compare/v0.7.0...v0.7.1) (2026-07-09)
 
 

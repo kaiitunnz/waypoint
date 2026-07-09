@@ -88,6 +88,7 @@ import {
   PaperclipIcon,
   useAttachments,
 } from "@/components/AttachmentTray";
+import { AccountProfilePicker } from "@/components/AccountProfilePicker";
 import { ScheduleMessageModal } from "@/components/ScheduleMessageModal";
 import { ScheduledMessagesDock } from "@/components/ScheduledMessagesDock";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
@@ -683,26 +684,18 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
     };
   }, [host, token, sessionId, sessionHostsProfiles, handleAuthFailure]);
 
+  // Restart the session under a different account profile. The destructive
+  // restart is confirmed explicitly by the composer's staged switch flow before
+  // this runs, so it performs the switch directly. Phase 1 switches between
+  // named profiles only; clearing back to the default config dir isn't a
+  // meaningful switch (it resolves to the same account and would be rejected),
+  // so an empty or unchanged pick is a no-op.
   const handleAccountProfileChange = useCallback(
     async (nextProfileId: string) => {
-      // Phase 1 offers switching between named profiles only; clearing back to
-      // the default config dir isn't a meaningful switch (it would resolve to
-      // the same account and be rejected), so an empty pick is a no-op.
       if (!session || !nextProfileId) {
         return;
       }
       if (nextProfileId === (session.account_profile_id ?? "")) {
-        return;
-      }
-      const label =
-        accountSettings?.account_profiles.find((p) => p.id === nextProfileId)
-          ?.label ?? nextProfileId;
-      if (
-        !window.confirm(
-          `Switch this session to the "${label}" account? It restarts and ` +
-            "resumes the current thread under the new config dir.",
-        )
-      ) {
         return;
       }
       setAccountBusy(true);
@@ -727,7 +720,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
         setAccountBusy(false);
       }
     },
-    [host, token, session, accountSettings, handleAuthFailure],
+    [host, token, session, handleAuthFailure],
   );
 
   const flushPendingEvents = useCallback(() => {
@@ -2573,6 +2566,12 @@ const ReplyComposer = memo(function ReplyComposer({
   // — staged here until the user confirms via the Apply button. `null` means
   // no pending change.
   const [pendingEffort, setPendingEffort] = useState<string | null>(null);
+  // Account-profile switch: a lifecycle action opened from the overflow menu.
+  // The pick is staged here and applied only after the explicit restart
+  // confirmation, never straight from a select change.
+  const [profileSwitchOpen, setProfileSwitchOpen] = useState(false);
+  const [pendingAccountProfileId, setPendingAccountProfileId] =
+    useState<string | null>(null);
   // iMessage-style leading actions: ⊕ + 📎 collapse to a single ›-chevron via
   // CSS (:focus-within) so focusing the field never triggers a React re-render
   // that could drop focus mid-gesture. The chevron re-opens them by forcing
@@ -2584,6 +2583,7 @@ const ReplyComposer = memo(function ReplyComposer({
   const composerRef = useRef<HTMLElement | null>(null);
   const overflowRef = useRef<HTMLDivElement | null>(null);
   const tuneRef = useRef<HTMLDivElement | null>(null);
+  const profileSwitchRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-grow the field to fit its content: a single line by default (so the
   // pill matches the flanking buttons), growing as the draft wraps up to the
@@ -2706,6 +2706,28 @@ const ReplyComposer = memo(function ReplyComposer({
       window.removeEventListener("keydown", onKey);
     };
   }, [tuneOpen]);
+
+  useEffect(() => {
+    if (!profileSwitchOpen) {
+      return;
+    }
+    function onPointer(event: PointerEvent) {
+      if (!profileSwitchRef.current) return;
+      if (profileSwitchRef.current.contains(event.target as Node)) return;
+      setProfileSwitchOpen(false);
+    }
+    function onKey(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setProfileSwitchOpen(false);
+      }
+    }
+    window.addEventListener("pointerdown", onPointer);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onPointer);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [profileSwitchOpen]);
 
   async function handleSend() {
     const text = draft.trim();
@@ -2855,13 +2877,36 @@ const ReplyComposer = memo(function ReplyComposer({
     await onEffortChange(value);
   };
 
+  // Account-profile switching is a session-identity lifecycle action, not turn
+  // tuning — it lives in the overflow menu's staged switch flow, so it doesn't
+  // gate the quick-tuning gear or appear in its summary.
   const hasAccountPicker = supportsAccountSwitch && accountProfiles.length > 0;
+  const currentProfileId = accountProfileId ?? "";
+  const profileSwitchValue = pendingAccountProfileId ?? currentProfileId;
+  // A switch is offered only to a named profile that isn't the current one —
+  // phase 1 doesn't switch back to the service default (it resolves to the same
+  // account), so staging it shows no confirm.
+  const profileSwitchDiffers =
+    profileSwitchValue !== "" && profileSwitchValue !== currentProfileId;
+  const pendingProfileLabel =
+    accountProfiles.find((profile) => profile.id === profileSwitchValue)?.label ??
+    profileSwitchValue;
+  const openProfileSwitch = () => {
+    setOverflowOpen(false);
+    setPendingAccountProfileId(currentProfileId);
+    setProfileSwitchOpen(true);
+  };
+  const confirmProfileSwitch = async () => {
+    if (!profileSwitchDiffers) return;
+    await onAccountChange(profileSwitchValue);
+    setProfileSwitchOpen(false);
+    setPendingAccountProfileId(null);
+  };
   const assistantOps = assistant ? assistantControls : null;
   const tuneVisible =
     modeOptions.length > 0 ||
     hasModelPicker ||
     hasEffortPicker ||
-    hasAccountPicker ||
     assistantOps !== null;
   // Backend the assistant controls target — the picked one, or the current.
   const assistantTargetBackend = pendingBackend ?? session?.backend ?? null;
@@ -2954,12 +2999,6 @@ const ReplyComposer = memo(function ReplyComposer({
     }
     if (hasEffortPicker) {
       parts.push(currentEffort ? effortLabel(currentEffort) : "Default");
-    }
-    if (hasAccountPicker) {
-      const matched = accountProfiles.find(
-        (profile) => profile.id === (accountProfileId ?? ""),
-      );
-      parts.push(matched?.label ?? "Default");
     }
     return parts.join(" · ") || "Settings";
   })();
@@ -3110,31 +3149,6 @@ const ReplyComposer = memo(function ReplyComposer({
                           {option.label}
                         </option>
                       ))}
-                    </select>
-                  </label>
-                ) : null}
-                {hasAccountPicker ? (
-                  <label className="composer-tune-field">
-                    <span>Account</span>
-                    <select
-                      value={accountProfileId ?? ""}
-                      onChange={(event) =>
-                        void onAccountChange(event.target.value)
-                      }
-                      disabled={accountBusy || disabled}
-                    >
-                      {accountProfileId ? null : (
-                        <option value="">Default</option>
-                      )}
-                      {accountProfiles.map((profile) => (
-                        <option key={profile.id} value={profile.id}>
-                          {profile.label}
-                        </option>
-                      ))}
-                      {accountProfileId &&
-                      !accountProfiles.some((p) => p.id === accountProfileId) ? (
-                        <option value={accountProfileId}>{accountProfileId}</option>
-                      ) : null}
                     </select>
                   </label>
                 ) : null}
@@ -3299,6 +3313,55 @@ const ReplyComposer = memo(function ReplyComposer({
                 ) : null}
               </div>
             ) : null}
+          </div>
+        ) : null}
+        {hasAccountPicker && profileSwitchOpen ? (
+          <div className="composer-tune composer-profile-switch" ref={profileSwitchRef}>
+            <div
+              className="composer-tune-popover"
+              role="dialog"
+              aria-label="Switch account profile"
+            >
+              <AccountProfilePicker
+                profiles={accountProfiles}
+                value={profileSwitchValue}
+                onChange={(id) => setPendingAccountProfileId(id)}
+                disabled={accountBusy}
+                fieldClassName="composer-tune-field"
+              />
+              {profileSwitchDiffers ? (
+                <div className="composer-tune-confirm">
+                  <p>
+                    Restart this session with{" "}
+                    <strong>{pendingProfileLabel}</strong>? The current turn is
+                    interrupted, the backend process restarts, and the session
+                    resumes from the selected profile&apos;s config and
+                    transcript store.
+                  </p>
+                  <div className="composer-tune-confirm-actions">
+                    <button
+                      type="button"
+                      className="composer-tune-confirm-cancel"
+                      onClick={() => {
+                        setProfileSwitchOpen(false);
+                        setPendingAccountProfileId(null);
+                      }}
+                      disabled={accountBusy}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="composer-tune-confirm-apply"
+                      onClick={() => void confirmProfileSwitch()}
+                      disabled={accountBusy}
+                    >
+                      {accountBusy ? "Restarting…" : "Restart session"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
         ) : null}
         {agentBusy ? (
@@ -3517,6 +3580,18 @@ const ReplyComposer = memo(function ReplyComposer({
                     <span className="glyph">◷</span>
                     Schedule message…
                   </button>
+                  {hasAccountPicker ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="composer-overflow-item"
+                      disabled={accountBusy}
+                      onClick={openProfileSwitch}
+                    >
+                      <span className="glyph">⊙</span>
+                      Switch profile…
+                    </button>
+                  ) : null}
                   {workspacePreviewEnabled ? (
                     <button
                       type="button"

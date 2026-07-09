@@ -290,6 +290,10 @@ class SessionRuntime:
         self._completion_refresh_tasks: dict[
             CompletionCacheKey, asyncio.Task[list[CommandCompletion]]
         ] = {}
+        # Fire-and-forget verified-account probes (launch, thread-import,
+        # reattach, boot-restore). Tracked so a task isn't GC'd mid-flight;
+        # discarded on done.
+        self._account_probe_tasks: set[asyncio.Task[None]] = set()
         self.file_offsets: dict[str, int] = {}
         # Open append handles for per-session structured logs, kept around
         # so the streaming path doesn't reopen (and re-stat via get_session)
@@ -396,6 +400,13 @@ class SessionRuntime:
         for completion_task in completion_tasks:
             with suppress(asyncio.CancelledError):
                 await completion_task
+        account_probe_tasks = list(self._account_probe_tasks)
+        self._account_probe_tasks.clear()
+        for probe_task in account_probe_tasks:
+            probe_task.cancel()
+        for probe_task in account_probe_tasks:
+            with suppress(asyncio.CancelledError):
+                await probe_task
         if self._broadcast_flusher is not None:
             self._broadcast_flusher.cancel()
             with suppress(asyncio.CancelledError):
@@ -757,6 +768,78 @@ class SessionRuntime:
                 ),
             )
         return result
+
+    def _stamp_verified_account(
+        self, session_id: str, probe: AccountProbeResult, probed_at: datetime
+    ) -> None:
+        """Persist the verified-account triple from a probe result.
+
+        Shared by every population point (switch, launch, thread-import,
+        reattach, boot-restore) so the write is always the same three fields.
+        """
+        self.storage.update_session(
+            session_id,
+            verified_account_key=probe.account_key,
+            verified_account_label=probe.account_label,
+            verified_account_probed_at=probed_at,
+        )
+
+    def _schedule_verified_account_probe(
+        self,
+        session_id: str,
+        backend: str,
+        env: dict[str, str],
+        *,
+        launch_target: SshLaunchTargetConfig | None,
+        cwd: str,
+    ) -> None:
+        """Fire-and-forget probe+stamp of ``verified_account_*``.
+
+        ``probe_account`` is a live, uncached HTTP call with up to a 30s
+        timeout, so this always runs off the launch/reattach/restore response
+        path. Tracked in ``_account_probe_tasks`` so the task isn't GC'd
+        mid-flight; discarded on done.
+        """
+        task = asyncio.create_task(
+            self._probe_and_stamp_verified_account(
+                session_id, backend, env, launch_target=launch_target, cwd=cwd
+            ),
+            name=f"verified-account-probe-{session_id}",
+        )
+        self._account_probe_tasks.add(task)
+        task.add_done_callback(self._account_probe_tasks.discard)
+
+    async def _probe_and_stamp_verified_account(
+        self,
+        session_id: str,
+        backend: str,
+        env: dict[str, str],
+        *,
+        launch_target: SshLaunchTargetConfig | None,
+        cwd: str,
+    ) -> None:
+        # Wraps the whole probe+stamp: a raised probe (timeout) or a
+        # post-probe storage write (session deleted mid-probe) must never
+        # fail the launch/reattach/restore this runs alongside. A ``None``
+        # probe result leaves the prior value untouched rather than
+        # clobbering good provenance with a transient failure.
+        try:
+            probe = await probe_account(
+                self, backend, env, launch_target=launch_target, cwd=cwd
+            )
+            if probe is None:
+                return
+            self._stamp_verified_account(session_id, probe, datetime.now(UTC))
+        except Exception:
+            log.exception(
+                "failed to probe/stamp verified account for session %s", session_id
+            )
+
+    async def _drain_account_probe_tasks(self) -> None:
+        """Test seam: await any in-flight verified-account probe tasks."""
+        tasks = list(self._account_probe_tasks)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def account_doctor(
         self,
@@ -1170,6 +1253,15 @@ class SessionRuntime:
                 account_profile_id=request.account_profile_id,
                 account_profile_label=account_profile_label,
             )
+            # Fire-and-forget verified-account probe+stamp — a no-profile
+            # launch leaves verified_account_* None.
+            self._schedule_verified_account_probe(
+                session.id,
+                request.backend,
+                effective_env,
+                launch_target=launch_target,
+                cwd=session.cwd,
+            )
         self._warm_command_completions(session)
         self._start_context_usage_source(session)
         return session
@@ -1492,6 +1584,15 @@ class SessionRuntime:
                 session.id,
                 account_profile_id=account_profile_id,
                 account_profile_label=account_profile_label,
+            )
+            # Fire-and-forget verified-account probe+stamp, parity with
+            # ``create_session``.
+            self._schedule_verified_account_probe(
+                session.id,
+                backend,
+                launch_env,
+                launch_target=launch_target,
+                cwd=session.cwd,
             )
         return session
 
@@ -1873,6 +1974,22 @@ class SessionRuntime:
             # stale-while-revalidate on the first `/` press.
             self._warm_command_completions(refreshed, include_remote=False)
             self._start_context_usage_source(refreshed)
+            # Boot-restore re-probe is local-only, mirroring the completion
+            # warming above — remote hosts aren't fanned out to at boot.
+            # Gated on a profile being set, same as launch/thread-import: an
+            # unconditional probe would mass-probe the provider's rate-limit
+            # endpoint for every no-profile session on every restart.
+            if (
+                refreshed.account_profile_id is not None
+                and refreshed.launch_target_id is None
+            ):
+                self._schedule_verified_account_probe(
+                    refreshed.id,
+                    refreshed.backend,
+                    refreshed.launch_env,
+                    launch_target=None,
+                    cwd=refreshed.cwd,
+                )
 
     def _warm_command_completions(
         self, session: SessionRecord, *, include_remote: bool = True
@@ -2115,6 +2232,18 @@ class SessionRuntime:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"failed to reattach session ({refreshed.status})",
                 )
+            # Re-probe after the terminal-status check so a probe failure
+            # never converts a good reattach into a 400. Gated on a profile
+            # being set, same as launch/thread-import/boot-restore — a
+            # no-profile session has nothing to re-verify.
+            if refreshed.account_profile_id is not None:
+                self._schedule_verified_account_probe(
+                    refreshed.id,
+                    refreshed.backend,
+                    refreshed.launch_env,
+                    launch_target=self._find_launch_target(refreshed.launch_target_id),
+                    cwd=refreshed.cwd,
+                )
             self._start_context_usage_source(refreshed)
             return refreshed
 
@@ -2265,6 +2394,7 @@ class SessionRuntime:
 
         old_launch_env = dict(session.launch_env)
         config_dir_key = caps.config_dir_env_var
+        verified_account_fields: dict[str, Any] = {}
         if profile_changing:
             profile = self._require_account_profile(
                 session.backend, cast(str, request.account_profile_id), launch_target
@@ -2287,6 +2417,14 @@ class SessionRuntime:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="could not verify the target account before switching",
                 )
+            # Stamp verified_account_* from the probe already run above — no
+            # second probe. Unlike the other population points, which probe
+            # off the response path, this is the only synchronous stamp.
+            verified_account_fields = {
+                "verified_account_key": target_probe.account_key,
+                "verified_account_label": target_probe.account_label,
+                "verified_account_probed_at": datetime.now(UTC),
+            }
             if profile.expected_account_key:
                 if target_probe.account_key != profile.expected_account_key:
                     raise HTTPException(
@@ -2377,6 +2515,22 @@ class SessionRuntime:
                             detail=f"cannot switch account profile: {exc}",
                         ) from exc
 
+        # Clearing the profile (set -> None) is not ``profile_changing``, but a
+        # de-profiled session must not keep stale provenance, so null the
+        # triple explicitly here; ``profile_changing`` already set the triple
+        # above from the probe just run, and any other update (model/args-only)
+        # leaves it empty so the persisted values are untouched.
+        if not profile_changing and (
+            "account_profile_id" in fields
+            and request.account_profile_id is None
+            and session.account_profile_id is not None
+        ):
+            verified_account_fields = {
+                "verified_account_key": None,
+                "verified_account_label": None,
+                "verified_account_probed_at": None,
+            }
+
         # Terminate → persist new settings → restore. terminate/restore cycle the
         # rate-limit watcher; restore rebuilds env from the persisted record, so
         # the account is fixed by the (already-verified) launch_env. Mark the
@@ -2395,6 +2549,7 @@ class SessionRuntime:
             launch_env=new_env,
             account_profile_id=selected_profile_id,
             account_profile_label=new_profile_label,
+            **verified_account_fields,
         )
         await plugin.restore_session(self, self.get_session(session.id))
         refreshed = self.get_session(session.id)

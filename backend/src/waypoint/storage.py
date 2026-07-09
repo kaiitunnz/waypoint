@@ -366,6 +366,9 @@ class Storage:
         self._ensure_column("sessions", "preset_name", "TEXT")
         self._ensure_column("sessions", "account_profile_id", "TEXT")
         self._ensure_column("sessions", "account_profile_label", "TEXT")
+        self._ensure_column("sessions", "verified_account_key", "TEXT")
+        self._ensure_column("sessions", "verified_account_label", "TEXT")
+        self._ensure_column("sessions", "verified_account_probed_at", "TEXT")
         self._ensure_column(
             "scheduled_sessions", "config_overrides", "TEXT NOT NULL DEFAULT '[]'"
         )
@@ -1867,6 +1870,12 @@ class Storage:
         raw_pinned_at = payload.get("pinned_at")
         payload["pinned_at"] = (
             datetime.fromisoformat(raw_pinned_at) if raw_pinned_at else None
+        )
+        raw_verified_probed_at = payload.get("verified_account_probed_at")
+        payload["verified_account_probed_at"] = (
+            datetime.fromisoformat(raw_verified_probed_at)
+            if raw_verified_probed_at
+            else None
         )
         payload["status"] = SessionStatus(payload["status"])
         payload["launch_mode"] = payload.get("launch_mode") or "auto"

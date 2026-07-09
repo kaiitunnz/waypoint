@@ -240,6 +240,15 @@ class SessionRecord(BaseModel):
     # private launch_env, so the account is bound even if config changes later.
     account_profile_id: str | None = None
     account_profile_label: str | None = None
+    # Server-owned provenance from the last account probe (launch, switch,
+    # reattach, or boot-restore) — distinct from the client-selected
+    # ``account_profile_id``/``label`` above. ``key`` and ``label`` are
+    # diagnostic-only (the label is frequently an OAuth email) and excluded
+    # from the public dump; ``probed_at`` is a bare timestamp and safe to show
+    # as "account last verified <ago>".
+    verified_account_key: str | None = Field(default=None, exclude=True)
+    verified_account_label: str | None = Field(default=None, exclude=True)
+    verified_account_probed_at: datetime | None = None
 
 
 class EventRecord(BaseModel):

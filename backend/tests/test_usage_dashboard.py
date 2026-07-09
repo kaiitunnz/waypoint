@@ -38,6 +38,8 @@ def _session(
     backend: str,
     snapshot: SessionRateLimitUsage | None,
     updated_at: datetime | None = None,
+    verified_account_key: str | None = None,
+    verified_account_label: str | None = None,
 ) -> SessionRecord:
     now = updated_at or datetime.now(UTC)
     return SessionRecord(
@@ -53,6 +55,8 @@ def _session(
         raw_log_path=f"/tmp/{sid}.raw",
         structured_log_path=f"/tmp/{sid}.json",
         rate_limit_usage=snapshot,
+        verified_account_key=verified_account_key,
+        verified_account_label=verified_account_label,
     )
 
 
@@ -188,6 +192,67 @@ def test_build_dashboard_skips_sessions_without_snapshot(
     ]
     dashboard = build_dashboard(sessions, registry)
     assert dashboard.buckets == []
+
+
+def test_account_bucket_prefers_verified_key_over_derivation(
+    registry: BackendRegistry,
+) -> None:
+    # Persisted verified_account_key (from a past probe) wins even though the
+    # snapshot's own notes would derive a different account.
+    snap = _snapshot(
+        source="claude_code",
+        notes=["CLI OAuth", "org: Acme", "org tier: enterprise"],
+        updated_at=datetime.now(UTC),
+    )
+    key, label = account_bucket_for(
+        snap,
+        session_id="s1",
+        registry=registry,
+        verified_account_key="claude_code:Verified",
+        verified_account_label="Verified Org",
+    )
+    assert key == "claude_code:Verified"
+    assert label == "Verified Org"
+
+
+def test_account_bucket_verified_key_without_label_falls_back_to_key(
+    registry: BackendRegistry,
+) -> None:
+    snap = _snapshot(
+        source="claude_code", notes=["CLI OAuth"], updated_at=datetime.now(UTC)
+    )
+    key, label = account_bucket_for(
+        snap,
+        session_id="s1",
+        registry=registry,
+        verified_account_key="claude_code:Verified",
+    )
+    assert key == "claude_code:Verified"
+    assert label == "claude_code:Verified"
+
+
+def test_build_dashboard_buckets_on_verified_account_key(
+    registry: BackendRegistry,
+) -> None:
+    now = datetime.now(UTC)
+    snap = _snapshot(
+        source="claude_code",
+        notes=["org: Acme", "org tier: enterprise"],
+        updated_at=now,
+    )
+    sessions = [
+        _session(
+            sid="s1",
+            backend="claude_code",
+            snapshot=snap,
+            verified_account_key="claude_code:Verified",
+            verified_account_label="Verified Org",
+        ),
+    ]
+    dashboard = build_dashboard(sessions, registry)
+    assert len(dashboard.buckets) == 1
+    assert dashboard.buckets[0].account_key == "claude_code:Verified"
+    assert dashboard.buckets[0].account_label == "Verified Org"
 
 
 def test_build_dashboard_separates_backends_and_accounts(

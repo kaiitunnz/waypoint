@@ -4734,8 +4734,8 @@ html[data-theme="light"] .usage-chip-group {
   top: calc(100% + 8px);
   right: 0;
   width: max-content;
-  max-width: 240px;
-  padding: 8px 11px;
+  max-width: 260px;
+  padding: 10px 13px;
   border: 1px solid var(--glass-line);
   border-radius: var(--radius);
   background: var(--glass-bg-thick);
@@ -4743,10 +4743,10 @@ html[data-theme="light"] .usage-chip-group {
     inset 0 1px 0 var(--glass-hi),
     var(--shadow);
   backdrop-filter: var(--glass-blur);
-  font-family: var(--font-mono);
-  font-size: 0.62rem;
-  line-height: 1.45;
-  letter-spacing: 0.01em;
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  letter-spacing: 0;
   text-transform: none;
   color: var(--text);
   z-index: 40;

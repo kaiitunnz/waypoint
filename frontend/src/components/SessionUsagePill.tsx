@@ -317,8 +317,9 @@ export function SessionUsagePill({
                             role="tooltip"
                             className={`usage-tip${totalTipOpen ? " usage-tip--open" : ""}`}
                           >
-                            Cumulative across turns — includes context re-sent
-                            each turn, so it far exceeds the conversation size.
+                            Each turn re-reads the whole conversation, so this
+                            running total climbs much faster than the chat
+                            itself.
                           </span>
                         </span>
                       </span>

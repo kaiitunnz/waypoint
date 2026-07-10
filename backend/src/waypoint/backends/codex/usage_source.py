@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from waypoint.backends.codex.adapter import _positive_int
 from waypoint.backends.context_usage_source import ContextUsageSource
-from waypoint.schemas import SessionContextUsage
+from waypoint.schemas import SessionContextUsage, SessionTokenUsage
 
 if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
@@ -107,7 +107,10 @@ class CodexRolloutUsageSource(ContextUsageSource):
         # found under the profile dir rather than the default ~/.codex.
         self._codex_home = codex_home
         self._offset = 0
-        self._context_usage_signature: tuple[int, int | None] | None = None
+        self._context_usage_signature: (
+            tuple[int, int | None, tuple[tuple[str, int], ...]] | None
+        ) = None
+        self._partial_coverage_published = False
 
     def _read_new_bytes(self, path: Path) -> bytes:
         try:
@@ -140,13 +143,52 @@ class CodexRolloutUsageSource(ContextUsageSource):
             snapshot = _parse_token_count_record(record)
             if snapshot is None:
                 continue
-            sig = (snapshot.used_tokens, snapshot.context_window_tokens)
+            await self._maybe_publish_partial_coverage()
+            # Key on the breakdown too, so a same-total/different-split turn refreshes.
+            sig = (
+                snapshot.used_tokens,
+                snapshot.context_window_tokens,
+                tuple(sorted(snapshot.breakdown.items())),
+            )
             if sig == self._context_usage_signature:
                 continue
             self._context_usage_signature = sig
             await self._runtime.update_session_fields(
                 self._session_id, context_usage=snapshot
             )
+
+    async def _maybe_publish_partial_coverage(self) -> None:
+        """Disclose (once) that per-turn totals are unavailable for Codex tmux.
+
+        The rollout ``token_count`` event has no stable per-turn id — only a
+        byte offset, which is a replay cursor, not a turn key — so it can't feed
+        the ledger without double-counting. The context meter still works.
+        """
+        if self._partial_coverage_published:
+            return
+        session = self._runtime.storage.get_session(self._session_id)
+        if session is None or session.session_token_usage is not None:
+            # Missing session, or an aggregate already exists (e.g. this thread
+            # was previously driven over the structured transport) — leave it.
+            self._partial_coverage_published = True
+            return
+        now = datetime.now(UTC)
+        aggregate = SessionTokenUsage(
+            source="codex",
+            tracked_turns=0,
+            totals={},
+            observed_from=session.created_at,
+            complete_through=session.created_at,
+            coverage="partial",
+            coverage_note=(
+                "Per-turn token totals are unavailable for Codex terminal " "sessions."
+            ),
+            updated_at=now,
+        )
+        self._partial_coverage_published = True
+        await self._runtime.update_session_fields(
+            self._session_id, session_token_usage=aggregate
+        )
 
     async def run(self) -> None:
         try:

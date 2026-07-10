@@ -416,12 +416,16 @@ class OpenCodePlugin(DefaultLaunchContract):
                 self._handle_server_died(runtime, key, active_session_ids)
 
             session_update_callback = getattr(runtime, "session_update_callback", None)
+            token_usage_callback = getattr(runtime, "token_usage_callback", None)
             adapter = OpenCodeAdapter(
                 emit_event=runtime._emit_adapter_event,
                 on_session_update=(
                     session_update_callback()
                     if callable(session_update_callback)
                     else None
+                ),
+                on_token_usage=(
+                    token_usage_callback() if callable(token_usage_callback) else None
                 ),
                 launch_target=launch_target,
                 on_agent_changed=_on_agent_changed,
@@ -707,19 +711,11 @@ class OpenCodePlugin(DefaultLaunchContract):
     def create_context_usage_source(
         self, session: SessionRecord, runtime: "SessionRuntime"
     ) -> "ContextUsageSource | None":
-        if session.transport != "tmux":
-            return None
-        from waypoint.backends.opencode.usage_source import (
-            OpenCodeTmuxUsageSource,
-            _opencode_db_dir,
-        )
-
-        return OpenCodeTmuxUsageSource(
-            session_id=session.id,
-            cwd=session.cwd,
-            runtime=runtime,
-            db_dir=_opencode_db_dir(),
-        )
+        # No telemetry over the tmux transport: the TUI creates its session id
+        # lazily after launch, so the only handle is the working directory —
+        # and two sessions in one directory would report each other's usage.
+        # Enable only once a native, unambiguous id handoff exists.
+        return None
 
     def register_routes(self, app: FastAPI, context: Any) -> None:
         pass

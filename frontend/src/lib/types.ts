@@ -32,6 +32,29 @@ export interface SessionContextUsage {
   breakdown?: Record<string, number>;
 }
 
+export type TokenUsageCoverage =
+  | "entire_waypoint_session"
+  | "tracked_since"
+  | "partial";
+
+// Cumulative per-turn token work over a session's tracked life. Distinct from
+// SessionContextUsage (the latest context-window occupancy): this can exceed
+// the window many times over, so it is never rendered as a percentage.
+export interface SessionTokenUsage {
+  source: Backend;
+  tracked_turns: number;
+  totals: Record<string, number>;
+  // Provider-safe grand total across turns, or null when categories overlap and
+  // no synthesized total is safe (the UI then shows only category totals).
+  display_total_tokens?: number | null;
+  observed_from: string;
+  complete_through: string;
+  backfilled_through?: string | null;
+  coverage: TokenUsageCoverage;
+  coverage_note?: string | null;
+  updated_at: string;
+}
+
 export interface UsageWindow {
   id: string;
   label: string;
@@ -97,6 +120,7 @@ export interface SessionRecord {
   resolved_model?: string | null;
   effort?: string | null;
   context_usage?: SessionContextUsage | null;
+  session_token_usage?: SessionTokenUsage | null;
   rate_limit_usage?: SessionRateLimitUsage | null;
   args: string[];
   config_overrides: string[];

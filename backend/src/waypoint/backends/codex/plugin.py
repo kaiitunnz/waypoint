@@ -233,6 +233,7 @@ class CodexPlugin(DefaultLaunchContract):
         self.adapter = CodexAppServerAdapter(
             runtime._emit_adapter_event,
             runtime.session_update_callback(),
+            on_token_usage=runtime.token_usage_callback(),
         )
 
     async def shutdown(self, runtime: "SessionRuntime") -> None:

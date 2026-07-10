@@ -10,7 +10,10 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-from waypoint.backends.claude_code.adapter import _context_usage_snapshot_from_message
+from waypoint.backends.claude_code.adapter import (
+    _context_usage_snapshot_from_message,
+    claude_token_usage_record,
+)
 from waypoint.backends.claude_tty.tailer import transcript_path
 from waypoint.backends.context_usage_source import ContextUsageSource
 
@@ -37,7 +40,9 @@ class TranscriptContextUsageSource(ContextUsageSource):
         self._path = transcript_path(cwd, session_uuid, config_dir)
         self._runtime = runtime
         self._offset = 0
-        self._context_usage_signature: tuple[int, int | None] | None = None
+        self._context_usage_signature: (
+            tuple[int, int | None, tuple[tuple[str, int], ...]] | None
+        ) = None
 
     def _read_new_bytes(self) -> bytes:
         if not self._path.exists():
@@ -90,8 +95,25 @@ class TranscriptContextUsageSource(ContextUsageSource):
         snapshot = _context_usage_snapshot_from_message(model, usage)
         if snapshot is None:
             return
-        sig = (snapshot.used_tokens, snapshot.context_window_tokens)
-        if sig == self._context_usage_signature:
+        # Key on the breakdown too, so a same-total/different-split turn refreshes.
+        sig = (
+            snapshot.used_tokens,
+            snapshot.context_window_tokens,
+            tuple(sorted(snapshot.breakdown.items())),
+        )
+        context_changed = sig != self._context_usage_signature
+        # Key the ledger on the message id (uuid fallback) so offset-zero replay
+        # is idempotent; recorded regardless of the snapshot dedup so two turns
+        # with identical totals both count. Broadcast it here only when the
+        # context publish below won't (a deduped snapshot), so the aggregate
+        # increment is never stranded, yet a changed turn still emits one frame.
+        record_id = str(message.get("id") or record.get("uuid") or "")
+        token_record = claude_token_usage_record(record_id, snapshot)
+        if token_record is not None:
+            await self._runtime.publish_token_usage_record(
+                self._session_id, token_record, publish=not context_changed
+            )
+        if not context_changed:
             return
         self._context_usage_signature = sig
         await self._runtime.update_session_fields(

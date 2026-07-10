@@ -52,6 +52,7 @@ def _make_runtime(session: SessionRecord) -> MagicMock:
     runtime.storage.get_session.return_value = session
     runtime._emit_adapter_event = AsyncMock()
     runtime.update_session_fields = AsyncMock()
+    runtime.publish_token_usage_record = AsyncMock()
     return runtime
 
 

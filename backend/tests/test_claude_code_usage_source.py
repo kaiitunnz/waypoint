@@ -13,6 +13,7 @@ from waypoint.backends.claude_code.usage_source import TranscriptContextUsageSou
 def _make_runtime(session_model: str | None = None) -> MagicMock:
     runtime = MagicMock()
     runtime.update_session_fields = AsyncMock()
+    runtime.publish_token_usage_record = AsyncMock()
     # The source reads the session's configured model fresh on each publish to
     # resolve the context window (the transcript only carries the resolved API
     # id, which loses the ``[1m]`` marker). Tests reassign
@@ -80,6 +81,42 @@ async def test_drain_publishes_context_usage_on_assistant_record(
     assert snapshot.used_tokens == 19
     assert snapshot.context_window_tokens == 200_000
     assert snapshot.source == "claude_code"
+
+    # The same assistant record also feeds the durable per-turn ledger, keyed
+    # on the provider message id, with a summed (non-overlapping) grand total.
+    runtime.publish_token_usage_record.assert_called_once()
+    record = runtime.publish_token_usage_record.call_args.args[1]
+    assert record.record_id == "msg_1"
+    assert record.totals == {
+        "input_tokens": 15,
+        "cache_read_tokens": 4,
+        "output_tokens": 6,
+    }
+    assert record.display_total_tokens == 25
+
+
+@pytest.mark.asyncio
+async def test_distinct_messages_each_publish_token_record(tmp_path: Path) -> None:
+    # Two distinct turns with identical usage: the snapshot dedupes (nothing
+    # changed to display), but each distinct message id must still be recorded
+    # so the aggregate counts both turns.
+    runtime = _make_runtime()
+    source = _make_source(runtime, tmp_path)
+    usage = {"input_tokens": 10, "output_tokens": 5}
+    rec1 = _assistant_record(usage=usage)
+    rec2 = _assistant_record(usage=usage)
+    rec2["message"]["id"] = "msg_2"
+    data = _jsonl(rec1, rec2)
+
+    with patch.object(source, "_read_new_bytes", return_value=data):
+        await source._drain()
+
+    assert runtime.update_session_fields.call_count == 1
+    assert runtime.publish_token_usage_record.call_count == 2
+    ids = [
+        c.args[1].record_id for c in runtime.publish_token_usage_record.call_args_list
+    ]
+    assert ids == ["msg_1", "msg_2"]
 
 
 @pytest.mark.asyncio

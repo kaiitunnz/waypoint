@@ -411,6 +411,58 @@ async def test_context_usage_snapshot_deduplicates_cached_updates() -> None:
 
 
 @pytest.mark.asyncio
+async def test_token_usage_record_keys_on_session_and_message_id() -> None:
+    records: list[tuple[str, Any, bool]] = []
+
+    async def _emit(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def on_token_usage(session_id: str, record: Any, publish: bool) -> object:
+        records.append((session_id, record, publish))
+        return None
+
+    adapter = OpenCodeAdapter(emit_event=_emit, on_token_usage=on_token_usage)
+    state = OpenCodeSessionState(
+        session_id="local-1",
+        cwd="/tmp",
+        opencode_session_id="ses_1",
+    )
+    properties = {
+        "sessionID": "ses_1",
+        "info": {
+            "id": "msg_9",
+            "role": "assistant",
+            "providerID": "opencode",
+            "modelID": "opencode/minimax-m2.5-free",
+            "tokens": {
+                "input": 120,
+                "output": 30,
+                "reasoning": 20,
+                "cache": {"read": 15, "write": 5},
+            },
+        },
+    }
+
+    # Published even though the context window is unknown (the ledger does not
+    # need it) — decoupled from the context-usage snapshot path.
+    await adapter._maybe_update_context_usage(state, properties)
+
+    assert len(records) == 1
+    session_id, record, _ = records[0]
+    assert session_id == "local-1"
+    assert record.record_id == "ses_1:msg_9"
+    # reasoning is a subset of output for some providers, so no synthesized total.
+    assert record.display_total_tokens is None
+    assert record.totals == {
+        "input_tokens": 120,
+        "output_tokens": 30,
+        "reasoning_tokens": 20,
+        "cache_read_tokens": 15,
+        "cache_write_tokens": 5,
+    }
+
+
+@pytest.mark.asyncio
 async def test_context_usage_background_lookup_publishes_once_ready() -> None:
     calls: list[tuple[str, dict[str, object], bool]] = []
 

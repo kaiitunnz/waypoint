@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { UsageBar, UsageReadout } from "@/components/UsageReadout";
 import { humaniseBackend, type BackendCatalog } from "@/lib/backends";
-import type { SessionContextUsage, SessionRecord } from "@/lib/types";
+import type {
+  SessionContextUsage,
+  SessionRecord,
+  SessionTokenUsage,
+} from "@/lib/types";
 import {
   clampPercent,
   formatRelativeTime,
@@ -39,6 +43,10 @@ export function SessionUsagePill({
   anchored = false,
 }: SessionUsagePillProps) {
   const [open, setOpen] = useState(false);
+  // Tap-to-reveal state for the cumulative-tokens tooltip (desktop also shows
+  // it on hover via CSS); reset whenever the panel closes.
+  const [totalTipOpen, setTotalTipOpen] = useState(false);
+  const totalTipId = useId();
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   // Below 540px the generic ``.usage-panel`` mobile bottom-sheet rule takes
@@ -63,7 +71,12 @@ export function SessionUsagePill({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
+  useEffect(() => {
+    if (!open) setTotalTipOpen(false);
+  }, [open]);
+
   const contextUsage = session?.context_usage ?? null;
+  const tokenUsage = session?.session_token_usage ?? null;
   const rateLimitUsage = session?.rate_limit_usage ?? null;
   const contextUsagePercentValue = contextUsage
     ? contextUsagePercent(contextUsage)
@@ -89,6 +102,15 @@ export function SessionUsagePill({
       ? `${formatTokens(contextUsage.used_tokens)} / ${formatTokens(contextUsageWindowDisplay)} (${contextUsagePercentDisplay}%)`
       : formatTokens(contextUsage.used_tokens)
     : null;
+
+  const tokenUsageTotals = tokenUsage
+    ? Object.entries(tokenUsage.totals ?? {})
+    : [];
+  // A partial disclosure with nothing tracked (e.g. Codex tmux) carries only a
+  // coverage note; the per-turn totals are genuinely unavailable there.
+  const tokenUsageHasTotals =
+    tokenUsage !== null && tokenUsage.tracked_turns > 0;
+
   const rateLimitUsageSummary = rateLimitUsage
     ? rateLimitUsage.windows.length > 0
       ? rateLimitUsage.windows
@@ -103,6 +125,8 @@ export function SessionUsagePill({
       ? rateLimitUsage.notes.join(" · ")
       : humaniseBackend(rateLimitUsage.source, catalog)
     : "Unavailable";
+  // The trigger only ever wears the context-pressure or rate-limit tone; the
+  // cumulative total never raises an alarm colour.
   const usageToneValue = (() => {
     if (contextUsage === null) return rateLimitUsageToneValue;
     if (rateLimitUsage === null) return contextUsageToneValue;
@@ -117,9 +141,10 @@ export function SessionUsagePill({
     }
     return "good";
   })();
-  const showUsagePopover = contextUsage !== null || rateLimitUsage !== null;
+  const showUsagePopover =
+    contextUsage !== null || tokenUsage !== null || rateLimitUsage !== null;
   const usagePopoverTitle = [
-    contextUsageSummary ? `Context ${contextUsageSummary}` : null,
+    contextUsageSummary ? `Current context ${contextUsageSummary}` : null,
     rateLimitUsageSummary ? `Rate limits ${rateLimitUsageSummary}` : null,
   ]
     .filter(Boolean)
@@ -178,6 +203,19 @@ export function SessionUsagePill({
           aria-label="Usage details"
         >
 
+          {rateLimitUsage ? (
+            <UsageReadout
+              usage={rateLimitUsage}
+              sourceLabel={rateLimitSourceLabel}
+              onRefresh={onRateLimitRefresh}
+              refreshing={rateLimitRefreshBusy}
+            />
+          ) : null}
+
+          {rateLimitUsage && (contextUsage || tokenUsage) ? (
+            <hr className="usage-divider" aria-hidden="true" />
+          ) : null}
+
           {contextUsage ? (
             <section className="usage-block">
               <header className="usage-block-head">
@@ -185,7 +223,7 @@ export function SessionUsagePill({
                   <span aria-hidden className="usage-block-mark">
                     ◆
                   </span>
-                  Context
+                  Current context window
                 </h3>
                 <span className="usage-block-tag">
                   {humaniseBackend(contextUsage.source, catalog)}
@@ -228,29 +266,104 @@ export function SessionUsagePill({
                 </div>
               </div>
               {contextUsageBreakdown.length > 0 ? (
-                <ul className="usage-chips">
-                  {contextUsageBreakdown.map(([key, value]) => (
-                    <li key={key}>
-                      <em>{contextUsageLabel(key)}</em>
-                      <strong>{formatTokens(value)}</strong>
-                    </li>
-                  ))}
-                </ul>
+                <div className="usage-chip-group">
+                  <p className="usage-chips-caption">Last turn</p>
+                  <ul className="usage-chips">
+                    {contextUsageBreakdown.map(([key, value]) => (
+                      <li key={key}>
+                        <em>{tokenCategoryLabel(key)}</em>
+                        <strong>{formatTokens(value)}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ) : null}
             </section>
           ) : null}
 
-          {contextUsage && rateLimitUsage ? (
+          {contextUsage && tokenUsage ? (
             <hr className="usage-divider" aria-hidden="true" />
           ) : null}
 
-          {rateLimitUsage ? (
-            <UsageReadout
-              usage={rateLimitUsage}
-              sourceLabel={rateLimitSourceLabel}
-              onRefresh={onRateLimitRefresh}
-              refreshing={rateLimitRefreshBusy}
-            />
+          {tokenUsage ? (
+            <section className="usage-block">
+              <header className="usage-block-head">
+                <h3 className="usage-block-eyebrow">
+                  <span aria-hidden className="usage-block-mark">
+                    ◆
+                  </span>
+                  Tracked session total
+                </h3>
+                <span className="usage-block-tag">
+                  {humaniseBackend(tokenUsage.source, catalog)}
+                </span>
+              </header>
+              {tokenUsageHasTotals ? (
+                <>
+                  <div className="usage-total-explain">
+                    <p className="usage-total-line">
+                      <span className="usage-total-count">
+                        {tokenUsage.tracked_turns}
+                      </span>
+                      <em>
+                        {tokenUsage.tracked_turns === 1 ? "turn" : "turns"}
+                      </em>
+                      {typeof tokenUsage.display_total_tokens === "number" ? (
+                        <span className="usage-total-work">
+                          <span aria-hidden>·</span>
+                          <strong>
+                            {formatTokens(tokenUsage.display_total_tokens)}
+                          </strong>
+                          cumulative tokens
+                          <button
+                            type="button"
+                            className="usage-info"
+                            aria-label="About cumulative tokens"
+                            aria-describedby={totalTipId}
+                            aria-expanded={totalTipOpen}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setTotalTipOpen((value) => !value);
+                            }}
+                          >
+                            ⓘ
+                          </button>
+                        </span>
+                      ) : null}
+                    </p>
+                    {typeof tokenUsage.display_total_tokens === "number" ? (
+                      <span
+                        id={totalTipId}
+                        role="tooltip"
+                        className={`usage-tip${totalTipOpen ? " usage-tip--open" : ""}`}
+                      >
+                        Counts the whole conversation, re-read every turn.
+                      </span>
+                    ) : null}
+                  </div>
+                  {tokenUsageTotals.length > 0 ? (
+                    <ul className="usage-chips">
+                      {tokenUsageTotals.map(([key, value]) => (
+                        <li key={key}>
+                          <em>{tokenCategoryLabel(key)}</em>
+                          <strong>{formatTokens(value)}</strong>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </>
+              ) : null}
+              <p
+                className={`usage-coverage${
+                  tokenUsage.coverage === "entire_waypoint_session"
+                    ? ""
+                    : " usage-coverage--partial"
+                }`}
+              >
+                <span aria-hidden className="usage-coverage-dot" />
+                {coverageLabel(tokenUsage)}
+              </p>
+            </section>
           ) : null}
         </div>
       ) : null}
@@ -273,7 +386,20 @@ function contextUsageTone(percent: number | null): "good" | "warn" | "danger" {
   return "good";
 }
 
-function contextUsageLabel(key: string): string {
+function coverageLabel(usage: SessionTokenUsage): string {
+  switch (usage.coverage) {
+    case "entire_waypoint_session":
+      return "Entire Waypoint session";
+    case "tracked_since":
+      return `Tracked since ${formatRelativeTime(usage.observed_from)}`;
+    case "partial":
+      return usage.coverage_note ?? "Partial coverage";
+    default:
+      return usage.coverage_note ?? "Partial coverage";
+  }
+}
+
+function tokenCategoryLabel(key: string): string {
   switch (key) {
     case "input_tokens":
       return "Input";
@@ -287,6 +413,8 @@ function contextUsageLabel(key: string): string {
       return "Reasoning";
     case "cache_read_tokens":
       return "Cache read";
+    case "cache_creation_tokens":
+      return "Cache write";
     case "cache_write_tokens":
       return "Cache write";
     default:

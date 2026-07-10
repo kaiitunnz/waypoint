@@ -36,6 +36,9 @@ from waypoint.schemas import (
     SessionPresetRecord,
     SessionRecord,
     SessionStatus,
+    SessionTokenUsage,
+    TokenUsageInit,
+    TokenUsageRecord,
 )
 
 log = logging.getLogger("waypoint.storage")
@@ -211,7 +214,17 @@ class Storage:
                 config_overrides TEXT NOT NULL DEFAULT '[]',
                 launch_env TEXT NOT NULL DEFAULT '{}',
                 context_usage TEXT,
+                session_token_usage TEXT,
                 rate_limit_usage TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS session_token_usage_records (
+                session_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                record_id TEXT NOT NULL,
+                observed_at TEXT NOT NULL,
+                usage_json TEXT NOT NULL,
+                PRIMARY KEY (session_id, source, record_id)
             );
 
             CREATE TABLE IF NOT EXISTS events (
@@ -357,6 +370,10 @@ class Storage:
         self._ensure_column("sessions", "launch_env", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column("sessions", "launch_mode", "TEXT NOT NULL DEFAULT 'auto'")
         self._ensure_column("sessions", "context_usage", "TEXT")
+        token_usage_column_is_new = not self._has_column(
+            "sessions", "session_token_usage"
+        )
+        self._ensure_column("sessions", "session_token_usage", "TEXT")
         self._ensure_column("sessions", "rate_limit_usage", "TEXT")
         self._ensure_column("sessions", "spawner_session_id", "TEXT")
         self._ensure_column("sessions", "worktree_path", "TEXT")
@@ -400,7 +417,37 @@ class Storage:
             CREATE INDEX IF NOT EXISTS idx_inbox_updated
                 ON inbox_items(updated_at, id);
             """)
+        if token_usage_column_is_new:
+            self._mark_sessions_pretracked()
         self.connection.commit()
+
+    def _has_column(self, table: str, column: str) -> bool:
+        rows = self.connection.execute(f"PRAGMA table_info({table})").fetchall()
+        return any(row["name"] == column for row in rows)
+
+    def _mark_sessions_pretracked(self) -> None:
+        """Flag sessions that predate the ledger so their coverage reports
+        "tracked since", not the whole session.
+
+        Runs once, guarded by the column having just been added, so sessions
+        created after the migration are never marked. The runtime's
+        coverage-init reads the ``transport_state`` marker.
+        """
+        rows = self.connection.execute(
+            "SELECT id, transport_state FROM sessions"
+        ).fetchall()
+        for row in rows:
+            try:
+                state = json.loads(row["transport_state"] or "{}")
+            except json.JSONDecodeError:
+                state = {}
+            if not isinstance(state, dict):
+                state = {}
+            state["pretracked_tokens"] = True
+            self.connection.execute(
+                "UPDATE sessions SET transport_state = ? WHERE id = ?",
+                (json.dumps(state), row["id"]),
+            )
 
     @_synchronized
     def close(self) -> None:
@@ -519,6 +566,12 @@ class Storage:
             (session_id,),
         )
         events_deleted = cursor.rowcount or 0
+        # No FK cascade is enforced (PRAGMA foreign_keys is off), so prune the
+        # per-turn token ledger explicitly in the same synchronized transaction.
+        self.connection.execute(
+            "DELETE FROM session_token_usage_records WHERE session_id = ?",
+            (session_id,),
+        )
         cursor = self.connection.execute(
             "DELETE FROM sessions WHERE id = ?",
             (session_id,),
@@ -526,6 +579,209 @@ class Storage:
         sessions_deleted = cursor.rowcount or 0
         self.connection.commit()
         return sessions_deleted > 0 or events_deleted > 0
+
+    @_synchronized
+    def record_token_usage(
+        self,
+        session_id: str,
+        record: TokenUsageRecord,
+        *,
+        init: TokenUsageInit,
+    ) -> SessionTokenUsage:
+        """Upsert one per-turn ledger row and delta-update the session aggregate.
+
+        Idempotent under ``(session_id, source, record_id)``: a duplicate or a
+        replay re-upserts the same row for a net-zero delta; a revised turn
+        replaces it. ``init`` seeds coverage/observed_from on the first record
+        only. One indexed read + one upsert + a bounded update, never a scan.
+        """
+        row = self.connection.execute(
+            """
+            SELECT usage_json FROM session_token_usage_records
+            WHERE session_id = ? AND source = ? AND record_id = ?
+            """,
+            (session_id, record.source, record.record_id),
+        ).fetchone()
+        prior = None
+        if row is not None:
+            try:
+                prior_dict = json.loads(row["usage_json"])
+            except json.JSONDecodeError:
+                prior_dict = None
+            if isinstance(prior_dict, dict):
+                prior = prior_dict
+
+        self.connection.execute(
+            """
+            INSERT INTO session_token_usage_records
+                (session_id, source, record_id, observed_at, usage_json)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(session_id, source, record_id) DO UPDATE SET
+                observed_at = excluded.observed_at,
+                usage_json = excluded.usage_json
+            """,
+            (
+                session_id,
+                record.source,
+                record.record_id,
+                record.observed_at.isoformat(),
+                json.dumps(
+                    {
+                        "totals": record.totals,
+                        "display_total_tokens": record.display_total_tokens,
+                    }
+                ),
+            ),
+        )
+
+        blob = self._load_token_usage_blob(session_id)
+        if blob is None:
+            blob = {
+                "source": record.source,
+                "tracked_turns": 0,
+                "totals": {},
+                "display_total_tokens": None,
+                "display_total_sum": 0,
+                "display_total_count": 0,
+                "observed_from": init.observed_from.isoformat(),
+                "complete_through": record.observed_at.isoformat(),
+                "backfilled_through": None,
+                "coverage": init.coverage,
+                "coverage_note": init.coverage_note,
+                "updated_at": record.observed_at.isoformat(),
+            }
+
+        self._apply_token_usage_delta(blob, record, prior)
+        self._store_token_usage_blob(session_id, blob)
+        self.connection.commit()
+        return SessionTokenUsage.model_validate(blob)
+
+    @staticmethod
+    def _apply_token_usage_delta(
+        blob: dict[str, Any],
+        record: TokenUsageRecord,
+        prior: dict[str, Any] | None,
+    ) -> None:
+        """Fold one record into ``blob`` in place (net-zero if it re-adds ``prior``)."""
+        prior_totals: dict[str, int] = (prior or {}).get("totals", {}) or {}
+        totals: dict[str, int] = dict(blob.get("totals", {}))
+        for cat in set(record.totals) | set(prior_totals):
+            net = int(record.totals.get(cat, 0)) - int(prior_totals.get(cat, 0))
+            if net:
+                totals[cat] = totals.get(cat, 0) + net
+        # Drop categories that have netted back to zero so the UI never shows an
+        # empty category; missing keys stay absent per the vocabulary rules.
+        blob["totals"] = {k: v for k, v in totals.items() if v}
+
+        is_new = prior is None
+        if is_new:
+            blob["tracked_turns"] = int(blob.get("tracked_turns", 0)) + 1
+
+        prior_display = None if is_new else (prior or {}).get("display_total_tokens")
+        new_display = record.display_total_tokens
+        blob["display_total_sum"] = (
+            int(blob.get("display_total_sum", 0))
+            + (int(new_display) if new_display is not None else 0)
+            - (int(prior_display) if prior_display is not None else 0)
+        )
+        blob["display_total_count"] = (
+            int(blob.get("display_total_count", 0))
+            + (1 if new_display is not None else 0)
+            - (1 if prior_display is not None else 0)
+        )
+        tracked = int(blob["tracked_turns"])
+        # Derived, non-destructive: a lone missing display_total yields None
+        # without discarding the accumulated sum, so a later correction restores it.
+        blob["display_total_tokens"] = (
+            blob["display_total_sum"]
+            if tracked > 0 and blob["display_total_count"] == tracked
+            else None
+        )
+
+        observed = record.observed_at.isoformat()
+        blob["complete_through"] = max(blob["complete_through"], observed)
+        # Never regress on an out-of-order correction for an older turn.
+        blob["updated_at"] = max(blob["updated_at"], observed)
+
+    def _load_token_usage_blob(self, session_id: str) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            "SELECT session_token_usage FROM sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        if row is None or not row["session_token_usage"]:
+            return None
+        try:
+            blob = json.loads(row["session_token_usage"])
+        except json.JSONDecodeError:
+            return None
+        return blob if isinstance(blob, dict) else None
+
+    def _store_token_usage_blob(self, session_id: str, blob: dict[str, Any]) -> None:
+        self.connection.execute(
+            "UPDATE sessions SET session_token_usage = ? WHERE id = ?",
+            (json.dumps(blob), session_id),
+        )
+
+    @_synchronized
+    def rebuild_aggregate_from_ledger(
+        self, session_id: str
+    ) -> SessionTokenUsage | None:
+        """Recompute the aggregate from the full ledger, preserving coverage.
+
+        Off the hot path. Reconciles a materialized aggregate that drifted from
+        its ledger and is the seam for verified native-history backfill. Returns
+        ``None`` when the session has no ledger rows and no prior aggregate.
+        """
+        existing = self._load_token_usage_blob(session_id)
+        rows = self.connection.execute(
+            """
+            SELECT source, observed_at, usage_json FROM session_token_usage_records
+            WHERE session_id = ? ORDER BY observed_at ASC
+            """,
+            (session_id,),
+        ).fetchall()
+        if not rows:
+            return (
+                SessionTokenUsage.model_validate(existing)
+                if existing is not None
+                else None
+            )
+        blob: dict[str, Any] | None = None
+        for row in rows:
+            try:
+                usage = json.loads(row["usage_json"])
+            except json.JSONDecodeError:
+                continue
+            observed = datetime.fromisoformat(row["observed_at"])
+            record = TokenUsageRecord(
+                record_id="",
+                source=row["source"],
+                observed_at=observed,
+                totals=usage.get("totals", {}) or {},
+                display_total_tokens=usage.get("display_total_tokens"),
+            )
+            if blob is None:
+                blob = {
+                    "source": row["source"],
+                    "tracked_turns": 0,
+                    "totals": {},
+                    "display_total_tokens": None,
+                    "display_total_sum": 0,
+                    "display_total_count": 0,
+                    "observed_from": (existing or {}).get(
+                        "observed_from", observed.isoformat()
+                    ),
+                    "complete_through": observed.isoformat(),
+                    "backfilled_through": (existing or {}).get("backfilled_through"),
+                    "coverage": (existing or {}).get("coverage", "tracked_since"),
+                    "coverage_note": (existing or {}).get("coverage_note"),
+                    "updated_at": observed.isoformat(),
+                }
+            self._apply_token_usage_delta(blob, record, None)
+        assert blob is not None
+        self._store_token_usage_blob(session_id, blob)
+        self.connection.commit()
+        return SessionTokenUsage.model_validate(blob)
 
     @_synchronized
     def add_board_entry(
@@ -1925,6 +2181,21 @@ class Storage:
                 payload["context_usage"] = None
         else:
             payload["context_usage"] = None
+        raw_token_usage = payload.get("session_token_usage")
+        if raw_token_usage:
+            try:
+                parsed_token_usage = json.loads(raw_token_usage)
+            except json.JSONDecodeError:
+                parsed_token_usage = None
+            # The stored blob carries private ``display_total_*`` bookkeeping
+            # keys the ledger delta path maintains; model_validate drops them
+            # (extra="ignore") and reads the materialized ``display_total_tokens``.
+            if isinstance(parsed_token_usage, dict):
+                payload["session_token_usage"] = parsed_token_usage
+            else:
+                payload["session_token_usage"] = None
+        else:
+            payload["session_token_usage"] = None
         raw_rate_limit_usage = payload.get("rate_limit_usage")
         if raw_rate_limit_usage:
             try:

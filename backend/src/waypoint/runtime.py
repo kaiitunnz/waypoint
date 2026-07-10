@@ -96,6 +96,8 @@ from waypoint.schemas import (
     SessionRecord,
     SessionSource,
     SessionStatus,
+    TokenUsageInit,
+    TokenUsageRecord,
 )
 from waypoint.settings import Settings
 from waypoint.ssh_master import SshMasterManager, SshMasterStatus
@@ -3438,6 +3440,13 @@ class SessionRuntime:
         resume, with a system note explaining history was unavailable. Returns
         the number of events seeded.
         """
+        # Every import routes through here, so stamp the adoption marker that
+        # makes token-usage coverage report "tracked since" (the adopted thread
+        # had prior turns Waypoint never metered). Merge to keep other keys.
+        session = self.storage.get_session(session_id)
+        if session is not None and not session.transport_state.get("adopted_thread"):
+            merged = {**session.transport_state, "adopted_thread": True}
+            self.storage.update_session(session_id, transport_state=merged)
         if not enabled:
             return 0
         try:
@@ -3500,6 +3509,73 @@ class SessionRuntime:
             )
 
         return _update_session_fields
+
+    def _token_usage_init(
+        self, session: SessionRecord, observed_at: datetime
+    ) -> "TokenUsageInit":
+        """Coverage seed for a session's first token-usage record.
+
+        Claims the whole session only when metered from turn one; anything that
+        adopted prior native history (imports, attached tmux, or sessions
+        predating the ledger) can honestly claim only "tracked since".
+        """
+        is_from_birth = (
+            session.source in {SessionSource.MANAGED, SessionSource.ASSISTANT}
+            and not session.transport_state.get("adopted_thread")
+            and not session.transport_state.get("pretracked_tokens")
+        )
+        if is_from_birth:
+            return TokenUsageInit(
+                coverage="entire_waypoint_session",
+                observed_from=session.created_at,
+            )
+        return TokenUsageInit(coverage="tracked_since", observed_from=observed_at)
+
+    async def publish_token_usage_record(
+        self,
+        session_id: str,
+        record: "TokenUsageRecord",
+        *,
+        publish: bool = True,
+    ) -> None:
+        """Fold one per-turn record into the durable session token aggregate.
+
+        Additive only — never touches ``context_usage``, so a swallowed failure
+        can't drop the snapshot or interrupt the turn.
+        """
+        if not record.record_id:
+            # An identity-less event can't key a ledger row (a "" key would
+            # collapse distinct turns), so skip aggregation.
+            log.debug(
+                "token usage record rejected: missing identity",
+                extra={"session_id": session_id, "source": record.source},
+            )
+            return
+        try:
+            session = self.storage.get_session(session_id)
+            if session is None:
+                return
+            init = self._token_usage_init(session, record.observed_at)
+            self.storage.record_token_usage(session_id, record, init=init)
+        except Exception:
+            log.debug(
+                "failed to record token usage",
+                extra={"session_id": session_id},
+                exc_info=True,
+            )
+            return
+        if publish:
+            self._publish_session_state(session_id)
+
+    def token_usage_callback(
+        self,
+    ) -> Callable[[str, "TokenUsageRecord", bool], Awaitable[None]]:
+        async def _publish_token_usage(
+            session_id: str, record: "TokenUsageRecord", publish: bool
+        ) -> None:
+            await self.publish_token_usage_record(session_id, record, publish=publish)
+
+        return _publish_token_usage
 
     async def _publish_event(self, event: EventRecord) -> None:
         await self.broadcast.publish(

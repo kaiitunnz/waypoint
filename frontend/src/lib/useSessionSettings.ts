@@ -248,13 +248,18 @@ export function useSessionSettings(
     [],
   );
 
-  const load = useCallback(async () => {
+  const load = useCallback(
+    async (opts?: { keepMessages?: boolean }) => {
     if (!sessionId || !backend) return;
     const currentToken = ++loadToken.current;
     setLoading(true);
     setLoadError(null);
-    setApplyError(null);
-    setPartialSuccess(false);
+    // A post-failure refresh keeps the apply error/partial-success banner
+    // visible; a normal (re)open clears it.
+    if (!opts?.keepMessages) {
+      setApplyError(null);
+      setPartialSuccess(false);
+    }
     try {
       const [record, settings] = await Promise.all([
         fetchSession(host, token, sessionId),
@@ -288,15 +293,9 @@ export function useSessionSettings(
     } finally {
       if (currentToken === loadToken.current) setLoading(false);
     }
-  }, [
-    host,
-    token,
-    sessionId,
-    backend,
-    launchTargetId,
-    resetDraft,
-    onAuthFailure,
-  ]);
+    },
+    [host, token, sessionId, backend, launchTargetId, resetDraft, onAuthFailure],
+  );
 
   useEffect(() => {
     if (open) {
@@ -418,8 +417,9 @@ export function useSessionSettings(
       if (hidden.has(entry.key)) continue;
       if (entry.op === "replace") {
         // Only emit a value the user actually typed — never synthesize an
-        // empty value for an unchanged redacted key.
-        envSet[entry.key] = entry.value;
+        // empty value for an unchanged redacted key. A blank Replace is treated
+        // as "keep" so it can't silently wipe a stored secret to "".
+        if (entry.value !== "") envSet[entry.key] = entry.value;
       } else if (entry.op === "remove") {
         envUnset.push(entry.key);
       }
@@ -649,10 +649,11 @@ export function useSessionSettings(
         error instanceof Error ? error.message : "failed to apply settings";
       setApplyError(message);
       // A later independent op failed after an earlier one succeeded: surface a
-      // truthful partial-success state and refresh, never roll back.
+      // truthful partial-success state and refresh, never roll back. The refresh
+      // must keep the error banner (load() otherwise clears it synchronously).
       setPartialSuccess(anySucceeded);
       if (message.toLowerCase().includes("auth")) onAuthFailure?.();
-      if (applyToken === loadToken.current) void load();
+      if (applyToken === loadToken.current) void load({ keepMessages: true });
       return false;
     } finally {
       setApplying(false);

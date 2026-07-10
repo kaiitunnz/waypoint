@@ -176,6 +176,9 @@ export function SessionSettingsModal({
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
+    // Move focus into the dialog on open so the Tab trap engages immediately
+    // and screen readers announce it; the trigger has usually unmounted.
+    modalRef.current?.focus();
     return () => {
       if (previous && typeof previous.focus === "function") previous.focus();
     };
@@ -285,6 +288,7 @@ export function SessionSettingsModal({
         role="dialog"
         aria-modal="true"
         aria-label="Session settings"
+        tabIndex={-1}
         ref={modalRef}
         style={
           isMobile && mobileVV !== null
@@ -445,23 +449,46 @@ export function SessionSettingsModal({
                       <label className="settings-field-label" htmlFor="settings-model">
                         Model
                       </label>
-                      <select
-                        id="settings-model"
-                        className="settings-input"
-                        value={model ?? ""}
-                        onChange={(e) => setModel(e.target.value || null)}
-                        disabled={busy}
-                      >
-                        {model !== null &&
-                        !models.some((m) => m.id === model) ? (
-                          <option value={model}>{model}</option>
-                        ) : null}
-                        {models.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.label}
-                          </option>
-                        ))}
-                      </select>
+                      {supportsFreeTextModel ? (
+                        // Editable combobox: pick a discovered model or type a
+                        // free-text id (backends that report supports_free_text).
+                        <>
+                          <input
+                            id="settings-model"
+                            className="settings-input"
+                            list="settings-model-options"
+                            value={model ?? ""}
+                            onChange={(e) => setModel(e.target.value || null)}
+                            placeholder="Model id"
+                            disabled={busy}
+                          />
+                          <datalist id="settings-model-options">
+                            {models.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.label}
+                              </option>
+                            ))}
+                          </datalist>
+                        </>
+                      ) : (
+                        <select
+                          id="settings-model"
+                          className="settings-input"
+                          value={model ?? ""}
+                          onChange={(e) => setModel(e.target.value || null)}
+                          disabled={busy}
+                        >
+                          {model !== null &&
+                          !models.some((m) => m.id === model) ? (
+                            <option value={model}>{model}</option>
+                          ) : null}
+                          {models.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                   ) : null}
                   {showEffort ? (
@@ -514,6 +541,15 @@ export function SessionSettingsModal({
                       }
                       disabled={busy || assistantReplacementStaged}
                     >
+                      {/* A session may currently run under no profile; show a
+                          disabled placeholder so the value isn't orphaned.
+                          Clearing a profile to none is out of scope, so it
+                          can't be re-selected once a real profile is chosen. */}
+                      {accountProfileId === null ? (
+                        <option value="" disabled>
+                          No profile
+                        </option>
+                      ) : null}
                       {accountProfiles.map((profile) => (
                         <option key={profile.id} value={profile.id}>
                           {profile.label}

@@ -1,0 +1,108 @@
+"use client";
+
+// Shared key/value environment-variable editor: one row per variable with a
+// name field, a value field, and a remove control, plus an "Add variable"
+// button. Used by the launch panel, the resume panel, and the session settings
+// modal so every env editor reads the same. Controlled — the parent owns the
+// entries and their conversion to/from a plain record.
+
+export interface EnvEntry {
+  id: number;
+  key: string;
+  value: string;
+}
+
+interface EnvVarRowsProps {
+  entries: EnvEntry[];
+  onChange: (entries: EnvEntry[]) => void;
+  disabled?: boolean;
+  // Launch/resume enter fresh values in the clear (matching the old textarea);
+  // the settings modal masks newly-typed secrets.
+  valueType?: "text" | "password";
+}
+
+// Assign stable, monotonic ids so React keys survive edits and removals.
+export function recordToEntries(record: Record<string, string> | undefined): EnvEntry[] {
+  return Object.entries(record ?? {}).map(([key, value], index) => ({
+    id: index + 1,
+    key,
+    value,
+  }));
+}
+
+// Trim keys, drop empty keys, last value wins on a duplicate key — matching the
+// prior text-parser semantics.
+export function entriesToRecord(entries: EnvEntry[]): Record<string, string> {
+  const record: Record<string, string> = {};
+  for (const entry of entries) {
+    const key = entry.key.trim();
+    if (!key) continue;
+    record[key] = entry.value;
+  }
+  return record;
+}
+
+export function EnvVarRows({
+  entries,
+  onChange,
+  disabled,
+  valueType = "text",
+}: EnvVarRowsProps) {
+  const nextId = () => entries.reduce((max, e) => Math.max(max, e.id), 0) + 1;
+  const add = () => onChange([...entries, { id: nextId(), key: "", value: "" }]);
+  const update = (id: number, patch: Partial<Omit<EnvEntry, "id">>) =>
+    onChange(entries.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  const remove = (id: number) => onChange(entries.filter((e) => e.id !== id));
+
+  return (
+    <div className="settings-env-list">
+      {entries.map((entry) => (
+        <div className="settings-env-row" key={entry.id}>
+          <input
+            className="settings-input settings-env-key-input"
+            type="text"
+            value={entry.key}
+            onChange={(e) => update(entry.id, { key: e.target.value })}
+            placeholder="KEY"
+            disabled={disabled}
+            spellCheck={false}
+            autoCapitalize="none"
+            autoComplete="off"
+            autoCorrect="off"
+            aria-label="Variable name"
+          />
+          <input
+            className="settings-input settings-env-value"
+            type={valueType}
+            value={entry.value}
+            onChange={(e) => update(entry.id, { value: e.target.value })}
+            placeholder="value"
+            disabled={disabled}
+            spellCheck={false}
+            autoCapitalize="none"
+            autoComplete="off"
+            autoCorrect="off"
+            aria-label="Variable value"
+          />
+          <button
+            type="button"
+            className="settings-env-remove"
+            onClick={() => remove(entry.id)}
+            disabled={disabled}
+            aria-label="Remove variable"
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        className="settings-env-add"
+        onClick={add}
+        disabled={disabled}
+      >
+        + Add variable
+      </button>
+    </div>
+  );
+}

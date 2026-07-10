@@ -134,9 +134,7 @@ export interface SessionSettingsController {
   setConfigOverridesText: (value: string) => void;
   setExistingEnvOp: (key: string, op: EnvKeyOp) => void;
   setExistingEnvValue: (key: string, value: string) => void;
-  addNewEnv: () => void;
-  updateNewEnv: (id: number, patch: Partial<Omit<NewEnvEntry, "id">>) => void;
-  removeNewEnv: (id: number) => void;
+  setNewEnv: (entries: NewEnvEntry[]) => void;
   setAssistantBackend: (backend: Backend) => void;
   setAssistantTransport: (transport: string) => void;
   setAssistantThreadId: (threadId: string | null) => void;
@@ -200,7 +198,6 @@ export function useSessionSettings(
   const [configOverridesText, setConfigOverridesText] = useState("");
   const [existingEnv, setExistingEnv] = useState<ExistingEnvEntry[]>([]);
   const [newEnv, setNewEnv] = useState<NewEnvEntry[]>([]);
-  const newEnvSeq = useRef(0);
   const [assistantBackend, setAssistantBackendState] = useState<Backend | null>(
     null,
   );
@@ -242,7 +239,6 @@ export function useSessionSettings(
           .map((key) => ({ key, op: "keep" as EnvKeyOp, value: "" })),
       );
       setNewEnv([]);
-      newEnvSeq.current = 0;
       setAssistantBackendState(record.backend);
       setAssistantTransportState(record.transport);
       setAssistantThreadIdState(null);
@@ -334,28 +330,6 @@ export function useSessionSettings(
         entry.key === key ? { ...entry, value, op: "replace" } : entry,
       ),
     );
-  }, []);
-
-  const addNewEnv = useCallback(() => {
-    setNewEnv((prev) => [
-      ...prev,
-      { id: ++newEnvSeq.current, key: "", value: "" },
-    ]);
-  }, []);
-
-  const updateNewEnv = useCallback(
-    (id: number, patch: Partial<Omit<NewEnvEntry, "id">>) => {
-      setNewEnv((prev) =>
-        prev.map((entry) =>
-          entry.id === id ? { ...entry, ...patch } : entry,
-        ),
-      );
-    },
-    [],
-  );
-
-  const removeNewEnv = useCallback((id: number) => {
-    setNewEnv((prev) => prev.filter((entry) => entry.id !== id));
   }, []);
 
   const setAssistantBackend = useCallback((value: Backend) => {
@@ -730,9 +704,7 @@ export function useSessionSettings(
     setConfigOverridesText,
     setExistingEnvOp,
     setExistingEnvValue,
-    addNewEnv,
-    updateNewEnv,
-    removeNewEnv,
+    setNewEnv,
     setAssistantBackend,
     setAssistantTransport,
     setAssistantThreadId,

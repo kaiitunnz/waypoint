@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { EnvVarRows } from "@/components/EnvVarRows";
 import type { AssistantControls } from "@/components/SessionDetail";
 import {
   agentTransports,
@@ -135,9 +136,7 @@ export function SessionSettingsModal({
     setConfigOverridesText,
     setExistingEnvOp,
     setExistingEnvValue,
-    addNewEnv,
-    updateNewEnv,
-    removeNewEnv,
+    setNewEnv,
     setAssistantBackend,
     setAssistantTransport,
     setAssistantThreadId,
@@ -622,104 +621,71 @@ export function SessionSettingsModal({
                           <div className="settings-field-label">
                             Environment variables
                           </div>
-                          <div className="settings-env-list">
-                            {existingEnv
-                              .filter((e) => !hiddenEnvKeys.includes(e.key))
-                              .map((entry) => (
-                                <div className="settings-env-row" key={entry.key}>
-                                  <span
-                                    className="settings-env-key"
-                                    title={entry.key}
+                          {existingEnv.filter(
+                            (e) => !hiddenEnvKeys.includes(e.key),
+                          ).length > 0 ? (
+                            <div className="settings-env-list">
+                              {existingEnv
+                                .filter((e) => !hiddenEnvKeys.includes(e.key))
+                                .map((entry) => (
+                                  <div
+                                    className="settings-env-row"
+                                    key={entry.key}
                                   >
-                                    {entry.key}
-                                  </span>
-                                  <select
-                                    className="settings-input settings-env-op"
-                                    value={entry.op}
-                                    onChange={(e) =>
-                                      setExistingEnvOp(
-                                        entry.key,
-                                        e.target
-                                          .value as typeof entry.op,
-                                      )
-                                    }
-                                    disabled={busy}
-                                    aria-label={`${entry.key} action`}
-                                  >
-                                    <option value="keep">Keep</option>
-                                    <option value="replace">Replace</option>
-                                    <option value="remove">Remove</option>
-                                  </select>
-                                  {entry.op === "replace" ? (
-                                    <input
-                                      className="settings-input settings-env-value"
-                                      type="password"
-                                      value={entry.value}
+                                    <span
+                                      className="settings-env-key"
+                                      title={entry.key}
+                                    >
+                                      {entry.key}
+                                    </span>
+                                    <select
+                                      className="settings-input settings-env-op"
+                                      value={entry.op}
                                       onChange={(e) =>
-                                        setExistingEnvValue(
+                                        setExistingEnvOp(
                                           entry.key,
-                                          e.target.value,
+                                          e.target.value as typeof entry.op,
                                         )
                                       }
-                                      placeholder="New value"
                                       disabled={busy}
-                                      aria-label={`${entry.key} new value`}
-                                    />
-                                  ) : (
-                                    <span className="settings-env-redacted">
-                                      ••••••
-                                    </span>
-                                  )}
-                                </div>
-                              ))}
-                            {newEnv.map((entry) => (
-                              <div className="settings-env-row" key={entry.id}>
-                                <input
-                                  className="settings-input settings-env-key-input"
-                                  type="text"
-                                  value={entry.key}
-                                  onChange={(e) =>
-                                    updateNewEnv(entry.id, {
-                                      key: e.target.value,
-                                    })
-                                  }
-                                  placeholder="KEY"
-                                  disabled={busy}
-                                  aria-label="New variable name"
-                                />
-                                <input
-                                  className="settings-input settings-env-value"
-                                  type="password"
-                                  value={entry.value}
-                                  onChange={(e) =>
-                                    updateNewEnv(entry.id, {
-                                      value: e.target.value,
-                                    })
-                                  }
-                                  placeholder="value"
-                                  disabled={busy}
-                                  aria-label="New variable value"
-                                />
-                                <button
-                                  type="button"
-                                  className="settings-env-remove"
-                                  onClick={() => removeNewEnv(entry.id)}
-                                  disabled={busy}
-                                  aria-label="Remove variable"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                          <button
-                            type="button"
-                            className="settings-env-add"
-                            onClick={addNewEnv}
+                                      aria-label={`${entry.key} action`}
+                                    >
+                                      <option value="keep">Keep</option>
+                                      <option value="replace">Replace</option>
+                                      <option value="remove">Remove</option>
+                                    </select>
+                                    {entry.op === "replace" ? (
+                                      <input
+                                        className="settings-input settings-env-value"
+                                        type="password"
+                                        value={entry.value}
+                                        onChange={(e) =>
+                                          setExistingEnvValue(
+                                            entry.key,
+                                            e.target.value,
+                                          )
+                                        }
+                                        placeholder="New value"
+                                        disabled={busy}
+                                        aria-label={`${entry.key} new value`}
+                                      />
+                                    ) : (
+                                      <span className="settings-env-redacted">
+                                        ••••••
+                                      </span>
+                                    )}
+                                  </div>
+                                ))}
+                            </div>
+                          ) : null}
+                          {/* New variables use the same key/value row editor as
+                              the launch panel; values mask as secrets here. */}
+                          <EnvVarRows
+                            entries={newEnv}
+                            onChange={setNewEnv}
+                            valueType="password"
                             disabled={busy}
-                          >
-                            + Add variable
-                          </button>
+                          />
                         </div>
                       </div>
                     )

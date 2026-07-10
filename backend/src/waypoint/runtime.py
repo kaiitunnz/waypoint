@@ -47,6 +47,7 @@ from waypoint.backends.transcript_fs import (
 from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
 from waypoint.backends.transcripts import (
     TranscriptUnavailableError,
+    ensure_symlink_shared,
     ensure_thread_available,
     setup_transcripts_symlink,
 )
@@ -656,6 +657,52 @@ class SessionRuntime:
                 detail=f"account profile {account_profile_id!r} is not set up: {exc}",
             ) from exc
 
+    async def _ensure_new_session_profile_transcript_store(
+        self,
+        backend: str,
+        launch_env: Mapping[str, str],
+        account_profile_id: str | None,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> None:
+        """Prepare a ``symlink_shared`` store before a profile-scoped launch.
+
+        A new thread has no prior transcript to transfer, but its first agent
+        process will create the native store. Establish the configured symlink
+        first so that process writes directly into the shared tree. The guarded
+        helper refuses a populated real directory; migrating existing user data
+        remains the explicit ``accounts setup-transcripts`` operation.
+        """
+        if account_profile_id is None:
+            return
+        profile = self._require_account_profile(
+            backend, account_profile_id, launch_target
+        )
+        if profile.transcript_policy != "symlink_shared":
+            return
+        caps = self.registry.get(backend).capabilities
+        if caps.native_thread_store is None:
+            return
+        config_dir = config_dir_for(caps, launch_env)
+        if config_dir is None:
+            return
+        fs: TranscriptFilesystem = (
+            LocalTranscriptFilesystem()
+            if launch_target is None
+            else RemoteTranscriptFilesystem(launch_target)
+        )
+        try:
+            await asyncio.to_thread(
+                ensure_symlink_shared,
+                Path(fs.expanduser(config_dir)) / caps.native_thread_store,
+                Path(fs.expanduser(cast(str, profile.shared_transcript_dir))),
+                fs=fs,
+            )
+        except TranscriptUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"cannot prepare account profile transcripts: {exc}",
+            ) from exc
+
     def _agent_process_env(
         self,
         backend: str,
@@ -1213,6 +1260,12 @@ class SessionRuntime:
         self._ensure_profile_config_dir_ready(
             request.backend,
             plugin.capabilities,
+            effective_env,
+            request.account_profile_id,
+            launch_target,
+        )
+        await self._ensure_new_session_profile_transcript_store(
+            request.backend,
             effective_env,
             request.account_profile_id,
             launch_target,

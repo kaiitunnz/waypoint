@@ -1890,6 +1890,20 @@ async def test_create_session_direct_mode_uses_requested_backend(
 ) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
     codex = runtime.registry.get("codex")
+    profile_dir = tmp_path / "codex-work"
+    shared_dir = tmp_path / "codex-shared-sessions"
+    settings.plugin_configs["codex"] = codex.config_schema.model_validate(
+        {
+            "account_profiles": {
+                "work": {
+                    "label": "Work",
+                    "config_dir": str(profile_dir),
+                    "transcript_policy": "symlink_shared",
+                    "shared_transcript_dir": str(shared_dir),
+                }
+            }
+        }
+    )
     tmux = runtime.registry.fallback_for_managed_launch()
     assert tmux is not None
     create_calls: list[tuple[str, LaunchMode]] = []
@@ -1944,6 +1958,7 @@ async def test_create_session_direct_mode_uses_requested_backend(
             title="Direct launch",
             args=[],
             source_mode=SessionSource.MANAGED,
+            account_profile_id="work",
         )
     )
 
@@ -1951,6 +1966,8 @@ async def test_create_session_direct_mode_uses_requested_backend(
     assert session.backend == "codex"
     assert session.transport == "codex_app_server"
     assert session.cwd == str(tmp_path)
+    assert (profile_dir / "sessions").is_symlink()
+    assert (profile_dir / "sessions").resolve() == shared_dir
 
 
 @pytest.mark.asyncio

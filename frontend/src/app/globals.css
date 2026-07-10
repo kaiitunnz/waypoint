@@ -10640,7 +10640,10 @@ html[data-theme="light"] .advanced-section.open .advanced-toggle {
 }
 
 /* ── Terminal-style textarea ── */
-.advanced-args-field span {
+/* Scope to the direct-child label span only — the field also hosts the env
+   editor, whose nested spans (add glyph, key label) must not inherit the "$"
+   prefix or the label typography. */
+.advanced-args-field > span {
   font-family: var(--font-mono);
   font-size: 0.7rem;
   letter-spacing: 0.1em;
@@ -10650,11 +10653,11 @@ html[data-theme="light"] .advanced-section.open .advanced-toggle {
   gap: 5px;
 }
 
-html[data-theme="light"] .advanced-args-field span {
+html[data-theme="light"] .advanced-args-field > span {
   color: var(--muted);
 }
 
-.advanced-args-field span::before {
+.advanced-args-field > span::before {
   content: "$";
   color: var(--accent);
   font-size: 0.78rem;

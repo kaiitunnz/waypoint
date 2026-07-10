@@ -64,6 +64,7 @@ interface SessionTerminalViewProps {
   onTerminate: () => void | Promise<void>;
   onRemoveFromList: () => void | Promise<void>;
   onSwitchSession: () => void;
+  onOpenSettings: () => void;
   onError: (message: string) => void;
 }
 
@@ -101,6 +102,7 @@ export function SessionTerminalView({
   onTerminate,
   onRemoveFromList,
   onSwitchSession,
+  onOpenSettings,
   onError,
 }: SessionTerminalViewProps) {
   const catalog = useBackendCatalog(host || null, token || null, null);
@@ -246,6 +248,20 @@ export function SessionTerminalView({
                 <span className="glyph">⇄</span>
                 Switch session…
               </button>
+              {session ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="composer-overflow-item"
+                  onClick={() => {
+                    closeMenu();
+                    onOpenSettings();
+                  }}
+                >
+                  <span className="glyph">⚙︎</span>
+                  Session settings…
+                </button>
+              ) : null}
               {session && !sessionExited ? (
                 <>
                   <div className="composer-overflow-separator" />

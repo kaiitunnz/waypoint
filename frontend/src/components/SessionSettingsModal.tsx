@@ -107,6 +107,7 @@ export function SessionSettingsModal({
     partialSuccess,
     session: current,
     launchSettings,
+    caps,
     models,
     defaultModelLabel,
     title,
@@ -118,6 +119,7 @@ export function SessionSettingsModal({
     configOverridesText,
     existingEnv,
     newEnv,
+    transport,
     assistantBackend,
     assistantTransport,
     assistantThreadId,
@@ -126,6 +128,9 @@ export function SessionSettingsModal({
     applyDisabled,
     launchFieldsAvailable,
     launchFieldsDisabledReason,
+    transportOptions,
+    transportSwitchAvailable,
+    transportChanged,
     hiddenEnvKeys,
     setTitle,
     setPermissionMode,
@@ -137,6 +142,7 @@ export function SessionSettingsModal({
     setExistingEnvOp,
     setExistingEnvValue,
     setNewEnv,
+    setTransport,
     setAssistantBackend,
     setAssistantTransport,
     setAssistantThreadId,
@@ -231,18 +237,43 @@ export function SessionSettingsModal({
   }, [models, model]);
   const accountProfiles = launchSettings?.account_profiles ?? [];
 
-  const showPermission = permissionModes.length > 0;
-  const showModel = models.length > 0 || model !== null;
+  // The transport option describing the current-or-staged interface; drives the
+  // restart-scoped gates so a staged switch reflects the target pair.
+  const activeTransportOption = transportOptions.find(
+    (option) => option.id === (transport ?? current?.transport ?? session.transport),
+  );
+
+  // Tuning controls are gated on the composed (current-or-staged) transport's
+  // inline capability — hidden, not merely disabled, when the transport can't
+  // apply them (e.g. a tmux-wrapped/terminal-only pair) — and suppressed while
+  // an interface switch is staged (it can't ride the same restart).
+  const showPermission =
+    !transportChanged &&
+    Boolean(caps?.supports_set_permission_mode_inline) &&
+    permissionModes.length > 0;
+  const showModel =
+    !transportChanged &&
+    Boolean(caps?.supports_set_model_inline) &&
+    (models.length > 0 || model !== null);
   // Mirror the launch panel's ModelPicker: surface a pre-existing custom model
   // (from an older session/schedule) that isn't in the discovered list.
   const modelEntries =
     model && !models.some((m) => m.id === model)
       ? [{ id: model, label: `Custom · ${model}` }, ...models]
       : models;
-  const showEffort = effortOptions.length > 0 || effort !== null;
+  const showEffort =
+    !transportChanged &&
+    Boolean(
+      caps?.supports_set_effort_inline || caps?.supports_set_effort_with_restart,
+    ) &&
+    (effortOptions.length > 0 || effort !== null);
   const showAccountProfile =
     accountProfiles.length > 0 &&
-    Boolean(launchSettings?.supports_account_profile_with_restart);
+    Boolean(
+      transportChanged
+        ? activeTransportOption?.supports_account_profile_with_restart
+        : launchSettings?.supports_account_profile_with_restart,
+    );
 
   const assistantAgents = isAssistant
     ? launchableAgents(assistant?.backends.map((b) => b.id) ?? [], catalog)
@@ -412,6 +443,37 @@ export function SessionSettingsModal({
                       {threads.map((t) => (
                         <option key={t.id} value={t.id}>
                           {t.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </section>
+              ) : null}
+
+              {/* Interface (transport) — an in-place switch for a managed,
+                  non-assistant session. Placed in the context group before
+                  Account profile, mirroring the launch panel's hierarchy. The
+                  server projects the safe targets; the catalog supplies labels. */}
+              {transportSwitchAvailable ? (
+                <section className="settings-group">
+                  <div className="settings-group-caption">Interface</div>
+                  <div className="settings-field">
+                    <label
+                      className="settings-field-label"
+                      htmlFor="settings-transport"
+                    >
+                      Interface
+                    </label>
+                    <select
+                      id="settings-transport"
+                      className="settings-input"
+                      value={transport ?? current?.transport ?? session.transport}
+                      onChange={(e) => setTransport(e.target.value)}
+                      disabled={busy}
+                    >
+                      {transportOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {transportLabel(option.id, catalog) ?? option.id}
                         </option>
                       ))}
                     </select>

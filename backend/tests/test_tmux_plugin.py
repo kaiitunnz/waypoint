@@ -372,6 +372,51 @@ async def test_restore_session_claude_keeps_thread_id_across_terminate_cycles(
 
 
 @pytest.mark.asyncio
+async def test_restore_reconstructs_launch_args_from_session_fields(
+    plugin: TmuxPlugin,
+    tmp_path: Path,
+) -> None:
+    """Transport-switch handoff: the runtime resets transport_state to the
+    neutral ``{thread_id}`` (no ``launch_args``). Restore must reconstruct the
+    managed flags and custom args from the persisted session fields via the
+    agent contract, so a switch *into* tmux keeps model/permission + custom args
+    (they live only in ``launch_args``)."""
+    uuid_str = "00000000-0000-0000-0000-000000000009"
+    agent = _FakeAgentPlugin(pregenerates=True, exists=True)
+    runtime = _FakeRuntime(inner_plugin=agent)
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="sess-switch",
+        backend="claude_code",
+        source=SessionSource.MANAGED,
+        transport="tmux",
+        title="t",
+        cwd="/Users/me/proj",
+        status=SessionStatus.EXITED,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        model="sonnet",
+        permission_mode="plan",
+        args=["--verbose"],
+        transport_state={"thread_id": uuid_str},  # neutral handoff, no launch_args
+        raw_log_path=str(tmp_path / "s.raw.log"),
+        structured_log_path=str(tmp_path / "s.events.jsonl"),
+    )
+    await plugin.restore_session(cast(Any, runtime), session)
+    state = runtime.updates[-1]["transport_state"]
+    assert state["launch_args"] == [
+        "--resume",
+        uuid_str,
+        "--model",
+        "sonnet",
+        "--permission-mode",
+        "plan",
+        "--verbose",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_restore_session_remote_resume_uses_switched_config_dir(
     plugin: TmuxPlugin,
     tmp_path: Path,

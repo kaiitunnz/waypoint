@@ -463,7 +463,19 @@ class TmuxPlugin:
         thread_id = state.get("thread_id")
         stored_args = state.get("launch_args")
         if not isinstance(stored_args, list):
-            stored_args = []
+            # No stored launch args — the usual after a transport switch reset
+            # the state to the neutral native-thread handoff. Reconstruct the
+            # managed flags and custom args from the persisted session fields via
+            # the agent contract so the resumed pane keeps model/effort/
+            # permission and custom args (they live only in launch_args).
+            stored_args = [
+                *inner.launch_flags(
+                    model=session.model,
+                    effort=session.effort,
+                    permission_mode=session.permission_mode,
+                ),
+                *session.args,
+            ]
         # A captured thread_id is only useful if the inner CLI has
         # actually persisted the conversation to disk. ``claude
         # --session-id <uuid>`` doesn't create the session file until

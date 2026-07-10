@@ -754,12 +754,33 @@ class LaunchSettingsUpdateRequest(BaseModel):
     session in phase 1.
     """
 
+    # When set and different from the session's current transport, the session
+    # is restarted onto the selected interface, keeping its native thread. Must
+    # be a transport the session's agent declares and the server projects as a
+    # safe target; the runtime rejects anything else.
+    transport: SessionTransportId | None = None
     account_profile_id: str | None = None
     args: list[str] | None = None
     config_overrides: list[str] | None = None
     env_set: dict[str, str] = Field(default_factory=dict)
     env_unset: list[str] = Field(default_factory=list)
     restart: bool = False
+
+
+class TransportSettingsOption(BaseModel):
+    """A transport the session may switch to, with the restart-scoped launch
+    capabilities of the resulting (agent, transport) pair.
+
+    The server is authoritative: the modal populates its Interface selector from
+    this list and reads the selected option's flags while a switch is staged,
+    using the live backend catalog only for labels/presentation.
+    """
+
+    id: SessionTransportId
+    supports_launch_settings_with_restart: bool = False
+    supports_account_profile_with_restart: bool = False
+    supports_custom_args: bool = False
+    supports_config_overrides: bool = False
 
 
 class LaunchSettingsResponse(BaseModel):
@@ -789,6 +810,12 @@ class LaunchSettingsResponse(BaseModel):
     # True only when the session's (agent, transport) can restart-and-resume
     # AND Waypoint owns the process (i.e. not a bare attached tmux pane).
     supports_launch_settings_with_restart: bool = False
+    # Interfaces this session may switch to (includes the current transport
+    # first, then every safe target). Empty when switching isn't offered
+    # (attached tmux, OpenCode, single-usable-transport agents, unpersisted
+    # thread). The frontend must not infer switchability from the catalog alone.
+    transport_options: list[TransportSettingsOption] = Field(default_factory=list)
+    supports_transport_switch_with_restart: bool = False
     requires_restart: bool = True
 
 

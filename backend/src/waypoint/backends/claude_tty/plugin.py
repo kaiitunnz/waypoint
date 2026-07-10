@@ -671,8 +671,12 @@ class ClaudeTtyPlugin:
 
         launch_target = runtime._find_launch_target(session.launch_target_id)
         stored_args = state.get("launch_args")
+        # After a transport switch the state is reset to the neutral native-thread
+        # handoff (no launch_args); fall back to the persisted custom args so they
+        # survive the switch. Model/effort/permission are inherited via --resume
+        # (scrubbed here as on every reconnect).
         base_args = _scrub_session_args(
-            stored_args if isinstance(stored_args, list) else []
+            stored_args if isinstance(stored_args, list) else list(session.args)
         )
 
         effective_thread_id: str | None = None

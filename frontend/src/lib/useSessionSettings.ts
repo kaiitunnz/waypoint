@@ -20,6 +20,7 @@ import type {
   LaunchSettingsUpdate,
   SessionLaunchSettings,
   SessionRecord,
+  TransportSettingsOption,
 } from "@/lib/types";
 
 // Editing model for an existing (redacted) env key. Its stored value is never
@@ -109,6 +110,8 @@ export interface SessionSettingsController {
   configOverridesText: string;
   existingEnv: ExistingEnvEntry[];
   newEnv: NewEnvEntry[];
+  // Non-assistant staged interface (transport) for an in-place switch.
+  transport: string | null;
   // Assistant-only staged replacement target (agent / interface / thread).
   assistantBackend: Backend | null;
   assistantTransport: string | null;
@@ -121,6 +124,10 @@ export interface SessionSettingsController {
   applyDisabled: boolean;
   launchFieldsAvailable: boolean;
   launchFieldsDisabledReason: string | null;
+  // Interfaces this session may switch to (empty when switching isn't offered).
+  transportOptions: TransportSettingsOption[];
+  transportSwitchAvailable: boolean;
+  transportChanged: boolean;
   // Keys hidden from raw env editing for the *staged* profile.
   hiddenEnvKeys: string[];
 
@@ -135,6 +142,7 @@ export interface SessionSettingsController {
   setExistingEnvOp: (key: string, op: EnvKeyOp) => void;
   setExistingEnvValue: (key: string, value: string) => void;
   setNewEnv: (entries: NewEnvEntry[]) => void;
+  setTransport: (value: string) => void;
   setAssistantBackend: (backend: Backend) => void;
   setAssistantTransport: (transport: string) => void;
   setAssistantThreadId: (threadId: string | null) => void;
@@ -198,6 +206,7 @@ export function useSessionSettings(
   const [configOverridesText, setConfigOverridesText] = useState("");
   const [existingEnv, setExistingEnv] = useState<ExistingEnvEntry[]>([]);
   const [newEnv, setNewEnv] = useState<NewEnvEntry[]>([]);
+  const [transportState, setTransportState] = useState<string | null>(null);
   const [assistantBackend, setAssistantBackendState] = useState<Backend | null>(
     null,
   );
@@ -216,10 +225,16 @@ export function useSessionSettings(
   const transport = candidate?.transport;
   const launchTargetId = candidate?.launch_target_id ?? null;
 
+  // Non-assistant sessions gate every field on the *staged* interface so a
+  // pending switch immediately reflects the target pair's capabilities; the
+  // assistant keeps its own (current) pair — its interface change is a
+  // replacement, handled separately.
+  const effectiveTransport =
+    !isAssistant && transportState ? transportState : transport;
   const caps = useMemo(() => {
-    if (!catalog || !backend || !transport) return undefined;
-    return catalog.capsFor(backend, transport);
-  }, [catalog, backend, transport]);
+    if (!catalog || !backend || !effectiveTransport) return undefined;
+    return catalog.capsFor(backend, effectiveTransport);
+  }, [catalog, backend, effectiveTransport]);
 
   const resetDraft = useCallback(
     (record: SessionRecord, settings: SessionLaunchSettings | null) => {
@@ -239,6 +254,7 @@ export function useSessionSettings(
           .map((key) => ({ key, op: "keep" as EnvKeyOp, value: "" })),
       );
       setNewEnv([]);
+      setTransportState(record.transport);
       setAssistantBackendState(record.backend);
       setAssistantTransportState(record.transport);
       setAssistantThreadIdState(null);
@@ -332,6 +348,10 @@ export function useSessionSettings(
     );
   }, []);
 
+  const setTransport = useCallback((value: string) => {
+    setTransportState(value);
+  }, []);
+
   const setAssistantBackend = useCallback((value: Backend) => {
     setAssistantBackendState(value);
     // Switching agent invalidates a staged interface/thread from the old agent.
@@ -345,10 +365,29 @@ export function useSessionSettings(
     setAssistantThreadIdState(value);
   }, []);
 
-  // ── availability / capability gating ──────────────────────────────────────
-  const launchFieldsAvailable = Boolean(
-    launchSettings?.supports_launch_settings_with_restart,
+  // ── transport switch (non-assistant in-place interface change) ─────────────
+  const transportOptions = launchSettings?.transport_options ?? [];
+  const transportSwitchAvailable = Boolean(
+    !isAssistant &&
+      launchSettings?.supports_transport_switch_with_restart &&
+      transportOptions.length > 1,
   );
+  const transportChanged = Boolean(
+    transportSwitchAvailable &&
+      transportState !== null &&
+      session !== null &&
+      transportState !== session.transport,
+  );
+  // While a switch is staged, advanced fields follow the *target* pair's
+  // restart-scoped capability; otherwise the response's own flag.
+  const selectedTransportOption = transportOptions.find(
+    (option) => option.id === (transportState ?? session?.transport),
+  );
+
+  // ── availability / capability gating ──────────────────────────────────────
+  const launchFieldsAvailable = transportChanged
+    ? Boolean(selectedTransportOption?.supports_launch_settings_with_restart)
+    : Boolean(launchSettings?.supports_launch_settings_with_restart);
   const assistantReplacementStaged = Boolean(
     isAssistant &&
       session &&
@@ -418,14 +457,19 @@ export function useSessionSettings(
   const titleChanged = Boolean(
     session && title.trim() && title.trim() !== session.title,
   );
+  // Inline tuning is suppressed while an interface switch is staged (the target
+  // pair may not support it, and it can't be applied in the same restart), so
+  // these read false during a staged switch — matching the hidden controls.
   const permissionChanged = Boolean(
-    session && (permissionMode ?? null) !== (session.permission_mode ?? null),
+    session &&
+      !transportChanged &&
+      (permissionMode ?? null) !== (session.permission_mode ?? null),
   );
   const modelChanged = Boolean(
-    session && (model ?? null) !== (session.model ?? null),
+    session && !transportChanged && (model ?? null) !== (session.model ?? null),
   );
   const effortChanged = Boolean(
-    session && (effort ?? null) !== (session.effort ?? null),
+    session && !transportChanged && (effort ?? null) !== (session.effort ?? null),
   );
   const profileChanged = Boolean(
     session &&
@@ -447,12 +491,16 @@ export function useSessionSettings(
     !assistantReplacementStaged &&
     (profileChanged || argsChanged || configChanged || envChanged);
 
+  // Any change carried by the single launch-settings PATCH (interface switch
+  // plus batched restart-scoped edits).
+  const restartLaunchChanged = launchChanged || transportChanged;
+
   const dirty =
     titleChanged ||
     permissionChanged ||
     modelChanged ||
     effortChanged ||
-    launchChanged ||
+    restartLaunchChanged ||
     assistantReplacementStaged;
 
   // ── change plan ───────────────────────────────────────────────────────────
@@ -486,12 +534,14 @@ export function useSessionSettings(
         tuneRestarts += 1;
       }
     }
-    const restartCount = (launchChanged ? 1 : 0) + tuneRestarts;
+    const restartCount = (restartLaunchChanged ? 1 : 0) + tuneRestarts;
     const running =
       session?.status === "running" || session?.status === "waiting_input";
     const willInterruptTurn = restartCount > 0 && running;
 
-    if (restartCount > 1) {
+    if (transportChanged) {
+      warnings.push("The session will be restarted, keeping its conversation.");
+    } else if (restartCount > 1) {
       warnings.push(
         `Applying these changes will restart the session ${restartCount} times and resume it.`,
       );
@@ -517,7 +567,8 @@ export function useSessionSettings(
     modelChanged,
     effortChanged,
     permissionChanged,
-    launchChanged,
+    restartLaunchChanged,
+    transportChanged,
     profileChanged,
     session,
     dirty,
@@ -573,9 +624,11 @@ export function useSessionSettings(
         return true;
       }
 
-      // 3. All restart-scoped launch changes in one PATCH.
-      if (launchChanged) {
+      // 3. The interface switch and all restart-scoped launch changes in one
+      //    PATCH.
+      if (restartLaunchChanged) {
         const update: LaunchSettingsUpdate = { restart: true };
+        if (transportChanged && transportState) update.transport = transportState;
         if (profileChanged) update.account_profile_id = accountProfileId;
         if (argsChanged) update.args = stagedArgs;
         if (configChanged) update.config_overrides = stagedConfig;
@@ -647,7 +700,9 @@ export function useSessionSettings(
     assistantTransport,
     assistantThreadId,
     accountProfileId,
-    launchChanged,
+    restartLaunchChanged,
+    transportChanged,
+    transportState,
     profileChanged,
     argsChanged,
     stagedArgs,
@@ -685,6 +740,7 @@ export function useSessionSettings(
     configOverridesText,
     existingEnv,
     newEnv,
+    transport: transportState,
     assistantBackend,
     assistantTransport,
     assistantThreadId,
@@ -694,6 +750,9 @@ export function useSessionSettings(
     applyDisabled,
     launchFieldsAvailable,
     launchFieldsDisabledReason,
+    transportOptions,
+    transportSwitchAvailable,
+    transportChanged,
     hiddenEnvKeys,
     setTitle,
     setPermissionMode,
@@ -705,6 +764,7 @@ export function useSessionSettings(
     setExistingEnvOp,
     setExistingEnvValue,
     setNewEnv,
+    setTransport,
     setAssistantBackend,
     setAssistantTransport,
     setAssistantThreadId,

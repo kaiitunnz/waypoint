@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from waypoint.backends.account_profiles import probe_account
+from waypoint.backends.transcripts import ThreadAvailability
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     AccountProbeResult,
@@ -113,6 +114,338 @@ async def test_probe_account_none_when_no_account_key(
 
 
 # ── GET projection ───────────────────────────────────────────────────────────
+
+
+# ── transport-switch projection ──────────────────────────────────────────────
+
+
+def test_transport_options_projected_for_claude(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path)
+    _session(runtime, backend="claude_code", transport="claude_cli")
+    resp = runtime.get_launch_settings("s1")
+    ids = [opt.id for opt in resp.transport_options]
+    # Current transport first, then every safe target.
+    assert ids[0] == "claude_cli"
+    assert set(ids) == {"claude_cli", "claude_tty", "tmux"}
+    assert resp.supports_transport_switch_with_restart is True
+
+
+def test_transport_options_projected_for_codex(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path)
+    _session(runtime, backend="codex", transport="codex_app_server")
+    resp = runtime.get_launch_settings("s1")
+    ids = [opt.id for opt in resp.transport_options]
+    assert ids[0] == "codex_app_server"
+    assert set(ids) == {"codex_app_server", "tmux"}
+    assert resp.supports_transport_switch_with_restart is True
+
+
+def test_transport_options_empty_for_opencode(tmp_path: Path) -> None:
+    # OpenCode has no resumable native store, so no safe handoff is advertised.
+    runtime = _runtime(tmp_path)
+    _session(runtime, backend="opencode", transport="opencode_http")
+    resp = runtime.get_launch_settings("s1")
+    assert resp.transport_options == []
+    assert resp.supports_transport_switch_with_restart is False
+
+
+def test_transport_options_empty_for_attached_tmux(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path)
+    _session(
+        runtime,
+        backend="tmux",
+        transport="tmux",
+        source=SessionSource.ATTACHED_TMUX,
+    )
+    resp = runtime.get_launch_settings("s1")
+    assert resp.transport_options == []
+    assert resp.supports_transport_switch_with_restart is False
+
+
+def test_attached_tmux_forces_account_profile_restart_false(tmp_path: Path) -> None:
+    # A claude/codex attached pane's agent has a config-dir env var, so the
+    # derived account-profile capability is True — but Waypoint doesn't own the
+    # process, so the projection must force it false (the terminal now opens the
+    # modal, which gates its profile picker purely on this flag).
+    runtime = _runtime(tmp_path)
+    _session(
+        runtime,
+        backend="claude_code",
+        transport="tmux",
+        source=SessionSource.ATTACHED_TMUX,
+    )
+    resp = runtime.get_launch_settings("s1")
+    assert resp.supports_account_profile_with_restart is False
+    assert resp.supports_launch_settings_with_restart is False
+    assert resp.transport_options == []
+
+
+# ── transport-switch lifecycle ────────────────────────────────────────────────
+
+
+async def test_switch_rejects_unknown_target_transport(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path)
+    _session(runtime, backend="claude_code", transport="claude_cli")
+    with pytest.raises(Exception) as exc:
+        await runtime.update_launch_settings(
+            "s1",
+            LaunchSettingsUpdateRequest(transport="codex_app_server", restart=True),
+        )
+    assert getattr(exc.value, "status_code", None) == 400
+    assert "not an offered switch target" in str(getattr(exc.value, "detail", ""))
+
+
+async def test_switch_rejects_opencode(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path)
+    _session(runtime, backend="opencode", transport="opencode_http")
+    with pytest.raises(Exception) as exc:
+        await runtime.update_launch_settings(
+            "s1", LaunchSettingsUpdateRequest(transport="tmux", restart=True)
+        )
+    assert getattr(exc.value, "status_code", None) == 400
+
+
+async def _persist_thread(
+    monkeypatch: pytest.MonkeyPatch, runtime: SessionRuntime
+) -> None:
+    async def yes(*_a: Any, **_k: Any) -> bool:
+        return True
+
+    for backend in ("claude_code", "codex"):
+        monkeypatch.setattr(runtime.registry.get(backend), "conversation_exists", yes)
+
+
+async def test_switch_persists_transport_and_resets_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _runtime(tmp_path)
+    _session(
+        runtime,
+        backend="claude_code",
+        transport="claude_cli",
+        status=SessionStatus.IDLE,
+        transport_state={"thread_id": TID, "slash_commands": ["/x"]},
+    )
+    await _persist_thread(monkeypatch, runtime)
+    old_plugin = runtime.registry.resolve("claude_code", "claude_cli")
+    target_plugin = runtime.registry.resolve("claude_code", "claude_tty")
+    seen: dict[str, Any] = {}
+
+    async def fake_terminate(_self_rt: Any, _session: SessionRecord) -> None:
+        seen["terminated"] = True
+
+    async def fake_restore(_self_rt: Any, session: SessionRecord) -> None:
+        seen["restored_on"] = target_plugin.id
+        seen["restore_status"] = session.status
+        seen["restore_transport"] = session.transport
+        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+
+    monkeypatch.setattr(old_plugin, "terminate_session", fake_terminate)
+    monkeypatch.setattr(target_plugin, "restore_session", fake_restore)
+
+    updated = await runtime.update_launch_settings(
+        "s1", LaunchSettingsUpdateRequest(transport="claude_tty", restart=True)
+    )
+
+    assert seen["terminated"] is True
+    assert seen["restored_on"] == "claude_tty"
+    assert seen["restore_status"] == SessionStatus.EXITED
+    assert seen["restore_transport"] == "claude_tty"
+    assert updated.transport == "claude_tty"
+    # Neutral handoff: only the agent-owned native thread id survives.
+    assert updated.transport_state == {"thread_id": TID}
+
+
+async def test_codex_switch_to_tmux(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _runtime(tmp_path)
+    _session(
+        runtime,
+        backend="codex",
+        transport="codex_app_server",
+        status=SessionStatus.IDLE,
+        model="gpt-5-codex",
+        args=["--foo"],
+    )
+    await _persist_thread(monkeypatch, runtime)
+    old_plugin = runtime.registry.resolve("codex", "codex_app_server")
+    target_plugin = runtime.registry.resolve("codex", "tmux")
+    seen: dict[str, Any] = {}
+
+    async def fake_terminate(_self_rt: Any, _session: SessionRecord) -> None:
+        seen["terminated"] = True
+
+    async def fake_restore(_self_rt: Any, session: SessionRecord) -> None:
+        seen["restored_on"] = target_plugin.id
+        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+
+    monkeypatch.setattr(old_plugin, "terminate_session", fake_terminate)
+    monkeypatch.setattr(target_plugin, "restore_session", fake_restore)
+
+    updated = await runtime.update_launch_settings(
+        "s1", LaunchSettingsUpdateRequest(transport="tmux", restart=True)
+    )
+
+    assert seen == {"terminated": True, "restored_on": "tmux"}
+    assert updated.transport == "tmux"
+    # Persisted tuning/args are retained on the record across the switch.
+    assert updated.model == "gpt-5-codex"
+    assert updated.args == ["--foo"]
+
+
+async def test_switch_rejected_when_thread_unpersisted_with_events(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _runtime(tmp_path)
+    _session(runtime, backend="claude_code", transport="claude_cli")
+    runtime.storage.append_event(
+        EventRecord(
+            session_id="s1",
+            ts=datetime.now(UTC),
+            kind=EventKind.USER_INPUT,
+            text="hello",
+            metadata={"submit": True},
+            sequence=runtime.storage.next_sequence("s1"),
+        )
+    )
+    plugin = runtime.registry.resolve("claude_code", "claude_cli")
+    terminated: list[bool] = []
+
+    async def spy_terminate(*_a: Any, **_k: Any) -> None:
+        terminated.append(True)
+
+    async def no(*_a: Any, **_k: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(plugin, "terminate_session", spy_terminate)
+    monkeypatch.setattr(runtime.registry.get("claude_code"), "conversation_exists", no)
+
+    with pytest.raises(Exception) as exc:
+        await runtime.update_launch_settings(
+            "s1", LaunchSettingsUpdateRequest(transport="claude_tty", restart=True)
+        )
+    assert getattr(exc.value, "status_code", None) == 400
+    assert "would lose context" in str(getattr(exc.value, "detail", ""))
+    assert terminated == []
+
+
+async def test_switch_rejected_when_thread_unpersisted_event_free(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _runtime(tmp_path)
+    _session(runtime, backend="claude_code", transport="claude_cli")
+    plugin = runtime.registry.resolve("claude_code", "claude_cli")
+    terminated: list[bool] = []
+
+    async def spy_terminate(*_a: Any, **_k: Any) -> None:
+        terminated.append(True)
+
+    async def no(*_a: Any, **_k: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(plugin, "terminate_session", spy_terminate)
+    monkeypatch.setattr(runtime.registry.get("claude_code"), "conversation_exists", no)
+
+    with pytest.raises(Exception) as exc:
+        await runtime.update_launch_settings(
+            "s1", LaunchSettingsUpdateRequest(transport="claude_tty", restart=True)
+        )
+    assert getattr(exc.value, "status_code", None) == 400
+    assert "send a message first" in str(getattr(exc.value, "detail", ""))
+    assert terminated == []
+
+
+async def test_combined_profile_and_transport_fresh_start_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A combined profile+transport change where the thread is persisted under the
+    # current config dir (D4 passes) but doesn't survive the profile move
+    # (UNPERSISTED at target) and is event-free would otherwise fall into the
+    # fresh-restart path — which resumes nothing and runs on the *current*
+    # plugin. Reject the combination before any teardown instead.
+    profiles = {
+        "account_profiles": {
+            "work": {
+                "label": "Work",
+                "config_dir": str(tmp_path / "codex-target"),
+                "transcript_policy": "symlink_shared",
+                "shared_transcript_dir": str(tmp_path / "shared"),
+                "expected_account_key": "codex:work@co",
+            }
+        }
+    }
+    runtime = _runtime(tmp_path, codex=profiles)
+    _session(runtime, launch_env={"CODEX_HOME": str(tmp_path / "codex-current")})
+    plugin = runtime.registry.resolve("codex", "codex_app_server")
+    terminated: list[bool] = []
+
+    async def spy_terminate(*_a: Any, **_k: Any) -> None:
+        terminated.append(True)
+
+    async def yes(*_a: Any, **_k: Any) -> bool:
+        return True
+
+    async def fake_probe(*_a: Any, **_k: Any) -> AccountProbeResult:
+        return AccountProbeResult(account_key="codex:work@co", account_label="work@co")
+
+    monkeypatch.setattr(plugin, "terminate_session", spy_terminate)
+    monkeypatch.setattr(runtime.registry.get("codex"), "conversation_exists", yes)
+    monkeypatch.setattr("waypoint.runtime.probe_account", fake_probe)
+    monkeypatch.setattr(
+        "waypoint.runtime.ensure_thread_available",
+        lambda *a, **k: ThreadAvailability.UNPERSISTED,
+    )
+
+    with pytest.raises(Exception) as exc:
+        await runtime.update_launch_settings(
+            "s1",
+            LaunchSettingsUpdateRequest(
+                transport="tmux", account_profile_id="work", restart=True
+            ),
+        )
+    assert getattr(exc.value, "status_code", None) == 400
+    assert "separate steps" in str(getattr(exc.value, "detail", ""))
+    assert terminated == []
+
+
+async def test_switch_interrupts_running_before_terminate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _runtime(tmp_path)
+    _session(
+        runtime,
+        backend="claude_code",
+        transport="claude_cli",
+        status=SessionStatus.RUNNING,
+    )
+    await _persist_thread(monkeypatch, runtime)
+    old_plugin = runtime.registry.resolve("claude_code", "claude_cli")
+    target_plugin = runtime.registry.resolve("claude_code", "claude_tty")
+    order: list[str] = []
+
+    class FakeTransport:
+        async def interrupt(self, _session: SessionRecord) -> None:
+            order.append("interrupt")
+
+        async def flush_before_restart(self, _session: SessionRecord) -> None:
+            order.append("flush")
+
+    monkeypatch.setattr(runtime, "transport_for", lambda _s: FakeTransport())
+
+    async def fake_terminate(_self_rt: Any, _session: SessionRecord) -> None:
+        order.append("terminate")
+
+    async def fake_restore(_self_rt: Any, session: SessionRecord) -> None:
+        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+
+    monkeypatch.setattr(old_plugin, "terminate_session", fake_terminate)
+    monkeypatch.setattr(target_plugin, "restore_session", fake_restore)
+
+    await runtime.update_launch_settings(
+        "s1", LaunchSettingsUpdateRequest(transport="claude_tty", restart=True)
+    )
+    assert order == ["interrupt", "flush", "terminate"]
 
 
 def test_get_launch_settings_projection(tmp_path: Path) -> None:

@@ -441,13 +441,31 @@ export interface SessionLaunchSettings {
   // True only when the (agent, transport) can restart-and-resume AND Waypoint
   // owns the process (false for a bare attached tmux pane).
   supports_launch_settings_with_restart: boolean;
+  // Interfaces the session may switch to (current transport first, then safe
+  // targets). Empty when switching isn't offered. The server is authoritative;
+  // the catalog supplies only labels.
+  transport_options: TransportSettingsOption[];
+  supports_transport_switch_with_restart: boolean;
   // Whether applying a change requires restarting the session (true in phase 1).
   requires_restart: boolean;
+}
+
+// One interface a session may switch to, with the restart-scoped launch
+// capabilities of the resulting (agent, transport) pair.
+export interface TransportSettingsOption {
+  id: SessionTransport;
+  supports_launch_settings_with_restart: boolean;
+  supports_account_profile_with_restart: boolean;
+  supports_custom_args: boolean;
+  supports_config_overrides: boolean;
 }
 
 // PATCH body for the same endpoint; omitted fields are left unchanged. `restart`
 // must be true to switch a running session (phase 1).
 export interface LaunchSettingsUpdate {
+  // When set and different from the current transport, restart the session onto
+  // the selected interface, keeping its native thread.
+  transport?: SessionTransport;
   account_profile_id?: string | null;
   args?: string[];
   config_overrides?: string[];

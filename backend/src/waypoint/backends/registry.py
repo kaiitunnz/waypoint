@@ -85,6 +85,24 @@ class BackendRegistry:
     def plugin_for(self, session: SessionRecord) -> BackendPlugin:
         return self.resolve(session.backend, session.transport)
 
+    def capabilities_for_pair(
+        self, backend_id: str, transport_id: str
+    ) -> BackendCapabilities:
+        """Compose the capabilities of an arbitrary ``(agent, transport)`` pair.
+
+        The agent axis comes from ``get(backend_id)`` and the transport axis
+        from ``for_transport(transport_id)`` — the same composition
+        :meth:`capabilities_for` does for a session, but for a pair that may not
+        yet be persisted (e.g. projecting a switch target). Raises ``KeyError``
+        for an unknown agent or transport.
+        """
+        agent = self.get(backend_id)
+        transport_owner = self.for_transport(transport_id)
+        return BackendCapabilities.from_split(
+            agent.capabilities.agent_capabilities(),
+            transport_owner.capabilities.transport_capabilities(),
+        )
+
     def capabilities_for(self, session: SessionRecord) -> BackendCapabilities:
         """Compose the session's capabilities from its (agent, transport) axes.
 
@@ -101,12 +119,7 @@ class BackendRegistry:
         this equals the flat descriptor; for a wrapped pair it reflects
         what the pair can actually do.
         """
-        agent = self.get(session.backend)
-        transport_owner = self.for_transport(session.transport)
-        return BackendCapabilities.from_split(
-            agent.capabilities.agent_capabilities(),
-            transport_owner.capabilities.transport_capabilities(),
-        )
+        return self.capabilities_for_pair(session.backend, session.transport)
 
     def supported_transports(self, backend_id: str) -> tuple[str, ...]:
         """Transport ids the named agent declares it can be driven over."""

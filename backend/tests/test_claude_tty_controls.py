@@ -236,6 +236,40 @@ async def test_restart_rebuilds_resume_flags_preserving_custom_args() -> None:
     assert captured["start_at_end"] is True
 
 
+async def test_restore_reconstructs_custom_args_when_launch_args_absent() -> None:
+    # Transport-switch handoff: the runtime resets transport_state to the neutral
+    # {thread_id} (no launch_args). claude_tty restore must fall back to the
+    # persisted custom args so they survive the switch (model/effort/permission
+    # are inherited via --resume).
+    plugin = ClaudeTtyPlugin()
+    captured = _stub_lifecycle(plugin)
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="sess-switch",
+        backend="claude_code",
+        source=SessionSource.MANAGED,
+        transport="claude_tty",
+        title="test",
+        cwd="/tmp",
+        status=SessionStatus.EXITED,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="/tmp/raw.log",
+        structured_log_path="/tmp/structured.log",
+        transport_state={"thread_id": "thread-1"},  # neutral handoff
+        model="opus",
+        args=["--verbose"],
+    )
+    runtime, _ = _restart_runtime()
+
+    await plugin.restore_session(runtime, session)
+
+    built_args = runtime._command_for_backend.call_args.args[1]
+    assert built_args == ["--resume", "thread-1", "--verbose"]
+    assert captured["start_at_end"] is True
+
+
 async def test_restart_into_plan_stashes_pre_plan_mode() -> None:
     plugin = ClaudeTtyPlugin()
     _stub_lifecycle(plugin)

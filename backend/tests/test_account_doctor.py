@@ -415,6 +415,54 @@ async def test_setup_transcripts_endpoint_migrates(
     assert (shared / "p" / "t.jsonl").read_text() == "thread"
 
 
+@pytest.mark.asyncio
+async def test_setup_transcripts_endpoint_recursive_merge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A populated shared dir that shares the project-dir ancestor with the store
+    # but no leaf transcript: the recursive merge must succeed and the profile
+    # must report ready afterwards.
+    cfg = _onboarded_claude_dir(tmp_path / "work")
+    (cfg / "projects" / "shared-proj").mkdir(parents=True)
+    (cfg / "projects" / "shared-proj" / "a.jsonl").write_text("from-store")
+    shared = tmp_path / "shared"
+    (shared / "shared-proj").mkdir(parents=True)
+    (shared / "shared-proj" / "b.jsonl").write_text("already-shared")
+    settings = _settings(
+        tmp_path,
+        {
+            "work": {
+                "label": "Work",
+                "config_dir": str(cfg),
+                "transcript_policy": "symlink_shared",
+                "shared_transcript_dir": str(shared),
+            }
+        },
+    )
+    app = create_app(settings)
+    headers = {"Authorization": f"Bearer {app.state.context.tokens.issue().token}"}
+
+    resp = await _post(
+        app, "/api/backends/claude_code/accounts/work/setup-transcripts", headers, {}
+    )
+    assert resp.status_code == 200
+    actions = resp.json()["actions"]
+    assert any("migrated 1 files" in a for a in actions)
+    assert any("backed up" in a for a in actions)
+    # Both leaves are visible through the merged symlink.
+    assert (cfg / "projects").is_symlink()
+    assert (shared / "shared-proj" / "a.jsonl").read_text() == "from-store"
+    assert (shared / "shared-proj" / "b.jsonl").read_text() == "already-shared"
+
+    async def fake_probe(*args: Any, **kwargs: Any) -> AccountProbeResult:
+        return AccountProbeResult(account_key="claude_code:acme", account_label="Acme")
+
+    monkeypatch.setattr(runtime_module, "probe_account", fake_probe)
+    doctor = await _get(app, "/api/backends/claude_code/accounts/doctor", headers)
+    checks = {c["name"]: c for c in doctor.json()[0]["checks"]}
+    assert checks["transcript_setup"]["ok"] is True
+
+
 # ── CLI verbs ───────────────────────────────────────────────────────────────
 
 

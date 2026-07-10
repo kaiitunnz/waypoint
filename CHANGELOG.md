@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/kaiitunnz/waypoint/compare/v0.7.4...v0.8.0) (2026-07-10)
+
+
+### Features
+
+* switch a managed session's transport from Session settings ([#279](https://github.com/kaiitunnz/waypoint/issues/279)) ([9ff385b](https://github.com/kaiitunnz/waypoint/commit/9ff385bd7806080402402f0e03c2ca770b832f47))
+
 ## [0.7.4](https://github.com/kaiitunnz/waypoint/compare/v0.7.3...v0.7.4) (2026-07-10)
 
 

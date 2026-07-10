@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.7.3](https://github.com/kaiitunnz/waypoint/compare/v0.7.2...v0.7.3) (2026-07-10)
+
+
+### Features
+
+* make assistant lifecycle profile-aware ([#270](https://github.com/kaiitunnz/waypoint/issues/270)) ([7982506](https://github.com/kaiitunnz/waypoint/commit/798250611e4d49231c50b7bb95f236998ca9d600))
+
+
+### Bug Fixes
+
+* restart unpersisted Codex threads on profile switch ([#272](https://github.com/kaiitunnz/waypoint/issues/272)) ([ae72604](https://github.com/kaiitunnz/waypoint/commit/ae7260494922a6a8acb6f11e2925f48497f195c0))
+
+
+### Miscellaneous Chores
+
+* release 0.7.3 ([7ec4be1](https://github.com/kaiitunnz/waypoint/commit/7ec4be1cf911972c93ed5b8475f23531460c2de1))
+
 ## [0.7.2](https://github.com/kaiitunnz/waypoint/compare/v0.7.1...v0.7.2) (2026-07-09)
 
 

@@ -184,6 +184,14 @@ export function SessionSettingsModal({
     };
   }, []);
 
+  // Invalidate the cached assistant thread list when the staged agent or
+  // account profile changes, so the Resume-thread dropdown can't offer (and
+  // attach) a thread that belongs to a different agent/profile.
+  useEffect(() => {
+    setThreads([]);
+    setThreadsLoaded(false);
+  }, [assistantBackend, accountProfileId]);
+
   useEffect(() => {
     if (!isMobile) return;
     const vv = window.visualViewport;

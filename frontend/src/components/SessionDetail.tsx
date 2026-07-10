@@ -3063,7 +3063,7 @@ const ReplyComposer = memo(function ReplyComposer({
               onClick={() => setTuneOpen((open) => !open)}
             >
               <span className="composer-tune-glyph" aria-hidden>
-                ⚙
+                {"⚙︎"}
               </span>
               <span className="composer-tune-summary">{tuneSummary}</span>
               {effortPendingDiffers ? (

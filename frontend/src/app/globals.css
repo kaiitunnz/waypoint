@@ -11116,6 +11116,318 @@ html[data-theme="light"] .session-switcher-row.selected {
   }
 }
 
+/* ─── Session settings editor ─── */
+/* Glass chrome (the floating modal) wrapping flat, opaque instrument fields.
+   Every color derives from a token so both themes resolve with no override. */
+.settings-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  padding: 16px;
+}
+
+.settings-modal {
+  width: 100%;
+  max-width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 64px);
+  min-height: 0;
+  background: var(--glass-bg-thick);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-glass);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    var(--shadow);
+  backdrop-filter: var(--glass-blur);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-modal-header {
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-modal-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.settings-modal-context {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted-soft);
+  word-break: break-word;
+}
+
+.settings-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-group-caption {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-soft);
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.settings-field-label {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.settings-input {
+  width: 100%;
+  padding: 7px 9px;
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-strong));
+}
+
+.settings-input:disabled {
+  opacity: 0.55;
+}
+
+.settings-textarea {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  resize: vertical;
+}
+
+.settings-advanced-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 0;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.settings-advanced-caret {
+  color: var(--muted-soft);
+}
+
+.settings-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.settings-env-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-env-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-env-key,
+.settings-env-key-input {
+  flex: 1 1 0;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-env-op {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.settings-env-value {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.settings-env-redacted {
+  flex: 1 1 0;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--muted-soft);
+  letter-spacing: 0.15em;
+}
+
+.settings-env-remove {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.settings-env-remove:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.settings-env-add {
+  align-self: flex-start;
+  padding: 5px 10px;
+  background: var(--bg-card-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+
+.settings-env-add:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+.settings-modal-note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.settings-modal-error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+
+.settings-modal-plan {
+  padding: 10px 18px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+
+.settings-modal-plan p {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--warn);
+}
+
+.settings-modal-plan p + p {
+  margin-top: 4px;
+}
+
+.settings-modal-plan-error {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.settings-modal-plan-error p {
+  color: var(--danger);
+}
+
+.settings-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-input);
+}
+
+.settings-btn {
+  padding: 7px 16px;
+  background: var(--bg-card-soft);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.settings-btn:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--bg-card);
+}
+
+.settings-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.settings-btn-primary {
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-card-soft));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-strong));
+  color: var(--text);
+}
+
+.settings-btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 32%, var(--bg-card-soft));
+}
+
+@media (max-width: 600px) {
+  /* The modal is sized/positioned inline from visualViewport (see
+     SessionSettingsModal.tsx). Env rows are too wide for a phone in one line,
+     so wrap: the key takes the full width, the action + value share the next. */
+  .settings-env-row {
+    flex-wrap: wrap;
+  }
+
+  .settings-env-key,
+  .settings-env-key-input {
+    flex: 1 1 100%;
+  }
+
+  .settings-env-op {
+    flex: 0 0 auto;
+  }
+
+  .settings-env-value,
+  .settings-env-redacted {
+    flex: 1 1 auto;
+  }
+}
+
 /* ─── Personal assistant ─── */
 /* Floating action button, fixed to the bottom-right of the home page for
    one-tap access. Collapses to a circular glyph on narrow/touch viewports. */

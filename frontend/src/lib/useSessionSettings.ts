@@ -56,6 +56,9 @@ export interface SettingsPlan {
 }
 
 // Assistant lifecycle actions the editor delegates to the existing controls.
+// Agent/interface change and native-thread adoption create a fresh assistant
+// (the reset/attach lifecycle); the modal stages the target and the controller
+// dispatches it here.
 export interface AssistantSettingsControls {
   onSwitchBackend: (
     backend: Backend,
@@ -106,6 +109,11 @@ export interface SessionSettingsController {
   configOverridesText: string;
   existingEnv: ExistingEnvEntry[];
   newEnv: NewEnvEntry[];
+  // Assistant-only staged replacement target (agent / interface / thread).
+  assistantBackend: Backend | null;
+  assistantTransport: string | null;
+  assistantThreadId: string | null;
+  assistantReplacementStaged: boolean;
 
   // Derived gates.
   dirty: boolean;
@@ -129,6 +137,9 @@ export interface SessionSettingsController {
   addNewEnv: () => void;
   updateNewEnv: (id: number, patch: Partial<Omit<NewEnvEntry, "id">>) => void;
   removeNewEnv: (id: number) => void;
+  setAssistantBackend: (backend: Backend) => void;
+  setAssistantTransport: (transport: string) => void;
+  setAssistantThreadId: (threadId: string | null) => void;
 
   reload: () => void;
   apply: () => Promise<boolean>;
@@ -188,6 +199,15 @@ export function useSessionSettings(
   const [existingEnv, setExistingEnv] = useState<ExistingEnvEntry[]>([]);
   const [newEnv, setNewEnv] = useState<NewEnvEntry[]>([]);
   const newEnvSeq = useRef(0);
+  const [assistantBackend, setAssistantBackendState] = useState<Backend | null>(
+    null,
+  );
+  const [assistantTransport, setAssistantTransportState] = useState<
+    string | null
+  >(null);
+  const [assistantThreadId, setAssistantThreadIdState] = useState<string | null>(
+    null,
+  );
 
   // Guards a late fetch from overwriting a newer load or an in-flight apply.
   const loadToken = useRef(0);
@@ -221,6 +241,9 @@ export function useSessionSettings(
       );
       setNewEnv([]);
       newEnvSeq.current = 0;
+      setAssistantBackendState(record.backend);
+      setAssistantTransportState(record.transport);
+      setAssistantThreadIdState(null);
     },
     [],
   );
@@ -334,6 +357,19 @@ export function useSessionSettings(
     setNewEnv((prev) => prev.filter((entry) => entry.id !== id));
   }, []);
 
+  const setAssistantBackend = useCallback((value: Backend) => {
+    setAssistantBackendState(value);
+    // Switching agent invalidates a staged interface/thread from the old agent.
+    setAssistantTransportState(null);
+    setAssistantThreadIdState(null);
+  }, []);
+  const setAssistantTransport = useCallback((value: string) => {
+    setAssistantTransportState(value);
+  }, []);
+  const setAssistantThreadId = useCallback((value: string | null) => {
+    setAssistantThreadIdState(value);
+  }, []);
+
   // ── availability / capability gating ──────────────────────────────────────
   const launchFieldsAvailable = Boolean(
     launchSettings?.supports_launch_settings_with_restart,
@@ -341,7 +377,10 @@ export function useSessionSettings(
   const assistantReplacementStaged = Boolean(
     isAssistant &&
       session &&
-      (backend !== session.backend || transport !== session.transport),
+      ((assistantBackend !== null && assistantBackend !== session.backend) ||
+        (assistantTransport !== null &&
+          assistantTransport !== session.transport) ||
+        (assistantThreadId !== null && assistantThreadId.length > 0)),
   );
   const launchFieldsDisabledReason = useMemo(() => {
     if (launchFieldsAvailable) {
@@ -533,16 +572,28 @@ export function useSessionSettings(
         onApplied?.(updated);
       }
 
-      // 2. Assistant replacement takes the place of the launch/tune steps.
+      // 2. Assistant replacement takes the place of the launch/tune steps: a
+      //    native-thread adoption when a thread is staged, otherwise an
+      //    agent/interface switch. Both create a fresh assistant and remount.
       if (assistantReplacementStaged) {
-        if (!assistantControls || !backend || !transport) {
+        if (!assistantControls) {
           throw new Error("assistant controls unavailable");
         }
-        await assistantControls.onSwitchBackend(
-          backend,
-          transport,
-          accountProfileId,
-        );
+        const targetBackend = assistantBackend ?? session.backend;
+        if (assistantThreadId) {
+          await assistantControls.onAttachThread(
+            targetBackend,
+            assistantThreadId,
+            accountProfileId,
+          );
+        } else {
+          const targetTransport = assistantTransport ?? session.transport;
+          await assistantControls.onSwitchBackend(
+            targetBackend,
+            targetTransport,
+            accountProfileId,
+          );
+        }
         return true;
       }
 
@@ -615,8 +666,9 @@ export function useSessionSettings(
     title,
     assistantReplacementStaged,
     assistantControls,
-    backend,
-    transport,
+    assistantBackend,
+    assistantTransport,
+    assistantThreadId,
     accountProfileId,
     launchChanged,
     profileChanged,
@@ -656,6 +708,10 @@ export function useSessionSettings(
     configOverridesText,
     existingEnv,
     newEnv,
+    assistantBackend,
+    assistantTransport,
+    assistantThreadId,
+    assistantReplacementStaged,
     dirty,
     plan,
     applyDisabled,
@@ -674,6 +730,9 @@ export function useSessionSettings(
     addNewEnv,
     updateNewEnv,
     removeNewEnv,
+    setAssistantBackend,
+    setAssistantTransport,
+    setAssistantThreadId,
     reload: load,
     apply,
   };

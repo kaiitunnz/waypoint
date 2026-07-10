@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.7.4](https://github.com/kaiitunnz/waypoint/compare/v0.7.3...v0.7.4) (2026-07-10)
+
+
+### Features
+
+* add a full session settings editor ([#275](https://github.com/kaiitunnz/waypoint/issues/275)) ([bab940b](https://github.com/kaiitunnz/waypoint/commit/bab940b0eecb30f8cdc8a0c38e9eb8d1380d0f4d))
+* recursively merge populated transcript stores on setup-transcripts ([#273](https://github.com/kaiitunnz/waypoint/issues/273)) ([09e85ae](https://github.com/kaiitunnz/waypoint/commit/09e85aee3de790bc61fb472bc2ac4f9ab8f9f012))
+* separate session context window from cumulative token telemetry ([#277](https://github.com/kaiitunnz/waypoint/issues/277)) ([6e90c50](https://github.com/kaiitunnz/waypoint/commit/6e90c508b3c82e8463640add723082e2d16a1eef))
+* tail remote claude_tty transcripts over the SSH seam ([#278](https://github.com/kaiitunnz/waypoint/issues/278)) ([6145677](https://github.com/kaiitunnz/waypoint/commit/6145677265e55ac668f94f999cb4b72eff8ea8bb))
+
+
+### Bug Fixes
+
+* order pin before settings on session cards and match hover style ([#276](https://github.com/kaiitunnz/waypoint/issues/276)) ([20d2397](https://github.com/kaiitunnz/waypoint/commit/20d2397d530a6fe9a119ae7de8957acd0c9fb2e4))
+
+
+### Miscellaneous Chores
+
+* release 0.7.4 ([c98350c](https://github.com/kaiitunnz/waypoint/commit/c98350caaaa3cfa6e65a2b09dbe925663cb036e5))
+
 ## [0.7.3](https://github.com/kaiitunnz/waypoint/compare/v0.7.2...v0.7.3) (2026-07-10)
 
 

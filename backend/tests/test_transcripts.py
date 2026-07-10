@@ -561,6 +561,50 @@ def test_setup_mid_merge_failure_retains_staging(
     assert len(list(staging[0].glob("f*.jsonl"))) >= 1
 
 
+def test_setup_rerun_after_mid_merge_completes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from waypoint.backends import transcripts as tr
+
+    store = tmp_path / "config" / "sessions"
+    store.mkdir(parents=True)
+    for i in range(3):
+        (store / f"f{i}.jsonl").write_text(f"x{i}")
+    shared = tmp_path / "shared"
+    shared.mkdir()
+
+    # Unique timestamps so the failed run's staging and the re-run's staging/backup
+    # don't collide on a same-second name.
+    stamps = iter(f"ts{n}" for n in range(10))
+    monkeypatch.setattr(tr, "_timestamp", lambda: next(stamps))
+
+    real_rename = Path.rename
+    state = {"fail": True, "n": 0}
+
+    def flaky_rename(self: Path, target: Any) -> Any:
+        if state["fail"] and ".wp-migrate-" in str(self):
+            state["n"] += 1
+            if state["n"] == 2:
+                raise OSError("simulated mid-merge failure")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", flaky_rename)
+    with pytest.raises(OSError, match="simulated mid-merge failure"):
+        setup_transcripts_symlink(store, shared)
+    assert store.is_dir() and not store.is_symlink()
+    assert len(list(shared.glob("f*.jsonl"))) == 1  # one leaf already moved
+
+    # Operator simply re-runs: the already-moved leaf deduplicates, the rest copy.
+    state["fail"] = False
+    actions = setup_transcripts_symlink(store, shared)
+
+    assert store.is_symlink()
+    for i in range(3):
+        assert (store / f"f{i}.jsonl").read_text() == f"x{i}"
+    assert any("migrated 2 files (1 deduplicated" in a for a in actions)
+    assert any(p.name.startswith("sessions.bak-") for p in store.parent.iterdir())
+
+
 # ── native_thread_artifact_glob (discovery-pattern contract) ───────────────
 
 

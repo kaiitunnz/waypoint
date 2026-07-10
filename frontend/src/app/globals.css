@@ -6321,6 +6321,9 @@ html[data-theme="light"] .composer-tune-restart-apply {
   gap: 10px;
   padding: 9px 12px;
   border-radius: 6px;
+  /* Keep each label on one line; the shrink-to-fit popover grows to the widest
+   * item on desktop (the ≤640 full-width bottom sheet has room either way). */
+  white-space: nowrap;
   /* Subtle persistent background + border so each row reads as a discrete
    * button at rest (without it the row reads as plain text). */
   border: 1px solid var(--line);

@@ -3645,7 +3645,7 @@ const ReplyComposer = memo(function ReplyComposer({
                       onOpenSettings();
                     }}
                   >
-                    <span className="glyph">⚙</span>
+                    <span className="glyph">{"⚙︎"}</span>
                     Session settings…
                   </button>
                   <button

@@ -297,7 +297,7 @@ export function SessionList({
               type="button"
               onClick={(event) => handleOpenSettings(event, session)}
             >
-              ⚙ Settings
+              {"⚙︎ Settings"}
             </button>
           ) : null}
           {onSetPinned ? (

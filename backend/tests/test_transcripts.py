@@ -17,6 +17,7 @@ from waypoint.backends.bootstrap import build_default_registry
 from waypoint.backends.registry import reset_registry_for_tests
 from waypoint.backends.transcript_fs import LocalTranscriptFilesystem
 from waypoint.backends.transcripts import (
+    ThreadAvailability,
     TranscriptUnavailableError,
     ensure_symlink_shared,
     ensure_thread_available,
@@ -165,17 +166,17 @@ def test_copy_thread_on_switch_leaves_preexisting_dirs_untouched(
     assert oct((target / "sessions").stat().st_mode)[-3:] == "700"
 
 
-def test_copy_thread_on_switch_rejects_when_source_missing(tmp_path: Path) -> None:
-    with pytest.raises(TranscriptUnavailableError, match="not found to copy"):
-        ensure_thread_available(
-            _plugin("codex"),
-            _session("codex"),
-            current_config_dir=str(tmp_path / "current"),
-            target_config_dir=str(tmp_path / "target"),
-            policy="copy_thread_on_switch",
-            shared_transcript_dir=None,
-            native_thread_store="sessions",
-        )
+def test_copy_thread_on_switch_reports_unpersisted_source(tmp_path: Path) -> None:
+    result = ensure_thread_available(
+        _plugin("codex"),
+        _session("codex"),
+        current_config_dir=str(tmp_path / "current"),
+        target_config_dir=str(tmp_path / "target"),
+        policy="copy_thread_on_switch",
+        shared_transcript_dir=None,
+        native_thread_store="sessions",
+    )
+    assert result == ThreadAvailability.UNPERSISTED
 
 
 # ── symlink_shared (guarded conversion) ─────────────────────────────────────
@@ -242,21 +243,53 @@ def test_symlink_shared_end_to_end_makes_thread_visible(tmp_path: Path) -> None:
     )
 
 
-def test_symlink_shared_rechecks_and_rejects_when_shared_lacks_thread(
+def test_symlink_shared_reports_unpersisted_when_shared_lacks_thread(
     tmp_path: Path,
 ) -> None:
-    # Shared dir is empty, so after symlinking the thread still isn't visible;
-    # the re-check turns that into a clear failure rather than a false success.
-    with pytest.raises(TranscriptUnavailableError, match="still unavailable"):
+    # An empty shared store means the source thread was never persisted. The
+    # runtime decides whether the agent can safely start a fresh native thread.
+    result = ensure_thread_available(
+        _plugin("claude_code"),
+        _session("claude_code"),
+        current_config_dir=str(tmp_path / "current"),
+        target_config_dir=str(tmp_path / "target"),
+        policy="symlink_shared",
+        shared_transcript_dir=str(tmp_path / "shared"),
+        native_thread_store="projects",
+    )
+    assert result == ThreadAvailability.UNPERSISTED
+
+
+def test_symlink_shared_reports_unpersisted_source_after_setup(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    result = ensure_thread_available(
+        _plugin("codex"),
+        _session("codex"),
+        current_config_dir=str(tmp_path / "current"),
+        target_config_dir=str(target),
+        policy="symlink_shared",
+        shared_transcript_dir=str(tmp_path / "shared"),
+        native_thread_store="sessions",
+    )
+    assert result == ThreadAvailability.UNPERSISTED
+    assert (target / "sessions").is_symlink()
+
+
+def test_symlink_shared_rejects_unknown_source_before_target_setup(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "target"
+    with pytest.raises(TranscriptUnavailableError, match="cannot determine"):
         ensure_thread_available(
-            _plugin("claude_code"),
-            _session("claude_code"),
-            current_config_dir=str(tmp_path / "current"),
-            target_config_dir=str(tmp_path / "target"),
+            _plugin("codex"),
+            _session("codex"),
+            current_config_dir=None,
+            target_config_dir=str(target),
             policy="symlink_shared",
             shared_transcript_dir=str(tmp_path / "shared"),
-            native_thread_store="projects",
+            native_thread_store="sessions",
         )
+    assert not (target / "sessions").exists()
 
 
 # ── setup_transcripts_symlink (accounts setup-transcripts) ──────────────────

@@ -17,12 +17,14 @@ from waypoint.backends.codex.usage_source import (
     find_codex_rollout,
 )
 from waypoint.launch_targets import SshLaunchTargetConfig
+from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
 
 
 def test_config_dir_for_resolves_from_launch_env(plugin: CodexPlugin) -> None:
     # The chokepoint every per-session on-disk op resolves the profile dir through.
     assert config_dir_for(plugin.capabilities, {"CODEX_HOME": "/x"}) == "/x"
     assert config_dir_for(plugin.capabilities, {}) is None
+    assert plugin.default_config_dir() == "~/.codex"
 
 
 def test_find_codex_rollout_honors_codex_home(
@@ -72,6 +74,173 @@ def test_resume_args_codex_prepends_resume_subcommand(plugin: CodexPlugin) -> No
 
 def test_pregenerate_thread_id_codex_returns_none(plugin: CodexPlugin) -> None:
     assert plugin.pregenerate_thread_id() is None
+
+
+@pytest.mark.asyncio
+async def test_restart_unpersisted_session_starts_new_thread(
+    plugin: CodexPlugin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="sess-1",
+        backend="codex",
+        source=SessionSource.MANAGED,
+        transport="codex_app_server",
+        title="t",
+        cwd="/repo",
+        status=SessionStatus.EXITED,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="/raw",
+        structured_log_path="/structured",
+        transport_state={"thread_id": "old-thread"},
+        launch_env={"CODEX_HOME": "/target-home"},
+    )
+    updates: list[dict[str, Any]] = []
+    events: list[tuple[str, str, SessionStatus]] = []
+
+    class _Storage:
+        def update_session(self, _session_id: str, **fields: Any) -> None:
+            updates.append(fields)
+
+    class _Runtime:
+        storage = _Storage()
+
+        def _find_launch_target(self, _target_id: str | None) -> None:
+            return None
+
+        def _agent_process_env(
+            self, _backend: str, launch_env: dict[str, str], *, session_id: str
+        ) -> dict[str, str]:
+            assert session_id == "sess-1"
+            return launch_env
+
+        async def _record_system_event(
+            self, _session_id: str, text: str, *, status: SessionStatus
+        ) -> None:
+            events.append((_session_id, text, status))
+
+    adapter = MagicMock()
+    adapter.start_session = AsyncMock(return_value="new-thread")
+    plugin.adapter = adapter
+    monkeypatch.setattr(plugin, "client_factory", MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(plugin, "_effective_args", lambda *_a: ["--arg"])
+    monkeypatch.setattr(plugin, "_effective_config_overrides", lambda *_a: ["x=1"])
+    monkeypatch.setattr(plugin, "_register_rate_limit_probe", AsyncMock())
+
+    await plugin.restart_unpersisted_session(_Runtime(), session)  # type: ignore[arg-type]
+
+    adapter.start_session.assert_awaited_once()
+    assert adapter.start_session.await_args.kwargs["launch_env"] == {
+        "CODEX_HOME": "/target-home"
+    }
+    assert updates == [
+        {
+            "transport_state": {"thread_id": "new-thread"},
+            "status": SessionStatus.IDLE,
+        }
+    ]
+    assert events == [
+        (
+            "sess-1",
+            "Codex started a fresh thread because the previous thread had no "
+            "persisted transcript",
+            SessionStatus.IDLE,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_restore_session_starts_fresh_thread_when_rollout_is_missing(
+    plugin: CodexPlugin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="sess-1",
+        backend="codex",
+        source=SessionSource.MANAGED,
+        transport="codex_app_server",
+        title="t",
+        cwd="/repo",
+        status=SessionStatus.EXITED,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="/raw",
+        structured_log_path="/structured",
+        transport_state={"thread_id": "old-thread"},
+    )
+    runtime = MagicMock()
+    runtime._find_launch_target.return_value = None
+    runtime._has_durable_conversation.return_value = False
+    monkeypatch.setattr(plugin, "conversation_exists", AsyncMock(return_value=False))
+    fresh_start = AsyncMock()
+    monkeypatch.setattr(plugin, "restart_unpersisted_session", fresh_start)
+
+    await plugin.restore_session(runtime, session)
+
+    fresh_start.assert_awaited_once_with(runtime, session)
+
+
+@pytest.mark.asyncio
+async def test_restore_session_rejects_missing_rollout_with_conversation_events(
+    plugin: CodexPlugin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime.now(UTC)
+    session = SessionRecord(
+        id="sess-1",
+        backend="codex",
+        source=SessionSource.MANAGED,
+        transport="codex_app_server",
+        title="t",
+        cwd="/repo",
+        status=SessionStatus.EXITED,
+        created_at=now,
+        updated_at=now,
+        last_event_at=now,
+        raw_log_path="/raw",
+        structured_log_path="/structured",
+        transport_state={"thread_id": "old-thread"},
+    )
+    updates: list[dict[str, Any]] = []
+    events: list[tuple[str, str, SessionStatus]] = []
+
+    class _Storage:
+        def update_session(self, _session_id: str, **fields: Any) -> None:
+            updates.append(fields)
+
+    class _Runtime:
+        storage = _Storage()
+
+        def _find_launch_target(self, _target_id: str | None) -> None:
+            return None
+
+        def _has_durable_conversation(self, _session_id: str) -> bool:
+            return True
+
+        async def _record_system_event(
+            self, _session_id: str, text: str, *, status: SessionStatus
+        ) -> None:
+            events.append((_session_id, text, status))
+
+    runtime = _Runtime()
+    monkeypatch.setattr(plugin, "conversation_exists", AsyncMock(return_value=False))
+    fresh_start = AsyncMock()
+    monkeypatch.setattr(plugin, "restart_unpersisted_session", fresh_start)
+
+    await plugin.restore_session(runtime, session)  # type: ignore[arg-type]
+
+    fresh_start.assert_not_awaited()
+    assert updates == [{"status": SessionStatus.ERROR}]
+    assert events == [
+        (
+            "sess-1",
+            "Codex session restore failed: the native rollout is missing for a "
+            "session with recorded conversation events",
+            SessionStatus.ERROR,
+        )
+    ]
 
 
 def test_codex_rollout_uuid_regex(plugin: CodexPlugin) -> None:

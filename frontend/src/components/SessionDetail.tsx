@@ -3078,8 +3078,9 @@ const ReplyComposer = memo(function ReplyComposer({
                           Restart this session with{" "}
                           <strong>{pendingProfileLabel}</strong>? The current
                           turn is interrupted, the backend process restarts, and
-                          the session resumes from the selected profile&apos;s
-                          config and transcript store.
+                          the session resumes from the selected profile&apos;s config
+                          and transcript store. For Codex, a thread with no
+                          persisted transcript starts fresh.
                         </p>
                         <div className="composer-tune-confirm-actions">
                           <button

@@ -17,6 +17,8 @@ from waypoint.backends.account_profiles import probe_account
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     AccountProbeResult,
+    EventKind,
+    EventRecord,
     LaunchSettingsUpdateRequest,
     SessionRateLimitUsage,
     SessionRecord,
@@ -529,3 +531,206 @@ async def test_update_aborts_tmux_switch_before_terminate_when_transcript_unavai
     assert "cannot switch account profile" in str(getattr(exc.value, "detail", ""))
     assert terminate_calls == []
     assert runtime.get_session("s1").status != SessionStatus.EXITED
+
+
+async def test_update_starts_fresh_codex_thread_when_transcript_is_unpersisted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current_dir = tmp_path / "codex-current"
+    target_dir = tmp_path / "codex-target"
+    profiles = {
+        "account_profiles": {
+            "work": {
+                "label": "Work",
+                "config_dir": str(target_dir),
+                "transcript_policy": "symlink_shared",
+                "shared_transcript_dir": str(tmp_path / "shared"),
+                "expected_account_key": "codex:work@co",
+            }
+        }
+    }
+    runtime = _runtime(tmp_path, codex=profiles)
+    pinned_at = datetime.now(UTC)
+    _session(
+        runtime,
+        source=SessionSource.ASSISTANT,
+        title="Personal Assistant",
+        pinned_at=pinned_at,
+        launch_env={"CODEX_HOME": str(current_dir)},
+    )
+    plugin = runtime.registry.plugin_for(runtime.get_session("s1"))
+    seen: dict[str, Any] = {}
+
+    async def fake_terminate(*_a: Any, **_k: Any) -> None:
+        seen["terminated"] = True
+
+    async def fake_fresh_start(_runtime: Any, session: SessionRecord) -> None:
+        seen["fresh_status"] = session.status
+        seen["fresh_home"] = session.launch_env["CODEX_HOME"]
+        runtime.storage.update_session(
+            session.id,
+            transport_state={**session.transport_state, "thread_id": "new-thread"},
+            status=SessionStatus.IDLE,
+        )
+
+    async def fake_probe(*_a: Any, **_k: Any) -> AccountProbeResult:
+        return AccountProbeResult(account_key="codex:work@co", account_label="work@co")
+
+    monkeypatch.setattr(plugin, "terminate_session", fake_terminate)
+    monkeypatch.setattr(plugin, "restart_unpersisted_session", fake_fresh_start)
+    monkeypatch.setattr("waypoint.runtime.probe_account", fake_probe)
+
+    updated = await runtime.update_launch_settings(
+        "s1", LaunchSettingsUpdateRequest(account_profile_id="work", restart=True)
+    )
+
+    assert seen == {
+        "terminated": True,
+        "fresh_status": SessionStatus.EXITED,
+        "fresh_home": str(target_dir),
+    }
+    assert updated.id == "s1"
+    assert updated.transport_state["thread_id"] == "new-thread"
+    assert updated.account_profile_id == "work"
+    assert updated.source == SessionSource.ASSISTANT
+    assert updated.title == "Personal Assistant"
+    assert updated.pinned_at == pinned_at
+    assert (target_dir / "sessions").is_symlink()
+
+
+async def test_update_uses_codex_default_source_home_when_env_is_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target_dir = tmp_path / "codex-target"
+    profiles = {
+        "account_profiles": {
+            "work": {
+                "label": "Work",
+                "config_dir": str(target_dir),
+                "transcript_policy": "symlink_shared",
+                "shared_transcript_dir": str(tmp_path / "shared"),
+                "expected_account_key": "codex:work@co",
+            }
+        }
+    }
+    runtime = _runtime(tmp_path, codex=profiles)
+    _session(runtime)
+    plugin = runtime.registry.plugin_for(runtime.get_session("s1"))
+    seen: dict[str, str] = {}
+
+    async def fake_terminate(*_a: Any, **_k: Any) -> None:
+        return None
+
+    async def fake_fresh_start(_runtime: Any, session: SessionRecord) -> None:
+        seen["home"] = session.launch_env["CODEX_HOME"]
+        runtime.storage.update_session(session.id, status=SessionStatus.IDLE)
+
+    async def fake_probe(*_a: Any, **_k: Any) -> AccountProbeResult:
+        return AccountProbeResult(account_key="codex:work@co", account_label="work@co")
+
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.setattr(plugin, "terminate_session", fake_terminate)
+    monkeypatch.setattr(plugin, "restart_unpersisted_session", fake_fresh_start)
+    monkeypatch.setattr("waypoint.runtime.probe_account", fake_probe)
+
+    updated = await runtime.update_launch_settings(
+        "s1", LaunchSettingsUpdateRequest(account_profile_id="work", restart=True)
+    )
+
+    assert seen["home"] == str(target_dir)
+    assert updated.account_profile_id == "work"
+
+
+async def test_update_rejects_unpersisted_hookless_switch_before_terminate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current_dir = tmp_path / "codex-current"
+    target_dir = tmp_path / "codex-target"
+    profiles = {
+        "account_profiles": {
+            "work": {
+                "label": "Work",
+                "config_dir": str(target_dir),
+                "transcript_policy": "symlink_shared",
+                "shared_transcript_dir": str(tmp_path / "shared"),
+                "expected_account_key": "codex:work@co",
+            }
+        }
+    }
+    runtime = _runtime(tmp_path, codex=profiles)
+    _session(
+        runtime,
+        transport="tmux",
+        launch_env={"CODEX_HOME": str(current_dir)},
+    )
+    plugin = runtime.registry.plugin_for(runtime.get_session("s1"))
+    terminated: list[bool] = []
+
+    async def fake_terminate(*_a: Any, **_k: Any) -> None:
+        terminated.append(True)
+
+    async def fake_probe(*_a: Any, **_k: Any) -> AccountProbeResult:
+        return AccountProbeResult(account_key="codex:work@co", account_label="work@co")
+
+    monkeypatch.setattr(plugin, "terminate_session", fake_terminate)
+    monkeypatch.setattr("waypoint.runtime.probe_account", fake_probe)
+
+    with pytest.raises(Exception) as exc:
+        await runtime.update_launch_settings(
+            "s1", LaunchSettingsUpdateRequest(account_profile_id="work", restart=True)
+        )
+
+    assert getattr(exc.value, "status_code", None) == 400
+    assert terminated == []
+    unchanged = runtime.get_session("s1")
+    assert unchanged.status == SessionStatus.IDLE
+    assert unchanged.launch_env["CODEX_HOME"] == str(current_dir)
+
+
+async def test_update_rejects_unpersisted_thread_with_conversation_events(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current_dir = tmp_path / "codex-current"
+    target_dir = tmp_path / "codex-target"
+    profiles = {
+        "account_profiles": {
+            "work": {
+                "label": "Work",
+                "config_dir": str(target_dir),
+                "transcript_policy": "copy_thread_on_switch",
+                "expected_account_key": "codex:work@co",
+            }
+        }
+    }
+    runtime = _runtime(tmp_path, codex=profiles)
+    _session(runtime, launch_env={"CODEX_HOME": str(current_dir)})
+    runtime.storage.append_event(
+        EventRecord(
+            session_id="s1",
+            ts=datetime.now(UTC),
+            kind=EventKind.USER_INPUT,
+            text="hello",
+            metadata={"submit": True},
+            sequence=runtime.storage.next_sequence("s1"),
+        )
+    )
+    plugin = runtime.registry.plugin_for(runtime.get_session("s1"))
+    terminated: list[bool] = []
+
+    async def fake_terminate(*_a: Any, **_k: Any) -> None:
+        terminated.append(True)
+
+    async def fake_probe(*_a: Any, **_k: Any) -> AccountProbeResult:
+        return AccountProbeResult(account_key="codex:work@co", account_label="work@co")
+
+    monkeypatch.setattr(plugin, "terminate_session", fake_terminate)
+    monkeypatch.setattr("waypoint.runtime.probe_account", fake_probe)
+
+    with pytest.raises(Exception) as exc:
+        await runtime.update_launch_settings(
+            "s1", LaunchSettingsUpdateRequest(account_profile_id="work", restart=True)
+        )
+
+    assert getattr(exc.value, "status_code", None) == 400
+    assert "conversation events" in str(getattr(exc.value, "detail", ""))
+    assert terminated == []

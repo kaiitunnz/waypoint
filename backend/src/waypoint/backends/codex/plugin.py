@@ -526,6 +526,9 @@ class CodexPlugin(DefaultLaunchContract):
             ),
         )
 
+    def default_config_dir(self) -> str | None:
+        return "~/.codex"
+
     def native_thread_id(self, session: SessionRecord) -> str | None:
         thread_id = session.transport_state.get("thread_id")
         return thread_id if isinstance(thread_id, str) else None
@@ -1040,6 +1043,24 @@ class CodexPlugin(DefaultLaunchContract):
                 status=SessionStatus.ERROR,
             )
             return
+        launch_target = runtime._find_launch_target(session.launch_target_id)
+        if not await self.conversation_exists(
+            thread_id,
+            session.cwd,
+            launch_target,
+            config_dir=config_dir_for(self.capabilities, session.launch_env),
+        ):
+            if runtime._has_durable_conversation(session.id):
+                runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
+                await runtime._record_system_event(
+                    session.id,
+                    "Codex session restore failed: the native rollout is missing "
+                    "for a session with recorded conversation events",
+                    status=SessionStatus.ERROR,
+                )
+                return
+            await self.restart_unpersisted_session(runtime, session)
+            return
         effective_cli_args = self._effective_args(
             runtime, session.launch_target_id, session.args
         )
@@ -1093,6 +1114,77 @@ class CodexPlugin(DefaultLaunchContract):
         await runtime._record_system_event(
             session.id,
             self.format_restore_message(runtime, session.cwd, session.launch_target_id),
+            status=SessionStatus.IDLE,
+        )
+
+    async def restart_unpersisted_session(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        """Start a new Codex thread after a safe unpersisted profile switch."""
+        if (
+            session.launch_target_id
+            and runtime._find_launch_target(session.launch_target_id) is None
+        ):
+            runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
+            await runtime._record_system_event(
+                session.id,
+                f"Codex session launch target {session.launch_target_id} is no longer configured",
+                status=SessionStatus.ERROR,
+            )
+            return
+        effective_cli_args = self._effective_args(
+            runtime, session.launch_target_id, session.args
+        )
+        effective_config_overrides = self._effective_config_overrides(
+            runtime, session.launch_target_id, session.config_overrides
+        )
+        process_env = runtime._agent_process_env(
+            self.id, session.launch_env, session_id=session.id
+        )
+        try:
+            thread_id = await self._require_adapter().start_session(
+                session.id,
+                session.cwd,
+                self.client_factory(
+                    runtime,
+                    session.launch_target_id,
+                    custom_args=effective_cli_args,
+                    custom_config_overrides=effective_config_overrides,
+                    launch_env=process_env,
+                ),
+                model=session.model,
+                effort=session.effort,
+                custom_args=effective_cli_args,
+                config_overrides=effective_config_overrides,
+                launch_env=process_env,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.exception(
+                "codex fresh-thread restart failed",
+                extra={"session_id": session.id, "cwd": session.cwd},
+            )
+            runtime.storage.update_session(session.id, status=SessionStatus.ERROR)
+            await runtime._record_system_event(
+                session.id,
+                f"Codex fresh-thread restart failed: {exc}",
+                status=SessionStatus.ERROR,
+            )
+            return
+        runtime.storage.update_session(
+            session.id,
+            transport_state={**session.transport_state, "thread_id": thread_id},
+            status=SessionStatus.IDLE,
+        )
+        await self._register_rate_limit_probe(
+            runtime,
+            session.id,
+            session.cwd,
+            runtime._find_launch_target(session.launch_target_id),
+        )
+        await runtime._record_system_event(
+            session.id,
+            "Codex started a fresh thread because the previous thread had no "
+            "persisted transcript",
             status=SessionStatus.IDLE,
         )
 

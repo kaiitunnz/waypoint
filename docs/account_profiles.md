@@ -240,7 +240,13 @@ The switch is **restart-and-resume**: Waypoint verifies the target account,
 flushes any running turn, makes the thread available under the target config dir
 per the transcript policy, terminates the session, persists the new profile, and
 restores it — resuming the *same* thread under the new `CLAUDE_CONFIG_DIR` /
-`CODEX_HOME`.
+`CODEX_HOME`. A fresh Codex thread has an ID before it has a native rollout
+file. With `symlink_shared` or `copy_thread_on_switch`, Waypoint may safely
+start a replacement thread under the selected profile only when it has no
+persisted native artifact and Waypoint has no user or agent conversation events.
+It preserves the Waypoint session and assistant identity, but the native thread
+starts fresh. A missing artifact after conversation events, or under
+`require_existing`, remains a pre-restart error.
 
 - Eligibility is derived from the session's **composed `(agent, transport)`
   pair**, not from whichever plugin happens to own the transport: the agent

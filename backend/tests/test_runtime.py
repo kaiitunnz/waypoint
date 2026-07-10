@@ -1224,10 +1224,18 @@ async def test_get_command_completions_returns_cache_while_refreshing(
 
 
 @pytest.mark.asyncio
-async def test_handle_input_reattaches_exited_codex_session(tmp_path) -> None:
+async def test_handle_input_reattaches_exited_codex_session(
+    tmp_path, monkeypatch
+) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
     fake = FakeCodexRuntimeAdapter()
-    _codex_plugin(runtime).adapter = cast(Any, fake)
+    plugin = _codex_plugin(runtime)
+    plugin.adapter = cast(Any, fake)
+
+    async def native_thread_exists(*_a: Any, **_k: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(plugin, "conversation_exists", native_thread_exists)
     session = make_session(
         settings,
         status=SessionStatus.EXITED,
@@ -1255,12 +1263,18 @@ async def test_handle_input_reattaches_exited_codex_session(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_resume_reattaches_exited_session(tmp_path) -> None:
+async def test_resume_reattaches_exited_session(tmp_path, monkeypatch) -> None:
     # The "Resume" endpoint on a terminated session must relaunch it, not send
     # Enter to the dead pane (which raised a 500). Mirror handle_input's guard.
     runtime, storage, settings = make_runtime(tmp_path)
     fake = FakeCodexRuntimeAdapter()
-    _codex_plugin(runtime).adapter = cast(Any, fake)
+    plugin = _codex_plugin(runtime)
+    plugin.adapter = cast(Any, fake)
+
+    async def native_thread_exists(*_a: Any, **_k: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(plugin, "conversation_exists", native_thread_exists)
     session = make_session(
         settings,
         status=SessionStatus.EXITED,
@@ -1318,7 +1332,9 @@ async def test_handle_input_reattaches_errored_claude_session(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_reattach_terminates_before_restoring_codex(tmp_path) -> None:
+async def test_reattach_terminates_before_restoring_codex(
+    tmp_path, monkeypatch
+) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
 
     # Order-tracking fake: a stale stream emitting ERROR leaves the adapter's
@@ -1360,7 +1376,13 @@ async def test_reattach_terminates_before_restoring_codex(tmp_path) -> None:
 
     timeline: list[str] = []
     fake = TimelineFake(timeline)
-    _codex_plugin(runtime).adapter = cast(Any, fake)
+    plugin = _codex_plugin(runtime)
+    plugin.adapter = cast(Any, fake)
+
+    async def native_thread_exists(*_a: Any, **_k: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(plugin, "conversation_exists", native_thread_exists)
     session = make_session(
         settings,
         status=SessionStatus.ERROR,

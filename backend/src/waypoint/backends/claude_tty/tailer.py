@@ -10,10 +10,10 @@ frontend can surface them.
 """
 
 import asyncio
+import functools
 import json
 import logging
 import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from waypoint.backends.claude_code.adapter import (
@@ -21,12 +21,12 @@ from waypoint.backends.claude_code.adapter import (
     claude_token_usage_record,
 )
 from waypoint.backends.claude_code.normalize import format_approval_text
-from waypoint.backends.claude_code.threads import (
-    claude_projects_root,
-    encode_project_dir,
-)
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty._state import PendingTtyApproval, PendingTtyQuestion
+from waypoint.backends.claude_tty.byte_source import (
+    TranscriptByteSource,
+    transcript_path,
+)
 from waypoint.backends.claude_tty.normalize import TranscriptNormalizer
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.schemas import EventKind, SessionRecord, SessionStatus
@@ -37,29 +37,17 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("waypoint.backends.claude_tty")
 
+# ``transcript_path`` moved to ``byte_source`` (where the local source uses it);
+# re-exported here for callers/tests that still import it from the tailer.
+__all__ = ["TranscriptTailer", "transcript_path"]
+
 _POLL_INTERVAL = 0.5  # seconds between transcript polls
 _PANE_CHECK_INTERVAL = 10.0  # seconds between tmux pane liveness checks
 _DIALOG_POLL_INTERVAL = 1.0  # seconds between live-pane dialog captures
 _DIALOG_STABLE_TICKS = 2  # consecutive identical captures before surfacing
-
-
-def transcript_path(cwd: str, session_uuid: str, config_dir: str | None = None) -> Path:
-    """Return the Claude TUI's JSONL transcript path for the given session.
-
-    Resolves the store root and the encoded project-dir name through the same
-    helpers thread discovery uses, so the tailed path matches where the CLI
-    actually writes — including for cwds with non-slash special characters
-    (hidden dirs, worktrees). ``config_dir`` is the session's
-    ``CLAUDE_CONFIG_DIR`` (e.g. an account profile's); pass it or the path
-    resolves under the default ``~/.claude`` and the tailer reads the wrong
-    file for a profile-scoped session — the session then never leaves
-    ``running`` because no transcript records reach the normalizer.
-    """
-    return (
-        claude_projects_root(config_dir)
-        / encode_project_dir(cwd)
-        / f"{session_uuid}.jsonl"
-    )
+# Protective cap on the unparsed trailing buffer: a JSONL record that never
+# completes past this size is dropped rather than grown without bound.
+_MAX_PARTIAL_BYTES = 8 * 1024 * 1024
 
 
 class TranscriptTailer:
@@ -74,8 +62,7 @@ class TranscriptTailer:
     def __init__(
         self,
         session_id: str,
-        session_uuid: str,
-        cwd: str,
+        source: TranscriptByteSource,
         runtime: "SessionRuntime",
         plugin: "ClaudeTtyPlugin",
         *,
@@ -83,15 +70,20 @@ class TranscriptTailer:
         config_dir: str | None = None,
     ) -> None:
         self._session_id = session_id
-        self._path = transcript_path(cwd, session_uuid, config_dir)
+        self._source = source
         self._runtime = runtime
         self._plugin = plugin
         self._normalizer = TranscriptNormalizer(config_dir)
         self._pane_check_elapsed = 0.0
         self._dialog_check_elapsed = 0.0
-        self._offset = (
-            self._path.stat().st_size if start_at_end and self._path.exists() else 0
-        )
+        # Cursor state, source-independent. ``start_at_end`` is applied lazily on
+        # the first successful observation (see ``_drain``), never here — the
+        # constructor runs on the event loop and must not do IO.
+        self._start_at_end = start_at_end
+        self._primed = False
+        self._fetch_offset = 0
+        self._partial = b""
+        self._identity: tuple[int, int] | None = None
         self._context_usage_signature: (
             tuple[int, int | None, tuple[tuple[str, int], ...]] | None
         ) = None
@@ -107,29 +99,78 @@ class TranscriptTailer:
         # the question screen.
         self._question_dismissed: bool = False
 
-    def _read_new_bytes(self) -> bytes:
-        if not self._path.exists():
-            return b""
-        try:
-            with self._path.open("rb") as fh:
-                fh.seek(self._offset)
-                return fh.read()
-        except OSError:
-            return b""
-
-    async def _drain(self) -> None:
-        data = await asyncio.to_thread(self._read_new_bytes)
-        if not data:
+    async def _drain(self, *, force: bool = False) -> None:
+        # The priming tick fetches size + identity only (no body) so start-at-end
+        # never downloads history; ``force`` bypasses a remote source's poll
+        # cadence (terminal drain on exit).
+        metadata_only = self._start_at_end and not self._primed
+        read = await asyncio.to_thread(
+            functools.partial(
+                self._source.read_from,
+                self._fetch_offset,
+                metadata_only=metadata_only,
+                force=force,
+            )
+        )
+        if not read.observed:
             return
 
-        lines = data.split(b"\n")
-        consumed = len(data)
-        # If the file ends without a trailing newline the last element is a
-        # partial record; rewind so it is re-read on the next poll.
-        if not data.endswith(b"\n"):
-            partial = lines.pop()
-            consumed -= len(partial)
-        self._offset += consumed
+        # First observation: record identity and, for start-at-end, jump to the
+        # current end without parsing (records already on disk are in the DB).
+        # This is correct regardless of whether the source resolved at
+        # construction time, so a transient boot-time miss never replays history.
+        if not self._primed:
+            self._primed = True
+            self._identity = read.identity
+            if self._start_at_end:
+                self._fetch_offset = read.size or 0
+                self._partial = b""
+                return
+
+        # Truncation (size shrank below the cursor) or replacement (file identity
+        # changed): the store cannot dedup a replay, so skip the ambiguous bytes,
+        # jump to the new end, and record one content-free note. Never re-read.
+        identity_changed = (
+            self._identity is not None
+            and read.identity is not None
+            and read.identity != self._identity
+        )
+        truncated = read.size is not None and read.size < self._fetch_offset
+        if identity_changed or truncated:
+            self._partial = b""
+            self._fetch_offset = read.size or 0
+            self._identity = read.identity
+            log.warning(
+                "transcript discontinuity; skipping to end",
+                extra={
+                    "session_id": self._session_id,
+                    "reason": "identity_changed" if identity_changed else "truncated",
+                },
+            )
+            await self._runtime._record_system_event(
+                self._session_id,
+                "Transcript was replaced or truncated; resuming from its end.",
+            )
+            return
+
+        self._identity = read.identity or self._identity
+        if not read.data:
+            return
+
+        buf = self._partial + read.data
+        self._fetch_offset += len(read.data)
+        parts = buf.split(b"\n")
+        # A trailing element without a newline is an incomplete record; keep it
+        # for the next read. ``split`` always yields a final element (b"" when
+        # ``buf`` ends in a newline), so this uniformly handles both cases.
+        self._partial = parts[-1]
+        lines = parts[:-1]
+        if len(self._partial) > _MAX_PARTIAL_BYTES:
+            log.warning(
+                "transcript partial record exceeded cap; dropping",
+                extra={"session_id": self._session_id},
+            )
+            self._partial = b""
 
         for raw_line in lines:
             line = raw_line.strip()
@@ -455,15 +496,16 @@ class TranscriptTailer:
 
                 if session.status in (SessionStatus.EXITED, SessionStatus.ERROR):
                     # One final drain in case records landed between the status
-                    # check and this point.
-                    await self._drain()
+                    # check and this point. ``force`` bypasses a remote source's
+                    # poll cadence so a tail written in the last second isn't lost.
+                    await self._drain(force=True)
                     return
 
                 self._pane_check_elapsed += _POLL_INTERVAL
                 if self._pane_check_elapsed >= _PANE_CHECK_INTERVAL:
                     self._pane_check_elapsed = 0.0
                     if not await self._pane_alive():
-                        await self._drain()
+                        await self._drain(force=True)
                         await self._runtime._record_system_event(
                             self._session_id,
                             "Claude TUI session exited",

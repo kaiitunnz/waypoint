@@ -21,6 +21,10 @@ import pytest
 from fastapi import HTTPException
 
 from waypoint.backends.claude_tty._state import PendingTtyApproval, PendingTtyQuestion
+from waypoint.backends.claude_tty.byte_source import (
+    LocalTranscriptByteSource,
+    TranscriptRead,
+)
 from waypoint.backends.claude_tty.plugin import ClaudeTtyPlugin
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.claude_tty.transport import ClaudeTtyTransport
@@ -63,6 +67,23 @@ def _make_session(
     )
 
 
+class _ScriptedSource:
+    """Hands over queued reads, then reports nothing observed."""
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._reads = [
+            TranscriptRead(observed=True, data=chunk, size=len(chunk), identity=(1, 1))
+            for chunk in chunks
+        ]
+
+    def read_from(
+        self, offset: int, *, metadata_only: bool = False, force: bool = False
+    ) -> TranscriptRead:
+        if self._reads:
+            return self._reads.pop(0)
+        return TranscriptRead(observed=False)
+
+
 def _make_tailer(
     plugin: ClaudeTtyPlugin,
     runtime: MagicMock,
@@ -70,8 +91,7 @@ def _make_tailer(
 ) -> TranscriptTailer:
     return TranscriptTailer(
         session_id=session_id,
-        session_uuid="thread-1",
-        cwd="/nonexistent",
+        source=LocalTranscriptByteSource("/nonexistent", "thread-1", None),
         runtime=runtime,
         plugin=plugin,
     )
@@ -455,7 +475,7 @@ async def test_question_drain_registers_pending() -> None:
         },
     }
     data = (json.dumps(record) + "\n").encode()
-    tailer._read_new_bytes = lambda: data  # type: ignore[method-assign]
+    tailer._source = _ScriptedSource([data])
 
     await tailer._drain()
 
@@ -584,6 +604,7 @@ async def _run_exited_reconnect(resumes: bool) -> bool:
         *,
         start_at_end: bool = False,
         config_dir: str | None = None,
+        launch_target: object = None,
     ) -> None:
         captured["start_at_end"] = start_at_end
 

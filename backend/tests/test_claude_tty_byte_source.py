@@ -260,3 +260,39 @@ def test_remote_exception_does_not_raise(monkeypatch) -> None:
     read = src.read_from(0)  # must not raise
     assert read.observed is False
     assert src._backoff > 1.0  # error backoff engaged
+
+
+# ── source selection at the plugin boundary ──────────────────────────────────
+
+
+def _capture_source(monkeypatch, **start_kwargs) -> object:
+    from waypoint.backends.claude_tty import plugin as plugin_mod
+
+    captured: dict[str, object] = {}
+
+    class _FakeTailer:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+        def run(self) -> None:  # pragma: no cover - never awaited
+            return None
+
+    monkeypatch.setattr(plugin_mod, "TranscriptTailer", _FakeTailer)
+    monkeypatch.setattr(plugin_mod.asyncio, "create_task", lambda coro: MagicMock())
+    plugin = plugin_mod.ClaudeTtyPlugin()
+    plugin._start_tailer(MagicMock(), "s1", TID, "/repo/app", **start_kwargs)
+    return captured["source"]
+
+
+def test_start_tailer_builds_local_source_without_target(monkeypatch) -> None:
+    source = _capture_source(monkeypatch, config_dir="/cfg", launch_target=None)
+    assert isinstance(source, bs.LocalTranscriptByteSource)
+
+
+def test_start_tailer_builds_remote_source_with_target(monkeypatch) -> None:
+    source = _capture_source(
+        monkeypatch, config_dir="/home/u/.claude-work", launch_target=_launch_target()
+    )
+    assert isinstance(source, bs.RemoteClaudeTranscriptByteSource)
+    assert source._config_dir == "/home/u/.claude-work"
+    assert source._launch_target_id == "remote-1"

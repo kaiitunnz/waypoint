@@ -161,23 +161,42 @@ export default function AssistantPage() {
     () => ({
       backends,
       supportsReattach: assistant?.supports_reattach ?? false,
-      onSwitchBackend: (backend: Backend, transport: SessionTransport) =>
-        applyControl(() => resetAssistant(host, token, { backend, transport })),
-      onAttachThread: (backend: Backend, threadId: string) =>
+      accountProfilesFor: (backend: Backend) => catalog.accountProfilesFor(backend),
+      onSwitchBackend: (
+        backend: Backend,
+        transport: SessionTransport,
+        accountProfileId: string | null,
+      ) =>
         applyControl(() =>
-          attachAssistant(host, token, { backend, thread_id: threadId }),
+          resetAssistant(host, token, {
+            backend,
+            transport,
+            account_profile_id: accountProfileId,
+          }),
+        ),
+      onAttachThread: (
+        backend: Backend,
+        threadId: string,
+        accountProfileId: string | null,
+      ) =>
+        applyControl(() =>
+          attachAssistant(host, token, {
+            backend,
+            thread_id: threadId,
+            account_profile_id: accountProfileId,
+          }),
         ),
       onClearContext: () => applyControl(() => resetAssistant(host, token, {})),
       onTerminate: () => applyControl(() => terminateAssistant(host, token)),
       onReattach: () => applyControl(() => reattachAssistant(host, token)),
-      listThreads: async (backend: Backend) => {
+      listThreads: async (backend: Backend, accountProfileId: string | null) => {
         try {
           const threads = await fetchBackendThreads<{
             id: string;
             title?: string | null;
             updated_at?: string | number | null;
             preview?: string | null;
-          }>(host, token, backend);
+          }>(host, token, backend, { accountProfileId });
           return threads.map((thread) => ({
             id: thread.id,
             title: thread.title || thread.id,
@@ -186,13 +205,14 @@ export default function AssistantPage() {
           }));
         } catch (err) {
           if (isAuthError(err)) handleAuthFailure();
-          return [];
+          throw err;
         }
       },
     }),
     [
       backends,
       assistant?.supports_reattach,
+      catalog,
       host,
       token,
       applyControl,

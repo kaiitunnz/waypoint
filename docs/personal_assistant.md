@@ -21,18 +21,21 @@ Add an `assistant` block to `waypoint.yaml` (see `backend/waypoint.example.yaml`
 assistant:
   enabled: true                       # omit the whole block to disable
   backend: claude_code                # defaults to `default_backend`
+  account_profile_id: work            # named account/config profile for first creation
   transport: claude_cli               # the agent's default interface if unset
   model: opus                         # must exist in the backend's catalogue
   effort: high                        # ignored by backends without an effort knob
   permission_mode: bypassPermissions  # see the security note below
 ```
 
-`backend`, `transport`, `model`, `effort`, and `permission_mode` seed the
-thread; they can be changed live from the assistant page, so treat them as
-defaults rather than a lockdown. `transport` must be one of the agent's
-supported interfaces; omitting it uses the agent's default (the Emulated
-chat interface for Claude Code). The block is enabled by default when present —
-set `enabled: false` to keep the config but turn the assistant off.
+`backend`, `account_profile_id`, `transport`, `model`, `effort`, and
+`permission_mode` seed the thread; they can be changed live from the assistant
+page, so treat them as defaults rather than a lockdown. The profile selects the
+backend's named config/account root and is validated like any other session
+launch. `transport` must be one of the agent's supported interfaces; omitting it
+uses the agent's default (the Emulated chat interface for Claude Code). The
+block is enabled by default when present — set `enabled: false` to keep the
+config but turn the assistant off.
 
 The assistant always runs in a managed working directory (`<data_dir>/assistant`),
 so it has no `cwd` setting. The runtime links repo-tracked assistant assets into
@@ -63,20 +66,20 @@ The **settings popover** (⚙, next to the composer) holds configuration. Changi
 the agent, the interface, or picking a thread there stages an inline confirm,
 since each replaces the conversation:
 
-- **Agent** — rebuild the assistant on a different coding agent. The
+- **Agent / Interface** — rebuild the assistant on a different coding agent or
+  interface. When the target agent hosts profiles, choose its **New conversation
+  account** for the replacement. The
   conversation cannot migrate between agents, so this starts a fresh thread at
   the new agent's default interface, model, effort, and permission mode.
-- **Interface** — rebuild the assistant over a different transport (Chat /
-  Emulated / Terminal, whatever the agent supports). The transport is fixed at
-  launch, so changing it also starts a fresh thread. Shown only when the agent
-  supports more than one interface; it defaults to the agent's default (Emulated
-  for Claude Code).
 - **Resume thread** — attach the assistant to an existing backend-native thread
-  (one discovered by the chosen agent's thread enumeration). The thread is
-  imported as-is over the agent's native interface: it resumes its own
+  (one discovered by the chosen agent and New conversation account). The thread
+  is imported as-is over the agent's native interface: it resumes its own
   conversation and working directory, so the assistant charter — which lives in
   the managed workspace — does **not** apply, and the **Interface** picker does
   not. Offered only for agents that support thread discovery and import.
+- **Account** — restart and resume the current assistant conversation under a
+  different named profile. This is the normal running-session account switch;
+  it keeps the same conversation rather than creating a replacement.
 - **Model / effort / permission mode** — applied live to the running thread; no
   context is lost.
 
@@ -84,7 +87,7 @@ The **overflow menu** (⋯) holds the standalone lifecycle actions, mirroring
 where ordinary sessions keep terminate/delete:
 
 - **Clear context** — start a fresh thread on the same agent and interface,
-  keeping the live model/effort/permission mode.
+  keeping the live model/effort/permission mode and account profile.
 - **Terminate / Reattach** — stop the thread (keeping it the pinned singleton)
   and later revive the same conversation. Reattach is offered only when the
   backend can resume after exit.

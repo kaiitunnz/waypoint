@@ -273,20 +273,29 @@ export interface AssistantThreadOption {
 // controls.
 export interface AssistantControls {
   backends: BackendDescriptor[];
+  accountProfilesFor: (backend: Backend) => AccountProfile[];
   supportsReattach: boolean;
   // Rebuild the assistant on the chosen agent and transport. Changing either
   // starts a fresh thread, since the transport is fixed at launch.
   onSwitchBackend: (
     backend: Backend,
     transport: SessionTransport,
+    accountProfileId: string | null,
   ) => Promise<void> | void;
-  onAttachThread: (backend: Backend, threadId: string) => Promise<void> | void;
+  onAttachThread: (
+    backend: Backend,
+    threadId: string,
+    accountProfileId: string | null,
+  ) => Promise<void> | void;
   onClearContext: () => Promise<void> | void;
   onTerminate: () => Promise<void> | void;
   onReattach: () => Promise<void> | void;
   // Lists importable threads for a backend (empty when discovery unsupported or
   // it fails); used to populate the "resume an existing thread" picker.
-  listThreads: (backend: Backend) => Promise<AssistantThreadOption[]>;
+  listThreads: (
+    backend: Backend,
+    accountProfileId: string | null,
+  ) => Promise<AssistantThreadOption[]>;
 }
 
 interface SessionDetailProps {
@@ -2560,6 +2569,11 @@ const ReplyComposer = memo(function ReplyComposer({
   // newly-picked agent's default once a different agent is staged).
   const [pendingTransport, setPendingTransport] =
     useState<SessionTransport | null>(null);
+  // Undefined means derive from the current assistant (or the default account
+  // for a staged backend change). Null is an explicit Default account choice.
+  const [pendingAssistantProfileId, setPendingAssistantProfileId] = useState<
+    string | null | undefined
+  >(undefined);
   const [selectedThreadId, setSelectedThreadId] = useState("");
   const [threadOptions, setThreadOptions] = useState<AssistantThreadOption[]>([]);
   // Pending effort for backends that need a session restart to apply (Claude)
@@ -2890,6 +2904,22 @@ const ReplyComposer = memo(function ReplyComposer({
     assistantOps !== null;
   // Backend the assistant controls target — the picked one, or the current.
   const assistantTargetBackend = pendingBackend ?? session?.backend ?? null;
+  const assistantTargetProfiles =
+    assistantOps && assistantTargetBackend
+      ? assistantOps.accountProfilesFor(assistantTargetBackend)
+      : [];
+  const assistantTargetProfileId =
+    pendingAssistantProfileId !== undefined
+      ? pendingAssistantProfileId
+      : pendingBackend
+        ? null
+        : (session?.account_profile_id ?? null);
+  const assistantTargetProfileLabel =
+    assistantTargetProfiles.find(
+      (profile) => profile.id === assistantTargetProfileId,
+    )?.label ?? "Default account";
+  const showAssistantTargetProfilePicker =
+    Boolean(assistantOps && session) && assistantTargetProfiles.length > 0;
   const assistantTargetCaps =
     assistantOps && assistantTargetBackend
       ? assistantOps.backends.find((b) => b.id === assistantTargetBackend)
@@ -2923,7 +2953,8 @@ const ReplyComposer = memo(function ReplyComposer({
       assistantTargetBackend &&
       assistantTargetTransport &&
       (assistantTargetBackend !== session.backend ||
-        assistantTargetTransport !== session.transport),
+        assistantTargetTransport !== session.transport ||
+        assistantTargetProfileId !== (session.account_profile_id ?? null)),
   );
   // Load resumable threads for the target backend when the popover is open.
   useEffect(() => {
@@ -2937,13 +2968,31 @@ const ReplyComposer = memo(function ReplyComposer({
       return;
     }
     let cancelled = false;
-    void assistantOps.listThreads(assistantTargetBackend).then((threads) => {
-      if (!cancelled) setThreadOptions(threads);
-    });
+    void assistantOps
+      .listThreads(assistantTargetBackend, assistantTargetProfileId)
+      .then((threads) => {
+        if (!cancelled) setThreadOptions(threads);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          onError(
+            error instanceof Error
+              ? error.message
+              : "Failed to load resumable threads",
+          );
+        }
+      });
     return () => {
       cancelled = true;
     };
-  }, [tuneOpen, assistantOps, assistantCanAttach, assistantTargetBackend]);
+  }, [
+    tuneOpen,
+    assistantOps,
+    assistantCanAttach,
+    assistantTargetBackend,
+    assistantTargetProfileId,
+    onError,
+  ]);
   const runAssistantAction = async (action: () => Promise<void> | void) => {
     if (assistantBusy) return;
     setAssistantBusy(true);
@@ -2955,6 +3004,7 @@ const ReplyComposer = memo(function ReplyComposer({
       setAssistantConfirm(null);
       setPendingBackend(null);
       setPendingTransport(null);
+      setPendingAssistantProfileId(undefined);
       setSelectedThreadId("");
     } catch (err) {
       onError(err instanceof Error ? err.message : "Action failed");
@@ -3068,10 +3118,12 @@ const ReplyComposer = memo(function ReplyComposer({
                         setPendingTransport(null);
                         if (next === session.backend) {
                           setPendingBackend(null);
+                          setPendingAssistantProfileId(undefined);
                           setAssistantConfirm(null);
                           return;
                         }
                         setPendingBackend(next);
+                        setPendingAssistantProfileId(null);
                         // Stage the confirm only once the new agent's default
                         // interface resolves; until the catalog loads it would
                         // be set but not renderable.
@@ -3088,6 +3140,28 @@ const ReplyComposer = memo(function ReplyComposer({
                       ))}
                     </select>
                   </label>
+                ) : null}
+                {showAssistantTargetProfilePicker ? (
+                  <AccountProfilePicker
+                    profiles={assistantTargetProfiles}
+                    value={assistantTargetProfileId ?? ""}
+                    onChange={(id) => {
+                      const nextProfileId = id || null;
+                      setSelectedThreadId("");
+                      setPendingAssistantProfileId(nextProfileId);
+                      setAssistantConfirm(
+                        assistantSwitchDiffers ||
+                          nextProfileId !== (session?.account_profile_id ?? null)
+                          ? "switch"
+                          : null,
+                      );
+                      onError("");
+                    }}
+                    disabled={assistantBusy}
+                    defaultLabel="Default account"
+                    label="New conversation account"
+                    fieldClassName="composer-tune-field"
+                  />
                 ) : null}
                 {assistantOps && session && assistantTransportOptions.length > 1 ? (
                   <label className="composer-tune-field">
@@ -3246,6 +3320,8 @@ const ReplyComposer = memo(function ReplyComposer({
                               catalog,
                             ).name
                           }
+                          {" · "}
+                          {assistantTargetProfileLabel}
                         </strong>
                         ? This starts a new conversation; the current one is kept
                         as a stopped session.
@@ -3257,6 +3333,7 @@ const ReplyComposer = memo(function ReplyComposer({
                           onClick={() => {
                             setPendingBackend(null);
                             setPendingTransport(null);
+                            setPendingAssistantProfileId(undefined);
                             setAssistantConfirm(null);
                             onError("");
                           }}
@@ -3272,6 +3349,7 @@ const ReplyComposer = memo(function ReplyComposer({
                               assistantOps.onSwitchBackend(
                                 assistantTargetBackend,
                                 assistantTargetTransport,
+                                assistantTargetProfileId,
                               ),
                             )
                           }
@@ -3320,6 +3398,7 @@ const ReplyComposer = memo(function ReplyComposer({
                               assistantOps.onAttachThread(
                                 assistantTargetBackend,
                                 selectedThreadId,
+                                assistantTargetProfileId,
                               ),
                             )
                           }

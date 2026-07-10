@@ -84,6 +84,9 @@ class AssistantConfig(BaseModel):
     enabled: bool = True
     # ``None`` resolves to the top-level ``default_backend`` at bootstrap.
     backend: BackendId | None = None
+    # Named account/config profile for the first assistant thread. A live
+    # assistant remains the source of truth across redeploys.
+    account_profile_id: str | None = None
     model: str | None = None
     effort: str | None = None
     # Transport the agent is driven over. ``None`` lets the agent pick its

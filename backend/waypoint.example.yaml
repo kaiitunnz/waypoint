@@ -102,6 +102,7 @@ plugin_configs:
 # assistant:
 #   enabled: true
 #   backend: claude_code          # defaults to `default_backend`
+#   account_profile_id: work      # named config/account profile for first creation
 #   model: opus                   # must exist in the backend's catalogue
 #   effort: high                  # ignored by backends without an effort knob
 #   permission_mode: bypassPermissions  # backend default (usually prompts) if unset

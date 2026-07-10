@@ -416,6 +416,10 @@ class AssistantSummary(BaseModel):
     # Surfaced alongside ``session_id`` so a user can recover the thread
     # outside the app. ``None`` when the backend has no resumable id.
     native_thread_id: str | None = None
+    # Redacted account/config profile identity of the live assistant. This
+    # deliberately excludes its config-dir path and account key.
+    account_profile_id: str | None = None
+    account_profile_label: str | None = None
     status: SessionStatus
     # Whether the backend can revive this thread after it exits. Drives the
     # assistant UI's choice between offering Reattach and only Clear context.
@@ -430,6 +434,9 @@ class AssistantResetRequest(BaseModel):
     # default on a backend switch).
     backend: BackendId | None = None
     transport: SessionTransportId | None = None
+    # Omitted means infer from the current assistant for a same-backend reset;
+    # explicit null means launch under the backend's default account.
+    account_profile_id: str | None = None
     model: str | None = None
     effort: str | None = None
     permission_mode: str | None = None
@@ -441,6 +448,8 @@ class AssistantAttachRequest(BaseModel):
     backend: BackendId
     thread_id: str
     launch_target_id: str | None = None
+    # The profile that owns the thread being imported.
+    account_profile_id: str | None = None
 
 
 PresetName = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]

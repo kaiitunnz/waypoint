@@ -1356,6 +1356,7 @@ class SessionRuntime:
             effort=assistant.effort,
             permission_mode=assistant.permission_mode,
             transport=assistant.transport,
+            account_profile_id=assistant.account_profile_id,
         )
         self.assistant_session_id = created.id
 
@@ -1367,6 +1368,7 @@ class SessionRuntime:
         effort: str | None,
         permission_mode: str | None,
         transport: str | None,
+        account_profile_id: str | None = None,
     ) -> SessionRecord:
         plugin = self.registry.get(backend)
         validated_mode = (
@@ -1383,6 +1385,7 @@ class SessionRuntime:
             effort=effort,
             permission_mode=validated_mode,
             transport=transport,
+            account_profile_id=account_profile_id,
         )
         session = await self.create_session(request)
         return self.storage.update_session(
@@ -1421,6 +1424,8 @@ class SessionRuntime:
             backend=session.backend,
             transport=session.transport,
             native_thread_id=plugin.native_thread_id(session),
+            account_profile_id=session.account_profile_id,
+            account_profile_label=session.account_profile_label,
             status=session.status,
             supports_reattach=plugin.capabilities.supports_reattach_after_exit,
         )
@@ -1439,6 +1444,8 @@ class SessionRuntime:
         *,
         backend: str | None = None,
         transport: str | None = None,
+        account_profile_id: str | None = None,
+        account_profile_supplied: bool = False,
         model: str | None = None,
         effort: str | None = None,
         permission_mode: str | None = None,
@@ -1481,6 +1488,12 @@ class SessionRuntime:
                 permission_mode if permission_mode is not None else old.permission_mode
             )
             transport = transport if transport is not None else old.transport
+        if account_profile_supplied:
+            selected_profile_id = account_profile_id
+        elif old is not None and chosen == old.backend:
+            selected_profile_id = old.account_profile_id
+        else:
+            selected_profile_id = None
         # Spawn the replacement before touching the current thread so a failed
         # launch (e.g. a misconfigured backend) leaves the live, pinned
         # assistant intact rather than orphaning the pointer at a stopped row.
@@ -1490,6 +1503,7 @@ class SessionRuntime:
             effort=effort,
             permission_mode=permission_mode,
             transport=transport,
+            account_profile_id=selected_profile_id,
         )
         self.assistant_session_id = created.id
         await self._retire_previous_assistant(old, created.id)
@@ -1602,6 +1616,7 @@ class SessionRuntime:
         backend: str,
         thread_id: str,
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> AssistantSummary:
         """Adopt an existing backend-native thread as the assistant singleton.
 
@@ -1624,7 +1639,12 @@ class SessionRuntime:
         # assistant always adopts a thread over the agent's native transport,
         # so no transport is pinned here.
         imported = await self.import_thread(
-            backend, {"thread_id": thread_id, "launch_target_id": launch_target_id}
+            backend,
+            {
+                "thread_id": thread_id,
+                "launch_target_id": launch_target_id,
+                "account_profile_id": account_profile_id,
+            },
         )
         adopted = self.storage.update_session(
             imported.id, source=SessionSource.ASSISTANT, pinned_at=datetime.now(UTC)

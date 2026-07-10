@@ -6,6 +6,7 @@ plugins with temporary config dirs, through the TranscriptFilesystem seam
 (local by default; a recording fake proves the policy code is IO-agnostic).
 """
 
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -356,19 +357,252 @@ def test_setup_migrates_populated_dir_with_backup(tmp_path: Path) -> None:
 
 
 def test_setup_refuses_conflict_and_does_not_mutate(tmp_path: Path) -> None:
+    # A shared directory ancestor (dup/) is fine to share; only the differing
+    # leaf transcript is a genuine conflict.
     store = tmp_path / "config" / "projects"
     (store / "dup").mkdir(parents=True)
     (store / "dup" / "f.jsonl").write_text("orig")
     shared = tmp_path / "shared"
     (shared / "dup").mkdir(parents=True)
+    (shared / "dup" / "f.jsonl").write_text("different")
 
-    with pytest.raises(TranscriptUnavailableError, match="dup"):
+    with pytest.raises(
+        TranscriptUnavailableError, match=r"dup/f\.jsonl \(different regular files\)"
+    ):
         setup_transcripts_symlink(store, shared)
 
     # Nothing moved: store is still the original real dir, no symlink, no backup.
     assert store.is_dir() and not store.is_symlink()
     assert (store / "dup" / "f.jsonl").read_text() == "orig"
+    assert (shared / "dup" / "f.jsonl").read_text() == "different"
     assert not any(p.name.startswith("projects.bak-") for p in store.parent.iterdir())
+
+
+def test_setup_merges_codex_date_trees(tmp_path: Path) -> None:
+    # Both stores hold sessions/2026/... but their leaf rollouts differ — the
+    # old top-level "2026" collision must no longer block the merge.
+    store = tmp_path / "config" / "sessions"
+    (store / "2026" / "07" / "10").mkdir(parents=True)
+    (store / "2026" / "07" / "10" / "rollout-A.jsonl").write_text("thread-a")
+    shared = tmp_path / "shared"
+    (shared / "2026" / "01" / "01").mkdir(parents=True)
+    (shared / "2026" / "01" / "01" / "rollout-B.jsonl").write_text("thread-b")
+
+    actions = setup_transcripts_symlink(store, shared)
+
+    assert store.is_symlink()
+    assert (store / "2026" / "07" / "10" / "rollout-A.jsonl").read_text() == "thread-a"
+    assert (store / "2026" / "01" / "01" / "rollout-B.jsonl").read_text() == "thread-b"
+    # A deep intermediate directory created by the merge is pinned 0700, not just
+    # the direct child — guards the os.makedirs mode-only-on-leaf trap.
+    assert (shared / "2026" / "07").stat().st_mode & 0o777 == 0o700
+    assert (shared / "2026" / "07" / "10").stat().st_mode & 0o777 == 0o700
+    assert (
+        shared / "2026" / "07" / "10" / "rollout-A.jsonl"
+    ).stat().st_mode & 0o777 == 0o600
+    backups = [p for p in store.parent.iterdir() if p.name.startswith("sessions.bak-")]
+    assert len(backups) == 1
+    assert any("migrated 1 files" in a for a in actions)
+    assert any("0 deduplicated" in a for a in actions)
+
+
+def test_setup_merges_claude_project_trees(tmp_path: Path) -> None:
+    store = tmp_path / "config" / "projects"
+    (store / "proj-a").mkdir(parents=True)
+    (store / "proj-a" / f"{TID}.jsonl").write_text("a")
+    shared = tmp_path / "shared"
+    (shared / "proj-b").mkdir(parents=True)
+    (shared / "proj-b" / "other.jsonl").write_text("b")
+
+    setup_transcripts_symlink(store, shared)
+
+    assert store.is_symlink()
+    assert sorted(p.name for p in shared.iterdir()) == ["proj-a", "proj-b"]
+    assert (shared / "proj-a" / f"{TID}.jsonl").read_text() == "a"
+
+
+def test_setup_deduplicates_identical_leaf(tmp_path: Path) -> None:
+    store = tmp_path / "config" / "sessions"
+    (store / "d").mkdir(parents=True)
+    (store / "d" / "same.jsonl").write_text("identical")
+    (store / "d" / "new.jsonl").write_text("fresh")
+    shared = tmp_path / "shared"
+    (shared / "d").mkdir(parents=True)
+    (shared / "d" / "same.jsonl").write_text("identical")
+
+    actions = setup_transcripts_symlink(store, shared)
+
+    assert store.is_symlink()
+    assert (shared / "d" / "same.jsonl").read_text() == "identical"
+    assert (shared / "d" / "new.jsonl").read_text() == "fresh"
+    assert any("migrated 1 files (1 deduplicated" in a for a in actions)
+    assert any(p.name.startswith("sessions.bak-") for p in store.parent.iterdir())
+
+
+def test_setup_conflict_on_file_vs_directory(tmp_path: Path) -> None:
+    store = tmp_path / "config" / "sessions"
+    (store / "x").mkdir(parents=True)
+    (store / "x" / "leaf").write_text("iamafile")
+    shared = tmp_path / "shared"
+    (shared / "x" / "leaf").mkdir(parents=True)  # dest is a directory
+
+    with pytest.raises(
+        TranscriptUnavailableError,
+        match=r"x/leaf \(source file, shared directory\)",
+    ):
+        setup_transcripts_symlink(store, shared)
+    assert store.is_dir() and not store.is_symlink()
+
+
+def test_setup_symlink_dedup_and_conflict(tmp_path: Path) -> None:
+    # Same-target child symlink dedups; a preserved symlink lands when the dest
+    # is absent; a diverging target is a conflict.
+    store = tmp_path / "config" / "sessions"
+    store.mkdir(parents=True)
+    (store / "same").symlink_to("target")
+    (store / "kept").symlink_to("elsewhere")
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    (shared / "same").symlink_to("target")
+
+    actions = setup_transcripts_symlink(store, shared)
+    assert store.is_symlink()
+    assert os.readlink(shared / "kept") == "elsewhere"
+    assert any("1 deduplicated" in a for a in actions)
+
+    # A diverging symlink target is a conflict.
+    store2 = tmp_path / "config2" / "sessions"
+    store2.mkdir(parents=True)
+    (store2 / "s").symlink_to("one")
+    shared2 = tmp_path / "shared2"
+    shared2.mkdir()
+    (shared2 / "s").symlink_to("two")
+    with pytest.raises(
+        TranscriptUnavailableError, match=r"s \(different symlink targets\)"
+    ):
+        setup_transcripts_symlink(store2, shared2)
+
+
+def test_setup_conflict_diagnostic_is_bounded_and_path_only(tmp_path: Path) -> None:
+    store = tmp_path / "config" / "sessions"
+    store.mkdir(parents=True)
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    for i in range(15):
+        (store / f"f{i:02d}.jsonl").write_text(f"source-{i}")
+        (shared / f"f{i:02d}.jsonl").write_text(f"shared-{i}")
+
+    with pytest.raises(TranscriptUnavailableError) as excinfo:
+        setup_transcripts_symlink(store, shared)
+    msg = str(excinfo.value)
+    assert "15 conflicting paths" in msg
+    assert "... and 5 more" in msg  # bounded to first 10
+    assert "f00.jsonl (different regular files)" in msg
+    # Deterministic ordering: f09 listed, f10 not (only first 10 sorted paths).
+    assert "f09.jsonl" in msg and "f10.jsonl" not in msg
+    # No transcript contents leak into diagnostics.
+    assert "source-" not in msg and "shared-" not in msg
+
+
+def test_setup_verify_failure_leaves_source_intact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from waypoint.backends import transcripts as tr
+
+    # Distinct relative paths (no dest collisions) so the planner makes zero
+    # filecmp calls — only the verify step does, which we force to fail.
+    store = tmp_path / "config" / "sessions"
+    (store / "d").mkdir(parents=True)
+    (store / "d" / "a.jsonl").write_text("a")
+    shared = tmp_path / "shared"
+    shared.mkdir()
+
+    monkeypatch.setattr(tr.filecmp, "cmp", lambda *a, **k: False)
+    with pytest.raises(TranscriptUnavailableError, match="did not match its source"):
+        setup_transcripts_symlink(store, shared)
+
+    assert store.is_dir() and not store.is_symlink()
+    assert (store / "d" / "a.jsonl").read_text() == "a"
+    assert list(shared.iterdir()) == []  # shared untouched
+    assert not any(p.name.startswith(".wp-migrate-") for p in shared.parent.iterdir())
+
+
+def test_setup_mid_merge_failure_retains_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "config" / "sessions"
+    store.mkdir(parents=True)
+    for i in range(3):
+        (store / f"f{i}.jsonl").write_text(f"x{i}")
+    shared = tmp_path / "shared"
+    shared.mkdir()
+
+    real_rename = Path.rename
+    calls = {"n": 0}
+
+    def flaky_rename(self: Path, target: Any) -> Any:
+        # Fail on the second staged move — shared is partially populated by then.
+        if ".wp-migrate-" in str(self):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise OSError("simulated mid-merge failure")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", flaky_rename)
+    with pytest.raises(OSError, match="simulated mid-merge failure"):
+        setup_transcripts_symlink(store, shared)
+
+    # Source intact; shared partially populated; staging retained for recovery.
+    assert store.is_dir() and not store.is_symlink()
+    assert {p.name for p in store.iterdir()} == {"f0.jsonl", "f1.jsonl", "f2.jsonl"}
+    assert len(list(shared.glob("f*.jsonl"))) == 1
+    staging = [p for p in shared.parent.iterdir() if p.name.startswith(".wp-migrate-")]
+    assert len(staging) == 1
+    assert len(list(staging[0].glob("f*.jsonl"))) >= 1
+
+
+def test_setup_rerun_after_mid_merge_completes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from waypoint.backends import transcripts as tr
+
+    store = tmp_path / "config" / "sessions"
+    store.mkdir(parents=True)
+    for i in range(3):
+        (store / f"f{i}.jsonl").write_text(f"x{i}")
+    shared = tmp_path / "shared"
+    shared.mkdir()
+
+    # Unique timestamps so the failed run's staging and the re-run's staging/backup
+    # don't collide on a same-second name.
+    stamps = iter(f"ts{n}" for n in range(10))
+    monkeypatch.setattr(tr, "_timestamp", lambda: next(stamps))
+
+    real_rename = Path.rename
+    state = {"fail": True, "n": 0}
+
+    def flaky_rename(self: Path, target: Any) -> Any:
+        if state["fail"] and ".wp-migrate-" in str(self):
+            state["n"] += 1
+            if state["n"] == 2:
+                raise OSError("simulated mid-merge failure")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", flaky_rename)
+    with pytest.raises(OSError, match="simulated mid-merge failure"):
+        setup_transcripts_symlink(store, shared)
+    assert store.is_dir() and not store.is_symlink()
+    assert len(list(shared.glob("f*.jsonl"))) == 1  # one leaf already moved
+
+    # Operator simply re-runs: the already-moved leaf deduplicates, the rest copy.
+    state["fail"] = False
+    actions = setup_transcripts_symlink(store, shared)
+
+    assert store.is_symlink()
+    for i in range(3):
+        assert (store / f"f{i}.jsonl").read_text() == f"x{i}"
+    assert any("migrated 2 files (1 deduplicated" in a for a in actions)
+    assert any(p.name.startswith("sessions.bak-") for p in store.parent.iterdir())
 
 
 # ── native_thread_artifact_glob (discovery-pattern contract) ───────────────

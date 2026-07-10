@@ -170,14 +170,52 @@ summary from the same checklist, minus the live account probe — run
 **`setup-transcripts`** performs the guarded conversion a `symlink_shared`
 profile needs: it makes `<config_dir>/<native-store>` a symlink to the shared
 dir, and when a populated real directory is already there it migrates the
-contents in (refusing same-named conflicts, keeping a timestamped backup of the
-original) before replacing it with the symlink. It is idempotent on a correct
+contents in before replacing it with the symlink. It is idempotent on a correct
 symlink and never runs implicitly during a switch:
 
 ```bash
 waypoint accounts setup-transcripts claude_code work
 waypoint accounts setup-transcripts codex work --shared-dir ~/.waypoint/codex-sessions
 ```
+
+The migration is a **recursive, conflict-aware merge**, so two stores may share
+directory ancestors — the usual Codex `sessions/YYYY/MM/DD/…` and Claude
+`projects/<project>/…` layouts — as long as their leaf transcript files do not
+truly collide:
+
+- A source file whose destination path is absent is copied in.
+- A byte-identical file at the same relative path is **deduplicated** (the shared
+  copy is retained), reported in the action summary.
+- A differing file, a file/directory type mismatch, or a diverging symlink target
+  is a **conflict**. Conflicts abort the whole migration before anything is
+  copied, renamed, or backed up. The error lists a bounded, deterministic set of
+  relative conflict paths (never transcript contents), for example:
+
+  ```text
+  cannot migrate ~/.codex-nus/sessions into ~/.codex/sessions: 2 conflicting paths:
+  2026/07/10/rollout-abc.jsonl (different regular files)
+  2026/07/11 (source file, shared directory)
+  ```
+
+The success summary reports the copied-file count, deduplicated-file count,
+directories created, the timestamped backup location, and the symlink
+destination. The original store is renamed to `<native-store>.bak-<timestamp>`
+(a complete snapshot) and is **never deleted automatically**.
+
+**Stop active sessions first.** A migration copies files while agents may still
+be writing to the source store; the command verifies each staged copy against its
+source but cannot take a filesystem snapshot, so a session writing mid-migration
+can still lose that in-flight write. Migrate only stores that are idle.
+
+**Recovery.** New files are staged in a temporary `.wp-migrate-<timestamp>`
+sibling of the shared dir and verified before any merge begins. On failure before
+the source rename the original store is left untouched. If the process dies
+mid-merge, the original store still exists intact and the staging directory is
+retained for inspection. Because the files already moved into the shared dir are
+byte-identical copies of the still-present source, simply re-running
+`setup-transcripts` resumes cleanly: the already-moved leaves deduplicate and the
+remaining files copy in. The orphaned `.wp-migrate-<timestamp>` directory from the
+interrupted run can be deleted after a successful re-run.
 
 Each command has an HTTP endpoint behind it
 (`GET .../accounts/{profile}/probe`, `GET .../accounts/doctor`,

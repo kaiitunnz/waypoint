@@ -180,21 +180,17 @@ class TranscriptTailer:
         snapshot = _context_usage_snapshot_from_message(model, usage)
         if snapshot is None:
             return
-        # Aggregate this turn keyed on the provider message id (falling back to
-        # the transcript record uuid), independent of the snapshot dedup below
-        # so distinct equal-valued turns both count and offset-zero replay is
-        # harmless.
+        # Key the ledger on the message id (uuid fallback) so offset-zero replay
+        # is idempotent; published before the snapshot dedup so two turns with
+        # identical totals both count. publish=False — the snapshot publish
+        # below carries the refreshed aggregate on one broadcast.
         record_id = str(message.get("id") or record.get("uuid") or "")
         token_record = claude_token_usage_record(record_id, snapshot)
         if token_record is not None:
-            # publish=False: the context-usage publish below carries the
-            # refreshed aggregate on the same broadcast, matching the structured
-            # adapter and avoiding a second per-turn broadcast on replay.
             await self._runtime.publish_token_usage_record(
                 self._session_id, token_record, publish=False
             )
-        # Include the breakdown so a same-headline/different-composition turn
-        # still refreshes the displayed snapshot (RFC integrity gap #1).
+        # Key on the breakdown too, so a same-total/different-split turn refreshes.
         sig = (
             snapshot.used_tokens,
             snapshot.context_window_tokens,

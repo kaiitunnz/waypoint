@@ -711,14 +711,10 @@ class OpenCodePlugin(DefaultLaunchContract):
     def create_context_usage_source(
         self, session: SessionRecord, runtime: "SessionRuntime"
     ) -> "ContextUsageSource | None":
-        # OpenCode over the generic tmux transport has no way to bind a stable
-        # upstream OpenCode session id at launch — the TUI creates the id lazily
-        # on the first turn — so the only handle is the working directory. Two
-        # sessions in the same directory would then report one another's usage,
-        # so we never fall back to that directory heuristic: no current or
-        # aggregate token telemetry is published for opencode tmux until a
-        # native, unambiguous id handoff exists. Structured OpenCode sessions
-        # use their persisted upstream session + message ids instead.
+        # No telemetry over the tmux transport: the TUI creates its session id
+        # lazily after launch, so the only handle is the working directory —
+        # and two sessions in one directory would report each other's usage.
+        # Enable only once a native, unambiguous id handoff exists.
         return None
 
     def register_routes(self, app: FastAPI, context: Any) -> None:

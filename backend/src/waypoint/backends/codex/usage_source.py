@@ -144,8 +144,7 @@ class CodexRolloutUsageSource(ContextUsageSource):
             if snapshot is None:
                 continue
             await self._maybe_publish_partial_coverage()
-            # Include the breakdown so a same-total/different-composition turn
-            # still refreshes the displayed snapshot (RFC integrity gap #1).
+            # Key on the breakdown too, so a same-total/different-split turn refreshes.
             sig = (
                 snapshot.used_tokens,
                 snapshot.context_window_tokens,
@@ -159,13 +158,11 @@ class CodexRolloutUsageSource(ContextUsageSource):
             )
 
     async def _maybe_publish_partial_coverage(self) -> None:
-        """Disclose that per-turn totals are unavailable for Codex tmux.
+        """Disclose (once) that per-turn totals are unavailable for Codex tmux.
 
-        The rollout ``token_count`` event carries no stable per-turn identity —
-        only a file byte offset, which is a replay cursor, not a turn key — so
-        it cannot feed the durable per-turn ledger without double-counting. The
-        context-window meter still works; the aggregate section honestly reports
-        partial coverage rather than a guessed total. Published once.
+        The rollout ``token_count`` event has no stable per-turn id — only a
+        byte offset, which is a replay cursor, not a turn key — so it can't feed
+        the ledger without double-counting. The context meter still works.
         """
         if self._partial_coverage_published:
             return

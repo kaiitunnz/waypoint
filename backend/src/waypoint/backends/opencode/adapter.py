@@ -694,9 +694,8 @@ class OpenCodeAdapter:
         if not isinstance(model_id, str) or not model_id:
             return
 
-        # Feed the durable ledger keyed on the upstream session + assistant
-        # message id, independent of the context-window resolution below. The
-        # ledger key makes redelivery of the same message idempotent.
+        # Feed the ledger keyed on the upstream session + message id, so
+        # redelivery is idempotent, independent of the context-window lookup.
         message_id = info.get("id")
         if self._on_token_usage is not None and isinstance(message_id, str):
             record = opencode_token_usage_record(
@@ -833,8 +832,7 @@ class OpenCodeAdapter:
         if snapshot is None:
             return
 
-        # Fold the breakdown into the dedup so a same-total/different-composition
-        # turn still refreshes the displayed snapshot (RFC integrity gap #1).
+        # Key on the breakdown too, so a same-total/different-split turn refreshes.
         signature = (
             snapshot.used_tokens,
             snapshot.context_window_tokens,
@@ -1456,12 +1454,10 @@ def _context_usage_snapshot_from_message(
 def opencode_token_usage_record(
     record_id: str, tokens: dict[str, Any]
 ) -> TokenUsageRecord | None:
-    """Build a per-turn ledger record from an OpenCode assistant token dict.
+    """Per-turn ledger record from an OpenCode assistant token dict.
 
-    Independent of the context-window resolution — the ledger only needs the
-    identity and categories. No ``display_total`` is supplied: OpenCode's
-    ``reasoning`` is a subset of ``output`` for several providers, so a summed
-    grand total is not provider-safe; the UI shows category totals instead.
+    No ``display_total``: ``reasoning`` is a subset of ``output`` for some
+    providers, so a summed grand total isn't safe.
     """
     if not record_id:
         return None

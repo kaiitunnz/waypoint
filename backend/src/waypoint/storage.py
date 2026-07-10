@@ -426,14 +426,12 @@ class Storage:
         return any(row["name"] == column for row in rows)
 
     def _mark_sessions_pretracked(self) -> None:
-        """Flag sessions that predate the token-usage ledger.
+        """Flag sessions that predate the ledger so their coverage reports
+        "tracked since", not the whole session.
 
-        These were active before any per-turn record could be captured, so their
-        aggregate must report "tracked since" rather than falsely claiming the
-        whole session (RFC coverage honesty). Runs exactly once — guarded by the
-        ``session_token_usage`` column having just been added — so genuinely new
-        sessions created after the migration are never marked. The marker lives
-        in ``transport_state``, which the runtime's coverage-init reads.
+        Runs once, guarded by the column having just been added, so sessions
+        created after the migration are never marked. The runtime's
+        coverage-init reads the ``transport_state`` marker.
         """
         rows = self.connection.execute(
             "SELECT id, transport_state FROM sessions"
@@ -590,15 +588,12 @@ class Storage:
         *,
         init: TokenUsageInit,
     ) -> SessionTokenUsage:
-        """Upsert one per-turn ledger row and update the session aggregate.
+        """Upsert one per-turn ledger row and delta-update the session aggregate.
 
-        Idempotent under the ledger key ``(session_id, source, record_id)``: a
-        duplicate delivery or a tmux-artifact replay from byte zero re-upserts
-        the same row and applies a net-zero delta, so totals never inflate. A
-        provider revising a known turn replaces the row and applies the
-        difference. ``init`` seeds coverage/observed_from only when the
-        aggregate does not yet exist. Steady-state work is one indexed read,
-        one upsert, and one bounded aggregate update — no scan of all turns.
+        Idempotent under ``(session_id, source, record_id)``: a duplicate or a
+        replay re-upserts the same row for a net-zero delta; a revised turn
+        replaces it. ``init`` seeds coverage/observed_from on the first record
+        only. One indexed read + one upsert + a bounded update, never a scan.
         """
         row = self.connection.execute(
             """

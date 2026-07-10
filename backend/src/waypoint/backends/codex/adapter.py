@@ -749,8 +749,7 @@ class CodexAppServerAdapter:
     async def _publish_context_usage(
         self, state: CodexSessionState, snapshot: SessionContextUsage
     ) -> None:
-        # Fold the breakdown into the dedup so a same-total/different-composition
-        # turn still refreshes the displayed breakdown (RFC integrity gap #1).
+        # Key on the breakdown too, so a same-total/different-split turn refreshes.
         signature = (
             snapshot.used_tokens,
             snapshot.context_window_tokens,
@@ -882,13 +881,11 @@ def _context_usage_snapshot_from_thread_token_usage(
 def codex_token_usage_record(
     record_id: str, snapshot: SessionContextUsage
 ) -> TokenUsageRecord | None:
-    """Build a per-turn ledger record from a Codex usage snapshot.
+    """Per-turn ledger record from a Codex usage snapshot; ``None`` for an empty
+    ``record_id`` (the native turn id).
 
-    ``record_id`` is the native turn id; an empty id yields ``None``. Codex's
-    ``cachedInputTokens`` is a subset of ``inputTokens``, so summing the
-    categories would double-count. The provider's ``totalTokens`` (carried as
-    the snapshot's ``used_tokens``) is the provider-safe grand total for the
-    turn; the category chips are shown without a synthesized sum.
+    Codex categories overlap (cached input ⊆ input), so the grand total is the
+    provider's ``totalTokens`` (the snapshot's ``used_tokens``), not their sum.
     """
     if not record_id:
         return None

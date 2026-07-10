@@ -3440,12 +3440,9 @@ class SessionRuntime:
         resume, with a system note explaining history was unavailable. Returns
         the number of events seeded.
         """
-        # Every import routes through here after create_session, whether or not
-        # transcript replay is enabled. Stamp the adoption marker so token-usage
-        # coverage reports "tracked since" rather than falsely claiming the
-        # whole session: the adopted native thread had prior turns Waypoint
-        # never metered. Merge into transport_state so a concurrent writer's
-        # keys survive.
+        # Every import routes through here, so stamp the adoption marker that
+        # makes token-usage coverage report "tracked since" (the adopted thread
+        # had prior turns Waypoint never metered). Merge to keep other keys.
         session = self.storage.get_session(session_id)
         if session is not None and not session.transport_state.get("adopted_thread"):
             merged = {**session.transport_state, "adopted_thread": True}
@@ -3518,19 +3515,13 @@ class SessionRuntime:
     ) -> "TokenUsageInit":
         """Coverage seed for a session's first token-usage record.
 
-        Honest by default: ``tracked_since`` unless a positive from-birth signal
-        is present, so a forgotten adoption marker under-claims rather than
-        falsely reporting full coverage. A freshly-created managed or assistant
-        session that never adopted a pre-existing native thread is metered from
-        turn one; anything that adopted prior native history (imports — stamped
-        in ``seed_thread_history`` — attached tmux, adopted-thread assistants)
-        only sees turns from adoption forward.
+        Claims the whole session only when metered from turn one; anything that
+        adopted prior native history (imports, attached tmux, or sessions
+        predating the ledger) can honestly claim only "tracked since".
         """
         is_from_birth = (
             session.source in {SessionSource.MANAGED, SessionSource.ASSISTANT}
             and not session.transport_state.get("adopted_thread")
-            # Sessions that predate the token ledger were active before tracking
-            # began, so they can only honestly claim "tracked since".
             and not session.transport_state.get("pretracked_tokens")
         )
         if is_from_birth:
@@ -3549,16 +3540,12 @@ class SessionRuntime:
     ) -> None:
         """Fold one per-turn record into the durable session token aggregate.
 
-        Purely additive: it never touches ``context_usage`` — the current
-        context-window snapshot keeps its own independent publish path, so a
-        failure here can neither double-write nor discard that snapshot. A parse
-        or write failure is swallowed (debug-logged) so telemetry never
-        interrupts a user turn, terminates the session, or drops the snapshot.
+        Additive only — never touches ``context_usage``, so a swallowed failure
+        can't drop the snapshot or interrupt the turn.
         """
         if not record.record_id:
-            # Never aggregate an identity-less event; keying a ledger row on ""
-            # would collapse distinct turns. The context snapshot still updates
-            # via its own path.
+            # An identity-less event can't key a ledger row (a "" key would
+            # collapse distinct turns), so skip aggregation.
             log.debug(
                 "token usage record rejected: missing identity",
                 extra={"session_id": session_id, "source": record.source},

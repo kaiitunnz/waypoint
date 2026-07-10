@@ -1900,11 +1900,8 @@ class ClaudeCliAdapter:
     async def _publish_context_usage(
         self, state: ClaudeSessionState, snapshot: SessionContextUsage
     ) -> None:
-        # Include the breakdown so a turn with the same headline total but a
-        # different cache/input composition still refreshes the displayed
-        # breakdown and timestamp (RFC integrity gap #1). Distinct turns that
-        # happen to be byte-identical are correctly deduped for the snapshot;
-        # the per-turn ledger counts them via its own message-id key.
+        # Key on the breakdown too, so a turn with the same total but a
+        # different cache/input split still refreshes what's shown.
         signature = (
             snapshot.used_tokens,
             snapshot.context_window_tokens,
@@ -2065,14 +2062,10 @@ def _context_usage_snapshot_from_message(
 def claude_token_usage_record(
     record_id: str, snapshot: SessionContextUsage
 ) -> TokenUsageRecord | None:
-    """Build a per-turn ledger record from a Claude usage snapshot.
+    """Per-turn ledger record from a Claude usage snapshot; ``None`` for an
+    empty ``record_id`` (never aggregate an identity-less turn).
 
-    ``record_id`` is the provider assistant-message id; an empty id yields
-    ``None`` so an identity-less turn is never aggregated. Claude's categories
-    (input, cache-read, cache-creation, output) do not overlap, so their sum is
-    a provider-safe grand total for the turn's token work. Shared by the
-    structured adapter and the transcript readers, all of which build the same
-    snapshot.
+    Claude's categories don't overlap, so their sum is a safe grand total.
     """
     if not record_id:
         return None

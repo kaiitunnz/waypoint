@@ -540,7 +540,7 @@ export function useSessionSettings(
     const willInterruptTurn = restartCount > 0 && running;
 
     if (transportChanged) {
-      warnings.push("The session will be restarted.");
+      warnings.push("The session will be restarted, keeping its conversation.");
     } else if (restartCount > 1) {
       warnings.push(
         `Applying these changes will restart the session ${restartCount} times and resume it.`,

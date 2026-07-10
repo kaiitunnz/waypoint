@@ -99,10 +99,12 @@ def _stub_lifecycle(plugin: ClaudeTtyPlugin) -> dict[str, object]:
         *,
         start_at_end: bool = False,
         config_dir: str | None = None,
+        launch_target: object = None,
     ) -> None:
         captured["tailer_thread_id"] = thread_id
         captured["start_at_end"] = start_at_end
         captured["tailer_config_dir"] = config_dir
+        captured["tailer_launch_target"] = launch_target
 
     plugin._start_tailer = _fake_start_tailer  # type: ignore[method-assign]
     plugin._spawn_rate_limit_watcher = MagicMock()  # type: ignore[method-assign]

@@ -18,6 +18,8 @@ Output schema (always one line, ``SENTINEL`` immediately followed by JSON,
     {"target": str} | {"error": str}            # readlink
     {"entries": [str, ...]} | {"error": str}    # listdir
     {"paths": [str, ...]}                       # glob
+    {"size": int, "device": int, "inode": int,  # read_range
+     "data_b64": str} | {"error": str}
 
 and mutating ops (mkdir, chmod, rmdir, symlink, copy_file):
 
@@ -29,10 +31,12 @@ and mutating ops (mkdir, chmod, rmdir, symlink, copy_file):
 # remote Python 3.8+ interpreter that actually executes this script.
 from __future__ import annotations
 
+import base64
 import glob as _glob
 import json
 import os
 import shutil
+import stat as _stat
 import sys
 from collections.abc import Callable
 
@@ -143,6 +147,42 @@ def op_glob(config_dir, pattern):
     emit({"paths": matches})
 
 
+def op_read_range(path, offset, limit):
+    # Bounded, read-only tail: seek to ``offset`` and read at most ``limit``
+    # bytes of a regular file, returning the file's size and stable identity
+    # (device, inode) so the caller can detect truncation/replacement. Bytes
+    # travel only inside ``data_b64`` — nothing raw is ever printed.
+    p = _u(path)
+    try:
+        want_offset = max(0, int(offset))
+        want_limit = max(0, int(limit))
+    except (TypeError, ValueError):
+        emit({"error": "offset and limit must be integers"})
+        return
+    try:
+        st = os.stat(p)
+        if not _stat.S_ISREG(st.st_mode):
+            emit({"error": "not a regular file: " + p})
+            return
+        if want_limit == 0:
+            data = b""
+        else:
+            with open(p, "rb") as fh:
+                fh.seek(want_offset)
+                data = fh.read(want_limit)
+    except OSError as exc:
+        emit({"error": str(exc)})
+        return
+    emit(
+        {
+            "size": st.st_size,
+            "device": st.st_dev,
+            "inode": st.st_ino,
+            "data_b64": base64.b64encode(data).decode("ascii"),
+        }
+    )
+
+
 def op_expanduser(path):
     # Resolve ``~`` against the remote home so the caller's policy logic
     # (relative_to, symlink-target comparison) works with absolute paths that
@@ -162,6 +202,7 @@ OPS: dict[str, Callable[..., None]] = {
     "symlink": op_symlink,
     "copy_file": op_copy_file,
     "glob": op_glob,
+    "read_range": op_read_range,
     "expanduser": op_expanduser,
 }
 

@@ -59,6 +59,11 @@ from waypoint.backends.claude_code.threads import (
 )
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty._state import PendingTtyApproval, PendingTtyQuestion
+from waypoint.backends.claude_tty.byte_source import (
+    LocalTranscriptByteSource,
+    RemoteClaudeTranscriptByteSource,
+    TranscriptByteSource,
+)
 from waypoint.backends.claude_tty.tailer import TranscriptTailer
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
@@ -491,13 +496,24 @@ class ClaudeTtyPlugin:
         *,
         start_at_end: bool = False,
         config_dir: str | None = None,
+        launch_target: SshLaunchTargetConfig | None = None,
     ) -> None:
         if session_id in self._tailer_tasks:
             return
+        # A local session tails the shared projects tree directly; a session on
+        # an SSH launch target reads its transcript over the remote filesystem
+        # seam. The selection lives here in the transport plugin so the runtime
+        # stays unaware of Claude-specific transcript storage.
+        source: TranscriptByteSource
+        if launch_target is None:
+            source = LocalTranscriptByteSource(cwd, thread_id, config_dir)
+        else:
+            source = RemoteClaudeTranscriptByteSource(
+                runtime, session_id, self, launch_target, config_dir
+            )
         tailer = TranscriptTailer(
             session_id=session_id,
-            session_uuid=thread_id,
-            cwd=cwd,
+            source=source,
             runtime=runtime,
             plugin=self,
             start_at_end=start_at_end,
@@ -613,6 +629,7 @@ class ClaudeTtyPlugin:
             thread_id,
             request.cwd,
             config_dir=self._config_dir_from_env(request.launch_env),
+            launch_target=launch_target,
         )
         self._spawn_rate_limit_watcher(runtime, session)
         return runtime.get_session(session.id)
@@ -635,6 +652,7 @@ class ClaudeTtyPlugin:
                     session.cwd,
                     start_at_end=True,
                     config_dir=self._config_dir(session),
+                    launch_target=runtime._find_launch_target(session.launch_target_id),
                 )
             else:
                 log.warning(
@@ -737,6 +755,7 @@ class ClaudeTtyPlugin:
             session.cwd,
             start_at_end=effective_thread_id is not None,
             config_dir=self._config_dir(session),
+            launch_target=launch_target,
         )
         self._spawn_rate_limit_watcher(runtime, session)
 
@@ -846,6 +865,7 @@ class ClaudeTtyPlugin:
             new_thread_id,
             session.cwd,
             config_dir=self._config_dir(new_session),
+            launch_target=launch_target,
         )
         self._spawn_rate_limit_watcher(runtime, new_session)
         return runtime.get_session(new_session_id)
@@ -1040,6 +1060,7 @@ class ClaudeTtyPlugin:
             session.cwd,
             start_at_end=resumed,
             config_dir=self._config_dir(session),
+            launch_target=launch_target,
         )
         return True
 
@@ -1154,6 +1175,7 @@ class ClaudeTtyPlugin:
                 new_session.cwd,
                 start_at_end=True,
                 config_dir=self._config_dir(new_session),
+                launch_target=launch_target,
             )
             self._spawn_rate_limit_watcher(runtime, new_session)
         except Exception:

@@ -31,6 +31,7 @@ from waypoint.schemas import (
     SessionContextUsage,
     SessionRateLimitUsage,
     SessionStatus,
+    TokenUsageRecord,
 )
 
 log = logging.getLogger("waypoint.codex")
@@ -42,6 +43,7 @@ ApprovalDecisionHandler = Callable[
 ApprovalCallback = Callable[[str, dict[str, Any] | None], dict[str, Any]]
 ClientFactory = Callable[[str, ApprovalCallback], CodexClient]
 SessionUpdateCallback = Callable[[str, dict[str, Any], bool], Awaitable[Any]]
+TokenUsageCallback = Callable[[str, TokenUsageRecord, bool], Awaitable[Any]]
 
 
 def default_client_factory(cwd: str, approval_handler: ApprovalCallback) -> CodexClient:
@@ -146,7 +148,9 @@ class CodexSessionState:
     # Same shape as `model` for reasoning-effort: re-emit on each turn_start so
     # the override survives restarts and turn reuse.
     effort: str | None = None
-    context_usage_signature: tuple[int, int | None] | None = None
+    context_usage_signature: (
+        tuple[int, int | None, tuple[tuple[str, int], ...]] | None
+    ) = None
     rate_limit_usage_snapshot: SessionRateLimitUsage | None = None
     rate_limit_usage_signature: str | None = None
     rate_limit_probe: Callable[[], Awaitable[SessionRateLimitUsage | None]] | None = (
@@ -160,10 +164,12 @@ class CodexAppServerAdapter:
         self,
         emit_event: ApprovalDecisionHandler,
         on_session_update: SessionUpdateCallback | None = None,
+        on_token_usage: TokenUsageCallback | None = None,
         client_factory: ClientFactory | None = None,
     ) -> None:
         self._emit_event = emit_event
         self._on_session_update = on_session_update
+        self._on_token_usage = on_token_usage
         self._client_factory = client_factory or default_client_factory
         self._sessions: dict[str, CodexSessionState] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -599,6 +605,7 @@ class CodexAppServerAdapter:
                     snapshot = _context_usage_snapshot_from_thread_token_usage(payload)
                     if snapshot is not None:
                         await self._publish_context_usage(state, snapshot)
+                        await self._publish_token_usage(state, turn_id, snapshot)
                     continue
                 if notification.method == "turn/plan/updated":
                     # Synthesize a todo_list item so the generic metadata path
@@ -742,7 +749,13 @@ class CodexAppServerAdapter:
     async def _publish_context_usage(
         self, state: CodexSessionState, snapshot: SessionContextUsage
     ) -> None:
-        signature = (snapshot.used_tokens, snapshot.context_window_tokens)
+        # Fold the breakdown into the dedup so a same-total/different-composition
+        # turn still refreshes the displayed breakdown (RFC integrity gap #1).
+        signature = (
+            snapshot.used_tokens,
+            snapshot.context_window_tokens,
+            tuple(sorted(snapshot.breakdown.items())),
+        )
         if state.context_usage_signature == signature:
             return
         state.context_usage_signature = signature
@@ -753,6 +766,19 @@ class CodexAppServerAdapter:
             {"context_usage": snapshot.model_dump(mode="json")},
             True,
         )
+
+    async def _publish_token_usage(
+        self,
+        state: CodexSessionState,
+        turn_id: str,
+        snapshot: SessionContextUsage,
+    ) -> None:
+        if self._on_token_usage is None:
+            return
+        record = codex_token_usage_record(turn_id, snapshot)
+        if record is None:
+            return
+        await self._on_token_usage(state.session_id, record, True)
 
     async def _refresh_rate_limit_usage_loop(
         self, state: CodexSessionState, *, refresh_interval_seconds: float
@@ -850,6 +876,28 @@ def _context_usage_snapshot_from_thread_token_usage(
         updated_at=datetime.now(UTC),
         source="codex",
         breakdown=breakdown,
+    )
+
+
+def codex_token_usage_record(
+    record_id: str, snapshot: SessionContextUsage
+) -> TokenUsageRecord | None:
+    """Build a per-turn ledger record from a Codex usage snapshot.
+
+    ``record_id`` is the native turn id; an empty id yields ``None``. Codex's
+    ``cachedInputTokens`` is a subset of ``inputTokens``, so summing the
+    categories would double-count. The provider's ``totalTokens`` (carried as
+    the snapshot's ``used_tokens``) is the provider-safe grand total for the
+    turn; the category chips are shown without a synthesized sum.
+    """
+    if not record_id:
+        return None
+    return TokenUsageRecord(
+        record_id=record_id,
+        source=snapshot.source,
+        observed_at=snapshot.updated_at,
+        totals=dict(snapshot.breakdown),
+        display_total_tokens=snapshot.used_tokens or None,
     )
 
 

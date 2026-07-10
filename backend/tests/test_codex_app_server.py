@@ -1045,3 +1045,61 @@ async def test_context_usage_snapshot_deduplicates_repeated_updates() -> None:
     assert calls == [
         ("sess", {"context_usage": snapshot.model_dump(mode="json")}, True)
     ]
+
+
+@pytest.mark.asyncio
+async def test_token_usage_record_uses_turn_id_and_provider_total() -> None:
+    records: list[tuple[str, Any, bool]] = []
+
+    async def _emit(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def on_token_usage(session_id: str, record: Any, publish: bool) -> Any:
+        records.append((session_id, record, publish))
+        return None
+
+    fake = FakeCodexClient()
+    adapter = CodexAppServerAdapter(
+        _emit,
+        on_token_usage=on_token_usage,
+        client_factory=lambda *_: cast(CodexClient, fake),
+    )
+    state = CodexSessionState(
+        session_id="sess",
+        cwd="/tmp",
+        client=cast(CodexClient, fake),
+        transport_lock=asyncio.Lock(),
+        thread_id="thread-1",
+    )
+    snapshot = _context_usage_snapshot_from_thread_token_usage(
+        {
+            "tokenUsage": {
+                "last": {
+                    "totalTokens": 4096,
+                    "inputTokens": 2048,
+                    "cachedInputTokens": 256,
+                    "outputTokens": 1536,
+                    "reasoningOutputTokens": 256,
+                },
+                "modelContextWindow": 8192,
+            }
+        }
+    )
+    assert snapshot is not None
+
+    await adapter._publish_token_usage(state, "turn-7", snapshot)
+
+    assert len(records) == 1
+    session_id, record, _ = records[0]
+    assert session_id == "sess"
+    assert record.record_id == "turn-7"
+    # cachedInputTokens is a subset of inputTokens, so the provider totalTokens
+    # is the safe grand total — never the category sum.
+    assert record.display_total_tokens == 4096
+    assert record.totals["input_tokens"] == 2048
+    assert record.totals["cached_input_tokens"] == 256
+
+    # An empty turn id is never aggregated.
+    records.clear()
+    await adapter._publish_token_usage(state, "", snapshot)
+    assert records == []

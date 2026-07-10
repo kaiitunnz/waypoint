@@ -27,6 +27,7 @@ from waypoint.backends.account_profiles import (
     resolve_account_profiles,
 )
 from waypoint.backends.base import (
+    AgentLaunchContract,
     ConfigDirNotReadyError,
     ConfigDirValidating,
     DefaultConfigDirProviding,
@@ -98,6 +99,7 @@ from waypoint.schemas import (
     SessionStatus,
     TokenUsageInit,
     TokenUsageRecord,
+    TransportSettingsOption,
 )
 from waypoint.settings import Settings
 from waypoint.ssh_master import SshMasterManager, SshMasterStatus
@@ -2333,6 +2335,64 @@ class SessionRuntime:
             self._session_locks[session_id] = lock
         return lock
 
+    def _transport_switch_options(
+        self, session: SessionRecord, caps: BackendCapabilities
+    ) -> list[TransportSettingsOption]:
+        """Project the interfaces a session may safely switch to.
+
+        Switching is offered only for a managed session whose agent has a
+        resumable native store (``native_thread_store`` — Claude/Codex, not
+        OpenCode or a bare attached pane) and declares more than one usable
+        transport. Each option carries the restart-scoped launch capabilities of
+        the resulting ``(agent, transport)`` pair so the modal can gate advanced
+        fields while an Interface change is staged. The current transport is
+        listed first so the controlled select is valid before any change.
+        """
+        if session.source == SessionSource.ATTACHED_TMUX:
+            return []
+        # An agent with no resumable native store cannot prove a switch keeps the
+        # conversation, so it advertises none (agent-agnostic OpenCode exclusion).
+        if not caps.native_thread_store:
+            return []
+        safe_targets: list[str] = []
+        for transport_id in self.registry.supported_transports(session.backend):
+            if transport_id == session.transport:
+                continue
+            try:
+                pair_caps = self.registry.capabilities_for_pair(
+                    session.backend, transport_id
+                )
+            except KeyError:
+                continue
+            if not pair_caps.supports_reattach_after_exit:
+                continue
+            safe_targets.append(transport_id)
+        if not safe_targets:
+            return []
+        options: list[TransportSettingsOption] = []
+        for transport_id in [session.transport, *safe_targets]:
+            try:
+                pair_caps = self.registry.capabilities_for_pair(
+                    session.backend, transport_id
+                )
+            except KeyError:
+                continue
+            options.append(
+                TransportSettingsOption(
+                    id=transport_id,
+                    supports_launch_settings_with_restart=(
+                        pair_caps.supports_launch_settings_with_restart
+                        and pair_caps.supports_reattach_after_exit
+                    ),
+                    supports_account_profile_with_restart=(
+                        pair_caps.supports_account_profile_with_restart
+                    ),
+                    supports_custom_args=pair_caps.supports_custom_cli_args,
+                    supports_config_overrides=pair_caps.supports_config_overrides,
+                )
+            )
+        return options
+
     def get_launch_settings(self, session_id: str) -> LaunchSettingsResponse:
         session = self.get_session(session_id)
         caps = self.registry.capabilities_for(session)
@@ -2343,11 +2403,20 @@ class SessionRuntime:
         # A bare attached tmux pane advertises the restart capability at the
         # transport level, but Waypoint does not own the process, so it cannot
         # honestly restart-and-resume it. Mirror the runtime gate here.
+        is_attached_tmux = session.source == SessionSource.ATTACHED_TMUX
         supports_launch_settings_with_restart = (
             caps.supports_launch_settings_with_restart
             and caps.supports_reattach_after_exit
-            and session.source != SessionSource.ATTACHED_TMUX
+            and not is_attached_tmux
         )
+        # An attached pane's derived account-profile capability is True (its
+        # agent has a config-dir env var), but Waypoint doesn't own the process,
+        # so force it false — else the modal renders a profile picker it can't
+        # honestly apply (the terminal overflow now opens this modal).
+        supports_account_profile_with_restart = (
+            caps.supports_account_profile_with_restart and not is_attached_tmux
+        )
+        transport_options = self._transport_switch_options(session, caps)
         config_dir_env_var = caps.config_dir_env_var
         protected_launch_env_keys = ["WAYPOINT_SESSION_ID"]
         if config_dir_env_var and session.account_profile_id:
@@ -2370,11 +2439,13 @@ class SessionRuntime:
             supports_custom_args=caps.supports_custom_cli_args,
             supports_config_overrides=caps.supports_config_overrides,
             supports_account_profile_with_restart=(
-                caps.supports_account_profile_with_restart
+                supports_account_profile_with_restart
             ),
             supports_launch_settings_with_restart=(
                 supports_launch_settings_with_restart
             ),
+            transport_options=transport_options,
+            supports_transport_switch_with_restart=len(transport_options) > 1,
             requires_restart=True,
         )
 
@@ -2410,8 +2481,27 @@ class SessionRuntime:
     ) -> SessionRecord:
         session = self.get_session(session_id)
         plugin = self.registry.plugin_for(session)
+        agent_plugin = self.registry.get(session.backend)
         caps = self.registry.capabilities_for(session)
+        target_transport = (
+            request.transport
+            if "transport" in request.model_fields_set and request.transport is not None
+            else session.transport
+        )
+        transport_changing = target_transport != session.transport
+        # Gate restart-scoped capability checks on the pair the session will run
+        # as after the switch; operate/terminate the current process through the
+        # current pair. For a non-switch these are the same composed caps.
+        gate_caps = (
+            self.registry.capabilities_for_pair(session.backend, target_transport)
+            if transport_changing
+            else caps
+        )
         fresh_thread_restarter: FreshThreadRestarting | None = None
+        turn_flushed = False
+        # A pending approval/question can't be carried to another interface; note
+        # its cancellation so the transition is observable in the transcript.
+        had_pending_input = session.status == SessionStatus.WAITING_INPUT
         if session.status == SessionStatus.STARTING:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -2425,9 +2515,25 @@ class SessionRuntime:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="cannot change launch settings for an attached tmux session",
             )
+        if transport_changing:
+            # Only interfaces the server projects as safe targets are accepted;
+            # recompute under the lock rather than trusting the client. The set
+            # excludes attached panes, agents without a resumable native store
+            # (OpenCode), and single-usable-transport agents.
+            valid_targets = {
+                option.id for option in self._transport_switch_options(session, caps)
+            }
+            if target_transport not in valid_targets:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"cannot switch {session.backend} to interface "
+                        f"{target_transport!r}: not an offered switch target"
+                    ),
+                )
         if not (
-            caps.supports_launch_settings_with_restart
-            and caps.supports_reattach_after_exit
+            gate_caps.supports_launch_settings_with_restart
+            and gate_caps.supports_reattach_after_exit
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -2451,11 +2557,47 @@ class SessionRuntime:
             and request.account_profile_id != session.account_profile_id
             and request.account_profile_id is not None
         )
-        if profile_changing and not caps.supports_account_profile_with_restart:
+        if profile_changing and not gate_caps.supports_account_profile_with_restart:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"{session.backend} does not support account-profile switching",
             )
+
+        native_thread_id: str | None = None
+        if transport_changing:
+            # v1 requires a durably-persisted native thread: the switch is a pure
+            # resume onto the target interface. Non-destructive, so run before any
+            # teardown — an unpersisted thread is rejected while the session is
+            # untouched (FR5: never silently start fresh over recorded events).
+            native_thread_id = agent_plugin.native_thread_id(session)
+            thread_config_dir = config_dir_for(caps, session.launch_env)
+            # A native-thread-store agent (gated by the switch-options projection)
+            # implements the launch contract; guard for mypy and defensiveness.
+            persisted = (
+                bool(native_thread_id)
+                and isinstance(agent_plugin, AgentLaunchContract)
+                and await agent_plugin.conversation_exists(
+                    cast(str, native_thread_id),
+                    session.cwd,
+                    launch_target,
+                    config_dir=thread_config_dir,
+                )
+            )
+            if not persisted:
+                if self._has_durable_conversation(session.id):
+                    detail = (
+                        "cannot switch interface: the native thread has no "
+                        "persisted transcript but this session has conversation "
+                        "events, so switching would lose context"
+                    )
+                else:
+                    detail = (
+                        "cannot switch interface: send a message first so the "
+                        "conversation is persisted before changing interface"
+                    )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=detail
+                )
 
         if launch_target is not None:
             # Clean 409 ``ssh-master-required`` for a dead password master
@@ -2580,6 +2722,7 @@ class SessionRuntime:
                     session.id, status=SessionStatus.INTERRUPTED
                 )
                 await self.transport_for(session).flush_before_restart(session)
+                turn_flushed = True
             if config_dir_key:
                 # ``config_dir_for`` reads only launch_env — no ``os.environ``
                 # fallback for remote (the backend host's env is meaningless on
@@ -2661,6 +2804,32 @@ class SessionRuntime:
                 "verified_account_probed_at": None,
             }
 
+        # Flush a running turn before teardown for any restart-resume that hasn't
+        # already (the profile branch flushes after account-verify). A transport
+        # switch of a RUNNING/WAITING session interrupts here so the native
+        # transcript includes the settled final turn at handoff.
+        if not turn_flushed and session.status in {
+            SessionStatus.RUNNING,
+            SessionStatus.WAITING_INPUT,
+        }:
+            await self.transport_for(session).interrupt(session)
+            session = self.storage.update_session(
+                session.id, status=SessionStatus.INTERRUPTED
+            )
+            await self.transport_for(session).flush_before_restart(session)
+            turn_flushed = True
+
+        # For a transport switch, reset transport_state to the neutral,
+        # agent-owned handoff payload (the native thread id) and discard the old
+        # driver's pane/adapter keys; the target transport rebuilds its own state
+        # in restore_session from this id plus the persisted launch fields.
+        transport_state_fields: dict[str, Any] = {}
+        if transport_changing:
+            transport_state_fields["transport"] = target_transport
+            transport_state_fields["transport_state"] = (
+                {"thread_id": native_thread_id} if native_thread_id else {}
+            )
+
         # Terminate → persist new settings → restore. terminate/restore cycle the
         # rate-limit watcher; restore rebuilds env from the persisted record, so
         # the account is fixed by the (already-verified) launch_env. Mark the
@@ -2668,7 +2837,8 @@ class SessionRuntime:
         # transport (claude_tty) only relaunches on an EXITED reattach — without
         # this it would take the boot-time branch, keep the dead pane, and reject
         # the next input with "can't find pane". Native transports (claude_cli,
-        # codex) relaunch unconditionally, so this is a no-op for them.
+        # codex) relaunch unconditionally, so this is a no-op for them. The old
+        # (current) plugin tears down; the target plugin restores.
         await plugin.terminate_session(self, session)
         await self._cancel_context_usage_source(session.id)
         self.storage.update_session(
@@ -2679,15 +2849,17 @@ class SessionRuntime:
             launch_env=new_env,
             account_profile_id=selected_profile_id,
             account_profile_label=new_profile_label,
+            **transport_state_fields,
             **verified_account_fields,
         )
         restored_session = self.get_session(session.id)
+        target_plugin = self.registry.resolve(session.backend, target_transport)
         if fresh_thread_restarter is not None:
             await fresh_thread_restarter.restart_unpersisted_session(
                 self, restored_session
             )
         else:
-            await plugin.restore_session(self, restored_session)
+            await target_plugin.restore_session(self, restored_session)
         refreshed = self.get_session(session.id)
         if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             # Restore failed: keep the new settings on the record (per the RFC —
@@ -2702,12 +2874,22 @@ class SessionRuntime:
                 ),
             )
         self._start_context_usage_source(refreshed)
-        note = (
-            f"Session restarted with account profile {new_profile_label}"
-            if selected_profile_id is not None and profile_changing
-            else "Session restarted with new launch settings"
-        )
+        if transport_changing:
+            note = (
+                f"Session interface changed from {plugin.label} to "
+                f"{target_plugin.label}"
+            )
+        elif selected_profile_id is not None and profile_changing:
+            note = f"Session restarted with account profile {new_profile_label}"
+        else:
+            note = "Session restarted with new launch settings"
         await self._record_system_event(session.id, note)
+        if transport_changing and had_pending_input:
+            await self._record_system_event(
+                session.id,
+                "Pending approval was cancelled by the interface change; "
+                "re-run the request on the new interface if needed",
+            )
         await self._broadcast_session_list()
         return self.get_session(session.id)
 

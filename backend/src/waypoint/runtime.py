@@ -1506,7 +1506,7 @@ class SessionRuntime:
         """Rebuild the assistant on a fresh thread (clear context / switch backend).
 
         Clearing context keeps the *current* thread's backend and live config
-        (model / effort / permission mode / transport), so a context wipe
+        (model / effort / permission mode / transport / account profile), so a context wipe
         doesn't silently revert tuning done from the UI; only an explicit
         ``backend`` switch overrides them, since model/effort/transport are
         backend-specific. waypoint.yaml only seeds the first creation, when no

@@ -1960,6 +1960,7 @@ async def test_create_session_direct_mode_uses_requested_backend(
         account_profile_id="work",
     )
     session = await runtime.create_session(request)
+    # Re-enter the preflight with the correct symlink already in place.
     second_session = await runtime.create_session(request)
 
     assert create_calls == [

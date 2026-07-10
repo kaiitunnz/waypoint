@@ -10,7 +10,6 @@ frontend can surface them.
 """
 
 import asyncio
-import functools
 import json
 import logging
 import uuid
@@ -105,12 +104,10 @@ class TranscriptTailer:
         # cadence (terminal drain on exit).
         metadata_only = self._start_at_end and not self._primed
         read = await asyncio.to_thread(
-            functools.partial(
-                self._source.read_from,
-                self._fetch_offset,
-                metadata_only=metadata_only,
-                force=force,
-            )
+            self._source.read_from,
+            self._fetch_offset,
+            metadata_only=metadata_only,
+            force=force,
         )
         if not read.observed:
             return

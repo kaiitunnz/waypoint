@@ -180,23 +180,25 @@ class TranscriptTailer:
         snapshot = _context_usage_snapshot_from_message(model, usage)
         if snapshot is None:
             return
-        # Key the ledger on the message id (uuid fallback) so offset-zero replay
-        # is idempotent; published before the snapshot dedup so two turns with
-        # identical totals both count. publish=False — the snapshot publish
-        # below carries the refreshed aggregate on one broadcast.
-        record_id = str(message.get("id") or record.get("uuid") or "")
-        token_record = claude_token_usage_record(record_id, snapshot)
-        if token_record is not None:
-            await self._runtime.publish_token_usage_record(
-                self._session_id, token_record, publish=False
-            )
         # Key on the breakdown too, so a same-total/different-split turn refreshes.
         sig = (
             snapshot.used_tokens,
             snapshot.context_window_tokens,
             tuple(sorted(snapshot.breakdown.items())),
         )
-        if sig == self._context_usage_signature:
+        context_changed = sig != self._context_usage_signature
+        # Key the ledger on the message id (uuid fallback) so offset-zero replay
+        # is idempotent; recorded regardless of the snapshot dedup so two turns
+        # with identical totals both count. Broadcast it here only when the
+        # context publish below won't (a deduped snapshot), so the aggregate
+        # increment is never stranded, yet a changed turn still emits one frame.
+        record_id = str(message.get("id") or record.get("uuid") or "")
+        token_record = claude_token_usage_record(record_id, snapshot)
+        if token_record is not None:
+            await self._runtime.publish_token_usage_record(
+                self._session_id, token_record, publish=not context_changed
+            )
+        if not context_changed:
             return
         self._context_usage_signature = sig
         await self._runtime.update_session_fields(

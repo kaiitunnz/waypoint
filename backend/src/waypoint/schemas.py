@@ -703,9 +703,21 @@ class LaunchSettingsResponse(BaseModel):
     args: list[str] = Field(default_factory=list)
     config_overrides: list[str] = Field(default_factory=list)
     launch_env_keys: list[str] = Field(default_factory=list)
+    # Keys the client must never edit or remove: runtime-owned
+    # (WAYPOINT_SESSION_ID) plus the profile-owned config-dir key when a
+    # profile is currently selected. Metadata only — the runtime validates
+    # every patch regardless of what a client hides.
+    protected_launch_env_keys: list[str] = Field(default_factory=list)
+    # The agent's config-dir env var (CLAUDE_CONFIG_DIR / CODEX_HOME), or None.
+    # Lets the client hide the profile-owned key for whichever profile is
+    # currently selected or staged, without hard-coding the name.
+    config_dir_env_var: str | None = None
     supports_custom_args: bool = False
     supports_config_overrides: bool = False
     supports_account_profile_with_restart: bool = False
+    # True only when the session's (agent, transport) can restart-and-resume
+    # AND Waypoint owns the process (i.e. not a bare attached tmux pane).
+    supports_launch_settings_with_restart: bool = False
     requires_restart: bool = True
 
 

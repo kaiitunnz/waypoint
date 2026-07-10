@@ -4704,11 +4704,11 @@ html[data-theme="light"] .usage-chip-group {
 }
 
 /* Cumulative-tokens explainer: an info affordance whose glass tip appears on
-   hover (desktop) and on tap (mobile, via .usage-tip--open). */
-.usage-info-wrap {
+   hover (desktop, via :has) and on tap (mobile, via .usage-tip--open). The tip
+   is anchored to the section (left: 0), never the mid-line button, so it can't
+   spill past the narrow mobile sheet's edge. */
+.usage-total-explain {
   position: relative;
-  display: inline-flex;
-  align-items: center;
 }
 
 .usage-info {
@@ -4731,10 +4731,10 @@ html[data-theme="light"] .usage-chip-group {
 
 .usage-tip {
   position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
+  top: calc(100% + 6px);
+  left: 0;
   width: max-content;
-  max-width: 260px;
+  max-width: min(320px, 100%);
   padding: 10px 13px;
   border: 1px solid var(--glass-line);
   border-radius: var(--radius);
@@ -4760,8 +4760,8 @@ html[data-theme="light"] .usage-chip-group {
   pointer-events: none;
 }
 
-.usage-info-wrap:hover .usage-tip,
-.usage-info:focus-visible + .usage-tip,
+.usage-total-explain:has(.usage-info:hover) .usage-tip,
+.usage-total-explain:has(.usage-info:focus-visible) .usage-tip,
 .usage-tip--open {
   opacity: 1;
   visibility: visible;

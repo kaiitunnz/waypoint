@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { UsageBar, UsageReadout } from "@/components/UsageReadout";
@@ -46,6 +46,7 @@ export function SessionUsagePill({
   // Tap-to-reveal state for the cumulative-tokens tooltip (desktop also shows
   // it on hover via CSS); reset whenever the panel closes.
   const [totalTipOpen, setTotalTipOpen] = useState(false);
+  const totalTipId = useId();
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   // Below 540px the generic ``.usage-panel`` mobile bottom-sheet rule takes
@@ -202,6 +203,19 @@ export function SessionUsagePill({
           aria-label="Usage details"
         >
 
+          {rateLimitUsage ? (
+            <UsageReadout
+              usage={rateLimitUsage}
+              sourceLabel={rateLimitSourceLabel}
+              onRefresh={onRateLimitRefresh}
+              refreshing={rateLimitRefreshBusy}
+            />
+          ) : null}
+
+          {rateLimitUsage && (contextUsage || tokenUsage) ? (
+            <hr className="usage-divider" aria-hidden="true" />
+          ) : null}
+
           {contextUsage ? (
             <section className="usage-block">
               <header className="usage-block-head">
@@ -286,25 +300,26 @@ export function SessionUsagePill({
               </header>
               {tokenUsageHasTotals ? (
                 <>
-                  <p className="usage-total-line">
-                    <span className="usage-total-count">
-                      {tokenUsage.tracked_turns}
-                    </span>
-                    <em>
-                      {tokenUsage.tracked_turns === 1 ? "turn" : "turns"}
-                    </em>
-                    {typeof tokenUsage.display_total_tokens === "number" ? (
-                      <span className="usage-total-work">
-                        <span aria-hidden>·</span>
-                        <strong>
-                          {formatTokens(tokenUsage.display_total_tokens)}
-                        </strong>
-                        cumulative tokens
-                        <span className="usage-info-wrap">
+                  <div className="usage-total-explain">
+                    <p className="usage-total-line">
+                      <span className="usage-total-count">
+                        {tokenUsage.tracked_turns}
+                      </span>
+                      <em>
+                        {tokenUsage.tracked_turns === 1 ? "turn" : "turns"}
+                      </em>
+                      {typeof tokenUsage.display_total_tokens === "number" ? (
+                        <span className="usage-total-work">
+                          <span aria-hidden>·</span>
+                          <strong>
+                            {formatTokens(tokenUsage.display_total_tokens)}
+                          </strong>
+                          cumulative tokens
                           <button
                             type="button"
                             className="usage-info"
                             aria-label="About cumulative tokens"
+                            aria-describedby={totalTipId}
                             aria-expanded={totalTipOpen}
                             onClick={(event) => {
                               event.stopPropagation();
@@ -313,18 +328,19 @@ export function SessionUsagePill({
                           >
                             ⓘ
                           </button>
-                          <span
-                            role="tooltip"
-                            className={`usage-tip${totalTipOpen ? " usage-tip--open" : ""}`}
-                          >
-                            Each turn re-reads the whole conversation, so this
-                            running total climbs much faster than the chat
-                            itself.
-                          </span>
                         </span>
+                      ) : null}
+                    </p>
+                    {typeof tokenUsage.display_total_tokens === "number" ? (
+                      <span
+                        id={totalTipId}
+                        role="tooltip"
+                        className={`usage-tip${totalTipOpen ? " usage-tip--open" : ""}`}
+                      >
+                        Counts the whole conversation, re-read every turn.
                       </span>
                     ) : null}
-                  </p>
+                  </div>
                   {tokenUsageTotals.length > 0 ? (
                     <ul className="usage-chips">
                       {tokenUsageTotals.map(([key, value]) => (
@@ -348,19 +364,6 @@ export function SessionUsagePill({
                 {coverageLabel(tokenUsage)}
               </p>
             </section>
-          ) : null}
-
-          {(contextUsage || tokenUsage) && rateLimitUsage ? (
-            <hr className="usage-divider" aria-hidden="true" />
-          ) : null}
-
-          {rateLimitUsage ? (
-            <UsageReadout
-              usage={rateLimitUsage}
-              sourceLabel={rateLimitSourceLabel}
-              onRefresh={onRateLimitRefresh}
-              refreshing={rateLimitRefreshBusy}
-            />
           ) : null}
         </div>
       ) : null}

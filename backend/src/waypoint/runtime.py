@@ -2338,6 +2338,20 @@ class SessionRuntime:
         profiles = redacted_profile_metadata(
             self.settings, session.backend, launch_target
         )
+        # A bare attached tmux pane advertises the restart capability at the
+        # transport level, but Waypoint does not own the process, so it cannot
+        # honestly restart-and-resume it. Mirror the runtime gate here.
+        supports_launch_settings_with_restart = (
+            caps.supports_launch_settings_with_restart
+            and caps.supports_reattach_after_exit
+            and session.source != SessionSource.ATTACHED_TMUX
+        )
+        config_dir_env_var = caps.config_dir_env_var
+        protected_launch_env_keys = ["WAYPOINT_SESSION_ID"]
+        if config_dir_env_var and session.account_profile_id:
+            # The selected profile owns its config-dir key; it must not be
+            # editable as a raw env var while that profile is active.
+            protected_launch_env_keys.append(config_dir_env_var)
         return LaunchSettingsResponse(
             backend=session.backend,
             transport=session.transport,
@@ -2349,10 +2363,15 @@ class SessionRuntime:
             config_overrides=list(session.config_overrides),
             # Redacted: only the env keys, never their (possibly secret) values.
             launch_env_keys=sorted(session.launch_env.keys()),
+            protected_launch_env_keys=protected_launch_env_keys,
+            config_dir_env_var=config_dir_env_var,
             supports_custom_args=caps.supports_custom_cli_args,
             supports_config_overrides=caps.supports_config_overrides,
             supports_account_profile_with_restart=(
                 caps.supports_account_profile_with_restart
+            ),
+            supports_launch_settings_with_restart=(
+                supports_launch_settings_with_restart
             ),
             requires_restart=True,
         )
@@ -2395,6 +2414,14 @@ class SessionRuntime:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="cannot change launch settings while the session is STARTING",
+            )
+        if session.source == SessionSource.ATTACHED_TMUX:
+            # Waypoint does not own the process behind a bare attached pane, so
+            # it cannot restart-and-resume it; the transport still advertises
+            # the restart capability, so guard here rather than trusting caps.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="cannot change launch settings for an attached tmux session",
             )
         if not (
             caps.supports_launch_settings_with_restart

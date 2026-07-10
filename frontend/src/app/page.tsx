@@ -13,6 +13,7 @@ import { LaunchPanel } from "@/components/LaunchPanel";
 import { LoginForm } from "@/components/LoginForm";
 import { SchedulePanel } from "@/components/SchedulePanel";
 import { SessionList } from "@/components/SessionList";
+import { SessionSettingsModal } from "@/components/SessionSettingsModal";
 import { SshConnectModal } from "@/components/SshConnectModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { UsageDashboardSection } from "@/components/UsageDashboardSection";
@@ -135,6 +136,9 @@ export default function HomePage() {
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [settingsSession, setSettingsSession] = useState<SessionRecord | null>(
+    null,
+  );
   const [assistant, setAssistant] = useState<AssistantSummary | null>(null);
   const [error, setError] = useState("");
   // The working directory the last New launch was rejected for (400
@@ -1172,6 +1176,21 @@ export default function HomePage() {
           onTerminate={handleTerminate}
           onSetPinned={handleSetPinned}
           onSetTitle={handleSetTitle}
+          onOpenSettings={setSettingsSession}
+        />
+      ) : null}
+      {settingsSession ? (
+        <SessionSettingsModal
+          host={host}
+          token={token}
+          session={settingsSession}
+          onClose={() => setSettingsSession(null)}
+          onApplied={(updated) =>
+            setSessions((prev) =>
+              prev.map((s) => (s.id === updated.id ? updated : s)),
+            )
+          }
+          onAuthFailure={handleAuthFailure}
         />
       ) : null}
       {token && assistant ? (

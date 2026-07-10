@@ -62,7 +62,19 @@ inspection is unaffected.
 
 ### Controls (assistant page)
 
-The **settings popover** (⚙, next to the composer) holds configuration. Changing
+The **Session settings** editor (opened from the composer overflow `+` menu)
+is the full editor for the assistant. It stages every safe change and applies
+them in one operation: title, tuning (model / effort / permission mode), account
+profile, and — for restart-capable agents — custom CLI args, config overrides,
+and launch-environment keys (add / replace / remove, values never shown).
+In-place changes restart-and-resume the same singleton; changing the agent,
+interface, or resuming a thread stages a replacement (the reset/attach
+lifecycle) and disables the advanced launch fields, since the replacement
+contract does not carry them. A single warning states the real restart /
+interrupt outcome before Apply.
+
+The **settings popover** (⚙, next to the composer) remains as a quick-tuning
+shortcut. Changing
 the agent, the interface, or picking a thread there stages an inline confirm,
 since each replaces the conversation:
 

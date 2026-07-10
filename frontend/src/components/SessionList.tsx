@@ -25,6 +25,7 @@ interface SessionListProps {
   onTerminate?: (sessionId: string) => void | Promise<void>;
   onSetPinned?: (sessionId: string, pinned: boolean) => void | Promise<void>;
   onSetTitle?: (sessionId: string, title: string) => void | Promise<void>;
+  onOpenSettings?: (session: SessionRecord) => void;
 }
 
 const PAGE_SIZE = 10;
@@ -37,6 +38,7 @@ export function SessionList({
   onTerminate,
   onSetPinned,
   onSetTitle,
+  onOpenSettings,
 }: SessionListProps) {
   const [page, setPage] = useState(1);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
@@ -88,6 +90,15 @@ export function SessionList({
     event.stopPropagation();
     setEditingSessionId(session.id);
     setDraftTitle(session.title);
+  }
+
+  function handleOpenSettings(
+    event: MouseEvent<HTMLButtonElement>,
+    session: SessionRecord,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    onOpenSettings?.(session);
   }
 
   function handleDraftKeyDown(
@@ -280,6 +291,15 @@ export function SessionList({
           </p>
         </div>
         <div className="session-card-actions">
+          {onOpenSettings ? (
+            <button
+              className="link-button"
+              type="button"
+              onClick={(event) => handleOpenSettings(event, session)}
+            >
+              {"⚙︎ Settings"}
+            </button>
+          ) : null}
           {onSetPinned ? (
             <button
               className={`link-button pin-link ${pinned ? "active" : ""}`}

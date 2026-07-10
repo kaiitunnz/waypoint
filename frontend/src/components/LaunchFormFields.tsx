@@ -13,10 +13,11 @@ import {
 import { useTransportForAgent } from "@/components/AgentTransportPicker";
 import { EffortPicker } from "@/components/EffortPicker";
 import {
-  formatLaunchEnv,
-  LaunchOptionsDetails,
-  parseLaunchEnv,
-} from "@/components/LaunchOptions";
+  type EnvEntry,
+  entriesToRecord,
+  recordToEntries,
+} from "@/components/EnvVarRows";
+import { LaunchOptionsDetails } from "@/components/LaunchOptions";
 import { ModelPicker } from "@/components/ModelPicker";
 import { SessionContextFields } from "@/components/SessionContextFields";
 import { WorkingDirectoryField } from "@/components/WorkingDirectoryField";
@@ -67,8 +68,8 @@ export interface LaunchForm {
   setCustomArgsText: (value: string) => void;
   configOverridesText: string;
   setConfigOverridesText: (value: string) => void;
-  launchEnvText: string;
-  setLaunchEnvText: (value: string) => void;
+  envEntries: EnvEntry[];
+  setEnvEntries: (entries: EnvEntry[]) => void;
   modelInfo: BackendModelListResponse | null;
   permissionOptions: ReturnType<typeof permissionModesFor>;
   supportsCustomArgs: boolean;
@@ -103,8 +104,8 @@ export function useLaunchForm({
   const [accountProfileId, setAccountProfileId] = useState("");
   const [customArgsText, setCustomArgsText] = useState("");
   const [configOverridesText, setConfigOverridesText] = useState("");
-  const [launchEnvText, setLaunchEnvText] = useState(() =>
-    formatLaunchEnv(defaultLaunchEnvByBackend[defaultBackend]),
+  const [envEntries, setEnvEntries] = useState<EnvEntry[]>(() =>
+    recordToEntries(defaultLaunchEnvByBackend[defaultBackend]),
   );
   const [modelInfo, setModelInfo] = useState<BackendModelListResponse | null>(null);
 
@@ -132,7 +133,7 @@ export function useLaunchForm({
     setEffort("");
     setModelInfo(null);
     setAccountProfileId("");
-    setLaunchEnvText(formatLaunchEnv(defaultLaunchEnvByBackend[nextBackend]));
+    setEnvEntries(recordToEntries(defaultLaunchEnvByBackend[nextBackend]));
   }, [defaultLaunchEnvByBackend]);
 
   useEffect(() => {
@@ -141,7 +142,7 @@ export function useLaunchForm({
     setEffort("");
     setModelInfo(null);
     setAccountProfileId("");
-    setLaunchEnvText(formatLaunchEnv(defaultLaunchEnvByBackend[defaultBackend]));
+    setEnvEntries(recordToEntries(defaultLaunchEnvByBackend[defaultBackend]));
   }, [defaultBackend, defaultLaunchEnvByBackend]);
 
   useEffect(() => {
@@ -161,7 +162,7 @@ export function useLaunchForm({
     setModel("");
     setModelInfo(null);
     setAccountProfileId("");
-    setLaunchEnvText(formatLaunchEnv(defaultLaunchEnvByBackend[backend]));
+    setEnvEntries(recordToEntries(defaultLaunchEnvByBackend[backend]));
   }, [backend, launchTargetId, defaultLaunchEnvByBackend]);
 
   // Applying a preset that changes the backend triggers the reset effect above,
@@ -192,7 +193,7 @@ export function useLaunchForm({
         setModel(spec.model ?? "");
         setEffort(spec.effort ?? "");
         setAccountProfileId(spec.account_profile_id ?? "");
-        setLaunchEnvText(formatLaunchEnv(spec.launch_env ?? {}));
+        setEnvEntries(recordToEntries(spec.launch_env ?? {}));
         if (spec.transport) setTransport(spec.transport);
       };
       if (nextBackend !== backend) {
@@ -260,14 +261,14 @@ export function useLaunchForm({
     const configOverrides = supportsConfigOverrides
       ? configOverridesText.split("\n").map((value) => value.trim()).filter(Boolean)
       : [];
-    const launchEnv = parseLaunchEnv(launchEnvText);
+    const launchEnv = entriesToRecord(envEntries);
     return { args, configOverrides, launchEnv };
   }, [
     supportsCustomArgs,
     supportsConfigOverrides,
     customArgsText,
     configOverridesText,
-    launchEnvText,
+    envEntries,
   ]);
 
   return {
@@ -291,8 +292,8 @@ export function useLaunchForm({
     setCustomArgsText,
     configOverridesText,
     setConfigOverridesText,
-    launchEnvText,
-    setLaunchEnvText,
+    envEntries,
+    setEnvEntries,
     modelInfo,
     permissionOptions,
     supportsCustomArgs,
@@ -430,8 +431,8 @@ export function LaunchFormFields({
         onCustomArgsChange={form.setCustomArgsText}
         configOverridesText={form.configOverridesText}
         onConfigOverridesChange={form.setConfigOverridesText}
-        launchEnvText={form.launchEnvText}
-        onLaunchEnvChange={form.setLaunchEnvText}
+        envEntries={form.envEntries}
+        onEnvEntriesChange={form.setEnvEntries}
         formBusy={busy}
       />
     </div>

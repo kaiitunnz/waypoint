@@ -7,10 +7,11 @@ import {
   useTransportForAgent,
 } from "@/components/AgentTransportPicker";
 import {
-  formatLaunchEnv,
-  LaunchOptionsDetails,
-  parseLaunchEnv,
-} from "@/components/LaunchOptions";
+  type EnvEntry,
+  entriesToRecord,
+  recordToEntries,
+} from "@/components/EnvVarRows";
+import { LaunchOptionsDetails } from "@/components/LaunchOptions";
 import type { BackendCatalog } from "@/lib/backends";
 import { defaultTransportFor, humaniseBackend } from "@/lib/backends";
 import { matchesQuery, parseQuery } from "@/lib/search";
@@ -137,8 +138,8 @@ export function ResumeThreadPanel({
         ? preferredBackend
         : (supportedBackends[0] ?? preferredBackend)
       : filter;
-  const [launchEnvText, setLaunchEnvText] = useState(() =>
-    formatLaunchEnv(defaultLaunchEnvByBackend[transportAgent]),
+  const [envEntries, setEnvEntries] = useState<EnvEntry[]>(() =>
+    recordToEntries(defaultLaunchEnvByBackend[transportAgent]),
   );
   const [transport, setTransport, transports] = useTransportForAgent(
     transportAgent,
@@ -146,7 +147,7 @@ export function ResumeThreadPanel({
   );
 
   useEffect(() => {
-    setLaunchEnvText(formatLaunchEnv(defaultLaunchEnvByBackend[transportAgent]));
+    setEnvEntries(recordToEntries(defaultLaunchEnvByBackend[transportAgent]));
   }, [defaultLaunchEnvByBackend, transportAgent]);
 
   const isExpanded = expanded || query.trim().length > 0;
@@ -208,7 +209,7 @@ export function ResumeThreadPanel({
         : defaultTransportFor(thread.backend, catalog);
     const launchEnv =
       filter === thread.backend
-        ? parseLaunchEnv(launchEnvText)
+        ? entriesToRecord(envEntries)
         : { ...(defaultLaunchEnvByBackend[thread.backend] ?? {}) };
     setImportingId(thread.id);
     try {
@@ -284,8 +285,8 @@ export function ResumeThreadPanel({
       {filter !== "all" ? (
         <LaunchOptionsDetails
           mode="resume"
-          launchEnvText={launchEnvText}
-          onLaunchEnvChange={setLaunchEnvText}
+          envEntries={envEntries}
+          onEnvEntriesChange={setEnvEntries}
           formBusy={importingId !== null || deletingId !== null}
         />
       ) : null}

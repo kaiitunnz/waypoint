@@ -134,6 +134,67 @@ def test_get_launch_settings_projection(tmp_path: Path) -> None:
     # Redacted: keys only, never values.
     assert resp.launch_env_keys == ["CODEX_HOME", "SECRET"]
     assert resp.supports_account_profile_with_restart is True
+    assert resp.supports_launch_settings_with_restart is True
+    assert resp.config_dir_env_var == "CODEX_HOME"
+    # WAYPOINT_SESSION_ID is always runtime-owned; the config-dir key is
+    # profile-owned while a profile is selected. Neither value ever leaks.
+    assert "WAYPOINT_SESSION_ID" in resp.protected_launch_env_keys
+    assert "CODEX_HOME" in resp.protected_launch_env_keys
+    assert "SECRET" not in resp.protected_launch_env_keys
+
+
+def test_get_launch_settings_omits_config_dir_key_when_no_profile(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime(tmp_path, codex=_codex_profiles())
+    _session(runtime, launch_env={"CODEX_HOME": "/x"})
+    resp = runtime.get_launch_settings("s1")
+    # No profile selected → config-dir key is not profile-owned; only the
+    # runtime-owned key is protected.
+    assert resp.protected_launch_env_keys == ["WAYPOINT_SESSION_ID"]
+    assert resp.config_dir_env_var == "CODEX_HOME"
+
+
+def test_get_launch_settings_attached_tmux_disables_restart(tmp_path: Path) -> None:
+    # A bare attached pane advertises the restart capability at the transport
+    # level, but Waypoint does not own the process; the projection must be
+    # honest so the client gates the editor correctly.
+    runtime = _runtime(tmp_path)
+    _session(
+        runtime,
+        backend="tmux",
+        transport="tmux",
+        source=SessionSource.ATTACHED_TMUX,
+    )
+    resp = runtime.get_launch_settings("s1")
+    assert resp.supports_launch_settings_with_restart is False
+
+
+def test_get_launch_settings_opencode_disables_restart(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path)
+    _session(runtime, backend="opencode", transport="opencode_http")
+    resp = runtime.get_launch_settings("s1")
+    assert resp.supports_launch_settings_with_restart is False
+
+
+async def test_update_rejects_env_edit_for_attached_tmux_pane(tmp_path: Path) -> None:
+    # The gap the capability gate alone misses: an env-only edit on an attached
+    # pane passes every capability gate (tmux transport flips restart on) but
+    # Waypoint does not own the process. The server must reject it regardless of
+    # what a client hides.
+    runtime = _runtime(tmp_path)
+    _session(
+        runtime,
+        backend="tmux",
+        transport="tmux",
+        source=SessionSource.ATTACHED_TMUX,
+    )
+    with pytest.raises(Exception) as exc:
+        await runtime.update_launch_settings(
+            "s1",
+            LaunchSettingsUpdateRequest(env_set={"HTTP_PROXY": "x"}, restart=True),
+        )
+    assert getattr(exc.value, "status_code", None) == 400
 
 
 def test_update_session_round_trips_list_columns(tmp_path: Path) -> None:

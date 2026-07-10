@@ -6321,6 +6321,9 @@ html[data-theme="light"] .composer-tune-restart-apply {
   gap: 10px;
   padding: 9px 12px;
   border-radius: 6px;
+  /* Keep each label on one line; the shrink-to-fit popover grows to the widest
+   * item on desktop (the ≤640 full-width bottom sheet has room either way). */
+  white-space: nowrap;
   /* Subtle persistent background + border so each row reads as a discrete
    * button at rest (without it the row reads as plain text). */
   border: 1px solid var(--line);
@@ -10637,7 +10640,10 @@ html[data-theme="light"] .advanced-section.open .advanced-toggle {
 }
 
 /* ── Terminal-style textarea ── */
-.advanced-args-field span {
+/* Scope to the direct-child label span only — the field also hosts the env
+   editor, whose nested spans (add glyph, key label) must not inherit the "$"
+   prefix or the label typography. */
+.advanced-args-field > span {
   font-family: var(--font-mono);
   font-size: 0.7rem;
   letter-spacing: 0.1em;
@@ -10647,11 +10653,11 @@ html[data-theme="light"] .advanced-section.open .advanced-toggle {
   gap: 5px;
 }
 
-html[data-theme="light"] .advanced-args-field span {
+html[data-theme="light"] .advanced-args-field > span {
   color: var(--muted);
 }
 
-.advanced-args-field span::before {
+.advanced-args-field > span::before {
   content: "$";
   color: var(--accent);
   font-size: 0.78rem;
@@ -11113,6 +11119,404 @@ html[data-theme="light"] .session-switcher-row.selected {
    * hint isn't useful on touch. */
   .session-switcher-footer {
     display: none;
+  }
+}
+
+/* ─── Session settings editor ─── */
+/* Glass chrome (the floating modal) wrapping flat, opaque instrument fields.
+   Every color derives from a token so both themes resolve with no override. */
+.settings-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  padding: 16px;
+}
+
+.settings-modal {
+  width: 100%;
+  max-width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 64px);
+  min-height: 0;
+  background: var(--glass-bg-thick);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-glass);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    var(--shadow);
+  backdrop-filter: var(--glass-blur);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-modal-header {
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-modal-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.settings-modal-context {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted-soft);
+  word-break: break-word;
+}
+
+.settings-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-group-caption {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-soft);
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.settings-field-label {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.settings-input {
+  width: 100%;
+  padding: 7px 9px;
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-strong));
+}
+
+.settings-input:disabled {
+  opacity: 0.55;
+}
+
+.settings-textarea {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  resize: vertical;
+}
+
+.settings-advanced-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 0;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.settings-advanced-caret {
+  color: var(--muted-soft);
+}
+
+.settings-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+/* Shared key/value env editor (EnvVarRows) — launch panel, resume panel, and
+   the settings modal. The input selectors carry two classes so they outrank the
+   launch panel's `.field input` rule and stay identically sized in every host. */
+.env-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.env-editor__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.env-editor__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.env-editor .env-editor__input {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.env-editor .env-editor__input--key {
+  flex: 2 1 0;
+}
+
+.env-editor .env-editor__input--value {
+  flex: 3 1 0;
+}
+
+.env-editor .env-editor__input::placeholder {
+  color: var(--muted-soft);
+}
+
+.env-editor .env-editor__input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.env-editor .env-editor__input:disabled {
+  opacity: 0.55;
+}
+
+/* Read-only name of an already-configured variable (settings modal). */
+.env-editor__key-label {
+  flex: 2 1 0;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The keep/replace/remove select for a configured variable. */
+.env-editor .env-editor__op {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 8px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+}
+
+.env-editor .env-editor__op:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.env-editor__redacted {
+  flex: 3 1 0;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--muted-soft);
+  letter-spacing: 0.18em;
+  padding: 8px 2px;
+}
+
+/* Quiet icon affordance — no box; reddens on hover. */
+.env-editor__remove {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--muted-soft);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.env-editor__remove:hover:not(:disabled) {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.env-editor__remove:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Ghost text action, not a filled chip. */
+.env-editor__add {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 2px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.env-editor__add:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.env-editor__add:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.env-editor__add-glyph {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.settings-modal-note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.settings-modal-error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+
+.settings-modal-plan {
+  padding: 10px 18px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+
+.settings-modal-plan p {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--warn);
+}
+
+.settings-modal-plan p + p {
+  margin-top: 4px;
+}
+
+.settings-modal-plan-error {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.settings-modal-plan-error p {
+  color: var(--danger);
+}
+
+.settings-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-input);
+}
+
+.settings-btn {
+  padding: 7px 16px;
+  background: var(--bg-card-soft);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.settings-btn:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--bg-card);
+}
+
+.settings-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.settings-btn-primary {
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-card-soft));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-strong));
+  color: var(--text);
+}
+
+.settings-btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 32%, var(--bg-card-soft));
+}
+
+@media (max-width: 600px) {
+  /* Env rows are too wide for a phone in one line, so wrap: the key (or the
+     configured-key name) takes the full width, and the value + action share
+     the next line. */
+  .env-editor__row {
+    flex-wrap: wrap;
+  }
+
+  .env-editor .env-editor__input--key,
+  .env-editor__key-label {
+    flex: 1 1 100%;
+  }
+
+  .env-editor .env-editor__input--value,
+  .env-editor .env-editor__op,
+  .env-editor__redacted {
+    flex: 1 1 auto;
   }
 }
 

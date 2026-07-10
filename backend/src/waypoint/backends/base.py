@@ -106,6 +106,26 @@ class ConfigDirValidating(Protocol):
 
 
 @runtime_checkable
+class FreshThreadRestarting(Protocol):
+    """An agent that can replace an unpersisted native thread after a switch."""
+
+    async def restart_unpersisted_session(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> None:
+        """Start a fresh native thread for an already-persisted session row."""
+        ...
+
+
+@runtime_checkable
+class DefaultConfigDirProviding(Protocol):
+    """An agent that knows its local config directory when no env override exists."""
+
+    def default_config_dir(self) -> str | None:
+        """Return the local default config directory, if the agent has one."""
+        ...
+
+
+@runtime_checkable
 class PaneSubmitConfirming(Protocol):
     """A plugin that can read its tmux-wrapped TUI's composer to drive input
     reliably, against two failure modes of a raw ``send-keys`` submit:

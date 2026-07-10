@@ -24,6 +24,7 @@ from waypoint.backends.base import BackendPlugin
 from waypoint.backends.bootstrap import build_default_registry
 from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
 from waypoint.backends.transcripts import (
+    ThreadAvailability,
     TranscriptUnavailableError,
     ensure_symlink_shared,
     ensure_thread_available,
@@ -264,22 +265,22 @@ def test_remote_copy_thread_on_switch_copies_codex_rollout(
     assert "glob" in op_names
 
 
-def test_remote_copy_thread_on_switch_rejects_when_source_missing(
+def test_remote_copy_thread_on_switch_reports_unpersisted_source(
     tmp_path: Path, fake_remote: _FakeRemote
 ) -> None:
     fs = RemoteTranscriptFilesystem(_launch_target())
-    with pytest.raises(TranscriptUnavailableError, match="not found to copy"):
-        ensure_thread_available(
-            _plugin("codex"),
-            _session("codex"),
-            current_config_dir=str(tmp_path / "current"),
-            target_config_dir=str(tmp_path / "target"),
-            policy="copy_thread_on_switch",
-            shared_transcript_dir=None,
-            native_thread_store="sessions",
-            fs=fs,
-        )
-    # Fail-before-destroy: no copy/mkdir attempted when the source can't be found.
+    result = ensure_thread_available(
+        _plugin("codex"),
+        _session("codex"),
+        current_config_dir=str(tmp_path / "current"),
+        target_config_dir=str(tmp_path / "target"),
+        policy="copy_thread_on_switch",
+        shared_transcript_dir=None,
+        native_thread_store="sessions",
+        fs=fs,
+    )
+    assert result == ThreadAvailability.UNPERSISTED
+    # No copy/mkdir is attempted when there is no source artifact.
     op_names = [name for name, _ in fake_remote.calls]
     assert "copy_file" not in op_names
     assert "mkdir" not in op_names
@@ -388,25 +389,25 @@ def test_remote_symlink_shared_tilde_dir_matches_existing_symlink(
     # symlink already pointing at the (absolute) shared dir, the idempotency
     # check must see them as equal — not raise the misleading "symlink to … not
     # the configured shared_transcript_dir". The thread isn't in shared here, so
-    # the flow still ends in the honest "still unavailable", proving the
-    # comparison passed rather than tripping the mismatch.
+    # the flow returns UNPERSISTED, proving the comparison passed rather than
+    # tripping the mismatch.
     monkeypatch.setenv("HOME", str(tmp_path))
     (tmp_path / "shared").mkdir()
     store = tmp_path / "target" / "projects"
     store.parent.mkdir(parents=True)
     store.symlink_to(tmp_path / "shared", target_is_directory=True)
     fs = RemoteTranscriptFilesystem(_launch_target())
-    with pytest.raises(TranscriptUnavailableError, match="still unavailable"):
-        ensure_thread_available(
-            _plugin("claude_code"),
-            _session("claude_code"),
-            current_config_dir="~/current",
-            target_config_dir=str(tmp_path / "target"),
-            policy="symlink_shared",
-            shared_transcript_dir="~/shared",
-            native_thread_store="projects",
-            fs=fs,
-        )
+    result = ensure_thread_available(
+        _plugin("claude_code"),
+        _session("claude_code"),
+        current_config_dir="~/current",
+        target_config_dir=str(tmp_path / "target"),
+        policy="symlink_shared",
+        shared_transcript_dir="~/shared",
+        native_thread_store="projects",
+        fs=fs,
+    )
+    assert result == ThreadAvailability.UNPERSISTED
 
 
 def test_remote_script_ops_expand_tilde_against_the_running_host() -> None:

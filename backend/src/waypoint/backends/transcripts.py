@@ -21,6 +21,7 @@ which the runtime maps to a 400 (nothing is terminated when it fires).
 import logging
 import shutil
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -41,6 +42,25 @@ _LOCAL_FS = LocalTranscriptFilesystem()
 
 class TranscriptUnavailableError(Exception):
     """The target profile cannot see the native thread and policy can't fix it."""
+
+
+class ThreadAvailability(StrEnum):
+    """Native-thread state prepared for a profile switch."""
+
+    PERSISTED = "persisted"
+    UNPERSISTED = "unpersisted"
+
+
+def unpersisted_thread_error(policy: TranscriptPolicy) -> TranscriptUnavailableError:
+    """Return the legacy availability error for a backend that cannot restart fresh."""
+    if policy == "copy_thread_on_switch":
+        return TranscriptUnavailableError(
+            "source native thread artifact not found to copy"
+        )
+    return TranscriptUnavailableError(
+        "native thread still unavailable in the target profile after "
+        f"applying transcript_policy {policy!r}"
+    )
 
 
 def ensure_symlink_shared(
@@ -204,13 +224,13 @@ def ensure_thread_available(
     plugin: "BackendPlugin",
     session: SessionRecord,
     *,
-    current_config_dir: str,
+    current_config_dir: str | None,
     target_config_dir: str,
     policy: TranscriptPolicy,
     shared_transcript_dir: str | None,
     native_thread_store: str | None,
     fs: TranscriptFilesystem = _LOCAL_FS,
-) -> None:
+) -> ThreadAvailability:
     """Make the session's native thread visible under ``target_config_dir``.
 
     No-op when it's already visible. Otherwise applies ``policy`` and re-checks;
@@ -220,13 +240,23 @@ def ensure_thread_available(
     """
     target = fs.expanduser(target_config_dir)
     if fs.glob_artifacts(session, plugin, target):
-        return
+        return ThreadAvailability.PERSISTED
 
     if policy == "require_existing":
         raise TranscriptUnavailableError(
             "the target account profile cannot see the native thread transcript "
             "and transcript_policy is 'require_existing'"
         )
+    if not current_config_dir:
+        if policy == "copy_thread_on_switch":
+            raise TranscriptUnavailableError(
+                "cannot determine the current config dir to copy the thread from"
+            )
+        raise TranscriptUnavailableError(
+            "cannot determine the current config dir to verify the native thread"
+        )
+    current = fs.expanduser(current_config_dir)
+    source_artifacts = fs.glob_artifacts(session, plugin, current)
     if policy == "symlink_shared":
         if not shared_transcript_dir:
             raise TranscriptUnavailableError(
@@ -242,18 +272,16 @@ def ensure_thread_available(
             fs=fs,
         )
     elif policy == "copy_thread_on_switch":
-        current = fs.expanduser(current_config_dir)
-        artifacts = fs.glob_artifacts(session, plugin, current)
-        if not artifacts:
-            raise TranscriptUnavailableError(
-                "source native thread artifact not found to copy"
-            )
-        copy_thread_artifacts(artifacts, current, target, fs=fs)
+        if source_artifacts:
+            copy_thread_artifacts(source_artifacts, current, target, fs=fs)
     else:  # pragma: no cover - exhaustive over TranscriptPolicy
         raise TranscriptUnavailableError(f"unknown transcript policy {policy!r}")
 
-    if not fs.glob_artifacts(session, plugin, target):
-        raise TranscriptUnavailableError(
-            "native thread still unavailable in the target profile after "
-            f"applying transcript_policy {policy!r}"
-        )
+    if fs.glob_artifacts(session, plugin, target):
+        return ThreadAvailability.PERSISTED
+    if source_artifacts == [] and policy in {
+        "symlink_shared",
+        "copy_thread_on_switch",
+    }:
+        return ThreadAvailability.UNPERSISTED
+    raise unpersisted_thread_error(policy)

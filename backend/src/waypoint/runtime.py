@@ -29,6 +29,8 @@ from waypoint.backends.account_profiles import (
 from waypoint.backends.base import (
     ConfigDirNotReadyError,
     ConfigDirValidating,
+    DefaultConfigDirProviding,
+    FreshThreadRestarting,
     config_dir_for,
 )
 from waypoint.backends.capabilities import BackendCapabilities
@@ -46,10 +48,12 @@ from waypoint.backends.transcript_fs import (
 )
 from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
 from waypoint.backends.transcripts import (
+    ThreadAvailability,
     TranscriptUnavailableError,
     ensure_symlink_shared,
     ensure_thread_available,
     setup_transcripts_symlink,
+    unpersisted_thread_error,
 )
 from waypoint.builtin_completions import waypoint_builtin_completions
 from waypoint.git_meta import resolve_git_meta
@@ -2373,12 +2377,20 @@ class SessionRuntime:
         async with lock:
             return await self._update_launch_settings_locked(session_id, request)
 
+    def _has_durable_conversation(self, session_id: str) -> bool:
+        """Whether a fresh native thread could discard visible conversation context."""
+        return any(
+            event.kind in {EventKind.USER_INPUT, EventKind.AGENT_OUTPUT}
+            for event in self.storage.list_events(session_id)
+        )
+
     async def _update_launch_settings_locked(
         self, session_id: str, request: LaunchSettingsUpdateRequest
     ) -> SessionRecord:
         session = self.get_session(session_id)
         plugin = self.registry.plugin_for(session)
         caps = self.registry.capabilities_for(session)
+        fresh_thread_restarter: FreshThreadRestarting | None = None
         if session.status == SessionStatus.STARTING:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -2549,16 +2561,11 @@ class SessionRuntime:
                     current_config_dir = current_config_dir or os.environ.get(
                         config_dir_key
                     )
+                    if current_config_dir is None and isinstance(
+                        plugin, DefaultConfigDirProviding
+                    ):
+                        current_config_dir = plugin.default_config_dir()
                 target_config_dir = config_dir_for(caps, new_env)
-                if (
-                    profile.transcript_policy == "copy_thread_on_switch"
-                    and not current_config_dir
-                ):
-                    await self._broadcast_session_list()
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="cannot determine the current config dir to copy the thread from",
-                    )
                 if target_config_dir:
                     fs: TranscriptFilesystem = (
                         LocalTranscriptFilesystem()
@@ -2570,11 +2577,11 @@ class SessionRuntime:
                         # (~8-15 round-trips), which would freeze the event
                         # loop for every other session; the local fs is fast
                         # but wrapping uniformly keeps one code path.
-                        await asyncio.to_thread(
+                        transcript_availability = await asyncio.to_thread(
                             ensure_thread_available,
                             plugin,
                             session,
-                            current_config_dir=current_config_dir or target_config_dir,
+                            current_config_dir=current_config_dir,
                             target_config_dir=target_config_dir,
                             policy=profile.transcript_policy,
                             shared_transcript_dir=profile.shared_transcript_dir,
@@ -2587,6 +2594,27 @@ class SessionRuntime:
                             status_code=status.HTTP_400_BAD_REQUEST,
                             detail=f"cannot switch account profile: {exc}",
                         ) from exc
+                    if transcript_availability == ThreadAvailability.UNPERSISTED:
+                        if self._has_durable_conversation(session.id):
+                            await self._broadcast_session_list()
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=(
+                                    "cannot switch account profile: the native thread "
+                                    "has no persisted transcript but this session has "
+                                    "conversation events, so starting fresh would lose context"
+                                ),
+                            )
+                        if not isinstance(plugin, FreshThreadRestarting):
+                            await self._broadcast_session_list()
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=(
+                                    "cannot switch account profile: "
+                                    f"{unpersisted_thread_error(profile.transcript_policy)}"
+                                ),
+                            )
+                        fresh_thread_restarter = plugin
 
         # Clearing the profile (set -> None) is not ``profile_changing``, but a
         # de-profiled session must not keep stale provenance, so null the
@@ -2624,7 +2652,13 @@ class SessionRuntime:
             account_profile_label=new_profile_label,
             **verified_account_fields,
         )
-        await plugin.restore_session(self, self.get_session(session.id))
+        restored_session = self.get_session(session.id)
+        if fresh_thread_restarter is not None:
+            await fresh_thread_restarter.restart_unpersisted_session(
+                self, restored_session
+            )
+        else:
+            await plugin.restore_session(self, restored_session)
         refreshed = self.get_session(session.id)
         if refreshed.status in {SessionStatus.EXITED, SessionStatus.ERROR}:
             # Restore failed: keep the new settings on the record (per the RFC —

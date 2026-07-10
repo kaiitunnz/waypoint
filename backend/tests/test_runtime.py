@@ -1950,24 +1950,73 @@ async def test_create_session_direct_mode_uses_requested_backend(
         runtime, "_warm_command_completions", lambda *_args, **_kwargs: None
     )
 
-    session = await runtime.create_session(
-        SessionCreateRequest(
-            backend="codex",
-            cwd=str(tmp_path),
-            launch_mode=LaunchMode.DIRECT,
-            title="Direct launch",
-            args=[],
-            source_mode=SessionSource.MANAGED,
-            account_profile_id="work",
-        )
+    request = SessionCreateRequest(
+        backend="codex",
+        cwd=str(tmp_path),
+        launch_mode=LaunchMode.DIRECT,
+        title="Direct launch",
+        args=[],
+        source_mode=SessionSource.MANAGED,
+        account_profile_id="work",
     )
+    session = await runtime.create_session(request)
+    second_session = await runtime.create_session(request)
 
-    assert create_calls == [(session.id, LaunchMode.DIRECT)]
+    assert create_calls == [
+        (session.id, LaunchMode.DIRECT),
+        (second_session.id, LaunchMode.DIRECT),
+    ]
     assert session.backend == "codex"
     assert session.transport == "codex_app_server"
     assert session.cwd == str(tmp_path)
     assert (profile_dir / "sessions").is_symlink()
     assert (profile_dir / "sessions").resolve() == shared_dir
+
+
+@pytest.mark.asyncio
+async def test_create_session_rejects_populated_symlink_shared_store(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, _, settings = make_runtime(tmp_path)
+    codex = runtime.registry.get("codex")
+    profile_dir = tmp_path / "codex-work"
+    shared_dir = tmp_path / "codex-shared-sessions"
+    store_dir = profile_dir / "sessions"
+    store_dir.mkdir(parents=True)
+    (store_dir / "existing.jsonl").write_text("existing", encoding="utf-8")
+    settings.plugin_configs["codex"] = codex.config_schema.model_validate(
+        {
+            "account_profiles": {
+                "work": {
+                    "label": "Work",
+                    "config_dir": str(profile_dir),
+                    "transcript_policy": "symlink_shared",
+                    "shared_transcript_dir": str(shared_dir),
+                }
+            }
+        }
+    )
+    monkeypatch.setattr(codex, "is_available_for_managed_launch", lambda _rt: True)
+    monkeypatch.setattr(
+        codex,
+        "create_session",
+        lambda *_args, **_kwargs: pytest.fail("profile preflight must run first"),
+    )
+
+    with pytest.raises(
+        HTTPException, match="cannot prepare account profile transcripts"
+    ):
+        await runtime.create_session(
+            SessionCreateRequest(
+                backend="codex",
+                cwd=str(tmp_path),
+                launch_mode=LaunchMode.DIRECT,
+                title="Blocked launch",
+                args=[],
+                source_mode=SessionSource.MANAGED,
+                account_profile_id="work",
+            )
+        )
 
 
 @pytest.mark.asyncio

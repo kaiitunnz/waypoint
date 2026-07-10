@@ -290,8 +290,8 @@ export interface AssistantControls {
   onClearContext: () => Promise<void> | void;
   onTerminate: () => Promise<void> | void;
   onReattach: () => Promise<void> | void;
-  // Lists importable threads for a backend (empty when discovery unsupported or
-  // it fails); used to populate the "resume an existing thread" picker.
+  // Lists importable threads for a backend; the caller surfaces discovery
+  // failures in the composer settings popover.
   listThreads: (
     backend: Backend,
     accountProfileId: string | null,

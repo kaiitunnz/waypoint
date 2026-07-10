@@ -4703,12 +4703,70 @@ html[data-theme="light"] .usage-chip-group {
   font-weight: 600;
 }
 
-.usage-total-hint {
-  margin: -2px 0 0;
+/* Cumulative-tokens explainer: an info affordance whose glass tip appears on
+   hover (desktop) and on tap (mobile, via .usage-tip--open). */
+.usage-info-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.usage-info {
+  margin-left: 5px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted-soft);
+  font-size: 0.78rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 140ms ease;
+}
+
+.usage-info:hover,
+.usage-info:focus-visible {
+  color: var(--accent-strong);
+  outline: none;
+}
+
+.usage-tip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: max-content;
+  max-width: 240px;
+  padding: 8px 11px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius);
+  background: var(--glass-bg-thick);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    var(--shadow);
+  backdrop-filter: var(--glass-blur);
   font-family: var(--font-mono);
   font-size: 0.62rem;
-  letter-spacing: 0.02em;
-  color: var(--muted-soft);
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--text);
+  z-index: 40;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-3px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    visibility 140ms;
+  pointer-events: none;
+}
+
+.usage-info-wrap:hover .usage-tip,
+.usage-info:focus-visible + .usage-tip,
+.usage-tip--open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  pointer-events: auto;
 }
 
 /* Coverage footer: honest scope of the tracked total. Neutral by design; the

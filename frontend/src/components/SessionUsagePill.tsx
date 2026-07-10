@@ -43,6 +43,9 @@ export function SessionUsagePill({
   anchored = false,
 }: SessionUsagePillProps) {
   const [open, setOpen] = useState(false);
+  // Tap-to-reveal state for the cumulative-tokens tooltip (desktop also shows
+  // it on hover via CSS); reset whenever the panel closes.
+  const [totalTipOpen, setTotalTipOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   // Below 540px the generic ``.usage-panel`` mobile bottom-sheet rule takes
@@ -65,6 +68,10 @@ export function SessionUsagePill({
     }
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) setTotalTipOpen(false);
   }, [open]);
 
   const contextUsage = session?.context_usage ?? null;
@@ -293,14 +300,30 @@ export function SessionUsagePill({
                           {formatTokens(tokenUsage.display_total_tokens)}
                         </strong>
                         cumulative tokens
+                        <span className="usage-info-wrap">
+                          <button
+                            type="button"
+                            className="usage-info"
+                            aria-label="About cumulative tokens"
+                            aria-expanded={totalTipOpen}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setTotalTipOpen((value) => !value);
+                            }}
+                          >
+                            ⓘ
+                          </button>
+                          <span
+                            role="tooltip"
+                            className={`usage-tip${totalTipOpen ? " usage-tip--open" : ""}`}
+                          >
+                            Cumulative across turns — includes context re-sent
+                            each turn, so it far exceeds the conversation size.
+                          </span>
+                        </span>
                       </span>
                     ) : null}
                   </p>
-                  {typeof tokenUsage.display_total_tokens === "number" ? (
-                    <p className="usage-total-hint">
-                      Includes context re-sent each turn
-                    </p>
-                  ) : null}
                   {tokenUsageTotals.length > 0 ? (
                     <ul className="usage-chips">
                       {tokenUsageTotals.map(([key, value]) => (

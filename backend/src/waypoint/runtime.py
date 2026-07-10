@@ -3526,10 +3526,13 @@ class SessionRuntime:
         in ``seed_thread_history`` — attached tmux, adopted-thread assistants)
         only sees turns from adoption forward.
         """
-        is_from_birth = session.source in {
-            SessionSource.MANAGED,
-            SessionSource.ASSISTANT,
-        } and not session.transport_state.get("adopted_thread")
+        is_from_birth = (
+            session.source in {SessionSource.MANAGED, SessionSource.ASSISTANT}
+            and not session.transport_state.get("adopted_thread")
+            # Sessions that predate the token ledger were active before tracking
+            # began, so they can only honestly claim "tracked since".
+            and not session.transport_state.get("pretracked_tokens")
+        )
         if is_from_birth:
             return TokenUsageInit(
                 coverage="entire_waypoint_session",

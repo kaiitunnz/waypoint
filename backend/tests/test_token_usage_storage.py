@@ -231,6 +231,31 @@ def test_delete_session_prunes_ledger(tmp_path: Path) -> None:
     assert count == 0
 
 
+def test_migration_marks_preexisting_sessions_pretracked(tmp_path: Path) -> None:
+    # A session created before the ledger column existed must be flagged so the
+    # runtime reports "tracked since" rather than falsely claiming the whole
+    # session; a session created after the migration must NOT be flagged.
+    db = tmp_path / "db.sqlite"
+    storage = Storage(db)
+    _make_session(storage, "old")
+    storage.close()
+    # Drop the column to simulate a DB predating the ledger, then reopen so the
+    # migration runs and stamps the pre-existing row.
+    raw = sqlite3.connect(str(db))
+    raw.execute("ALTER TABLE sessions DROP COLUMN session_token_usage")
+    raw.commit()
+    raw.close()
+    reopened = Storage(db)
+    old = reopened.get_session("old")
+    assert old is not None
+    assert old.transport_state.get("pretracked_tokens") is True
+    # A session created after the migration is untouched.
+    _make_session(reopened, "new")
+    new = reopened.get_session("new")
+    assert new is not None
+    assert "pretracked_tokens" not in new.transport_state
+
+
 def test_legacy_db_without_column_decodes(tmp_path: Path) -> None:
     db = tmp_path / "db.sqlite"
     storage = Storage(db)

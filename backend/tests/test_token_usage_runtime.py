@@ -101,6 +101,15 @@ def test_attached_tmux_session_is_tracked_since(tmp_path: Path) -> None:
     assert init.coverage == "tracked_since"
 
 
+def test_pretracked_session_is_tracked_since(tmp_path: Path) -> None:
+    # A managed session that predates the ledger (migration-stamped) must not
+    # claim the whole session even though it is otherwise from-birth.
+    runtime = _make_runtime(tmp_path)
+    session = _session(runtime, tmp_path, transport_state={"pretracked_tokens": True})
+    init = runtime._token_usage_init(session, datetime.now(UTC))
+    assert init.coverage == "tracked_since"
+
+
 async def test_publish_persists_and_marks_dirty(tmp_path: Path) -> None:
     runtime = _make_runtime(tmp_path)
     session = _session(runtime, tmp_path)

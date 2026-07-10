@@ -370,6 +370,9 @@ class Storage:
         self._ensure_column("sessions", "launch_env", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column("sessions", "launch_mode", "TEXT NOT NULL DEFAULT 'auto'")
         self._ensure_column("sessions", "context_usage", "TEXT")
+        token_usage_column_is_new = not self._has_column(
+            "sessions", "session_token_usage"
+        )
         self._ensure_column("sessions", "session_token_usage", "TEXT")
         self._ensure_column("sessions", "rate_limit_usage", "TEXT")
         self._ensure_column("sessions", "spawner_session_id", "TEXT")
@@ -414,7 +417,39 @@ class Storage:
             CREATE INDEX IF NOT EXISTS idx_inbox_updated
                 ON inbox_items(updated_at, id);
             """)
+        if token_usage_column_is_new:
+            self._mark_sessions_pretracked()
         self.connection.commit()
+
+    def _has_column(self, table: str, column: str) -> bool:
+        rows = self.connection.execute(f"PRAGMA table_info({table})").fetchall()
+        return any(row["name"] == column for row in rows)
+
+    def _mark_sessions_pretracked(self) -> None:
+        """Flag sessions that predate the token-usage ledger.
+
+        These were active before any per-turn record could be captured, so their
+        aggregate must report "tracked since" rather than falsely claiming the
+        whole session (RFC coverage honesty). Runs exactly once — guarded by the
+        ``session_token_usage`` column having just been added — so genuinely new
+        sessions created after the migration are never marked. The marker lives
+        in ``transport_state``, which the runtime's coverage-init reads.
+        """
+        rows = self.connection.execute(
+            "SELECT id, transport_state FROM sessions"
+        ).fetchall()
+        for row in rows:
+            try:
+                state = json.loads(row["transport_state"] or "{}")
+            except json.JSONDecodeError:
+                state = {}
+            if not isinstance(state, dict):
+                state = {}
+            state["pretracked_tokens"] = True
+            self.connection.execute(
+                "UPDATE sessions SET transport_state = ? WHERE id = ?",
+                (json.dumps(state), row["id"]),
+            )
 
     @_synchronized
     def close(self) -> None:

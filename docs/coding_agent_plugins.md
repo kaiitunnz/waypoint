@@ -393,6 +393,39 @@ async def post_approval(self, runtime, session) -> None: ...
   any structured approval response (Claude syncs the permission-mode pill when
   an ExitPlanMode approval flips the mode out of "plan").
 
+## Token & context usage
+
+Waypoint tracks two independent token measurements, both agent-owned at the
+parse boundary and both backend-agnostic in the runtime and frontend.
+
+- **Current context window** — the latest provider-reported context occupancy
+  (`SessionContextUsage`, `used / window`). A plugin publishes it whenever it
+  parses a fresh usage payload: structured adapters push it through the
+  `on_session_update` callback; non-structured `ContextUsageSource`s call
+  `runtime.update_session_fields(context_usage=...)`. The dedup signature must
+  fold in the breakdown so a same-headline turn with a different composition
+  still refreshes.
+- **Tracked session total** — a durable, replay-safe per-turn ledger
+  materialized into a `SessionTokenUsage` aggregate. A plugin builds a
+  `TokenUsageRecord` from the *same* normalized categories as its snapshot,
+  keyed on a **stable per-turn identity**, and publishes it via
+  `runtime.publish_token_usage_record` (structured adapters receive the
+  `on_token_usage` callback from `runtime.token_usage_callback()`;
+  non-structured sources call the runtime directly). Storage upserts on
+  `(session_id, source, record_id)`, so retransmission and tmux-artifact replay
+  from byte zero are idempotent, and a provider revising a known turn replaces
+  the row.
+
+The identity is intentionally an adapter concern — Claude uses the assistant
+message id, Codex the native turn id, OpenCode the upstream session + message
+id. **If an artifact exposes no stable per-turn identity, do not aggregate**: a
+file byte offset is a replay cursor, not a turn key (Codex's rollout), and a
+working directory is not a session id (OpenCode's tmux transport). Keep the
+current snapshot working and let the aggregate report `partial` coverage rather
+than guessing. `display_total_tokens` is supplied only when the provider's
+categories do not overlap (Claude sums; Codex uses `totalTokens`; OpenCode
+omits it), so the UI never synthesizes an unsafe grand total.
+
 ## The claude_tty composition
 
 `claude_tty` is the clearest illustration of the (agent, transport) split: it

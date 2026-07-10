@@ -141,6 +141,76 @@ class SessionContextUsage(BaseModel):
     breakdown: dict[str, int] = Field(default_factory=dict)
 
 
+# The category vocabulary an aggregate may carry. Normalization happens only at
+# the plugin's parse boundary; the ledger and aggregate never infer one category
+# from another, and missing provider fields stay absent rather than zero.
+TOKEN_USAGE_CATEGORIES = (
+    "input_tokens",
+    "cached_input_tokens",
+    "cache_read_tokens",
+    "cache_creation_tokens",
+    "cache_write_tokens",
+    "output_tokens",
+    "reasoning_output_tokens",
+    "reasoning_tokens",
+)
+
+TokenUsageCoverage = Literal["entire_waypoint_session", "tracked_since", "partial"]
+
+
+class SessionTokenUsage(BaseModel):
+    """Cumulative per-turn token work tracked across a Waypoint session.
+
+    Distinct from ``SessionContextUsage``: that is the latest provider-reported
+    context-window occupancy (``used / window``); this is the sum of per-turn
+    provider-reported token work over the session's tracked life. Because a
+    provider re-sends prior context on later turns, this total can exceed the
+    context window many times over — it is never a percentage of the window and
+    never drives the context warning colour.
+    """
+
+    source: BackendId
+    tracked_turns: int
+    totals: dict[str, int] = Field(default_factory=dict)
+    # Provider-safe grand total across tracked turns, when the plugin can supply
+    # one whose categories do not overlap (e.g. Codex ``totalTokens``). ``None``
+    # means the UI shows category totals without a synthesized grand total.
+    display_total_tokens: int | None = None
+    observed_from: datetime
+    complete_through: datetime
+    backfilled_through: datetime | None = None
+    coverage: TokenUsageCoverage
+    coverage_note: str | None = None
+    updated_at: datetime
+
+
+class TokenUsageRecord(BaseModel):
+    """One durable per-turn ledger row (storage/ingestion input).
+
+    ``record_id`` is the plugin-owned stable turn/message identity; the ledger's
+    unique key is ``(session_id, source, record_id)`` so retransmission and
+    tmux-artifact replay upsert the same row rather than double-counting.
+    """
+
+    record_id: str
+    source: BackendId
+    observed_at: datetime
+    totals: dict[str, int] = Field(default_factory=dict)
+    display_total_tokens: int | None = None
+
+
+class TokenUsageInit(BaseModel):
+    """Aggregate seed applied only when the first record for a session lands.
+
+    The runtime computes this from session context (source + adopted-thread
+    marker) so storage stays mechanical; ignored once an aggregate exists.
+    """
+
+    coverage: TokenUsageCoverage
+    observed_from: datetime
+    coverage_note: str | None = None
+
+
 class UsageWindow(BaseModel):
     id: str
     label: str
@@ -224,6 +294,7 @@ class SessionRecord(BaseModel):
     # runtime still uses the field internally for restore/relaunch.
     launch_env: LaunchEnv = Field(default_factory=dict, exclude=True)
     context_usage: SessionContextUsage | None = None
+    session_token_usage: SessionTokenUsage | None = None
     rate_limit_usage: SessionRateLimitUsage | None = None
     # Free-form user/agent labels for grouping and selective teardown, e.g.
     # ``{"role": "backend-lead"}`` or ``{"overflow": ""}`` (a bare tag stores an

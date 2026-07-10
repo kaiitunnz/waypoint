@@ -9259,11 +9259,25 @@ html[data-theme="light"] .preset-modal-overlay {
   color: var(--accent);
 }
 
+/* Settings shares pin's neutral mono treatment (without the pinned state). */
+.settings-link {
+  align-self: flex-start;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.settings-link:hover:not(:disabled) {
+  color: var(--accent-strong);
+}
+
 /* Session-card actions (and the scheduled-panel row Cancel/Dismiss, via
    .action-chip) are bare mono text actions; color alone separates pin
    (neutral→gold) from terminate/delete/cancel (danger-red). Padding keeps
    the touch target without drawing a chip around it. */
 .session-card-actions .link-button.pin-link,
+.session-card-actions .link-button.settings-link,
 .session-card-actions .link-button.danger-link,
 .link-button.action-chip {
   align-self: center;
@@ -9275,6 +9289,7 @@ html[data-theme="light"] .preset-modal-overlay {
 }
 
 .session-card-actions .link-button.pin-link:hover:not(:disabled),
+.session-card-actions .link-button.settings-link:hover:not(:disabled),
 .session-card-actions .link-button.danger-link:hover:not(:disabled),
 .link-button.action-chip:hover:not(:disabled) {
   background: color-mix(in srgb, currentColor 10%, transparent);

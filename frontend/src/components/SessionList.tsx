@@ -291,15 +291,6 @@ export function SessionList({
           </p>
         </div>
         <div className="session-card-actions">
-          {onOpenSettings ? (
-            <button
-              className="link-button"
-              type="button"
-              onClick={(event) => handleOpenSettings(event, session)}
-            >
-              {"⚙︎ Settings"}
-            </button>
-          ) : null}
           {onSetPinned ? (
             <button
               className={`link-button pin-link ${pinned ? "active" : ""}`}
@@ -308,6 +299,15 @@ export function SessionList({
               aria-pressed={pinned}
             >
               {pinned ? "★ Pinned" : "☆ Pin"}
+            </button>
+          ) : null}
+          {onOpenSettings ? (
+            <button
+              className="link-button settings-link"
+              type="button"
+              onClick={(event) => handleOpenSettings(event, session)}
+            >
+              {"⚙︎ Settings"}
             </button>
           ) : null}
           {onTerminate && session.status !== "exited" ? (

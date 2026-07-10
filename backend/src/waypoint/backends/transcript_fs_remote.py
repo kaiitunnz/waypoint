@@ -29,10 +29,13 @@ symlink or copy is attempted — mirroring how the local implementation never
 special-cases this either.
 """
 
+import base64
+import binascii
 import importlib.resources
 import json
 import logging
 import subprocess
+from dataclasses import dataclass
 from typing import Any
 
 from waypoint.backends.transcripts import TranscriptUnavailableError
@@ -43,6 +46,23 @@ log = logging.getLogger("waypoint.backends.transcript_fs_remote")
 
 SENTINEL = "__WP_FS_BEGIN__"
 DEFAULT_TIMEOUT_SECONDS = 20.0
+
+
+@dataclass(frozen=True)
+class RemoteRead:
+    """One bounded read of a remote file: bytes plus size and stable identity.
+
+    ``size`` is the file's length at read time and ``(device, inode)`` its
+    identity, so a caller polling by offset can detect truncation (size drops
+    below its cursor) or replacement (identity changes) without downloading the
+    whole file.
+    """
+
+    data: bytes
+    size: int
+    device: int
+    inode: int
+
 
 _SCRIPT_BYTES: bytes | None = None
 
@@ -93,6 +113,35 @@ class RemoteTranscriptFilesystem:
             return []
         paths = self._run("glob", config_dir, pattern).get("paths", [])
         return paths if isinstance(paths, list) else []
+
+    def read_range(self, path: str, offset: int, limit: int) -> RemoteRead | None:
+        """Read up to ``limit`` bytes of ``path`` starting at ``offset``.
+
+        Read-only and never raises: any failure — transport, malformed payload,
+        undecodable base64 — degrades to ``None`` (an unavailable read). A live
+        transcript tailer polls this on a background loop, so a raised exception
+        would kill the loop; ``None`` lets it retry with backoff instead. The
+        decoded payload is capped to ``limit`` defensively.
+        """
+        result = self._run("read_range", path, str(offset), str(limit))
+        if "error" in result:
+            return None
+        size = result.get("size")
+        device = result.get("device")
+        inode = result.get("inode")
+        data_b64 = result.get("data_b64")
+        if (
+            not isinstance(size, int)
+            or not isinstance(device, int)
+            or not isinstance(inode, int)
+            or not isinstance(data_b64, str)
+        ):
+            return None
+        try:
+            data = base64.b64decode(data_b64, validate=True)
+        except (binascii.Error, ValueError):
+            return None
+        return RemoteRead(data=data[:limit], size=size, device=device, inode=inode)
 
     # -- mutating ops: raise on any failure, transport or remote
 

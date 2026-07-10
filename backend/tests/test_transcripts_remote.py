@@ -410,6 +410,137 @@ def test_remote_symlink_shared_tilde_dir_matches_existing_symlink(
     assert result == ThreadAvailability.UNPERSISTED
 
 
+# ── read_range ──────────────────────────────────────────────────────────────
+
+
+def test_remote_read_range_reads_bytes_and_reports_identity(
+    tmp_path: Path, fake_remote: _FakeRemote
+) -> None:
+    target = tmp_path / f"{TID}.jsonl"
+    target.write_bytes(b"line one\nline two\n")
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    read = fs.read_range(str(target), 0, 256 * 1024)
+    assert read is not None
+    assert read.data == b"line one\nline two\n"
+    assert read.size == 18
+    st = target.stat()
+    assert read.device == st.st_dev
+    assert read.inode == st.st_ino
+
+
+def test_remote_read_range_honors_offset(
+    tmp_path: Path, fake_remote: _FakeRemote
+) -> None:
+    target = tmp_path / "t.jsonl"
+    target.write_bytes(b"0123456789")
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    read = fs.read_range(str(target), 4, 256 * 1024)
+    assert read is not None
+    assert read.data == b"456789"
+    assert read.size == 10
+
+
+def test_remote_read_range_caps_to_limit(
+    tmp_path: Path, fake_remote: _FakeRemote
+) -> None:
+    target = tmp_path / "t.jsonl"
+    target.write_bytes(b"0123456789")
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    read = fs.read_range(str(target), 0, 4)
+    assert read is not None
+    assert read.data == b"0123"
+    # size still reflects the whole file, not the capped read
+    assert read.size == 10
+
+
+def test_remote_read_range_metadata_only_with_zero_limit(
+    tmp_path: Path, fake_remote: _FakeRemote
+) -> None:
+    target = tmp_path / "t.jsonl"
+    target.write_bytes(b"0123456789")
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    read = fs.read_range(str(target), 0, 0)
+    assert read is not None
+    assert read.data == b""
+    assert read.size == 10
+
+
+def test_remote_read_range_offset_past_eof_returns_empty(
+    tmp_path: Path, fake_remote: _FakeRemote
+) -> None:
+    target = tmp_path / "t.jsonl"
+    target.write_bytes(b"0123456789")
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    read = fs.read_range(str(target), 50, 256 * 1024)
+    assert read is not None
+    assert read.data == b""
+    assert read.size == 10
+
+
+def test_remote_read_range_binary_round_trip(
+    tmp_path: Path, fake_remote: _FakeRemote
+) -> None:
+    target = tmp_path / "t.jsonl"
+    payload = bytes(range(256))
+    target.write_bytes(payload)
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    read = fs.read_range(str(target), 0, 256 * 1024)
+    assert read is not None
+    assert read.data == payload
+
+
+def test_remote_read_range_missing_file_returns_none(
+    tmp_path: Path, fake_remote: _FakeRemote
+) -> None:
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    assert fs.read_range(str(tmp_path / "nope.jsonl"), 0, 256 * 1024) is None
+
+
+def test_remote_read_range_directory_returns_none(
+    tmp_path: Path, fake_remote: _FakeRemote
+) -> None:
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    assert fs.read_range(str(tmp_path), 0, 256 * 1024) is None
+
+
+def test_remote_read_range_malformed_response_returns_none(
+    tmp_path: Path, fake_remote: _FakeRemote
+) -> None:
+    target = tmp_path / "t.jsonl"
+    target.write_bytes(b"data")
+    fake_remote.force_error("read_range", "boom")
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    assert fs.read_range(str(target), 0, 256 * 1024) is None
+
+
+def test_remote_read_range_transport_failure_returns_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        SshLaunchTargetConfig,
+        "build_remote_exec_args",
+        lambda self, command, *a, **kw: ("ssh", "test-host", "python3 -"),
+    )
+    monkeypatch.setattr(
+        remote_mod.subprocess,
+        "run",
+        lambda *a, **kw: (_ for _ in ()).throw(subprocess.TimeoutExpired("ssh", 20)),
+    )
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    assert fs.read_range("/whatever", 0, 256 * 1024) is None
+
+
+def test_remote_read_range_expands_tilde(
+    tmp_path: Path, fake_remote: _FakeRemote, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / "t.jsonl").write_bytes(b"hi")
+    fs = RemoteTranscriptFilesystem(_launch_target())
+    read = fs.read_range("~/t.jsonl", 0, 256 * 1024)
+    assert read is not None
+    assert read.data == b"hi"
+
+
 def test_remote_script_ops_expand_tilde_against_the_running_host() -> None:
     # Ops resolve ``~`` on the host that runs the script (the remote one in
     # production; here the test host stands in), so a ``~``-relative config_dir

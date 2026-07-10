@@ -96,6 +96,8 @@ from waypoint.schemas import (
     SessionRecord,
     SessionSource,
     SessionStatus,
+    TokenUsageInit,
+    TokenUsageRecord,
 )
 from waypoint.settings import Settings
 from waypoint.ssh_master import SshMasterManager, SshMasterStatus
@@ -3438,6 +3440,16 @@ class SessionRuntime:
         resume, with a system note explaining history was unavailable. Returns
         the number of events seeded.
         """
+        # Every import routes through here after create_session, whether or not
+        # transcript replay is enabled. Stamp the adoption marker so token-usage
+        # coverage reports "tracked since" rather than falsely claiming the
+        # whole session: the adopted native thread had prior turns Waypoint
+        # never metered. Merge into transport_state so a concurrent writer's
+        # keys survive.
+        session = self.storage.get_session(session_id)
+        if session is not None and not session.transport_state.get("adopted_thread"):
+            merged = {**session.transport_state, "adopted_thread": True}
+            self.storage.update_session(session_id, transport_state=merged)
         if not enabled:
             return 0
         try:
@@ -3500,6 +3512,80 @@ class SessionRuntime:
             )
 
         return _update_session_fields
+
+    def _token_usage_init(
+        self, session: SessionRecord, observed_at: datetime
+    ) -> "TokenUsageInit":
+        """Coverage seed for a session's first token-usage record.
+
+        Honest by default: ``tracked_since`` unless a positive from-birth signal
+        is present, so a forgotten adoption marker under-claims rather than
+        falsely reporting full coverage. A freshly-created managed or assistant
+        session that never adopted a pre-existing native thread is metered from
+        turn one; anything that adopted prior native history (imports — stamped
+        in ``seed_thread_history`` — attached tmux, adopted-thread assistants)
+        only sees turns from adoption forward.
+        """
+        is_from_birth = session.source in {
+            SessionSource.MANAGED,
+            SessionSource.ASSISTANT,
+        } and not session.transport_state.get("adopted_thread")
+        if is_from_birth:
+            return TokenUsageInit(
+                coverage="entire_waypoint_session",
+                observed_from=session.created_at,
+            )
+        return TokenUsageInit(coverage="tracked_since", observed_from=observed_at)
+
+    async def publish_token_usage_record(
+        self,
+        session_id: str,
+        record: "TokenUsageRecord",
+        *,
+        publish: bool = True,
+    ) -> None:
+        """Fold one per-turn record into the durable session token aggregate.
+
+        Purely additive: it never touches ``context_usage`` — the current
+        context-window snapshot keeps its own independent publish path, so a
+        failure here can neither double-write nor discard that snapshot. A parse
+        or write failure is swallowed (debug-logged) so telemetry never
+        interrupts a user turn, terminates the session, or drops the snapshot.
+        """
+        if not record.record_id:
+            # Never aggregate an identity-less event; keying a ledger row on ""
+            # would collapse distinct turns. The context snapshot still updates
+            # via its own path.
+            log.debug(
+                "token usage record rejected: missing identity",
+                extra={"session_id": session_id, "source": record.source},
+            )
+            return
+        try:
+            session = self.storage.get_session(session_id)
+            if session is None:
+                return
+            init = self._token_usage_init(session, record.observed_at)
+            self.storage.record_token_usage(session_id, record, init=init)
+        except Exception:
+            log.debug(
+                "failed to record token usage",
+                extra={"session_id": session_id},
+                exc_info=True,
+            )
+            return
+        if publish:
+            self._publish_session_state(session_id)
+
+    def token_usage_callback(
+        self,
+    ) -> Callable[[str, "TokenUsageRecord", bool], Awaitable[None]]:
+        async def _publish_token_usage(
+            session_id: str, record: "TokenUsageRecord", publish: bool
+        ) -> None:
+            await self.publish_token_usage_record(session_id, record, publish=publish)
+
+        return _publish_token_usage
 
     async def _publish_event(self, event: EventRecord) -> None:
         await self.broadcast.publish(

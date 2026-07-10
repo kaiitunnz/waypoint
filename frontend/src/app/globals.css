@@ -4760,13 +4760,25 @@ html[data-theme="light"] .usage-chip-group {
   pointer-events: none;
 }
 
-.usage-total-explain:has(.usage-info:hover) .usage-tip,
-.usage-total-explain:has(.usage-info:focus-visible) .usage-tip,
+/* Tap toggle (all devices): the React ``--open`` class is the sole control on
+   touch, so a second tap reliably closes the tip. */
 .usage-tip--open {
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
   pointer-events: auto;
+}
+
+/* Hover/focus reveal only on real pointer devices. On touch a tap leaves a
+   sticky :hover that would otherwise keep the tip open and fight the toggle. */
+@media (hover: hover) {
+  .usage-total-explain:has(.usage-info:hover) .usage-tip,
+  .usage-total-explain:has(.usage-info:focus-visible) .usage-tip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
 }
 
 /* Coverage footer: honest scope of the tracked total. Neutral by design; the

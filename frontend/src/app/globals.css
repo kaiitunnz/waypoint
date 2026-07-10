@@ -4703,6 +4703,14 @@ html[data-theme="light"] .usage-chip-group {
   font-weight: 600;
 }
 
+.usage-total-hint {
+  margin: -2px 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.02em;
+  color: var(--muted-soft);
+}
+
 /* Coverage footer: honest scope of the tracked total. Neutral by design; the
    partial/tracked-since variant softens to --muted so a caveat never alarms. */
 .usage-coverage {

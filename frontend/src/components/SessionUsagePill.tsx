@@ -269,7 +269,7 @@ export function SessionUsagePill({
               <header className="usage-block-head">
                 <h3 className="usage-block-eyebrow">
                   <span aria-hidden className="usage-block-mark">
-                    ∑
+                    ◆
                   </span>
                   Tracked session total
                 </h3>
@@ -292,10 +292,15 @@ export function SessionUsagePill({
                         <strong>
                           {formatTokens(tokenUsage.display_total_tokens)}
                         </strong>
-                        provider-reported token work
+                        cumulative tokens
                       </span>
                     ) : null}
                   </p>
+                  {typeof tokenUsage.display_total_tokens === "number" ? (
+                    <p className="usage-total-hint">
+                      Includes context re-sent each turn
+                    </p>
+                  ) : null}
                   {tokenUsageTotals.length > 0 ? (
                     <ul className="usage-chips">
                       {tokenUsageTotals.map(([key, value]) => (

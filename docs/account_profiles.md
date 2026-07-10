@@ -210,9 +210,12 @@ can still lose that in-flight write. Migrate only stores that are idle.
 **Recovery.** New files are staged in a temporary `.wp-migrate-<timestamp>`
 sibling of the shared dir and verified before any merge begins. On failure before
 the source rename the original store is left untouched. If the process dies
-mid-merge, the original store still exists intact, the staging directory is retained
-for inspection, and a re-run reports only the already-moved destinations as
-conflicts — finish the move by hand from the retained source/staging state.
+mid-merge, the original store still exists intact and the staging directory is
+retained for inspection. Because the files already moved into the shared dir are
+byte-identical copies of the still-present source, simply re-running
+`setup-transcripts` resumes cleanly: the already-moved leaves deduplicate and the
+remaining files copy in. The orphaned `.wp-migrate-<timestamp>` directory from the
+interrupted run can be deleted after a successful re-run.
 
 Each command has an HTTP endpoint behind it
 (`GET .../accounts/{profile}/probe`, `GET .../accounts/doctor`,

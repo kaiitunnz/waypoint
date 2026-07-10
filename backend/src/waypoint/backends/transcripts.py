@@ -133,17 +133,18 @@ def setup_transcripts_symlink(store_dir: Path, shared_dir: Path) -> list[str]:
 
     The sequence is data-safe against loss: (1) a recursive pre-flight builds the
     full plan and refuses before touching anything if any leaf genuinely
-    conflicts; (2) new files/links are copied into a temp staging sibling of
-    ``shared`` and verified against their source; (3) each staged entry is
-    renamed into ``shared`` (re-checking the destination is still absent first);
-    (4) the original ``store`` is renamed to a timestamped backup (a complete
-    snapshot, not an emptied husk); (5) ``store`` becomes the symlink. The
-    original ``store`` is never touched until every entry is safely in ``shared``,
-    so no transcript is lost. The per-entry rename in step 3 is not a single
-    atomic commit, so a process death partway through can leave some entries
-    already under ``shared``; a re-run then reports only those new destinations as
-    conflicts (identical leaves dedup cleanly) and the operator finishes the move
-    by hand — the original data is still intact in ``store``.
+    conflicts; (2) new files and links are copied into a temp staging sibling of
+    ``shared`` and every staged file is verified byte-for-byte against its source;
+    (3) each staged entry is renamed into ``shared`` (re-checking the destination
+    is still absent first); (4) the original ``store`` is renamed to a timestamped
+    backup (a complete snapshot, not an emptied husk); (5) ``store`` becomes the
+    symlink. The original ``store`` is never touched until every entry is safely in
+    ``shared``, so no transcript is lost. The per-entry rename in step 3 is not a
+    single atomic commit, so a process death partway through can leave some
+    entries already under ``shared``; because those are byte-identical copies of
+    the still-intact source, simply re-running resumes cleanly — the already-moved
+    leaves deduplicate and the rest copy in. The retained ``.wp-migrate-*`` staging
+    dir from the interrupted run is then orphaned and safe to delete.
     """
     shared_dir = shared_dir.expanduser()
     if store_dir.is_symlink() and store_dir.resolve() == shared_dir.resolve():

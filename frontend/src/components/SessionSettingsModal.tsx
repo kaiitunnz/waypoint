@@ -628,20 +628,21 @@ export function SessionSettingsModal({
                             Environment variables
                           </div>
                           {visibleExistingEnv.length > 0 ? (
-                            <div className="settings-env-list">
-                              {visibleExistingEnv.map((entry) => (
+                            <div className="env-editor">
+                              <div className="env-editor__rows">
+                                {visibleExistingEnv.map((entry) => (
                                   <div
-                                    className="settings-env-row"
+                                    className="env-editor__row"
                                     key={entry.key}
                                   >
                                     <span
-                                      className="settings-env-key"
+                                      className="env-editor__key-label"
                                       title={entry.key}
                                     >
                                       {entry.key}
                                     </span>
                                     <select
-                                      className="settings-input settings-env-op"
+                                      className="env-editor__op"
                                       value={entry.op}
                                       onChange={(e) =>
                                         setExistingEnvOp(
@@ -658,7 +659,7 @@ export function SessionSettingsModal({
                                     </select>
                                     {entry.op === "replace" ? (
                                       <input
-                                        className="settings-input settings-env-value"
+                                        className="env-editor__input env-editor__input--value"
                                         type="password"
                                         value={entry.value}
                                         onChange={(e) =>
@@ -672,12 +673,13 @@ export function SessionSettingsModal({
                                         aria-label={`${entry.key} new value`}
                                       />
                                     ) : (
-                                      <span className="settings-env-redacted">
+                                      <span className="env-editor__redacted">
                                         ••••••
                                       </span>
                                     )}
                                   </div>
                                 ))}
+                              </div>
                             </div>
                           ) : null}
                           {/* New variables use the same key/value row editor as

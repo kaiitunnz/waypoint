@@ -11260,77 +11260,166 @@ html[data-theme="light"] .session-switcher-row.selected {
   padding-top: 4px;
 }
 
-.settings-env-list {
+/* Shared key/value env editor (EnvVarRows) — launch panel, resume panel, and
+   the settings modal. The input selectors carry two classes so they outrank the
+   launch panel's `.field input` rule and stay identically sized in every host. */
+.env-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.env-editor__rows {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.settings-env-row {
+.env-editor__row {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.settings-env-key,
-.settings-env-key-input {
+.env-editor .env-editor__input {
   flex: 1 1 0;
   min-width: 0;
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
   font-family: var(--font-mono);
-  font-size: 0.76rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.env-editor .env-editor__input--key {
+  flex: 2 1 0;
+}
+
+.env-editor .env-editor__input--value {
+  flex: 3 1 0;
+}
+
+.env-editor .env-editor__input::placeholder {
+  color: var(--muted-soft);
+}
+
+.env-editor .env-editor__input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.env-editor .env-editor__input:disabled {
+  opacity: 0.55;
+}
+
+/* Read-only name of an already-configured variable (settings modal). */
+.env-editor__key-label {
+  flex: 2 1 0;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.settings-env-op {
+/* The keep/replace/remove select for a configured variable. */
+.env-editor .env-editor__op {
   flex: 0 0 auto;
   width: auto;
-}
-
-.settings-env-value {
-  flex: 1 1 0;
-  min-width: 0;
-}
-
-.settings-env-redacted {
-  flex: 1 1 0;
-  min-width: 0;
-  font-family: var(--font-mono);
-  font-size: 0.76rem;
-  color: var(--muted-soft);
-  letter-spacing: 0.15em;
-}
-
-.settings-env-remove {
-  flex: 0 0 auto;
-  padding: 4px 8px;
-  background: none;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.settings-env-remove:hover:not(:disabled) {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-
-.settings-env-add {
-  align-self: flex-start;
-  padding: 5px 10px;
-  background: var(--bg-card-soft);
+  padding: 8px 10px;
+  background: var(--bg-input);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   color: var(--text);
-  font-size: 0.76rem;
-  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
 }
 
-.settings-env-add:hover:not(:disabled) {
-  border-color: var(--line-strong);
+.env-editor .env-editor__op:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.env-editor__redacted {
+  flex: 3 1 0;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--muted-soft);
+  letter-spacing: 0.18em;
+  padding: 8px 2px;
+}
+
+/* Quiet icon affordance — no box; reddens on hover. */
+.env-editor__remove {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--muted-soft);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.env-editor__remove:hover:not(:disabled) {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.env-editor__remove:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Ghost text action, not a filled chip. */
+.env-editor__add {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 2px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.env-editor__add:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.env-editor__add:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.env-editor__add-glyph {
+  font-size: 0.95rem;
+  line-height: 1;
 }
 
 .settings-modal-note {
@@ -11409,24 +11498,21 @@ html[data-theme="light"] .session-switcher-row.selected {
 }
 
 @media (max-width: 600px) {
-  /* The modal is sized/positioned inline from visualViewport (see
-     SessionSettingsModal.tsx). Env rows are too wide for a phone in one line,
-     so wrap: the key takes the full width, the action + value share the next. */
-  .settings-env-row {
+  /* Env rows are too wide for a phone in one line, so wrap: the key (or the
+     configured-key name) takes the full width, and the value + action share
+     the next line. */
+  .env-editor__row {
     flex-wrap: wrap;
   }
 
-  .settings-env-key,
-  .settings-env-key-input {
+  .env-editor .env-editor__input--key,
+  .env-editor__key-label {
     flex: 1 1 100%;
   }
 
-  .settings-env-op {
-    flex: 0 0 auto;
-  }
-
-  .settings-env-value,
-  .settings-env-redacted {
+  .env-editor .env-editor__input--value,
+  .env-editor .env-editor__op,
+  .env-editor__redacted {
     flex: 1 1 auto;
   }
 }

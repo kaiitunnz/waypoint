@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from waypoint.backends.account_profiles import probe_account
+from waypoint.backends.transcripts import ThreadAvailability
 from waypoint.runtime import SessionRuntime
 from waypoint.schemas import (
     AccountProbeResult,
@@ -352,6 +353,59 @@ async def test_switch_rejected_when_thread_unpersisted_event_free(
         )
     assert getattr(exc.value, "status_code", None) == 400
     assert "send a message first" in str(getattr(exc.value, "detail", ""))
+    assert terminated == []
+
+
+async def test_combined_profile_and_transport_fresh_start_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A combined profile+transport change where the thread is persisted under the
+    # current config dir (D4 passes) but doesn't survive the profile move
+    # (UNPERSISTED at target) and is event-free would otherwise fall into the
+    # fresh-restart path — which resumes nothing and runs on the *current*
+    # plugin. Reject the combination before any teardown instead.
+    profiles = {
+        "account_profiles": {
+            "work": {
+                "label": "Work",
+                "config_dir": str(tmp_path / "codex-target"),
+                "transcript_policy": "symlink_shared",
+                "shared_transcript_dir": str(tmp_path / "shared"),
+                "expected_account_key": "codex:work@co",
+            }
+        }
+    }
+    runtime = _runtime(tmp_path, codex=profiles)
+    _session(runtime, launch_env={"CODEX_HOME": str(tmp_path / "codex-current")})
+    plugin = runtime.registry.resolve("codex", "codex_app_server")
+    terminated: list[bool] = []
+
+    async def spy_terminate(*_a: Any, **_k: Any) -> None:
+        terminated.append(True)
+
+    async def yes(*_a: Any, **_k: Any) -> bool:
+        return True
+
+    async def fake_probe(*_a: Any, **_k: Any) -> AccountProbeResult:
+        return AccountProbeResult(account_key="codex:work@co", account_label="work@co")
+
+    monkeypatch.setattr(plugin, "terminate_session", spy_terminate)
+    monkeypatch.setattr(runtime.registry.get("codex"), "conversation_exists", yes)
+    monkeypatch.setattr("waypoint.runtime.probe_account", fake_probe)
+    monkeypatch.setattr(
+        "waypoint.runtime.ensure_thread_available",
+        lambda *a, **k: ThreadAvailability.UNPERSISTED,
+    )
+
+    with pytest.raises(Exception) as exc:
+        await runtime.update_launch_settings(
+            "s1",
+            LaunchSettingsUpdateRequest(
+                transport="tmux", account_profile_id="work", restart=True
+            ),
+        )
+    assert getattr(exc.value, "status_code", None) == 400
+    assert "separate steps" in str(getattr(exc.value, "detail", ""))
     assert terminated == []
 
 

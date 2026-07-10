@@ -2364,7 +2364,12 @@ class SessionRuntime:
                 )
             except KeyError:
                 continue
-            if not pair_caps.supports_reattach_after_exit:
+            # Use the same predicate the switch gate enforces, so a projected
+            # target can't be rejected with a confusing 400 on apply.
+            if not (
+                pair_caps.supports_reattach_after_exit
+                and pair_caps.supports_launch_settings_with_restart
+            ):
                 continue
             safe_targets.append(transport_id)
         if not safe_targets:
@@ -2775,6 +2780,21 @@ class SessionRuntime:
                                     "cannot switch account profile: the native thread "
                                     "has no persisted transcript but this session has "
                                     "conversation events, so starting fresh would lose context"
+                                ),
+                            )
+                        if transport_changing:
+                            # A fresh restart resumes nothing, so it can't hand a
+                            # thread across a transport boundary; the fresh path
+                            # would also run on the current plugin, not the target.
+                            # Reject the combined change rather than relaunch the
+                            # target transport with the source driver.
+                            await self._broadcast_session_list()
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=(
+                                    "cannot combine an interface switch with a profile "
+                                    "change that starts a fresh thread; switch the "
+                                    "interface and the profile in separate steps"
                                 ),
                             )
                         if not isinstance(plugin, FreshThreadRestarting):

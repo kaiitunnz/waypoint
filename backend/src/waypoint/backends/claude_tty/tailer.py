@@ -187,8 +187,11 @@ class TranscriptTailer:
         record_id = str(message.get("id") or record.get("uuid") or "")
         token_record = claude_token_usage_record(record_id, snapshot)
         if token_record is not None:
+            # publish=False: the context-usage publish below carries the
+            # refreshed aggregate on the same broadcast, matching the structured
+            # adapter and avoiding a second per-turn broadcast on replay.
             await self._runtime.publish_token_usage_record(
-                self._session_id, token_record
+                self._session_id, token_record, publish=False
             )
         # Include the breakdown so a same-headline/different-composition turn
         # still refreshes the displayed snapshot (RFC integrity gap #1).

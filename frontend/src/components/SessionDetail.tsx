@@ -92,6 +92,7 @@ import { AccountProfilePicker } from "@/components/AccountProfilePicker";
 import { ScheduleMessageModal } from "@/components/ScheduleMessageModal";
 import { ScheduledMessagesDock } from "@/components/ScheduledMessagesDock";
 import { SessionFilesPanel } from "@/components/SessionFilesPanel";
+import { SessionSettingsModal } from "@/components/SessionSettingsModal";
 import { WorkspaceFilesPanel } from "@/components/WorkspaceFilesPanel";
 import {
   WorkspaceFileLinkProvider,
@@ -346,6 +347,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // `events` and win the max-sequence comparison in `currentTaskEvent`.
   const [loadedTodoEvent, setLoadedTodoEvent] = useState<EventRecord | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | undefined>(undefined);
   const [workspaceInitialDir, setWorkspaceInitialDir] = useState<string | undefined>(undefined);
   // Bumped on every open request so the panel re-reveals even when the target
@@ -2388,6 +2390,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           onRateLimitRefresh={handleRateLimitRefresh}
           onReattach={reattach}
           onSwitchSession={openSwitcher}
+          onOpenSettings={() => setSettingsOpen(true)}
           onSend={onSendWithOptimistic}
           attachmentsEnabled={
             session ? supportsAttachments(session.backend, catalog) : false
@@ -2417,6 +2420,18 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           width={dockWidth}
           onResize={setDockWidth}
           onClose={() => setWorkspaceOpen(false)}
+        />
+      ) : null}
+      {settingsOpen && session ? (
+        <SessionSettingsModal
+          host={host}
+          token={token}
+          session={session}
+          onClose={() => setSettingsOpen(false)}
+          onApplied={setSession}
+          onAuthFailure={onAuthFailure}
+          isAssistant={assistant}
+          assistant={assistantControls ?? undefined}
         />
       ) : null}
     </section>
@@ -2476,6 +2491,7 @@ interface ReplyComposerProps {
   onRateLimitRefresh: () => void | Promise<void>;
   onReattach: () => void | Promise<void>;
   onSwitchSession: () => void;
+  onOpenSettings: () => void;
   onSend: (
     text: string,
     command?: SessionCommandInvocation,
@@ -2535,6 +2551,7 @@ const ReplyComposer = memo(function ReplyComposer({
   onRateLimitRefresh,
   onReattach,
   onSwitchSession,
+  onOpenSettings,
   onSend,
   attachmentsEnabled,
   onTerminate,
@@ -3618,6 +3635,18 @@ const ReplyComposer = memo(function ReplyComposer({
                   >
                     <span className="glyph">⇄</span>
                     Switch session…
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="composer-overflow-item"
+                    onClick={() => {
+                      setOverflowOpen(false);
+                      onOpenSettings();
+                    }}
+                  >
+                    <span className="glyph">⚙</span>
+                    Session settings…
                   </button>
                   <button
                     type="button"

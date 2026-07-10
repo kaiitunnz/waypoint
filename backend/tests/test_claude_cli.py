@@ -581,7 +581,18 @@ async def test_dispatch_assistant_dedupes_context_usage_snapshot() -> None:
     await adapter._dispatch(state, event)
 
     assert len(session_updates) == 1
-    assert state.context_usage_signature == (11, 200_000)
+    # The dedup signature now folds in the breakdown so a same-headline turn
+    # with a different composition still refreshes the snapshot.
+    assert state.context_usage_signature == (
+        11,
+        200_000,
+        (
+            ("cache_creation_tokens", 1),
+            ("cache_read_tokens", 2),
+            ("input_tokens", 8),
+            ("output_tokens", 6),
+        ),
+    )
 
 
 @pytest.mark.asyncio

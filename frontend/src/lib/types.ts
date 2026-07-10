@@ -404,9 +404,19 @@ export interface SessionLaunchSettings {
   args: string[];
   config_overrides: string[];
   launch_env_keys: string[];
+  // Keys the client must never edit or remove: runtime-owned
+  // (WAYPOINT_SESSION_ID) plus the profile-owned config-dir key while a
+  // profile is selected. Metadata only — the runtime validates every patch.
+  protected_launch_env_keys: string[];
+  // The agent's config-dir env var (CLAUDE_CONFIG_DIR / CODEX_HOME) or null,
+  // so the client can hide the profile-owned key for the staged profile.
+  config_dir_env_var?: string | null;
   supports_custom_args: boolean;
   supports_config_overrides: boolean;
   supports_account_profile_with_restart: boolean;
+  // True only when the (agent, transport) can restart-and-resume AND Waypoint
+  // owns the process (false for a bare attached tmux pane).
+  supports_launch_settings_with_restart: boolean;
   // Whether applying a change requires restarting the session (true in phase 1).
   requires_restart: boolean;
 }

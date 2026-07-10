@@ -97,7 +97,7 @@ export interface SessionSettingsController {
   launchSettings: SessionLaunchSettings | null;
   caps: BackendCapabilities | undefined;
   models: BackendModelOption[];
-  supportsFreeTextModel: boolean;
+  defaultModelLabel: string | null;
 
   // Draft state.
   title: string;
@@ -186,7 +186,9 @@ export function useSessionSettings(
   const [launchSettings, setLaunchSettings] =
     useState<SessionLaunchSettings | null>(null);
   const [models, setModels] = useState<BackendModelOption[]>([]);
-  const [supportsFreeTextModel, setSupportsFreeTextModel] = useState(false);
+  const [defaultModelLabel, setDefaultModelLabel] = useState<string | null>(
+    null,
+  );
 
   // Draft.
   const [title, setTitle] = useState("");
@@ -266,14 +268,14 @@ export function useSessionSettings(
         fetchLaunchSettings(host, token, sessionId).catch(() => null),
       ]);
       let modelList: BackendModelOption[] = [];
-      let freeText = false;
+      let defaultLabel: string | null = null;
       try {
         const resp = await fetchBackendModels(host, token, backend, {
           launchTargetId,
           accountProfileId: record.account_profile_id ?? null,
         });
         modelList = resp.models ?? [];
-        freeText = Boolean(resp.supports_free_text);
+        defaultLabel = resp.default_model_label ?? null;
       } catch {
         // Model discovery is best-effort; the picker degrades to the current
         // value when it fails (e.g. a backend with no live model list).
@@ -282,7 +284,7 @@ export function useSessionSettings(
       setSession(record);
       setLaunchSettings(settings);
       setModels(modelList);
-      setSupportsFreeTextModel(freeText);
+      setDefaultModelLabel(defaultLabel);
       resetDraft(record, settings);
     } catch (error) {
       if (currentToken !== loadToken.current) return;
@@ -699,7 +701,7 @@ export function useSessionSettings(
     launchSettings,
     caps,
     models,
-    supportsFreeTextModel,
+    defaultModelLabel,
     title,
     permissionMode,
     model,

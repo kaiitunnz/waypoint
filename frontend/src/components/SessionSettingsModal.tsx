@@ -107,7 +107,7 @@ export function SessionSettingsModal({
     session: current,
     launchSettings,
     models,
-    supportsFreeTextModel,
+    defaultModelLabel,
     title,
     permissionMode,
     model,
@@ -233,7 +233,13 @@ export function SessionSettingsModal({
   const accountProfiles = launchSettings?.account_profiles ?? [];
 
   const showPermission = permissionModes.length > 0;
-  const showModel = models.length > 0 || supportsFreeTextModel || model !== null;
+  const showModel = models.length > 0 || model !== null;
+  // Mirror the launch panel's ModelPicker: surface a pre-existing custom model
+  // (from an older session/schedule) that isn't in the discovered list.
+  const modelEntries =
+    model && !models.some((m) => m.id === model)
+      ? [{ id: model, label: `Custom · ${model}` }, ...models]
+      : models;
   const showEffort = effortOptions.length > 0 || effort !== null;
   const showAccountProfile =
     accountProfiles.length > 0 &&
@@ -498,46 +504,27 @@ export function SessionSettingsModal({
                       <label className="settings-field-label" htmlFor="settings-model">
                         Model
                       </label>
-                      {supportsFreeTextModel ? (
-                        // Editable combobox: pick a discovered model or type a
-                        // free-text id (backends that report supports_free_text).
-                        <>
-                          <input
-                            id="settings-model"
-                            className="settings-input"
-                            list="settings-model-options"
-                            value={model ?? ""}
-                            onChange={(e) => setModel(e.target.value || null)}
-                            placeholder="Model id"
-                            disabled={busy}
-                          />
-                          <datalist id="settings-model-options">
-                            {models.map((m) => (
-                              <option key={m.id} value={m.id}>
-                                {m.label}
-                              </option>
-                            ))}
-                          </datalist>
-                        </>
-                      ) : (
-                        <select
-                          id="settings-model"
-                          className="settings-input"
-                          value={model ?? ""}
-                          onChange={(e) => setModel(e.target.value || null)}
-                          disabled={busy}
-                        >
-                          {model !== null &&
-                          !models.some((m) => m.id === model) ? (
-                            <option value={model}>{model}</option>
-                          ) : null}
-                          {models.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.label}
-                            </option>
-                          ))}
-                        </select>
-                      )}
+                      {/* Same select-style picker as the launch panel's
+                          ModelPicker: a Default option, the discovered models,
+                          and a passthrough for a pre-existing custom value. */}
+                      <select
+                        id="settings-model"
+                        className="settings-input"
+                        value={model ?? ""}
+                        onChange={(e) => setModel(e.target.value || null)}
+                        disabled={busy}
+                      >
+                        <option value="">
+                          {defaultModelLabel
+                            ? `Default (${defaultModelLabel})`
+                            : "Default"}
+                        </option>
+                        {modelEntries.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   ) : null}
                   {showEffort ? (

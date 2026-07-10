@@ -316,21 +316,6 @@ export function SessionSettingsModal({
             <p className="settings-modal-error">{loadError}</p>
           ) : (
             <>
-              {/* Title */}
-              <section className="settings-field">
-                <label className="settings-field-label" htmlFor="settings-title">
-                  Title
-                </label>
-                <input
-                  id="settings-title"
-                  className="settings-input"
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  disabled={busy}
-                />
-              </section>
-
               {/* Assistant agent / interface / resume */}
               {isAssistant && assistant ? (
                 <section className="settings-group">
@@ -414,6 +399,62 @@ export function SessionSettingsModal({
                   </div>
                 </section>
               ) : null}
+
+              {/* Account profile — kept with the context group (agent /
+                  interface / profile) above Session and Tuning, mirroring the
+                  launch panel's field hierarchy. */}
+              {showAccountProfile ? (
+                <section className="settings-group">
+                  <div className="settings-group-caption">Account profile</div>
+                  <div className="settings-field">
+                    <label
+                      className="settings-field-label"
+                      htmlFor="settings-profile"
+                    >
+                      Profile
+                    </label>
+                    <select
+                      id="settings-profile"
+                      className="settings-input"
+                      value={accountProfileId ?? ""}
+                      onChange={(e) =>
+                        setAccountProfileId(e.target.value || null)
+                      }
+                      disabled={busy || assistantReplacementStaged}
+                    >
+                      {/* A session may currently run under no profile; show a
+                          disabled placeholder so the value isn't orphaned.
+                          Clearing a profile to none is out of scope, so it
+                          can't be re-selected once a real profile is chosen. */}
+                      {accountProfileId === null ? (
+                        <option value="" disabled>
+                          No profile
+                        </option>
+                      ) : null}
+                      {accountProfiles.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </section>
+              ) : null}
+
+              {/* Title */}
+              <section className="settings-field">
+                <label className="settings-field-label" htmlFor="settings-title">
+                  Title
+                </label>
+                <input
+                  id="settings-title"
+                  className="settings-input"
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  disabled={busy}
+                />
+              </section>
 
               {/* Tuning */}
               {showPermission || showModel || showEffort ? (
@@ -518,45 +559,6 @@ export function SessionSettingsModal({
                       </select>
                     </div>
                   ) : null}
-                </section>
-              ) : null}
-
-              {/* Account profile */}
-              {showAccountProfile ? (
-                <section className="settings-group">
-                  <div className="settings-group-caption">Account profile</div>
-                  <div className="settings-field">
-                    <label
-                      className="settings-field-label"
-                      htmlFor="settings-profile"
-                    >
-                      Profile
-                    </label>
-                    <select
-                      id="settings-profile"
-                      className="settings-input"
-                      value={accountProfileId ?? ""}
-                      onChange={(e) =>
-                        setAccountProfileId(e.target.value || null)
-                      }
-                      disabled={busy || assistantReplacementStaged}
-                    >
-                      {/* A session may currently run under no profile; show a
-                          disabled placeholder so the value isn't orphaned.
-                          Clearing a profile to none is out of scope, so it
-                          can't be re-selected once a real profile is chosen. */}
-                      {accountProfileId === null ? (
-                        <option value="" disabled>
-                          No profile
-                        </option>
-                      ) : null}
-                      {accountProfiles.map((profile) => (
-                        <option key={profile.id} value={profile.id}>
-                          {profile.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
                 </section>
               ) : null}
 

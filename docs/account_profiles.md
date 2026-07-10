@@ -9,7 +9,11 @@ for Codex) plus a policy for how a running session's transcript follows it.
 You can pick a profile when launching, scheduling, or presetting a session, and
 switch a *running* session between profiles without restarting the Waypoint
 service — the session terminates and resumes the same thread under the new
-config dir (restart-and-resume).
+config dir (restart-and-resume). For a running session the profile picker lives
+in the **Session settings** editor (opened from the composer overflow `+` menu
+or a session card's settings action), alongside the other restart-scoped launch
+settings; staging a profile switch there batches into the same restart, and the
+editor warns before an active turn is interrupted.
 
 Only the agent backends that own a config-dir env var host profiles today:
 **`claude_code` and `codex`**. `opencode` and the transport wrappers do not, and

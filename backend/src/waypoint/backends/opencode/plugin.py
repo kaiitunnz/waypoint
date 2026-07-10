@@ -416,12 +416,16 @@ class OpenCodePlugin(DefaultLaunchContract):
                 self._handle_server_died(runtime, key, active_session_ids)
 
             session_update_callback = getattr(runtime, "session_update_callback", None)
+            token_usage_callback = getattr(runtime, "token_usage_callback", None)
             adapter = OpenCodeAdapter(
                 emit_event=runtime._emit_adapter_event,
                 on_session_update=(
                     session_update_callback()
                     if callable(session_update_callback)
                     else None
+                ),
+                on_token_usage=(
+                    token_usage_callback() if callable(token_usage_callback) else None
                 ),
                 launch_target=launch_target,
                 on_agent_changed=_on_agent_changed,
@@ -707,19 +711,15 @@ class OpenCodePlugin(DefaultLaunchContract):
     def create_context_usage_source(
         self, session: SessionRecord, runtime: "SessionRuntime"
     ) -> "ContextUsageSource | None":
-        if session.transport != "tmux":
-            return None
-        from waypoint.backends.opencode.usage_source import (
-            OpenCodeTmuxUsageSource,
-            _opencode_db_dir,
-        )
-
-        return OpenCodeTmuxUsageSource(
-            session_id=session.id,
-            cwd=session.cwd,
-            runtime=runtime,
-            db_dir=_opencode_db_dir(),
-        )
+        # OpenCode over the generic tmux transport has no way to bind a stable
+        # upstream OpenCode session id at launch — the TUI creates the id lazily
+        # on the first turn — so the only handle is the working directory. Two
+        # sessions in the same directory would then report one another's usage,
+        # so we never fall back to that directory heuristic: no current or
+        # aggregate token telemetry is published for opencode tmux until a
+        # native, unambiguous id handoff exists. Structured OpenCode sessions
+        # use their persisted upstream session + message ids instead.
+        return None
 
     def register_routes(self, app: FastAPI, context: Any) -> None:
         pass

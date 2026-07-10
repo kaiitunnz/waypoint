@@ -22,7 +22,12 @@ from waypoint.backends.opencode.client import (
 from waypoint.backends.opencode.normalize import map_event
 from waypoint.backends.opencode.remote import build_remote_serve_args
 from waypoint.launch_targets import SshLaunchTargetConfig
-from waypoint.schemas import EventKind, SessionContextUsage, SessionStatus
+from waypoint.schemas import (
+    EventKind,
+    SessionContextUsage,
+    SessionStatus,
+    TokenUsageRecord,
+)
 
 log = logging.getLogger("waypoint.opencode")
 
@@ -68,6 +73,7 @@ SessionUpdateCallback = Callable[
     [str, dict[str, Any], bool],
     Awaitable[Any],
 ]
+TokenUsageCallback = Callable[[str, TokenUsageRecord, bool], Awaitable[Any]]
 
 
 class OpenCodeError(RuntimeError):
@@ -100,7 +106,9 @@ class OpenCodeSessionState:
     context_window_lookup_failed: dict[tuple[str, str], float] = field(
         default_factory=dict
     )
-    context_usage_signature: tuple[int, int | None] | None = None
+    context_usage_signature: (
+        tuple[int, int | None, tuple[tuple[str, int], ...]] | None
+    ) = None
     closing: bool = False
 
 
@@ -113,6 +121,7 @@ class OpenCodeAdapter:
         self,
         emit_event: EmitEvent,
         on_session_update: SessionUpdateCallback | None = None,
+        on_token_usage: TokenUsageCallback | None = None,
         binary: str | None = None,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
@@ -125,6 +134,7 @@ class OpenCodeAdapter:
     ) -> None:
         self._emit_event = emit_event
         self._on_session_update = on_session_update
+        self._on_token_usage = on_token_usage
         self._binary = binary
         self._host = host
         self._port = port
@@ -684,6 +694,17 @@ class OpenCodeAdapter:
         if not isinstance(model_id, str) or not model_id:
             return
 
+        # Feed the durable ledger keyed on the upstream session + assistant
+        # message id, independent of the context-window resolution below. The
+        # ledger key makes redelivery of the same message idempotent.
+        message_id = info.get("id")
+        if self._on_token_usage is not None and isinstance(message_id, str):
+            record = opencode_token_usage_record(
+                f"{state.opencode_session_id}:{message_id}", tokens
+            )
+            if record is not None:
+                await self._on_token_usage(state.session_id, record, False)
+
         key = (provider_id, model_id)
         state.context_usage_pending_tokens[key] = tokens
 
@@ -812,7 +833,13 @@ class OpenCodeAdapter:
         if snapshot is None:
             return
 
-        signature = (snapshot.used_tokens, snapshot.context_window_tokens)
+        # Fold the breakdown into the dedup so a same-total/different-composition
+        # turn still refreshes the displayed snapshot (RFC integrity gap #1).
+        signature = (
+            snapshot.used_tokens,
+            snapshot.context_window_tokens,
+            tuple(sorted(snapshot.breakdown.items())),
+        )
         if state.context_usage_signature == signature:
             state.context_usage_pending_tokens.pop((provider_id, model_id), None)
             return
@@ -1423,6 +1450,41 @@ def _context_usage_snapshot_from_message(
         updated_at=datetime.now(UTC),
         source="opencode",
         breakdown=breakdown,
+    )
+
+
+def opencode_token_usage_record(
+    record_id: str, tokens: dict[str, Any]
+) -> TokenUsageRecord | None:
+    """Build a per-turn ledger record from an OpenCode assistant token dict.
+
+    Independent of the context-window resolution — the ledger only needs the
+    identity and categories. No ``display_total`` is supplied: OpenCode's
+    ``reasoning`` is a subset of ``output`` for several providers, so a summed
+    grand total is not provider-safe; the UI shows category totals instead.
+    """
+    if not record_id:
+        return None
+    cache = tokens.get("cache")
+    if not isinstance(cache, dict):
+        cache = {}
+    totals = {
+        key: value
+        for key, value in {
+            "input_tokens": _non_negative_int(tokens.get("input")),
+            "output_tokens": _non_negative_int(tokens.get("output")),
+            "reasoning_tokens": _non_negative_int(tokens.get("reasoning")),
+            "cache_read_tokens": _non_negative_int(cache.get("read")),
+            "cache_write_tokens": _non_negative_int(cache.get("write")),
+        }.items()
+        if value is not None
+    }
+    return TokenUsageRecord(
+        record_id=record_id,
+        source="opencode",
+        observed_at=datetime.now(UTC),
+        totals=totals,
+        display_total_tokens=None,
     )
 
 

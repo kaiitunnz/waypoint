@@ -1890,6 +1890,20 @@ async def test_create_session_direct_mode_uses_requested_backend(
 ) -> None:
     runtime, storage, settings = make_runtime(tmp_path)
     codex = runtime.registry.get("codex")
+    profile_dir = tmp_path / "codex-work"
+    shared_dir = tmp_path / "codex-shared-sessions"
+    settings.plugin_configs["codex"] = codex.config_schema.model_validate(
+        {
+            "account_profiles": {
+                "work": {
+                    "label": "Work",
+                    "config_dir": str(profile_dir),
+                    "transcript_policy": "symlink_shared",
+                    "shared_transcript_dir": str(shared_dir),
+                }
+            }
+        }
+    )
     tmux = runtime.registry.fallback_for_managed_launch()
     assert tmux is not None
     create_calls: list[tuple[str, LaunchMode]] = []
@@ -1936,21 +1950,74 @@ async def test_create_session_direct_mode_uses_requested_backend(
         runtime, "_warm_command_completions", lambda *_args, **_kwargs: None
     )
 
-    session = await runtime.create_session(
-        SessionCreateRequest(
-            backend="codex",
-            cwd=str(tmp_path),
-            launch_mode=LaunchMode.DIRECT,
-            title="Direct launch",
-            args=[],
-            source_mode=SessionSource.MANAGED,
-        )
+    request = SessionCreateRequest(
+        backend="codex",
+        cwd=str(tmp_path),
+        launch_mode=LaunchMode.DIRECT,
+        title="Direct launch",
+        args=[],
+        source_mode=SessionSource.MANAGED,
+        account_profile_id="work",
     )
+    session = await runtime.create_session(request)
+    # Re-enter the preflight with the correct symlink already in place.
+    second_session = await runtime.create_session(request)
 
-    assert create_calls == [(session.id, LaunchMode.DIRECT)]
+    assert create_calls == [
+        (session.id, LaunchMode.DIRECT),
+        (second_session.id, LaunchMode.DIRECT),
+    ]
     assert session.backend == "codex"
     assert session.transport == "codex_app_server"
     assert session.cwd == str(tmp_path)
+    assert (profile_dir / "sessions").is_symlink()
+    assert (profile_dir / "sessions").resolve() == shared_dir
+
+
+@pytest.mark.asyncio
+async def test_create_session_rejects_populated_symlink_shared_store(
+    monkeypatch, tmp_path
+) -> None:
+    runtime, _, settings = make_runtime(tmp_path)
+    codex = runtime.registry.get("codex")
+    profile_dir = tmp_path / "codex-work"
+    shared_dir = tmp_path / "codex-shared-sessions"
+    store_dir = profile_dir / "sessions"
+    store_dir.mkdir(parents=True)
+    (store_dir / "existing.jsonl").write_text("existing", encoding="utf-8")
+    settings.plugin_configs["codex"] = codex.config_schema.model_validate(
+        {
+            "account_profiles": {
+                "work": {
+                    "label": "Work",
+                    "config_dir": str(profile_dir),
+                    "transcript_policy": "symlink_shared",
+                    "shared_transcript_dir": str(shared_dir),
+                }
+            }
+        }
+    )
+    monkeypatch.setattr(codex, "is_available_for_managed_launch", lambda _rt: True)
+    monkeypatch.setattr(
+        codex,
+        "create_session",
+        lambda *_args, **_kwargs: pytest.fail("profile preflight must run first"),
+    )
+
+    with pytest.raises(
+        HTTPException, match="cannot prepare account profile transcripts"
+    ):
+        await runtime.create_session(
+            SessionCreateRequest(
+                backend="codex",
+                cwd=str(tmp_path),
+                launch_mode=LaunchMode.DIRECT,
+                title="Blocked launch",
+                args=[],
+                source_mode=SessionSource.MANAGED,
+                account_profile_id="work",
+            )
+        )
 
 
 @pytest.mark.asyncio
@@ -4391,7 +4458,11 @@ async def test_assistant_first_boot_seeds_config_transport(tmp_path) -> None:
     # resolution itself (None => the agent default) is covered by the
     # create_session default-transport tests.
     runtime, storage, settings = make_runtime(tmp_path)
-    settings.assistant = AssistantConfig(backend="claude_code", transport="claude_cli")
+    settings.assistant = AssistantConfig(
+        backend="claude_code",
+        transport="claude_cli",
+        account_profile_id="work",
+    )
     captured: dict[str, Any] = {}
 
     async def _fake_create(backend: str, **kwargs: Any) -> SessionRecord:
@@ -4412,6 +4483,7 @@ async def test_assistant_first_boot_seeds_config_transport(tmp_path) -> None:
 
     assert runtime.assistant_session_id == "claude-fresh"
     assert captured["transport"] == "claude_cli"
+    assert captured["account_profile_id"] == "work"
 
 
 @pytest.mark.asyncio
@@ -4448,6 +4520,11 @@ async def test_assistant_summary_reports_native_thread_id(tmp_path) -> None:
         status=SessionStatus.IDLE,
         transport="codex_app_server",
     )
+    storage.update_session(
+        "codex-assistant",
+        account_profile_id="work",
+        account_profile_label="Work",
+    )
     runtime.assistant_session_id = "codex-assistant"
 
     summary = runtime.assistant_summary()
@@ -4457,6 +4534,8 @@ async def test_assistant_summary_reports_native_thread_id(tmp_path) -> None:
     assert summary.backend == "codex"
     assert summary.transport == "codex_app_server"
     assert summary.native_thread_id == "thread-1"
+    assert summary.account_profile_id == "work"
+    assert summary.account_profile_label == "Work"
     assert summary.status == SessionStatus.IDLE
     assert (
         summary.supports_reattach
@@ -4647,6 +4726,7 @@ async def test_reset_assistant_rebuilds_thread_and_keeps_old(tmp_path) -> None:
         effort: Any,
         permission_mode: Any,
         transport: Any,
+        account_profile_id: Any = None,
     ) -> SessionRecord:
         captured.update(
             backend=backend,
@@ -4654,6 +4734,7 @@ async def test_reset_assistant_rebuilds_thread_and_keeps_old(tmp_path) -> None:
             effort=effort,
             permission_mode=permission_mode,
             transport=transport,
+            account_profile_id=account_profile_id,
         )
         return _make_assistant_row(
             storage,
@@ -4680,6 +4761,7 @@ async def test_reset_assistant_rebuilds_thread_and_keeps_old(tmp_path) -> None:
         "effort": None,
         "permission_mode": None,
         "transport": None,
+        "account_profile_id": None,
     }
     old = storage.get_session("codex-old")
     assert old is not None
@@ -4705,7 +4787,12 @@ async def test_reset_assistant_clear_context_inherits_live_config(tmp_path) -> N
         cwd=str(runtime._assistant_workspace_dir()),
     )
     storage.update_session(
-        "codex-live", model="gpt-5", effort="high", permission_mode="full-access"
+        "codex-live",
+        model="gpt-5",
+        effort="high",
+        permission_mode="full-access",
+        account_profile_id="work",
+        account_profile_label="Work",
     )
     runtime.assistant_session_id = "codex-live"
 
@@ -4723,6 +4810,7 @@ async def test_reset_assistant_clear_context_inherits_live_config(tmp_path) -> N
         effort: Any,
         permission_mode: Any,
         transport: Any,
+        account_profile_id: Any = None,
     ) -> SessionRecord:
         captured.update(
             backend=backend,
@@ -4730,6 +4818,7 @@ async def test_reset_assistant_clear_context_inherits_live_config(tmp_path) -> N
             effort=effort,
             permission_mode=permission_mode,
             transport=transport,
+            account_profile_id=account_profile_id,
         )
         return _make_assistant_row(
             storage,
@@ -4752,6 +4841,7 @@ async def test_reset_assistant_clear_context_inherits_live_config(tmp_path) -> N
         "effort": "high",
         "permission_mode": "full-access",
         "transport": "codex_app_server",
+        "account_profile_id": "work",
     }
 
 
@@ -4779,6 +4869,7 @@ async def test_reset_assistant_keeps_current_thread_when_create_fails(tmp_path) 
         effort: Any,
         permission_mode: Any,
         transport: Any,
+        account_profile_id: Any = None,
     ) -> SessionRecord:
         raise RuntimeError("spawn failed")
 
@@ -4792,6 +4883,96 @@ async def test_reset_assistant_keeps_current_thread_when_create_fails(tmp_path) 
     assert row is not None
     assert row.source == SessionSource.ASSISTANT
     assert row.status == SessionStatus.IDLE
+
+
+@pytest.mark.asyncio
+async def test_reset_assistant_explicit_profile_overrides_live_profile(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(backend="codex")
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-live",
+        backend="codex",
+        status=SessionStatus.IDLE,
+        transport="codex_app_server",
+        cwd=str(runtime._assistant_workspace_dir()),
+    )
+    storage.update_session(
+        "codex-live",
+        account_profile_id="personal",
+        account_profile_label="Personal",
+    )
+    runtime.assistant_session_id = "codex-live"
+    captured: dict[str, Any] = {}
+
+    async def _fake_create(backend: str, **kwargs: Any) -> SessionRecord:
+        captured.update(backend=backend, **kwargs)
+        return _make_assistant_row(
+            storage,
+            settings,
+            session_id="codex-new",
+            backend="codex",
+            status=SessionStatus.STARTING,
+            transport="codex_app_server",
+            cwd=str(runtime._assistant_workspace_dir()),
+        )
+
+    runtime._create_assistant_session = _fake_create  # type: ignore[method-assign]
+
+    await runtime.reset_assistant(
+        account_profile_id="work",
+        account_profile_supplied=True,
+    )
+
+    assert captured["account_profile_id"] == "work"
+
+
+@pytest.mark.asyncio
+async def test_reset_assistant_explicit_default_does_not_inherit_profile(
+    tmp_path,
+) -> None:
+    runtime, storage, settings = make_runtime(tmp_path)
+    settings.assistant = AssistantConfig(backend="codex")
+    _make_assistant_row(
+        storage,
+        settings,
+        session_id="codex-live",
+        backend="codex",
+        status=SessionStatus.IDLE,
+        transport="codex_app_server",
+        cwd=str(runtime._assistant_workspace_dir()),
+    )
+    storage.update_session(
+        "codex-live",
+        account_profile_id="work",
+        account_profile_label="Work",
+    )
+    runtime.assistant_session_id = "codex-live"
+    captured: dict[str, Any] = {}
+
+    async def _fake_create(backend: str, **kwargs: Any) -> SessionRecord:
+        captured.update(backend=backend, **kwargs)
+        return _make_assistant_row(
+            storage,
+            settings,
+            session_id="codex-new",
+            backend="codex",
+            status=SessionStatus.STARTING,
+            transport="codex_app_server",
+            cwd=str(runtime._assistant_workspace_dir()),
+        )
+
+    runtime._create_assistant_session = _fake_create  # type: ignore[method-assign]
+
+    await runtime.reset_assistant(
+        account_profile_id=None,
+        account_profile_supplied=True,
+    )
+
+    assert captured["account_profile_id"] is None
 
 
 @pytest.mark.asyncio
@@ -4889,6 +5070,18 @@ async def test_attach_assistant_adopts_imported_thread(tmp_path, monkeypatch) ->
     # demotes the previous thread to a normal stopped session.
     runtime, storage, settings = make_runtime(tmp_path)
     settings.assistant = AssistantConfig(backend="codex")
+    settings.plugin_configs["codex"] = runtime.registry.get(
+        "codex"
+    ).config_schema.model_validate(
+        {
+            "account_profiles": {
+                "work": {
+                    "label": "Work",
+                    "config_dir": str(tmp_path / "codex-work"),
+                }
+            }
+        }
+    )
     _make_assistant_row(
         storage,
         settings,
@@ -4909,6 +5102,7 @@ async def test_attach_assistant_adopts_imported_thread(tmp_path, monkeypatch) ->
         rt: Any, request: Any, *, agent: str | None = None
     ) -> SessionRecord:
         assert request.thread_id == "thread-xyz"
+        assert request.account_profile_id == "work"
         assert agent == "codex"
         # import_thread persists a MANAGED session living in the thread's own cwd.
         session = make_session(
@@ -4923,7 +5117,11 @@ async def test_attach_assistant_adopts_imported_thread(tmp_path, monkeypatch) ->
 
     monkeypatch.setattr(runtime.registry.get("codex"), "import_thread", _fake_import)
 
-    summary = await runtime.attach_assistant(backend="codex", thread_id="thread-xyz")
+    summary = await runtime.attach_assistant(
+        backend="codex",
+        thread_id="thread-xyz",
+        account_profile_id="work",
+    )
 
     assert summary.session_id == "codex-imported"
     assert runtime.assistant_session_id == "codex-imported"

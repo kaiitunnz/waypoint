@@ -47,6 +47,7 @@ from waypoint.backends.transcript_fs import (
 from waypoint.backends.transcript_fs_remote import RemoteTranscriptFilesystem
 from waypoint.backends.transcripts import (
     TranscriptUnavailableError,
+    ensure_symlink_shared,
     ensure_thread_available,
     setup_transcripts_symlink,
 )
@@ -656,6 +657,52 @@ class SessionRuntime:
                 detail=f"account profile {account_profile_id!r} is not set up: {exc}",
             ) from exc
 
+    async def _ensure_new_session_profile_transcript_store(
+        self,
+        backend: str,
+        launch_env: Mapping[str, str],
+        account_profile_id: str | None,
+        launch_target: SshLaunchTargetConfig | None,
+    ) -> None:
+        """Prepare a ``symlink_shared`` store before a profile-scoped launch.
+
+        A new thread has no prior transcript to transfer, but its first agent
+        process will create the native store. Establish the configured symlink
+        first so that process writes directly into the shared tree. The guarded
+        helper refuses a populated real directory; migrating existing user data
+        remains the explicit ``accounts setup-transcripts`` operation.
+        """
+        if account_profile_id is None:
+            return
+        profile = self._require_account_profile(
+            backend, account_profile_id, launch_target
+        )
+        if profile.transcript_policy != "symlink_shared":
+            return
+        caps = self.registry.get(backend).capabilities
+        if caps.native_thread_store is None:
+            return
+        config_dir = config_dir_for(caps, launch_env)
+        if config_dir is None:
+            return
+        fs: TranscriptFilesystem = (
+            LocalTranscriptFilesystem()
+            if launch_target is None
+            else RemoteTranscriptFilesystem(launch_target)
+        )
+        try:
+            await asyncio.to_thread(
+                ensure_symlink_shared,
+                Path(fs.expanduser(config_dir)) / caps.native_thread_store,
+                Path(fs.expanduser(cast(str, profile.shared_transcript_dir))),
+                fs=fs,
+            )
+        except TranscriptUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"cannot prepare account profile transcripts: {exc}",
+            ) from exc
+
     def _agent_process_env(
         self,
         backend: str,
@@ -1217,6 +1264,12 @@ class SessionRuntime:
             request.account_profile_id,
             launch_target,
         )
+        await self._ensure_new_session_profile_transcript_store(
+            request.backend,
+            effective_env,
+            request.account_profile_id,
+            launch_target,
+        )
         session = await plugin.create_session(
             self,
             request,
@@ -1356,6 +1409,7 @@ class SessionRuntime:
             effort=assistant.effort,
             permission_mode=assistant.permission_mode,
             transport=assistant.transport,
+            account_profile_id=assistant.account_profile_id,
         )
         self.assistant_session_id = created.id
 
@@ -1367,6 +1421,7 @@ class SessionRuntime:
         effort: str | None,
         permission_mode: str | None,
         transport: str | None,
+        account_profile_id: str | None = None,
     ) -> SessionRecord:
         plugin = self.registry.get(backend)
         validated_mode = (
@@ -1383,6 +1438,7 @@ class SessionRuntime:
             effort=effort,
             permission_mode=validated_mode,
             transport=transport,
+            account_profile_id=account_profile_id,
         )
         session = await self.create_session(request)
         return self.storage.update_session(
@@ -1421,6 +1477,8 @@ class SessionRuntime:
             backend=session.backend,
             transport=session.transport,
             native_thread_id=plugin.native_thread_id(session),
+            account_profile_id=session.account_profile_id,
+            account_profile_label=session.account_profile_label,
             status=session.status,
             supports_reattach=plugin.capabilities.supports_reattach_after_exit,
         )
@@ -1439,6 +1497,8 @@ class SessionRuntime:
         *,
         backend: str | None = None,
         transport: str | None = None,
+        account_profile_id: str | None = None,
+        account_profile_supplied: bool = False,
         model: str | None = None,
         effort: str | None = None,
         permission_mode: str | None = None,
@@ -1446,7 +1506,7 @@ class SessionRuntime:
         """Rebuild the assistant on a fresh thread (clear context / switch backend).
 
         Clearing context keeps the *current* thread's backend and live config
-        (model / effort / permission mode / transport), so a context wipe
+        (model / effort / permission mode / transport / account profile), so a context wipe
         doesn't silently revert tuning done from the UI; only an explicit
         ``backend`` switch overrides them, since model/effort/transport are
         backend-specific. waypoint.yaml only seeds the first creation, when no
@@ -1481,6 +1541,12 @@ class SessionRuntime:
                 permission_mode if permission_mode is not None else old.permission_mode
             )
             transport = transport if transport is not None else old.transport
+        if account_profile_supplied:
+            selected_profile_id = account_profile_id
+        elif old is not None and chosen == old.backend:
+            selected_profile_id = old.account_profile_id
+        else:
+            selected_profile_id = None
         # Spawn the replacement before touching the current thread so a failed
         # launch (e.g. a misconfigured backend) leaves the live, pinned
         # assistant intact rather than orphaning the pointer at a stopped row.
@@ -1490,6 +1556,7 @@ class SessionRuntime:
             effort=effort,
             permission_mode=permission_mode,
             transport=transport,
+            account_profile_id=selected_profile_id,
         )
         self.assistant_session_id = created.id
         await self._retire_previous_assistant(old, created.id)
@@ -1602,6 +1669,7 @@ class SessionRuntime:
         backend: str,
         thread_id: str,
         launch_target_id: str | None = None,
+        account_profile_id: str | None = None,
     ) -> AssistantSummary:
         """Adopt an existing backend-native thread as the assistant singleton.
 
@@ -1624,7 +1692,12 @@ class SessionRuntime:
         # assistant always adopts a thread over the agent's native transport,
         # so no transport is pinned here.
         imported = await self.import_thread(
-            backend, {"thread_id": thread_id, "launch_target_id": launch_target_id}
+            backend,
+            {
+                "thread_id": thread_id,
+                "launch_target_id": launch_target_id,
+                "account_profile_id": account_profile_id,
+            },
         )
         adopted = self.storage.update_session(
             imported.id, source=SessionSource.ASSISTANT, pinned_at=datetime.now(UTC)

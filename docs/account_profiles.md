@@ -114,6 +114,14 @@ directory first). So point profiles at a shared directory on fresh or empty
 config dirs. If the thread still isn't visible after linking, the switch is
 rejected before the session is touched.
 
+When Waypoint launches a **new** session under a `symlink_shared` profile, it
+performs that guarded missing-or-empty setup before the agent starts, so the new
+thread is written to the shared tree from its first event. This does not affect a
+Codex or Claude process launched outside Waypoint: its config-dir environment
+causes the agent itself to create a normal native-store directory. Run
+`accounts setup-transcripts` before using such a populated profile for a
+restart-and-resume switch.
+
 The tradeoff versus `copy_thread_on_switch`: one shared tree means the accounts
 have **no transcript isolation** — every profile sees every thread — whereas
 copying keeps independent trees and duplicates only the switched thread.

@@ -294,6 +294,8 @@ export interface AssistantSummary {
   // UI label it and preselect it in the settings popover.
   transport: SessionTransport;
   native_thread_id: string | null;
+  account_profile_id: string | null;
+  account_profile_label: string | null;
   status: SessionStatus;
   // Whether the backend can revive the thread after it exits — drives the
   // choice between offering Reattach and only Clear context.
@@ -303,6 +305,7 @@ export interface AssistantSummary {
 export interface AssistantResetRequest {
   backend?: Backend;
   transport?: SessionTransport | null;
+  account_profile_id?: string | null;
   model?: string | null;
   effort?: string | null;
   permission_mode?: string | null;
@@ -312,6 +315,7 @@ export interface AssistantAttachRequest {
   backend: Backend;
   thread_id: string;
   launch_target_id?: string | null;
+  account_profile_id?: string | null;
 }
 
 export interface MeResponse {

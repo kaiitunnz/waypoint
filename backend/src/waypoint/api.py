@@ -310,6 +310,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return await context.runtime.reset_assistant(
             backend=body.backend,
             transport=body.transport,
+            account_profile_id=body.account_profile_id,
+            account_profile_supplied="account_profile_id" in body.model_fields_set,
             model=body.model,
             effort=body.effort,
             permission_mode=body.permission_mode,
@@ -326,6 +328,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             backend=body.backend,
             thread_id=body.thread_id,
             launch_target_id=body.launch_target_id,
+            account_profile_id=body.account_profile_id,
         )
 
     @app.post("/api/assistant/terminate", response_model=AssistantSummary)

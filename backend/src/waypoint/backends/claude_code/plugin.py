@@ -326,6 +326,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             runtime._emit_adapter_event,
             on_init=runtime.handle_completion_source_init,
             on_session_update=runtime.session_update_callback(),
+            on_token_usage=runtime.token_usage_callback(),
             default_model_id=self._config(runtime).default_model_id,
         )
         self.thread_enumerator = RemoteClaudeThreadEnumerator(

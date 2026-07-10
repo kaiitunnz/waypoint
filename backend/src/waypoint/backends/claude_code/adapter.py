@@ -52,6 +52,7 @@ from waypoint.schemas import (
     SessionContextUsage,
     SessionRateLimitUsage,
     SessionStatus,
+    TokenUsageRecord,
 )
 
 log = logging.getLogger("waypoint.claude_cli")
@@ -257,6 +258,7 @@ EmitEvent = Callable[
 ]
 InitCallback = Callable[[str, dict[str, Any]], None]
 SessionUpdateCallback = Callable[[str, dict[str, Any], bool], Awaitable[Any]]
+TokenUsageCallback = Callable[[str, TokenUsageRecord, bool], Awaitable[Any]]
 LaunchFactory = Callable[
     [
         str,
@@ -350,7 +352,9 @@ class ClaudeSessionState:
     # (normalized to a family, e.g. ``sonnet``), this is never normalized.
     resolved_model: str | None = None
     context_usage_snapshot: SessionContextUsage | None = None
-    context_usage_signature: tuple[int, int | None] | None = None
+    context_usage_signature: (
+        tuple[int, int | None, tuple[tuple[str, int], ...]] | None
+    ) = None
     rate_limit_usage_snapshot: SessionRateLimitUsage | None = None
     rate_limit_usage_signature: str | None = None
     rate_limit_probe: Callable[[], Awaitable[SessionRateLimitUsage | None]] | None = (
@@ -387,6 +391,7 @@ class ClaudeCliAdapter:
         launch_factory: LaunchFactory | None = None,
         on_init: InitCallback | None = None,
         on_session_update: SessionUpdateCallback | None = None,
+        on_token_usage: TokenUsageCallback | None = None,
         default_model_id: str | None = None,
     ) -> None:
         self._emit_event = emit_event
@@ -394,6 +399,7 @@ class ClaudeCliAdapter:
         self._launch_factory = launch_factory
         self._on_init = on_init
         self._on_session_update = on_session_update
+        self._on_token_usage = on_token_usage
         self._default_model_id = normalize_claude_model_id(default_model_id)
         self._sessions: dict[str, ClaudeSessionState] = {}
         # Folded todo state stashed by terminate_session and consumed by the
@@ -1737,6 +1743,7 @@ class ClaudeCliAdapter:
         if snapshot is not None:
             state.context_usage_snapshot = snapshot
             await self._publish_context_usage(state, snapshot)
+            await self._publish_token_usage(state, message_id, snapshot)
 
     async def _handle_user(
         self, state: ClaudeSessionState, event: dict[str, Any]
@@ -1893,7 +1900,16 @@ class ClaudeCliAdapter:
     async def _publish_context_usage(
         self, state: ClaudeSessionState, snapshot: SessionContextUsage
     ) -> None:
-        signature = (snapshot.used_tokens, snapshot.context_window_tokens)
+        # Include the breakdown so a turn with the same headline total but a
+        # different cache/input composition still refreshes the displayed
+        # breakdown and timestamp (RFC integrity gap #1). Distinct turns that
+        # happen to be byte-identical are correctly deduped for the snapshot;
+        # the per-turn ledger counts them via its own message-id key.
+        signature = (
+            snapshot.used_tokens,
+            snapshot.context_window_tokens,
+            tuple(sorted(snapshot.breakdown.items())),
+        )
         if state.context_usage_signature == signature:
             return
         state.context_usage_signature = signature
@@ -1904,6 +1920,19 @@ class ClaudeCliAdapter:
             {"context_usage": snapshot.model_dump(mode="json")},
             False,
         )
+
+    async def _publish_token_usage(
+        self,
+        state: ClaudeSessionState,
+        record_id: str,
+        snapshot: SessionContextUsage,
+    ) -> None:
+        if self._on_token_usage is None:
+            return
+        record = claude_token_usage_record(record_id, snapshot)
+        if record is None:
+            return
+        await self._on_token_usage(state.session_id, record, False)
 
     async def _refresh_rate_limit_usage_loop(
         self, state: ClaudeSessionState, *, refresh_interval_seconds: float
@@ -2030,6 +2059,30 @@ def _context_usage_snapshot_from_message(
         updated_at=datetime.now(UTC),
         source="claude_code",
         breakdown=breakdown,
+    )
+
+
+def claude_token_usage_record(
+    record_id: str, snapshot: SessionContextUsage
+) -> TokenUsageRecord | None:
+    """Build a per-turn ledger record from a Claude usage snapshot.
+
+    ``record_id`` is the provider assistant-message id; an empty id yields
+    ``None`` so an identity-less turn is never aggregated. Claude's categories
+    (input, cache-read, cache-creation, output) do not overlap, so their sum is
+    a provider-safe grand total for the turn's token work. Shared by the
+    structured adapter and the transcript readers, all of which build the same
+    snapshot.
+    """
+    if not record_id:
+        return None
+    totals = dict(snapshot.breakdown)
+    return TokenUsageRecord(
+        record_id=record_id,
+        source=snapshot.source,
+        observed_at=snapshot.updated_at,
+        totals=totals,
+        display_total_tokens=sum(totals.values()) or None,
     )
 
 

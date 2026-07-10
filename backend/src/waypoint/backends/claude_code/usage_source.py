@@ -10,7 +10,10 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-from waypoint.backends.claude_code.adapter import _context_usage_snapshot_from_message
+from waypoint.backends.claude_code.adapter import (
+    _context_usage_snapshot_from_message,
+    claude_token_usage_record,
+)
 from waypoint.backends.claude_tty.tailer import transcript_path
 from waypoint.backends.context_usage_source import ContextUsageSource
 
@@ -37,7 +40,9 @@ class TranscriptContextUsageSource(ContextUsageSource):
         self._path = transcript_path(cwd, session_uuid, config_dir)
         self._runtime = runtime
         self._offset = 0
-        self._context_usage_signature: tuple[int, int | None] | None = None
+        self._context_usage_signature: (
+            tuple[int, int | None, tuple[tuple[str, int], ...]] | None
+        ) = None
 
     def _read_new_bytes(self) -> bytes:
         if not self._path.exists():
@@ -90,7 +95,23 @@ class TranscriptContextUsageSource(ContextUsageSource):
         snapshot = _context_usage_snapshot_from_message(model, usage)
         if snapshot is None:
             return
-        sig = (snapshot.used_tokens, snapshot.context_window_tokens)
+        # Aggregate this turn keyed on the provider message id (falling back to
+        # the transcript record uuid). Published independent of the snapshot
+        # dedup below so two distinct turns with identical totals both count;
+        # the ledger key makes a replay from offset zero harmless.
+        record_id = str(message.get("id") or record.get("uuid") or "")
+        token_record = claude_token_usage_record(record_id, snapshot)
+        if token_record is not None:
+            await self._runtime.publish_token_usage_record(
+                self._session_id, token_record
+            )
+        # Include the breakdown so a same-headline/different-composition turn
+        # still refreshes the displayed snapshot (RFC integrity gap #1).
+        sig = (
+            snapshot.used_tokens,
+            snapshot.context_window_tokens,
+            tuple(sorted(snapshot.breakdown.items())),
+        )
         if sig == self._context_usage_signature:
             return
         self._context_usage_signature = sig

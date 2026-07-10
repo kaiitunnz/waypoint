@@ -289,6 +289,12 @@ export function SessionSettingsModal({
       launchFieldsAvailable ||
       launchFieldsDisabledReason !== null);
 
+  // Existing env keys the user can act on (profile-owned/runtime-owned keys are
+  // hidden and stay server-managed).
+  const visibleExistingEnv = existingEnv.filter(
+    (e) => !hiddenEnvKeys.includes(e.key),
+  );
+
   const content = (
     <div
       className="settings-modal-backdrop"
@@ -621,13 +627,9 @@ export function SessionSettingsModal({
                           <div className="settings-field-label">
                             Environment variables
                           </div>
-                          {existingEnv.filter(
-                            (e) => !hiddenEnvKeys.includes(e.key),
-                          ).length > 0 ? (
+                          {visibleExistingEnv.length > 0 ? (
                             <div className="settings-env-list">
-                              {existingEnv
-                                .filter((e) => !hiddenEnvKeys.includes(e.key))
-                                .map((entry) => (
+                              {visibleExistingEnv.map((entry) => (
                                   <div
                                     className="settings-env-row"
                                     key={entry.key}

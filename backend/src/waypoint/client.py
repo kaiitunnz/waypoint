@@ -974,3 +974,27 @@ class WaypointClient:
     def refresh_usage(self) -> dict[str, Any]:
         data: dict[str, Any] = self._request("POST", "/api/usage/refresh").json()
         return data
+
+    # ── telemetry ───────────────────────────────────────────────────────
+
+    def get_telemetry_overview(
+        self,
+        *,
+        preset: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        backends: list[str] | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if preset is not None:
+            params["preset"] = preset
+        if start is not None:
+            params["start"] = start
+        if end is not None:
+            params["end"] = end
+        if backends:
+            params["backend"] = list(backends)
+        data: dict[str, Any] = self._request(
+            "GET", "/api/telemetry/overview", params=params or None
+        ).json()
+        return data

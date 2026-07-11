@@ -15,6 +15,7 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
+    Request,
     Response,
     UploadFile,
     WebSocket,
@@ -89,6 +90,15 @@ from waypoint.storage import (
     Storage,
 )
 from waypoint.tailnet import fetch_snapshot
+from waypoint.telemetry import aggregate as telemetry_aggregate
+from waypoint.telemetry import insights as telemetry_insights
+from waypoint.telemetry.api_models import (
+    InsightDismissResponse,
+    TelemetryInsightsResponse,
+    TokenGroupBy,
+)
+from waypoint.telemetry.facts import TelemetryFactKind
+from waypoint.telemetry.query import parse_range_filter
 from waypoint.usage_dashboard import build_dashboard
 from waypoint.workspace_git import git_file_diff, git_list_files, git_status
 from waypoint.workspace_preview import (
@@ -1078,6 +1088,99 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             context.runtime.list_sessions(), context.runtime.registry
         )
         return refreshed.model_dump(mode="json")
+
+    @app.get("/api/telemetry/overview")
+    async def telemetry_overview(
+        request: Request,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        rng, flt = parse_range_filter(request, context.settings)
+        return telemetry_aggregate.build_overview(
+            context.storage, context.settings, rng, flt
+        ).model_dump(mode="json")
+
+    @app.get("/api/telemetry/tokens")
+    async def telemetry_tokens(
+        request: Request,
+        _: Annotated[str, Depends(token_dependency())],
+        group_by: Annotated[TokenGroupBy, Query()] = "time",
+    ) -> Any:
+        rng, flt = parse_range_filter(request, context.settings)
+        return telemetry_aggregate.build_tokens(
+            context.storage, rng, flt, group_by
+        ).model_dump(mode="json")
+
+    @app.get("/api/telemetry/activity")
+    async def telemetry_activity(
+        request: Request,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        rng, flt = parse_range_filter(request, context.settings)
+        return telemetry_aggregate.build_activity(context.storage, rng, flt).model_dump(
+            mode="json"
+        )
+
+    @app.get("/api/telemetry/health")
+    async def telemetry_health(
+        request: Request,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        rng, flt = parse_range_filter(request, context.settings)
+        return telemetry_aggregate.build_health(
+            context.storage, context.settings, rng, flt
+        ).model_dump(mode="json")
+
+    @app.get("/api/telemetry/drilldown")
+    async def telemetry_drilldown(
+        request: Request,
+        _: Annotated[str, Depends(token_dependency())],
+        kind: Annotated[TelemetryFactKind, Query()],
+        page: Annotated[int, Query(ge=1)] = 1,
+        page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    ) -> Any:
+        rng, flt = parse_range_filter(request, context.settings)
+        return telemetry_aggregate.build_drilldown(
+            context.storage, rng, flt, kind, page, page_size
+        ).model_dump(mode="json")
+
+    @app.get("/api/telemetry/insights")
+    async def telemetry_insights_list(
+        request: Request,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        rng, flt = parse_range_filter(request, context.settings)
+        insights = telemetry_insights.compute_insights(
+            context.storage, context.settings, rng, flt
+        )
+        return TelemetryInsightsResponse(insights=insights).model_dump(mode="json")
+
+    @app.post("/api/telemetry/insights/{signature}/dismiss")
+    async def telemetry_insight_dismiss(
+        signature: str,
+        request: Request,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        rng, _flt = parse_range_filter(request, context.settings)
+        context.storage.telemetry.dismiss_insight(
+            signature, telemetry_aggregate.range_key(rng)
+        )
+        return InsightDismissResponse(signature=signature).model_dump(mode="json")
+
+    @app.get("/api/telemetry/settings")
+    async def telemetry_settings_view(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        return telemetry_aggregate.build_settings(
+            context.storage, context.settings
+        ).model_dump(mode="json")
+
+    @app.delete("/api/telemetry")
+    async def telemetry_delete(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        result = telemetry_aggregate.delete_all(context.storage)
+        context.runtime.mark_telemetry_dirty()
+        return result.model_dump(mode="json")
 
     @app.post("/api/sessions/{session_id}/terminate")
     async def session_terminate(

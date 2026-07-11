@@ -115,6 +115,11 @@ COMPLETION_REFRESH_INTERVAL_SECONDS = 30.0
 # immediately, so this only adds at most this much latency to the live
 # list/status updates a fast stream produces.
 SESSION_BROADCAST_DEBOUNCE_SECONDS = 0.25
+# Debounce window for the ``telemetry_update`` WS broadcast. Fact ingestion
+# can write in small bursts (a turn boundary derives several facts at once);
+# this collapses a burst into one notification per window rather than one
+# per fact write.
+TELEMETRY_BROADCAST_DEBOUNCE_SECONDS = 1.0
 # The per-session structured log (events.jsonl) is a write-only audit/debug
 # artifact; the SQLite store is the source of truth for replay. Flushing every
 # write turns the streaming path into a syscall per event, so we let the buffer
@@ -318,6 +323,11 @@ class SessionRuntime:
         self._session_list_dirty = False
         self._broadcast_wake = asyncio.Event()
         self._broadcast_flusher: asyncio.Task[None] | None = None
+        # Coalesced ``telemetry_update`` WS broadcast (CONTRACT.md §4). Whatever
+        # writes telemetry facts calls ``mark_telemetry_dirty()``; the debounced
+        # loop below is the only thing that publishes onto the broadcast hub.
+        self._telemetry_dirty = asyncio.Event()
+        self._telemetry_broadcast_task: asyncio.Task[None] | None = None
         # Id of the personal-assistant singleton, populated by
         # ``_ensure_assistant_session`` during ``start``. ``None`` when the
         # assistant is disabled or its bootstrap failed.
@@ -338,6 +348,9 @@ class SessionRuntime:
     async def start(self) -> None:
         self._broadcast_flusher = asyncio.create_task(
             self._session_broadcast_loop(), name="session-broadcast-flusher"
+        )
+        self._telemetry_broadcast_task = asyncio.create_task(
+            self._telemetry_broadcast_loop(), name="telemetry-broadcast-flusher"
         )
         for session in self.storage.list_sessions():
             # ERROR sessions get one passive restore attempt at boot — the
@@ -422,6 +435,11 @@ class SessionRuntime:
             with suppress(asyncio.CancelledError):
                 await self._broadcast_flusher
             self._broadcast_flusher = None
+        if self._telemetry_broadcast_task is not None:
+            self._telemetry_broadcast_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._telemetry_broadcast_task
+            self._telemetry_broadcast_task = None
         for entry in self._structured_log_handles.values():
             with suppress(Exception):
                 entry.handle.close()
@@ -3873,6 +3891,25 @@ class SessionRuntime:
             ),
             session_id=session_id,
         )
+
+    def mark_telemetry_dirty(self) -> None:
+        """Signal that telemetry facts changed; debounce-publishes ``telemetry_update``.
+
+        Called by whatever writes telemetry facts (the ingester's drain loop
+        wires this up) so the Telemetry page can refetch instead of polling.
+        The payload carries no data — every telemetry endpoint re-derives its
+        own view from the store on refetch.
+        """
+        self._telemetry_dirty.set()
+
+    async def _telemetry_broadcast_loop(self) -> None:
+        while True:
+            await self._telemetry_dirty.wait()
+            await asyncio.sleep(TELEMETRY_BROADCAST_DEBOUNCE_SECONDS)
+            self._telemetry_dirty.clear()
+            await self.broadcast.publish(
+                SessionEnvelope(type="telemetry_update", payload={})
+            )
 
     async def _session_broadcast_loop(self) -> None:
         while True:

@@ -390,6 +390,36 @@ def usage(
     _emit(_settings_from_ctx(ctx), run)
 
 
+@app.command()
+def telemetry(
+    ctx: typer.Context,
+    preset: Annotated[
+        str | None,
+        typer.Option(help="Range preset: today|7d|30d|custom (default: 7d)."),
+    ] = None,
+    start: Annotated[
+        str | None,
+        typer.Option(help="Custom range start (YYYY-MM-DD or ISO datetime)."),
+    ] = None,
+    end: Annotated[
+        str | None,
+        typer.Option(help="Custom range end (YYYY-MM-DD or ISO datetime)."),
+    ] = None,
+    backend: Annotated[
+        list[str] | None,
+        typer.Option("--backend", help="Filter to this backend (repeatable)."),
+    ] = None,
+) -> None:
+    """Show the telemetry overview (tokens, sessions, turns, alerts) for a range."""
+
+    def run(c: WaypointClient) -> Any:
+        return c.get_telemetry_overview(
+            preset=preset, start=start, end=end, backends=backend
+        )
+
+    _emit(_settings_from_ctx(ctx), run)
+
+
 @app.command("help")
 def help_(
     json_output: Annotated[

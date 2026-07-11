@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -2959,6 +2960,64 @@ async def test_import_claude_thread_creates_session_and_resumes(
     events = storage.list_events(session.id)
     assert events[-1].kind == EventKind.SYSTEM_NOTE
     assert "Imported stored Claude thread" in events[-1].text
+
+
+@pytest.mark.asyncio
+async def test_import_claude_thread_seeds_token_usage_ledger_from_transcript(
+    monkeypatch, tmp_path
+) -> None:
+    # The direct-SDK ``--resume`` continues the session without re-emitting
+    # historical stream-json events, so this on-disk transcript read is the
+    # only source of per-turn model for the imported turns' ledger.
+    runtime, storage, settings = make_runtime(tmp_path)
+    fake = FakeClaudeAdapter()
+    _claude_plugin(runtime).adapter = cast(Any, fake)
+    thread_id = "55555555-5555-4555-8555-555555555555"
+    info = _make_claude_thread_info(
+        id=thread_id,
+        cwd=str(tmp_path),
+        title="Resumed thread",
+        branch="main",
+        repo_name=tmp_path.name,
+        preview="Pick up where we left off",
+    )
+    monkeypatch.setattr(
+        "waypoint.backends.claude_code.plugin.find_local_claude_thread",
+        lambda tid, config_dir=None: info if tid == thread_id else None,
+    )
+
+    claude_config_dir = tmp_path / "claude-config"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_config_dir))
+    project_dir = claude_config_dir / "projects" / "-work"
+    project_dir.mkdir(parents=True)
+    (project_dir / f"{thread_id}.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "msg_1",
+                    "model": "claude-sonnet-4-5",
+                    "content": [{"type": "text", "text": "hi"}],
+                    "usage": {"input_tokens": 10, "output_tokens": 5},
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    session = await runtime.registry.get("claude_code").import_thread(
+        runtime, ClaudeThreadImportRequest(thread_id=thread_id)
+    )
+
+    row = storage.connection.execute(
+        "SELECT usage_json FROM session_token_usage_records WHERE session_id = ?",
+        (session.id,),
+    ).fetchone()
+    assert row is not None
+    usage = json.loads(row["usage_json"])
+    assert usage["model"] == "claude-sonnet-4-5"
+    assert usage["effort"] is None
 
 
 @pytest.mark.asyncio

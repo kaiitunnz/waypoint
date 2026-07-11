@@ -42,7 +42,10 @@ from waypoint.backends.capabilities import BackendCapabilities, ModelSource
 from waypoint.backends.claude_code import side_question as _sq
 from waypoint.backends.claude_code.adapter import seed_context_usage_from_transcript
 from waypoint.backends.claude_code.commands import list_claude_command_completions
-from waypoint.backends.claude_code.history import read_local_claude_history
+from waypoint.backends.claude_code.history import (
+    read_local_claude_history,
+    read_local_claude_token_usage_history,
+)
 from waypoint.backends.claude_code.models import (
     DEFAULT_CLAUDE_MODELS,
     claude_default_model_id,
@@ -1462,6 +1465,16 @@ class ClaudeTtyPlugin:
             reader=_read_thread_history,
             enabled=request.import_history,
         )
+        if request.import_history:
+            # Same on-disk transcript the event seed above just replayed;
+            # the resumed tailer starts at EOF (below), so this is the only
+            # source of per-turn model/effort for the imported turns' ledger.
+            for token_record in await read_local_claude_token_usage_history(
+                request.thread_id
+            ):
+                await runtime.publish_token_usage_record(
+                    session.id, token_record, publish=False
+                )
         await runtime._record_system_event(
             session.id,
             f"Imported stored Claude thread ({cwd})",

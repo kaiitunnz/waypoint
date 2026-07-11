@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 
 import { UsageBar, UsageReadout } from "@/components/UsageReadout";
 import { humaniseBackend, type BackendCatalog } from "@/lib/backends";
+import { UNIFIED_TOKEN_LABELS, unifyTokens } from "@/lib/tokens";
 import type {
   SessionContextUsage,
   SessionRecord,
@@ -103,8 +104,13 @@ export function SessionUsagePill({
       : formatTokens(contextUsage.used_tokens)
     : null;
 
+  // Raw per-backend ledger totals overlap (Codex/OpenCode totals already
+  // include cached/reasoning tokens); unify onto the 5 disjoint buckets
+  // before display so the chip list never double-counts.
+  const hasTokenTotals =
+    tokenUsage !== null && Object.keys(tokenUsage.totals ?? {}).length > 0;
   const tokenUsageTotals = tokenUsage
-    ? Object.entries(tokenUsage.totals ?? {})
+    ? Object.entries(unifyTokens(tokenUsage.source, tokenUsage.totals ?? {}))
     : [];
   // A partial disclosure with nothing tracked (e.g. Codex tmux) carries only a
   // coverage note; the per-turn totals are genuinely unavailable there.
@@ -341,11 +347,11 @@ export function SessionUsagePill({
                       </span>
                     ) : null}
                   </div>
-                  {tokenUsageTotals.length > 0 ? (
+                  {hasTokenTotals ? (
                     <ul className="usage-chips">
                       {tokenUsageTotals.map(([key, value]) => (
                         <li key={key}>
-                          <em>{tokenCategoryLabel(key)}</em>
+                          <em>{UNIFIED_TOKEN_LABELS[key as keyof typeof UNIFIED_TOKEN_LABELS] ?? key}</em>
                           <strong>{formatTokens(value)}</strong>
                         </li>
                       ))}

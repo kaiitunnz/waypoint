@@ -10,7 +10,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import monotonic
 from typing import Any, TextIO, cast
@@ -105,6 +105,7 @@ from waypoint.schemas import (
 from waypoint.settings import Settings
 from waypoint.ssh_master import SshMasterManager, SshMasterStatus
 from waypoint.storage import Storage
+from waypoint.telemetry.ingest import TelemetryIngester
 from waypoint.transports import TransportAdapter
 
 TMUX_TRANSPORT_ID = "tmux"
@@ -115,6 +116,15 @@ COMPLETION_REFRESH_INTERVAL_SECONDS = 30.0
 # immediately, so this only adds at most this much latency to the live
 # list/status updates a fast stream produces.
 SESSION_BROADCAST_DEBOUNCE_SECONDS = 0.25
+# Debounce window for the ``telemetry_update`` WS broadcast. Fact ingestion
+# can write in small bursts (a turn boundary derives several facts at once);
+# this collapses a burst into one notification per window rather than one
+# per fact write.
+TELEMETRY_BROADCAST_DEBOUNCE_SECONDS = 1.0
+# How often the runtime prunes telemetry facts/rollups past their retention
+# windows. Slow cadence — retention is measured in days/months, so a few hours
+# of lag is immaterial and keeps this off any hot path.
+TELEMETRY_MAINTENANCE_INTERVAL_SECONDS = 6 * 60 * 60
 # The per-session structured log (events.jsonl) is a write-only audit/debug
 # artifact; the SQLite store is the source of truth for replay. Flushing every
 # write turns the streaming path into a syscall per event, so we let the buffer
@@ -318,11 +328,32 @@ class SessionRuntime:
         self._session_list_dirty = False
         self._broadcast_wake = asyncio.Event()
         self._broadcast_flusher: asyncio.Task[None] | None = None
+        # Coalesced ``telemetry_update`` WS broadcast (CONTRACT.md §4). Whatever
+        # writes telemetry facts calls ``mark_telemetry_dirty()``; the debounced
+        # loop below is the only thing that publishes onto the broadcast hub.
+        self._telemetry_dirty = asyncio.Event()
+        self._telemetry_broadcast_task: asyncio.Task[None] | None = None
+        # Sessions we've already emitted a CREATED lifecycle fact for this
+        # process (the fact itself is idempotent in the store; this just avoids
+        # re-enqueueing on every subsequent event).
+        self._telemetry_created_seen: set[str] = set()
+        self._telemetry_maintenance_task: asyncio.Task[None] | None = None
         # Id of the personal-assistant singleton, populated by
         # ``_ensure_assistant_session`` during ``start``. ``None`` when the
         # assistant is disabled or its bootstrap failed.
         self.assistant_session_id: str | None = None
         self.registry = registry or get_registry()
+        # Generic telemetry fact ingestion (CONTRACT.md §3). ``None`` when
+        # telemetry is disabled; otherwise the runtime feeds it from its
+        # event/session-update/token-ledger seams and owns its drain + prune.
+        # Constructed after ``self.registry`` so it can resolve a rate-limit
+        # snapshot's account via a plugin's ``rate_limit_account`` for
+        # sessions with no verified-account probe (CC, profile-less Codex).
+        self.telemetry_ingester: TelemetryIngester | None = (
+            TelemetryIngester(storage, self.registry)
+            if settings.telemetry_enabled
+            else None
+        )
         self._transports: dict[str, TransportAdapter] = {
             plugin.transport_id: plugin.transport_view(self)
             for plugin in self.registry.all()
@@ -339,6 +370,19 @@ class SessionRuntime:
         self._broadcast_flusher = asyncio.create_task(
             self._session_broadcast_loop(), name="session-broadcast-flusher"
         )
+        self._telemetry_broadcast_task = asyncio.create_task(
+            self._telemetry_broadcast_loop(), name="telemetry-broadcast-flusher"
+        )
+        if self.telemetry_ingester is not None:
+            await self.telemetry_ingester.start()
+            # Backfill and pruning run off the boot path so a large history
+            # never delays startup or blocks a turn.
+            asyncio.create_task(
+                self._run_telemetry_backfill(), name="telemetry-backfill"
+            )
+            self._telemetry_maintenance_task = asyncio.create_task(
+                self._telemetry_maintenance_loop(), name="telemetry-maintenance"
+            )
         for session in self.storage.list_sessions():
             # ERROR sessions get one passive restore attempt at boot — the
             # plugin's restore_session is responsible for tagging them
@@ -384,6 +428,13 @@ class SessionRuntime:
 
     async def stop(self) -> None:
         await self.scheduler.stop()
+        if self._telemetry_maintenance_task is not None:
+            self._telemetry_maintenance_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._telemetry_maintenance_task
+            self._telemetry_maintenance_task = None
+        if self.telemetry_ingester is not None:
+            await self.telemetry_ingester.stop()
         for task in self.monitor_tasks.values():
             task.cancel()
         for task in self.monitor_tasks.values():
@@ -422,6 +473,11 @@ class SessionRuntime:
             with suppress(asyncio.CancelledError):
                 await self._broadcast_flusher
             self._broadcast_flusher = None
+        if self._telemetry_broadcast_task is not None:
+            self._telemetry_broadcast_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._telemetry_broadcast_task
+            self._telemetry_broadcast_task = None
         for entry in self._structured_log_handles.values():
             with suppress(Exception):
                 entry.handle.close()
@@ -3746,6 +3802,11 @@ class SessionRuntime:
         self, session_id: str, *, publish: bool = True, **updates: Any
     ) -> SessionRecord:
         session = self.storage.update_session(session_id, **updates)
+        if self.telemetry_ingester is not None and (
+            "context_usage" in updates or "rate_limit_usage" in updates
+        ):
+            self.telemetry_ingester.derive_from_session_update(session, updates)
+            self.mark_telemetry_dirty()
         if publish:
             self._publish_session_state(session_id)
         return session
@@ -3816,6 +3877,9 @@ class SessionRuntime:
                 exc_info=True,
             )
             return
+        if self.telemetry_ingester is not None:
+            self.telemetry_ingester.derive_from_token_record(session, record)
+            self.mark_telemetry_dirty()
         if publish:
             self._publish_session_state(session_id)
 
@@ -3837,7 +3901,26 @@ class SessionRuntime:
             ),
             session_id=event.session_id,
         )
+        self._derive_telemetry_from_event(event)
         self._publish_session_state(event.session_id)
+
+    def _derive_telemetry_from_event(self, event: EventRecord) -> None:
+        """Feed the telemetry ingester from the single event chokepoint.
+
+        Errors are swallowed inside the ingester's ``derive_from_*`` methods, so
+        a telemetry hiccup never affects event delivery.
+        """
+        ingester = self.telemetry_ingester
+        if ingester is None:
+            return
+        session = self.storage.get_session(event.session_id)
+        if session is None:
+            return
+        if session.id not in self._telemetry_created_seen:
+            self._telemetry_created_seen.add(session.id)
+            ingester.derive_from_session_created(session)
+        ingester.derive_from_event(session, event)
+        self.mark_telemetry_dirty()
 
     def _publish_session_state(self, session_id: str) -> None:
         # Streaming hot path: mark the session dirty and let the debounced
@@ -3873,6 +3956,54 @@ class SessionRuntime:
             ),
             session_id=session_id,
         )
+
+    def mark_telemetry_dirty(self) -> None:
+        """Signal that telemetry facts changed; debounce-publishes ``telemetry_update``.
+
+        Called by whatever writes telemetry facts (the ingester's drain loop
+        wires this up) so the Telemetry page can refetch instead of polling.
+        The payload carries no data — every telemetry endpoint re-derives its
+        own view from the store on refetch.
+        """
+        self._telemetry_dirty.set()
+
+    async def _telemetry_broadcast_loop(self) -> None:
+        while True:
+            await self._telemetry_dirty.wait()
+            await asyncio.sleep(TELEMETRY_BROADCAST_DEBOUNCE_SECONDS)
+            self._telemetry_dirty.clear()
+            await self.broadcast.publish(
+                SessionEnvelope(type="telemetry_update", payload={})
+            )
+
+    async def _run_telemetry_backfill(self) -> None:
+        ingester = self.telemetry_ingester
+        if ingester is None:
+            return
+        try:
+            await ingester.backfill()
+            self.mark_telemetry_dirty()
+        except Exception:
+            log.debug("telemetry backfill failed", exc_info=True)
+
+    async def _telemetry_maintenance_loop(self) -> None:
+        """Prune expired facts/rollups on a slow cadence (runtime-owned, not a plugin hook)."""
+        interval_seconds = TELEMETRY_MAINTENANCE_INTERVAL_SECONDS
+        while True:
+            await asyncio.sleep(interval_seconds)
+            try:
+                now = datetime.now(UTC)
+                facts_before = now - timedelta(
+                    days=self.settings.telemetry_retention_days
+                )
+                rollups_before = now - timedelta(
+                    days=self.settings.telemetry_rollup_retention_months * 31
+                )
+                self.storage.telemetry.prune(
+                    facts_before=facts_before, rollups_before=rollups_before
+                )
+            except Exception:
+                log.debug("telemetry prune failed", exc_info=True)
 
     async def _session_broadcast_loop(self) -> None:
         while True:

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { UsageInstrumentPanel } from "@/components/UsageInstrumentPanel";
@@ -333,6 +334,9 @@ export function UsageDashboardSection({
               <span className="usage-deck-status-detail">{status.detail}</span>
             </div>
             <div className="usage-deck-status-actions">
+              <Link className="usage-deck-full-link" href="/telemetry">
+                View full telemetry →
+              </Link>
               {status.freshest ? (
                 <span
                   className="usage-deck-status-sweep"

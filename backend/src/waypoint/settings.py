@@ -160,6 +160,18 @@ class Settings(BaseModel):
     # assistant is created. A present block is enabled unless it sets
     # ``enabled: false``.
     assistant: AssistantConfig | None = None
+    # Usage telemetry (session lifecycle/turn/tool/context/limit facts +
+    # daily rollups) backing the Telemetry dashboard.
+    telemetry_enabled: bool = True
+    telemetry_retention_days: int = 90
+    telemetry_rollup_retention_months: int = 13
+    # Context-window occupancy percent thresholds (low, elevated, critical)
+    # that drive the dashboard's context-pressure alerts/insight gates.
+    telemetry_context_thresholds: tuple[int, int, int] = (70, 90, 100)
+    # FR-9: limit-snapshot facts always persist a pseudonymous ``account_key``;
+    # the human-readable ``account_label`` is only ever returned by the API
+    # when this is explicitly turned on (an opt-in local-labels carve-out).
+    telemetry_local_labels: bool = False
 
     @field_validator("plugin_configs", mode="before")
     @classmethod
@@ -304,6 +316,31 @@ def _env_overrides() -> dict[str, Any]:
     if "WAYPOINT_WRITE_STRUCTURED_LOG" in os.environ:
         overrides["write_structured_log"] = os.environ[
             "WAYPOINT_WRITE_STRUCTURED_LOG"
+        ].lower() not in {"0", "false", "no", ""}
+    if "WAYPOINT_TELEMETRY_ENABLED" in os.environ:
+        overrides["telemetry_enabled"] = os.environ[
+            "WAYPOINT_TELEMETRY_ENABLED"
+        ].lower() not in {"0", "false", "no", ""}
+    if "WAYPOINT_TELEMETRY_RETENTION_DAYS" in os.environ:
+        overrides["telemetry_retention_days"] = int(
+            os.environ["WAYPOINT_TELEMETRY_RETENTION_DAYS"]
+        )
+    if "WAYPOINT_TELEMETRY_ROLLUP_RETENTION_MONTHS" in os.environ:
+        overrides["telemetry_rollup_retention_months"] = int(
+            os.environ["WAYPOINT_TELEMETRY_ROLLUP_RETENTION_MONTHS"]
+        )
+    if "WAYPOINT_TELEMETRY_CONTEXT_THRESHOLDS" in os.environ:
+        parts = os.environ["WAYPOINT_TELEMETRY_CONTEXT_THRESHOLDS"].split(",")
+        if len(parts) != 3:
+            raise ValueError(
+                "WAYPOINT_TELEMETRY_CONTEXT_THRESHOLDS must have 3 comma-separated values"
+            )
+        overrides["telemetry_context_thresholds"] = tuple(
+            int(part.strip()) for part in parts
+        )
+    if "WAYPOINT_TELEMETRY_LOCAL_LABELS" in os.environ:
+        overrides["telemetry_local_labels"] = os.environ[
+            "WAYPOINT_TELEMETRY_LOCAL_LABELS"
         ].lower() not in {"0", "false", "no", ""}
     return overrides
 

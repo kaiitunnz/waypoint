@@ -1927,7 +1927,9 @@ class ClaudeCliAdapter:
     ) -> None:
         if self._on_token_usage is None:
             return
-        record = claude_token_usage_record(record_id, snapshot)
+        record = claude_token_usage_record(
+            record_id, snapshot, model=state.resolved_model, effort=state.effort
+        )
         if record is None:
             return
         await self._on_token_usage(state.session_id, record, False)
@@ -2118,12 +2120,19 @@ def seed_context_usage_from_transcript(
 
 
 def claude_token_usage_record(
-    record_id: str, snapshot: SessionContextUsage
+    record_id: str,
+    snapshot: SessionContextUsage,
+    *,
+    model: str | None = None,
+    effort: str | None = None,
 ) -> TokenUsageRecord | None:
     """Per-turn ledger record from a Claude usage snapshot; ``None`` for an
     empty ``record_id`` (never aggregate an identity-less turn).
 
     Claude's categories don't overlap, so their sum is a safe grand total.
+    ``model``/``effort`` are the resolved values in effect for this turn
+    (telemetry's "actual model at turn time"); callers pass ``None`` when they
+    can't be resolved, never a guess.
     """
     if not record_id:
         return None
@@ -2134,6 +2143,8 @@ def claude_token_usage_record(
         observed_at=snapshot.updated_at,
         totals=totals,
         display_total_tokens=sum(totals.values()) or None,
+        model=model,
+        effort=effort,
     )
 
 

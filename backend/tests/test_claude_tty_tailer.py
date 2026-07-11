@@ -45,7 +45,11 @@ def test_transcript_path_honors_config_dir() -> None:
     assert scoped.name == f"{uuid}.jsonl"
 
 
-def _make_session(session_id: str = "sess-1") -> SessionRecord:
+def _make_session(
+    session_id: str = "sess-1",
+    resolved_model: str | None = None,
+    effort: str | None = None,
+) -> SessionRecord:
     now = datetime.now(UTC)
     return SessionRecord(
         id=session_id,
@@ -60,6 +64,8 @@ def _make_session(session_id: str = "sess-1") -> SessionRecord:
         last_event_at=now,
         raw_log_path="/tmp/raw.log",
         structured_log_path="/tmp/structured.log",
+        resolved_model=resolved_model,
+        effort=effort,
         transport_state={
             "tmux_session": session_id,
             "tmux_window": "0",
@@ -136,6 +142,44 @@ async def test_drain_publishes_context_usage_on_assistant_record() -> None:
     assert snapshot.used_tokens == 19
     assert snapshot.context_window_tokens == 200_000
     assert snapshot.source == "claude_code"
+
+
+@pytest.mark.asyncio
+async def test_drain_publishes_token_record_with_resolved_model_and_effort() -> None:
+    session = _make_session(resolved_model="claude-sonnet-4-5", effort="high")
+    runtime = _make_runtime(session)
+    tailer, source = _make_tailer(runtime)
+
+    record = _assistant_record(
+        usage={"input_tokens": 15, "cache_read_input_tokens": 4, "output_tokens": 6}
+    )
+    source.feed(_jsonl(record))
+    await tailer._drain()
+
+    runtime.publish_token_usage_record.assert_called_once()
+    published = runtime.publish_token_usage_record.call_args.args[1]
+    assert published.model == "claude-sonnet-4-5"
+    assert published.effort == "high"
+
+
+@pytest.mark.asyncio
+async def test_token_record_prefers_message_model_over_stale_session_model() -> None:
+    # The session's resolved_model reflects the *latest* turn, not necessarily
+    # this one — a transcript replayed from offset 0 after a resume must not
+    # have every earlier turn rewritten onto the current model.
+    session = _make_session(resolved_model="claude-opus-4-8", effort="high")
+    runtime = _make_runtime(session)
+    tailer, source = _make_tailer(runtime)
+
+    record = _assistant_record(
+        model="claude-sonnet-4-5",
+        usage={"input_tokens": 10, "output_tokens": 5},
+    )
+    source.feed(_jsonl(record))
+    await tailer._drain()
+
+    published = runtime.publish_token_usage_record.call_args.args[1]
+    assert published.model == "claude-sonnet-4-5"
 
 
 @pytest.mark.asyncio

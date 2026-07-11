@@ -30,28 +30,28 @@ class _PluginRegistry(Protocol):
     def get(self, backend_id: str) -> object: ...
 
 
-def account_bucket_for(
+def resolve_account(
     snapshot: SessionRateLimitUsage,
     *,
-    session_id: str,
-    registry: _PluginRegistry,
+    registry: _PluginRegistry | None,
     verified_account_key: str | None = None,
     verified_account_label: str | None = None,
-) -> tuple[str, str]:
-    """Return ``(account_key, account_label)`` for a snapshot.
+) -> tuple[str, str] | None:
+    """Return the raw ``(account_key, account_label)`` for a snapshot, or ``None``.
 
-    Prefers the session's persisted ``verified_account_key``/``label`` (last
-    probed at launch/switch/reattach) when present — it's already in the same
-    ``{backend}:{identity}`` shape ``rate_limit_account`` produces, since both
-    derive from the same probe. Otherwise dispatches the account-scoping
-    decision to the snapshot's agent plugin (``rate_limit_account``), falling
-    back to a session-scoped key labelled with the plugin's human name when
-    the plugin declines (no account info) or is unknown, so probes without
-    org/email metadata still surface as their own bucket instead of
-    collapsing together.
+    Resolution order: the session's persisted ``verified_account_key``/``label``
+    (last probed at launch/switch/reattach) when present — it's already in the
+    same ``{backend}:{identity}`` shape ``rate_limit_account`` produces, since
+    both derive from the same probe — else the snapshot's agent plugin's own
+    ``rate_limit_account``. ``None`` means neither source could attribute the
+    snapshot to an account; callers decide what that means for them (the
+    dashboard buckets it per-session below, telemetry ingest skips it instead
+    of minting a per-session pseudo-account).
     """
     if verified_account_key is not None:
         return verified_account_key, verified_account_label or verified_account_key
+    if registry is None:
+        return None
     plugin = (
         registry.get(snapshot.source) if registry.has_backend(snapshot.source) else None
     )
@@ -61,6 +61,32 @@ def account_bucket_for(
             account = resolver(snapshot)
             if account is not None:
                 return account
+    return None
+
+
+def account_bucket_for(
+    snapshot: SessionRateLimitUsage,
+    *,
+    session_id: str,
+    registry: _PluginRegistry,
+    verified_account_key: str | None = None,
+    verified_account_label: str | None = None,
+) -> tuple[str, str]:
+    """Return ``(account_key, account_label)`` for a snapshot, raw identity.
+
+    Falls back to a session-scoped key labelled with the plugin's human name
+    when ``resolve_account`` declines (no account info) or the plugin is
+    unknown, so probes without org/email metadata still surface as their own
+    bucket instead of collapsing together.
+    """
+    resolved = resolve_account(
+        snapshot,
+        registry=registry,
+        verified_account_key=verified_account_key,
+        verified_account_label=verified_account_label,
+    )
+    if resolved is not None:
+        return resolved
     return (
         f"{snapshot.source}:session:{session_id}",
         _humanise_backend(snapshot.source, registry),

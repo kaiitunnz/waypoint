@@ -22,6 +22,10 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from waypoint.backends.claude_code.adapter import (
+    _context_usage_snapshot_from_message,
+    claude_token_usage_record,
+)
 from waypoint.backends.claude_code.normalize import (
     is_injected_user_turn,
     iter_content_blocks,
@@ -31,7 +35,7 @@ from waypoint.backends.claude_code.threads import (
     parse_iso_timestamp,
     read_local_claude_transcript,
 )
-from waypoint.schemas import EventKind, EventRecord, SessionStatus
+from waypoint.schemas import EventKind, EventRecord, SessionStatus, TokenUsageRecord
 
 
 async def read_local_claude_history(
@@ -40,6 +44,14 @@ async def read_local_claude_history(
     """Read and convert a local Claude transcript for thread-history import."""
     records = await asyncio.to_thread(read_local_claude_transcript, thread_id)
     return convert_transcript_records(session_id, records)
+
+
+async def read_local_claude_token_usage_history(
+    thread_id: str,
+) -> list[TokenUsageRecord]:
+    """Read a local Claude transcript's per-turn ledger rows for thread-history import."""
+    records = await asyncio.to_thread(read_local_claude_transcript, thread_id)
+    return token_usage_records_from_history(records)
 
 
 def convert_transcript_records(
@@ -62,6 +74,35 @@ def convert_transcript_records(
         elif rec_type == "user":
             events.extend(_convert_user(session_id, record, ts))
     return events
+
+
+def token_usage_records_from_history(
+    records: list[dict[str, Any]],
+) -> list[TokenUsageRecord]:
+    """Per-turn ledger rows recoverable from a replayed Claude transcript.
+
+    Only ``assistant`` records carrying a usable ``usage`` block and a model
+    resolvable to a known context window produce a record (mirroring the live
+    normalizers' snapshot gate). ``effort`` is never recoverable from a
+    transcript record — it is a launch-time CLI flag with no per-message
+    trace — so imported turns always surface it as ``None`` rather than a
+    guess.
+    """
+    out: list[TokenUsageRecord] = []
+    for record in records:
+        if record.get("type") != "assistant":
+            continue
+        message: dict[str, Any] = record.get("message") or {}
+        model = str(message.get("model") or "") or None
+        usage: dict[str, Any] = message.get("usage") or {}
+        snapshot = _context_usage_snapshot_from_message(model, usage)
+        if snapshot is None:
+            continue
+        record_id = str(message.get("id") or record.get("uuid") or "")
+        token_record = claude_token_usage_record(record_id, snapshot, model=model)
+        if token_record is not None:
+            out.append(token_record)
+    return out
 
 
 def _convert_assistant(

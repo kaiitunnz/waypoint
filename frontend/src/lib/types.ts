@@ -610,7 +610,8 @@ export interface SessionEnvelope {
     | "board_update"
     | "clipboard_copy"
     | "side_question"
-    | "inbox_update";
+    | "inbox_update"
+    | "telemetry_update";
   payload: Record<string, unknown>;
 }
 
@@ -717,4 +718,284 @@ export interface InboxItem {
   created_at: string;
   updated_at: string;
   blocks: InboxBlock[];
+}
+
+// ── Telemetry (mirrors backend/src/waypoint/telemetry/{facts,api_models}.py —
+// CONTRACT.md §4). Every response echoes the range/filters it was resolved
+// against, so the client renders the server's interpretation, never its own.
+
+export type TelemetryFactKind =
+  | "session_lifecycle"
+  | "turn"
+  | "tool_call"
+  | "context_snapshot"
+  | "limit_snapshot";
+
+export type LifecycleTransition =
+  | "created"
+  | "starting"
+  | "running"
+  | "idle"
+  | "waiting"
+  | "interrupted"
+  | "exited"
+  | "error";
+
+export type TurnKind = "user" | "agent";
+
+export type ToolOutcome =
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "timed_out"
+  | "unknown";
+
+export type TelemetryParentScope = "all" | "top_level" | "children";
+
+export interface TelemetryRange {
+  start: string;
+  end: string;
+  tz: string;
+}
+
+export interface TelemetryFilter {
+  backends: string[];
+  models: string[];
+  repos: string[];
+  tags: string[];
+  sources: string[];
+  transports: string[];
+  parent_scope: TelemetryParentScope;
+  parent_session_id: string | null;
+  include_descendants: boolean;
+}
+
+export type TokenCoverage = "entire" | "tracked_since" | "partial";
+export type TokenGroupBy = "time" | "backend" | "model" | "repo" | "session";
+export type InsightType = "near_limit" | "context_pressure" | "token_volume_change";
+export type InsightSeverity = "info" | "warning" | "critical";
+
+export interface TokenTotals {
+  totals: Record<string, number>;
+  display_total: number | null;
+  safe_total: boolean;
+  coverage: TokenCoverage;
+  meter_coverage_percent: number | null;
+}
+
+export interface SessionCounts {
+  created: number;
+  exited: number;
+  interrupted: number;
+  error: number;
+  active_now: number;
+}
+
+export interface TurnCounts {
+  user: number;
+  agent: number;
+}
+
+export interface ContextSnapshotView {
+  session_id: string;
+  used: number;
+  window: number | null;
+  percent: number | null;
+  stale: boolean;
+  updated_at: string;
+}
+
+export interface LimitSnapshotView {
+  backend: string;
+  account_key: string;
+  // Only populated when the server's `telemetry_local_labels` setting is on
+  // (default off); `account_key` is always a pseudonym, never a raw email/org.
+  account_label: string | null;
+  window_id: string;
+  label: string | null;
+  used_percent: number;
+  resets_at: string | null;
+  stale: boolean;
+  updated_at: string;
+}
+
+export interface TelemetryAlerts {
+  context: ContextSnapshotView[];
+  limits: LimitSnapshotView[];
+}
+
+export interface TelemetryOverview {
+  range: TelemetryRange;
+  filters_echo: TelemetryFilter;
+  tokens: TokenTotals;
+  sessions: SessionCounts;
+  turns: TurnCounts;
+  tool_calls: number;
+  alerts: TelemetryAlerts;
+  limit_card_hidden: boolean;
+  limit_card_hidden_reason: string | null;
+}
+
+export interface TokenSeriesPoint {
+  bucket_start: string;
+  totals: Record<string, number>;
+  display_total: number | null;
+}
+
+export interface TokenGroup {
+  key: string;
+  label: string;
+  totals: Record<string, number>;
+  display_total: number | null;
+  coverage: TokenCoverage;
+}
+
+export interface TelemetryTokens {
+  range: TelemetryRange;
+  filters_echo: TelemetryFilter;
+  series: TokenSeriesPoint[];
+  group_by: TokenGroupBy;
+  groups: TokenGroup[];
+}
+
+export interface ActivityDaily {
+  day: string;
+  user_turns: number;
+  agent_turns: number;
+  tool_calls: number;
+  sessions_created: number;
+}
+
+export interface ActivityHeatmapCell {
+  dow: number;
+  hour: number;
+  count: number;
+}
+
+export interface TelemetryActivity {
+  range: TelemetryRange;
+  filters_echo: TelemetryFilter;
+  daily: ActivityDaily[];
+  heatmap: ActivityHeatmapCell[];
+}
+
+export interface ContextSeriesPoint {
+  bucket_start: string;
+  peak_percent: number | null;
+}
+
+export interface TelemetryHealthContext {
+  current: ContextSnapshotView[];
+  series: ContextSeriesPoint[];
+}
+
+export interface LimitSeriesPoint {
+  bucket_start: string;
+  used_percent: number | null;
+}
+
+export interface LimitSeries {
+  backend: string;
+  account_key: string;
+  // See `LimitSnapshotView.account_label` — same local-labels gate.
+  account_label: string | null;
+  window_id: string;
+  label: string | null;
+  points: LimitSeriesPoint[];
+}
+
+export interface TelemetryHealthLimits {
+  current: LimitSnapshotView[];
+  series: LimitSeries[];
+  hidden: boolean;
+  hidden_reason: string | null;
+}
+
+export interface TelemetryHealth {
+  range: TelemetryRange;
+  filters_echo: TelemetryFilter;
+  context: TelemetryHealthContext;
+  limits: TelemetryHealthLimits;
+}
+
+export interface DrilldownItem {
+  session_id: string;
+  kind: TelemetryFactKind;
+  fact_id: string;
+  occurred_at: string;
+  label: string;
+  backend?: string | null;
+  model?: string | null;
+  repo_name?: string | null;
+  transition?: string | null;
+  turn_kind?: string | null;
+  tool_name?: string | null;
+  tool_category?: string | null;
+  outcome?: string | null;
+  duration_ms?: number | null;
+  used_tokens?: number | null;
+  window_tokens?: number | null;
+  occupancy_percent?: number | null;
+  account_key?: string | null;
+  window_id?: string | null;
+  used_percent?: number | null;
+}
+
+export interface TelemetryDrilldown {
+  range: TelemetryRange;
+  filters_echo: TelemetryFilter;
+  items: DrilldownItem[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface InsightClickThrough {
+  endpoint: string;
+  params: Record<string, unknown>;
+}
+
+export interface Insight {
+  signature: string;
+  type: InsightType;
+  statement: string;
+  metrics: Record<string, unknown>;
+  range: TelemetryRange;
+  filters: TelemetryFilter;
+  click_through: InsightClickThrough;
+  severity: InsightSeverity;
+}
+
+export interface TelemetryInsightsResponse {
+  insights: Insight[];
+}
+
+export interface InsightDismissResponse {
+  signature: string;
+  dismissed: boolean;
+}
+
+export interface TelemetryCoverageInfo {
+  backfill_done: boolean;
+  backfill_through: string | null;
+}
+
+export interface TelemetrySettingsResponse {
+  retention_days_facts: number;
+  retention_months_rollups: number;
+  coverage: TelemetryCoverageInfo;
+  privacy_statement: string;
+  external_export: boolean;
+  content_capture: boolean;
+  nl_enabled: boolean;
+}
+
+export interface TelemetryDeleteCounts {
+  facts: number;
+  rollups: number;
+}
+
+export interface TelemetryDeleteResponse {
+  removed: TelemetryDeleteCounts;
+  transcripts_unaffected: boolean;
 }

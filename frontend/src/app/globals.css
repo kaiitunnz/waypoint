@@ -17,6 +17,23 @@
   --warn: #d99a4a;
   --success: #6cc99a;
   --todo-glyph: #c8a3eb;
+  /* Telemetry categorical series (token categories, backend/model/repo/session
+   * groups). Values are the dataviz skill's validated 8-hue reference set,
+   * fixed order — never cycled or reassigned by value. Status meaning
+   * (good/warn/danger) stays on --success/--warn/--danger; these are pure
+   * identity and always ship with a legend/direct label, never color alone. */
+  --tm-series-1: #3987e5;
+  --tm-series-2: #199e70;
+  --tm-series-3: #c98500;
+  --tm-series-4: #008300;
+  --tm-series-5: #9085e9;
+  --tm-series-6: #e66767;
+  --tm-series-7: #d55181;
+  --tm-series-8: #d95926;
+  /* Re-read context (cache_read) is cheap re-sent prior context and routinely
+   * dwarfs every other bucket — it carries a muted slate rather than a vivid
+   * categorical hue so it reads as background bulk, not headline work. */
+  --tm-token-reread: #47566b;
   /* Thick glass is fully opaque: text-dense sheets sit over bright
    * transcript text, where even a few percent of bleed-through reads as
    * ghost text on a dark ground — and popovers nested inside the composer
@@ -65,6 +82,15 @@ html[data-theme="light"] {
   --warn: #aa6618;
   --success: #257a50;
   --todo-glyph: #7040b0;
+  --tm-series-1: #2a78d6;
+  --tm-series-2: #1baf7a;
+  --tm-series-3: #eda100;
+  --tm-series-4: #008300;
+  --tm-series-5: #4a3aa7;
+  --tm-series-6: #e34948;
+  --tm-series-7: #e87ba4;
+  --tm-series-8: #eb6834;
+  --tm-token-reread: #9a9382;
   --glass-bg: rgba(250, 246, 238, 0.8);
   --glass-bg-thick: rgb(250, 247, 240);
   --glass-line: rgba(90, 78, 58, 0.18);
@@ -15925,5 +15951,1625 @@ html[data-theme="light"] .wp-hl {
     right: -4px;
     background: var(--accent);
     color: var(--bg-base);
+  }
+}
+
+/* ─── Telemetry dashboard ─── */
+
+/* Home entry: bottom-center glass floater (mirrors .inbox-dock/.assistant-fab,
+   centered so it never collides with either corner dock) + a link out of the
+   existing rate-limit "Telemetry" deck. */
+.telemetry-dock {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: max(20px, env(safe-area-inset-bottom));
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 18px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-line);
+  background: var(--glass-bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    var(--shadow);
+  backdrop-filter: var(--glass-blur);
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease;
+}
+
+.telemetry-dock:hover {
+  border-color: var(--accent-cool);
+}
+
+.telemetry-dock-glyph {
+  display: inline-flex;
+  color: var(--accent-cool);
+}
+
+@media (max-width: 640px) {
+  .telemetry-dock {
+    padding: 0;
+    width: 52px;
+    height: 52px;
+    justify-content: center;
+  }
+
+  .telemetry-dock-label {
+    display: none;
+  }
+}
+
+.usage-deck-full-link {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-cool);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.usage-deck-full-link:hover {
+  text-decoration: underline;
+}
+
+/* Page-level grid: every telemetry section is a direct child of .page-shell's
+   grid, spaced by its existing `gap`, so no extra top-level wrapper needed. */
+
+/* Filters */
+.tm-filters {
+  display: grid;
+  gap: 12px;
+}
+
+.tm-filters-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.tm-range-presets,
+.tm-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tm-chip {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+  color: var(--muted);
+  transition:
+    border-color 0.14s ease,
+    color 0.14s ease,
+    background 0.14s ease;
+}
+
+.tm-chip:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.tm-chip.is-active {
+  border-color: var(--accent-cool);
+  background: color-mix(in srgb, var(--accent-cool) 14%, var(--bg-input));
+  color: var(--text-strong);
+}
+
+.tm-custom-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.tm-date-input,
+.tm-text-input {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+.tm-effective-range {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted-soft);
+  white-space: nowrap;
+}
+
+.tm-filters-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-cool);
+}
+
+.tm-filters-toggle-chevron {
+  font-size: 0.7rem;
+}
+
+.tm-filters-body {
+  display: grid;
+  gap: 14px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.tm-filter-field {
+  display: grid;
+  gap: 6px;
+}
+
+.tm-filter-label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.tm-filter-sublabel {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted-soft);
+}
+
+.tm-tag-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+}
+
+.tm-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-cool) 16%, var(--bg-card-soft));
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+}
+
+.tm-tag-chip-remove {
+  color: var(--muted);
+  line-height: 1;
+  font-size: 0.9rem;
+}
+
+.tm-tag-chip-remove:hover {
+  color: var(--danger);
+}
+
+.tm-tag-input {
+  flex: 1;
+  min-width: 120px;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text);
+  padding: 4px;
+}
+
+.tm-tag-input:focus {
+  outline: none;
+}
+
+.tm-parent-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.tm-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+/* Overview cards */
+.tm-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.tm-overview-card {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.tm-overview-card.is-loading {
+  min-height: 180px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-card) 25%,
+    var(--bg-card-soft) 37%,
+    var(--bg-card) 63%
+  );
+  background-size: 400% 100%;
+  animation: tm-shimmer 1.6s ease infinite;
+}
+
+@keyframes tm-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+.tm-overview-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tm-overview-card-head h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  color: var(--text-strong);
+}
+
+.tm-overview-card-badge {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+}
+
+.tm-overview-hero-block {
+  display: grid;
+  gap: 0;
+}
+
+.tm-overview-hero {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 2.15rem;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-overview-hero.is-clear {
+  color: var(--success);
+}
+
+.tm-overview-hero-caption {
+  margin: 3px 0 0;
+  color: var(--muted-soft);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tm-overview-hero-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+/* Hairline shelf under the hero: separates headline from breakdown so the
+   card reads as instrument (numeral + supporting detail), not a flat list. */
+.tm-overview-body {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.tm-overview-empty {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.tm-overview-footnote {
+  margin: 0;
+  color: var(--muted-soft);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.tm-stat-list {
+  margin: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.tm-stat-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.82rem;
+}
+
+.tm-stat-row-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+}
+
+.tm-stat-row-value {
+  font-family: var(--font-mono);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-stat-row.tone-danger .tm-stat-row-value {
+  color: var(--danger);
+}
+
+.tm-stat-row.tone-warn .tm-stat-row-value {
+  color: var(--warn);
+}
+
+.tm-stat-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.tm-stat-swatch.is-newwork {
+  background: var(--tm-series-1);
+}
+
+.tm-stat-swatch.is-reread {
+  background: var(--tm-token-reread);
+}
+
+/* Token tiers (Tokens card) — new work vs re-read context */
+.tm-tier-bar {
+  display: flex;
+  height: 8px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+}
+
+.tm-tier-bar-seg {
+  min-width: 2px;
+}
+
+.tm-tier-bar-seg.is-newwork {
+  background: var(--tm-series-1);
+}
+
+.tm-tier-bar-seg.is-reread {
+  background: var(--tm-token-reread);
+}
+
+.tm-tier-list {
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.tm-tier {
+  display: grid;
+  gap: 4px;
+}
+
+.tm-tier-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tm-tier-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.tm-tier-value {
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sub-rows sit inset under their tier head, one hairline column rule tying
+   the four new-work buckets to the tier they roll up into. */
+.tm-tier-sub {
+  display: grid;
+  gap: 3px;
+  margin-left: 3px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+
+.tm-tier-sub .tm-stat-row {
+  font-size: 0.78rem;
+}
+
+.tm-tier-note {
+  margin: 0 0 0 3px;
+  padding-left: 10px;
+  color: var(--muted-soft);
+  font-size: 0.74rem;
+}
+
+.tm-alerts-card.has-alerts {
+  border-color: var(--line-strong);
+}
+
+.tm-alert-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.tm-alert-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+}
+
+.tm-alert-glyph {
+  font-size: 0.7rem;
+  color: var(--muted-soft);
+}
+
+.tm-alert-row.tone-warn .tm-alert-glyph {
+  color: var(--warn);
+}
+
+.tm-alert-row.tone-danger .tm-alert-glyph {
+  color: var(--danger);
+}
+
+.tm-alert-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.tm-alert-row.tone-warn .tm-alert-text {
+  color: var(--warn);
+}
+
+.tm-alert-row.tone-danger .tm-alert-text {
+  color: var(--danger);
+}
+
+.tm-alert-time {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--muted-soft);
+  white-space: nowrap;
+}
+
+/* Chart cards (shared chrome for TokenChart / ActivityChart / HealthPanel) */
+.tm-chart-card {
+  display: grid;
+  gap: 10px;
+  position: relative;
+}
+
+.tm-chart-card.is-loading {
+  min-height: 220px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-card) 25%,
+    var(--bg-card-soft) 37%,
+    var(--bg-card) 63%
+  );
+  background-size: 400% 100%;
+  animation: tm-shimmer 1.6s ease infinite;
+}
+
+.tm-chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tm-chart-head h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  color: var(--text-strong);
+}
+
+.tm-chart-subhead {
+  margin: 4px 0 -2px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.tm-chart-summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.tm-chart-select-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.tm-chart-select {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+.tm-chart-empty {
+  margin: 0;
+  padding: 24px 0;
+  text-align: center;
+}
+
+.tm-chart-svg {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.tm-chart-gridline {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.tm-chart-axis {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+.tm-chart-axis-label {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  fill: var(--muted-soft);
+}
+
+.tm-rowlabel {
+  font-size: 9px;
+}
+
+.tm-bar-group,
+.tm-hover-column,
+.tm-hover-point {
+  cursor: pointer;
+}
+
+.tm-bar-group:focus,
+.tm-hover-column:focus,
+.tm-hover-point:focus {
+  outline: 2px solid var(--accent-cool);
+  outline-offset: 1px;
+}
+
+.tm-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.tm-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.tm-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+/* Token legend: the five buckets split into their two named tiers so the
+   chart's colour groups read as new-work vs re-read at a glance. */
+.tm-token-legend {
+  gap: 8px 22px;
+}
+
+.tm-legend-tier {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.tm-legend-tier-name {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.tm-legend-tier-name::after {
+  content: "";
+  display: inline-block;
+  width: 1px;
+  height: 11px;
+  margin-left: 12px;
+  vertical-align: -2px;
+  background: var(--line-strong);
+}
+
+/* Hover/focus readout — floating chrome, so it takes the glass recipe. */
+.tm-chart-tooltip {
+  position: fixed;
+  transform: translate(-50%, calc(-100% - 12px));
+  z-index: 60;
+  pointer-events: none;
+  min-width: 140px;
+  max-width: 240px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--glass-line);
+  background: var(--glass-bg-thick);
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    var(--shadow);
+  backdrop-filter: var(--glass-blur);
+}
+
+.tm-chart-tooltip-title {
+  margin: 0 0 4px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  color: var(--muted-soft);
+}
+
+.tm-chart-tooltip-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 3px;
+}
+
+.tm-chart-tooltip-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.8rem;
+}
+
+.tm-chart-tooltip-row strong {
+  color: var(--text-strong);
+}
+
+.tm-chart-tooltip-row .muted {
+  font-size: 0.74rem;
+}
+
+.tm-chart-tooltip-key {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.tm-table-toggle {
+  justify-self: start;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent-cool);
+}
+
+.tm-table-wrap {
+  overflow-x: auto;
+}
+
+.tm-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.tm-data-table th,
+.tm-data-table td {
+  padding: 6px 10px;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-data-table th[scope="row"] {
+  text-align: left;
+  color: var(--muted);
+  font-variant-numeric: normal;
+}
+
+.tm-data-table thead th {
+  color: var(--muted-soft);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Small-multiples session-activity trend */
+.tm-smallmult-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.tm-smallmult {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card-soft);
+}
+
+.tm-smallmult-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tm-smallmult-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.tm-smallmult-total {
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-smallmult-svg {
+  width: 100%;
+  height: 60px;
+  display: block;
+}
+
+.tm-smallmult-area {
+  opacity: 0.14;
+}
+
+.tm-smallmult-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  color: var(--muted-soft);
+}
+
+.tm-chart-footnote {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
+/* Activity heatmap */
+.tm-heatmap-scale {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.tm-heatmap-scale-ramp {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.tm-heatmap-scale-ramp span {
+  width: 12px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid var(--line);
+}
+
+.tm-heatmap-scroll {
+  overflow-x: auto;
+}
+
+.tm-heatmap {
+  border-collapse: collapse;
+  min-width: 760px;
+}
+
+.tm-heatmap-corner {
+  width: 92px;
+}
+
+.tm-heatmap-hour {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--muted-soft);
+  font-weight: 400;
+  padding-bottom: 4px;
+  text-align: center;
+}
+
+.tm-heatmap-dow {
+  text-align: right;
+  padding-right: 10px;
+  font-weight: 400;
+  white-space: nowrap;
+  vertical-align: middle;
+  line-height: 1.15;
+}
+
+.tm-heatmap-dow-name {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text);
+}
+
+.tm-heatmap-dow-date {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--muted-soft);
+}
+
+.tm-heatmap-cell-wrap {
+  padding: 1px;
+}
+
+.tm-heatmap-cell {
+  width: 26px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+}
+
+/* Empty cells carry a faint hollow fill so the grid still reads as a grid
+   and a genuinely-empty slot is unmistakably distinct from a low-count one. */
+.tm-heatmap-cell.is-empty {
+  background: color-mix(in srgb, var(--muted-soft) 8%, transparent);
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.tm-heatmap-cell.is-peak {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.tm-heatmap-cell:hover,
+.tm-heatmap-cell:focus {
+  outline: 2px solid var(--accent-cool);
+  outline-offset: 1px;
+}
+
+/* Health panel */
+.tm-health-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.tm-health-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) minmax(80px, 2fr) 72px auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.82rem;
+}
+
+.tm-health-glyph {
+  color: var(--muted-soft);
+  font-size: 0.7rem;
+}
+
+.tm-health-row.tone-warn .tm-health-glyph {
+  color: var(--warn);
+}
+
+.tm-health-row.tone-danger .tm-health-glyph {
+  color: var(--danger);
+}
+
+.tm-health-label {
+  font-family: var(--font-mono);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tm-health-stale {
+  color: var(--muted-soft);
+}
+
+.tm-health-value {
+  font-family: var(--font-mono);
+  text-align: right;
+  color: var(--text);
+}
+
+.tm-health-tone-word {
+  color: var(--muted-soft);
+  font-size: 0.72rem;
+}
+
+.tm-health-row.tone-warn .tm-health-tone-word {
+  color: var(--warn);
+}
+
+.tm-health-row.tone-danger .tm-health-tone-word {
+  color: var(--danger);
+}
+
+.tm-health-time {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted-soft);
+  white-space: nowrap;
+}
+
+/* Provider-limit account groups */
+.tm-account-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.tm-account-group {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card-soft);
+}
+
+.tm-account-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tm-account-name {
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tm-account-backend {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tm-window-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 12px;
+}
+
+.tm-window-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.tm-window-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tm-window-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.tm-window-glyph {
+  font-size: 0.62rem;
+  color: var(--muted-soft);
+}
+
+.tm-window-row.tone-warn .tm-window-glyph {
+  color: var(--warn);
+}
+
+.tm-window-row.tone-danger .tm-window-glyph {
+  color: var(--danger);
+}
+
+.tm-window-value {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tm-window-trend {
+  margin-top: 2px;
+}
+
+.tm-sparkline-wrap {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.tm-sparkline-scale {
+  order: 2;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
+.tm-sparkline {
+  order: 1;
+  width: 100%;
+  height: 30px;
+  display: block;
+}
+
+.tm-sparkline-area {
+  fill: var(--tm-series-1);
+  opacity: 0.12;
+}
+
+.tm-sparkline-empty,
+.tm-sparkline-single {
+  margin: 0;
+  font-size: 0.74rem;
+  font-family: var(--font-mono);
+}
+
+/* Drilldown */
+/* Aggregate header — gives the list meaning instead of a raw dump. The
+   headline count is the authoritative full-set total; the chips summarise the
+   loaded page (labelled as such below when the set is larger). */
+.tm-drill-summary {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card-soft);
+}
+
+.tm-drill-summary-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.tm-drill-summary-count {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-drill-summary-caption {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.tm-drill-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tm-drill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text);
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+
+.tm-drill-chip.is-rest {
+  color: var(--muted);
+}
+
+.tm-drill-chip-glyph {
+  font-size: 0.66rem;
+  color: var(--muted-soft);
+}
+
+.tm-drill-chip.tone-good .tm-drill-chip-glyph {
+  color: var(--success);
+}
+
+.tm-drill-chip.tone-warn .tm-drill-chip-glyph {
+  color: var(--warn);
+}
+
+.tm-drill-chip.tone-danger .tm-drill-chip-glyph {
+  color: var(--danger);
+}
+
+.tm-drill-chip-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-soft);
+}
+
+.tm-drill-tools {
+  display: grid;
+  gap: 6px;
+}
+
+.tm-drill-tools-label {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.tm-drill-scope {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.tm-drilldown-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0;
+}
+
+.tm-drilldown-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Single status indicator — glyph carries colour, text carries the same
+   meaning for the colour-blind (sr-only in the pip, visible inline in the
+   label), so the outcome is stated once and remains non-colour-safe. */
+.tm-drill-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  color: var(--muted-soft);
+}
+
+.tm-drill-status.tone-good {
+  color: var(--success);
+}
+
+.tm-drill-status.tone-warn {
+  color: var(--warn);
+}
+
+.tm-drill-status.tone-danger {
+  color: var(--danger);
+}
+
+.tm-drill-status-text {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.tm-drilldown-row .tm-drill-status.tone-danger ~ .tm-drilldown-main .tm-drill-status-text {
+  color: var(--danger);
+}
+
+.tm-drilldown-row .tm-drill-status.tone-warn ~ .tm-drilldown-main .tm-drill-status-text {
+  color: var(--warn);
+}
+
+.tm-drill-duration {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted-soft);
+}
+
+.tm-drilldown-main {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.tm-drilldown-label {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tm-drilldown-secondary {
+  font-size: 0.72rem;
+}
+
+.tm-drilldown-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.tm-drilldown-session {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--accent-cool);
+}
+
+.tm-drilldown-time {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--muted-soft);
+  white-space: nowrap;
+}
+
+/* Insight cards */
+.tm-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.tm-insight-card {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.tm-insight-card.tone-warn {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+}
+
+.tm-insight-card.tone-danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+}
+
+.tm-insight-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tm-insight-glyph {
+  font-size: 0.7rem;
+  color: var(--muted-soft);
+}
+
+.tm-insight-card.tone-warn .tm-insight-glyph {
+  color: var(--warn);
+}
+
+.tm-insight-card.tone-danger .tm-insight-glyph {
+  color: var(--danger);
+}
+
+.tm-insight-severity {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.tm-insight-dismiss {
+  margin-left: auto;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--muted-soft);
+  padding: 2px 6px;
+}
+
+.tm-insight-dismiss:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.tm-insight-statement {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.tm-insight-metrics {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.tm-insight-metric {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 0.76rem;
+}
+
+.tm-insight-metric dt {
+  color: var(--muted-soft);
+  text-transform: capitalize;
+}
+
+.tm-insight-metric dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.tm-insight-evidence {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding-block: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--accent-cool);
+}
+
+/* Settings panel */
+.tm-settings-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.tm-settings-toggle {
+  margin-left: 0;
+  justify-content: space-between;
+}
+
+.tm-settings-body {
+  display: grid;
+  gap: 14px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.tm-settings-statement {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.tm-settings-danger {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.tm-settings-delete-result {
+  margin: 0;
+  color: var(--success);
+  font-size: 0.82rem;
+}
+
+@media (max-width: 640px) {
+  .tm-filters-toggle {
+    margin-left: 0;
+  }
+
+  /* The bar's 80px-min column doesn't fit a phone width; give it a
+     dedicated full-width row underneath instead of dropping it (the glyph,
+     numeric %, and tone word alone don't convey the occupancy shape). The
+     `grid-area` assignments live only in this scoped block — declaring them
+     unconditionally on the elements (so they'd also cover the desktop rule,
+     which has no `grid-template-areas`) does NOT safely no-op: an unmatched
+     named `grid-area` still claims its own implicit line/track per element,
+     which silently collapses the desktop 4-column row (verified empirically,
+     not just per spec-reading — every child ends up stacked in one track). */
+  .tm-health-row {
+    grid-template-columns: 16px minmax(0, 1fr) 60px auto;
+    grid-template-areas:
+      "glyph label value time"
+      "bar bar bar bar";
+    row-gap: 6px;
+  }
+
+  .tm-health-glyph {
+    grid-area: glyph;
+  }
+
+  .tm-health-label {
+    grid-area: label;
+  }
+
+  .tm-health-value {
+    grid-area: value;
+  }
+
+  .tm-health-time {
+    grid-area: time;
+  }
+
+  .tm-health-row .usage-bar {
+    grid-area: bar;
+    align-self: center;
+  }
+
+  /* Restack the row: status + primary on top, session/time meta on its own
+     full-width line underneath (see the .tm-health-row note above on why the
+     grid-area assignments must stay scoped to this query). */
+  .tm-drilldown-row {
+    grid-template-columns: 16px minmax(0, 1fr);
+    grid-template-areas:
+      "status main"
+      "meta meta";
+    row-gap: 4px;
+  }
+
+  .tm-drill-status {
+    grid-area: status;
+  }
+
+  .tm-drilldown-main {
+    grid-area: main;
+  }
+
+  .tm-drilldown-meta {
+    grid-area: meta;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  /* ~40px tap targets on touch — desktop keeps the denser flat-instrument
+     sizing; only the box grows (via min-height / padding), not the type
+     scale, so these still read as text links and thin instruments, not
+     inflated buttons. `.back-link`, `.theme-toggle`, and `.pager-btn` are
+     shared beyond this page, so the reach benefits every mobile view. */
+  .tm-filters-toggle,
+  .tm-table-toggle,
+  .back-link {
+    min-height: 40px;
+  }
+
+  .tm-table-toggle {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .tm-chip {
+    min-height: 40px;
+    padding: 0 14px;
+  }
+
+  .tm-chart-select {
+    min-height: 40px;
+  }
+
+  .theme-toggle {
+    width: 40px;
+    height: 40px;
+  }
+
+  .pager-btn {
+    min-height: 40px;
   }
 }

@@ -19,7 +19,7 @@ import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from waypoint.settings import Settings
+from waypoint.settings import Settings, TelemetryNLConfig
 from waypoint.storage import Storage
 from waypoint.telemetry import aggregate
 from waypoint.telemetry import insights as telemetry_insights
@@ -246,6 +246,46 @@ def _parse_reply(
     )
 
 
+def _resolve_oneshot_launch(
+    runtime: "SessionRuntime", config: TelemetryNLConfig
+) -> tuple[str, str | None, str | None, str | None, str | None]:
+    """Resolve the effective (backend, transport, model, account_profile, permission_mode).
+
+    When ``config.preset`` names a resolvable session preset (via
+    ``runtime.presets``, the same ``PresetManager`` ``sessions start
+    --preset`` uses), its spec overrides the individual ``config`` fields
+    wherever the preset itself sets them; the individual fields remain the
+    fallback for whatever the preset leaves unset, or when no preset is
+    configured or it can't be resolved.
+    """
+    backend: str = config.backend
+    transport: str | None = config.transport
+    model: str | None = config.model
+    account_profile: str | None = config.account_profile
+    permission_mode: str | None = None
+    if config.preset:
+        preset = runtime.presets.resolve_ref(config.preset)
+        if preset is None:
+            log.warning(
+                "telemetry_nl.preset=%r not found; falling back to the "
+                "individually configured backend/transport/model",
+                config.preset,
+            )
+        else:
+            spec = preset.spec
+            if spec.backend is not None:
+                backend = spec.backend
+            if spec.transport is not None:
+                transport = spec.transport
+            if spec.model is not None:
+                model = spec.model
+            if spec.account_profile_id is not None:
+                account_profile = spec.account_profile_id
+            if spec.permission_mode is not None:
+                permission_mode = spec.permission_mode
+    return backend, transport, model, account_profile, permission_mode
+
+
 class CodingAgentSummarizer:
     """Default ``Summarizer``: drives ``settings.telemetry_nl``'s configured agent."""
 
@@ -260,22 +300,24 @@ class CodingAgentSummarizer:
                 "telemetry_nl.mode=headless is not implemented yet; "
                 "falling back to the managed one-shot path"
             )
+        backend, transport, model, account_profile, permission_mode = (
+            _resolve_oneshot_launch(self._runtime, config)
+        )
         try:
             payload = json.dumps(request.model_dump(mode="json"), indent=2)
             raw = await self._runtime.run_oneshot(
-                backend=config.backend,
-                transport=config.transport,
-                model=config.model,
-                account_profile=config.account_profile,
+                backend=backend,
+                transport=transport,
+                model=model,
+                account_profile=account_profile,
+                permission_mode=permission_mode,
                 instruction=_INSTRUCTION_PROMPT,
                 payload=payload,
                 timeout_s=GENERATION_TIMEOUT_SECONDS,
             )
             if not raw:
                 return None
-            return _parse_reply(
-                raw, request, backend=config.backend, model=config.model
-            )
+            return _parse_reply(raw, request, backend=backend, model=model)
         except Exception:  # noqa: BLE001
             log.warning("NL-insight summarize failed", exc_info=True)
             return None

@@ -1602,6 +1602,7 @@ class SessionRuntime:
         account_profile: str | None,
         instruction: str,
         payload: str,
+        permission_mode: str | None = None,
         timeout_s: float = ONE_SHOT_DEFAULT_TIMEOUT_SECONDS,
     ) -> str | None:
         """Run one prompt through a throwaway managed session and return the reply.
@@ -1615,6 +1616,10 @@ class SessionRuntime:
         does. Config-dir/account-profile handling comes for free from that
         normal launch path — the reason a managed session (``claude_tty`` by
         default) is preferred over a raw ``claude -p`` subprocess.
+
+        ``permission_mode`` passes through to the launched session unchanged
+        (``None`` lets the backend pick its own default) — the summarizer
+        resolves it from a configured preset when one is set.
 
         ``instruction`` is a short natural-language contract (rules + the
         expected reply shape); ``payload`` is the (potentially large,
@@ -1653,6 +1658,7 @@ class SessionRuntime:
                 model=model,
                 transport=transport,
                 account_profile_id=account_profile,
+                permission_mode=permission_mode,
             )
             session = await self.create_session(request)
             session = self.storage.update_session(

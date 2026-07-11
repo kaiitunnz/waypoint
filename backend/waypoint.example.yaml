@@ -124,6 +124,9 @@ plugin_configs:
 #   account_profile: work
 #   mode: managed                 # managed | headless
 #   interval_hours: 168           # weekly digest cadence
+#   preset: telemetry-digest      # optional session preset (id or name); overrides
+#                                 # backend/transport/model/account_profile above
+#                                 # wherever the preset itself sets them
 
 ssh_targets:
   - id: devbox

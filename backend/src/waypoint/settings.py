@@ -124,6 +124,13 @@ class TelemetryNLConfig(BaseModel):
     # Weekly by default; how long a stored digest must age before the
     # maintenance loop generates a fresh one.
     interval_hours: int = 168
+    # Optional session preset (id or name) resolved via ``PresetManager`` at
+    # launch time, exactly like ``sessions start --preset``. When set, the
+    # preset's backend/transport/model/permission_mode/account_profile
+    # override the individual fields above wherever the preset defines them;
+    # the fields above remain the fallback for whatever the preset leaves
+    # unset (or when no preset is configured at all).
+    preset: str | None = None
 
 
 class Settings(BaseModel):
@@ -408,6 +415,9 @@ def _telemetry_nl_env_overrides(existing: Any) -> dict[str, Any] | None:
         changed = True
     if "WAYPOINT_TELEMETRY_NL_INTERVAL_HOURS" in os.environ:
         nl["interval_hours"] = int(os.environ["WAYPOINT_TELEMETRY_NL_INTERVAL_HOURS"])
+        changed = True
+    if "WAYPOINT_TELEMETRY_NL_PRESET" in os.environ:
+        nl["preset"] = os.environ["WAYPOINT_TELEMETRY_NL_PRESET"]
         changed = True
     return nl if changed else None
 

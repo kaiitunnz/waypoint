@@ -95,11 +95,14 @@ class TranscriptContextUsageSource(ContextUsageSource):
         snapshot = _context_usage_snapshot_from_message(model, usage)
         if snapshot is None:
             return
-        # The ledger's model is the concrete resolved id, distinct from the
-        # alias above used for the window lookup; falls back to the
-        # transcript's resolved API id when the session record lacks it.
-        record_model = (session.resolved_model if session is not None else None) or (
-            str(message.get("model") or "") or None
+        # The ledger's model is the concrete resolved id for *this* turn, taken
+        # from the transcript message itself (authoritative "actual model at
+        # turn time", FR-4) — never the session's mutable latest ``resolved_model``,
+        # which would rewrite earlier turns onto the current model when the
+        # transcript is replayed from offset 0 after a resume. The session model
+        # is only a fallback for a message with no model field.
+        record_model = (str(message.get("model") or "") or None) or (
+            session.resolved_model if session is not None else None
         )
         effort = session.effort if session is not None else None
         # Key on the breakdown too, so a same-total/different-split turn refreshes.

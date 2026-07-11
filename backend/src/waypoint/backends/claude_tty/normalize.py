@@ -49,6 +49,17 @@ from waypoint.schemas import EventKind, SessionStatus
 
 FILE_EDIT_TOOL_NAMES: frozenset[str] = frozenset({"Edit", "Write", "MultiEdit"})
 
+# The Claude CLI stamps locally-fabricated (non-model) messages with this model
+# id. It covers useful synthetic messages too (API-error notices, interrupted
+# partials), so the marker alone is not a suppression signal — it only gates the
+# exact placeholder strings below.
+SYNTHETIC_MODEL_ID = "<synthetic>"
+# Placeholder text the CLI substitutes for an empty assistant turn injected on a
+# `--resume` relaunch (settings-change restart, reconnect, or compaction). It is
+# a fixed CLI constant, and a synthetic message carrying exactly this text is
+# always the phantom — an interrupted partial or error notice has other text.
+RESUME_NOOP_TEXT = "No response requested."
+
 
 class NormalizedEvent:
     __slots__ = ("kind", "text", "metadata", "status")
@@ -181,13 +192,16 @@ class TranscriptNormalizer:
             self._seen_message_ids.add(message_id)
 
         # Resuming a thread (settings-change restart, reconnect, or compaction)
-        # relaunches the CLI with `--resume`, which injects a synthetic first
-        # turn with no model round-trip — a text-only message stamped
-        # stop_reason="stop_sequence" with zero output tokens (e.g. the literal
-        # "No response requested."). Suppress its text so the phantom reply
-        # never reaches the transcript; the result note below still fires, so
-        # the turn resolves to idle even if no real turn follows.
-        is_resume_noop = stop_reason == "stop_sequence" and output_tokens == 0
+        # relaunches the CLI with `--resume`, which injects a synthetic empty
+        # turn with no model round-trip whose text is the fixed placeholder
+        # "No response requested." — it pollutes the transcript as a phantom
+        # reply. It shares its shape (model="<synthetic>", stop_sequence, zero
+        # output tokens) with messages we must keep: interrupted partials and
+        # API-error notices are synthetic and zero-token too. Only the exact
+        # placeholder string on a synthetic message identifies the phantom, so
+        # match that and nothing structural. The result note below still fires,
+        # so the turn resolves to idle even if no real turn follows.
+        is_synthetic = str(message.get("model") or "") == SYNTHETIC_MODEL_ID
 
         events: list[NormalizedEvent] = []
         blocks = iter_content_blocks(message.get("content"))
@@ -199,7 +213,9 @@ class TranscriptNormalizer:
             bt = block.get("type")
             if bt == "text":
                 text = str(block.get("text") or "")
-                if text and not is_resume_noop:
+                if is_synthetic and text.strip() == RESUME_NOOP_TEXT:
+                    continue
+                if text:
                     had_text = True
                     events.append(
                         NormalizedEvent(

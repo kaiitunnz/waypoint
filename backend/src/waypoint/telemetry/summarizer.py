@@ -40,9 +40,7 @@ GENERATION_TIMEOUT_SECONDS = 180.0
 _PATH_LIKE_PATTERN = re.compile(r"(?:/[^/\s\"']+){2,}|~[/\\][^\s\"']+")
 
 _DISCLAIMER = (
-    "AI-generated summary of the deterministic telemetry aggregates above — "
-    "an inference over measured facts, not itself a measured outcome. Verify "
-    "against the linked evidence before treating it as ground truth."
+    "AI-generated from the aggregates above — verify against the linked evidence."
 )
 
 _INSTRUCTION_PROMPT = """You are writing a short natural-language digest of your reader's own AI coding-agent usage telemetry, from the JSON payload below. The reader IS the Waypoint operator whose activity this describes.

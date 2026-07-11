@@ -1584,6 +1584,15 @@ class SessionRuntime:
     def _telemetry_oneshot_workspace_dir(self) -> Path:
         return self.settings.data_dir / "telemetry_oneshot"
 
+    def _oneshot_payload_path(self, session: SessionRecord) -> Path:
+        # Filename is session-scoped (not just the shared workspace dir) so
+        # two one-shots in flight at once (a weekly digest tick racing an
+        # on-demand generate) can't clobber each other's payload file.
+        return (
+            self._telemetry_oneshot_workspace_dir()
+            / f"telemetry_payload_{session.id}.json"
+        )
+
     async def run_oneshot(
         self,
         *,
@@ -1591,10 +1600,11 @@ class SessionRuntime:
         transport: str | None,
         model: str | None,
         account_profile: str | None,
-        prompt: str,
+        instruction: str,
+        payload: str,
         timeout_s: float = ONE_SHOT_DEFAULT_TIMEOUT_SECONDS,
     ) -> str | None:
-        """Run ``prompt`` through a throwaway managed session and return the reply.
+        """Run one prompt through a throwaway managed session and return the reply.
 
         Generic across backends — dispatches through the normal
         ``create_session``/``handle_input`` launch path exactly like every
@@ -1606,13 +1616,33 @@ class SessionRuntime:
         normal launch path — the reason a managed session (``claude_tty`` by
         default) is preferred over a raw ``claude -p`` subprocess.
 
-        Submits ``prompt`` as the one input turn, awaits its completion (status
-        settles to idle/waiting-input, or exited/error on failure) up to
-        ``timeout_s``, then reads back the assembled ``agent_output`` text.
-        Always torn down (terminate + delete) in a ``finally``. Never raises —
-        any failure, including a timeout, returns ``None``.
+        ``instruction`` is a short natural-language contract (rules + the
+        expected reply shape); ``payload`` is the (potentially large,
+        multi-KB) data to act on. How they're delivered is dispatched on the
+        *resolved* (agent, transport) pair's ``has_terminal_pane`` capability
+        — never a backend-id check, so any plugin/transport/preset works:
+
+        - Pane-injected transports (``has_terminal_pane`` — claude_tty,
+          tmux) drive input via ``tmux send-keys``, which has a practical
+          command-length limit a multi-KB payload blows past ("command too
+          long"). ``payload`` is written to a file in the one-shot's
+          workspace instead, and the submitted prompt is just ``instruction``
+          plus a pointer at that filename — the agent reads it with a tool
+          call. Auto-approved generically for any ``TELEMETRY``-source
+          session (see ``_maybe_auto_approve``) so that Read is never left
+          hanging with no one to click approve.
+        - Programmatic-input transports (claude_code structured, codex,
+          opencode) submit ``instruction`` + ``payload`` together as the
+          prompt — no tool call needed, so no approval risk either.
+
+        Awaits turn completion (status settles to idle/waiting-input, or
+        exited/error on failure) up to ``timeout_s``, then reads back the
+        assembled ``agent_output`` text. Always torn down (terminate +
+        delete, payload file included) in a ``finally``. Never raises — any
+        failure, including a timeout, returns ``None``.
         """
         session: SessionRecord | None = None
+        payload_path: Path | None = None
         try:
             workspace = self._telemetry_oneshot_workspace_dir()
             workspace.mkdir(parents=True, exist_ok=True)
@@ -1628,8 +1658,21 @@ class SessionRuntime:
             session = self.storage.update_session(
                 session.id, source=SessionSource.TELEMETRY, pinned_at=datetime.now(UTC)
             )
+            resolved_plugin = self.registry.plugin_for(session)
+            if resolved_plugin.capabilities.has_terminal_pane:
+                payload_path = self._oneshot_payload_path(session)
+                payload_path.write_text(payload, encoding="utf-8")
+                delivered_prompt = (
+                    f"{instruction}\n\n"
+                    f"The data described above is saved as JSON in the file "
+                    f"`{payload_path.name}` in your current working directory. "
+                    "Read that file and produce your answer following the "
+                    "instructions above exactly."
+                )
+            else:
+                delivered_prompt = f"{instruction}\n\n{payload}"
             await self.handle_input(
-                session.id, SessionInputRequest(text=prompt, submit=True)
+                session.id, SessionInputRequest(text=delivered_prompt, submit=True)
             )
             settled = await self._await_oneshot_turn(session.id, timeout_s)
             if not settled:
@@ -1641,6 +1684,9 @@ class SessionRuntime:
             log.warning("telemetry one-shot failed", exc_info=True)
             return None
         finally:
+            if payload_path is not None:
+                with suppress(OSError):
+                    payload_path.unlink(missing_ok=True)
             if session is not None:
                 await self._teardown_oneshot_session(session.id)
 
@@ -4062,6 +4108,32 @@ class SessionRuntime:
         )
         self._derive_telemetry_from_event(event)
         self._publish_session_state(event.session_id)
+        if event.kind == EventKind.APPROVAL_REQUEST:
+            await self._maybe_auto_approve_oneshot(event)
+
+    async def _maybe_auto_approve_oneshot(self, event: EventRecord) -> None:
+        """Auto-approve any approval request on a ``TELEMETRY`` one-shot session.
+
+        A one-shot has no user to click approve; leaving a request pending
+        would hang the turn forever — in particular the file-hand-off Read
+        call pane-injected transports need (CONTRACT-NL fix-nl-input).
+        Generic: dispatches on ``session.source``, never on backend id, so it
+        covers whichever plugin/transport a one-shot happens to be configured
+        with, via the same ``approve()`` entry point the UI uses.
+        """
+        session = self.storage.get_session(event.session_id)
+        if session is None or session.source != SessionSource.TELEMETRY:
+            return
+        metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        approval_id = metadata.get("approval_id")
+        with suppress(Exception):
+            await self.approve(
+                event.session_id,
+                SessionApprovalRequest(
+                    decision="approve",
+                    approval_id=approval_id if isinstance(approval_id, str) else None,
+                ),
+            )
 
     def _derive_telemetry_from_event(self, event: EventRecord) -> None:
         """Feed the telemetry ingester from the single event chokepoint.

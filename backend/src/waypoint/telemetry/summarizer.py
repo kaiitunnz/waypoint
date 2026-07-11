@@ -241,15 +241,14 @@ class CodingAgentSummarizer:
                 "falling back to the managed one-shot path"
             )
         try:
-            prompt = _INSTRUCTION_PROMPT + json.dumps(
-                request.model_dump(mode="json"), indent=2
-            )
+            payload = json.dumps(request.model_dump(mode="json"), indent=2)
             raw = await self._runtime.run_oneshot(
                 backend=config.backend,
                 transport=config.transport,
                 model=config.model,
                 account_profile=config.account_profile,
-                prompt=prompt,
+                instruction=_INSTRUCTION_PROMPT,
+                payload=payload,
                 timeout_s=GENERATION_TIMEOUT_SECONDS,
             )
             if not raw:

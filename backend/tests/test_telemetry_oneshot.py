@@ -6,7 +6,7 @@ stubbing the pieces it calls (``create_session``/``handle_input``/
 ``terminate``/``delete``) rather than driving a real backend plugin/CLI.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,9 @@ from waypoint.schemas import (
 )
 from waypoint.settings import Settings
 from waypoint.storage import Storage
+from waypoint.telemetry.facts import TelemetryFilter, TelemetryRange
+from waypoint.telemetry.nl import NLInsightRequest
+from waypoint.telemetry.summarizer import _parse_reply
 
 
 def _make_runtime(tmp_path: Path) -> tuple[SessionRuntime, Storage]:
@@ -37,13 +40,14 @@ def _session_record(
     *,
     source: SessionSource = SessionSource.MANAGED,
     status: SessionStatus = SessionStatus.IDLE,
+    transport: str = "tmux",
 ) -> SessionRecord:
     now = datetime.now(UTC)
     return SessionRecord(
         id=session_id,
         backend="codex",
         source=source,
-        transport="tmux",
+        transport=transport,
         title="t",
         cwd="/tmp",
         status=status,
@@ -154,7 +158,8 @@ async def test_run_oneshot_returns_assembled_reply_and_tears_down(
         transport=None,
         model=None,
         account_profile=None,
-        prompt="hi",
+        instruction="hi",
+        payload="{}",
         timeout_s=5,
     )
 
@@ -200,7 +205,8 @@ async def test_run_oneshot_relabels_session_to_telemetry_source(
         transport=None,
         model=None,
         account_profile=None,
-        prompt="hi",
+        instruction="hi",
+        payload="{}",
         timeout_s=5,
     )
 
@@ -236,7 +242,8 @@ async def test_run_oneshot_times_out_and_still_tears_down(tmp_path: Path) -> Non
         transport=None,
         model=None,
         account_profile=None,
-        prompt="hi",
+        instruction="hi",
+        payload="{}",
         timeout_s=0.05,
     )
 
@@ -273,7 +280,8 @@ async def test_run_oneshot_returns_none_on_backend_error_status(
         transport=None,
         model=None,
         account_profile=None,
-        prompt="hi",
+        instruction="hi",
+        payload="{}",
         timeout_s=5,
     )
     assert reply is None
@@ -311,3 +319,189 @@ async def test_sweep_orphaned_oneshot_sessions_reaps_only_telemetry_source(
     assert deleted == ["orphan-1"]
     assert storage.get_session("normal-1") is not None
     assert storage.get_session("orphan-1") is None
+
+
+# ── payload delivery: file hand-off vs direct prompt (fix-nl-input) ────────
+
+
+async def test_run_oneshot_pane_transport_uses_file_handoff(tmp_path: Path) -> None:
+    """``has_terminal_pane`` transports (tmux send-keys) can't carry a large
+    payload in the prompt itself — it must be written to a file instead."""
+    runtime, storage = _make_runtime(tmp_path)
+    captured_prompts: list[str] = []
+    payload_json = '{"prose": "payload data"}'
+
+    async def fake_create_session(request: Any) -> SessionRecord:
+        session = _session_record("codex-oneshot", transport="tmux")
+        storage.create_session(session)
+        return session
+
+    async def fake_handle_input(session_id: str, request: Any) -> SessionRecord:
+        captured_prompts.append(request.text)
+        session = storage.get_session(session_id)
+        assert session is not None
+        payload_path = runtime._oneshot_payload_path(session)
+        assert payload_path.exists()
+        assert payload_path.read_text(encoding="utf-8") == payload_json
+        storage.append_event(
+            EventRecord(
+                session_id=session_id,
+                ts=datetime.now(UTC),
+                kind=EventKind.AGENT_OUTPUT,
+                text=('{"prose": "digest done", "evidence": [], "confidence": "low"}'),
+                metadata={"item_id": "m1"},
+                sequence=1,
+            )
+        )
+        return storage.update_session(session_id, status=SessionStatus.IDLE)
+
+    async def fake_terminate(session_id: str, **_kwargs: Any) -> None:
+        pass
+
+    async def fake_delete(session_id: str, **_kwargs: Any) -> None:
+        storage.delete_session(session_id)
+
+    runtime.create_session = fake_create_session  # type: ignore[method-assign, assignment]
+    runtime.handle_input = fake_handle_input  # type: ignore[method-assign]
+    runtime.terminate = fake_terminate  # type: ignore[method-assign, assignment]
+    runtime.delete = fake_delete  # type: ignore[method-assign]
+
+    reply = await runtime.run_oneshot(
+        backend="codex",
+        transport="tmux",
+        model=None,
+        account_profile=None,
+        instruction="Follow the evidence/confidence rules exactly.",
+        payload=payload_json,
+        timeout_s=5,
+    )
+
+    assert reply is not None
+    prompt = captured_prompts[0]
+    assert "Follow the evidence/confidence rules exactly." in prompt
+    assert payload_json not in prompt  # not embedded directly
+    assert "telemetry_payload_codex-oneshot.json" in prompt
+    # File cleaned up after teardown.
+    assert not (
+        runtime._telemetry_oneshot_workspace_dir()
+        / "telemetry_payload_codex-oneshot.json"
+    ).exists()
+
+    now = datetime.now(UTC)
+    request = NLInsightRequest(
+        range=TelemetryRange(start=now - timedelta(days=7), end=now, tz="UTC"),
+        filters=TelemetryFilter(),
+    )
+    insight = _parse_reply(reply, request, backend="codex", model=None)
+    assert insight is not None
+    assert insight.prose == "digest done"
+    assert insight.confidence == "low"
+
+
+async def test_run_oneshot_programmatic_transport_sends_full_payload_in_prompt(
+    tmp_path: Path,
+) -> None:
+    """Structured (non-pane) transports have no length limit — the current
+    "embed the whole payload in the prompt" behavior is preserved for them."""
+    runtime, storage = _make_runtime(tmp_path)
+    captured_prompts: list[str] = []
+    payload_json = '{"prose": "payload data"}'
+
+    async def fake_create_session(request: Any) -> SessionRecord:
+        session = _session_record("codex-oneshot", transport="codex_app_server")
+        storage.create_session(session)
+        return session
+
+    async def fake_handle_input(session_id: str, request: Any) -> SessionRecord:
+        captured_prompts.append(request.text)
+        return storage.update_session(session_id, status=SessionStatus.IDLE)
+
+    async def fake_terminate(session_id: str, **_kwargs: Any) -> None:
+        pass
+
+    async def fake_delete(session_id: str, **_kwargs: Any) -> None:
+        storage.delete_session(session_id)
+
+    runtime.create_session = fake_create_session  # type: ignore[method-assign, assignment]
+    runtime.handle_input = fake_handle_input  # type: ignore[method-assign]
+    runtime.terminate = fake_terminate  # type: ignore[method-assign, assignment]
+    runtime.delete = fake_delete  # type: ignore[method-assign]
+
+    await runtime.run_oneshot(
+        backend="codex",
+        transport="codex_app_server",
+        model=None,
+        account_profile=None,
+        instruction="Follow the rules.",
+        payload=payload_json,
+        timeout_s=5,
+    )
+
+    assert len(captured_prompts) == 1
+    assert "Follow the rules." in captured_prompts[0]
+    assert payload_json in captured_prompts[0]
+
+
+# ── auto-approve for TELEMETRY one-shot sessions ───────────────────────────
+
+
+async def test_auto_approve_hook_approves_pending_request_on_telemetry_session(
+    tmp_path: Path,
+) -> None:
+    runtime, storage = _make_runtime(tmp_path)
+    storage.create_session(_session_record("t1", source=SessionSource.TELEMETRY))
+
+    approve_calls: list[tuple[str, Any]] = []
+
+    async def fake_approve(session_id: str, request: Any) -> SessionRecord:
+        approve_calls.append((session_id, request))
+        session = storage.get_session(session_id)
+        assert session is not None
+        return session
+
+    runtime.approve = fake_approve  # type: ignore[method-assign]
+
+    event = EventRecord(
+        session_id="t1",
+        ts=datetime.now(UTC),
+        kind=EventKind.APPROVAL_REQUEST,
+        text="",
+        metadata={"approval_id": "appr-1"},
+        sequence=1,
+    )
+    await runtime._publish_event(event)
+
+    assert len(approve_calls) == 1
+    session_id, request = approve_calls[0]
+    assert session_id == "t1"
+    assert request.decision == "approve"
+    assert request.approval_id == "appr-1"
+
+
+async def test_auto_approve_hook_ignores_non_telemetry_sessions(
+    tmp_path: Path,
+) -> None:
+    runtime, storage = _make_runtime(tmp_path)
+    storage.create_session(_session_record("m1", source=SessionSource.MANAGED))
+
+    approve_calls: list[str] = []
+
+    async def fake_approve(session_id: str, request: Any) -> SessionRecord:
+        approve_calls.append(session_id)
+        session = storage.get_session(session_id)
+        assert session is not None
+        return session
+
+    runtime.approve = fake_approve  # type: ignore[method-assign]
+
+    event = EventRecord(
+        session_id="m1",
+        ts=datetime.now(UTC),
+        kind=EventKind.APPROVAL_REQUEST,
+        text="",
+        metadata={"approval_id": "appr-1"},
+        sequence=1,
+    )
+    await runtime._publish_event(event)
+
+    assert approve_calls == []

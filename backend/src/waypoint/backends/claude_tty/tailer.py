@@ -218,6 +218,13 @@ class TranscriptTailer:
         snapshot = _context_usage_snapshot_from_message(model, usage)
         if snapshot is None:
             return
+        # The ledger's model is the concrete resolved id, distinct from the
+        # alias above used for the window lookup; falls back to the
+        # transcript's resolved API id when the session record lacks it.
+        record_model = (session.resolved_model if session is not None else None) or (
+            str(message.get("model") or "") or None
+        )
+        effort = session.effort if session is not None else None
         # Key on the breakdown too, so a same-total/different-split turn refreshes.
         sig = (
             snapshot.used_tokens,
@@ -231,7 +238,9 @@ class TranscriptTailer:
         # context publish below won't (a deduped snapshot), so the aggregate
         # increment is never stranded, yet a changed turn still emits one frame.
         record_id = str(message.get("id") or record.get("uuid") or "")
-        token_record = claude_token_usage_record(record_id, snapshot)
+        token_record = claude_token_usage_record(
+            record_id, snapshot, model=record_model, effort=effort
+        )
         if token_record is not None:
             await self._runtime.publish_token_usage_record(
                 self._session_id, token_record, publish=not context_changed

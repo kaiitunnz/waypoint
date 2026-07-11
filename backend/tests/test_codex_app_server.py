@@ -1103,3 +1103,47 @@ async def test_token_usage_record_uses_turn_id_and_provider_total() -> None:
     records.clear()
     await adapter._publish_token_usage(state, "", snapshot)
     assert records == []
+
+
+@pytest.mark.asyncio
+async def test_token_usage_record_threads_sticky_model_and_effort() -> None:
+    records: list[tuple[str, Any, bool]] = []
+
+    async def _emit(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def on_token_usage(session_id: str, record: Any, publish: bool) -> Any:
+        records.append((session_id, record, publish))
+        return None
+
+    fake = FakeCodexClient()
+    adapter = CodexAppServerAdapter(
+        _emit,
+        on_token_usage=on_token_usage,
+        client_factory=lambda *_: cast(CodexClient, fake),
+    )
+    state = CodexSessionState(
+        session_id="sess",
+        cwd="/tmp",
+        client=cast(CodexClient, fake),
+        transport_lock=asyncio.Lock(),
+        thread_id="thread-1",
+        model="gpt-5-codex",
+        effort="high",
+    )
+    snapshot = _context_usage_snapshot_from_thread_token_usage(
+        {
+            "tokenUsage": {
+                "last": {"totalTokens": 100, "inputTokens": 80, "outputTokens": 20},
+                "modelContextWindow": 8192,
+            }
+        }
+    )
+    assert snapshot is not None
+
+    await adapter._publish_token_usage(state, "turn-1", snapshot)
+
+    assert len(records) == 1
+    record = records[0][1]
+    assert record.model == "gpt-5-codex"
+    assert record.effort == "high"

@@ -463,6 +463,46 @@ async def test_token_usage_record_keys_on_session_and_message_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_token_usage_record_threads_resolved_model_and_effort() -> None:
+    records: list[tuple[str, Any, bool]] = []
+
+    async def _emit(*args: object, **kwargs: object) -> None:
+        return None
+
+    async def on_token_usage(session_id: str, record: Any, publish: bool) -> object:
+        records.append((session_id, record, publish))
+        return None
+
+    adapter = OpenCodeAdapter(emit_event=_emit, on_token_usage=on_token_usage)
+    state = OpenCodeSessionState(
+        session_id="local-1",
+        cwd="/tmp",
+        opencode_session_id="ses_1",
+        effort="high",
+    )
+    properties = {
+        "sessionID": "ses_1",
+        "info": {
+            "id": "msg_9",
+            "role": "assistant",
+            "providerID": "opencode",
+            "modelID": "minimax-m2.5-free",
+            "tokens": {"input": 120, "output": 30},
+        },
+    }
+
+    await adapter._maybe_update_context_usage(state, properties)
+
+    assert len(records) == 1
+    record = records[0][1]
+    # The ledger's model is the exact per-message resolved value, not the
+    # session's sticky selection — assembled as "provider/model" to match the
+    # session-level ``state.model`` convention.
+    assert record.model == "opencode/minimax-m2.5-free"
+    assert record.effort == "high"
+
+
+@pytest.mark.asyncio
 async def test_context_usage_background_lookup_publishes_once_ready() -> None:
     calls: list[tuple[str, dict[str, object], bool]] = []
 

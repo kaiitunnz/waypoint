@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,13 +12,36 @@ from waypoint.backends.claude_code.adapter import (
     _is_plan_file_path,
     _read_stream_line,
     claude_cli_mode_for,
+    claude_token_usage_record,
 )
 from waypoint.backends.claude_code.models import (
     DEFAULT_CLAUDE_MODELS,
     claude_default_model_id,
 )
 from waypoint.backends.claude_code.plugin import ClaudeCodePluginConfig
-from waypoint.schemas import EventKind, SessionStatus
+from waypoint.schemas import EventKind, SessionContextUsage, SessionStatus
+
+
+def test_claude_token_usage_record_threads_model_and_effort() -> None:
+    snapshot = SessionContextUsage(
+        used_tokens=15,
+        context_window_tokens=200_000,
+        updated_at=datetime.now(UTC),
+        source="claude_code",
+        breakdown={"input_tokens": 10, "output_tokens": 5},
+    )
+    record = claude_token_usage_record(
+        "msg_1", snapshot, model="claude-sonnet-4-5", effort="high"
+    )
+    assert record is not None
+    assert record.model == "claude-sonnet-4-5"
+    assert record.effort == "high"
+
+    # Absent values are never guessed.
+    bare = claude_token_usage_record("msg_1", snapshot)
+    assert bare is not None
+    assert bare.model is None
+    assert bare.effort is None
 
 
 def test_is_plan_file_path_honors_config_dir() -> None:
@@ -86,6 +110,7 @@ class FakeProcess:
 def _make_adapter(
     emitted: list[tuple[str, EventKind, str, dict[str, Any], SessionStatus]],
     session_updates: list[tuple[str, dict[str, Any], bool]] | None = None,
+    token_usage_records: list[tuple[str, Any, bool]] | None = None,
 ) -> ClaudeCliAdapter:
     async def emit(session_id, kind, text, metadata, status):
         emitted.append((session_id, kind, text, metadata, status))
@@ -95,9 +120,15 @@ def _make_adapter(
             session_updates.append((session_id, updates, publish))
         return updates
 
+    async def on_token_usage(session_id: str, record: Any, publish: bool) -> Any:
+        if token_usage_records is not None:
+            token_usage_records.append((session_id, record, publish))
+        return None
+
     return ClaudeCliAdapter(
         emit,
         on_session_update=update if session_updates is not None else None,
+        on_token_usage=on_token_usage if token_usage_records is not None else None,
     )
 
 
@@ -186,6 +217,40 @@ async def test_dispatch_assistant_emits_text_and_tool_use_events() -> None:
     # text block carries assistant message id; tool_use carries its own tool_use_id as item_id
     assert emitted[0][3]["item_id"] == "msg_1"
     assert emitted[1][3]["tool_use_id"] == "toolu_xyz"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_assistant_threads_resolved_model_and_effort_into_ledger() -> (
+    None
+):
+    emitted: list = []
+    token_usage_records: list[tuple[str, Any, bool]] = []
+    adapter = _make_adapter(emitted, token_usage_records=token_usage_records)
+    state, _ = _attach_state(adapter)
+    # ``state.model`` (family-normalized) drives the context-window lookup
+    # that gates publishing at all; ``state.resolved_model`` (the concrete id)
+    # is the value threaded into the ledger record.
+    state.model = "sonnet"
+    state.resolved_model = "claude-sonnet-4-5"
+    state.effort = "high"
+    event = {
+        "type": "assistant",
+        "message": {
+            "id": "msg_1",
+            "model": "claude-sonnet-4-5",
+            "content": [{"type": "text", "text": "Working on it"}],
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        },
+    }
+
+    await adapter._dispatch(state, event)
+
+    assert len(token_usage_records) == 1
+    session_id, record, _ = token_usage_records[0]
+    assert session_id == "sess"
+    assert record.record_id == "msg_1"
+    assert record.model == "claude-sonnet-4-5"
+    assert record.effort == "high"
 
 
 @pytest.mark.asyncio

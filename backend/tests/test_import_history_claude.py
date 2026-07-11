@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from waypoint.backends.claude_code.history import (
     convert_transcript_records,
     read_local_claude_history,
+    token_usage_records_from_history,
 )
 from waypoint.backends.claude_code.threads import read_local_claude_transcript
 from waypoint.schemas import EventKind
@@ -170,6 +171,82 @@ def test_read_local_claude_transcript_reads_entire_file(monkeypatch, tmp_path) -
     # Longer than the 200-line cap `_read_thread_info` uses for metadata
     # sniffing — history import must not inherit that cap.
     assert len(read_records) == 250
+
+
+def _assistant_with_usage(
+    msg_id: str,
+    model: str,
+    usage: dict,
+    text: str = "hi",
+    ts: str = "2026-04-29T15:47:09.826Z",
+) -> dict:
+    return {
+        "type": "assistant",
+        "timestamp": ts,
+        "message": {
+            "id": msg_id,
+            "model": model,
+            "content": [{"type": "text", "text": text}],
+            "stop_reason": "end_turn",
+            "usage": usage,
+        },
+    }
+
+
+def test_token_usage_records_from_history_threads_model_no_effort() -> None:
+    records = [
+        _assistant_with_usage(
+            "msg1",
+            "claude-sonnet-4-5",
+            {"input_tokens": 10, "output_tokens": 5},
+        )
+    ]
+
+    token_records = token_usage_records_from_history(records)
+
+    assert len(token_records) == 1
+    record = token_records[0]
+    assert record.record_id == "msg1"
+    assert record.model == "claude-sonnet-4-5"
+    # A transcript never records reasoning effort per message — a replayed
+    # turn always surfaces it as unknown rather than guessed.
+    assert record.effort is None
+    assert record.totals == {"input_tokens": 10, "output_tokens": 5}
+
+
+def test_token_usage_records_from_history_skips_unresolvable_model() -> None:
+    # Model not in the Claude catalogue — context window unknown, so the
+    # snapshot gate (shared with the live path) drops it rather than guess.
+    records = [
+        _assistant_with_usage("msg1", "gpt-4", {"input_tokens": 10, "output_tokens": 5})
+    ]
+
+    assert token_usage_records_from_history(records) == []
+
+
+def test_token_usage_records_from_history_skips_non_assistant_and_no_usage() -> None:
+    records = [
+        _user_text("hello"),
+        {"type": "assistant", "message": {"id": "msg1", "model": "claude-sonnet-4-5"}},
+    ]
+
+    assert token_usage_records_from_history(records) == []
+
+
+def test_token_usage_records_from_history_multiple_turns() -> None:
+    records = [
+        _assistant_with_usage(
+            "msg1", "claude-sonnet-4-5", {"input_tokens": 10, "output_tokens": 5}
+        ),
+        _assistant_with_usage(
+            "msg2", "claude-opus-4-8", {"input_tokens": 20, "output_tokens": 8}
+        ),
+    ]
+
+    token_records = token_usage_records_from_history(records)
+
+    assert [r.record_id for r in token_records] == ["msg1", "msg2"]
+    assert [r.model for r in token_records] == ["claude-sonnet-4-5", "claude-opus-4-8"]
 
 
 async def test_read_local_claude_history_converts_full_file(

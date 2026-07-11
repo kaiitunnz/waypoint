@@ -699,7 +699,10 @@ class OpenCodeAdapter:
         message_id = info.get("id")
         if self._on_token_usage is not None and isinstance(message_id, str):
             record = opencode_token_usage_record(
-                f"{state.opencode_session_id}:{message_id}", tokens
+                f"{state.opencode_session_id}:{message_id}",
+                tokens,
+                model=f"{provider_id}/{model_id}",
+                effort=state.effort,
             )
             if record is not None:
                 await self._on_token_usage(state.session_id, record, False)
@@ -1452,12 +1455,19 @@ def _context_usage_snapshot_from_message(
 
 
 def opencode_token_usage_record(
-    record_id: str, tokens: dict[str, Any]
+    record_id: str,
+    tokens: dict[str, Any],
+    *,
+    model: str | None = None,
+    effort: str | None = None,
 ) -> TokenUsageRecord | None:
     """Per-turn ledger record from an OpenCode assistant token dict.
 
     No ``display_total``: ``reasoning`` is a subset of ``output`` for some
-    providers, so a summed grand total isn't safe.
+    providers, so a summed grand total isn't safe. ``model``/``effort`` are
+    the resolved values in effect for this turn (telemetry's "actual model at
+    turn time"); callers pass ``None`` when they can't be resolved, never a
+    guess.
     """
     if not record_id:
         return None
@@ -1481,6 +1491,8 @@ def opencode_token_usage_record(
         observed_at=datetime.now(UTC),
         totals=totals,
         display_total_tokens=None,
+        model=model,
+        effort=effort,
     )
 
 

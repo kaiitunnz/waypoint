@@ -10,7 +10,11 @@ import pytest
 from waypoint.backends.claude_code.usage_source import TranscriptContextUsageSource
 
 
-def _make_runtime(session_model: str | None = None) -> MagicMock:
+def _make_runtime(
+    session_model: str | None = None,
+    resolved_model: str | None = None,
+    effort: str | None = None,
+) -> MagicMock:
     runtime = MagicMock()
     runtime.update_session_fields = AsyncMock()
     runtime.publish_token_usage_record = AsyncMock()
@@ -18,7 +22,9 @@ def _make_runtime(session_model: str | None = None) -> MagicMock:
     # resolve the context window (the transcript only carries the resolved API
     # id, which loses the ``[1m]`` marker). Tests reassign
     # ``get_session.return_value`` to simulate a dynamic model change mid-run.
-    runtime.storage.get_session.return_value = SimpleNamespace(model=session_model)
+    runtime.storage.get_session.return_value = SimpleNamespace(
+        model=session_model, resolved_model=resolved_model, effort=effort
+    )
     return runtime
 
 
@@ -62,7 +68,7 @@ def _assistant_record(
 async def test_drain_publishes_context_usage_on_assistant_record(
     tmp_path: Path,
 ) -> None:
-    runtime = _make_runtime()
+    runtime = _make_runtime(resolved_model="claude-sonnet-4-5", effort="high")
     source = _make_source(runtime, tmp_path)
 
     record = _assistant_record(
@@ -93,6 +99,31 @@ async def test_drain_publishes_context_usage_on_assistant_record(
         "output_tokens": 6,
     }
     assert record.display_total_tokens == 25
+    assert record.model == "claude-sonnet-4-5"
+    assert record.effort == "high"
+
+
+@pytest.mark.asyncio
+async def test_token_record_falls_back_to_transcript_model_without_session(
+    tmp_path: Path,
+) -> None:
+    # No session (or a session with no resolved_model): the record's model
+    # falls back to the transcript's resolved API id rather than going unset.
+    runtime = _make_runtime()
+    runtime.storage.get_session.return_value = None
+    source = _make_source(runtime, tmp_path)
+
+    record = _assistant_record(
+        model="claude-opus-4-8", usage={"input_tokens": 10, "output_tokens": 5}
+    )
+    data = _jsonl(record)
+
+    with patch.object(source, "_read_new_bytes", return_value=data):
+        await source._drain()
+
+    published = runtime.publish_token_usage_record.call_args.args[1]
+    assert published.model == "claude-opus-4-8"
+    assert published.effort is None
 
 
 @pytest.mark.asyncio
@@ -236,7 +267,9 @@ async def test_dynamic_model_change_updates_window(tmp_path: Path) -> None:
         == 1_000_000
     )
     # Switch the configured model to the base alias; next publish uses 200k.
-    runtime.storage.get_session.return_value = SimpleNamespace(model="sonnet")
+    runtime.storage.get_session.return_value = SimpleNamespace(
+        model="sonnet", resolved_model=None, effort=None
+    )
     rec2 = _assistant_record(
         model="claude-sonnet-4-6", usage={"input_tokens": 99, "output_tokens": 1}
     )

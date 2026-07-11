@@ -197,6 +197,10 @@ class TokenUsageRecord(BaseModel):
     observed_at: datetime
     totals: dict[str, int] = Field(default_factory=dict)
     display_total_tokens: int | None = None
+    # The concrete model/effort in effect for this turn (telemetry's "actual
+    # model at turn time", FR-4). ``None`` when the plugin can't resolve one.
+    model: str | None = None
+    effort: str | None = None
 
 
 class TokenUsageInit(BaseModel):

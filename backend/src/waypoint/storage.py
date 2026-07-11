@@ -40,6 +40,7 @@ from waypoint.schemas import (
     TokenUsageInit,
     TokenUsageRecord,
 )
+from waypoint.telemetry.store import TelemetryStore
 
 log = logging.getLogger("waypoint.storage")
 
@@ -183,6 +184,7 @@ class Storage:
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.execute("PRAGMA synchronous=NORMAL")
         self.connection.execute("PRAGMA busy_timeout=5000")
+        self.telemetry = TelemetryStore(self.connection, self._lock)
         self._init_db()
 
     def _init_db(self) -> None:
@@ -416,7 +418,12 @@ class Storage:
                 ON inbox_items(status);
             CREATE INDEX IF NOT EXISTS idx_inbox_updated
                 ON inbox_items(updated_at, id);
+            CREATE INDEX IF NOT EXISTS idx_sessions_status
+                ON sessions(status);
+            CREATE INDEX IF NOT EXISTS idx_sessions_last_event
+                ON sessions(last_event_at);
             """)
+        self.telemetry.init_schema()
         if token_usage_column_is_new:
             self._mark_sessions_pretracked()
         self.connection.commit()
@@ -572,6 +579,7 @@ class Storage:
             "DELETE FROM session_token_usage_records WHERE session_id = ?",
             (session_id,),
         )
+        self.telemetry.delete_session(session_id)
         cursor = self.connection.execute(
             "DELETE FROM sessions WHERE id = ?",
             (session_id,),
@@ -629,6 +637,8 @@ class Storage:
                     {
                         "totals": record.totals,
                         "display_total_tokens": record.display_total_tokens,
+                        "model": record.model,
+                        "effort": record.effort,
                     }
                 ),
             ),
@@ -759,6 +769,8 @@ class Storage:
                 observed_at=observed,
                 totals=usage.get("totals", {}) or {},
                 display_total_tokens=usage.get("display_total_tokens"),
+                model=usage.get("model"),
+                effort=usage.get("effort"),
             )
             if blob is None:
                 blob = {

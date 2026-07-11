@@ -22,6 +22,7 @@ from waypoint.telemetry.facts import (
     TurnFact,
     TurnKind,
 )
+from waypoint.telemetry.store import TelemetryStore
 
 __all__ = [
     "ApprovalDecision",
@@ -34,6 +35,7 @@ __all__ = [
     "TelemetryFactKind",
     "TelemetryFilter",
     "TelemetryRange",
+    "TelemetryStore",
     "ToolCallFact",
     "ToolOutcome",
     "TurnFact",

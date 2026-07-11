@@ -622,10 +622,14 @@ def test_activity_daily_is_zero_not_missing_for_quiet_days(tmp_path: Path) -> No
         start=now - timedelta(days=2), end=now + timedelta(hours=1), tz="UTC"
     )
     activity = aggregate.build_activity(storage, rng, TelemetryFilter())
-    assert len(activity.daily) == 3  # today + 2 prior quiet days
+    # One row per host-tz calendar day the range touches (derived, not a fixed
+    # count — running near host-tz midnight makes ``now + 1h`` cross into an
+    # extra day, which is correct: that day is partially in range).
+    expected_days = aggregate.day_range(rng)
+    assert [d.day for d in activity.daily] == expected_days
     assert sum(d.sessions_created for d in activity.daily) == 1
     quiet_days = [d for d in activity.daily if d.sessions_created == 0]
-    assert len(quiet_days) == 2
+    assert len(quiet_days) == len(expected_days) - 1  # only the created day is busy
     for day in quiet_days:
         assert day.user_turns == 0
         assert day.tool_calls == 0

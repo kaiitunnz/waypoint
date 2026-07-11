@@ -40,11 +40,13 @@ from waypoint.backends.base import (
 )
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
 from waypoint.backends.claude_code import side_question as _sq
+from waypoint.backends.claude_code.adapter import seed_context_usage_from_transcript
 from waypoint.backends.claude_code.commands import list_claude_command_completions
 from waypoint.backends.claude_code.history import read_local_claude_history
 from waypoint.backends.claude_code.models import (
     DEFAULT_CLAUDE_MODELS,
     claude_default_model_id,
+    resolve_import_model_id,
 )
 from waypoint.backends.claude_code.plugin import (
     ClaudeCodePlugin,
@@ -59,6 +61,7 @@ from waypoint.backends.claude_code.threads import (
     ClaudeThreadInfo,
     find_local_claude_thread,
     list_local_claude_threads,
+    local_claude_thread_artifacts,
 )
 from waypoint.backends.claude_tty import pane_dialog
 from waypoint.backends.claude_tty._state import PendingTtyApproval, PendingTtyQuestion
@@ -160,6 +163,7 @@ class ClaudeTtyPlugin:
         supports_custom_cli_args=True,
         supports_thread_discovery=True,
         supports_thread_import=True,
+        supports_thread_import_model=True,
         effort_levels=ClaudeCodePlugin.capabilities.effort_levels,
         model_source=ModelSource.STATIC,
         permission_modes=ClaudeCodePlugin.capabilities.permission_modes,
@@ -1372,7 +1376,15 @@ class ClaudeTtyPlugin:
                 detail="claude thread already imported",
             )
         cwd = str(cwd_path)
+        # Durable effective model — request choice, else the configured default.
+        # Pin it on the resume command so the relaunched CLI is deterministic,
+        # and persist it as the authoritative context-window denominator.
+        effective_model = resolve_import_model_id(
+            request.model, self._config(runtime).default_model_id
+        )
         launch_args = ["--resume", request.thread_id]
+        if effective_model:
+            launch_args += ["--model", effective_model]
         session_id = runtime._generate_session_id(self.id)
         session_dir = runtime._session_dir(session_id)
         raw_log = session_dir / "raw.log"
@@ -1401,6 +1413,16 @@ class ClaudeTtyPlugin:
         with suppress(TmuxError):
             await runtime.tmux.resize_window(target.session, 120, 50)
 
+        # Seed the context pill from the last transcript turn so the correct
+        # window shows immediately; the tailer starts at EOF and would otherwise
+        # leave it empty until the first new assistant message.
+        seeded_context_usage = None
+        artifacts = local_claude_thread_artifacts(request.thread_id, config_dir)
+        if artifacts:
+            seeded_context_usage = await asyncio.to_thread(
+                seed_context_usage_from_transcript, artifacts[0], effective_model
+            )
+
         now = datetime.now(UTC)
         session = SessionRecord(
             id=session_id,
@@ -1426,6 +1448,8 @@ class ClaudeTtyPlugin:
                 "thread_id": request.thread_id,
                 "launch_args": launch_args,
             },
+            model=effective_model,
+            context_usage=seeded_context_usage,
             launch_env=request.launch_env,
         )
         runtime.storage.create_session(session)

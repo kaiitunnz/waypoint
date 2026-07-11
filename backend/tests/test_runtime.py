@@ -2941,6 +2941,9 @@ async def test_import_claude_thread_creates_session_and_resumes(
     assert session.cwd == str(tmp_path)
     assert session.branch == "main"
     assert session.status == SessionStatus.IDLE
+    # No model selected → the configured default (opus[1m]) is persisted as the
+    # durable selection and handed to the resumed adapter.
+    assert session.model == "opus[1m]"
     assert fake.restore_calls == [
         (
             session.id,
@@ -2948,7 +2951,7 @@ async def test_import_claude_thread_creates_session_and_resumes(
             info.id,
             None,
             "default",
-            None,
+            "opus[1m]",
             None,
         )
     ]
@@ -3009,7 +3012,7 @@ async def test_import_claude_thread_remote_target_uses_remote_factory(
             info.id,
             "remote-factory-devbox",
             "default",
-            None,
+            "opus[1m]",
             None,
         )
     ]
@@ -3183,10 +3186,21 @@ async def test_import_claude_thread_terminal_supersedes_launch_mode(
     assert tmux is not None
     resume_calls: list[str] = []
 
+    resume_models: list[str | None] = []
+
     async def _fake_resume(
-        _runtime, *, backend, thread_id, cwd, launch_target_id, title, launch_env=None
+        _runtime,
+        *,
+        backend,
+        thread_id,
+        cwd,
+        launch_target_id,
+        title,
+        launch_env=None,
+        model=None,
     ):
         resume_calls.append(backend)
+        resume_models.append(model)
         session = make_session(
             settings,
             id="tmux-imported",
@@ -3205,6 +3219,8 @@ async def test_import_claude_thread_terminal_supersedes_launch_mode(
     )
 
     assert resume_calls == ["claude_code"]
+    # The configured default flows into the tmux resume wrapper.
+    assert resume_models == ["opus[1m]"]
     assert session.backend == "claude_code"
     assert session.transport == "tmux"
 

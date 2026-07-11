@@ -45,6 +45,11 @@ class AgentCapabilities(_FrozenModel):
     approval_decisions: tuple[str, ...] = ("approve", "decline")
     supports_thread_discovery: bool = False
     supports_thread_import: bool = False
+    # The agent consumes a durable model selection at thread import (persisted on
+    # the session and used as the context-window denominator). Drives whether the
+    # Resume panel offers a model picker; agents without it (Codex today) would
+    # silently drop the field, so the picker must stay hidden for them.
+    supports_thread_import_model: bool = False
     supports_thread_delete: bool = False
     supports_fork: bool = False
     supports_plan_approval: bool = False
@@ -176,6 +181,9 @@ class BackendCapabilities(_FrozenModel):
     terminal_resizable: bool = False
     supports_thread_discovery: bool = False
     supports_thread_import: bool = False
+    # The agent consumes a durable model selection at thread import; drives the
+    # Resume panel's model picker (see AgentCapabilities for the full note).
+    supports_thread_import_model: bool = False
     # The plugin can delete a resumable thread's on-disk transcript via
     # ``delete_thread``. Drives the delete affordance in the frontend's
     # resume list.
@@ -247,6 +255,7 @@ class BackendCapabilities(_FrozenModel):
             approval_decisions=self.approval_decisions,
             supports_thread_discovery=self.supports_thread_discovery,
             supports_thread_import=self.supports_thread_import,
+            supports_thread_import_model=self.supports_thread_import_model,
             supports_thread_delete=self.supports_thread_delete,
             supports_fork=self.supports_fork,
             supports_plan_approval=self.supports_plan_approval,

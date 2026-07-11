@@ -657,7 +657,15 @@ async def test_import_thread_resumes_and_starts_tailer(
     result = await plugin.import_thread(runtime, request)
 
     assert result.transport_state["thread_id"] == "imp-1"
-    assert result.transport_state["launch_args"] == ["--resume", "imp-1"]
+    # The effective model (configured default here) is pinned on the resume
+    # command and persisted so the context-window denominator is deterministic.
+    assert result.transport_state["launch_args"] == [
+        "--resume",
+        "imp-1",
+        "--model",
+        "opus[1m]",
+    ]
+    assert result.model == "opus[1m]"
     assert result.backend == "claude_tty"
     # Resume tails from the end of the already-populated transcript.
     assert captured["tailer_thread_id"] == "imp-1"

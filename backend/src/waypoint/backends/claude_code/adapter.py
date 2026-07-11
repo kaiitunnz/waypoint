@@ -51,6 +51,7 @@ from waypoint.schemas import (
     EventKind,
     SessionContextUsage,
     SessionRateLimitUsage,
+    SessionRecord,
     SessionStatus,
     TokenUsageRecord,
 )
@@ -2057,6 +2058,63 @@ def _context_usage_snapshot_from_message(
         source="claude_code",
         breakdown=breakdown,
     )
+
+
+def rebase_claude_context_usage(
+    session: SessionRecord, *, model: str | None = None
+) -> SessionContextUsage | None:
+    """Recompute a stored Claude snapshot's window from the durable model.
+
+    Keeps ``used_tokens``/source/timestamp/breakdown; changes only
+    ``context_window_tokens``. Uses the explicit ``model`` when given, else the
+    session's durable ``model`` — never the resolved provider id, which loses
+    the ``[1m]`` entitlement. An unknown/absent selection clears the window
+    (``None``) rather than fabricating a default. Returns ``None`` when there is
+    no snapshot to rebase; otherwise returns the (possibly unchanged) snapshot,
+    so the caller can no-op idempotently when nothing changed.
+    """
+    snapshot = session.context_usage
+    if snapshot is None:
+        return None
+    selection = model if model is not None else session.model
+    window = claude_context_window_for_model(selection) if selection else None
+    if snapshot.context_window_tokens == window:
+        return snapshot
+    return snapshot.model_copy(update={"context_window_tokens": window})
+
+
+def seed_context_usage_from_transcript(
+    transcript_path: Path, model: str | None
+) -> SessionContextUsage | None:
+    """Initial context snapshot for a freshly-imported thread.
+
+    Scans the local transcript JSONL for the last real ``assistant`` record
+    carrying a ``usage`` block (skipping ``isSidechain`` subagent turns so the
+    seeded ``used_tokens`` reflects the main conversation) and computes the
+    window from the durable ``model`` — so the context pill shows the correct
+    denominator immediately, without waiting for a new turn. Returns ``None``
+    when the transcript is missing or has no usable assistant usage yet.
+    """
+    try:
+        raw = transcript_path.read_text(encoding="utf-8", errors="replace")
+    except (OSError, UnicodeError):
+        return None
+    for line in reversed(raw.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record: dict[str, Any] = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if record.get("type") != "assistant" or record.get("isSidechain"):
+            continue
+        message: dict[str, Any] = record.get("message") or {}
+        usage: dict[str, Any] = message.get("usage") or {}
+        snapshot = _context_usage_snapshot_from_message(model, usage)
+        if snapshot is not None:
+            return snapshot
+    return None
 
 
 def claude_token_usage_record(

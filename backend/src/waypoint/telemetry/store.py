@@ -555,8 +555,12 @@ class TelemetryStore:
             where, params = self._filter_clause(
                 rng, flt, extra_kind=kind, partial=partial
             )
+            # Stable tiebreak (source, fact_id) after occurred_at so paginated
+            # drilldown results (LIMIT/OFFSET) never reorder or repeat a row
+            # across pages when several facts share the same instant.
             sql = (
-                f"SELECT * FROM telemetry_facts WHERE {where} ORDER BY occurred_at ASC"
+                f"SELECT * FROM telemetry_facts WHERE {where} "
+                "ORDER BY occurred_at ASC, source ASC, fact_id ASC"
             )
             if limit is not None:
                 sql += " LIMIT ?"
@@ -582,6 +586,17 @@ class TelemetryStore:
     def query_rollup(
         self, rng: TelemetryRange, flt: TelemetryFilter
     ) -> list[dict[str, Any]]:
+        """Daily rollup rows matching ``rng``/``flt``.
+
+        The rollup key is ``(day, backend, model, repo, source, transport,
+        is_child)`` — it has no tag or parent-session dimension, so it cannot
+        represent a ``flt.tags`` or ``flt.parent_session_id`` filter. Callers
+        that need those must fall back to a fact scan instead of this method
+        (``aggregate.session_counts_totals`` does); a ``model=`` filter also
+        always zeroes lifecycle-derived counts here since lifecycle facts
+        carry no ``model_at_turn`` and so always land in the ``""`` model
+        bucket (lifecycle isn't model-attributable).
+        """
         with self._lock:
             end_day = _day_key(rng.end)
             # ``end`` is an exclusive instant; only exclude its calendar day when
@@ -638,6 +653,31 @@ class TelemetryStore:
             ).fetchall()
             return {row["signature"] for row in rows}
 
+    def _descendant_session_ids(self, root_id: str) -> set[str]:
+        """Every transitive descendant of ``root_id`` (excluding ``root_id`` itself).
+
+        Walks the ``spawner_session_id`` edges telemetry facts carry — mirrors
+        ``aggregate._descendant_session_ids``'s BFS, fed from facts instead of
+        live ``SessionRecord``s (a session with zero facts contributes nothing
+        to a facts query anyway, so this is sufficient here).
+        """
+        rows = self._conn.execute(
+            "SELECT DISTINCT session_id, spawner_session_id FROM telemetry_facts "
+            "WHERE spawner_session_id IS NOT NULL"
+        ).fetchall()
+        children: dict[str, list[str]] = {}
+        for row in rows:
+            children.setdefault(row["spawner_session_id"], []).append(row["session_id"])
+        found: set[str] = set()
+        queue = list(children.get(root_id, []))
+        while queue:
+            current = queue.pop()
+            if current in found:
+                continue
+            found.add(current)
+            queue.extend(children.get(current, []))
+        return found
+
     def _filter_clause(
         self,
         rng: TelemetryRange,
@@ -671,10 +711,16 @@ class TelemetryStore:
             clauses.append("is_child = 1")
         if flt.parent_session_id:
             if flt.include_descendants:
-                clauses.append("(spawner_session_id = ? OR session_id = ?)")
-                params.extend([flt.parent_session_id, flt.parent_session_id])
+                # The parent's own facts plus every transitive descendant's —
+                # a direct-children-only join would silently drop grandchildren.
+                descendant_ids = self._descendant_session_ids(flt.parent_session_id)
+                ids = [flt.parent_session_id, *sorted(descendant_ids)]
+                clauses.append(f"session_id IN ({', '.join('?' for _ in ids)})")
+                params.extend(ids)
             else:
-                clauses.append("spawner_session_id = ?")
+                # Excluding descendants means the parent's OWN facts only —
+                # not "only its children" (that would be backwards).
+                clauses.append("session_id = ?")
                 params.append(flt.parent_session_id)
         if flt.tags:
             tag_terms = [

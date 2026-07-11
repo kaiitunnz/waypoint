@@ -256,22 +256,57 @@ def test_build_overview_hides_limit_card_when_session_scoped(tmp_path: Path) -> 
     assert scoped.alerts.limits == []
 
 
-def test_build_overview_active_now_ignores_time_range(tmp_path: Path) -> None:
+def test_build_overview_active_now_uses_live_status_for_current_range(
+    tmp_path: Path,
+) -> None:
     storage = Storage(tmp_path / "db.sqlite")
     _make_session(storage, "running", status=SessionStatus.RUNNING)
     _make_session(storage, "exited", status=SessionStatus.EXITED)
 
-    # A range that predates both sessions entirely — active_now must still
-    # reflect live status, not the (empty) fact window.
-    empty_rng = TelemetryRange(
-        start=datetime(2000, 1, 1, tzinfo=UTC),
-        end=datetime(2000, 1, 2, tzinfo=UTC),
-        tz="UTC",
-    )
+    # rng.end covers the live present -> the cheap live-status shortcut applies,
+    # even though no lifecycle facts were seeded to back it.
     overview = aggregate.build_overview(
-        storage, _settings(), empty_rng, TelemetryFilter()
+        storage, _settings(), _full_range(), TelemetryFilter()
     )
     assert overview.sessions.active_now == 1
+
+
+def test_build_overview_active_now_reconstructs_from_facts_for_historical_range(
+    tmp_path: Path,
+) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    now = datetime.now(UTC)
+    _make_session(storage, "s1", status=SessionStatus.EXITED)
+    # Live status says EXITED, but at the historical instant below the
+    # session's last known transition was RUNNING — active_now for a
+    # wholly-past range must reflect *that*, not today's live status.
+    storage.telemetry.ingest_fact(
+        SessionLifecycleFact(
+            fact_id="s1:running",
+            source="runtime",
+            session_id="s1",
+            occurred_at=now - timedelta(days=10),
+            dims=_dims(),
+            transition=LifecycleTransition.RUNNING,
+        )
+    )
+    historical_rng = TelemetryRange(
+        start=now - timedelta(days=11), end=now - timedelta(days=9), tz="UTC"
+    )
+    overview = aggregate.build_overview(
+        storage, _settings(), historical_rng, TelemetryFilter()
+    )
+    assert overview.sessions.active_now == 1
+
+    # A range ending before the RUNNING transition was even recorded sees no
+    # active sessions yet (facts, not live status, govern the past).
+    earlier_rng = TelemetryRange(
+        start=now - timedelta(days=20), end=now - timedelta(days=15), tz="UTC"
+    )
+    earlier_overview = aggregate.build_overview(
+        storage, _settings(), earlier_rng, TelemetryFilter()
+    )
+    assert earlier_overview.sessions.active_now == 0
 
 
 def test_build_overview_empty_range_is_zero_not_error(tmp_path: Path) -> None:
@@ -720,3 +755,183 @@ def test_token_volume_change_omitted_below_percent_gate(tmp_path: Path) -> None:
         storage, _settings(), rng, TelemetryFilter()
     )
     assert [i for i in insights if i.type == "token_volume_change"] == []
+
+
+# ── fix-api regression tests (review findings 1-3) ────────────────────────
+
+
+def test_overview_tag_filter_keeps_session_counts_consistent_with_tokens(
+    tmp_path: Path,
+) -> None:
+    """Finding 1: query_rollup can't represent a tag filter, so the fact-scan
+    fallback must be used for lifecycle/turn counts too — not just tokens."""
+    storage = Storage(tmp_path / "db.sqlite")
+    now = _make_session(storage, "tagged")
+    _make_session(storage, "untagged")
+
+    storage.telemetry.ingest_fact(
+        SessionLifecycleFact(
+            fact_id="tagged:created",
+            source="runtime",
+            session_id="tagged",
+            occurred_at=now,
+            dims=_dims(),
+            transition=LifecycleTransition.CREATED,
+        ),
+        tags={"role": "lead"},
+    )
+    storage.telemetry.ingest_fact(
+        SessionLifecycleFact(
+            fact_id="untagged:created",
+            source="runtime",
+            session_id="untagged",
+            occurred_at=now,
+            dims=_dims(),
+            transition=LifecycleTransition.CREATED,
+        )
+    )
+    storage.record_token_usage(
+        "tagged",
+        TokenUsageRecord(
+            record_id="tagged:turn",
+            source="codex",
+            observed_at=now,
+            totals={"input_tokens": 500},
+            display_total_tokens=500,
+        ),
+        init=TokenUsageInit(coverage="entire_waypoint_session", observed_from=now),
+    )
+    storage.telemetry.ingest_fact(
+        TurnFact(
+            fact_id="tagged:turn",
+            source="codex",
+            session_id="tagged",
+            occurred_at=now,
+            dims=_dims(),
+            turn_kind=TurnKind.AGENT,
+        ),
+        tags={"role": "lead"},
+    )
+    storage.record_token_usage(
+        "untagged",
+        TokenUsageRecord(
+            record_id="untagged:turn",
+            source="codex",
+            observed_at=now,
+            totals={"input_tokens": 900},
+            display_total_tokens=900,
+        ),
+        init=TokenUsageInit(coverage="entire_waypoint_session", observed_from=now),
+    )
+    storage.telemetry.ingest_fact(
+        TurnFact(
+            fact_id="untagged:turn",
+            source="codex",
+            session_id="untagged",
+            occurred_at=now,
+            dims=_dims(),
+            turn_kind=TurnKind.AGENT,
+        )
+    )
+
+    overview = aggregate.build_overview(
+        storage, _settings(), _full_range(), TelemetryFilter(tags=["role:lead"])
+    )
+    # Before the fix, sessions/turns came from the (tag-blind) rollup and
+    # would include BOTH sessions while tokens (always fact-derived) included
+    # only the tagged one — an internally inconsistent response.
+    assert overview.sessions.created == 1
+    assert overview.turns.agent == 1
+    assert overview.tokens.totals == {"input_tokens": 500}
+    assert overview.tokens.display_total == 500
+
+
+def test_transitive_descendants_scope_tokens_and_drilldown(tmp_path: Path) -> None:
+    """Finding 3: exclude-descendants means the parent's own facts only;
+    include-descendants must resolve the full transitive descendant set."""
+    storage = Storage(tmp_path / "db.sqlite")
+    now = _make_session(storage, "parent")
+    _make_session(storage, "child", spawner_session_id="parent")
+    _make_session(storage, "grandchild", spawner_session_id="child")
+
+    spawner_by_session = {"parent": None, "child": "parent", "grandchild": "child"}
+    for session_id, tokens in (("parent", 100), ("child", 200), ("grandchild", 300)):
+        spawner = spawner_by_session[session_id]
+        dims = _dims(spawner_session_id=spawner, is_child=spawner is not None)
+        storage.record_token_usage(
+            session_id,
+            TokenUsageRecord(
+                record_id=f"{session_id}:turn",
+                source="codex",
+                observed_at=now,
+                totals={"input_tokens": tokens},
+                display_total_tokens=tokens,
+            ),
+            init=TokenUsageInit(coverage="entire_waypoint_session", observed_from=now),
+        )
+        storage.telemetry.ingest_fact(
+            TurnFact(
+                fact_id=f"{session_id}:turn",
+                source="codex",
+                session_id=session_id,
+                occurred_at=now,
+                dims=dims,
+                turn_kind=TurnKind.AGENT,
+            )
+        )
+        storage.telemetry.ingest_fact(
+            ToolCallFact(
+                fact_id=f"{session_id}:tool",
+                source="codex",
+                session_id=session_id,
+                occurred_at=now,
+                dims=dims,
+                tool_name="Read",
+                outcome=ToolOutcome.SUCCEEDED,
+            )
+        )
+
+    include_all = aggregate.build_tokens(
+        storage,
+        _full_range(),
+        TelemetryFilter(parent_session_id="parent", include_descendants=True),
+        "session",
+    )
+    assert {g.key for g in include_all.groups} == {"parent", "child", "grandchild"}
+
+    own_only = aggregate.build_tokens(
+        storage,
+        _full_range(),
+        TelemetryFilter(parent_session_id="parent", include_descendants=False),
+        "session",
+    )
+    assert {g.key for g in own_only.groups} == {"parent"}
+
+    include_from_child = aggregate.build_tokens(
+        storage,
+        _full_range(),
+        TelemetryFilter(parent_session_id="child", include_descendants=True),
+        "session",
+    )
+    assert {g.key for g in include_from_child.groups} == {"child", "grandchild"}
+
+    drilldown_all = aggregate.build_drilldown(
+        storage,
+        _full_range(),
+        TelemetryFilter(parent_session_id="parent", include_descendants=True),
+        TelemetryFactKind.TOOL_CALL,
+        1,
+        10,
+    )
+    assert drilldown_all.total == 3
+
+    drilldown_own = aggregate.build_drilldown(
+        storage,
+        _full_range(),
+        TelemetryFilter(parent_session_id="parent", include_descendants=False),
+        TelemetryFactKind.TOOL_CALL,
+        1,
+        10,
+    )
+    assert drilldown_own.total == 1
+    assert drilldown_own.items[0].session_id == "parent"

@@ -55,6 +55,8 @@ from waypoint.telemetry.api_models import (
     TurnCounts,
 )
 from waypoint.telemetry.facts import (
+    ACTIVE_TRANSITIONS,
+    LifecycleTransition,
     TelemetryFactKind,
     TelemetryFilter,
     TelemetryRange,
@@ -357,7 +359,9 @@ def _session_matches_filter(
         if flt.include_descendants:
             if session.id != flt.parent_session_id and session.id not in descendant_ids:
                 return False
-        elif session.spawner_session_id != flt.parent_session_id:
+        # Excluding descendants means the parent's OWN session only — not
+        # "only its direct children" (that would be backwards).
+        elif session.id != flt.parent_session_id:
             return False
     for term in flt.tags:
         parsed = _parse_tag_term(term)
@@ -369,12 +373,25 @@ def _session_matches_filter(
     return True
 
 
-def count_active_sessions(storage: Storage, flt: TelemetryFilter) -> int:
-    """Point-in-time count of sessions in a live state matching ``flt`` (FR-3).
+def count_active_sessions(
+    storage: Storage, flt: TelemetryFilter, rng: TelemetryRange
+) -> int:
+    """Point-in-time count of sessions active at ``rng.end`` matching ``flt`` (FR-3).
 
-    Unlike every other overview metric this ignores the time range — "active
-    now" is evaluated against live ``SessionRecord.status``, not a fact window.
+    "Active now" means the state at the range's end instant, not something
+    summed over the range. When ``rng.end`` covers the live present, the
+    cheap live-``SessionRecord.status`` shortcut is exact and avoids a fact
+    scan. For a wholly historical range (``rng.end`` in the past) live status
+    reflects the session's state *now*, not at ``rng.end``, so it must instead
+    be reconstructed from the latest ``SessionLifecycleFact.transition``
+    recorded before that instant.
     """
+    if rng.end >= datetime.now(UTC):
+        return _count_active_sessions_live(storage, flt)
+    return _count_active_sessions_historical(storage, flt, rng.end)
+
+
+def _count_active_sessions_live(storage: Storage, flt: TelemetryFilter) -> int:
     sessions = storage.list_sessions()
     descendant_ids = (
         _descendant_session_ids(sessions, flt.parent_session_id)
@@ -389,21 +406,106 @@ def count_active_sessions(storage: Storage, flt: TelemetryFilter) -> int:
     )
 
 
+def _count_active_sessions_historical(
+    storage: Storage, flt: TelemetryFilter, at: datetime
+) -> int:
+    as_of_range = TelemetryRange(
+        start=ALL_TIME_RANGE.start, end=at, tz=ALL_TIME_RANGE.tz
+    )
+    rows = storage.telemetry.query_facts(
+        TelemetryFactKind.SESSION_LIFECYCLE, as_of_range, flt
+    )
+    latest: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        existing = latest.get(row["session_id"])
+        if existing is None or row["occurred_at"] > existing["occurred_at"]:
+            latest[row["session_id"]] = row
+    return sum(1 for row in latest.values() if row["transition"] in ACTIVE_TRANSITIONS)
+
+
 # ── /overview ─────────────────────────────────────────────────────────────
+
+
+def _needs_fact_scan_for_session_counts(flt: TelemetryFilter) -> bool:
+    """Whether lifecycle/turn/tool counts must come from a fact scan, not the rollup.
+
+    ``query_rollup`` is keyed on ``(day, backend, model, repo, source,
+    transport, is_child)`` — it has no tag or parent-session dimension. Under
+    a ``flt.tags`` or ``flt.parent_session_id`` filter, using it anyway would
+    silently mix UNFILTERED session/turn/tool counts with the (correctly)
+    FILTERED fact-derived token totals in the same response. Fact scans
+    respect every ``TelemetryFilter`` dimension via ``_filter_clause``, so
+    fall back to them whenever the rollup can't represent the active filter.
+    """
+    return bool(flt.tags) or flt.parent_session_id is not None
+
+
+def _lifecycle_turn_tool_totals_from_rollup(
+    storage: Storage, rng: TelemetryRange, flt: TelemetryFilter
+) -> tuple[dict[str, int], int, int, int]:
+    lifecycle: dict[str, int] = {}
+    turns_user = turns_agent = tool_calls = 0
+    for row in storage.telemetry.query_rollup(rng, flt):
+        metrics = json.loads(row["metrics_json"])
+        for transition, count in (metrics.get("lifecycle") or {}).items():
+            lifecycle[transition] = lifecycle.get(transition, 0) + count
+        turns_user += metrics.get("turns_user", 0)
+        turns_agent += metrics.get("turns_agent", 0)
+        tool_calls += metrics.get("tool_calls", 0)
+    return lifecycle, turns_user, turns_agent, tool_calls
+
+
+def _lifecycle_turn_tool_totals_from_facts(
+    storage: Storage, rng: TelemetryRange, flt: TelemetryFilter
+) -> tuple[dict[str, int], int, int, int]:
+    lifecycle: dict[str, int] = {}
+    for row in storage.telemetry.query_facts(
+        TelemetryFactKind.SESSION_LIFECYCLE, rng, flt
+    ):
+        lifecycle[row["transition"]] = lifecycle.get(row["transition"], 0) + 1
+    turns_user = turns_agent = 0
+    for row in storage.telemetry.query_facts(TelemetryFactKind.TURN, rng, flt):
+        if row["turn_kind"] == TurnKind.USER:
+            turns_user += 1
+        elif row["turn_kind"] == TurnKind.AGENT:
+            turns_agent += 1
+    tool_calls = storage.telemetry.count_facts(TelemetryFactKind.TOOL_CALL, rng, flt)
+    return lifecycle, turns_user, turns_agent, tool_calls
+
+
+def session_counts_totals(
+    storage: Storage, rng: TelemetryRange, flt: TelemetryFilter
+) -> tuple[dict[str, int], int, int, int]:
+    """Lifecycle/turn/tool totals for ``rng``/``flt`` (``lifecycle, user, agent, tool_calls``).
+
+    Uses the daily rollup when it can represent every active filter
+    dimension; falls back to a direct fact scan under a tag or
+    parent-session filter, since the rollup has neither dimension (see
+    ``_needs_fact_scan_for_session_counts``). Note: a ``model=`` filter
+    always zeroes the lifecycle bucket either way — lifecycle facts carry no
+    ``model_at_turn`` (lifecycle isn't model-attributable), so they never
+    match a concrete model value in either the rollup or a fact scan.
+    """
+    if _needs_fact_scan_for_session_counts(flt):
+        return _lifecycle_turn_tool_totals_from_facts(storage, rng, flt)
+    return _lifecycle_turn_tool_totals_from_rollup(storage, rng, flt)
 
 
 def build_overview(
     storage: Storage, settings: Settings, rng: TelemetryRange, flt: TelemetryFilter
 ) -> TelemetryOverview:
-    lifecycle_totals: dict[str, int] = {}
-    turns_user = turns_agent = tool_calls = 0
-    for row in storage.telemetry.query_rollup(rng, flt):
-        metrics = json.loads(row["metrics_json"])
-        for transition, count in (metrics.get("lifecycle") or {}).items():
-            lifecycle_totals[transition] = lifecycle_totals.get(transition, 0) + count
-        turns_user += metrics.get("turns_user", 0)
-        turns_agent += metrics.get("turns_agent", 0)
-        tool_calls += metrics.get("tool_calls", 0)
+    """Shape the ``/api/telemetry/overview`` response.
+
+    Note: for a sub-day custom range, session/turn/tool counts sourced from
+    the daily rollup cover the WHOLE calendar day(s) touching ``rng`` (the
+    rollup's own granularity — see ``query_rollup``), while the token totals
+    below are always fact-derived and reflect the exact sub-range instant
+    window. The two can diverge for hour-granularity queries; this is
+    expected, not a bug (the fact-scan fallback above doesn't have this gap).
+    """
+    lifecycle_totals, turns_user, turns_agent, tool_calls = session_counts_totals(
+        storage, rng, flt
+    )
 
     rows = agent_turn_rows(storage, rng, flt)
     ledger = ledger_rows_for_sessions(storage, {row["session_id"] for row in rows})
@@ -426,7 +528,7 @@ def build_overview(
             exited=lifecycle_totals.get("exited", 0),
             interrupted=lifecycle_totals.get("interrupted", 0),
             error=lifecycle_totals.get("error", 0),
-            active_now=count_active_sessions(storage, flt),
+            active_now=count_active_sessions(storage, flt, rng),
         ),
         turns=TurnCounts(user=turns_user, agent=turns_agent),
         tool_calls=tool_calls,
@@ -519,20 +621,57 @@ def build_tokens(
 # ── /activity ─────────────────────────────────────────────────────────────
 
 
-def build_activity(
+def _empty_activity_bucket() -> dict[str, int]:
+    return {"user_turns": 0, "agent_turns": 0, "tool_calls": 0, "sessions_created": 0}
+
+
+def _activity_daily_from_rollup(
     storage: Storage, rng: TelemetryRange, flt: TelemetryFilter
-) -> TelemetryActivity:
+) -> dict[str, dict[str, int]]:
     by_day: dict[str, dict[str, int]] = {}
     for row in storage.telemetry.query_rollup(rng, flt):
         metrics = json.loads(row["metrics_json"])
-        bucket = by_day.setdefault(
-            row["day"],
-            {"user_turns": 0, "agent_turns": 0, "tool_calls": 0, "sessions_created": 0},
-        )
+        bucket = by_day.setdefault(row["day"], _empty_activity_bucket())
         bucket["user_turns"] += metrics.get("turns_user", 0)
         bucket["agent_turns"] += metrics.get("turns_agent", 0)
         bucket["tool_calls"] += metrics.get("tool_calls", 0)
         bucket["sessions_created"] += (metrics.get("lifecycle") or {}).get("created", 0)
+    return by_day
+
+
+def _activity_daily_from_facts(
+    storage: Storage, rng: TelemetryRange, flt: TelemetryFilter
+) -> dict[str, dict[str, int]]:
+    by_day: dict[str, dict[str, int]] = {}
+
+    def bucket_for(occurred_at: str) -> dict[str, int]:
+        day = _day_key(datetime.fromisoformat(occurred_at))
+        return by_day.setdefault(day, _empty_activity_bucket())
+
+    for row in storage.telemetry.query_facts(
+        TelemetryFactKind.SESSION_LIFECYCLE, rng, flt
+    ):
+        if row["transition"] == LifecycleTransition.CREATED:
+            bucket_for(row["occurred_at"])["sessions_created"] += 1
+    for row in storage.telemetry.query_facts(TelemetryFactKind.TURN, rng, flt):
+        bucket = bucket_for(row["occurred_at"])
+        if row["turn_kind"] == TurnKind.USER:
+            bucket["user_turns"] += 1
+        elif row["turn_kind"] == TurnKind.AGENT:
+            bucket["agent_turns"] += 1
+    for row in storage.telemetry.query_facts(TelemetryFactKind.TOOL_CALL, rng, flt):
+        bucket_for(row["occurred_at"])["tool_calls"] += 1
+    return by_day
+
+
+def build_activity(
+    storage: Storage, rng: TelemetryRange, flt: TelemetryFilter
+) -> TelemetryActivity:
+    by_day = (
+        _activity_daily_from_facts(storage, rng, flt)
+        if _needs_fact_scan_for_session_counts(flt)
+        else _activity_daily_from_rollup(storage, rng, flt)
+    )
 
     daily = [ActivityDaily(day=day, **by_day.get(day, {})) for day in day_range(rng)]
 

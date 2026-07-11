@@ -48,9 +48,10 @@ _DISCLAIMER = (
 _INSTRUCTION_PROMPT = """You are writing a short natural-language digest of your reader's own AI coding-agent usage telemetry, from the JSON payload below. The reader IS the Waypoint operator whose activity this describes.
 
 Rules — follow exactly:
+- Write "prose" as 3 to 6 short bullet points, one per line, each line starting with "- ". No long paragraph. Keep each bullet to one crisp sentence.
 - Address the reader directly in the second person ("you", "your"). Never refer to them in the third person ("the user", "they") — this is their own dashboard.
 - Every material claim in "prose" must be backed by an item in "evidence" that names the aggregate field it came from.
-- State the time range and any active filters explicitly in the prose.
+- State the time range and any active filters explicitly (in the first bullet).
 - Set "confidence" to "low", "medium", or "high" based on how well the data supports the summary — use "low" when data is sparse, meter coverage is well under 100%, or the range is nearly empty.
 - Never present an inference (a trend, a comparison, a recommendation) as a measured fact — phrase those as inferences, clearly distinct from counted totals.
 - Do not invent any number that is not present in the payload.

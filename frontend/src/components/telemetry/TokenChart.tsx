@@ -25,7 +25,7 @@ interface TokenChartProps {
 const CHART_W = 640;
 const CHART_H = 220;
 const PAD_LEFT = 40;
-const PAD_RIGHT = 12;
+const PAD_RIGHT = 40;
 const PAD_TOP = 12;
 const PAD_BOTTOM = 26;
 const SEGMENT_GAP = 2;
@@ -282,6 +282,9 @@ export function TokenChart({ tokens, loading, groupBy, onGroupByChange }: TokenC
   );
 }
 
+// New-work buckets are the primary stacked bars, scaled to their own max so
+// they stay legible; cached re-reads (which numerically dwarf new work) ride a
+// faint secondary-axis line instead of flattening everything into one stack.
 function TimeSeriesBars({
   series,
   categories,
@@ -295,19 +298,50 @@ function TimeSeriesBars({
   plotH: number;
   onHover: (state: ChartTooltipState | null) => void;
 }) {
-  const totals = series.map((point) =>
-    categories.reduce((sum, category) => sum + (point.totals[category] ?? 0), 0),
+  const rereadSet = new Set<string>(TOKEN_TIER_REREAD);
+  const stackCats = categories.filter((c) => !rereadSet.has(c));
+  const rereadCats = categories.filter((c) => rereadSet.has(c));
+
+  const primaryTotals = series.map((point) =>
+    stackCats.reduce((sum, category) => sum + (point.totals[category] ?? 0), 0),
   );
-  const max = niceMax(Math.max(...totals, 0));
+  const rereadTotals = series.map((point) =>
+    rereadCats.reduce((sum, category) => sum + (point.totals[category] ?? 0), 0),
+  );
+  const max = niceMax(Math.max(...primaryTotals, 0));
+  const rereadMax = niceMax(Math.max(...rereadTotals, 0));
+  const hasReread = Math.max(...rereadTotals, 0) > 0;
+
   const barSlot = plotW / Math.max(series.length, 1);
   const barW = barSlot * (1 - BAR_GAP_RATIO);
+
+  const rereadCoords = series.map((_, i) => ({
+    x: i * barSlot + barSlot / 2,
+    y: plotH - (rereadMax > 0 ? (rereadTotals[i] / rereadMax) * (plotH - 2) : 0),
+  }));
+  const rereadLine = rereadCoords.map((c) => `${c.x},${c.y}`).join(" ");
+
+  const tooltipRows = (point: TelemetryTokens["series"][number]) =>
+    categories
+      .filter((c) => (point.totals[c] ?? 0) > 0)
+      .map((c) => ({
+        key: c,
+        label: tokenCategoryLabel(c),
+        value: formatCompactNumber(point.totals[c] ?? 0),
+        color: tokenCategoryColor(c),
+      }));
 
   return (
     <svg
       viewBox={`0 0 ${CHART_W} ${CHART_H}`}
       className="tm-chart-svg"
       role="img"
-      aria-label={`Token usage across ${series.length} time buckets, up to ${formatCompactNumber(max)} tokens`}
+      aria-label={
+        `New-work token usage across ${series.length} time buckets, up to ${formatCompactNumber(max)} tokens` +
+        (hasReread
+          ? `; cached re-reads shown as a secondary line up to ${formatCompactNumber(rereadMax)}`
+          : "")
+      }
     >
       <g transform={`translate(${PAD_LEFT},${PAD_TOP})`}>
         {[0, 0.5, 1].map((fraction) => {
@@ -318,77 +352,54 @@ function TimeSeriesBars({
               <text x={-8} y={y} className="tm-chart-axis-label" textAnchor="end" dy="0.32em">
                 {formatCompactNumber(max * fraction)}
               </text>
+              {hasReread ? (
+                <text
+                  x={plotW + 6}
+                  y={y}
+                  className="tm-chart-axis-label tm-chart-axis-label-reread"
+                  textAnchor="start"
+                  dy="0.32em"
+                >
+                  {formatCompactNumber(rereadMax * fraction)}
+                </text>
+              ) : null}
             </g>
           );
         })}
         {series.map((point, i) => {
           const x = i * barSlot + (barSlot - barW) / 2;
-          const usableH = plotH - (categories.length - 1) * SEGMENT_GAP;
+          const usableH = plotH - Math.max(stackCats.length - 1, 0) * SEGMENT_GAP;
           let cursorY = plotH;
-          const segments = categories
-            .map((category, ci) => {
+          const segments = stackCats
+            .map((category) => {
               const value = point.totals[category] ?? 0;
               const h = max > 0 ? (value / max) * usableH : 0;
               cursorY -= h;
               const segY = cursorY;
               cursorY -= SEGMENT_GAP;
-              return { category, ci, value, y: segY, h };
+              return { category, value, y: segY, h };
             })
             .filter((segment) => segment.h > 0);
           const topIndex = segments.length - 1;
-          const total = totals[i];
+          const reread = rereadTotals[i];
+          const title = new Date(point.bucket_start).toLocaleString();
+          const label =
+            `${title}: ${formatCompactNumber(primaryTotals[i])} new-work tokens` +
+            (reread > 0 ? `, ${formatCompactNumber(reread)} cached re-reads` : "");
           return (
             <g
               key={point.bucket_start}
               tabIndex={0}
               role="img"
-              aria-label={`${new Date(point.bucket_start).toLocaleString()}: ${formatCompactNumber(total)} tokens`}
+              aria-label={label}
               className="tm-bar-group"
               onMouseEnter={(event) =>
-                onHover({
-                  left: event.clientX,
-                  top: event.clientY,
-                  title: new Date(point.bucket_start).toLocaleString(),
-                  rows: categories
-                    .filter((c) => (point.totals[c] ?? 0) > 0)
-                    .map((c) => ({
-                      key: c,
-                      label: tokenCategoryLabel(c),
-                      value: formatCompactNumber(point.totals[c] ?? 0),
-                      color: tokenCategoryColor(c),
-                    })),
-                })
+                onHover({ left: event.clientX, top: event.clientY, title, rows: tooltipRows(point) })
               }
               onMouseMove={(event) =>
-                onHover({
-                  left: event.clientX,
-                  top: event.clientY,
-                  title: new Date(point.bucket_start).toLocaleString(),
-                  rows: categories
-                    .filter((c) => (point.totals[c] ?? 0) > 0)
-                    .map((c) => ({
-                      key: c,
-                      label: tokenCategoryLabel(c),
-                      value: formatCompactNumber(point.totals[c] ?? 0),
-                      color: tokenCategoryColor(c),
-                    })),
-                })
+                onHover({ left: event.clientX, top: event.clientY, title, rows: tooltipRows(point) })
               }
-              onFocus={() =>
-                onHover({
-                  left: 0,
-                  top: 0,
-                  title: new Date(point.bucket_start).toLocaleString(),
-                  rows: categories
-                    .filter((c) => (point.totals[c] ?? 0) > 0)
-                    .map((c) => ({
-                      key: c,
-                      label: tokenCategoryLabel(c),
-                      value: formatCompactNumber(point.totals[c] ?? 0),
-                      color: tokenCategoryColor(c),
-                    })),
-                })
-              }
+              onFocus={() => onHover({ left: 0, top: 0, title, rows: tooltipRows(point) })}
               onMouseLeave={() => onHover(null)}
               onBlur={() => onHover(null)}
             >
@@ -413,6 +424,29 @@ function TimeSeriesBars({
             </g>
           );
         })}
+        {hasReread && rereadCoords.length > 1 ? (
+          <polyline
+            points={rereadLine}
+            className="tm-reread-line"
+            fill="none"
+            stroke="var(--tm-token-reread)"
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : null}
+        {hasReread
+          ? rereadCoords.map((c, i) =>
+              rereadTotals[i] > 0 ? (
+                <circle
+                  key={i}
+                  cx={c.x}
+                  cy={c.y}
+                  r={2}
+                  className="tm-reread-dot"
+                  fill="var(--tm-token-reread)"
+                />
+              ) : null,
+            )
+          : null}
         <line x1={0} y1={plotH} x2={plotW} y2={plotH} className="tm-chart-axis" />
       </g>
     </svg>

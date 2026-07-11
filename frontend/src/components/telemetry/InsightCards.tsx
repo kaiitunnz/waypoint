@@ -28,16 +28,7 @@ export function InsightCards({
     return <div className="panel tm-chart-card is-loading" aria-busy="true" />;
   }
   if (insights.length === 0) {
-    return (
-      <section className="panel tm-chart-card" aria-label="Insights">
-        <header className="tm-chart-head">
-          <h3>Insights</h3>
-        </header>
-        <p className="muted tm-chart-empty">
-          No insights for this range — deterministic checks fire only once their evidence gates are met.
-        </p>
-      </section>
-    );
+    return null;
   }
 
   return (

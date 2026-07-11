@@ -16372,38 +16372,7 @@ html[data-theme="light"] .wp-hl {
   background: var(--tm-series-1);
 }
 
-.tm-stat-swatch.is-reread {
-  background: var(--tm-token-reread);
-}
-
-/* Token tiers (Tokens card) — new work vs re-read context */
-.tm-tier-bar {
-  display: flex;
-  height: 8px;
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  background: var(--bg-input);
-  border: 1px solid var(--line);
-}
-
-.tm-tier-bar-seg {
-  min-width: 2px;
-}
-
-.tm-tier-bar-seg.is-newwork {
-  background: var(--tm-series-1);
-}
-
-.tm-tier-bar-seg.is-reread {
-  background: var(--tm-token-reread);
-}
-
-.tm-tier-list {
-  margin: 0;
-  display: grid;
-  gap: 10px;
-}
-
+/* Token tiers (Tokens card) — new work primary, re-read demoted to a footnote */
 .tm-tier {
   display: grid;
   gap: 4px;
@@ -16448,11 +16417,21 @@ html[data-theme="light"] .wp-hl {
   font-size: 0.78rem;
 }
 
-.tm-tier-note {
-  margin: 0 0 0 3px;
-  padding-left: 10px;
-  color: var(--muted-soft);
+/* Re-read context is demoted to a muted footnote under the new-work
+   breakdown — it dwarfs new work numerically but isn't the headline metric. */
+.tm-tier-footnote {
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
   font-size: 0.74rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-tier-footnote-note {
+  color: var(--muted-soft);
+  font-variant-numeric: normal;
 }
 
 .tm-alerts-card.has-alerts {
@@ -16607,6 +16586,22 @@ html[data-theme="light"] .wp-hl {
 
 .tm-rowlabel {
   font-size: 9px;
+}
+
+/* Cached re-reads ride a faint secondary axis so the new-work bars stay
+   legible instead of being flattened by a co-equal stack segment. */
+.tm-chart-axis-label-reread {
+  fill: var(--tm-token-reread);
+}
+
+.tm-reread-line {
+  stroke-width: 1.5;
+  opacity: 0.7;
+  stroke-dasharray: 3 3;
+}
+
+.tm-reread-dot {
+  opacity: 0.7;
 }
 
 .tm-bar-group,
@@ -16968,14 +16963,31 @@ html[data-theme="light"] .wp-hl {
 }
 
 .tm-health-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
   font-family: var(--font-mono);
   color: var(--text);
+}
+
+.tm-health-id {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* A non-shrinking marker: the id truncates, but "stale" always stays legible. */
 .tm-health-stale {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--muted-soft);
 }
 
@@ -17629,6 +17641,30 @@ html[data-theme="light"] .wp-hl {
 
 .tm-nl-prose {
   font-family: var(--font-sans);
+}
+
+.tm-nl-prose-list {
+  margin: 0;
+  padding-left: 1.15em;
+  display: grid;
+  gap: 5px;
+  line-height: 1.45;
+}
+
+.tm-nl-prose-list li {
+  padding-left: 2px;
+}
+
+/* Evidence is supporting links, not a second dashboard — collapse it so the
+   card leads with the bulleted prose. */
+.tm-nl-evidence {
+  display: grid;
+  gap: 4px;
+}
+
+.tm-nl-evidence-toggle {
+  min-height: 32px;
+  font-size: 0.72rem;
 }
 
 .tm-nl-evidence-list {

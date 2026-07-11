@@ -41,10 +41,6 @@ function StatRow({
   );
 }
 
-function percentOf(part: number, whole: number): number {
-  return whole > 0 ? Math.round((part / whole) * 100) : 0;
-}
-
 function TokensCard({ tokens }: { tokens: TelemetryOverview["tokens"] }) {
   const tiers = splitTokenTiers(tokens.totals);
   const hasData = tiers.total > 0;
@@ -67,54 +63,31 @@ function TokensCard({ tokens }: { tokens: TelemetryOverview["tokens"] }) {
 
       {hasData ? (
         <div className="tm-overview-body">
-          <div
-            className="tm-tier-bar"
-            role="img"
-            aria-label={`${percentOf(tiers.newWork, tiers.total)}% new work, ${percentOf(
-              tiers.reread,
-              tiers.total,
-            )}% re-read context`}
-          >
-            <span
-              className="tm-tier-bar-seg is-newwork"
-              style={{ flexGrow: Math.max(tiers.newWork, 0) }}
-            />
-            <span
-              className="tm-tier-bar-seg is-reread"
-              style={{ flexGrow: Math.max(tiers.reread, 0) }}
-            />
+          <div className="tm-tier">
+            <div className="tm-tier-head">
+              <span className="tm-tier-name">
+                <span className="tm-stat-swatch is-newwork" aria-hidden="true" />
+                New work
+              </span>
+              <span className="tm-tier-value">{formatCompactNumber(tiers.newWork)}</span>
+            </div>
+            <div className="tm-tier-sub">
+              {TOKEN_TIER_NEW_WORK.filter((c) => (tokens.totals[c] ?? 0) > 0).map((category) => (
+                <StatRow
+                  key={category}
+                  label={tokenCategoryLabel(category)}
+                  value={formatCompactNumber(tokens.totals[category] ?? 0)}
+                  swatch={tokenCategoryColor(category)}
+                />
+              ))}
+            </div>
           </div>
-          <dl className="tm-tier-list">
-            <div className="tm-tier">
-              <div className="tm-tier-head">
-                <span className="tm-tier-name">
-                  <span className="tm-stat-swatch is-newwork" aria-hidden="true" />
-                  New work
-                </span>
-                <span className="tm-tier-value">{formatCompactNumber(tiers.newWork)}</span>
-              </div>
-              <div className="tm-tier-sub">
-                {TOKEN_TIER_NEW_WORK.filter((c) => (tokens.totals[c] ?? 0) > 0).map((category) => (
-                  <StatRow
-                    key={category}
-                    label={tokenCategoryLabel(category)}
-                    value={formatCompactNumber(tokens.totals[category] ?? 0)}
-                    swatch={tokenCategoryColor(category)}
-                  />
-                ))}
-              </div>
-            </div>
-            <div className="tm-tier">
-              <div className="tm-tier-head">
-                <span className="tm-tier-name">
-                  <span className="tm-stat-swatch is-reread" aria-hidden="true" />
-                  Re-read context
-                </span>
-                <span className="tm-tier-value">{formatCompactNumber(tiers.reread)}</span>
-              </div>
-              <p className="tm-tier-note">cheap re-sent prior context</p>
-            </div>
-          </dl>
+          {tiers.reread > 0 ? (
+            <p className="tm-tier-footnote">
+              + {formatCompactNumber(tiers.reread)} cached re-reads
+              <span className="tm-tier-footnote-note"> · cheap re-sent prior context</span>
+            </p>
+          ) : null}
         </div>
       ) : (
         <p className="muted tm-overview-empty">No token activity in range.</p>

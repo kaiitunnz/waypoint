@@ -1,6 +1,6 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useState } from "react";
 
 import { confidenceLabel } from "@/lib/telemetry";
 import { NLInsightEvidence, NLInsightResponse } from "@/lib/types";
@@ -24,6 +24,7 @@ export function NLInsightCard({
   onEvidenceClick,
 }: NLInsightCardProps) {
   const titleId = useId();
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
 
   if (!nlEnabled) {
     return (
@@ -70,6 +71,12 @@ export function NLInsightCard({
     );
   }
 
+  const proseLines = insight.prose
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const hasBullets = proseLines.some((line) => /^[-*]\s+/.test(line));
+
   return (
     <section className="panel tm-chart-card tm-nl-card" aria-labelledby={titleId}>
       <header className="tm-chart-head">
@@ -82,25 +89,51 @@ export function NLInsightCard({
       </header>
 
       <p className="tm-nl-label">AI-generated — links to evidence, not a measured outcome</p>
-      <p className="tm-insight-statement tm-nl-prose">{insight.prose}</p>
-
-      {insight.evidence.length > 0 ? (
-        <ul className="tm-nl-evidence-list">
-          {insight.evidence.map((evidence, i) => (
-            <li key={`${evidence.metric}:${i}`} className="tm-nl-evidence-row">
-              <span className="tm-nl-evidence-text">
-                {evidence.statement} <strong>{evidence.value}</strong>
-              </span>
-              <button
-                type="button"
-                className="tm-insight-evidence"
-                onClick={() => onEvidenceClick(evidence)}
-              >
-                View →
-              </button>
-            </li>
+      {hasBullets ? (
+        <ul className="tm-nl-prose tm-nl-prose-list">
+          {proseLines.map((line, i) => (
+            <li key={i}>{line.replace(/^[-*]\s+/, "")}</li>
           ))}
         </ul>
+      ) : (
+        <p className="tm-insight-statement tm-nl-prose">{insight.prose}</p>
+      )}
+
+      {insight.evidence.length > 0 ? (
+        <div className="tm-nl-evidence">
+          <button
+            type="button"
+            className="tm-insight-evidence tm-nl-evidence-toggle"
+            onClick={() => setEvidenceOpen((open) => !open)}
+            aria-expanded={evidenceOpen}
+          >
+            {evidenceOpen ? "Hide evidence" : `Show evidence (${insight.evidence.length})`}
+          </button>
+          {evidenceOpen ? (
+            <ul className="tm-nl-evidence-list">
+              {insight.evidence.map((evidence, i) => {
+                const echoesValue =
+                  evidence.value.trim().length === 0 ||
+                  evidence.statement.includes(evidence.value.trim());
+                return (
+                  <li key={`${evidence.metric}:${i}`} className="tm-nl-evidence-row">
+                    <span className="tm-nl-evidence-text">
+                      {evidence.statement}
+                      {echoesValue ? null : <strong> {evidence.value}</strong>}
+                    </span>
+                    <button
+                      type="button"
+                      className="tm-insight-evidence"
+                      onClick={() => onEvidenceClick(evidence)}
+                    >
+                      View →
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+        </div>
       ) : null}
 
       <p className="tm-nl-disclaimer muted">{insight.disclaimer}</p>

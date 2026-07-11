@@ -43,7 +43,16 @@ function StatRow({
 
 function TokensCard({ tokens }: { tokens: TelemetryOverview["tokens"] }) {
   const tiers = splitTokenTiers(tokens.totals);
-  const hasData = tiers.total > 0;
+  // Headline is the new-work grand total only. Derive it from the raw buckets
+  // rather than `display_total`: the four new-work buckets never overlap, so the
+  // sum is always safe, and it stays correct regardless of whether the backend
+  // has already switched `display_total` to exclude cache reads.
+  const newWorkTotal = tiers.newWork;
+  // Cached re-reads are reported as their own standalone value, never summed
+  // into the total; prefer the explicit field, falling back to the raw bucket.
+  const cachedReread = tokens.cached_read_tokens ?? tiers.reread;
+  const hasNewWork = tiers.newWork > 0;
+  const hasData = hasNewWork || cachedReread > 0;
 
   return (
     <article className="panel tm-overview-card" aria-label="Token usage">
@@ -52,43 +61,36 @@ function TokensCard({ tokens }: { tokens: TelemetryOverview["tokens"] }) {
         <span className="tm-overview-card-badge">{coverageLabel(tokens.coverage)}</span>
       </header>
 
-      {tokens.safe_total && tokens.display_total !== null ? (
-        <div className="tm-overview-hero-block">
-          <p className="tm-overview-hero">{formatCompactNumber(tokens.display_total)}</p>
-          <p className="tm-overview-hero-caption">total tokens</p>
-        </div>
-      ) : (
-        <p className="tm-overview-hero-note">No safe grand total — the tiers below don’t sum.</p>
-      )}
-
       {hasData ? (
-        <div className="tm-overview-body">
-          <div className="tm-tier">
-            <div className="tm-tier-head">
-              <span className="tm-tier-name">
-                <span className="tm-stat-swatch is-newwork" aria-hidden="true" />
-                New work
-              </span>
-              <span className="tm-tier-value">{formatCompactNumber(tiers.newWork)}</span>
-            </div>
-            <div className="tm-tier-sub">
-              {TOKEN_TIER_NEW_WORK.filter((c) => (tokens.totals[c] ?? 0) > 0).map((category) => (
-                <StatRow
-                  key={category}
-                  label={tokenCategoryLabel(category)}
-                  value={formatCompactNumber(tokens.totals[category] ?? 0)}
-                  swatch={tokenCategoryColor(category)}
-                />
-              ))}
-            </div>
+        <>
+          <div className="tm-overview-hero-block">
+            <p className="tm-overview-hero">{formatCompactNumber(newWorkTotal)}</p>
+            <p className="tm-overview-hero-caption">new-work tokens</p>
           </div>
-          {tiers.reread > 0 ? (
-            <p className="tm-tier-footnote">
-              + {formatCompactNumber(tiers.reread)} cached re-reads
-              <span className="tm-tier-footnote-note"> · cheap re-sent prior context</span>
-            </p>
-          ) : null}
-        </div>
+          <div className="tm-overview-body">
+            {hasNewWork ? (
+              <div className="tm-tokens-breakdown">
+                {TOKEN_TIER_NEW_WORK.filter((c) => (tokens.totals[c] ?? 0) > 0).map((category) => (
+                  <StatRow
+                    key={category}
+                    label={tokenCategoryLabel(category)}
+                    value={formatCompactNumber(tokens.totals[category] ?? 0)}
+                    swatch={tokenCategoryColor(category)}
+                  />
+                ))}
+              </div>
+            ) : null}
+            {cachedReread > 0 ? (
+              <div className="tm-token-reread-block">
+                <div className="tm-token-reread-head">
+                  <span className="tm-token-reread-label">Cached re-reads</span>
+                  <span className="tm-token-reread-value">{formatCompactNumber(cachedReread)}</span>
+                </div>
+                <p className="tm-token-reread-note">Repeated prior context · not counted in total</p>
+              </div>
+            ) : null}
+          </div>
+        </>
       ) : (
         <p className="muted tm-overview-empty">No token activity in range.</p>
       )}

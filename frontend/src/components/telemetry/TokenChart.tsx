@@ -10,6 +10,7 @@ import {
   TOKEN_TIER_REREAD,
   coverageLabel,
   formatCompactNumber,
+  splitTokenTiers,
   tokenCategoryColor,
   tokenCategoryLabel,
 } from "@/lib/telemetry";
@@ -34,6 +35,14 @@ const MAX_RANKED_GROUPS = 7;
 
 function seriesColor(index: number): string {
   return `var(--tm-series-${(index % 8) + 1})`;
+}
+
+// SVG <text> has no ellipsis/clip of its own, so a long ranked-group label would
+// spill past the chart's left margin. Trim to a character budget with an
+// ellipsis; the full label stays reachable via the row's <title> tooltip.
+function truncateLabel(label: string, max: number): string {
+  if (label.length <= max) return label;
+  return `${label.slice(0, max - 1).trimEnd()}…`;
 }
 
 function niceMax(value: number): number {
@@ -101,11 +110,13 @@ export function TokenChart({ tokens, loading, groupBy, onGroupByChange }: TokenC
 
   const rankedGroups = useMemo(() => {
     const rawGroups = groupBy !== "time" ? tokens?.groups ?? [] : [];
-    // `display_total` is always the safe sum of the 5 unified categories now
-    // (backend `fold_tokens`); the `?? 0` only guards the TS type, not a real gap.
+    // Bars represent new-work only (cached re-reads would dwarf the axis), so
+    // derive the value from the raw buckets rather than `display_total` — the
+    // four new-work buckets never overlap, so the sum is always safe and it
+    // stays correct whether or not the backend has excluded cache reads yet.
     const withValues = rawGroups.map((group) => ({
       group,
-      value: group.display_total ?? 0,
+      value: splitTokenTiers(group.totals).newWork,
     }));
     withValues.sort((a, b) => b.value - a.value);
     if (withValues.length <= MAX_RANKED_GROUPS + 1) return withValues;
@@ -124,7 +135,10 @@ export function TokenChart({ tokens, loading, groupBy, onGroupByChange }: TokenC
           label: `Other (${tail.length})`,
           totals: {},
           display_total: otherValue,
-          cached_read_tokens: otherCachedRead,
+          cached_read_tokens: tail.reduce(
+            (sum, item) => sum + (item.group.cached_read_tokens ?? 0),
+            0,
+          ),
           coverage: "partial" as const,
         },
         value: otherValue,
@@ -472,7 +486,12 @@ function RankedBars({
   const max = niceMax(Math.max(...items.map((item) => item.value), 0));
   const rowSlot = plotH / Math.max(items.length, 1);
   const barH = Math.min(24, rowSlot * (1 - BAR_GAP_RATIO));
-  const labelW = 96;
+  // A wide gutter for the group labels so bars start clear of them; labels are
+  // truncated to a character budget that stays inside this gutter at both the
+  // desktop and (larger) mobile row-label type sizes, so nothing spills past
+  // the card's left edge. The full name lives in a <title> tooltip.
+  const labelW = 120;
+  const LABEL_MAX_CHARS = 14;
 
   return (
     <svg
@@ -526,7 +545,8 @@ function RankedBars({
                 dy="0.32em"
                 className="tm-chart-axis-label tm-rowlabel"
               >
-                {group.label}
+                <title>{group.label}</title>
+                {truncateLabel(group.label, LABEL_MAX_CHARS)}
               </text>
               <path d={roundedRightRectPath(0, y, w, barH, 4)} fill={seriesColor(i)} />
             </g>

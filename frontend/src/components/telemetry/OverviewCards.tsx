@@ -86,7 +86,6 @@ function TokensCard({ tokens }: { tokens: TelemetryOverview["tokens"] }) {
                   <span className="tm-token-reread-label">Cached re-reads</span>
                   <span className="tm-token-reread-value">{formatCompactNumber(cachedReread)}</span>
                 </div>
-                <p className="tm-token-reread-note">Repeated prior context · not counted in total</p>
               </div>
             ) : null}
           </div>
@@ -189,7 +188,7 @@ export function OverviewCards({ overview, loading }: OverviewCardsProps) {
           {overview.limit_card_hidden ? (
             <p className="muted tm-overview-footnote">
               {overview.limit_card_hidden_reason ??
-                "Provider limits hidden while a session filter is active."}
+                "Hidden while a session filter is active."}
             </p>
           ) : null}
           {alertCount === 0 ? (

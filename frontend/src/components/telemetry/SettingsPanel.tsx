@@ -98,14 +98,12 @@ export function SettingsPanel({
               plain-language digest — never raw prompts, tool arguments, or
               paths. Set with <code>telemetry_nl.enabled</code> in{" "}
               <code>waypoint.yaml</code> (or{" "}
-              <code>WAYPOINT_TELEMETRY_NL_ENABLED</code>); there is no
-              in-app switch yet.
+              <code>WAYPOINT_TELEMETRY_NL_ENABLED</code>).
             </p>
 
             <div className="tm-settings-danger">
               <p className="muted">
-                Deleting telemetry removes every stored fact and rollup. Session
-                transcripts are never affected.
+                Removes all stored facts and rollups; transcripts are untouched.
               </p>
               <button
                 type="button"
@@ -126,7 +124,7 @@ export function SettingsPanel({
               {deleteResult ? (
                 <p className="tm-settings-delete-result" role="status">
                   Removed {deleteResult.removed.facts} facts and {deleteResult.removed.rollups}{" "}
-                  rollup rows. Transcripts unaffected.
+                  rollup rows.
                 </p>
               ) : null}
             </div>

@@ -11,14 +11,22 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from openai_codex.generated.notification_registry import NOTIFICATION_MODELS
 from openai_codex.generated.v2_all import (
+    ItemStartedNotification,
     ModelListResponse,
     ReasoningEffort,
+    ThreadResumeResponse,
     ThreadStartResponse,
+    Turn,
 )
+from pydantic import ValidationError
 
 import waypoint.backends.codex  # noqa: F401  (installs the shim on import)
-from waypoint.backends.codex._sdk_compat import install_reasoning_effort_tolerance
+from waypoint.backends.codex._sdk_compat import (
+    install_reasoning_effort_tolerance,
+    install_thread_item_tolerance,
+)
 from waypoint.backends.codex.adapter import CodexAppServerAdapter
 from waypoint.backends.codex.plugin import CodexPlugin, CodexPluginConfig
 
@@ -143,3 +151,108 @@ async def test_list_models_surfaces_unknown_efforts_through_plugin(
     result = await plugin.list_models(cast(Any, _FakeRuntime()))
     efforts = {e for model in result["models"] for e in model["supported_efforts"]}
     assert {"max", "ultra"} <= efforts
+
+
+# ── ThreadItem union tolerance ──────────────────────────────────────────────
+# A codex CLI ahead of the pinned SDK emits thread item types the SDK's
+# ``ThreadItem`` union does not model (observed: ``subAgentActivity``), which made
+# ``thread/resume`` responses fail validation and reattach return 400.
+
+_UNKNOWN_ITEM = {
+    "type": "subAgentActivity",
+    "id": "item-x1",
+    "path": "/root/plan_review",
+    "detail": {"nested": "kept"},
+}
+_KNOWN_ITEM = {"type": "reasoning", "id": "item-r1", "text": "thinking"}
+
+
+def _thread_resume_payload(items: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "approvalPolicy": "never",
+        "approvalsReviewer": "user",
+        "cwd": "/workspace",
+        "model": "gpt-5-codex",
+        "modelProvider": "openai",
+        "sandbox": {"type": "readOnly"},
+        "thread": {
+            "cliVersion": "0.139.0",
+            "createdAt": 1_700_000_000,
+            "cwd": "/workspace",
+            "ephemeral": False,
+            "id": "th-1",
+            "modelProvider": "openai",
+            "preview": "hi",
+            "sessionId": "sess-1",
+            "source": "cli",
+            "status": {"type": "idle"},
+            "updatedAt": 1_700_000_010,
+            "turns": [{"id": "turn-1", "status": "completed", "items": items}],
+        },
+    }
+
+
+def test_thread_resume_with_unknown_item_validates_and_preserves() -> None:
+    response = ThreadResumeResponse.model_validate(
+        _thread_resume_payload([_KNOWN_ITEM, _UNKNOWN_ITEM])
+    )
+    known, unknown = response.thread.turns[0].items
+    assert type(known.root).__name__ == "ReasoningThreadItem"
+    assert type(unknown.root).__name__ == "UnknownThreadItem"
+    # The whole unknown payload round-trips for downstream rendering.
+    assert unknown.root.model_dump(by_alias=True) == _UNKNOWN_ITEM
+
+
+def test_known_item_still_binds_to_strict_member() -> None:
+    turn = Turn.model_validate(
+        {"id": "t", "status": "completed", "items": [_KNOWN_ITEM]}
+    )
+    assert type(turn.items[0].root).__name__ == "ReasoningThreadItem"
+
+
+def test_malformed_known_item_still_fails_loudly() -> None:
+    # A known ``type`` with required fields missing must NOT be masked by the
+    # unknown-item fallback; it should raise as before the shim.
+    with pytest.raises(ValidationError):
+        Turn.model_validate(
+            {
+                "id": "t",
+                "status": "completed",
+                "items": [{"type": "commandExecution", "id": "c"}],
+            }
+        )
+
+
+def test_thread_item_tolerance_is_idempotent() -> None:
+    # Re-invoking the installer is a no-op (guarded by a sentinel) and does not
+    # corrupt the union.
+    install_thread_item_tolerance()
+    install_thread_item_tolerance()
+    turn = Turn.model_validate(
+        {"id": "t", "status": "completed", "items": [_UNKNOWN_ITEM]}
+    )
+    assert type(turn.items[0].root).__name__ == "UnknownThreadItem"
+
+
+def test_unknown_item_in_live_notification_validates_and_unwraps() -> None:
+    # ``item/started`` carries a ``ThreadItem`` and drives every live turn. After
+    # widening, an unknown item validates into the typed notification (instead of
+    # the SDK's UnknownNotification fallback); the item must still unwrap to the
+    # same raw dict the normalizer consumes.
+    notification = ItemStartedNotification.model_validate(
+        {
+            "itemId": "item-x1",
+            "startedAtMs": 1,
+            "threadId": "th-1",
+            "turnId": "turn-1",
+            "item": _UNKNOWN_ITEM,
+        }
+    )
+    dumped = notification.model_dump(by_alias=True)
+    assert dumped["item"] == _UNKNOWN_ITEM  # RootModel serializes as its root
+
+
+def test_unknown_notification_method_still_falls_back_to_unknown() -> None:
+    # The shim must not tighten the notification method dispatch: a genuinely
+    # unknown method still has no model and degrades to UnknownNotification.
+    assert "waypoint/nonexistent/method" not in NOTIFICATION_MODELS

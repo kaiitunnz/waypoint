@@ -1138,7 +1138,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
         kind: Annotated[TelemetryFactKind, Query()],
         page: Annotated[int, Query(ge=1)] = 1,
-        page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+        page_size: Annotated[int, Query(ge=1, le=200)] = 20,
     ) -> Any:
         rng, flt = parse_range_filter(request, context.settings)
         return telemetry_aggregate.build_drilldown(

@@ -50,7 +50,7 @@ import {
   TokenGroupBy,
 } from "@/lib/types";
 
-const DRILLDOWN_PAGE_SIZE = 50;
+const DRILLDOWN_PAGE_SIZE = 20;
 const REFRESH_DEBOUNCE_MS = 400;
 
 type LoadState = "loading" | "ready" | "error";

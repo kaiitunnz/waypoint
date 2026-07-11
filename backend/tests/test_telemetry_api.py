@@ -293,6 +293,18 @@ async def test_drilldown_requires_kind_query_param(tmp_path: Path) -> None:
     assert resp.status_code == 422
 
 
+async def test_drilldown_defaults_page_size_to_20(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        resp = await client.get(
+            "/api/telemetry/drilldown",
+            params={"kind": "tool_call"},
+            headers=_auth(token),
+        )
+    assert resp.status_code == 200
+    assert resp.json()["page_size"] == 20
+
+
 async def test_settings_endpoint_shape(tmp_path: Path) -> None:
     app, token = _build(tmp_path)
     async with _client(app) as client:

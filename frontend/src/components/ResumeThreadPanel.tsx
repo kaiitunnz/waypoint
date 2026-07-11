@@ -12,10 +12,11 @@ import {
   recordToEntries,
 } from "@/components/EnvVarRows";
 import { LaunchOptionsDetails } from "@/components/LaunchOptions";
+import { fetchBackendModels } from "@/lib/api";
 import type { BackendCatalog } from "@/lib/backends";
 import { defaultTransportFor, humaniseBackend } from "@/lib/backends";
 import { matchesQuery, parseQuery } from "@/lib/search";
-import { Backend, SessionTransport } from "@/lib/types";
+import { Backend, BackendModelOption, SessionTransport } from "@/lib/types";
 
 import { SearchInput } from "./SearchInput";
 
@@ -35,6 +36,10 @@ interface ThreadSummary {
 }
 
 interface ResumeThreadPanelProps {
+  host: string;
+  token: string;
+  launchTargetId: string | null;
+  accountProfileId: string | null;
   threadsByBackend: Record<Backend, ThreadSummary[]>;
   loadingByBackend: Record<Backend, boolean>;
   targetLabel: string | null;
@@ -47,6 +52,7 @@ interface ResumeThreadPanelProps {
     transport: SessionTransport | null,
     importHistory: boolean,
     launchEnv: Record<string, string>,
+    model: string | null,
   ) => Promise<void>;
   onDeleteThread?: (
     backend: Backend,
@@ -80,6 +86,10 @@ function backendGlyph(id: Backend, catalog?: BackendCatalog): string {
 }
 
 export function ResumeThreadPanel({
+  host,
+  token,
+  launchTargetId,
+  accountProfileId,
   threadsByBackend,
   loadingByBackend,
   targetLabel,
@@ -150,6 +160,55 @@ export function ResumeThreadPanel({
     setEnvEntries(recordToEntries(defaultLaunchEnvByBackend[transportAgent]));
   }, [defaultLaunchEnvByBackend, transportAgent]);
 
+  // Only agents that consume a durable model at import get a picker — a
+  // catalogue alone isn't enough (Codex has one but drops the field). The
+  // durable selection becomes the resumed session's context-window denominator.
+  const showModelPicker =
+    filter !== "all" &&
+    (catalog.agentCaps(transportAgent)?.supports_thread_import_model ?? false);
+  const [modelOptions, setModelOptions] = useState<BackendModelOption[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!showModelPicker || !token) {
+      setModelOptions([]);
+      setSelectedModel(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetchBackendModels(host, token, transportAgent, {
+          launchTargetId,
+          accountProfileId,
+        });
+        if (cancelled) return;
+        setModelOptions(response.models);
+        const preferred =
+          response.default_model_id ??
+          response.models.find((option) => option.is_default)?.id ??
+          response.models[0]?.id ??
+          null;
+        setSelectedModel(preferred);
+      } catch {
+        if (!cancelled) {
+          setModelOptions([]);
+          setSelectedModel(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    showModelPicker,
+    host,
+    token,
+    transportAgent,
+    launchTargetId,
+    accountProfileId,
+  ]);
+
   const isExpanded = expanded || query.trim().length > 0;
 
   // Re-clamp if the selected agent drops out of the supported set.
@@ -211,6 +270,10 @@ export function ResumeThreadPanel({
       filter === thread.backend
         ? entriesToRecord(envEntries)
         : { ...(defaultLaunchEnvByBackend[thread.backend] ?? {}) };
+    // The model selection is single-agent only; the merged "All" view imports
+    // each row over its agent's configured default (a value isn't portable).
+    const model =
+      filter === thread.backend && showModelPicker ? selectedModel : null;
     setImportingId(thread.id);
     try {
       await onImportThread(
@@ -220,6 +283,7 @@ export function ResumeThreadPanel({
         chosen,
         importHistory,
         launchEnv,
+        model,
       );
     } finally {
       setImportingId(null);
@@ -298,6 +362,24 @@ export function ResumeThreadPanel({
           onChange={setTransport}
           catalog={catalog}
         />
+      ) : null}
+
+      {showModelPicker && modelOptions.length > 0 ? (
+        <label className="field">
+          <span>Model</span>
+          <select
+            value={selectedModel ?? ""}
+            onChange={(event) => setSelectedModel(event.target.value)}
+          >
+            {modelOptions
+              .filter((option) => !option.hidden)
+              .map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+          </select>
+        </label>
       ) : null}
 
       <div className="import-history-row">

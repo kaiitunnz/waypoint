@@ -87,6 +87,7 @@ interface LaunchPanelProps {
     transport: SessionTransport | null,
     importHistory: boolean,
     launchEnv: Record<string, string>,
+    model: string | null,
   ) => Promise<void>;
   onDeleteThread?: (
     backend: Backend,
@@ -436,6 +437,10 @@ export function LaunchPanel({
 
       {mode === "resume" && supportedBackends.length > 0 ? (
         <ResumeThreadPanel
+          host={host}
+          token={token}
+          launchTargetId={launchTargetId}
+          accountProfileId={form.accountProfileId || null}
           threadsByBackend={threadsByBackend}
           loadingByBackend={loadingByBackend}
           targetLabel={targetLabel}

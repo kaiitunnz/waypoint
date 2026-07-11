@@ -30,6 +30,7 @@ from waypoint.backends.base import (
     AgentLaunchContract,
     ConfigDirNotReadyError,
     ConfigDirValidating,
+    ContextUsageRebasing,
     DefaultConfigDirProviding,
     FreshThreadRestarting,
     config_dir_for,
@@ -2894,6 +2895,12 @@ class SessionRuntime:
                 ),
             )
         self._start_context_usage_source(refreshed)
+        # A transport switch resumes onto a target that may tail from EOF, so
+        # rebase the retained snapshot's window to the durable model now rather
+        # than waiting for the next assistant message. Under the lifecycle lock;
+        # the helper re-reads the fresh session to avoid racing the new tailer.
+        if transport_changing:
+            await self._rebase_context_usage(session.id)
         if transport_changing:
             note = (
                 f"Session interface changed from {plugin.label} to "
@@ -3251,6 +3258,40 @@ class SessionRuntime:
         await self._broadcast_session_list()
         return updated
 
+    async def _rebase_context_usage(
+        self, session_id: str, *, model: str | None = None
+    ) -> None:
+        """Rebase a session's context-window denominator without a new turn.
+
+        Dispatched on the AGENT plugin (``registry.get(session.backend)``) so a
+        single agent implementation covers all its transports; a plugin that
+        doesn't implement ``ContextUsageRebasing`` is a no-op. Idempotent: when
+        the rebased snapshot equals the stored one (e.g. the native adapter
+        already refreshed it during ``apply_model``), nothing is written, so no
+        duplicate broadcast is produced. Callers own the surrounding broadcast.
+        """
+        session = self.get_session(session_id)
+        plugin = self.registry.get(session.backend)
+        if not isinstance(plugin, ContextUsageRebasing):
+            return
+        rebased = plugin.rebase_context_usage(session, model=model)
+        if rebased is None or rebased == session.context_usage:
+            return
+        self.storage.update_session(session_id, context_usage=rebased)
+        log.debug(
+            "rebased context usage",
+            extra={
+                "session_id": session_id,
+                "old_window": (
+                    session.context_usage.context_window_tokens
+                    if session.context_usage
+                    else None
+                ),
+                "new_window": rebased.context_window_tokens,
+                "source": rebased.source,
+            },
+        )
+
     async def set_model(self, session_id: str, model: str | None) -> SessionRecord:
         session = self.get_session(session_id)
         cleaned = model.strip() if isinstance(model, str) and model.strip() else None
@@ -3261,7 +3302,16 @@ class SessionRuntime:
                 detail=f"model selection is not supported for {session.backend}",
             )
         await plugin.apply_model(self, session, cleaned)
-        updated = self.storage.update_session(session_id, model=cleaned)
+        self.storage.update_session(session_id, model=cleaned)
+        # Refresh the window immediately for restart-style transports (claude_tty
+        # tails from EOF and won't otherwise update until the next turn). A no-op
+        # for the native adapter, which already rebased during apply_model. Only
+        # for an explicit selection: clearing to the agent default (model=None)
+        # would otherwise rebase to an unknown window and blank a valid pill —
+        # the transport's own apply_model already carries the default's window.
+        if cleaned is not None:
+            await self._rebase_context_usage(session_id, model=cleaned)
+        updated = self.get_session(session_id)
         await self._broadcast_session_list()
         return updated
 

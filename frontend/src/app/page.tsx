@@ -764,6 +764,7 @@ export default function HomePage() {
     transport: SessionTransport | null,
     importHistory: boolean,
     launchEnv: Record<string, string>,
+    model: string | null,
   ) {
     try {
       const payload = {
@@ -786,6 +787,9 @@ export default function HomePage() {
         // Replay the thread's prior conversation into the new session's
         // transcript; false starts empty and only resumes the agent's context.
         import_history: importHistory,
+        // Durable model selection (single-agent Resume view only); null lets the
+        // backend resolve its configured default.
+        model,
       };
       const session = await importBackendThread(host, token, backend, payload);
       setSessions((current) => [

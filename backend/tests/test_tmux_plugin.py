@@ -753,9 +753,58 @@ async def test_import_thread_via_resume_claude_builds_resume_command(
     assert record.transport_state["thread_id"] == uuid_str
     assert record.transport_state["launch_args"] == ["--resume", uuid_str]
     assert record.cwd == cwd
+    # No model selected → resume command unchanged.
+    assert record.model is None
     # The import path must request a remote PTY too — same TTY rules as
     # create_session and restore.
     assert runtime.command_calls[-1]["allocate_tty"] is True
+
+
+@pytest.mark.asyncio
+async def test_import_thread_via_resume_claude_pins_selected_model(
+    plugin: TmuxPlugin,
+    tmp_path: Path,
+) -> None:
+    """A durable model selection is persisted on the record and pinned on the
+    resume command so the resumed CLI (and its context-window denominator) is
+    deterministic."""
+    uuid_str = "11111111-1111-1111-1111-111111111111"
+    runtime = _FakeRuntime(
+        inner_plugin=_FakeAgentPlugin(pregenerates=True, exists=True)
+    )
+    runtime._session_dir_root = tmp_path
+
+    captured_commands: list[list[str]] = []
+    original_start = runtime.tmux.start_managed_session
+
+    async def start_capture(
+        session_id: str, cwd: str, command: list[str]
+    ) -> _PaneTarget:
+        captured_commands.append(command)
+        return await original_start(session_id, cwd, command)
+
+    runtime.tmux.start_managed_session = start_capture  # type: ignore[method-assign]
+
+    record = await plugin.import_thread_via_resume(
+        cast(Any, runtime),
+        backend="claude_code",
+        thread_id=uuid_str,
+        cwd="/Users/me/proj",
+        launch_target_id=None,
+        title="resumed",
+        model="opus[1m]",
+    )
+
+    assert captured_commands == [
+        ["claude_code", "--resume", uuid_str, "--model", "opus[1m]"]
+    ]
+    assert record.model == "opus[1m]"
+    assert record.transport_state["launch_args"] == [
+        "--resume",
+        uuid_str,
+        "--model",
+        "opus[1m]",
+    ]
 
 
 @pytest.mark.asyncio

@@ -948,6 +948,7 @@ class TmuxPlugin:
         launch_target_id: str | None,
         title: str,
         launch_env: dict[str, str] | None = None,
+        model: str | None = None,
     ) -> SessionRecord:
         """Create a tmux-wrapped session that resumes an existing thread.
 
@@ -957,6 +958,11 @@ class TmuxPlugin:
         launch). The agent owns the resume contract for its CLI
         (``--resume <uuid>`` for claude, ``resume <uuid>`` sub-command
         for codex) so the structured plugins don't have to know about it.
+
+        ``model`` is the durable selection persisted on the record and, where
+        the agent pins it via launch flags, added to the resume command so the
+        resumed runtime is deterministic. Callers that don't select a model
+        (e.g. Codex today) pass ``None`` — behavior is unchanged.
         """
         inner = self._agent_launch(runtime, backend)
         launch_target = runtime._find_launch_target(launch_target_id)
@@ -979,7 +985,12 @@ class TmuxPlugin:
                     f"{thread_id} — cannot resume via tmux"
                 ),
             )
-        launch_args = inner.resume_args(thread_id, [])
+        resume_extra = (
+            inner.launch_flags(model=model, effort=None, permission_mode=None)
+            if model
+            else []
+        )
+        launch_args = inner.resume_args(thread_id, resume_extra)
         session_id = runtime._generate_session_id(backend)
         try:
             command = runtime._command_for_backend(
@@ -1040,6 +1051,7 @@ class TmuxPlugin:
             raw_log_path=str(raw_log),
             structured_log_path=str(structured_log),
             transport_state=transport_state,
+            model=model,
             launch_env=effective_launch_env,
         )
         runtime.storage.create_session(session)

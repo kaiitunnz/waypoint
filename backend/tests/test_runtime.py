@@ -33,6 +33,7 @@ from waypoint.schemas import (
     EventRecord,
     LaunchMode,
     SessionApprovalRequest,
+    SessionContextUsage,
     SessionCreateRequest,
     SessionInputRequest,
     SessionPlanApprovalRequest,
@@ -2941,6 +2942,9 @@ async def test_import_claude_thread_creates_session_and_resumes(
     assert session.cwd == str(tmp_path)
     assert session.branch == "main"
     assert session.status == SessionStatus.IDLE
+    # No model selected → the configured default (opus[1m]) is persisted as the
+    # durable selection and handed to the resumed adapter.
+    assert session.model == "opus[1m]"
     assert fake.restore_calls == [
         (
             session.id,
@@ -2948,7 +2952,7 @@ async def test_import_claude_thread_creates_session_and_resumes(
             info.id,
             None,
             "default",
-            None,
+            "opus[1m]",
             None,
         )
     ]
@@ -3009,7 +3013,7 @@ async def test_import_claude_thread_remote_target_uses_remote_factory(
             info.id,
             "remote-factory-devbox",
             "default",
-            None,
+            "opus[1m]",
             None,
         )
     ]
@@ -3183,10 +3187,21 @@ async def test_import_claude_thread_terminal_supersedes_launch_mode(
     assert tmux is not None
     resume_calls: list[str] = []
 
+    resume_models: list[str | None] = []
+
     async def _fake_resume(
-        _runtime, *, backend, thread_id, cwd, launch_target_id, title, launch_env=None
+        _runtime,
+        *,
+        backend,
+        thread_id,
+        cwd,
+        launch_target_id,
+        title,
+        launch_env=None,
+        model=None,
     ):
         resume_calls.append(backend)
+        resume_models.append(model)
         session = make_session(
             settings,
             id="tmux-imported",
@@ -3205,6 +3220,8 @@ async def test_import_claude_thread_terminal_supersedes_launch_mode(
     )
 
     assert resume_calls == ["claude_code"]
+    # The configured default flows into the tmux resume wrapper.
+    assert resume_models == ["opus[1m]"]
     assert session.backend == "claude_code"
     assert session.transport == "tmux"
 
@@ -4153,6 +4170,48 @@ async def test_set_model_claude_calls_adapter_and_persists(tmp_path) -> None:
     cleared = await runtime.set_model("claude-sess", "  ")
     assert fake.model_calls[-1] == ("claude-sess", None)
     assert cleared.model is None
+
+
+@pytest.mark.asyncio
+async def test_set_model_rebases_window_but_revert_to_default_keeps_it(
+    tmp_path,
+) -> None:
+    # A concrete selection rebases the stored context window immediately; a
+    # revert to the agent default (model=None) must NOT blank a valid pill —
+    # the transport's own apply_model already carries the default's window.
+    runtime, storage, settings = make_runtime(tmp_path)
+    _claude_plugin(runtime).adapter = cast(Any, FakeClaudeAdapter())
+    now = datetime.now(UTC)
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend="claude_code",
+        transport="claude_cli",
+    )
+    storage.create_session(session)
+    storage.update_session(
+        "claude-sess",
+        model="opus[1m]",
+        context_usage=SessionContextUsage(
+            used_tokens=1000,
+            context_window_tokens=1_000_000,
+            updated_at=now,
+            source="claude_code",
+            breakdown={"input_tokens": 1000},
+        ),
+    )
+
+    await runtime.set_model("claude-sess", "opus")
+    rebased = storage.get_session("claude-sess")
+    assert rebased is not None and rebased.context_usage is not None
+    assert rebased.context_usage.context_window_tokens == 200_000
+
+    await runtime.set_model("claude-sess", "")
+    reverted = storage.get_session("claude-sess")
+    assert reverted is not None and reverted.context_usage is not None
+    assert reverted.model is None
+    # Window preserved, not cleared to None.
+    assert reverted.context_usage.context_window_tokens == 200_000
 
 
 @pytest.mark.asyncio

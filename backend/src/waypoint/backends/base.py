@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from waypoint.backends.capabilities import BackendCapabilities
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
-from waypoint.schemas import CommandCompletion, SessionRecord
+from waypoint.schemas import CommandCompletion, SessionContextUsage, SessionRecord
 from waypoint.transports.base import TransportAdapter
 
 if TYPE_CHECKING:
@@ -114,6 +114,26 @@ class FreshThreadRestarting(Protocol):
         self, runtime: "SessionRuntime", session: SessionRecord
     ) -> None:
         """Start a fresh native thread for an already-persisted session row."""
+        ...
+
+
+@runtime_checkable
+class ContextUsageRebasing(Protocol):
+    """An agent that can recompute a stored context snapshot's window in place.
+
+    Used when only the context-window *denominator* changes — a model swap or a
+    transport switch — so the runtime can refresh it without waiting for a new
+    provider message or replaying history. Pure and data-only: it reads the
+    session's durable ``model`` (never a resolved provider id, which loses the
+    ``[1m]`` entitlement) and returns a rebased snapshot, ``None`` when there is
+    nothing to rebase. An unknown/absent selection yields a snapshot whose
+    ``context_window_tokens`` is ``None`` rather than a fabricated default.
+    """
+
+    def rebase_context_usage(
+        self, session: SessionRecord, *, model: str | None = None
+    ) -> "SessionContextUsage | None":
+        """Rebase ``session.context_usage`` to ``model`` (or the durable one)."""
         ...
 
 

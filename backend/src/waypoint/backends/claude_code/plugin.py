@@ -32,7 +32,12 @@ from waypoint.backends.capabilities import (
     ModelSource,
 )
 from waypoint.backends.claude_code import side_question as _sq
-from waypoint.backends.claude_code.adapter import ClaudeCliAdapter, ClaudeCliError
+from waypoint.backends.claude_code.adapter import (
+    ClaudeCliAdapter,
+    ClaudeCliError,
+    rebase_claude_context_usage,
+    seed_context_usage_from_transcript,
+)
 from waypoint.backends.claude_code.commands import (
     CLAUDE_BUILTIN_SLASH_COMMANDS,
     list_claude_command_completions,
@@ -43,6 +48,7 @@ from waypoint.backends.claude_code.models import (
     DEFAULT_CLAUDE_MODELS,
     claude_default_model_id,
     claude_models_for_version,
+    resolve_import_model_id,
 )
 from waypoint.backends.claude_code.permission_modes import (
     CLAUDE_PERMISSION_MODE_SPECS,
@@ -101,6 +107,7 @@ from waypoint.schemas import (
     EventKind,
     EventRecord,
     LaunchMode,
+    SessionContextUsage,
     SessionCreateRequest,
     SessionEnvelope,
     SessionInputRequest,
@@ -259,6 +266,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         supports_set_permission_mode_inline=True,
         supports_thread_discovery=True,
         supports_thread_import=True,
+        supports_thread_import_model=True,
         supports_thread_delete=True,
         supports_fork=True,
         supports_slash_compact=False,
@@ -727,6 +735,14 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
+
+    def rebase_context_usage(
+        self, session: SessionRecord, *, model: str | None = None
+    ) -> "SessionContextUsage | None":
+        # ContextUsageRebasing: dispatched by the runtime on the agent plugin,
+        # so this one implementation covers every Claude transport (native,
+        # claude_tty, tmux). Pure/data-only — see rebase_claude_context_usage.
+        return rebase_claude_context_usage(session, model=model)
 
     async def apply_effort(
         self,
@@ -1585,6 +1601,13 @@ class ClaudeCodePlugin(DefaultLaunchContract):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="claude thread already imported",
             )
+        # Durable effective model — the request's choice, else the configured
+        # default. Persisted on the record and used as the authoritative
+        # context-window denominator; the transcript's resolved id can't carry
+        # the ``[1m]`` entitlement.
+        effective_model = resolve_import_model_id(
+            request.model, self._config(runtime).default_model_id
+        )
         # Resolve thread metadata first; cwd is needed for both the
         # direct (Claude SDK) and tmux_wrapper paths.
         if launch_target is None:
@@ -1645,6 +1668,7 @@ class ClaudeCodePlugin(DefaultLaunchContract):
                 launch_target_id=request.launch_target_id,
                 title=info.title,
                 launch_env=request.launch_env,
+                model=effective_model,
             )
         # Direct (structured-SDK) path requires the adapter.
         if self.adapter is None:
@@ -1658,6 +1682,19 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         structured_log = session_dir / "events.jsonl"
         raw_log.touch(exist_ok=True)
         now = datetime.now(UTC)
+        # Seed the context pill from the last transcript turn so the correct
+        # window shows immediately; the adapter otherwise only publishes usage
+        # on the first live assistant message. Local-only (no cheap remote
+        # transcript read).
+        seeded_context_usage = None
+        if launch_target is None:
+            artifacts = local_claude_thread_artifacts(
+                info.id, config_dir_for(self.capabilities, request.launch_env)
+            )
+            if artifacts:
+                seeded_context_usage = await asyncio.to_thread(
+                    seed_context_usage_from_transcript, artifacts[0], effective_model
+                )
         session = SessionRecord(
             id=session_id,
             backend=backend,
@@ -1676,6 +1713,8 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             structured_log_path=str(structured_log),
             transport_state={"thread_id": info.id},
             permission_mode="default",
+            model=effective_model,
+            context_usage=seeded_context_usage,
             launch_env=request.launch_env,
         )
         runtime.storage.create_session(session)

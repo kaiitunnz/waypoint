@@ -52,3 +52,8 @@ class ClaudeThreadImportRequest(BaseModel):
     # session's transcript at import time; when false the transcript starts
     # empty and only the underlying agent resumes its own context.
     import_history: bool = True
+    # Durable model selection for the resumed session. A blank/omitted value
+    # resolves to the Claude plugin's configured default. This is the only
+    # reliable source of the ``[1m]`` context-window entitlement: the
+    # transcript's resolved API id (e.g. ``claude-opus-4-8``) loses it.
+    model: str | None = None

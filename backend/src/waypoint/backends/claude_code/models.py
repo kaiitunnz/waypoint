@@ -157,6 +157,20 @@ def claude_default_model_id() -> str | None:
     return None
 
 
+def resolve_import_model_id(
+    requested: str | None, default_model_id: str | None
+) -> str | None:
+    """Effective durable model for an imported thread.
+
+    A non-blank request value wins (accepting both catalogue aliases and
+    free-form ids, mirroring ``set_model``'s trim contract); otherwise the
+    plugin's configured default. Returns ``None`` only when neither is set.
+    """
+    if isinstance(requested, str) and requested.strip():
+        return requested.strip()
+    return default_model_id
+
+
 # CLI version milestones, from the official changelog (anthropics/claude-code):
 #   2.1.154  Opus 4.8 introduced (defaults high; accepts xhigh + max)
 #   2.1.170  Fable 5 introduced (accepts xhigh + max; 1M context)

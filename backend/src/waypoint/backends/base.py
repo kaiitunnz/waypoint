@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -167,6 +168,49 @@ class PaneSubmitConfirming(Protocol):
         was sent. Agents that render input literally check that ``sent_text``
         no longer occupies the composer; ones that collapse it (Claude pastes an
         image to an ``[Image]`` chip) check that the composer is empty instead."""
+        ...
+
+
+class TerminalAppearance(StrEnum):
+    """Light/dark surface a terminal pane should adopt for an agent's TUI.
+
+    ``UNKNOWN`` is the safe-degradation value: the plugin could not resolve the
+    agent's effective theme (no preference, ``auto``, malformed/unreadable config,
+    an unsupported theme form, or a blocked remote probe). Generic terminal code
+    maps ``UNKNOWN`` — and any plugin that does not implement
+    :class:`TerminalAppearanceResolving` — to the existing dark presentation, so
+    the enum never leaks a third value onto the wire.
+    """
+
+    LIGHT = "light"
+    DARK = "dark"
+    UNKNOWN = "unknown"
+
+
+@runtime_checkable
+class TerminalAppearanceResolving(Protocol):
+    """An agent that can resolve the light/dark surface its terminal pane wants.
+
+    Per-session and profile-scoped — deliberately *not* a
+    :class:`BackendCapabilities` field: the result varies with the session's
+    account profile and the user's native agent theme preference, and can change
+    after a ``/theme`` swap. The terminal websocket narrows to this protocol
+    (``isinstance``) and asks the resolved plugin for the appearance before it
+    seeds the pane; a plugin without the protocol keeps the dark default.
+
+    A generic transport that wraps an arbitrary agent (the tmux pane wrapper)
+    implements this by delegating to its inner agent plugin through the same
+    protocol, so a new agent gains terminal theme sync by implementing
+    :meth:`terminal_appearance` alone — no change to the wrapper, the websocket,
+    or the frontend.
+    """
+
+    async def terminal_appearance(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> TerminalAppearance:
+        """Resolve the appearance for ``session``'s terminal pane, reading only
+        the session's profile-scoped agent configuration. Must degrade to
+        ``UNKNOWN`` (never raise) on any missing/malformed/unreadable input."""
         ...
 
 

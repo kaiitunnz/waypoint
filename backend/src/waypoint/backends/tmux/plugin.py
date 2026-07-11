@@ -19,7 +19,11 @@ from typing import TYPE_CHECKING, Any, Never
 from fastapi import HTTPException, status
 from pydantic import BaseModel
 
-from waypoint.backends.base import AgentLaunchContract
+from waypoint.backends.base import (
+    AgentLaunchContract,
+    TerminalAppearance,
+    TerminalAppearanceResolving,
+)
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
 from waypoint.backends.completions import static_slash_completions
 from waypoint.backends.plugin_config import PluginConfig, PluginLaunchTargetConfig
@@ -195,6 +199,20 @@ class TmuxPlugin:
     def native_thread_id(self, session: SessionRecord) -> str | None:
         thread_id = session.transport_state.get("thread_id")
         return thread_id if isinstance(thread_id, str) else None
+
+    async def terminal_appearance(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> TerminalAppearance:
+        # Terminal theme is the wrapped agent's knowledge. Delegate to the inner
+        # agent through the same protocol so a new agent gains theme sync by
+        # implementing ``terminal_appearance`` alone; an agent that doesn't (or a
+        # bare attached pane with no wrapped agent) keeps the dark default.
+        if session.backend == self.id:
+            return TerminalAppearance.UNKNOWN
+        inner = runtime.registry.get(session.backend)
+        if isinstance(inner, TerminalAppearanceResolving):
+            return await inner.terminal_appearance(runtime, session)
+        return TerminalAppearance.UNKNOWN
 
     def native_thread_artifacts(
         self, session: SessionRecord, config_dir: str | None = None

@@ -24,6 +24,7 @@ from waypoint.backends.base import (
     ConfigDirNotReadyError,
     ConfigDirReadiness,
     DefaultLaunchContract,
+    TerminalAppearance,
     config_dir_for,
 )
 from waypoint.backends.capabilities import (
@@ -62,6 +63,10 @@ from waypoint.backends.claude_code.schemas import (
 from waypoint.backends.claude_code.support import (
     ClaudeSupportBundle,
     ensure_claude_support_bundle,
+)
+from waypoint.backends.claude_code.terminal_theme import classify_effective_appearance
+from waypoint.backends.claude_code.terminal_theme_remote import (
+    probe_terminal_appearance_remote,
 )
 from waypoint.backends.claude_code.threads import (
     UUID_RE,
@@ -305,6 +310,34 @@ class ClaudeCodePlugin(DefaultLaunchContract):
         # not literally on screen — emptiness is the only reliable signal.
         # Shared with claude_tty, which wraps the same TUI.
         return composer_is_empty(pane_text)
+
+    async def terminal_appearance(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> TerminalAppearance:
+        # Resolve the effective native Claude theme for this session's terminal
+        # pane, reading only the session's profile-scoped config. Degrades to
+        # UNKNOWN (→ dark) on anything unresolvable; never raises.
+        config_dir = config_dir_for(self.capabilities, session.launch_env)
+        target = runtime._find_launch_target(session.launch_target_id)
+        if target is not None:
+            # A remote session's theme lives on the target, under its launch
+            # env. Never read the local server's config for it (profile
+            # isolation). Honor the shared SSH circuit-breaker: a password
+            # target with no live ControlMaster would otherwise make every
+            # terminal open block on an unreachable-host probe.
+            if runtime.remote_probe_blocked(session.launch_target_id):
+                return TerminalAppearance.UNKNOWN
+            appearance = await probe_terminal_appearance_remote(
+                target, session.cwd, launch_env=dict(session.launch_env)
+            )
+        else:
+            appearance = await asyncio.to_thread(
+                classify_effective_appearance, config_dir, session.cwd
+            )
+        try:
+            return TerminalAppearance(appearance)
+        except ValueError:
+            return TerminalAppearance.UNKNOWN
 
     def setup(self, runtime: "SessionRuntime") -> None:
         # Build the host-side support bundle, the CLI adapter, and the remote

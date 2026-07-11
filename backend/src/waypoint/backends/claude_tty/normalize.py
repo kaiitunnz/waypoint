@@ -49,6 +49,17 @@ from waypoint.schemas import EventKind, SessionStatus
 
 FILE_EDIT_TOOL_NAMES: frozenset[str] = frozenset({"Edit", "Write", "MultiEdit"})
 
+# The Claude CLI stamps locally-fabricated (non-model) messages with this model
+# id. It covers useful synthetic messages too (API-error notices, interrupted
+# partials), so the marker alone is not a suppression signal — it only gates the
+# exact placeholder string below.
+SYNTHETIC_MODEL_ID = "<synthetic>"
+# Placeholder text the CLI substitutes for an empty assistant turn injected on a
+# `--resume` relaunch (settings-change restart, reconnect, or compaction). It is
+# a fixed CLI constant, and a synthetic message carrying exactly this text is
+# always the phantom — an interrupted partial or error notice has other text.
+RESUME_NOOP_TEXT = "No response requested."
+
 
 class NormalizedEvent:
     __slots__ = ("kind", "text", "metadata", "status")
@@ -179,6 +190,11 @@ class TranscriptNormalizer:
         if message_id:
             self._seen_message_ids.add(message_id)
 
+        # Suppress the resume phantom (see RESUME_NOOP_TEXT); the result note
+        # below still fires, so the turn resolves to idle even if no real turn
+        # follows.
+        is_synthetic = str(message.get("model") or "") == SYNTHETIC_MODEL_ID
+
         events: list[NormalizedEvent] = []
         blocks = iter_content_blocks(message.get("content"))
         has_tool_use = False
@@ -189,6 +205,8 @@ class TranscriptNormalizer:
             bt = block.get("type")
             if bt == "text":
                 text = str(block.get("text") or "")
+                if is_synthetic and text.strip() == RESUME_NOOP_TEXT:
+                    continue
                 if text:
                     had_text = True
                     events.append(

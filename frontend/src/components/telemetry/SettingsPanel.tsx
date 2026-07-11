@@ -1,0 +1,113 @@
+"use client";
+
+import { useState } from "react";
+
+import { TelemetryDeleteResponse, TelemetrySettingsResponse } from "@/lib/types";
+
+interface SettingsPanelProps {
+  settings: TelemetrySettingsResponse | null;
+  loading: boolean;
+  deleting: boolean;
+  deleteResult: TelemetryDeleteResponse | null;
+  onDelete: () => void;
+}
+
+export function SettingsPanel({
+  settings,
+  loading,
+  deleting,
+  deleteResult,
+  onDelete,
+}: SettingsPanelProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <section className="panel tm-settings-panel">
+      <button
+        type="button"
+        className="tm-filters-toggle tm-settings-toggle"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+      >
+        Privacy, coverage &amp; retention
+        <span aria-hidden="true" className="tm-filters-toggle-chevron">
+          {expanded ? "▴" : "▾"}
+        </span>
+      </button>
+
+      {expanded ? (
+        loading && !settings ? (
+          <p className="muted">Loading settings…</p>
+        ) : settings ? (
+          <div className="tm-settings-body">
+            <p className="tm-settings-statement">{settings.privacy_statement}</p>
+            <dl className="tm-stat-list">
+              <div className="tm-stat-row">
+                <span className="tm-stat-row-label">Fact retention</span>
+                <span className="tm-stat-row-value">{settings.retention_days_facts} days</span>
+              </div>
+              <div className="tm-stat-row">
+                <span className="tm-stat-row-label">Rollup retention</span>
+                <span className="tm-stat-row-value">
+                  {settings.retention_months_rollups} months
+                </span>
+              </div>
+              <div className="tm-stat-row">
+                <span className="tm-stat-row-label">Backfill</span>
+                <span className="tm-stat-row-value">
+                  {settings.coverage.backfill_done ? "Complete" : "In progress"}
+                  {settings.coverage.backfill_through
+                    ? ` · through ${new Date(settings.coverage.backfill_through).toLocaleDateString()}`
+                    : ""}
+                </span>
+              </div>
+              <div className="tm-stat-row">
+                <span className="tm-stat-row-label">External export</span>
+                <span className="tm-stat-row-value">
+                  {settings.external_export ? "Enabled" : "Disabled"}
+                </span>
+              </div>
+              <div className="tm-stat-row">
+                <span className="tm-stat-row-label">Content capture</span>
+                <span className="tm-stat-row-value">
+                  {settings.content_capture ? "Enabled" : "Disabled"}
+                </span>
+              </div>
+            </dl>
+
+            <div className="tm-settings-danger">
+              <p className="muted">
+                Deleting telemetry removes every stored fact and rollup. Session
+                transcripts are never affected.
+              </p>
+              <button
+                type="button"
+                className="board-action board-action-danger"
+                disabled={deleting}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "Delete all retained telemetry (facts + rollups)? Session transcripts are not affected. This cannot be undone.",
+                    )
+                  ) {
+                    onDelete();
+                  }
+                }}
+              >
+                {deleting ? "Deleting…" : "Delete all telemetry"}
+              </button>
+              {deleteResult ? (
+                <p className="tm-settings-delete-result" role="status">
+                  Removed {deleteResult.removed.facts} facts and {deleteResult.removed.rollups}{" "}
+                  rollup rows. Transcripts unaffected.
+                </p>
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          <p className="muted">Settings unavailable.</p>
+        )
+      ) : null}
+    </section>
+  );
+}

@@ -31,9 +31,21 @@ import {
   SessionPresetSummary,
   SessionPresetWriteRequest,
   SessionRecord,
+  TelemetryActivity,
+  TelemetryDeleteResponse,
+  TelemetryDrilldown,
+  TelemetryFactKind,
+  TelemetryHealth,
+  TelemetryOverview,
+  TelemetrySettingsResponse,
+  TelemetryTokens,
+  TokenGroupBy,
+  Insight,
   UsageDashboardResponse,
 } from "@/lib/types";
 import { parseDiffPreviewPayload, type EventDiffPreview } from "@/lib/events";
+import type { TelemetryFiltersState, TelemetryRangeState } from "@/lib/telemetry";
+import { telemetryParams } from "@/lib/telemetry";
 
 export class AuthError extends Error {
   constructor(message = "session expired") {
@@ -470,6 +482,142 @@ export async function refreshUsageDashboard(
   });
   await ensureOk(response, "failed to refresh usage dashboard");
   return (await response.json()) as UsageDashboardResponse;
+}
+
+// ── Telemetry (CONTRACT.md §4 — /api/telemetry/*) ────────────────────────
+
+export async function fetchTelemetryOverview(
+  host: string,
+  token: string,
+  range: TelemetryRangeState,
+  filters: TelemetryFiltersState,
+): Promise<TelemetryOverview> {
+  const response = await fetch(
+    `${host}/api/telemetry/overview?${telemetryParams(range, filters).toString()}`,
+    { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
+  );
+  await ensureOk(response, "failed to fetch telemetry overview");
+  return (await response.json()) as TelemetryOverview;
+}
+
+export async function fetchTelemetryTokens(
+  host: string,
+  token: string,
+  range: TelemetryRangeState,
+  filters: TelemetryFiltersState,
+  groupBy: TokenGroupBy,
+): Promise<TelemetryTokens> {
+  const params = telemetryParams(range, filters, { group_by: groupBy });
+  const response = await fetch(`${host}/api/telemetry/tokens?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch telemetry tokens");
+  return (await response.json()) as TelemetryTokens;
+}
+
+export async function fetchTelemetryActivity(
+  host: string,
+  token: string,
+  range: TelemetryRangeState,
+  filters: TelemetryFiltersState,
+): Promise<TelemetryActivity> {
+  const response = await fetch(
+    `${host}/api/telemetry/activity?${telemetryParams(range, filters).toString()}`,
+    { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
+  );
+  await ensureOk(response, "failed to fetch telemetry activity");
+  return (await response.json()) as TelemetryActivity;
+}
+
+export async function fetchTelemetryHealth(
+  host: string,
+  token: string,
+  range: TelemetryRangeState,
+  filters: TelemetryFiltersState,
+): Promise<TelemetryHealth> {
+  const response = await fetch(
+    `${host}/api/telemetry/health?${telemetryParams(range, filters).toString()}`,
+    { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
+  );
+  await ensureOk(response, "failed to fetch telemetry health");
+  return (await response.json()) as TelemetryHealth;
+}
+
+export async function fetchTelemetryDrilldown(
+  host: string,
+  token: string,
+  range: TelemetryRangeState,
+  filters: TelemetryFiltersState,
+  kind: TelemetryFactKind,
+  page: number,
+  pageSize: number,
+): Promise<TelemetryDrilldown> {
+  const params = telemetryParams(range, filters, {
+    kind,
+    page,
+    page_size: pageSize,
+  });
+  const response = await fetch(`${host}/api/telemetry/drilldown?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch telemetry drilldown");
+  return (await response.json()) as TelemetryDrilldown;
+}
+
+export async function fetchTelemetryInsights(
+  host: string,
+  token: string,
+  range: TelemetryRangeState,
+  filters: TelemetryFiltersState,
+): Promise<Insight[]> {
+  const response = await fetch(
+    `${host}/api/telemetry/insights?${telemetryParams(range, filters).toString()}`,
+    { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
+  );
+  await ensureOk(response, "failed to fetch telemetry insights");
+  const payload = await response.json();
+  return (payload.insights ?? []) as Insight[];
+}
+
+export async function dismissTelemetryInsight(
+  host: string,
+  token: string,
+  range: TelemetryRangeState,
+  filters: TelemetryFiltersState,
+  signature: string,
+): Promise<void> {
+  const params = telemetryParams(range, filters);
+  const response = await fetch(
+    `${host}/api/telemetry/insights/${encodeURIComponent(signature)}/dismiss?${params.toString()}`,
+    { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+  );
+  await ensureOk(response, "failed to dismiss insight");
+}
+
+export async function fetchTelemetrySettings(
+  host: string,
+  token: string,
+): Promise<TelemetrySettingsResponse> {
+  const response = await fetch(`${host}/api/telemetry/settings`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch telemetry settings");
+  return (await response.json()) as TelemetrySettingsResponse;
+}
+
+export async function deleteTelemetry(
+  host: string,
+  token: string,
+): Promise<TelemetryDeleteResponse> {
+  const response = await fetch(`${host}/api/telemetry`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, "failed to delete telemetry");
+  return (await response.json()) as TelemetryDeleteResponse;
 }
 
 export async function setSessionPermissionMode(

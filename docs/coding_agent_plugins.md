@@ -457,6 +457,40 @@ than guessing. `display_total_tokens` is supplied only when the provider's
 categories do not overlap (Claude sums; Codex uses `totalTokens`; OpenCode
 omits it), so the UI never synthesizes an unsafe grand total.
 
+### Context-window rebase (optional)
+
+Sometimes only the *denominator* of the current context window changes, with no
+fresh usage payload to trigger a republish — a model swap or a transport switch.
+An agent opts into rebasing the stored snapshot in place by implementing the
+`ContextUsageRebasing` protocol from
+[`base.py`](../backend/src/waypoint/backends/base.py):
+
+```python
+def rebase_context_usage(self, session, *, model=None) -> SessionContextUsage | None: ...
+```
+
+Like `TerminalAppearanceResolving`, it is a `@runtime_checkable` optional
+protocol rather than a `BackendCapabilities` field, and it is **dispatched on the
+agent plugin** (`registry.get(session.backend)`), so one implementation covers
+every transport the agent runs over and an agent that doesn't implement it simply
+no-ops — no `backend == …` branch in the runtime. It is pure and data-only: it
+reads the session's durable `model` (or an explicit override), recomputes only
+`context_window_tokens`, and returns the rebased snapshot — `None` when there is
+nothing to rebase. It must key off the durable selection, never a resolved
+provider id, and clear the window (`context_window_tokens = None`) for an unknown
+selection rather than fabricating a default; returning the unchanged snapshot when
+the window already matches lets the runtime no-op idempotently (so an adapter that
+already refreshed in-place is not double-broadcast).
+
+The runtime invokes it after an explicit inline model change and after a transport
+switch restores, under the session lifecycle lock and before the state broadcast.
+This is a Claude concern: Claude's catalogue distinguishes `opus[1m]` (1M) from
+`opus`/`claude-opus-4-8` (200K), and the transcript records only the resolved base
+id, so the durable selection is the sole source of the `[1m]` entitlement. Codex
+and OpenCode take their window from the provider directly (Codex's `token_count`
+`model_context_window`, OpenCode's per-model lookup), so they neither implement
+the protocol nor need it.
+
 ## The claude_tty composition
 
 `claude_tty` is the clearest illustration of the (agent, transport) split: it

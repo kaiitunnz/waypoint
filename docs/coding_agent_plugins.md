@@ -393,6 +393,37 @@ async def post_approval(self, runtime, session) -> None: ...
   any structured approval response (Claude syncs the permission-mode pill when
   an ExitPlanMode approval flips the mode out of "plan").
 
+### Terminal appearance (optional)
+
+A terminal pane is a host for an opaque TUI, so its light/dark surface should
+follow the *agent's own theme*, not Waypoint's app theme toggle. An agent opts
+into this by implementing the `TerminalAppearanceResolving` protocol from
+[`base.py`](../backend/src/waypoint/backends/base.py):
+
+```python
+async def terminal_appearance(self, runtime, session) -> TerminalAppearance: ...
+```
+
+It is a `@runtime_checkable` optional protocol, **not** a `BackendCapabilities`
+field: the answer is per-session and profile-scoped (it varies with the account
+profile's config dir and the user's native theme preference, and changes after a
+`/theme` swap), so it cannot live on the immutable capability descriptor. The
+terminal websocket narrows to the protocol with `isinstance` and asks the
+resolved plugin for the surface before it seeds the pane; a plugin that does not
+implement it — or a resolved `UNKNOWN` — keeps the existing dark default. The
+enum is `LIGHT`/`DARK`/`UNKNOWN`; only the first two ever reach the wire.
+
+Resolution must read only the session's profile-scoped config, never mutate the
+agent's preference, and degrade to `UNKNOWN` (never raise) on anything missing,
+malformed, unreadable, or remote-unreachable. Claude implements it in
+[`claude_code/terminal_theme.py`](../backend/src/waypoint/backends/claude_code/terminal_theme.py),
+a stdlib-only classifier that doubles as the SSH remote probe so local and
+remote resolution share one implementation. `claude_tty` delegates to its
+composed Claude agent, and the generic `tmux` wrapper delegates to its inner
+agent through the same protocol — so a new agent (Codex, OpenCode) gains
+terminal theme sync by implementing `terminal_appearance` alone, with no change
+to the wrapper, the websocket, or the frontend.
+
 ## Token & context usage
 
 Waypoint tracks two independent token measurements, both agent-owned at the

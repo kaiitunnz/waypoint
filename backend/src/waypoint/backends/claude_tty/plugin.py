@@ -34,7 +34,10 @@ from typing import TYPE_CHECKING, Any
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 
-from waypoint.backends.base import config_dir_for
+from waypoint.backends.base import (
+    TerminalAppearance,
+    config_dir_for,
+)
 from waypoint.backends.capabilities import BackendCapabilities, ModelSource
 from waypoint.backends.claude_code import side_question as _sq
 from waypoint.backends.claude_code.commands import list_claude_command_completions
@@ -244,6 +247,13 @@ class ClaudeTtyPlugin:
         # collapses the paste to a chip, so emptiness — not the sent text — is
         # the signal.
         return pane_dialog.composer_is_empty(pane_text)
+
+    async def terminal_appearance(
+        self, runtime: "SessionRuntime", session: SessionRecord
+    ) -> TerminalAppearance:
+        # Delegate to the composed Claude agent so this tty-tail transport and
+        # claude_code cannot drift on theme resolution.
+        return await self._claude.terminal_appearance(runtime, session)
 
     def on_session_deleted(
         self, runtime: "SessionRuntime", session: SessionRecord

@@ -8134,9 +8134,12 @@ html[data-theme="light"] .term-bar-action.primary {
   flex: 0 0 auto;
 }
 
-/* The stage stays dark in both app themes, matching XTerminal's fixed dark
- * palette — TUI truecolor output is tuned for a dark ground and cannot be
- * remapped, so a light stage renders it illegibly. */
+/* The stage surface follows the running agent's TUI theme, not the Waypoint app
+ * theme: xterm selects a light or dark palette from the appearance the server
+ * resolves, and the stage background must match xterm's own ground exactly.
+ * Dark is the default; ``.term-stage--light`` is applied when the agent's theme
+ * is light. Both backgrounds are terminal-specific literals — deliberately not
+ * app-theme tokens — so the stage never tracks the web chrome's light/dark. */
 .term-stage {
   position: relative;
   flex: 1 1 auto;
@@ -8144,6 +8147,10 @@ html[data-theme="light"] .term-bar-action.primary {
   display: flex;
   background: #060810;
   overflow: hidden;
+}
+
+.term-stage--light {
+  background: #faf7f0;
 }
 
 .term-stage-host {
@@ -8183,62 +8190,15 @@ html[data-theme="light"] .term-bar-action.primary {
   border-radius: var(--radius-pill);
 }
 
-/* Light theme — override xterm.js v6 inline color strings. v6's DOM
-   renderer writes inline ``background-color``/``color`` on each
-   indexed cell, bypassing the ``xterm-bg-*`` / ``xterm-fg-*`` class
-   rules that ``ITheme.extendedAnsi`` is supposed to drive — so the
-   bg-bar that claude_code draws around a user message (xterm index
-   237/238) and its pure-white emphasis text (index 231) render
-   straight from the default xterm 256-color palette against cream.
-   Two inline-style formats are emitted depending on which path
-   fires inside the row factory: ``rgb(R, G, B)`` with spaces, and
-   compact ``#hex``. Match both. */
-html[data-theme="light"] .xterm-rows span[style*="background-color: rgb(58, 58, 58)"],
-html[data-theme="light"] .xterm-rows span[style*="background-color:#3a3a3a"] {
-  background-color: #bcb4a1 !important;
-}
-html[data-theme="light"] .xterm-rows span[style*="background-color: rgb(68, 68, 68)"],
-html[data-theme="light"] .xterm-rows span[style*="background-color:#444444"] {
-  background-color: #b3ab99 !important;
-}
-html[data-theme="light"] .xterm-rows span[style*="color: rgb(255, 255, 255)"],
-html[data-theme="light"] .xterm-rows span[style*="color:#ffffff"],
-html[data-theme="light"] .xterm-rows span[style*="color:#fff;"] {
-  color: #1c1914 !important;
-}
-html[data-theme="light"] .xterm-rows span[style*="color: rgb(148, 148, 148)"],
-html[data-theme="light"] .xterm-rows span[style*="color:#949494"] {
-  color: #6c665a !important;
-}
-/* CC code-identifier accent (xterm index 153, #afd7ff). The pale blue
-   sits below readable contrast against cream; bump to the light-theme
-   ``brightBlue`` so the colour cue survives without going slate. */
-html[data-theme="light"] .xterm-rows span[style*="color: rgb(175, 215, 255)"],
-html[data-theme="light"] .xterm-rows span[style*="color:#afd7ff"] {
-  color: #3a87ba !important;
-}
-/* Codex TUI accents. Codex emits 24-bit RGB for its model picker /
-   path / status text, and xterm v6 also inlines ANSI 3/6 as literal
-   ``#cdcd00`` / ``#00cdcd`` instead of consulting LIGHT_THEME.yellow
-   / cyan — same renderer behaviour we work around for the 256-color
-   indexed cells above. All four land below readable contrast on
-   cream; remap to the theme's yellow / green / cyan. */
-html[data-theme="light"] .xterm-rows span[style*="color: rgb(246, 226, 183)"],
-html[data-theme="light"] .xterm-rows span[style*="color:#f6e2b7"] {
-  color: #aa6618 !important;
-}
-html[data-theme="light"] .xterm-rows span[style*="color: rgb(171, 223, 167)"],
-html[data-theme="light"] .xterm-rows span[style*="color:#abdfa7"] {
-  color: #257a50 !important;
-}
-html[data-theme="light"] .xterm-rows span[style*="color: rgb(205, 205, 0)"],
-html[data-theme="light"] .xterm-rows span[style*="color:#cdcd00"] {
-  color: #aa6618 !important;
-}
-html[data-theme="light"] .xterm-rows span[style*="color: rgb(0, 205, 205)"],
-html[data-theme="light"] .xterm-rows span[style*="color:#00cdcd"] {
-  color: #1e7a8e !important;
-}
+/* The terminal surface follows the agent's TUI theme (``.term-stage--light``),
+   not the Waypoint app theme, so xterm's own light/dark ``ITheme`` — including
+   its explicit ``extendedAnsi`` palette — drives cell colours. The former
+   ``html[data-theme="light"] .xterm-rows`` inline-style overrides were removed:
+   they coupled terminal colours to the web chrome, which is exactly what this
+   feature decouples. If xterm's DOM renderer is later shown to bypass
+   ``extendedAnsi`` for a specific indexed cell on the light surface, add a
+   narrowly scoped ``.term-stage--light .xterm-rows span[...]`` rule here,
+   documented with the observed index/colour. */
 
 .term-jump {
   position: absolute;

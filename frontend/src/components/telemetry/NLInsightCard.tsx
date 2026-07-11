@@ -143,7 +143,7 @@ export function NLInsightCard({
         <span className="muted">
           {formatRelativeTime(insight.generated_at)} · {insight.source_backend}
           {insight.source_model ? ` · ${insight.source_model}` : ""}
-          {response?.stale ? " · stale" : ""}
+          {response && !response.fresh ? " · stale" : ""}
         </span>
         <button
           type="button"

@@ -1048,5 +1048,6 @@ export interface NLInsight {
 export interface NLInsightResponse {
   available: boolean;
   insight: NLInsight | null;
-  stale: boolean;
+  // Whether the stored digest is still within the configured digest interval.
+  fresh: boolean;
 }

@@ -815,6 +815,10 @@ export interface LimitSnapshotView {
   // Only populated when the server's `telemetry_local_labels` setting is on
   // (default off); `account_key` is always a pseudonym, never a raw email/org.
   account_label: string | null;
+  // The user-chosen local profile name ("nus") or "Default" for a no-profile
+  // session — never the raw OAuth email/org, so it's shown by default (unlike
+  // `account_label` above, which needs local labels on).
+  profile_label: string | null;
   window_id: string;
   label: string | null;
   used_percent: number;
@@ -903,6 +907,8 @@ export interface LimitSeries {
   account_key: string;
   // See `LimitSnapshotView.account_label` — same local-labels gate.
   account_label: string | null;
+  // See `LimitSnapshotView.profile_label` — always shown, no gate.
+  profile_label: string | null;
   window_id: string;
   label: string | null;
   points: LimitSeriesPoint[];

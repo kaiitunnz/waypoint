@@ -21,6 +21,7 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any
 
+from waypoint.backends.approvals import is_approve_decision
 from waypoint.schemas import (
     EventKind,
     EventRecord,
@@ -62,8 +63,6 @@ _STATUS_TO_TRANSITION: dict[str, LifecycleTransition] = {
 # (a generic, backend-neutral runtime path, not a per-plugin one) — the only
 # place a decision on an ``APPROVAL_REQUEST`` currently surfaces at all.
 _APPROVAL_DECISION_PREFIX = "Approval response sent: "
-_APPROVE_WORDS = {"accept", "acceptforsession", "approve", "approved"}
-_DECLINE_WORDS = {"decline", "declined", "cancel", "cancelled", "deny", "denied"}
 
 # ``ContextSnapshotFact`` is rate-limited to one per session per minute bucket
 # (CONTRACT.md §3); this is the strftime pattern for that bucket.
@@ -71,7 +70,9 @@ _MINUTE_BUCKET_FORMAT = "%Y%m%dT%H%M"
 
 
 def _dims_for_session(session: SessionRecord) -> FactDimensions:
-    repo_name = os.path.basename(session.repo_name) if session.repo_name else None
+    repo_name = (
+        os.path.basename(session.repo_name.rstrip("/")) if session.repo_name else None
+    )
     return FactDimensions(
         backend=session.backend,
         repo_name=repo_name or None,
@@ -103,12 +104,16 @@ def _approval_decision_from_event(
     approval_id = _approval_id(event.metadata)
     if approval_id is None or not event.text.startswith(_APPROVAL_DECISION_PREFIX):
         return None
-    word = event.text[len(_APPROVAL_DECISION_PREFIX) :].strip().lower()
-    if word in _APPROVE_WORDS:
-        return approval_id, ApprovalDecision.APPROVED
-    if word in _DECLINE_WORDS:
-        return approval_id, ApprovalDecision.DECLINED
-    return None
+    word = event.text[len(_APPROVAL_DECISION_PREFIX) :].strip()
+    # An unrecognized word is treated as a decline, never skipped — skipping
+    # would strand the fact at REQUESTED forever even though a decision was
+    # actually made.
+    decision = (
+        ApprovalDecision.APPROVED
+        if is_approve_decision(word)
+        else ApprovalDecision.DECLINED
+    )
+    return approval_id, decision
 
 
 def _epoch_ms(value: datetime) -> int:
@@ -138,6 +143,11 @@ class TelemetryIngester:
         # arrives); never persisted.
         self._pending_tool_calls: dict[tuple[str, str], datetime] = {}
         self._pending_approvals: dict[tuple[str, str], str | None] = {}
+        # Nearly every event stamps ``metadata["status"]`` (STATUS_UPDATE is
+        # never actually emitted; see the note below), so without this a
+        # single turn's worth of same-status events would each mint their own
+        # lifecycle fact. Only a genuine transition is worth recording.
+        self._last_transition: dict[str, LifecycleTransition] = {}
 
     # ── enqueue (fast path; called inline from runtime signal points) ──────
 
@@ -208,7 +218,11 @@ class TelemetryIngester:
         transition = (
             _STATUS_TO_TRANSITION.get(status) if isinstance(status, str) else None
         )
-        if transition is not None:
+        if (
+            transition is not None
+            and self._last_transition.get(session.id) != transition
+        ):
+            self._last_transition[session.id] = transition
             self._enqueue(
                 SessionLifecycleFact(
                     fact_id=f"{session.id}:{event.sequence}",

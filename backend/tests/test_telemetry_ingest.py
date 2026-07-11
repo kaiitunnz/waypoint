@@ -99,6 +99,18 @@ def test_child_session_is_stamped_is_child(tmp_path: Path) -> None:
     assert row["spawner_session_id"] == "parent"
 
 
+def test_repo_name_basename_handles_trailing_slash(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1", repo_path="/home/user/projects/waypoint/")
+    ingester = TelemetryIngester(storage)
+
+    ingester.derive_from_session_created(session)
+    ingester._drain_available()
+
+    row = _facts(storage, "s1")[0]
+    assert row["repo_name"] == "waypoint"
+
+
 def test_status_metadata_on_event_derives_lifecycle_fact_and_dedups_replay(
     tmp_path: Path,
 ) -> None:
@@ -123,6 +135,87 @@ def test_status_metadata_on_event_derives_lifecycle_fact_and_dedups_replay(
     assert len(rows) == 1
     assert rows[0]["transition"] == "idle"
     assert rows[0]["fact_id"] == "s1:7"
+
+
+def test_many_same_status_events_in_one_turn_collapse_to_one_lifecycle_fact(
+    tmp_path: Path,
+) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1")
+    ingester = TelemetryIngester(storage)
+    now = datetime.now(UTC)
+
+    # STATUS_UPDATE is never actually emitted; nearly every event of a turn
+    # (tool calls, agent output, ...) stamps metadata["status"] with the
+    # current status instead, so a single turn easily carries 30 RUNNING
+    # events. Only the first should mint a lifecycle fact.
+    for sequence in range(1, 31):
+        ingester.derive_from_event(
+            session,
+            EventRecord(
+                session_id="s1",
+                ts=now,
+                kind=EventKind.TOOL_CALL,
+                text="Read\n{...}",
+                metadata={
+                    "tool_use_id": f"tool-{sequence}",
+                    "tool_name": "Read",
+                    "status": SessionStatus.RUNNING,
+                },
+                sequence=sequence,
+            ),
+        )
+    ingester._drain_available()
+
+    rows = [r for r in _facts(storage, "s1") if r["kind"] == "session_lifecycle"]
+    assert len(rows) == 1
+    assert rows[0]["transition"] == "running"
+
+
+def test_status_change_after_dedup_still_emits(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1")
+    ingester = TelemetryIngester(storage)
+    now = datetime.now(UTC)
+
+    ingester.derive_from_event(
+        session,
+        EventRecord(
+            session_id="s1",
+            ts=now,
+            kind=EventKind.SYSTEM_NOTE,
+            text="a",
+            metadata={"status": SessionStatus.RUNNING},
+            sequence=1,
+        ),
+    )
+    ingester.derive_from_event(
+        session,
+        EventRecord(
+            session_id="s1",
+            ts=now,
+            kind=EventKind.SYSTEM_NOTE,
+            text="b",
+            metadata={"status": SessionStatus.RUNNING},
+            sequence=2,
+        ),
+    )
+    ingester.derive_from_event(
+        session,
+        EventRecord(
+            session_id="s1",
+            ts=now,
+            kind=EventKind.SYSTEM_NOTE,
+            text="c",
+            metadata={"status": SessionStatus.IDLE},
+            sequence=3,
+        ),
+    )
+    ingester._drain_available()
+
+    rows = [r for r in _facts(storage, "s1") if r["kind"] == "session_lifecycle"]
+    transitions = sorted(r["transition"] for r in rows)
+    assert transitions == ["idle", "running"]
 
 
 def test_user_input_event_derives_turn_fact_with_resolved_model(tmp_path: Path) -> None:
@@ -319,6 +412,79 @@ def test_approval_decline_maps_to_declined(tmp_path: Path) -> None:
             kind=EventKind.SYSTEM_NOTE,
             text="Approval response sent: decline",
             metadata={"approval_id": "appr-2"},
+            sequence=2,
+        ),
+    )
+    ingester._drain_available()
+
+    row = [r for r in _facts(storage, "s1") if r["kind"] == "tool_call"][0]
+    assert row["approval_decision"] == "declined"
+
+
+def test_approval_shared_vocabulary_words_map_to_approved(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    ingester = TelemetryIngester(storage)
+    now = datetime.now(UTC)
+
+    for word in ["allow", "acceptalways", "yes"]:
+        session_id = f"s-{word}"
+        session = _make_session(storage, session_id)
+        approval_id = f"appr-{word}"
+        ingester.derive_from_event(
+            session,
+            EventRecord(
+                session_id=session_id,
+                ts=now,
+                kind=EventKind.APPROVAL_REQUEST,
+                text="Allow?",
+                metadata={"approval_id": approval_id, "tool_name": "Bash"},
+                sequence=1,
+            ),
+        )
+        ingester.derive_from_event(
+            session,
+            EventRecord(
+                session_id=session_id,
+                ts=now + timedelta(seconds=1),
+                kind=EventKind.SYSTEM_NOTE,
+                text=f"Approval response sent: {word}",
+                metadata={"approval_id": approval_id},
+                sequence=2,
+            ),
+        )
+        ingester._drain_available()
+
+        row = [r for r in _facts(storage, session_id) if r["kind"] == "tool_call"][0]
+        assert row["approval_decision"] == "approved", word
+
+
+def test_approval_unrecognized_word_maps_to_declined_not_stranded(
+    tmp_path: Path,
+) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1")
+    ingester = TelemetryIngester(storage)
+    now = datetime.now(UTC)
+
+    ingester.derive_from_event(
+        session,
+        EventRecord(
+            session_id="s1",
+            ts=now,
+            kind=EventKind.APPROVAL_REQUEST,
+            text="Allow?",
+            metadata={"approval_id": "appr-3", "tool_name": "Write"},
+            sequence=1,
+        ),
+    )
+    ingester.derive_from_event(
+        session,
+        EventRecord(
+            session_id="s1",
+            ts=now + timedelta(seconds=1),
+            kind=EventKind.SYSTEM_NOTE,
+            text="Approval response sent: some-unrecognized-word",
+            metadata={"approval_id": "appr-3"},
             sequence=2,
         ),
     )

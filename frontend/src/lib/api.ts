@@ -1638,6 +1638,11 @@ interface TerminalSocketHandlers {
   // in-band resize ops. The client applies it via term.resize() so its grid
   // matches the cell-positioned stream.
   onResize?: (cols: number, rows: number) => void;
+  // Version-2 servers send a ``{type:"appearance"}`` frame before the seed so
+  // the pane selects the light/dark surface matching the agent's TUI theme.
+  // Applied synchronously here (in an earlier message handler than the seed),
+  // so no acknowledgement is needed.
+  onAppearance?: (appearance: "light" | "dark") => void;
   onAuthFailure?: () => void;
   // Backend sends 4410 when the underlying tmux pane has exited. The
   // user has to click Reconnect explicitly; we don't auto-retry.
@@ -1663,6 +1668,10 @@ export function connectTerminalSocket(
         const msg = JSON.parse(event.data);
         if (msg?.type === "size" && typeof msg.cols === "number" && typeof msg.rows === "number") {
           handlers.onResize?.(msg.cols, msg.rows);
+          return;
+        }
+        if (msg?.type === "appearance" && (msg.appearance === "light" || msg.appearance === "dark")) {
+          handlers.onAppearance?.(msg.appearance);
           return;
         }
       } catch {

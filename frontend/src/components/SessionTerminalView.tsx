@@ -25,6 +25,8 @@ interface SessionTerminalViewProps {
   keyInjection: boolean;
   terminalRef: MutableRefObject<XTerminalHandle | null>;
   terminalDims: { cols: number; rows: number } | null;
+  // Light/dark surface for the pane, resolved from the agent's TUI theme.
+  terminalAppearance: "light" | "dark";
   sessionExited: boolean;
   dormantReattach: boolean;
   termMenuOpen: boolean;
@@ -77,6 +79,7 @@ export function SessionTerminalView({
   keyInjection,
   terminalRef,
   terminalDims,
+  terminalAppearance,
   sessionExited,
   dormantReattach,
   termMenuOpen,
@@ -296,7 +299,11 @@ export function SessionTerminalView({
           ) : null}
         </div>
       </div>
-      <div className="term-stage">
+      <div
+        className={`term-stage${
+          terminalAppearance === "light" ? " term-stage--light" : ""
+        }`}
+      >
         <div className="term-stage-host" role="log" aria-live="polite">
           <XTerminal
             // Remount when the transport (and thus fit mode) changes — autoFit
@@ -305,6 +312,7 @@ export function SessionTerminalView({
             ref={terminalRef}
             readOnly={!interactive}
             autoFit={!fixedGrid}
+            appearance={terminalAppearance}
             onData={interactive ? onTerminalInput : undefined}
             onResize={onTerminalResize}
             onScrollChange={interactive ? onTerminalScrollChange : undefined}

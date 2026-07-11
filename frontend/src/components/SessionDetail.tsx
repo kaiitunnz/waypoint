@@ -1455,6 +1455,12 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
   // Bumped to reconnect the terminal WS: on EXITED → live transitions and
   // when the pane target (tmux_pane) changes under a running session.
   const [terminalEpoch, setTerminalEpoch] = useState(0);
+  // The light/dark surface the connected pane should show, resolved from the
+  // agent's own TUI theme by the server. Connection state, not app state:
+  // dark until the appearance frame arrives, reset to dark on each reconnect.
+  const [terminalAppearance, setTerminalAppearance] = useState<
+    "light" | "dark"
+  >("dark");
   const prevSessionExitedRef = useRef(sessionExited);
   useEffect(() => {
     if (prevSessionExitedRef.current && !sessionExited) {
@@ -1500,30 +1506,42 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
 
     function connect() {
       terminalRef.current?.reset();
+      // Baseline the surface to dark before every (re)connect so a prior light
+      // session, transport, or profile can never bleed into a new one — the
+      // server re-sends the appearance frame if this connection is light.
+      terminalRef.current?.setAppearance("dark");
+      setTerminalAppearance("dark");
+      const resizable = !!paneTransport && terminalResizable(paneTransport, catalog);
       socket = connectTerminalSocket(host, token, sessionId, {
         onOpen: () => {
           attempt = 0;
-          // Push the current viewport size so tmux resizes the pane to
-          // match — otherwise xterm renders the seed at whatever pane size
-          // the agent last used. Read the live ref because the term may
-          // not have mounted at connect() time; the closure captured null
-          // would silently skip this resize and leave the pane stuck at
-          // xterm's default 80x24 if fit() produces the same dims and
-          // never fires onResize. Non-resizable panes (claude_tty) own their
-          // geometry server-side and must never be resized from here, so skip
-          // the seed resize entirely for them.
-          if (!paneTransport || !terminalResizable(paneTransport, catalog)) {
-            return;
-          }
+          // Opt into terminal protocol v2 with a universal hello so the server
+          // sends the appearance frame. Resizable panes carry their viewport so
+          // tmux resizes the pane to match; fixed-grid panes (claude_tty) own
+          // their geometry server-side and send the hello without dimensions.
+          // Read the live ref because the term may not have mounted at
+          // connect() time.
+          if (socket?.readyState !== WebSocket.OPEN) return;
           const term = terminalRef.current;
-          const cols = term?.cols();
-          const rows = term?.rows();
-          if (cols && rows && socket?.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: "resize", cols, rows }));
-          }
+          const cols = resizable ? term?.cols() : undefined;
+          const rows = resizable ? term?.rows() : undefined;
+          socket.send(
+            JSON.stringify({
+              type: "hello",
+              terminal_protocol: 2,
+              ...(cols && rows ? { cols, rows } : {}),
+            }),
+          );
         },
         onChunk: (text) => {
           terminalRef.current?.write(text);
+        },
+        onAppearance: (appearance) => {
+          // Applied imperatively before the seed write (ordering guarantees the
+          // seed renders on the right surface), plus stored so re-renders and
+          // the stage background stay consistent.
+          terminalRef.current?.setAppearance(appearance);
+          setTerminalAppearance(appearance);
         },
         onResize: (cols, rows) => {
           // Fixed-grid panes (claude_tty) are pinned server-side; match our
@@ -1979,6 +1997,7 @@ export function SessionDetail({ host, token, sessionId, onAuthFailure, assistant
           keyInjection={canInjectKeys}
           terminalRef={terminalRef}
           terminalDims={terminalDims}
+          terminalAppearance={terminalAppearance}
           sessionExited={sessionExited}
           dormantReattach={dormantReattach}
           // The Terminal tab is presented fullscreen (sticky, viewport-filling)

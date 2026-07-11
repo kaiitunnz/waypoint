@@ -4,8 +4,13 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { ITheme, Terminal } from "@xterm/xterm";
+import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+
+import {
+  type TerminalAppearance,
+  terminalThemeFor,
+} from "@/lib/terminalTheme";
 
 export interface XTerminalHandle {
   write(data: string): void;
@@ -16,6 +21,10 @@ export interface XTerminalHandle {
   rows(): number;
   focus(): void;
   scrollToBottom(): void;
+  // Select the light/dark surface. The connection layer calls this on the
+  // appearance control frame before writing the seed, and resets it to dark
+  // before every (re)connect so a prior light session can't bleed through.
+  setAppearance(appearance: TerminalAppearance): void;
 }
 
 interface XTerminalProps {
@@ -33,36 +42,12 @@ interface XTerminalProps {
   // by SessionDetail to surface a "jump to live" pill once the viewport
   // has slipped into the scrollback.
   onScrollChange?: (isAtBottom: boolean) => void;
+  // The light/dark surface for this pane. Defaults to dark so the terminal
+  // always mounts on the safe ground; the connection layer overrides it via
+  // the imperative handle once the server resolves the agent's theme.
+  appearance?: TerminalAppearance;
   className?: string;
 }
-
-/* The terminal is a dark instrument in both app themes: TUIs emit truecolor
- * output tuned for a dark ground (e.g. Claude Code's diff backgrounds), and
- * only the 16 ANSI palette slots can be remapped — rendering that output on
- * a light background is illegible no matter the palette. */
-const TERMINAL_THEME: ITheme = {
-  background: "#060810",
-  foreground: "#e7ecf3",
-  cursor: "#e0bb73",
-  cursorAccent: "#0a0d12",
-  selectionBackground: "rgba(200, 169, 106, 0.30)",
-  black: "#0a0d12",
-  red: "#e26c70",
-  green: "#6cc99a",
-  yellow: "#d99a4a",
-  blue: "#8fb3d6",
-  magenta: "#c8a3eb",
-  cyan: "#6cc4d6",
-  white: "#e7ecf3",
-  brightBlack: "#6f7a8c",
-  brightRed: "#ff8a8e",
-  brightGreen: "#8ee0b3",
-  brightYellow: "#e0bb73",
-  brightBlue: "#b0cfee",
-  brightMagenta: "#dcc1f0",
-  brightCyan: "#9adeec",
-  brightWhite: "#f5f7fb",
-};
 
 
 export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
@@ -73,6 +58,7 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       onData,
       onResize,
       onScrollChange,
+      appearance = "dark",
       className,
     },
     ref,
@@ -110,10 +96,10 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
         // browser.
         cursorBlink: false,
         cursorStyle: "underline",
+        theme: terminalThemeFor(appearance),
         scrollback: 20000,
         allowProposedApi: true,
         disableStdin: readOnly,
-        theme: TERMINAL_THEME,
       });
       const fit = autoFit ? new FitAddon() : null;
       if (fit) term.loadAddon(fit);
@@ -230,6 +216,17 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       term.options.disableStdin = readOnly;
     }, [readOnly]);
 
+    // Declarative backstop for the imperative setAppearance below: keep the
+    // live theme in sync when the prop changes across re-renders. A repaint of
+    // the visible grid is needed because xterm's DOM renderer bakes colours
+    // into each cell, so a theme swap alone leaves already-painted cells stale.
+    useEffect(() => {
+      const term = termRef.current;
+      if (!term) return;
+      term.options.theme = terminalThemeFor(appearance);
+      term.refresh(0, term.rows - 1);
+    }, [appearance]);
+
     useImperativeHandle(ref, () => ({
       write: (data: string) => {
         termRef.current?.write(data);
@@ -265,6 +262,12 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(
       focus: () => termRef.current?.focus(),
       scrollToBottom: () => {
         termRef.current?.scrollToBottom();
+      },
+      setAppearance: (appearance: TerminalAppearance) => {
+        const term = termRef.current;
+        if (!term) return;
+        term.options.theme = terminalThemeFor(appearance);
+        term.refresh(0, term.rows - 1);
       },
     }));
 

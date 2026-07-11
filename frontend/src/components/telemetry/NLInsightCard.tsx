@@ -2,9 +2,17 @@
 
 import { useId, useState } from "react";
 
+import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
+
 import { confidenceLabel } from "@/lib/telemetry";
 import { NLInsightEvidence, NLInsightResponse } from "@/lib/types";
 import { formatRelativeTime } from "@/lib/usage";
+
+// The summarizer returns markdown (a "- " bullet list, occasional **bold**);
+// render it so inline formatting resolves instead of showing literal "**".
+const NL_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 
 interface NLInsightCardProps {
   nlEnabled: boolean;
@@ -71,12 +79,6 @@ export function NLInsightCard({
     );
   }
 
-  const proseLines = insight.prose
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const hasBullets = proseLines.some((line) => /^[-*]\s+/.test(line));
-
   return (
     <section className="panel tm-chart-card tm-nl-card" aria-labelledby={titleId}>
       <header className="tm-chart-head">
@@ -89,15 +91,18 @@ export function NLInsightCard({
       </header>
 
       <p className="tm-nl-label">AI-generated — links to evidence, not a measured outcome</p>
-      {hasBullets ? (
-        <ul className="tm-nl-prose tm-nl-prose-list">
-          {proseLines.map((line, i) => (
-            <li key={i}>{line.replace(/^[-*]\s+/, "")}</li>
-          ))}
-        </ul>
-      ) : (
-        <p className="tm-insight-statement tm-nl-prose">{insight.prose}</p>
-      )}
+      <div className="tm-nl-prose">
+        <ReactMarkdown
+          remarkPlugins={NL_REMARK_PLUGINS}
+          components={{
+            ul: (props) => <ul className="tm-nl-prose-list" {...props} />,
+            // Flatten stray paragraphs the model may emit between bullets.
+            p: (props) => <p className="tm-insight-statement" {...props} />,
+          }}
+        >
+          {insight.prose}
+        </ReactMarkdown>
+      </div>
 
       {insight.evidence.length > 0 ? (
         <div className="tm-nl-evidence">

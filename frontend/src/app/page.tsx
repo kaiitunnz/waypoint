@@ -1211,7 +1211,7 @@ export default function HomePage() {
         </Link>
       ) : null}
       {token ? <InboxDock host={host} token={token} /> : null}
-      {token ? <TelemetryDock /> : null}
+      {token ? <TelemetryDock host={host} token={token} /> : null}
       {connectPrompt ? (
         <SshConnectModal
           targetName={connectPrompt.target.name}

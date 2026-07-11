@@ -16007,6 +16007,12 @@ html[data-theme="light"] .wp-hl {
   .telemetry-dock-label {
     display: none;
   }
+
+  .telemetry-dock-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+  }
 }
 
 .usage-deck-full-link {
@@ -17572,4 +17578,156 @@ html[data-theme="light"] .wp-hl {
   .pager-btn {
     min-height: 40px;
   }
+}
+
+/* ─── NL insight (PR-NL) ─── */
+
+.telemetry-dock-badge {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-cool);
+  flex-shrink: 0;
+}
+
+.tm-nl-card {
+  border-color: color-mix(in srgb, var(--accent-cool) 35%, var(--line));
+}
+
+.tm-nl-badge {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent-cool);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 45%, var(--line));
+  white-space: nowrap;
+}
+
+.tm-nl-optin {
+  text-align: left;
+  padding: 12px 0;
+  line-height: 1.5;
+}
+
+.tm-nl-optin code {
+  font-family: var(--font-mono);
+  font-size: 0.84em;
+  color: var(--text);
+}
+
+.tm-nl-label {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent-cool);
+}
+
+.tm-nl-prose {
+  font-family: var(--font-sans);
+}
+
+.tm-nl-evidence-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.tm-nl-evidence-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  font-size: 0.82rem;
+}
+
+.tm-nl-evidence-text {
+  min-width: 0;
+  color: var(--muted);
+}
+
+.tm-nl-evidence-text strong {
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-nl-disclaimer {
+  margin: 0;
+  font-size: 0.76rem;
+  font-style: italic;
+}
+
+.tm-nl-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 0.76rem;
+}
+
+.tm-nl-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tm-nl-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+  color: var(--text);
+}
+
+/* A disabled/inert switch: it reflects `nl_enabled`, it doesn't set it —
+   there is no settings-PATCH endpoint for this yet (CONTRACT-NL.md §1). */
+.tm-nl-toggle {
+  appearance: none;
+  width: 32px;
+  height: 18px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+  position: relative;
+  cursor: not-allowed;
+}
+
+.tm-nl-toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: var(--muted-soft);
+  transition: transform 0.14s ease;
+}
+
+.tm-nl-toggle:checked {
+  border-color: color-mix(in srgb, var(--accent-cool) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent-cool) 18%, var(--bg-input));
+}
+
+.tm-nl-toggle:checked::after {
+  transform: translateX(14px);
+  background: var(--accent-cool);
+}
+
+.tm-nl-toggle-state {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted-soft);
 }

@@ -340,6 +340,10 @@ export function formatCompactNumber(value: number): string {
   return COMPACT_NUMBER_FORMATTER.format(value);
 }
 
+export function confidenceLabel(confidence: string): string {
+  return confidence.charAt(0).toUpperCase() + confidence.slice(1);
+}
+
 // The effective range a response echoed back (CONTRACT.md §4) — always
 // rendered instead of the client's own guess at what it asked for.
 export function formatRangeLabel(range: TelemetryRange): string {

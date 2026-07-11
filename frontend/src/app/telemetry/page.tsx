@@ -10,6 +10,7 @@ import { ActivityChart } from "@/components/telemetry/ActivityChart";
 import { DrilldownPanel } from "@/components/telemetry/DrilldownPanel";
 import { HealthPanel } from "@/components/telemetry/HealthPanel";
 import { InsightCards } from "@/components/telemetry/InsightCards";
+import { NLInsightCard } from "@/components/telemetry/NLInsightCard";
 import { OverviewCards } from "@/components/telemetry/OverviewCards";
 import { SettingsPanel } from "@/components/telemetry/SettingsPanel";
 import { TelemetryFilters } from "@/components/telemetry/TelemetryFilters";
@@ -25,6 +26,8 @@ import {
   fetchTelemetryOverview,
   fetchTelemetrySettings,
   fetchTelemetryTokens,
+  fetchNLInsight,
+  generateNLInsight,
   isAuthError,
 } from "@/lib/api";
 import { agentTransports, useBackendCatalog } from "@/lib/backends";
@@ -33,6 +36,8 @@ import { formatRangeLabel, readTelemetryQuery, writeTelemetryQuery } from "@/lib
 import { useTheme } from "@/lib/theme";
 import {
   Insight,
+  NLInsightEvidence,
+  NLInsightResponse,
   SessionEnvelope,
   TelemetryActivity,
   TelemetryDeleteResponse,
@@ -82,6 +87,10 @@ export default function TelemetryPage() {
   const [drilldownPage, setDrilldownPage] = useState(1);
   const [drilldown, setDrilldown] = useState<TelemetryDrilldown | null>(null);
   const [drilldownLoading, setDrilldownLoading] = useState(true);
+
+  const [nlResponse, setNlResponse] = useState<NLInsightResponse | null>(null);
+  const [nlLoading, setNlLoading] = useState(true);
+  const [nlGenerating, setNlGenerating] = useState(false);
 
   const catalog = useBackendCatalog(host || null, token || null, null);
 
@@ -250,6 +259,31 @@ export default function TelemetryPage() {
     void refreshSettings();
   }, [refreshSettings]);
 
+  // The stored NL digest is independent of the page's active range/filter —
+  // it's whatever the last weekly/on-demand generation covered — so this
+  // doesn't depend on [range, filters]. A 404/409 (feature off or not yet
+  // deployed) resolves to `null`, not an error (CONTRACT-NL.md §4).
+  const refreshNLInsight = useCallback(async () => {
+    if (!host || !token) return;
+    setNlLoading(true);
+    try {
+      const res = await fetchNLInsight(host, token);
+      setNlResponse(res);
+    } catch (err) {
+      if (isAuthError(err)) {
+        handleAuthFailure();
+        return;
+      }
+      // Non-blocking: the NL card degrades to its empty state on failure.
+    } finally {
+      setNlLoading(false);
+    }
+  }, [host, token, handleAuthFailure]);
+
+  useEffect(() => {
+    void refreshNLInsight();
+  }, [refreshNLInsight]);
+
   // Live refresh: re-fetch whenever the runtime reports telemetry facts
   // changed, debounced so a burst of ingested facts triggers one refetch.
   const latestRefreshersRef = useRef({
@@ -347,6 +381,45 @@ export default function TelemetryPage() {
     document.getElementById("tm-drilldown-anchor")?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
+  const handleGenerateNLInsight = useCallback(async () => {
+    if (!host || !token) return;
+    setNlGenerating(true);
+    try {
+      const insight = await generateNLInsight(host, token, range, filters);
+      if (insight) {
+        setNlResponse({ available: true, insight, stale: false });
+      } else {
+        setError("AI insights are off, or generation is not available yet.");
+      }
+    } catch (err) {
+      if (isAuthError(err)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(err instanceof Error ? err.message : "failed to generate AI insight");
+    } finally {
+      setNlGenerating(false);
+    }
+  }, [host, token, range, filters, handleAuthFailure]);
+
+  // `click_through` is a whitelisted-but-loosely-typed dict on the backend
+  // (nl.py); read the same `{kind}` / `{params:{kind}}` shapes the
+  // deterministic insights use rather than assuming one fixed layout.
+  const handleNLEvidenceClick = useCallback((evidence: NLInsightEvidence) => {
+    const clickThrough = evidence.click_through;
+    const nestedParams = clickThrough.params;
+    const kindParam =
+      clickThrough.kind ??
+      (nestedParams && typeof nestedParams === "object"
+        ? (nestedParams as Record<string, unknown>).kind
+        : undefined);
+    if (typeof kindParam === "string") {
+      setDrilldownKind(kindParam as TelemetryFactKind);
+      setDrilldownPage(1);
+    }
+    document.getElementById("tm-drilldown-anchor")?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
   const handleDeleteTelemetry = useCallback(async () => {
     if (!host || !token) return;
     setDeleting(true);
@@ -428,6 +501,15 @@ export default function TelemetryPage() {
           />
 
           <OverviewCards overview={overview} loading={overviewLoading} />
+
+          <NLInsightCard
+            nlEnabled={settings?.nl_enabled ?? false}
+            response={nlResponse}
+            loading={nlLoading}
+            generating={nlGenerating}
+            onGenerate={() => void handleGenerateNLInsight()}
+            onEvidenceClick={handleNLEvidenceClick}
+          />
 
           <InsightCards
             insights={insights}

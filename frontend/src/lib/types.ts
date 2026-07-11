@@ -999,3 +999,36 @@ export interface TelemetryDeleteResponse {
   removed: TelemetryDeleteCounts;
   transcripts_unaffected: boolean;
 }
+
+// ── NL insight (PR-NL — mirrors backend/src/waypoint/telemetry/nl.py) ─────
+// Opt-in AI summarizer over the deterministic aggregates. Never itself a
+// measured outcome — every claim links back to the aggregate that produced it.
+
+export interface NLInsightEvidence {
+  statement: string;
+  metric: string;
+  value: string;
+  click_through: Record<string, unknown>;
+}
+
+export type NLConfidence = "low" | "medium" | "high";
+
+export interface NLInsight {
+  prose: string;
+  evidence: NLInsightEvidence[];
+  range: TelemetryRange;
+  filters: TelemetryFilter;
+  confidence: NLConfidence | string;
+  generated_at: string;
+  source_backend: string;
+  source_model: string | null;
+  disclaimer: string;
+}
+
+// GET /api/telemetry/nl-insight — the latest stored digest, its freshness,
+// and whether the feature is available at all (CONTRACT-NL.md §4).
+export interface NLInsightResponse {
+  available: boolean;
+  insight: NLInsight | null;
+  stale: boolean;
+}

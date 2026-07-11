@@ -1174,7 +1174,10 @@ export default function HomePage() {
       {token ? <BoardPanel channels={boardChannels} /> : null}
       {token ? (
         <SessionList
-          sessions={sessions.filter((session) => session.source !== "assistant")}
+          sessions={sessions.filter(
+            (session) =>
+              session.source !== "assistant" && session.source !== "telemetry",
+          )}
           catalog={catalog}
           onDelete={handleDelete}
           onDeleteExited={handleDeleteExited}

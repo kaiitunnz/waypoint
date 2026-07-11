@@ -4,7 +4,11 @@
 // hand-mirroring per-backend constants.
 export type Backend = string;
 export type SessionTransport = string;
-export type SessionSource = "managed" | "attached_tmux" | "assistant";
+export type SessionSource =
+  | "managed"
+  | "attached_tmux"
+  | "assistant"
+  | "telemetry";
 export type LaunchMode = "auto" | "direct" | "tmux_wrapper";
 export type SessionStatus =
   | "starting"

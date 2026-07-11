@@ -304,3 +304,17 @@ export function formatRangeLabel(range: TelemetryRange): string {
     : inclusiveEnd.toLocaleDateString(undefined, fmt);
   return `${startLabel} – ${endLabel} (${range.tz})`;
 }
+
+// A session id is `<backend>-<8 hex>` (e.g. `claude_code-196bdf37`) — the
+// distinguishing part is the *suffix*, so a plain `.slice(0, N)` truncation
+// collapses every row from the same backend to an identical prefix. Show the
+// full id when it already fits; otherwise keep both ends so the id stays
+// distinguishable at a glance.
+const SHORT_ID_MAX = 24;
+const SHORT_ID_HEAD = 12;
+const SHORT_ID_TAIL = 8;
+
+export function shortId(id: string): string {
+  if (id.length <= SHORT_ID_MAX) return id;
+  return `${id.slice(0, SHORT_ID_HEAD)}…${id.slice(-SHORT_ID_TAIL)}`;
+}

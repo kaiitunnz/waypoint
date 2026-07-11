@@ -85,6 +85,11 @@ export default function TelemetryPage() {
 
   const catalog = useBackendCatalog(host || null, token || null, null);
 
+  // A custom range with only one bound picked is a normal mid-edit state, not
+  // an error — the backend 400s on it ("custom range requires both start and
+  // end"), so every fetch below no-ops instead of firing while it's incomplete.
+  const customRangeIncomplete = range.preset === "custom" && (!range.start || !range.end);
+
   const handleAuthFailure = useCallback(() => {
     clearToken();
     setToken("");
@@ -114,6 +119,13 @@ export default function TelemetryPage() {
 
   const refreshOverviewGroup = useCallback(async () => {
     if (!host || !token) return;
+    if (customRangeIncomplete) {
+      setOverviewLoading(false);
+      setActivityLoading(false);
+      setHealthLoading(false);
+      setInsightsLoading(false);
+      return;
+    }
     setOverviewLoading(true);
     setActivityLoading(true);
     setHealthLoading(true);
@@ -144,10 +156,14 @@ export default function TelemetryPage() {
       setHealthLoading(false);
       setInsightsLoading(false);
     }
-  }, [host, token, range, filters, handleAuthFailure]);
+  }, [host, token, range, filters, customRangeIncomplete, handleAuthFailure]);
 
   const refreshTokens = useCallback(async () => {
     if (!host || !token) return;
+    if (customRangeIncomplete) {
+      setTokensLoading(false);
+      return;
+    }
     setTokensLoading(true);
     try {
       const res = await fetchTelemetryTokens(host, token, range, filters, tokenGroupBy);
@@ -161,10 +177,14 @@ export default function TelemetryPage() {
     } finally {
       setTokensLoading(false);
     }
-  }, [host, token, range, filters, tokenGroupBy, handleAuthFailure]);
+  }, [host, token, range, filters, tokenGroupBy, customRangeIncomplete, handleAuthFailure]);
 
   const refreshDrilldown = useCallback(async () => {
     if (!host || !token) return;
+    if (customRangeIncomplete) {
+      setDrilldownLoading(false);
+      return;
+    }
     setDrilldownLoading(true);
     try {
       const res = await fetchTelemetryDrilldown(
@@ -186,7 +206,16 @@ export default function TelemetryPage() {
     } finally {
       setDrilldownLoading(false);
     }
-  }, [host, token, range, filters, drilldownKind, drilldownPage, handleAuthFailure]);
+  }, [
+    host,
+    token,
+    range,
+    filters,
+    drilldownKind,
+    drilldownPage,
+    customRangeIncomplete,
+    handleAuthFailure,
+  ]);
 
   const refreshSettings = useCallback(async () => {
     if (!host || !token) return;

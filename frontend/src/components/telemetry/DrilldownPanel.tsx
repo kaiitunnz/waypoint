@@ -6,6 +6,7 @@ import { useId } from "react";
 import { Pager } from "@/components/Pager";
 import {
   DRILLDOWN_KIND_OPTIONS,
+  shortId,
   toolOutcomeLabel,
   toolOutcomeTone,
   transitionLabel,
@@ -105,7 +106,7 @@ export function DrilldownPanel({
                   </div>
                   <div className="tm-drilldown-meta">
                     <Link className="tm-drilldown-session" href={`/session/${item.session_id}`}>
-                      {item.session_id.slice(0, 10)}
+                      {shortId(item.session_id)}
                     </Link>
                     <span className="tm-drilldown-time">
                       {new Date(item.occurred_at).toLocaleString()}

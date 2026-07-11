@@ -1,6 +1,12 @@
 "use client";
 
-import { coverageLabel, formatCompactNumber, orderedTokenCategories, tokenCategoryLabel } from "@/lib/telemetry";
+import {
+  coverageLabel,
+  formatCompactNumber,
+  orderedTokenCategories,
+  shortId,
+  tokenCategoryLabel,
+} from "@/lib/telemetry";
 import { TelemetryOverview } from "@/lib/types";
 import { formatRelativeTime, usageTone } from "@/lib/usage";
 
@@ -123,7 +129,7 @@ export function OverviewCards({ overview, loading }: OverviewCardsProps) {
                   </span>
                   <span className="tm-alert-text">
                     Context {snapshot.percent !== null ? Math.round(snapshot.percent) : "—"}%
-                    <span className="muted"> · {snapshot.session_id.slice(0, 12)}</span>
+                    <span className="muted"> · {shortId(snapshot.session_id)}</span>
                   </span>
                   <span className="tm-alert-time">{formatRelativeTime(snapshot.updated_at)}</span>
                 </li>

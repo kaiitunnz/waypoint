@@ -16042,6 +16042,8 @@ html[data-theme="light"] .wp-hl {
 }
 
 .tm-chip {
+  display: inline-flex;
+  align-items: center;
   font-family: var(--font-mono);
   font-size: 0.76rem;
   padding: 6px 12px;
@@ -16717,6 +16719,17 @@ html[data-theme="light"] .wp-hl {
   justify-content: center;
 }
 
+.tm-sparkline-wrap {
+  display: grid;
+  gap: 2px;
+}
+
+.tm-sparkline-scale {
+  justify-self: end;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+}
+
 .tm-sparkline {
   width: 100%;
   height: auto;
@@ -16931,12 +16944,42 @@ html[data-theme="light"] .wp-hl {
     margin-left: 0;
   }
 
+  /* The bar's 80px-min column doesn't fit a phone width; give it a
+     dedicated full-width row underneath instead of dropping it (the glyph,
+     numeric %, and tone word alone don't convey the occupancy shape). The
+     `grid-area` assignments live only in this scoped block — declaring them
+     unconditionally on the elements (so they'd also cover the desktop rule,
+     which has no `grid-template-areas`) does NOT safely no-op: an unmatched
+     named `grid-area` still claims its own implicit line/track per element,
+     which silently collapses the desktop 4-column row (verified empirically,
+     not just per spec-reading — every child ends up stacked in one track). */
   .tm-health-row {
-    grid-template-columns: 16px minmax(0, 1fr) auto;
+    grid-template-columns: 16px minmax(0, 1fr) 60px auto;
+    grid-template-areas:
+      "glyph label value time"
+      "bar bar bar bar";
+    row-gap: 6px;
+  }
+
+  .tm-health-glyph {
+    grid-area: glyph;
+  }
+
+  .tm-health-label {
+    grid-area: label;
+  }
+
+  .tm-health-value {
+    grid-area: value;
+  }
+
+  .tm-health-time {
+    grid-area: time;
   }
 
   .tm-health-row .usage-bar {
-    display: none;
+    grid-area: bar;
+    align-self: center;
   }
 
   .tm-drilldown-row {
@@ -16947,5 +16990,39 @@ html[data-theme="light"] .wp-hl {
   .tm-drilldown-meta {
     width: 100%;
     justify-content: space-between;
+  }
+
+  /* ~40px tap targets on touch — desktop keeps the denser flat-instrument
+     sizing; only the box grows (via min-height / padding), not the type
+     scale, so these still read as text links and thin instruments, not
+     inflated buttons. `.back-link`, `.theme-toggle`, and `.pager-btn` are
+     shared beyond this page, so the reach benefits every mobile view. */
+  .tm-filters-toggle,
+  .tm-table-toggle,
+  .back-link {
+    min-height: 40px;
+  }
+
+  .tm-table-toggle {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .tm-chip {
+    min-height: 40px;
+    padding: 0 14px;
+  }
+
+  .tm-chart-select {
+    min-height: 40px;
+  }
+
+  .theme-toggle {
+    width: 40px;
+    height: 40px;
+  }
+
+  .pager-btn {
+    min-height: 40px;
   }
 }

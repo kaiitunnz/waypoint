@@ -387,7 +387,7 @@ export default function TelemetryPage() {
     try {
       const insight = await generateNLInsight(host, token, range, filters);
       if (insight) {
-        setNlResponse({ available: true, insight, stale: false });
+        setNlResponse({ available: true, insight, fresh: true });
       } else {
         setError("AI insights are off, or generation is not available yet.");
       }

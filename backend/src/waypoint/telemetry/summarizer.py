@@ -116,16 +116,33 @@ def build_nl_request(
         range=rng,
         filters=flt,
         aggregates={
-            "overview": overview.model_dump(mode="json"),
-            "tokens": tokens.model_dump(mode="json"),
-            "activity": activity.model_dump(mode="json"),
-            "health": health.model_dump(mode="json"),
+            "overview": _strip_navigation(overview.model_dump(mode="json")),
+            "tokens": _strip_navigation(tokens.model_dump(mode="json")),
+            "activity": _strip_navigation(activity.model_dump(mode="json")),
+            "health": _strip_navigation(health.model_dump(mode="json")),
         },
-        deterministic_insights=[i.model_dump(mode="json") for i in deterministic],
+        deterministic_insights=[
+            _strip_navigation(i.model_dump(mode="json")) for i in deterministic
+        ],
         drilldown_samples=[_redact_drilldown_row(item) for item in drilldown.items],
     )
     assert_no_path_like_strings(request.model_dump(mode="json"))
     return request
+
+
+def _strip_navigation(obj: Any) -> Any:
+    """Drop ``click_through`` navigation hints recursively.
+
+    They carry API route strings (``/api/telemetry/health``) that the summarizer
+    never needs and that the path-like privacy guard would (correctly, for a
+    filesystem path) reject. Removing them keeps the guard strict while feeding
+    the model only facts, not frontend navigation.
+    """
+    if isinstance(obj, dict):
+        return {k: _strip_navigation(v) for k, v in obj.items() if k != "click_through"}
+    if isinstance(obj, list):
+        return [_strip_navigation(v) for v in obj]
+    return obj
 
 
 def _strip_code_fence(text: str) -> str:

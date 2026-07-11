@@ -16,6 +16,7 @@ from waypoint.schemas import SessionRecord, SessionSource, SessionStatus
 from waypoint.settings import Settings
 from waypoint.storage import Storage
 from waypoint.telemetry.facts import (
+    ContextSnapshotFact,
     FactDimensions,
     TelemetryFilter,
     TelemetryRange,
@@ -114,6 +115,41 @@ def test_build_nl_request_payload_has_no_path_like_strings(tmp_path: Path) -> No
     # build_nl_request already asserts this internally; re-assert explicitly
     # on the round-tripped JSON so a regression here fails this test directly.
     assert_no_path_like_strings(request.model_dump(mode="json"))
+
+
+def test_build_nl_request_strips_insight_navigation_endpoints(tmp_path: Path) -> None:
+    """A firing insight carries a ``click_through.endpoint`` like
+    ``/api/telemetry/health`` — an API route, not a filesystem path. It must be
+    stripped from the payload so the path-like privacy guard doesn't reject the
+    whole request (regression: this 500'd live once a near-limit insight fired)."""
+    storage = Storage(tmp_path / "db.sqlite")
+    now = _make_session(storage, "s1")
+    storage.telemetry.ingest_fact(
+        ContextSnapshotFact(
+            fact_id="s1:ctx",
+            source="codex",
+            session_id="s1",
+            occurred_at=now,
+            dims=_dims(),
+            used_tokens=95000,
+            window_tokens=100000,
+            occupancy_percent=95.0,  # >= 90 critical → a context-pressure insight fires
+        )
+    )
+    settings = Settings(data_dir=tmp_path / "data")
+    # Must not raise (previously ValueError: path-like string … /api/telemetry/health).
+    request = build_nl_request(storage, settings, _range(), TelemetryFilter())
+    dumped = request.model_dump(mode="json")
+    assert request.deterministic_insights, "expected a context-pressure insight to fire"
+
+    def _has_key(obj: Any, key: str) -> bool:
+        if isinstance(obj, dict):
+            return key in obj or any(_has_key(v, key) for v in obj.values())
+        if isinstance(obj, list):
+            return any(_has_key(v, key) for v in obj)
+        return False
+
+    assert not _has_key(dumped, "click_through")
 
 
 def test_build_nl_request_drilldown_samples_are_whitelisted(tmp_path: Path) -> None:

@@ -33,6 +33,7 @@ from waypoint.schemas import (
     EventRecord,
     LaunchMode,
     SessionApprovalRequest,
+    SessionContextUsage,
     SessionCreateRequest,
     SessionInputRequest,
     SessionPlanApprovalRequest,
@@ -4169,6 +4170,48 @@ async def test_set_model_claude_calls_adapter_and_persists(tmp_path) -> None:
     cleared = await runtime.set_model("claude-sess", "  ")
     assert fake.model_calls[-1] == ("claude-sess", None)
     assert cleared.model is None
+
+
+@pytest.mark.asyncio
+async def test_set_model_rebases_window_but_revert_to_default_keeps_it(
+    tmp_path,
+) -> None:
+    # A concrete selection rebases the stored context window immediately; a
+    # revert to the agent default (model=None) must NOT blank a valid pill —
+    # the transport's own apply_model already carries the default's window.
+    runtime, storage, settings = make_runtime(tmp_path)
+    _claude_plugin(runtime).adapter = cast(Any, FakeClaudeAdapter())
+    now = datetime.now(UTC)
+    session = make_session(
+        settings,
+        id="claude-sess",
+        backend="claude_code",
+        transport="claude_cli",
+    )
+    storage.create_session(session)
+    storage.update_session(
+        "claude-sess",
+        model="opus[1m]",
+        context_usage=SessionContextUsage(
+            used_tokens=1000,
+            context_window_tokens=1_000_000,
+            updated_at=now,
+            source="claude_code",
+            breakdown={"input_tokens": 1000},
+        ),
+    )
+
+    await runtime.set_model("claude-sess", "opus")
+    rebased = storage.get_session("claude-sess")
+    assert rebased is not None and rebased.context_usage is not None
+    assert rebased.context_usage.context_window_tokens == 200_000
+
+    await runtime.set_model("claude-sess", "")
+    reverted = storage.get_session("claude-sess")
+    assert reverted is not None and reverted.context_usage is not None
+    assert reverted.model is None
+    # Window preserved, not cleared to None.
+    assert reverted.context_usage.context_window_tokens == 200_000
 
 
 @pytest.mark.asyncio

@@ -3305,8 +3305,12 @@ class SessionRuntime:
         self.storage.update_session(session_id, model=cleaned)
         # Refresh the window immediately for restart-style transports (claude_tty
         # tails from EOF and won't otherwise update until the next turn). A no-op
-        # for the native adapter, which already rebased during apply_model.
-        await self._rebase_context_usage(session_id, model=cleaned)
+        # for the native adapter, which already rebased during apply_model. Only
+        # for an explicit selection: clearing to the agent default (model=None)
+        # would otherwise rebase to an unknown window and blank a valid pill —
+        # the transport's own apply_model already carries the default's window.
+        if cleaned is not None:
+            await self._rebase_context_usage(session_id, model=cleaned)
         updated = self.get_session(session_id)
         await self._broadcast_session_list()
         return updated

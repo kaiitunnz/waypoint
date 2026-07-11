@@ -326,6 +326,30 @@ def test_build_overview_empty_range_is_zero_not_error(tmp_path: Path) -> None:
     assert overview.tool_calls == 0
 
 
+def test_current_context_only_includes_active_sessions(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    now = datetime.now(UTC)
+    _make_session(storage, "live", status=SessionStatus.IDLE)
+    _make_session(storage, "gone", status=SessionStatus.EXITED)
+    for sid in ("live", "gone"):
+        storage.telemetry.ingest_fact(
+            ContextSnapshotFact(
+                fact_id=f"{sid}:bucket",
+                source="codex",
+                session_id=sid,
+                occurred_at=now - timedelta(minutes=1),
+                dims=_dims(),
+                used_tokens=1000,
+                window_tokens=10000,
+                occupancy_percent=10.0,
+            )
+        )
+    views = aggregate.current_context_snapshots(storage, TelemetryFilter(), now)
+    # The exited session holds no live context window and must not surface,
+    # even though it recorded a recent snapshot before exiting.
+    assert [v.session_id for v in views] == ["live"]
+
+
 # ── /health ───────────────────────────────────────────────────────────────
 
 

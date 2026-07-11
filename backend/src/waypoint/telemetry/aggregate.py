@@ -223,11 +223,24 @@ def _is_stale(
 def current_context_snapshots(
     storage: Storage, flt: TelemetryFilter, now: datetime
 ) -> list[ContextSnapshotView]:
+    # "Current" context occupancy is a property of sessions that are still
+    # live: an exited/errored session holds no context window (FR-6). Restrict
+    # to sessions whose latest status is active so the panel shows the handful
+    # of running sessions, not every session that ever recorded a snapshot.
+    active_ids = {
+        session.id
+        for session in storage.list_sessions()
+        if session.status in _ACTIVE_STATUSES
+    }
+    if not active_ids:
+        return []
     rows = storage.telemetry.query_facts(
         TelemetryFactKind.CONTEXT_SNAPSHOT, ALL_TIME_RANGE, flt
     )
     latest: dict[str, dict[str, Any]] = {}
     for row in rows:
+        if row["session_id"] not in active_ids:
+            continue
         existing = latest.get(row["session_id"])
         if existing is None or row["occurred_at"] > existing["occurred_at"]:
             latest[row["session_id"]] = row
@@ -247,6 +260,16 @@ def current_context_snapshots(
     return sorted(views, key=lambda v: v.session_id)
 
 
+def _is_real_account(account_key: str) -> bool:
+    """A verified account, not the per-session pseudonym fallback.
+
+    Provider limits are account-scoped (FR-6); a session with no verified
+    account gets a ``session:<id>`` placeholder key at ingest, which must not
+    surface as its own account row and fragment the limit view.
+    """
+    return not account_key.startswith("session:")
+
+
 def current_limit_snapshots(
     storage: Storage, flt: TelemetryFilter, now: datetime
 ) -> list[LimitSnapshotView]:
@@ -255,6 +278,8 @@ def current_limit_snapshots(
     )
     latest: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in rows:
+        if not _is_real_account(row["account_key"]):
+            continue
         key = (row["backend"], row["account_key"], row["window_id"])
         existing = latest.get(key)
         if existing is None or row["occurred_at"] > existing["occurred_at"]:
@@ -719,6 +744,8 @@ def _limits_series(
     for row in storage.telemetry.query_facts(
         TelemetryFactKind.LIMIT_SNAPSHOT, rng, flt
     ):
+        if not _is_real_account(row["account_key"]):
+            continue
         key = (row["backend"], row["account_key"], row["window_id"])
         groups.setdefault(key, []).append(row)
 

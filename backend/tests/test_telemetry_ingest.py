@@ -592,7 +592,9 @@ def test_context_usage_update_is_rate_limited_to_one_per_minute(tmp_path: Path) 
 
 def test_rate_limit_usage_derives_one_fact_per_window(tmp_path: Path) -> None:
     storage = Storage(tmp_path / "db.sqlite")
-    session = _make_session(storage, "s1")
+    session = _make_session(storage, "s1").model_copy(
+        update={"verified_account_key": "acct-abc"}
+    )
     ingester = TelemetryIngester(storage)
     now = datetime.now(UTC)
 
@@ -615,7 +617,30 @@ def test_rate_limit_usage_derives_one_fact_per_window(tmp_path: Path) -> None:
     assert len(rows) == 2
     window_ids = {r["window_id"] for r in rows}
     assert window_ids == {"5h", "7d"}
-    assert all(r["account_key"] == "session:s1" for r in rows)
+    # Keyed to the verified account, so windows aggregate across the account's
+    # sessions rather than fragmenting per session.
+    assert all(r["account_key"] == "acct-abc" for r in rows)
+
+
+def test_rate_limit_usage_without_verified_account_derives_nothing(
+    tmp_path: Path,
+) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1")  # no verified_account_key
+    ingester = TelemetryIngester(storage)
+    ingester.derive_from_session_update(
+        session,
+        {
+            "rate_limit_usage": SessionRateLimitUsage(
+                source="codex",
+                updated_at=datetime.now(UTC),
+                windows=[UsageWindow(id="5h", label="5 hour", used_percent=42.0)],
+            )
+        },
+    )
+    ingester._drain_available()
+    rows = [r for r in _facts(storage, "s1") if r["kind"] == "limit_snapshot"]
+    assert rows == []
 
 
 def test_backfill_derives_facts_and_is_idempotent(tmp_path: Path) -> None:

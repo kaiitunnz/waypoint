@@ -389,10 +389,13 @@ class TelemetryIngester:
 
         rate_limit_usage = updates.get("rate_limit_usage")
         if isinstance(rate_limit_usage, SessionRateLimitUsage):
-            # Account-scoped, not session-attributable (CONTRACT.md §1f
-            # docstring on LimitSnapshotFact) — falls back to a per-session
-            # pseudonym only when the account hasn't been verified yet.
-            account_key = session.verified_account_key or f"session:{session.id}"
+            # Provider limits are account-scoped (FR-6). Without a verified
+            # account the snapshot can't be attributed to an account, so skip
+            # it rather than mint a per-session pseudo-account that fragments
+            # the account-scoped limit view into one row per session.
+            account_key = session.verified_account_key
+            if not account_key:
+                return
             for window in rate_limit_usage.windows:
                 self._enqueue(
                     LimitSnapshotFact(

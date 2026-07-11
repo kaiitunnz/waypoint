@@ -30,6 +30,7 @@ from waypoint.backends.account_profiles import (
     backend_hosts_account_profiles,
     redacted_profile_metadata,
 )
+from waypoint.backends.base import TerminalAppearance, TerminalAppearanceResolving
 from waypoint.backends.tmux.adapter import TmuxError
 from waypoint.backends.tmux.renderer import (
     Osc52Extractor,
@@ -1756,38 +1757,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         adapter = context.runtime.tmux
         raw_log_path = Path(session.raw_log_path)
 
-        # Resizable transports wait for the client's initial resize frame so
-        # the seed is rendered at the viewport's dimensions. Non-resizable
-        # transports (claude_tty) have their size fixed by the pane manager;
-        # query the actual dimensions instead.
+        # Read the client's opening control frame. Every version-2 client sends
+        # a universal ``hello`` first, carrying its protocol version and — for a
+        # resizable pane — its viewport dimensions. A legacy client sends the
+        # old resize-only frame (resizable panes) or nothing (fixed-grid panes).
+        # We read one frame for every pane so a fixed-grid TUI (claude_tty) can
+        # opt into version 2 and receive the appearance frame too. A stale v1
+        # fixed-grid tab that sends nothing simply times out into version 1.
+        client_protocol = 1
+        viewport_cols = 0
+        viewport_rows = 0
+        handshake: Any = None
+        try:
+            first = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+            handshake = json.loads(first)
+        except WebSocketDisconnect:
+            # Client closed during the handshake; nothing left to seed.
+            return
+        except (TimeoutError, json.JSONDecodeError):
+            handshake = None
+        if isinstance(handshake, dict):
+            htype = handshake.get("type")
+            if htype == "hello":
+                try:
+                    if int(handshake.get("terminal_protocol", 1)) >= 2:
+                        client_protocol = 2
+                except (TypeError, ValueError):
+                    pass
+            if htype in ("hello", "resize"):
+                try:
+                    viewport_cols = int(handshake.get("cols", 0))
+                    viewport_rows = int(handshake.get("rows", 0))
+                except (TypeError, ValueError):
+                    viewport_cols = viewport_rows = 0
+
+        # Resizable transports render the seed at the client's viewport;
+        # non-resizable transports (claude_tty) have their size fixed by the
+        # pane manager, so query the actual dimensions instead.
         cols = 80
         rows = 24
         if terminal_resizable:
-            viewport_cols = 0
-            viewport_rows = 0
-            try:
-                first = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
-                handshake = json.loads(first)
-                if handshake.get("type") == "resize":
-                    try:
-                        viewport_cols = int(handshake.get("cols", 0))
-                        viewport_rows = int(handshake.get("rows", 0))
-                    except (TypeError, ValueError):
-                        viewport_cols = viewport_rows = 0
-                    if viewport_cols > 0 and viewport_rows > 0:
-                        with suppress(TmuxError):
-                            await adapter.resize_window(
-                                tmux_session, viewport_cols, viewport_rows
-                            )
-                            await adapter.resize_pane(
-                                pane, viewport_cols, viewport_rows
-                            )
-            except WebSocketDisconnect:
-                # Client closed during the handshake; nothing left to seed.
-                return
-            except (TimeoutError, json.JSONDecodeError):
-                # No handshake — fall through with default viewport.
-                pass
+            if viewport_cols > 0 and viewport_rows > 0:
+                with suppress(TmuxError):
+                    await adapter.resize_window(
+                        tmux_session, viewport_cols, viewport_rows
+                    )
+                    await adapter.resize_pane(pane, viewport_cols, viewport_rows)
             cols = viewport_cols or 80
             rows = viewport_rows or 24
             # Give the pane process a beat to handle SIGWINCH and emit its
@@ -1801,6 +1816,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # the diff encoding matches what the pane produces.
             with suppress(TmuxError):
                 cols, rows = await adapter.pane_dimensions(pane)
+
+        # For a version-2 client, resolve the agent's effective terminal
+        # appearance and send it before any size/seed frame so xterm selects the
+        # matching light/dark surface up front. WebSocket frames are ordered and
+        # the browser applies this synchronously in an earlier message handler
+        # than the seed write, so no acknowledgement round-trip is needed. A
+        # legacy (version-1) client never opted in and receives no appearance
+        # frame — keeping the byte stream identical to the prior protocol. The
+        # plugin owns the resolution; a plugin without the protocol, or an
+        # unresolved value, falls back to the existing dark presentation.
+        if client_protocol >= 2:
+            appearance = TerminalAppearance.DARK
+            if isinstance(plugin, TerminalAppearanceResolving):
+                try:
+                    resolved = await plugin.terminal_appearance(
+                        context.runtime, session
+                    )
+                except Exception:
+                    resolved = TerminalAppearance.UNKNOWN
+                if resolved in (TerminalAppearance.LIGHT, TerminalAppearance.DARK):
+                    appearance = resolved
+                else:
+                    log.debug(
+                        "terminal appearance fallback to dark (session=%s)",
+                        session_id,
+                    )
+            with suppress(Exception):
+                await websocket.send_text(
+                    json.dumps({"type": "appearance", "appearance": appearance.value})
+                )
 
         # Server-side terminal emulator: bytes from the pane go through
         # pyte, which maintains the authoritative screen state. The

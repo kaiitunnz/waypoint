@@ -174,10 +174,20 @@ class TranscriptNormalizer:
         message_id = str(message.get("id") or "")
         usage: dict[str, Any] = message.get("usage") or {}
         stop_reason = str(message.get("stop_reason") or "")
+        output_tokens = int(usage.get("output_tokens") or 0)
 
         first_seen = message_id not in self._seen_message_ids
         if message_id:
             self._seen_message_ids.add(message_id)
+
+        # Resuming a thread (settings-change restart, reconnect, or compaction)
+        # relaunches the CLI with `--resume`, which injects a synthetic first
+        # turn with no model round-trip — a text-only message stamped
+        # stop_reason="stop_sequence" with zero output tokens (e.g. the literal
+        # "No response requested."). Suppress its text so the phantom reply
+        # never reaches the transcript; the result note below still fires, so
+        # the turn resolves to idle even if no real turn follows.
+        is_resume_noop = stop_reason == "stop_sequence" and output_tokens == 0
 
         events: list[NormalizedEvent] = []
         blocks = iter_content_blocks(message.get("content"))
@@ -189,7 +199,7 @@ class TranscriptNormalizer:
             bt = block.get("type")
             if bt == "text":
                 text = str(block.get("text") or "")
-                if text:
+                if text and not is_resume_noop:
                     had_text = True
                     events.append(
                         NormalizedEvent(
@@ -298,7 +308,6 @@ class TranscriptNormalizer:
             if message_id:
                 self._result_emitted_ids.add(message_id)
             usage_payload: dict[str, Any] = usage if first_seen else {}
-            output_tokens = int(usage.get("output_tokens") or 0)
             if stop_reason == "end_turn":
                 result_text = (
                     f"Turn complete · {output_tokens} output tokens"

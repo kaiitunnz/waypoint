@@ -170,6 +170,43 @@ def test_no_result_when_tool_use_block_present_despite_end_turn() -> None:
     assert not any(e.metadata.get("method") == "result" for e in events)
 
 
+def test_resume_noop_turn_suppresses_phantom_text() -> None:
+    """A resumed thread's zero-token stop_sequence turn emits no agent_output.
+
+    The CLI injects a synthetic first turn after a `--resume` relaunch (e.g.
+    the literal "No response requested."); it must not pollute the transcript,
+    but the turn still resolves to idle.
+    """
+    norm = TranscriptNormalizer()
+    record = _assistant_record(
+        "msg1",
+        [_text_block("No response requested.")],
+        stop_reason="stop_sequence",
+        usage={"input_tokens": 0, "output_tokens": 0},
+    )
+    events = norm.process_record(record)
+    assert not any(e.kind == EventKind.AGENT_OUTPUT for e in events)
+    result_events = [e for e in events if e.metadata.get("method") == "result"]
+    assert len(result_events) == 1
+    assert result_events[0].status == SessionStatus.IDLE
+    assert result_events[0].metadata["stop_reason"] == "stop_sequence"
+
+
+def test_real_stop_sequence_turn_keeps_text() -> None:
+    """A stop_sequence turn with real output tokens is genuine — keep its text."""
+    norm = TranscriptNormalizer()
+    record = _assistant_record(
+        "msg1",
+        [_text_block("Reached the boundary.")],
+        stop_reason="stop_sequence",
+        usage={"input_tokens": 20, "output_tokens": 8},
+    )
+    events = norm.process_record(record)
+    text_events = [e for e in events if e.kind == EventKind.AGENT_OUTPUT]
+    assert len(text_events) == 1
+    assert text_events[0].text == "Reached the boundary."
+
+
 # ── Usage deduplication ───────────────────────────────────────────────────────
 
 

@@ -141,7 +141,9 @@ class TelemetryIngester:
         # Transient cross-event correlation, keyed by (session_id, id). Small
         # and self-cleaning (each entry is popped once its counterpart event
         # arrives); never persisted.
-        self._pending_tool_calls: dict[tuple[str, str], datetime] = {}
+        self._pending_tool_calls: dict[tuple[str, str], tuple[datetime, str | None]] = (
+            {}
+        )
         self._pending_approvals: dict[tuple[str, str], str | None] = {}
         # Nearly every event stamps ``metadata["status"]`` (STATUS_UPDATE is
         # never actually emitted; see the note below), so without this a
@@ -251,7 +253,11 @@ class TelemetryIngester:
         elif event.kind == EventKind.TOOL_CALL:
             tool_use_id = _tool_use_id(event.metadata)
             if tool_use_id is not None:
-                self._pending_tool_calls[(session.id, tool_use_id)] = event.ts
+                tool_name = _tool_name(event.metadata)
+                self._pending_tool_calls[(session.id, tool_use_id)] = (
+                    event.ts,
+                    tool_name,
+                )
                 self._enqueue(
                     ToolCallFact(
                         fact_id=tool_use_id,
@@ -259,7 +265,7 @@ class TelemetryIngester:
                         session_id=session.id,
                         occurred_at=event.ts,
                         dims=dims,
-                        tool_name=_tool_name(event.metadata) or "unknown",
+                        tool_name=tool_name or "unknown",
                         outcome=ToolOutcome.UNKNOWN,
                     ),
                     tags,
@@ -267,7 +273,8 @@ class TelemetryIngester:
         elif event.kind == EventKind.TOOL_RESULT:
             tool_use_id = _tool_use_id(event.metadata)
             if tool_use_id is not None:
-                call_ts = self._pending_tool_calls.pop((session.id, tool_use_id), None)
+                pending = self._pending_tool_calls.pop((session.id, tool_use_id), None)
+                call_ts, call_tool_name = pending if pending else (None, None)
                 duration_ms = (
                     max(0, int((event.ts - call_ts).total_seconds() * 1000))
                     if call_ts is not None
@@ -277,6 +284,10 @@ class TelemetryIngester:
                 outcome = ToolOutcome.UNKNOWN
                 if isinstance(is_error, bool):
                     outcome = ToolOutcome.FAILED if is_error else ToolOutcome.SUCCEEDED
+                # The tool_result event carries no tool_name (only the paired
+                # tool_call does), and this revision-1 fact overwrites the
+                # revision-0 one, so carry the name forward from the pending
+                # call — otherwise every resolved tool collapses to "unknown".
                 self._enqueue(
                     ToolCallFact(
                         fact_id=tool_use_id,
@@ -285,7 +296,9 @@ class TelemetryIngester:
                         occurred_at=event.ts,
                         revision=1,
                         dims=dims,
-                        tool_name=_tool_name(event.metadata) or "unknown",
+                        tool_name=_tool_name(event.metadata)
+                        or call_tool_name
+                        or "unknown",
                         outcome=outcome,
                         duration_ms=duration_ms,
                     ),

@@ -62,13 +62,21 @@ Telemetry payload:
 """
 
 
+# Keys whose values are known-safe identifiers that may legitimately contain
+# slashes (a model id like ``openrouter/anthropic/claude-3.5``), so the
+# path-like guard must not treat them as leaked filesystem paths.
+_PATH_CHECK_EXEMPT_KEYS = frozenset({"model", "source_model"})
+
+
 def assert_no_path_like_strings(value: Any, *, _at: str = "$") -> None:
     """Raise if any string leaf in ``value`` looks like a filesystem path.
 
     A defensive boundary assertion (CONTRACT-NL.md §3): every aggregate field
     this payload draws from is already privacy-safe (basename repo names,
     bare tool names, no raw text), so this should never trip — it exists to
-    fail closed if a future change ever leaks one, rather than ship it.
+    fail closed if a future change ever leaks one, rather than ship it. Model
+    ids (``_PATH_CHECK_EXEMPT_KEYS``) are exempt: they are non-path identifiers
+    that can carry slashes.
     """
     if isinstance(value, str):
         if _PATH_LIKE_PATTERN.search(value):
@@ -76,6 +84,8 @@ def assert_no_path_like_strings(value: Any, *, _at: str = "$") -> None:
         return
     if isinstance(value, dict):
         for key, item in value.items():
+            if key in _PATH_CHECK_EXEMPT_KEYS:
+                continue
             assert_no_path_like_strings(item, _at=f"{_at}.{key}")
         return
     if isinstance(value, list):

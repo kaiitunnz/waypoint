@@ -60,7 +60,7 @@ def _parse_instant(raw: str, *, end_of_day: bool) -> datetime:
     return value.astimezone(UTC)
 
 
-def _resolve_preset_range(preset: str, tz: str) -> TelemetryRange:
+def resolve_preset_range(preset: str, tz: str) -> TelemetryRange:
     now = datetime.now(UTC)
     today = _day_key(now)
     _, end = _day_bounds_utc(today)
@@ -104,7 +104,7 @@ def parse_range_filter(
         )
 
     if preset in ("today", "7d", "30d"):
-        rng = _resolve_preset_range(preset, tz)
+        rng = resolve_preset_range(preset, tz)
     elif preset == "custom" or start_raw is not None or end_raw is not None:
         if start_raw is None or end_raw is None:
             raise HTTPException(
@@ -120,7 +120,7 @@ def parse_range_filter(
             )
         rng = TelemetryRange(start=start, end=end, tz=tz)
     else:
-        rng = _resolve_preset_range("7d", tz)
+        rng = resolve_preset_range("7d", tz)
 
     scope = params.get("scope", "all")
     if scope not in _VALID_SCOPES:

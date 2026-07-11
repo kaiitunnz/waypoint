@@ -251,6 +251,27 @@ async def test_run_oneshot_times_out_and_still_tears_down(tmp_path: Path) -> Non
     assert torn_down == ["terminate:stuck-oneshot", "delete:stuck-oneshot"]
 
 
+async def test_await_oneshot_turn_waits_through_pending_approval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # WAITING_INPUT is also the mid-turn state while the file-hand-off Read
+    # awaits approval; the poll must not treat it as a finished turn until the
+    # approval clears (regression: the default claude_tty path parks here).
+    runtime, storage = _make_runtime(tmp_path)
+    storage.create_session(
+        _session_record("waiting", status=SessionStatus.WAITING_INPUT)
+    )
+
+    monkeypatch.setattr(runtime, "_oneshot_awaiting_approval", lambda _s: True)
+    # Approval never clears → the WAITING_INPUT status must NOT count as settled;
+    # it times out instead of falsely returning True.
+    assert await runtime._await_oneshot_turn("waiting", timeout_s=0.05) is False
+
+    monkeypatch.setattr(runtime, "_oneshot_awaiting_approval", lambda _s: False)
+    # Approval cleared → the same WAITING_INPUT is now a finished turn.
+    assert await runtime._await_oneshot_turn("waiting", timeout_s=0.5) is True
+
+
 async def test_run_oneshot_returns_none_on_backend_error_status(
     tmp_path: Path,
 ) -> None:

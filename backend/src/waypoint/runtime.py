@@ -108,7 +108,7 @@ from waypoint.storage import Storage
 from waypoint.telemetry.facts import TelemetryFilter, TelemetryRange
 from waypoint.telemetry.ingest import TelemetryIngester
 from waypoint.telemetry.nl import NLInsight
-from waypoint.telemetry.query import _resolve_preset_range, host_tz_name
+from waypoint.telemetry.query import host_tz_name, resolve_preset_range
 from waypoint.telemetry.summarizer import CodingAgentSummarizer, build_nl_request
 from waypoint.transports import TransportAdapter
 
@@ -1705,19 +1705,34 @@ class SessionRuntime:
         nothing in the runtime provided before (plan §2.9 review B1).
         """
         deadline = monotonic() + timeout_s
-        settled_ok = {SessionStatus.IDLE, SessionStatus.WAITING_INPUT}
         settled_failed = {SessionStatus.EXITED, SessionStatus.ERROR}
         while True:
             session = self.storage.get_session(session_id)
             if session is None:
                 return False
-            if session.status in settled_ok:
-                return True
             if session.status in settled_failed:
                 return False
+            if session.status == SessionStatus.IDLE:
+                return True
+            # WAITING_INPUT is the finished-turn state, but it is *also* the
+            # mid-turn state while an approval is pending — the file hand-off
+            # path (claude_tty) parks here waiting for the payload-file Read to
+            # be approved. Treat it as done only once no approval is
+            # outstanding, else the poll can return before the reply exists.
+            if (
+                session.status == SessionStatus.WAITING_INPUT
+                and not self._oneshot_awaiting_approval(session)
+            ):
+                return True
             if monotonic() >= deadline:
                 return False
             await asyncio.sleep(ONE_SHOT_POLL_INTERVAL_SECONDS)
+
+    def _oneshot_awaiting_approval(self, session: SessionRecord) -> bool:
+        try:
+            return self.transport_for(session).has_pending_approval(session)
+        except Exception:
+            return False
 
     async def _teardown_oneshot_session(self, session_id: str) -> None:
         with suppress(Exception):
@@ -4283,11 +4298,17 @@ class SessionRuntime:
         ``POST /api/telemetry/nl-insight`` endpoint generates over the
         caller's active range/filters instead.
         """
-        resolved_rng = rng or _resolve_preset_range("7d", host_tz_name())
+        resolved_rng = rng or resolve_preset_range("7d", host_tz_name())
         resolved_flt = flt or TelemetryFilter()
-        request = build_nl_request(
-            self.storage, self.settings, resolved_rng, resolved_flt
-        )
+        try:
+            request = build_nl_request(
+                self.storage, self.settings, resolved_rng, resolved_flt
+            )
+        except Exception:
+            # Assembling the payload must never surface as a 500 — the endpoint
+            # maps a None digest to a graceful opt-in/empty state, not an error.
+            log.debug("failed to assemble NL-insight request", exc_info=True)
+            return None
         summarizer = CodingAgentSummarizer(self, self.settings)
         insight = await summarizer.summarize(request)
         if insight is not None:

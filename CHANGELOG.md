@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.2](https://github.com/kaiitunnz/waypoint/compare/v0.8.1...v0.8.2) (2026-07-11)
+
+
+### Bug Fixes
+
+* preserve Claude context-window model provenance across resume ([#285](https://github.com/kaiitunnz/waypoint/issues/285)) ([5c14f22](https://github.com/kaiitunnz/waypoint/commit/5c14f228185b3e9eeeb406acf52a1046b4d9d1ad))
+* suppress phantom "No response requested." turn after claude_tty resume ([#287](https://github.com/kaiitunnz/waypoint/issues/287)) ([20f4652](https://github.com/kaiitunnz/waypoint/commit/20f4652ec193cd0697c629e10406b9c8235f85e9))
+* tolerate unknown Codex thread item types on session reattach ([#283](https://github.com/kaiitunnz/waypoint/issues/283)) ([f081580](https://github.com/kaiitunnz/waypoint/commit/f081580219b5a4bb2929bdc4d2089211b9434d6d))
+
 ## [0.8.1](https://github.com/kaiitunnz/waypoint/compare/v0.8.0...v0.8.1) (2026-07-11)
 
 

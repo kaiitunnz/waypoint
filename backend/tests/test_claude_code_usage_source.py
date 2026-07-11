@@ -104,6 +104,28 @@ async def test_drain_publishes_context_usage_on_assistant_record(
 
 
 @pytest.mark.asyncio
+async def test_token_record_prefers_message_model_over_stale_session_model(
+    tmp_path: Path,
+) -> None:
+    # The session's resolved_model reflects the *latest* turn, not necessarily
+    # this one — a transcript replayed from offset 0 after a resume must not
+    # have every earlier turn rewritten onto the current model.
+    runtime = _make_runtime(resolved_model="claude-opus-4-8", effort="high")
+    source = _make_source(runtime, tmp_path)
+
+    record = _assistant_record(
+        model="claude-sonnet-4-5", usage={"input_tokens": 10, "output_tokens": 5}
+    )
+    data = _jsonl(record)
+
+    with patch.object(source, "_read_new_bytes", return_value=data):
+        await source._drain()
+
+    published = runtime.publish_token_usage_record.call_args.args[1]
+    assert published.model == "claude-sonnet-4-5"
+
+
+@pytest.mark.asyncio
 async def test_token_record_falls_back_to_transcript_model_without_session(
     tmp_path: Path,
 ) -> None:

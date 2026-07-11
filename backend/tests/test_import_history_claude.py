@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from waypoint.backends.claude_code.history import (
     convert_transcript_records,
     read_local_claude_history,
+    read_local_claude_token_usage_history,
     token_usage_records_from_history,
 )
 from waypoint.backends.claude_code.threads import read_local_claude_transcript
@@ -266,3 +267,30 @@ async def test_read_local_claude_history_converts_full_file(
 
     assert len(events) == 210
     assert all(event.kind == EventKind.USER_INPUT for event in events)
+
+
+async def test_read_local_claude_token_usage_history_reads_full_file(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    thread_id = "33333333-3333-3333-3333-333333333333"
+    project_dir = tmp_path / "claude" / "projects" / "-home-user-project"
+    project_dir.mkdir(parents=True)
+    transcript = project_dir / f"{thread_id}.jsonl"
+    records = [
+        _assistant_with_usage(
+            "msg1", "claude-sonnet-4-5", {"input_tokens": 10, "output_tokens": 5}
+        ),
+        _assistant_with_usage(
+            "msg2", "claude-opus-4-8", {"input_tokens": 20, "output_tokens": 8}
+        ),
+    ]
+    transcript.write_text(
+        "\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8"
+    )
+
+    token_records = await read_local_claude_token_usage_history(thread_id)
+
+    assert [r.record_id for r in token_records] == ["msg1", "msg2"]
+    assert [r.model for r in token_records] == ["claude-sonnet-4-5", "claude-opus-4-8"]
+    assert all(r.effort is None for r in token_records)

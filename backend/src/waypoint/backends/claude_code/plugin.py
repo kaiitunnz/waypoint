@@ -42,7 +42,10 @@ from waypoint.backends.claude_code.commands import (
     CLAUDE_BUILTIN_SLASH_COMMANDS,
     list_claude_command_completions,
 )
-from waypoint.backends.claude_code.history import read_local_claude_history
+from waypoint.backends.claude_code.history import (
+    read_local_claude_history,
+    read_local_claude_token_usage_history,
+)
 from waypoint.backends.claude_code.models import (
     CLAUDE_EFFORT_LEVELS,
     DEFAULT_CLAUDE_MODELS,
@@ -1772,6 +1775,16 @@ class ClaudeCodePlugin(DefaultLaunchContract):
             reader=_read_thread_history,
             enabled=request.import_history,
         )
+        if launch_target is None and request.import_history:
+            # ``--resume`` continues the SDK session without re-emitting
+            # historical stream-json events, so this on-disk transcript read
+            # is the only source of per-turn model for the imported turns'
+            # ledger (mirrors the remote-skip guard above: no cheap remote
+            # transcript read exists yet).
+            for token_record in await read_local_claude_token_usage_history(info.id):
+                await runtime.publish_token_usage_record(
+                    session.id, token_record, publish=False
+                )
         await runtime._record_system_event(
             session.id,
             self.format_import_message(cwd, launch_target),

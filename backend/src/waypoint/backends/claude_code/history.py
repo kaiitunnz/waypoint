@@ -46,6 +46,14 @@ async def read_local_claude_history(
     return convert_transcript_records(session_id, records)
 
 
+async def read_local_claude_token_usage_history(
+    thread_id: str,
+) -> list[TokenUsageRecord]:
+    """Read a local Claude transcript's per-turn ledger rows for thread-history import."""
+    records = await asyncio.to_thread(read_local_claude_transcript, thread_id)
+    return token_usage_records_from_history(records)
+
+
 def convert_transcript_records(
     session_id: str, records: list[dict[str, Any]]
 ) -> list[EventRecord]:

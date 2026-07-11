@@ -8,6 +8,7 @@ effort return contract, custom-arg validation, thread-discovery dedup, and the
 resume-import path — all against fakes so no live TUI/tmux is needed.
 """
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -673,6 +674,71 @@ async def test_import_thread_resumes_and_starts_tailer(
     # Resumed thread import recorded with provenance metadata.
     meta = runtime._record_system_event.call_args.kwargs["metadata"]
     assert meta["imported_thread_id"] == "imp-1"
+
+
+async def test_import_thread_seeds_token_usage_ledger_from_transcript(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The resumed pane's tailer starts at EOF (asserted above), so the
+    # on-disk transcript read here is the only source of per-turn model for
+    # the imported turns' ledger.
+    thread_id = "44444444-4444-4444-4444-444444444444"
+    claude_config_dir = tmp_path / "claude"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_config_dir))
+    project_dir = claude_config_dir / "projects" / "-work"
+    project_dir.mkdir(parents=True)
+    transcript = project_dir / f"{thread_id}.jsonl"
+    transcript.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "msg_1",
+                    "model": "claude-sonnet-4-5",
+                    "content": [{"type": "text", "text": "hi"}],
+                    "usage": {"input_tokens": 10, "output_tokens": 5},
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    info = _thread_info(thread_id)
+    info.cwd = str(tmp_path)
+    monkeypatch.setattr(
+        plugin_mod, "find_local_claude_thread", lambda tid, config_dir=None: info
+    )
+    plugin = ClaudeTtyPlugin()
+    _stub_lifecycle(plugin)
+
+    target = MagicMock(session="s", window="0", pane="%1", pane_pid=7)
+    runtime = MagicMock()
+    runtime._generate_session_id.return_value = "claude_tty-token"
+    runtime._session_dir.return_value = tmp_path
+    runtime._command_for_backend.return_value = ["claude", "--resume", thread_id]
+    runtime.tmux.start_managed_session = AsyncMock(return_value=target)
+    runtime.tmux.pipe_output = AsyncMock()
+    runtime.tmux.resize_window = AsyncMock()
+    runtime.storage.list_sessions.return_value = []
+    created_holder: dict[str, SessionRecord] = {}
+    runtime.storage.create_session.side_effect = lambda s: created_holder.update(
+        session=s
+    )
+    runtime.get_session.side_effect = lambda sid: created_holder["session"]
+    runtime._record_system_event = AsyncMock()
+    runtime.seed_thread_history = AsyncMock(return_value=0)
+    runtime.publish_token_usage_record = AsyncMock()
+
+    request = ClaudeThreadImportRequest(thread_id=thread_id)
+    await plugin.import_thread(runtime, request)
+
+    runtime.publish_token_usage_record.assert_called_once()
+    session_id, record = runtime.publish_token_usage_record.call_args.args
+    assert session_id == "claude_tty-token"
+    assert record.record_id == "msg_1"
+    assert record.model == "claude-sonnet-4-5"
+    assert runtime.publish_token_usage_record.call_args.kwargs == {"publish": False}
 
 
 async def test_import_thread_persists_resolving_agent_backend(

@@ -112,6 +112,10 @@ export function TokenChart({ tokens, loading, groupBy, onGroupByChange }: TokenC
     const head = withValues.slice(0, MAX_RANKED_GROUPS);
     const tail = withValues.slice(MAX_RANKED_GROUPS);
     const otherValue = tail.reduce((sum, item) => sum + item.value, 0);
+    const otherCachedRead = tail.reduce(
+      (sum, item) => sum + (item.group.cached_read_tokens ?? 0),
+      0,
+    );
     return [
       ...head,
       {
@@ -120,6 +124,7 @@ export function TokenChart({ tokens, loading, groupBy, onGroupByChange }: TokenC
           label: `Other (${tail.length})`,
           totals: {},
           display_total: otherValue,
+          cached_read_tokens: otherCachedRead,
           coverage: "partial" as const,
         },
         value: otherValue,

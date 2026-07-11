@@ -781,7 +781,12 @@ export type InsightSeverity = "info" | "warning" | "critical";
 
 export interface TokenTotals {
   totals: Record<string, number>;
+  // New-work total (fresh input + cache write + output + reasoning) — cache
+  // reads are excluded; see `cached_read_tokens`.
   display_total: number | null;
+  // Standalone cache-read total (repeated prior context), not part of
+  // `display_total`.
+  cached_read_tokens: number;
   safe_total: boolean;
   coverage: TokenCoverage;
   meter_coverage_percent: number | null;
@@ -854,7 +859,10 @@ export interface TokenGroup {
   key: string;
   label: string;
   totals: Record<string, number>;
+  // See `TokenTotals.display_total` — excludes cache_read.
   display_total: number | null;
+  // See `TokenTotals.cached_read_tokens`.
+  cached_read_tokens: number;
   coverage: TokenCoverage;
 }
 

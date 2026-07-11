@@ -144,7 +144,7 @@ def test_custom_theme_omitted_base_is_dark(tmp_path: Path) -> None:
     assert classify_effective_appearance(str(cfg), None) == "dark"
 
 
-@pytest.mark.parametrize("base", ["mauve", "", 123, None])
+@pytest.mark.parametrize("base", ["mauve", "", 123, None, "custom:other", "auto"])
 def test_custom_theme_bad_base_unknown(tmp_path: Path, base: Any) -> None:
     cfg = tmp_path / "cfg"
     _write(cfg / "themes" / "mine.json", {"base": base})

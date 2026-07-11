@@ -131,9 +131,15 @@ def _classify_custom(slug: str, theme_root: Path) -> str:
     if "base" not in data:
         return DARK
     base = data.get("base")
-    if not isinstance(base, str):
-        return UNKNOWN
-    return classify_theme(base, theme_root)
+    # ``base`` inherits from a built-in theme, so only the six literal built-in
+    # values are accepted — never another ``custom:`` form. Mapping directly
+    # (rather than back through ``classify_theme``) also rules out unbounded
+    # recursion on a self-referential base.
+    if base in _LIGHT_THEMES:
+        return LIGHT
+    if base in _DARK_THEMES:
+        return DARK
+    return UNKNOWN
 
 
 def classify_theme(preference: str | None, theme_root: Path) -> str:

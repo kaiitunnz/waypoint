@@ -16896,6 +16896,10 @@ html[data-theme="light"] .wp-hl {
 
 .tm-insight-evidence {
   justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding-block: 8px;
   font-family: var(--font-mono);
   font-size: 0.76rem;
   color: var(--accent-cool);

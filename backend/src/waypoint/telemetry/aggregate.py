@@ -870,7 +870,12 @@ def build_drilldown(
     page_size: int,
 ) -> TelemetryDrilldown:
     offset = (page - 1) * page_size
-    rows = storage.telemetry.query_facts(kind, rng, flt, limit=page_size, offset=offset)
+    # Newest-first: the first page should surface the most recent facts (with
+    # their resolved outcomes) rather than the oldest, which skew toward
+    # unpaired/unknown early history.
+    rows = storage.telemetry.query_facts(
+        kind, rng, flt, limit=page_size, offset=offset, descending=True
+    )
     total = storage.telemetry.count_facts(kind, rng, flt)
     return TelemetryDrilldown(
         range=rng,

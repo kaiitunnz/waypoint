@@ -558,6 +558,7 @@ class TelemetryStore:
         limit: int | None = None,
         offset: int | None = None,
         partial: bool = False,
+        descending: bool = False,
     ) -> list[dict[str, Any]]:
         with self._lock:
             where, params = self._filter_clause(
@@ -565,10 +566,14 @@ class TelemetryStore:
             )
             # Stable tiebreak (source, fact_id) after occurred_at so paginated
             # drilldown results (LIMIT/OFFSET) never reorder or repeat a row
-            # across pages when several facts share the same instant.
+            # across pages when several facts share the same instant. Drill-down
+            # defaults to newest-first (``descending``) so the first page shows
+            # the most recent, most relevant facts rather than the oldest.
+            direction = "DESC" if descending else "ASC"
             sql = (
                 f"SELECT * FROM telemetry_facts WHERE {where} "
-                "ORDER BY occurred_at ASC, source ASC, fact_id ASC"
+                f"ORDER BY occurred_at {direction}, source {direction}, "
+                f"fact_id {direction}"
             )
             if limit is not None:
                 sql += " LIMIT ?"

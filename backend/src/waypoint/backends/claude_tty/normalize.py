@@ -52,7 +52,7 @@ FILE_EDIT_TOOL_NAMES: frozenset[str] = frozenset({"Edit", "Write", "MultiEdit"})
 # The Claude CLI stamps locally-fabricated (non-model) messages with this model
 # id. It covers useful synthetic messages too (API-error notices, interrupted
 # partials), so the marker alone is not a suppression signal — it only gates the
-# exact placeholder strings below.
+# exact placeholder string below.
 SYNTHETIC_MODEL_ID = "<synthetic>"
 # Placeholder text the CLI substitutes for an empty assistant turn injected on a
 # `--resume` relaunch (settings-change restart, reconnect, or compaction). It is
@@ -185,22 +185,14 @@ class TranscriptNormalizer:
         message_id = str(message.get("id") or "")
         usage: dict[str, Any] = message.get("usage") or {}
         stop_reason = str(message.get("stop_reason") or "")
-        output_tokens = int(usage.get("output_tokens") or 0)
 
         first_seen = message_id not in self._seen_message_ids
         if message_id:
             self._seen_message_ids.add(message_id)
 
-        # Resuming a thread (settings-change restart, reconnect, or compaction)
-        # relaunches the CLI with `--resume`, which injects a synthetic empty
-        # turn with no model round-trip whose text is the fixed placeholder
-        # "No response requested." — it pollutes the transcript as a phantom
-        # reply. It shares its shape (model="<synthetic>", stop_sequence, zero
-        # output tokens) with messages we must keep: interrupted partials and
-        # API-error notices are synthetic and zero-token too. Only the exact
-        # placeholder string on a synthetic message identifies the phantom, so
-        # match that and nothing structural. The result note below still fires,
-        # so the turn resolves to idle even if no real turn follows.
+        # Suppress the resume phantom (see RESUME_NOOP_TEXT); the result note
+        # below still fires, so the turn resolves to idle even if no real turn
+        # follows.
         is_synthetic = str(message.get("model") or "") == SYNTHETIC_MODEL_ID
 
         events: list[NormalizedEvent] = []
@@ -324,6 +316,7 @@ class TranscriptNormalizer:
             if message_id:
                 self._result_emitted_ids.add(message_id)
             usage_payload: dict[str, Any] = usage if first_seen else {}
+            output_tokens = int(usage.get("output_tokens") or 0)
             if stop_reason == "end_turn":
                 result_text = (
                     f"Turn complete · {output_tokens} output tokens"

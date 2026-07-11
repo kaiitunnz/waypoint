@@ -166,8 +166,12 @@ def fold_tokens(
     Each tracked row's raw ledger totals are mapped through
     ``unify_tokens(row.source, ...)`` before folding, onto the 5 disjoint
     buckets (``waypoint.schemas.TOKEN_USAGE_CATEGORIES``); because those
-    buckets never overlap for any backend, ``display_total`` is simply their
-    sum and is always safe — no backend-declared total to trust or gate on.
+    buckets never overlap for any backend, summing them is always safe — no
+    backend-declared total to trust or gate on. ``display_total`` sums only
+    the *new-work* buckets (``fresh_input``/``cache_write``/``output``/
+    ``reasoning``) — ``cache_read`` is the same prior context re-sent every
+    turn, accumulative and meaningless to add to a total, so it's excluded
+    here and reported standalone (``totals["cache_read"]``) instead.
     ``tracked`` is the number of turns with a resolvable ledger record;
     ``total`` is ``len(rows)``.
     """
@@ -181,15 +185,17 @@ def fold_tokens(
         unified = unify_tokens(row["source"], usage.get("totals") or {})
         for category, amount in unified.items():
             totals[category] = totals.get(category, 0) + amount
-    display_total = sum(totals.values())
+    display_total = sum(
+        amount for category, amount in totals.items() if category != "cache_read"
+    )
     return totals, display_total, tracked, len(rows)
 
 
 def grand_total(totals: dict[str, int], display_total: int | None) -> int:
     """A single comparable token quantity for insight gating (CONTRACT.md §4/§7).
 
-    ``display_total`` (``fold_tokens``'s unconditional sum of the unified
-    buckets) is always the safe grand total now; the ``None`` branch is dead
+    ``display_total`` (``fold_tokens``'s new-work-only sum, ``cache_read``
+    excluded) is always the safe grand total now; the ``None`` branch is dead
     but kept so ``TokenTotals.display_total``'s optional type still type-checks.
     """
     return display_total if display_total is not None else sum(totals.values())
@@ -570,6 +576,7 @@ def build_overview(
         tokens=TokenTotals(
             totals=totals,
             display_total=display_total,
+            cached_read_tokens=totals.get("cache_read", 0),
             safe_total=display_total is not None,
             coverage=coverage_label(storage, meter_pct),
             meter_coverage_percent=meter_pct,
@@ -660,6 +667,7 @@ def build_tokens(
                 label=label_fn(key),
                 totals=totals,
                 display_total=display_total,
+                cached_read_tokens=totals.get("cache_read", 0),
                 coverage=coverage_label(storage, meter_pct),
             )
         )

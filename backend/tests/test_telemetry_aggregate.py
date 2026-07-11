@@ -232,11 +232,42 @@ def test_fold_tokens_unifies_mixed_backends_without_double_counting(
         "output": 20 + 30 + 17,
         "reasoning": 0 + 10 + 8,
     }
-    provider_totals = 85 + 140 + 92  # each backend's true (unified) grand total
-    assert display_total == provider_totals
-    assert display_total == sum(totals.values())
+    # display_total is new-work only: cache_read (45) is excluded from the
+    # 317 each-backend-unified grand total.
+    provider_totals = 85 + 140 + 92
+    assert display_total == provider_totals - 45
+    assert display_total == sum(v for k, v in totals.items() if k != "cache_read")
     assert tracked == 3
     assert total == 3
+
+
+def test_fold_tokens_display_total_excludes_cache_read(tmp_path: Path) -> None:
+    """A cache-read-heavy turn's ``display_total`` is the small new-work
+    number, not the cache-read-inflated grand total — cache reads are the
+    same prior context re-sent every turn, not new work."""
+    storage = Storage(tmp_path / "db.sqlite")
+    now = _make_session(storage, "s1")
+    _seed_agent_turn(
+        storage,
+        "s1",
+        fact_id="t1",
+        occurred_at=now,
+        source="claude_code",
+        totals={
+            "input_tokens": 100,
+            "cache_read_tokens": 579_000_000,
+            "cache_creation_tokens": 50,
+            "output_tokens": 200,
+        },
+    )
+
+    rows = aggregate.agent_turn_rows(storage, _full_range(), TelemetryFilter())
+    ledger = aggregate.ledger_rows_for_sessions(storage, {"s1"})
+    totals, display_total, _tracked, _total = aggregate.fold_tokens(rows, ledger)
+
+    assert totals["cache_read"] == 579_000_000
+    # New work only: fresh_input + cache_write + output + reasoning.
+    assert display_total == 100 + 50 + 200 + 0
 
 
 def test_coverage_label_entire_when_all_turns_tracked(tmp_path: Path) -> None:
@@ -317,8 +348,37 @@ def test_build_overview_sums_tokens_turns_and_lifecycle(tmp_path: Path) -> None:
         "reasoning": 0,
     }
     assert overview.tokens.display_total == 120
+    assert overview.tokens.cached_read_tokens == 0
     assert overview.tokens.safe_total is True
     assert overview.tokens.meter_coverage_percent == 100.0
+
+
+def test_build_overview_reports_cached_read_tokens_standalone(tmp_path: Path) -> None:
+    """The overview's ``display_total`` stays the small new-work number while
+    ``cached_read_tokens`` carries the (much larger) cache-read volume
+    separately (FR: #2, iteration 4)."""
+    storage = Storage(tmp_path / "db.sqlite")
+    now = _make_session(storage, "s1")
+    _seed_agent_turn(
+        storage,
+        "s1",
+        fact_id="turn-1",
+        occurred_at=now,
+        source="claude_code",
+        totals={
+            "input_tokens": 500,
+            "cache_read_tokens": 579_000_000,
+            "output_tokens": 100,
+        },
+    )
+
+    overview = aggregate.build_overview(
+        storage, _settings(), _full_range(), TelemetryFilter()
+    )
+    assert overview.tokens.cached_read_tokens == 579_000_000
+    assert overview.tokens.display_total == 600
+    assert overview.tokens.display_total is not None
+    assert overview.tokens.display_total < overview.tokens.cached_read_tokens
 
 
 def test_build_overview_hides_limit_card_when_session_scoped(tmp_path: Path) -> None:
@@ -993,6 +1053,43 @@ def test_token_volume_change_omitted_below_percent_gate(tmp_path: Path) -> None:
     _seed_tracked_turns(
         storage, "s1", current_times, per_turn_tokens=16500, prefix="cur"
     )
+
+    insights = telemetry_insights.compute_insights(
+        storage, _settings(), rng, TelemetryFilter()
+    )
+    assert [i for i in insights if i.type == "token_volume_change"] == []
+
+
+def test_token_volume_change_gates_on_new_work_total_not_cache_read(
+    tmp_path: Path,
+) -> None:
+    """A huge cache-read swing between the two ranges must not, by itself,
+    fire the insight — only a change in the new-work total counts (#2,
+    iteration 4)."""
+    storage = Storage(tmp_path / "db.sqlite")
+    now = datetime.now(UTC)
+    _make_session(storage, "s1")
+    rng = TelemetryRange(start=now - timedelta(hours=2), end=now, tz="UTC")
+    current_times = [now - timedelta(minutes=100 - 5 * i) for i in range(10)]
+    previous_times = [now - timedelta(minutes=220 - 5 * i) for i in range(10)]
+    # Identical new-work (fresh_input=2000/turn) in both ranges; only the
+    # cache-read volume swings wildly (100k -> 900k per turn).
+    for i, occurred_at in enumerate(previous_times):
+        _seed_agent_turn(
+            storage,
+            "s1",
+            fact_id=f"prev:{i}",
+            occurred_at=occurred_at,
+            totals={"input_tokens": 2000, "cache_read_tokens": 100_000},
+        )
+    for i, occurred_at in enumerate(current_times):
+        _seed_agent_turn(
+            storage,
+            "s1",
+            fact_id=f"cur:{i}",
+            occurred_at=occurred_at,
+            totals={"input_tokens": 2000, "cache_read_tokens": 900_000},
+        )
 
     insights = telemetry_insights.compute_insights(
         storage, _settings(), rng, TelemetryFilter()

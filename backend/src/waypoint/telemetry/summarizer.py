@@ -55,6 +55,7 @@ Rules — follow exactly:
 - Set "confidence" to "low", "medium", or "high" based on how well the data supports the summary — use "low" when data is sparse, meter coverage is well under 100%, or the range is nearly empty.
 - Never present an inference (a trend, a comparison, a recommendation) as a measured fact — phrase those as inferences, clearly distinct from counted totals.
 - Do not invent any number that is not present in the payload.
+- Token totals count new work only (fresh input, output, reasoning, cache writes); cached re-reads are reported separately and are NOT part of the total — never add them to it.
 
 Respond with ONLY a JSON object of exactly this shape and nothing else:
 {"prose": "...", "evidence": [{"statement": "...", "metric": "...", "value": "...", "click_through": {}}], "confidence": "low|medium|high"}

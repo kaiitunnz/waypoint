@@ -228,6 +228,64 @@ async def test_tokens_group_by_backend_splits_totals(tmp_path: Path) -> None:
     }
 
 
+async def test_tokens_group_cached_read_tokens_excluded_from_display_total(
+    tmp_path: Path,
+) -> None:
+    """A cache-read-heavy group's ``display_total`` is the small new-work
+    number, and ``cached_read_tokens`` carries the cache-read volume
+    standalone (#2, iteration 4)."""
+    app, token = _build(tmp_path)
+    context = app.state.context
+    _seed_session(context, "s1")
+    now = datetime.now(UTC)
+
+    context.storage.record_token_usage(
+        "s1",
+        TokenUsageRecord(
+            record_id="turn-1",
+            source="claude_code",
+            observed_at=now,
+            totals={
+                "input_tokens": 100,
+                "cache_read_tokens": 579_000_000,
+                "output_tokens": 50,
+            },
+        ),
+        init=TokenUsageInit(coverage="entire_waypoint_session", observed_from=now),
+    )
+    context.storage.telemetry.ingest_fact(
+        TurnFact(
+            fact_id="turn-1",
+            source="claude_code",
+            session_id="s1",
+            occurred_at=now,
+            dims=FactDimensions.model_validate(
+                {
+                    "backend": "claude_code",
+                    "repo_name": "waypoint",
+                    "source": SessionSource.MANAGED,
+                    "transport": "tmux",
+                    "spawner_session_id": None,
+                    "is_child": False,
+                }
+            ),
+            turn_kind=TurnKind.AGENT,
+        )
+    )
+
+    async with _client(app) as client:
+        resp = await client.get(
+            "/api/telemetry/tokens",
+            params={"group_by": "backend"},
+            headers=_auth(token),
+        )
+    assert resp.status_code == 200
+    group = resp.json()["groups"][0]
+    assert group["cached_read_tokens"] == 579_000_000
+    assert group["display_total"] == 150
+    assert group["totals"]["cache_read"] == 579_000_000
+
+
 async def test_drilldown_requires_kind_query_param(tmp_path: Path) -> None:
     app, token = _build(tmp_path)
     async with _client(app) as client:

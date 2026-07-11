@@ -26,7 +26,14 @@ class TokenTotals(BaseModel):
     totals: dict[str, int] = Field(default_factory=dict)
     # Only present when every contributing row supplied a safe, backend-declared
     # display total (CONTRACT.md §4: categories must not otherwise be summed).
+    # New-work total only (fresh input + cache write + output + reasoning) —
+    # cache reads are excluded (same prior context re-sent every turn, not new
+    # work) and reported standalone via ``cached_read_tokens`` instead.
     display_total: int | None = None
+    # Standalone cache-read total, already folded into ``totals["cache_read"]``
+    # but broken out here so the UI can show it distinct from — never added to
+    # — ``display_total``.
+    cached_read_tokens: int = 0
     safe_total: bool = False
     coverage: TokenCoverage = "entire"
     meter_coverage_percent: float | None = None
@@ -106,7 +113,10 @@ class TokenGroup(BaseModel):
     key: str
     label: str
     totals: dict[str, int] = Field(default_factory=dict)
+    # New-work total (see ``TokenTotals.display_total``) — excludes cache_read.
     display_total: int | None = None
+    # See ``TokenTotals.cached_read_tokens``.
+    cached_read_tokens: int = 0
     coverage: TokenCoverage = "entire"
 
 

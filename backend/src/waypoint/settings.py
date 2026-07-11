@@ -168,6 +168,10 @@ class Settings(BaseModel):
     # Context-window occupancy percent thresholds (low, elevated, critical)
     # that drive the dashboard's context-pressure alerts/insight gates.
     telemetry_context_thresholds: tuple[int, int, int] = (70, 90, 100)
+    # FR-9: limit-snapshot facts always persist a pseudonymous ``account_key``;
+    # the human-readable ``account_label`` is only ever returned by the API
+    # when this is explicitly turned on (an opt-in local-labels carve-out).
+    telemetry_local_labels: bool = False
 
     @field_validator("plugin_configs", mode="before")
     @classmethod
@@ -334,6 +338,10 @@ def _env_overrides() -> dict[str, Any]:
         overrides["telemetry_context_thresholds"] = tuple(
             int(part.strip()) for part in parts
         )
+    if "WAYPOINT_TELEMETRY_LOCAL_LABELS" in os.environ:
+        overrides["telemetry_local_labels"] = os.environ[
+            "WAYPOINT_TELEMETRY_LOCAL_LABELS"
+        ].lower() not in {"0", "false", "no", ""}
     return overrides
 
 

@@ -202,11 +202,15 @@ class LimitSnapshotFact(TelemetryFactBase):
     ``session_id`` carries the session the snapshot was observed through (for
     provenance) but limit aggregates group by ``(backend, account_key, window_id)``
     and the dashboard hides the limit card when any session-scoping filter is
-    active (FR-1). ``account_key`` is the pseudonymous verified-account key.
+    active (FR-1). ``account_key`` is a stable pseudonymous digest of the
+    resolved account identity (never a raw email/org, FR-9); ``account_label``
+    carries the human-readable name and is only ever surfaced by the API when
+    the ``telemetry_local_labels`` setting opts into local labels.
     """
 
     kind: Literal[TelemetryFactKind.LIMIT_SNAPSHOT] = TelemetryFactKind.LIMIT_SNAPSHOT
     account_key: str
+    account_label: str | None = None
     window_id: str
     window_label: str | None = None
     used_percent: float

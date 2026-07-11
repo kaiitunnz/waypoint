@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  UNIFIED_TOKEN_CATEGORIES,
+  UNIFIED_TOKEN_LABELS,
+  UnifiedTokenCategory,
+} from "@/lib/tokens";
+import {
   InsightSeverity,
   LifecycleTransition,
   TelemetryFactKind,
@@ -241,16 +246,14 @@ export function coverageLabel(coverage: TokenCoverage): string {
 
 // Category keys a token totals map may carry — order here is the fixed
 // stacking/legend order (never resorted by value; see the telemetry CSS
-// section's `--tm-series-*` categorical slots).
-export const TOKEN_CATEGORY_ORDER = [
-  "input",
-  "output",
-  "cache_read",
-  "cache_write",
-  "reasoning",
-] as const;
+// section's `--tm-series-*` categorical slots). Mirrors the backend's 5
+// unified buckets (`telemetry/tokens.py`) that every aggregate response's
+// `totals` now carries.
+export const TOKEN_CATEGORY_ORDER = UNIFIED_TOKEN_CATEGORIES;
 
 export function tokenCategoryLabel(category: string): string {
+  const known = UNIFIED_TOKEN_LABELS[category as UnifiedTokenCategory];
+  if (known) return known;
   return category
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))

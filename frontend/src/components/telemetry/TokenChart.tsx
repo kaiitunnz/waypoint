@@ -94,9 +94,11 @@ export function TokenChart({ tokens, loading, groupBy, onGroupByChange }: TokenC
 
   const rankedGroups = useMemo(() => {
     const rawGroups = groupBy !== "time" ? tokens?.groups ?? [] : [];
+    // `display_total` is always the safe sum of the 5 unified categories now
+    // (backend `fold_tokens`); the `?? 0` only guards the TS type, not a real gap.
     const withValues = rawGroups.map((group) => ({
       group,
-      value: group.display_total ?? Object.values(group.totals).reduce((a, b) => a + b, 0),
+      value: group.display_total ?? 0,
     }));
     withValues.sort((a, b) => b.value - a.value);
     if (withValues.length <= MAX_RANKED_GROUPS + 1) return withValues;

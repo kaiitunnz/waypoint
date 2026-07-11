@@ -63,6 +63,7 @@ from waypoint.telemetry.facts import (
     TurnKind,
 )
 from waypoint.telemetry.store import _day_bounds_utc, _day_key, _parse_tag_term
+from waypoint.telemetry.tokens import unify_tokens
 
 # A snapshot is "current" (CONTRACT.md §4) for 15 minutes or until its
 # provider-declared reset, whichever is sooner.
@@ -162,39 +163,34 @@ def fold_tokens(
 ) -> tuple[dict[str, int], int | None, int, int]:
     """Fold a set of AGENT ``TurnFact`` rows into ``(totals, display_total, tracked, total)``.
 
+    Each tracked row's raw ledger totals are mapped through
+    ``unify_tokens(row.source, ...)`` before folding, onto the 5 disjoint
+    buckets (``waypoint.schemas.TOKEN_USAGE_CATEGORIES``); because those
+    buckets never overlap for any backend, ``display_total`` is simply their
+    sum and is always safe — no backend-declared total to trust or gate on.
     ``tracked`` is the number of turns with a resolvable ledger record;
-    ``total`` is ``len(rows)``. ``display_total`` is the safe grand total only
-    when every tracked turn supplied one (never a partial sum passed off as
-    complete).
+    ``total`` is ``len(rows)``.
     """
     totals: dict[str, int] = {}
-    display_totals: list[int | None] = []
     tracked = 0
     for row in rows:
         usage = ledger.get((row["session_id"], row["source"], row["fact_id"]))
         if usage is None:
-            display_totals.append(None)
             continue
         tracked += 1
-        for category, amount in (usage.get("totals") or {}).items():
-            if isinstance(amount, int | float):
-                totals[category] = totals.get(category, 0) + int(amount)
-        display_total = usage.get("display_total_tokens")
-        display_totals.append(display_total if isinstance(display_total, int) else None)
-    display_total = (
-        sum(d for d in display_totals if d is not None)
-        if display_totals and all(d is not None for d in display_totals)
-        else None
-    )
+        unified = unify_tokens(row["source"], usage.get("totals") or {})
+        for category, amount in unified.items():
+            totals[category] = totals.get(category, 0) + amount
+    display_total = sum(totals.values())
     return totals, display_total, tracked, len(rows)
 
 
 def grand_total(totals: dict[str, int], display_total: int | None) -> int:
     """A single comparable token quantity for insight gating (CONTRACT.md §4/§7).
 
-    Prefers the safe backend-declared ``display_total``; falls back to the sum
-    of tracked categories when no backend supplied one (best-effort, never
-    shown as the safe grand total in the UI).
+    ``display_total`` (``fold_tokens``'s unconditional sum of the unified
+    buckets) is always the safe grand total now; the ``None`` branch is dead
+    but kept so ``TokenTotals.display_total``'s optional type still type-checks.
     """
     return display_total if display_total is not None else sum(totals.values())
 
@@ -271,7 +267,7 @@ def _is_real_account(account_key: str) -> bool:
 
 
 def current_limit_snapshots(
-    storage: Storage, flt: TelemetryFilter, now: datetime
+    storage: Storage, flt: TelemetryFilter, now: datetime, settings: Settings
 ) -> list[LimitSnapshotView]:
     rows = storage.telemetry.query_facts(
         TelemetryFactKind.LIMIT_SNAPSHOT, ALL_TIME_RANGE, flt
@@ -294,6 +290,9 @@ def current_limit_snapshots(
             LimitSnapshotView(
                 backend=backend,
                 account_key=account_key,
+                account_label=(
+                    row["account_label"] if settings.telemetry_local_labels else None
+                ),
                 window_id=window_id,
                 label=row["window_label"],
                 used_percent=row["used_percent"],
@@ -341,7 +340,7 @@ def alerting_limits(
     now = datetime.now(UTC)
     return [
         snapshot
-        for snapshot in current_limit_snapshots(storage, flt, now)
+        for snapshot in current_limit_snapshots(storage, flt, now, settings)
         if not snapshot.stale and snapshot.used_percent >= low
     ]
 
@@ -738,7 +737,7 @@ def _context_series(
 
 
 def _limits_series(
-    storage: Storage, rng: TelemetryRange, flt: TelemetryFilter
+    storage: Storage, rng: TelemetryRange, flt: TelemetryFilter, settings: Settings
 ) -> list[LimitSeries]:
     groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
     for row in storage.telemetry.query_facts(
@@ -753,6 +752,7 @@ def _limits_series(
     result = []
     for (backend, account_key, window_id), group_rows in groups.items():
         label = None
+        account_label = None
         best_per_bucket: dict[datetime, tuple[datetime, float]] = {}
         for row in group_rows:
             occurred = datetime.fromisoformat(row["occurred_at"])
@@ -762,6 +762,8 @@ def _limits_series(
                 best_per_bucket[bucket] = (occurred, row["used_percent"])
             if row["window_label"]:
                 label = row["window_label"]
+            if row["account_label"]:
+                account_label = row["account_label"]
         points = [
             LimitSeriesPoint(
                 bucket_start=bucket,
@@ -775,6 +777,9 @@ def _limits_series(
             LimitSeries(
                 backend=backend,
                 account_key=account_key,
+                account_label=(
+                    account_label if settings.telemetry_local_labels else None
+                ),
                 window_id=window_id,
                 label=label,
                 points=points,
@@ -791,8 +796,10 @@ def build_health(
 ) -> TelemetryHealth:
     now = datetime.now(UTC)
     hidden = flt.has_session_scoping()
-    limits_current = [] if hidden else current_limit_snapshots(storage, flt, now)
-    limits_series = [] if hidden else _limits_series(storage, rng, flt)
+    limits_current = (
+        [] if hidden else current_limit_snapshots(storage, flt, now, settings)
+    )
+    limits_series = [] if hidden else _limits_series(storage, rng, flt, settings)
     return TelemetryHealth(
         range=rng,
         filters_echo=flt,

@@ -13,6 +13,7 @@ alongside its own lifecycle, and invoking ``backfill()`` once at boot.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -46,6 +47,7 @@ from waypoint.telemetry.facts import (
     TurnFact,
     TurnKind,
 )
+from waypoint.usage_dashboard import _PluginRegistry, resolve_account
 
 log = logging.getLogger("waypoint.telemetry.ingest")
 
@@ -121,18 +123,43 @@ def _epoch_ms(value: datetime) -> int:
     return int(aware.timestamp() * 1000)
 
 
+# Length of the pseudonymous digest suffix on a telemetry ``account_key``
+# (e.g. ``acct_1a2b3c4d``) — short enough to stay a label, long enough that
+# collisions across the handful of accounts one Waypoint instance sees are
+# not a practical concern.
+_ACCOUNT_KEY_DIGEST_LENGTH = 8
+
+
+def _pseudonymize_account_key(raw_account_key: str) -> str:
+    """A stable, non-reversible grouping key for a raw account identity (FR-9).
+
+    ``raw_account_key`` (e.g. ``codex:noppanat@u.nus.edu``, ``claude_code:lumid``)
+    must never reach the store or the API verbatim; only this digest does.
+    Stable across process restarts (plain SHA-256, no per-process salt) so the
+    same account always groups under the same ``account_key``.
+    """
+    digest = hashlib.sha256(raw_account_key.encode("utf-8")).hexdigest()
+    return f"acct_{digest[:_ACCOUNT_KEY_DIGEST_LENGTH]}"
+
+
 class TelemetryIngester:
     """Enqueue-and-drain seam between normalized signals and ``TelemetryStore``."""
 
     def __init__(
         self,
         storage: Storage,
+        registry: _PluginRegistry | None = None,
         *,
         batch_size: int = 200,
         drain_debounce_seconds: float = 1.0,
     ) -> None:
         self._storage = storage
         self._store = storage.telemetry
+        # Backend-plugin lookup for resolving a rate-limit snapshot's account
+        # when the session has no verified probe (``resolve_account``). Only
+        # ``None`` in tests that don't exercise that fallback; the runtime
+        # always supplies its real registry.
+        self._registry = registry
         self._batch_size = batch_size
         self._drain_debounce_seconds = drain_debounce_seconds
         self._queue: list[tuple[TelemetryFact, dict[str, str]]] = []
@@ -402,13 +429,26 @@ class TelemetryIngester:
 
         rate_limit_usage = updates.get("rate_limit_usage")
         if isinstance(rate_limit_usage, SessionRateLimitUsage):
-            # Provider limits are account-scoped (FR-6). Without a verified
-            # account the snapshot can't be attributed to an account, so skip
-            # it rather than mint a per-session pseudo-account that fragments
-            # the account-scoped limit view into one row per session.
-            account_key = session.verified_account_key
-            if not account_key:
+            # Provider limits are account-scoped (FR-6). Without a resolvable
+            # account the snapshot can't be attributed to one, so skip it
+            # rather than mint a per-session pseudo-account that fragments
+            # the account-scoped limit view into one row per session. Prefers
+            # the session's verified probe, falling back to the plugin's own
+            # ``rate_limit_account`` (e.g. CC/profile-less-Codex org/email
+            # notes) so sessions that never ran a verified-account probe
+            # still surface (root cause of the "only Codex shows" bug).
+            resolved = resolve_account(
+                rate_limit_usage,
+                registry=self._registry,
+                verified_account_key=session.verified_account_key,
+                verified_account_label=session.verified_account_label,
+            )
+            if resolved is None:
                 return
+            raw_account_key, account_label = resolved
+            # FR-9: only the pseudonymous digest is persisted as account_key;
+            # the raw identity never reaches the store or the API.
+            account_key = _pseudonymize_account_key(raw_account_key)
             for window in rate_limit_usage.windows:
                 self._enqueue(
                     LimitSnapshotFact(
@@ -421,6 +461,7 @@ class TelemetryIngester:
                         occurred_at=rate_limit_usage.updated_at,
                         dims=dims,
                         account_key=account_key,
+                        account_label=account_label,
                         window_id=window.id,
                         window_label=window.label,
                         used_percent=window.used_percent,

@@ -808,6 +808,9 @@ export interface ContextSnapshotView {
 export interface LimitSnapshotView {
   backend: string;
   account_key: string;
+  // Only populated when the server's `telemetry_local_labels` setting is on
+  // (default off); `account_key` is always a pseudonym, never a raw email/org.
+  account_label: string | null;
   window_id: string;
   label: string | null;
   used_percent: number;
@@ -894,6 +897,8 @@ export interface LimitSeriesPoint {
 export interface LimitSeries {
   backend: string;
   account_key: string;
+  // See `LimitSnapshotView.account_label` — same local-labels gate.
+  account_label: string | null;
   window_id: string;
   label: string | null;
   points: LimitSeriesPoint[];

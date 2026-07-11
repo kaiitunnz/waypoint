@@ -118,6 +118,7 @@ class TelemetryStore:
                   window_tokens   INTEGER,
                   occupancy_percent REAL,
                   account_key     TEXT,
+                  account_label   TEXT,
                   window_id       TEXT,
                   window_label    TEXT,
                   used_percent    REAL,
@@ -163,7 +164,14 @@ class TelemetryStore:
                   PRIMARY KEY (day, backend, model, repo_name, src_source, transport, is_child, session_id)
                 );
                 """)
+            self._ensure_column("account_label", "TEXT")
             self._conn.commit()
+
+    def _ensure_column(self, column: str, ddl: str) -> None:
+        rows = self._conn.execute("PRAGMA table_info(telemetry_facts)").fetchall()
+        if any(row["name"] == column for row in rows):
+            return
+        self._conn.execute(f"ALTER TABLE telemetry_facts ADD COLUMN {column} {ddl}")
 
     # ── ingest ────────────────────────────────────────────────────────────
 
@@ -768,6 +776,7 @@ def _row_from_fact(fact: TelemetryFact) -> dict[str, Any]:
         "window_tokens": None,
         "occupancy_percent": None,
         "account_key": None,
+        "account_label": None,
         "window_id": None,
         "window_label": None,
         "used_percent": None,
@@ -792,6 +801,7 @@ def _row_from_fact(fact: TelemetryFact) -> dict[str, Any]:
         row["occupancy_percent"] = fact.occupancy_percent
     elif isinstance(fact, LimitSnapshotFact):
         row["account_key"] = fact.account_key
+        row["account_label"] = fact.account_label
         row["window_id"] = fact.window_id
         row["window_label"] = fact.window_label
         row["used_percent"] = fact.used_percent

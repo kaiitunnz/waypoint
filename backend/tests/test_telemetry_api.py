@@ -99,7 +99,8 @@ async def test_overview_empty_instance_returns_zeros_not_error(tmp_path: Path) -
     assert resp.status_code == 200
     body = resp.json()
     assert body["tokens"]["totals"] == {}
-    assert body["tokens"]["display_total"] is None
+    assert body["tokens"]["display_total"] == 0
+    assert body["tokens"]["safe_total"] is True
     assert body["sessions"]["active_now"] == 0
     assert body["tool_calls"] == 0
     assert "start" in body["range"] and "end" in body["range"] and "tz" in body["range"]
@@ -210,8 +211,20 @@ async def test_tokens_group_by_backend_splits_totals(tmp_path: Path) -> None:
     body = resp.json()
     assert body["group_by"] == "backend"
     by_key = {group["key"]: group for group in body["groups"]}
-    assert by_key["codex"]["totals"] == {"input_tokens": 100}
-    assert by_key["claude_code"]["totals"] == {"input_tokens": 250}
+    assert by_key["codex"]["totals"] == {
+        "fresh_input": 100,
+        "cache_read": 0,
+        "cache_write": 0,
+        "output": 0,
+        "reasoning": 0,
+    }
+    assert by_key["claude_code"]["totals"] == {
+        "fresh_input": 250,
+        "cache_read": 0,
+        "cache_write": 0,
+        "output": 0,
+        "reasoning": 0,
+    }
 
 
 async def test_drilldown_requires_kind_query_param(tmp_path: Path) -> None:

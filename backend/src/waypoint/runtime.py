@@ -333,12 +333,6 @@ class SessionRuntime:
         # loop below is the only thing that publishes onto the broadcast hub.
         self._telemetry_dirty = asyncio.Event()
         self._telemetry_broadcast_task: asyncio.Task[None] | None = None
-        # Generic telemetry fact ingestion (CONTRACT.md §3). ``None`` when
-        # telemetry is disabled; otherwise the runtime feeds it from its
-        # event/session-update/token-ledger seams and owns its drain + prune.
-        self.telemetry_ingester: TelemetryIngester | None = (
-            TelemetryIngester(storage) if settings.telemetry_enabled else None
-        )
         # Sessions we've already emitted a CREATED lifecycle fact for this
         # process (the fact itself is idempotent in the store; this just avoids
         # re-enqueueing on every subsequent event).
@@ -349,6 +343,17 @@ class SessionRuntime:
         # assistant is disabled or its bootstrap failed.
         self.assistant_session_id: str | None = None
         self.registry = registry or get_registry()
+        # Generic telemetry fact ingestion (CONTRACT.md §3). ``None`` when
+        # telemetry is disabled; otherwise the runtime feeds it from its
+        # event/session-update/token-ledger seams and owns its drain + prune.
+        # Constructed after ``self.registry`` so it can resolve a rate-limit
+        # snapshot's account via a plugin's ``rate_limit_account`` for
+        # sessions with no verified-account probe (CC, profile-less Codex).
+        self.telemetry_ingester: TelemetryIngester | None = (
+            TelemetryIngester(storage, self.registry)
+            if settings.telemetry_enabled
+            else None
+        )
         self._transports: dict[str, TransportAdapter] = {
             plugin.transport_id: plugin.transport_view(self)
             for plugin in self.registry.all()

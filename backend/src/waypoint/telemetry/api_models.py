@@ -57,6 +57,10 @@ class ContextSnapshotView(BaseModel):
 class LimitSnapshotView(BaseModel):
     backend: str
     account_key: str
+    # Only populated when the ``telemetry_local_labels`` setting is on
+    # (default off); ``None`` otherwise (FR-9 — ``account_key`` is always the
+    # pseudonym, never a raw email/org).
+    account_label: str | None = None
     window_id: str
     label: str | None = None
     used_percent: float
@@ -155,6 +159,8 @@ class LimitSeriesPoint(BaseModel):
 class LimitSeries(BaseModel):
     backend: str
     account_key: str
+    # See ``LimitSnapshotView.account_label`` — same local-labels gate.
+    account_label: str | None = None
     window_id: str
     label: str | None = None
     points: list[LimitSeriesPoint] = Field(default_factory=list)

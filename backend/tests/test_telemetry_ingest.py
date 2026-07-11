@@ -11,6 +11,9 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
+from waypoint.backends import BackendRegistry, get_registry, reset_registry_for_tests
 from waypoint.schemas import (
     EventKind,
     EventRecord,
@@ -25,6 +28,12 @@ from waypoint.schemas import (
 )
 from waypoint.storage import Storage
 from waypoint.telemetry.ingest import TelemetryIngester
+
+
+@pytest.fixture
+def registry() -> BackendRegistry:
+    reset_registry_for_tests()
+    return get_registry()
 
 
 def _make_session(
@@ -618,8 +627,14 @@ def test_rate_limit_usage_derives_one_fact_per_window(tmp_path: Path) -> None:
     window_ids = {r["window_id"] for r in rows}
     assert window_ids == {"5h", "7d"}
     # Keyed to the verified account, so windows aggregate across the account's
-    # sessions rather than fragmenting per session.
-    assert all(r["account_key"] == "acct-abc" for r in rows)
+    # sessions rather than fragmenting per session — but the persisted key is
+    # a pseudonymous digest, never the raw verified account key (FR-9).
+    account_keys = {r["account_key"] for r in rows}
+    assert len(account_keys) == 1
+    account_key = next(iter(account_keys))
+    assert account_key != "acct-abc"
+    assert account_key.startswith("acct_")
+    assert all(r["account_label"] == "acct-abc" for r in rows)
 
 
 def test_rate_limit_usage_without_verified_account_derives_nothing(
@@ -641,6 +656,126 @@ def test_rate_limit_usage_without_verified_account_derives_nothing(
     ingester._drain_available()
     rows = [r for r in _facts(storage, "s1") if r["kind"] == "limit_snapshot"]
     assert rows == []
+
+
+def test_rate_limit_usage_flows_for_claude_code_without_verified_account(
+    tmp_path: Path, registry: BackendRegistry
+) -> None:
+    """Root-cause regression: a claude_code session carrying rate_limit_usage
+    plus org/tier notes but no verified_account_key (never ran a
+    verified-account probe) now yields limit facts, resolved via the plugin's
+    own ``rate_limit_account`` instead of being silently dropped."""
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1").model_copy(update={"backend": "claude_code"})
+    ingester = TelemetryIngester(storage, registry)
+
+    ingester.derive_from_session_update(
+        session,
+        {
+            "rate_limit_usage": SessionRateLimitUsage(
+                source="claude_code",
+                updated_at=datetime.now(UTC),
+                notes=["CLI OAuth", "org: Acme", "org tier: enterprise"],
+                windows=[UsageWindow(id="5h", label="5 hour", used_percent=42.0)],
+            )
+        },
+    )
+    ingester._drain_available()
+
+    rows = [r for r in _facts(storage, "s1") if r["kind"] == "limit_snapshot"]
+    assert len(rows) == 1
+    assert rows[0]["account_key"].startswith("acct_")
+    assert "Acme" not in rows[0]["account_key"]
+    assert rows[0]["account_label"] == "Acme · enterprise"
+
+
+def test_rate_limit_usage_flows_for_profile_less_codex(
+    tmp_path: Path, registry: BackendRegistry
+) -> None:
+    """A codex session with no launched account profile (and so no verified
+    probe) still surfaces its rate-limit windows, via the plugin's email/plan
+    notes fallback."""
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1")  # backend="codex", no verified key
+    ingester = TelemetryIngester(storage, registry)
+
+    ingester.derive_from_session_update(
+        session,
+        {
+            "rate_limit_usage": SessionRateLimitUsage(
+                source="codex",
+                updated_at=datetime.now(UTC),
+                notes=["noppanat@u.nus.edu", "plan: pro"],
+                windows=[UsageWindow(id="5h", label="5 hour", used_percent=10.0)],
+            )
+        },
+    )
+    ingester._drain_available()
+
+    rows = [r for r in _facts(storage, "s1") if r["kind"] == "limit_snapshot"]
+    assert len(rows) == 1
+    assert rows[0]["account_key"].startswith("acct_")
+    assert "noppanat" not in rows[0]["account_key"]
+    assert rows[0]["account_label"] == "noppanat@u.nus.edu · plan: pro"
+
+
+def test_account_key_is_never_the_raw_email_or_org(
+    tmp_path: Path, registry: BackendRegistry
+) -> None:
+    """FR-9: whichever resolution path fires, the persisted ``account_key``
+    is always a digest — the raw identity never reaches the store."""
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1")
+    ingester = TelemetryIngester(storage, registry)
+
+    ingester.derive_from_session_update(
+        session,
+        {
+            "rate_limit_usage": SessionRateLimitUsage(
+                source="codex",
+                updated_at=datetime.now(UTC),
+                notes=["secret.user@example.com"],
+                windows=[UsageWindow(id="5h", label="5 hour", used_percent=10.0)],
+            )
+        },
+    )
+    ingester._drain_available()
+
+    rows = [r for r in _facts(storage, "s1") if r["kind"] == "limit_snapshot"]
+    assert len(rows) == 1
+    assert "secret.user@example.com" not in rows[0]["account_key"]
+    assert rows[0]["account_key"].startswith("acct_")
+    # The label is still the human identity (gated behind the API's
+    # telemetry_local_labels setting, not at ingest/storage time).
+    assert rows[0]["account_label"] == "secret.user@example.com"
+
+
+def test_pseudonymized_account_key_is_stable_across_sessions(
+    tmp_path: Path, registry: BackendRegistry
+) -> None:
+    """The same raw account always digests to the same account_key, so two
+    sessions on the same account still group together."""
+    storage = Storage(tmp_path / "db.sqlite")
+    ingester = TelemetryIngester(storage, registry)
+    session_a = _make_session(storage, "s1")
+    session_b = _make_session(storage, "s2")
+
+    for session in (session_a, session_b):
+        ingester.derive_from_session_update(
+            session,
+            {
+                "rate_limit_usage": SessionRateLimitUsage(
+                    source="codex",
+                    updated_at=datetime.now(UTC),
+                    notes=["shared@example.com"],
+                    windows=[UsageWindow(id="5h", label="5 hour", used_percent=1.0)],
+                )
+            },
+        )
+    ingester._drain_available()
+
+    keys = {r["account_key"] for r in _facts(storage) if r["kind"] == "limit_snapshot"}
+    assert len(keys) == 1
 
 
 def test_backfill_derives_facts_and_is_idempotent(tmp_path: Path) -> None:

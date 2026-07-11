@@ -141,18 +141,21 @@ class SessionContextUsage(BaseModel):
     breakdown: dict[str, int] = Field(default_factory=dict)
 
 
-# The category vocabulary an aggregate may carry. Normalization happens only at
-# the plugin's parse boundary; the ledger and aggregate never infer one category
-# from another, and missing provider fields stay absent rather than zero.
+# The 5 disjoint category buckets an aggregate (API-facing totals dict) may
+# carry. The ledger itself keeps storing each backend's raw, overlapping
+# native keys (``input_tokens``/``cachedInputTokens``/``cache.read``/…,
+# normalized only at each plugin's parse boundary) and is never backfilled
+# onto this vocabulary. The one documented exception to "never infer one
+# category from another" is the telemetry read layer's ``unify_tokens``
+# (``telemetry/tokens.py``), which folds those native keys onto these 5
+# buckets for display via a deterministic, source-keyed subset subtraction —
+# not a guess — so every aggregate response's totals always sum safely.
 TOKEN_USAGE_CATEGORIES = (
-    "input_tokens",
-    "cached_input_tokens",
-    "cache_read_tokens",
-    "cache_creation_tokens",
-    "cache_write_tokens",
-    "output_tokens",
-    "reasoning_output_tokens",
-    "reasoning_tokens",
+    "fresh_input",
+    "cache_read",
+    "cache_write",
+    "output",
+    "reasoning",
 )
 
 TokenUsageCoverage = Literal["entire_waypoint_session", "tracked_since", "partial"]

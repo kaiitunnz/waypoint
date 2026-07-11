@@ -156,10 +156,87 @@ def test_fold_tokens_counts_tracked_vs_untracked_turns(tmp_path: Path) -> None:
     assert len(rows) == 2
     ledger = aggregate.ledger_rows_for_sessions(storage, {"s1"})
     totals, display_total, tracked, total = aggregate.fold_tokens(rows, ledger)
-    assert totals == {"input_tokens": 100}
-    assert display_total is None  # t1 has no display_total_tokens
+    assert totals == {
+        "fresh_input": 100,
+        "cache_read": 0,
+        "cache_write": 0,
+        "output": 0,
+        "reasoning": 0,
+    }
+    assert display_total == 100  # unify_tokens's sum is always safe now
     assert tracked == 1
     assert total == 2
+
+
+def test_fold_tokens_unifies_mixed_backends_without_double_counting(
+    tmp_path: Path,
+) -> None:
+    """Regression: OpenCode's ``display_total_tokens=None`` used to poison a
+    mixed-backend group's ``display_total`` to ``None``, and Codex's
+    overlapping ``inputTokens``/``cachedInputTokens`` would double-count if
+    ever summed verbatim. ``unify_tokens`` removes the dependency on the
+    (sometimes-absent) declared total entirely, so the fold is always a safe,
+    non-double-counted sum across every backend in the group."""
+    storage = Storage(tmp_path / "db.sqlite")
+    now = _make_session(storage, "s1")
+    _seed_agent_turn(
+        storage,
+        "s1",
+        fact_id="claude-turn",
+        occurred_at=now,
+        source="claude_code",
+        totals={
+            "input_tokens": 50,
+            "cache_read_tokens": 10,
+            "cache_creation_tokens": 5,
+            "output_tokens": 20,
+        },
+    )
+    _seed_agent_turn(
+        storage,
+        "s1",
+        fact_id="codex-turn",
+        occurred_at=now,
+        source="codex",
+        totals={
+            "input_tokens": 100,  # TOTAL, includes cached_input_tokens
+            "cached_input_tokens": 30,
+            "output_tokens": 40,  # TOTAL, includes reasoning_output_tokens
+            "reasoning_output_tokens": 10,
+        },
+    )
+    _seed_agent_turn(
+        storage,
+        "s1",
+        fact_id="opencode-turn",
+        occurred_at=now,
+        source="opencode",
+        totals={
+            "input_tokens": 60,
+            "cache_read_tokens": 5,
+            "cache_write_tokens": 2,
+            "output_tokens": 25,  # TOTAL, includes reasoning_tokens
+            "reasoning_tokens": 8,
+        },
+        display_total=None,  # OpenCode never declares one
+    )
+
+    rows = aggregate.agent_turn_rows(storage, _full_range(), TelemetryFilter())
+    ledger = aggregate.ledger_rows_for_sessions(storage, {"s1"})
+    totals, display_total, tracked, total = aggregate.fold_tokens(rows, ledger)
+
+    assert totals == {
+        "fresh_input": 50 + 70 + 60,
+        "cache_read": 10 + 30 + 5,
+        "cache_write": 5 + 0 + 2,
+        "output": 20 + 30 + 17,
+        "reasoning": 0 + 10 + 8,
+    }
+    provider_totals = 85 + 140 + 92  # each backend's true (unified) grand total
+    assert display_total == provider_totals
+    assert display_total == sum(totals.values())
+    assert tracked == 3
+    assert total == 3
 
 
 def test_coverage_label_entire_when_all_turns_tracked(tmp_path: Path) -> None:
@@ -232,7 +309,13 @@ def test_build_overview_sums_tokens_turns_and_lifecycle(tmp_path: Path) -> None:
     assert overview.turns.user == 1
     assert overview.turns.agent == 1
     assert overview.tool_calls == 1
-    assert overview.tokens.totals == {"input_tokens": 100, "output_tokens": 20}
+    assert overview.tokens.totals == {
+        "fresh_input": 100,
+        "cache_read": 0,
+        "cache_write": 0,
+        "output": 20,
+        "reasoning": 0,
+    }
     assert overview.tokens.display_total == 120
     assert overview.tokens.safe_total is True
     assert overview.tokens.meter_coverage_percent == 100.0
@@ -321,7 +404,8 @@ def test_build_overview_empty_range_is_zero_not_error(tmp_path: Path) -> None:
         storage, _settings(), empty_rng, TelemetryFilter()
     )
     assert overview.tokens.totals == {}
-    assert overview.tokens.display_total is None
+    assert overview.tokens.display_total == 0
+    assert overview.tokens.safe_total is True
     assert overview.turns.user == 0
     assert overview.tool_calls == 0
 
@@ -431,11 +515,55 @@ def test_current_limit_snapshot_stale_after_15_minutes(tmp_path: Path) -> None:
             used_percent=95.0,
         )
     )
-    current = aggregate.current_limit_snapshots(storage, TelemetryFilter(), now)
+    current = aggregate.current_limit_snapshots(
+        storage, TelemetryFilter(), now, _settings()
+    )
     assert len(current) == 1
     assert current[0].stale is True
     # A stale snapshot never drives an alert/insight even above threshold.
     assert aggregate.alerting_limits(storage, _settings(), TelemetryFilter()) == []
+
+
+def test_account_label_hidden_unless_local_labels_setting_is_on(
+    tmp_path: Path,
+) -> None:
+    """FR-9: account_key is always the pseudonym; account_label is only ever
+    surfaced by the API when telemetry_local_labels opts in (default off)."""
+    storage = Storage(tmp_path / "db.sqlite")
+    now = datetime.now(UTC)
+    _make_session(storage, "s1")
+    storage.telemetry.ingest_fact(
+        LimitSnapshotFact(
+            fact_id="limit-1",
+            source="codex",
+            session_id="s1",
+            occurred_at=now,
+            dims=_dims(),
+            account_key="acct_deadbeef",
+            account_label="noppanat@u.nus.edu · plan: pro",
+            window_id="5h",
+            used_percent=42.0,
+        )
+    )
+
+    default_settings = Settings(telemetry_context_thresholds=(70, 90, 100))
+    assert default_settings.telemetry_local_labels is False
+    hidden = aggregate.build_health(
+        storage, default_settings, _full_range(), TelemetryFilter()
+    )
+    assert len(hidden.limits.current) == 1
+    assert hidden.limits.current[0].account_key == "acct_deadbeef"
+    assert hidden.limits.current[0].account_label is None
+    assert hidden.limits.series[0].account_label is None
+
+    labels_on = Settings(
+        telemetry_context_thresholds=(70, 90, 100), telemetry_local_labels=True
+    )
+    visible = aggregate.build_health(
+        storage, labels_on, _full_range(), TelemetryFilter()
+    )
+    assert visible.limits.current[0].account_label == "noppanat@u.nus.edu · plan: pro"
+    assert visible.limits.series[0].account_label == "noppanat@u.nus.edu · plan: pro"
 
 
 # ── /drilldown ────────────────────────────────────────────────────────────
@@ -866,7 +994,13 @@ def test_overview_tag_filter_keeps_session_counts_consistent_with_tokens(
     # only the tagged one — an internally inconsistent response.
     assert overview.sessions.created == 1
     assert overview.turns.agent == 1
-    assert overview.tokens.totals == {"input_tokens": 500}
+    assert overview.tokens.totals == {
+        "fresh_input": 500,
+        "cache_read": 0,
+        "cache_write": 0,
+        "output": 0,
+        "reasoning": 0,
+    }
     assert overview.tokens.display_total == 500
 
 

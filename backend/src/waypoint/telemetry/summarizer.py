@@ -45,9 +45,10 @@ _DISCLAIMER = (
     "against the linked evidence before treating it as ground truth."
 )
 
-_INSTRUCTION_PROMPT = """You are writing a short natural-language digest of AI coding-agent usage telemetry for one Waypoint user, from the JSON payload below.
+_INSTRUCTION_PROMPT = """You are writing a short natural-language digest of your reader's own AI coding-agent usage telemetry, from the JSON payload below. The reader IS the Waypoint operator whose activity this describes.
 
 Rules — follow exactly:
+- Address the reader directly in the second person ("you", "your"). Never refer to them in the third person ("the user", "they") — this is their own dashboard.
 - Every material claim in "prose" must be backed by an item in "evidence" that names the aggregate field it came from.
 - State the time range and any active filters explicitly in the prose.
 - Set "confidence" to "low", "medium", or "high" based on how well the data supports the summary — use "low" when data is sparse, meter coverage is well under 100%, or the range is nearly empty.

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.1](https://github.com/kaiitunnz/waypoint/compare/v0.8.0...v0.8.1) (2026-07-11)
+
+
+### Features
+
+* sync the terminal surface to the Claude TUI theme ([#281](https://github.com/kaiitunnz/waypoint/issues/281)) ([710e354](https://github.com/kaiitunnz/waypoint/commit/710e35426288dfab61f7eccf238574f203eb3b1d))
+
+
+### Miscellaneous Chores
+
+* release 0.8.1 ([745570f](https://github.com/kaiitunnz/waypoint/commit/745570f84669abd66f6877c7982682ace27ac446))
+
 ## [0.8.0](https://github.com/kaiitunnz/waypoint/compare/v0.7.4...v0.8.0) (2026-07-10)
 
 

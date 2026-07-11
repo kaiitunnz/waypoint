@@ -637,6 +637,66 @@ def test_rate_limit_usage_derives_one_fact_per_window(tmp_path: Path) -> None:
     assert all(r["account_label"] == "acct-abc" for r in rows)
 
 
+def test_rate_limit_usage_carries_profile_label_for_profiled_session(
+    tmp_path: Path,
+) -> None:
+    """A profiled session's limit facts carry the user-chosen local profile
+    name — FR-9-safe and always shown, unlike the OAuth-derived account_label."""
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1").model_copy(
+        update={
+            "verified_account_key": "acct-abc",
+            "account_profile_id": "nus",
+            "account_profile_label": "nus",
+        }
+    )
+    ingester = TelemetryIngester(storage)
+
+    ingester.derive_from_session_update(
+        session,
+        {
+            "rate_limit_usage": SessionRateLimitUsage(
+                source="codex",
+                updated_at=datetime.now(UTC),
+                windows=[UsageWindow(id="5h", label="5 hour", used_percent=42.0)],
+            )
+        },
+    )
+    ingester._drain_available()
+
+    rows = [r for r in _facts(storage, "s1") if r["kind"] == "limit_snapshot"]
+    assert len(rows) == 1
+    assert rows[0]["profile_label"] == "nus"
+
+
+def test_rate_limit_usage_profile_label_defaults_for_no_profile_session(
+    tmp_path: Path,
+) -> None:
+    """A session with no account profile gets the humanized "Default" label,
+    not a raw pseudonym or ``None``."""
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1").model_copy(
+        update={"verified_account_key": "acct-abc"}
+    )
+    ingester = TelemetryIngester(storage)
+
+    ingester.derive_from_session_update(
+        session,
+        {
+            "rate_limit_usage": SessionRateLimitUsage(
+                source="codex",
+                updated_at=datetime.now(UTC),
+                windows=[UsageWindow(id="5h", label="5 hour", used_percent=42.0)],
+            )
+        },
+    )
+    ingester._drain_available()
+
+    rows = [r for r in _facts(storage, "s1") if r["kind"] == "limit_snapshot"]
+    assert len(rows) == 1
+    assert rows[0]["profile_label"] == "Default"
+
+
 def test_rate_limit_usage_without_verified_account_derives_nothing(
     tmp_path: Path,
 ) -> None:

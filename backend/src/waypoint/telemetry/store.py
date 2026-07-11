@@ -122,6 +122,7 @@ class TelemetryStore:
                   occupancy_percent REAL,
                   account_key     TEXT,
                   account_label   TEXT,
+                  profile_label   TEXT,
                   window_id       TEXT,
                   window_label    TEXT,
                   used_percent    REAL,
@@ -168,6 +169,7 @@ class TelemetryStore:
                 );
                 """)
             self._ensure_column("account_label", "TEXT")
+            self._ensure_column("profile_label", "TEXT")
             self._conn.commit()
 
     def _ensure_column(self, column: str, ddl: str) -> None:
@@ -807,6 +809,7 @@ def _row_from_fact(fact: TelemetryFact) -> dict[str, Any]:
         "occupancy_percent": None,
         "account_key": None,
         "account_label": None,
+        "profile_label": None,
         "window_id": None,
         "window_label": None,
         "used_percent": None,
@@ -832,6 +835,7 @@ def _row_from_fact(fact: TelemetryFact) -> dict[str, Any]:
     elif isinstance(fact, LimitSnapshotFact):
         row["account_key"] = fact.account_key
         row["account_label"] = fact.account_label
+        row["profile_label"] = fact.profile_label
         row["window_id"] = fact.window_id
         row["window_label"] = fact.window_label
         row["used_percent"] = fact.used_percent

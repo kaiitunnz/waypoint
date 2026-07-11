@@ -266,6 +266,25 @@ def _is_real_account(account_key: str) -> bool:
     return not account_key.startswith("session:")
 
 
+def _pick_profile_label(labels: list[str]) -> str:
+    """The account group's display name: most common label wins, ties keep first-seen order.
+
+    An account can group sessions launched under different local profiles; this
+    picks one simple, deterministic label to head the group rather than showing
+    every profile that ever touched it.
+    """
+    if not labels:
+        return "Default"
+    counts: dict[str, int] = {}
+    order: list[str] = []
+    for label in labels:
+        if label not in counts:
+            counts[label] = 0
+            order.append(label)
+        counts[label] += 1
+    return max(order, key=lambda label: counts[label])
+
+
 def current_limit_snapshots(
     storage: Storage, flt: TelemetryFilter, now: datetime, settings: Settings
 ) -> list[LimitSnapshotView]:
@@ -273,10 +292,15 @@ def current_limit_snapshots(
         TelemetryFactKind.LIMIT_SNAPSHOT, ALL_TIME_RANGE, flt
     )
     latest: dict[tuple[str, str, str], dict[str, Any]] = {}
+    profile_labels: dict[tuple[str, str], list[str]] = {}
     for row in rows:
         if not _is_real_account(row["account_key"]):
             continue
-        key = (row["backend"], row["account_key"], row["window_id"])
+        account_group = (row["backend"], row["account_key"])
+        profile_labels.setdefault(account_group, []).append(
+            row["profile_label"] or "Default"
+        )
+        key = (*account_group, row["window_id"])
         existing = latest.get(key)
         if existing is None or row["occurred_at"] > existing["occurred_at"]:
             latest[key] = row
@@ -292,6 +316,9 @@ def current_limit_snapshots(
                 account_key=account_key,
                 account_label=(
                     row["account_label"] if settings.telemetry_local_labels else None
+                ),
+                profile_label=_pick_profile_label(
+                    profile_labels[(backend, account_key)]
                 ),
                 window_id=window_id,
                 label=row["window_label"],
@@ -740,12 +767,17 @@ def _limits_series(
     storage: Storage, rng: TelemetryRange, flt: TelemetryFilter, settings: Settings
 ) -> list[LimitSeries]:
     groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    profile_labels: dict[tuple[str, str], list[str]] = {}
     for row in storage.telemetry.query_facts(
         TelemetryFactKind.LIMIT_SNAPSHOT, rng, flt
     ):
         if not _is_real_account(row["account_key"]):
             continue
-        key = (row["backend"], row["account_key"], row["window_id"])
+        account_group = (row["backend"], row["account_key"])
+        profile_labels.setdefault(account_group, []).append(
+            row["profile_label"] or "Default"
+        )
+        key = (*account_group, row["window_id"])
         groups.setdefault(key, []).append(row)
 
     buckets = hour_range(rng)
@@ -779,6 +811,9 @@ def _limits_series(
                 account_key=account_key,
                 account_label=(
                     account_label if settings.telemetry_local_labels else None
+                ),
+                profile_label=_pick_profile_label(
+                    profile_labels[(backend, account_key)]
                 ),
                 window_id=window_id,
                 label=label,

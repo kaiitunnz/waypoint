@@ -449,6 +449,13 @@ class TelemetryIngester:
             # FR-9: only the pseudonymous digest is persisted as account_key;
             # the raw identity never reaches the store or the API.
             account_key = _pseudonymize_account_key(raw_account_key)
+            # The user-chosen local profile name is FR-9-safe (never the raw
+            # OAuth email/org) and is the primary, always-shown display label.
+            profile_label = (
+                session.account_profile_label
+                if session.account_profile_id and session.account_profile_label
+                else "Default"
+            )
             for window in rate_limit_usage.windows:
                 self._enqueue(
                     LimitSnapshotFact(
@@ -462,6 +469,7 @@ class TelemetryIngester:
                         dims=dims,
                         account_key=account_key,
                         account_label=account_label,
+                        profile_label=profile_label,
                         window_id=window.id,
                         window_label=window.label,
                         used_percent=window.used_percent,

@@ -566,6 +566,93 @@ def test_account_label_hidden_unless_local_labels_setting_is_on(
     assert visible.limits.series[0].account_label == "noppanat@u.nus.edu · plan: pro"
 
 
+def test_profile_label_shown_regardless_of_local_labels_setting(
+    tmp_path: Path,
+) -> None:
+    """Unlike ``account_label``, ``profile_label`` is a user-chosen local name
+    (never the raw OAuth email/org) so it's always surfaced, default off or on."""
+    storage = Storage(tmp_path / "db.sqlite")
+    now = datetime.now(UTC)
+    _make_session(storage, "s1")
+    storage.telemetry.ingest_fact(
+        LimitSnapshotFact(
+            fact_id="limit-1",
+            source="codex",
+            session_id="s1",
+            occurred_at=now,
+            dims=_dims(),
+            account_key="acct_deadbeef",
+            profile_label="nus",
+            window_id="5h",
+            used_percent=42.0,
+        )
+    )
+
+    default_settings = Settings(telemetry_context_thresholds=(70, 90, 100))
+    assert default_settings.telemetry_local_labels is False
+    visible = aggregate.build_health(
+        storage, default_settings, _full_range(), TelemetryFilter()
+    )
+    assert visible.limits.current[0].profile_label == "nus"
+    assert visible.limits.series[0].profile_label == "nus"
+
+
+def test_profile_label_picks_most_common_across_account_group(
+    tmp_path: Path,
+) -> None:
+    """When an account groups sessions launched under different profiles, the
+    account's display label is the most common one seen, not the latest."""
+    storage = Storage(tmp_path / "db.sqlite")
+    now = datetime.now(UTC)
+    _make_session(storage, "s1")
+    for i, label in enumerate(["nus", "nus", "work"]):
+        storage.telemetry.ingest_fact(
+            LimitSnapshotFact(
+                fact_id=f"limit-{i}",
+                source="codex",
+                session_id="s1",
+                occurred_at=now - timedelta(minutes=len(["nus", "nus", "work"]) - i),
+                dims=_dims(),
+                account_key="acct_deadbeef",
+                profile_label=label,
+                window_id="5h",
+                used_percent=42.0,
+            )
+        )
+
+    current = aggregate.current_limit_snapshots(
+        storage, TelemetryFilter(), now, _settings()
+    )
+    assert len(current) == 1
+    assert current[0].profile_label == "nus"
+
+
+def test_profile_label_defaults_when_absent(tmp_path: Path) -> None:
+    """A limit fact with no profile_label (e.g. pre-migration data) surfaces
+    the humanized 'Default' rather than ``None``."""
+    storage = Storage(tmp_path / "db.sqlite")
+    now = datetime.now(UTC)
+    _make_session(storage, "s1")
+    storage.telemetry.ingest_fact(
+        LimitSnapshotFact(
+            fact_id="limit-1",
+            source="codex",
+            session_id="s1",
+            occurred_at=now,
+            dims=_dims(),
+            account_key="acct_deadbeef",
+            window_id="5h",
+            used_percent=42.0,
+        )
+    )
+
+    current = aggregate.current_limit_snapshots(
+        storage, TelemetryFilter(), now, _settings()
+    )
+    assert len(current) == 1
+    assert current[0].profile_label == "Default"
+
+
 # ── /drilldown ────────────────────────────────────────────────────────────
 
 

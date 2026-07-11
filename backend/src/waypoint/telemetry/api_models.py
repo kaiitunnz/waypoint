@@ -61,6 +61,10 @@ class LimitSnapshotView(BaseModel):
     # (default off); ``None`` otherwise (FR-9 — ``account_key`` is always the
     # pseudonym, never a raw email/org).
     account_label: str | None = None
+    # The user-chosen local profile name ("nus") or "Default" for a no-profile
+    # session — never the raw OAuth email/org, so it's FR-9-safe and shown by
+    # default (unlike ``account_label`` above, which needs local labels on).
+    profile_label: str | None = None
     window_id: str
     label: str | None = None
     used_percent: float
@@ -161,6 +165,8 @@ class LimitSeries(BaseModel):
     account_key: str
     # See ``LimitSnapshotView.account_label`` — same local-labels gate.
     account_label: str | None = None
+    # See ``LimitSnapshotView.profile_label`` — always shown, no gate.
+    profile_label: str | None = None
     window_id: str
     label: str | None = None
     points: list[LimitSeriesPoint] = Field(default_factory=list)

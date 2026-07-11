@@ -93,7 +93,7 @@ install_reasoning_effort_tolerance()
 _THREAD_ITEM_SENTINEL = "_waypoint_thread_item_tolerant"
 
 
-def _known_thread_item_types(union: object) -> frozenset[str]:
+def _known_thread_item_types(union: typing.Any) -> frozenset[str]:
     """Collect the ``type`` literal of every member of the ``ThreadItem`` union.
 
     Raises if any member contributes no string literal -- the set is load-bearing
@@ -145,12 +145,15 @@ def _referenced_models(cls: type[BaseModel]) -> set[type[BaseModel]]:
     return out
 
 
-def _thread_item_containers() -> list[type[BaseModel]]:
-    """Every generated model that transitively embeds ``ThreadItem``.
+def _thread_item_containers() -> tuple[list[type[BaseModel]], int]:
+    """Every generated model transitively embedding ``ThreadItem``, plus the
+    longest containment chain length from ``ThreadItem`` to a container.
 
-    Only these need rebuilding when the union is widened; the SDK ships ~660
-    models but ~25 contain a thread item, so scoping the rebuild keeps the
-    import-time cost negligible.
+    Only these models need rebuilding when the union is widened; the SDK ships
+    ~660 models but ~25 contain a thread item, so scoping the rebuild keeps the
+    import-time cost negligible. The chain length is the number of rebuild passes
+    needed to propagate the widened union to the deepest container, so callers
+    size the rebuild to the actual graph rather than a fixed guess.
     """
     models = [
         obj
@@ -172,10 +175,23 @@ def _thread_item_containers() -> list[type[BaseModel]]:
             if parent not in containers:
                 containers.add(parent)
                 frontier.append(parent)
-    return list(containers)
+
+    depth_memo: dict[type[BaseModel], int] = {}
+
+    def _chain_depth(node: type[BaseModel], on_path: frozenset[type[BaseModel]]) -> int:
+        longest = 0
+        for parent in parents.get(node, ()):
+            if parent in on_path:  # cycle guard; the container graph is a DAG
+                continue
+            if parent not in depth_memo:
+                depth_memo[parent] = _chain_depth(parent, on_path | {parent})
+            longest = max(longest, 1 + depth_memo[parent])
+        return longest
+
+    depth = _chain_depth(ThreadItem, frozenset({ThreadItem}))
+    return list(containers), depth
 
 
-_THREAD_ITEM_REBUILD_PASSES = 6
 _PROBE_UNKNOWN_TYPE = "_waypointUnknownItemProbe"
 
 
@@ -213,13 +229,14 @@ def install_thread_item_tolerance() -> None:
     _v2.UnknownThreadItem = UnknownThreadItem  # type: ignore[attr-defined]
 
     _rebuild(ThreadItem)
-    containers = _thread_item_containers()
+    containers, depth = _thread_item_containers()
     # ThreadItem sits at the bottom of a containment DAG
-    # (ThreadItem -> Turn -> Thread -> *Response / *Notification). Each pass
-    # propagates the widened union one level up; the SDK's depth is ~4, so a few
-    # passes reach a fixpoint. Order-independent (and cycle-safe) rather than
-    # relying on a topological sort of the SDK's shape.
-    for _ in range(_THREAD_ITEM_REBUILD_PASSES):
+    # (ThreadItem -> Turn -> Thread -> *Response / *Notification). Rebuilding all
+    # containers once propagates the widened union one level up; repeating for the
+    # DAG's depth reaches a fixpoint regardless of iteration order. Deriving the
+    # pass count from the measured depth means a future SDK that deepens the graph
+    # cannot silently outrun a hard-coded count.
+    for _ in range(max(1, depth)):
         for cls in containers:
             _rebuild(cls)
 

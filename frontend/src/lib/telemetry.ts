@@ -268,6 +268,53 @@ export function orderedTokenCategories(totals: Record<string, number>): string[]
   return [...known, ...rest];
 }
 
+// The two spend tiers the Tokens card and legend group by: fresh work the
+// model actually did this range vs. cheap prior context re-sent to it. Keeping
+// `cache_read` in its own tier is what stops it visually drowning the rest.
+export const TOKEN_TIER_NEW_WORK: readonly UnifiedTokenCategory[] = [
+  "fresh_input",
+  "output",
+  "reasoning",
+  "cache_write",
+];
+export const TOKEN_TIER_REREAD: readonly UnifiedTokenCategory[] = ["cache_read"];
+
+// Stacking/legend order: the four new-work buckets first (most→least
+// characteristic), then the muted re-read band last so it reads as the
+// backdrop the vivid work sits against.
+export const TOKEN_DISPLAY_ORDER: readonly UnifiedTokenCategory[] = [
+  ...TOKEN_TIER_NEW_WORK,
+  ...TOKEN_TIER_REREAD,
+];
+
+const TOKEN_CATEGORY_COLORS: Record<UnifiedTokenCategory, string> = {
+  fresh_input: "var(--tm-series-1)",
+  output: "var(--tm-series-2)",
+  reasoning: "var(--tm-series-3)",
+  cache_write: "var(--tm-series-5)",
+  cache_read: "var(--tm-token-reread)",
+};
+
+export function tokenCategoryColor(category: string): string {
+  return TOKEN_CATEGORY_COLORS[category as UnifiedTokenCategory] ?? "var(--tm-series-6)";
+}
+
+export interface TokenTierSplit {
+  newWork: number;
+  reread: number;
+  total: number;
+}
+
+function tierSum(totals: Record<string, number>, keys: readonly string[]): number {
+  return keys.reduce((sum, key) => sum + (totals[key] ?? 0), 0);
+}
+
+export function splitTokenTiers(totals: Record<string, number>): TokenTierSplit {
+  const newWork = tierSum(totals, TOKEN_TIER_NEW_WORK);
+  const reread = tierSum(totals, TOKEN_TIER_REREAD);
+  return { newWork, reread, total: newWork + reread };
+}
+
 // Python's `datetime.weekday()` (Monday=0…Sunday=6) — matches
 // `telemetry/aggregate.py`'s heatmap bucketing exactly.
 export const DOW_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];

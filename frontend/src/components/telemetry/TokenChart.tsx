@@ -4,10 +4,13 @@ import { useId, useMemo, useState } from "react";
 
 import { ChartTooltip, ChartTooltipState } from "@/components/telemetry/ChartTooltip";
 import {
+  TOKEN_DISPLAY_ORDER,
   TOKEN_GROUP_BY_OPTIONS,
+  TOKEN_TIER_NEW_WORK,
+  TOKEN_TIER_REREAD,
   coverageLabel,
   formatCompactNumber,
-  orderedTokenCategories,
+  tokenCategoryColor,
   tokenCategoryLabel,
 } from "@/lib/telemetry";
 import { TelemetryTokens, TokenGroupBy } from "@/lib/types";
@@ -83,13 +86,17 @@ export function TokenChart({ tokens, loading, groupBy, onGroupByChange }: TokenC
 
   const categories = useMemo(() => {
     const points = groupBy === "time" ? tokens?.series ?? [] : [];
-    const merged: Record<string, number> = {};
+    const present = new Set<string>();
     for (const point of points) {
       for (const [key, value] of Object.entries(point.totals)) {
-        merged[key] = (merged[key] ?? 0) + value;
+        if (value > 0) present.add(key);
       }
     }
-    return orderedTokenCategories(merged);
+    // Fixed two-tier stacking order (new work first, muted re-read band last),
+    // then any unrecognized key trailing so nothing silently drops.
+    const known = TOKEN_DISPLAY_ORDER.filter((key) => present.has(key));
+    const rest = [...present].filter((key) => !TOKEN_DISPLAY_ORDER.includes(key as never)).sort();
+    return [...known, ...rest];
   }, [groupBy, tokens]);
 
   const rankedGroups = useMemo(() => {
@@ -166,20 +173,45 @@ export function TokenChart({ tokens, loading, groupBy, onGroupByChange }: TokenC
       )}
       <ChartTooltip state={tooltip} />
 
-      {hasData ? (
+      {hasData && groupBy === "time" ? (
+        <div className="tm-chart-legend tm-token-legend" role="list" aria-label="Token categories">
+          {(
+            [
+              ["New work", TOKEN_TIER_NEW_WORK],
+              ["Re-read context", TOKEN_TIER_REREAD],
+            ] as const
+          ).map(([tierName, tierCats]) => {
+            const present = tierCats.filter((c) => categories.includes(c));
+            if (present.length === 0) return null;
+            return (
+              <div key={tierName} className="tm-legend-tier">
+                <span className="tm-legend-tier-name">{tierName}</span>
+                {present.map((category) => (
+                  <span key={category} className="tm-legend-item" role="listitem">
+                    <span
+                      className="tm-legend-swatch"
+                      aria-hidden="true"
+                      style={{ background: tokenCategoryColor(category) }}
+                    />
+                    {tokenCategoryLabel(category)}
+                  </span>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      ) : hasData ? (
         <div className="tm-chart-legend" role="list" aria-label="Series">
-          {(groupBy === "time" ? categories : rankedGroups.map((g) => g.group.label)).map(
-            (label, index) => (
-              <span key={typeof label === "string" ? label : index} className="tm-legend-item" role="listitem">
-                <span
-                  className="tm-legend-swatch"
-                  aria-hidden="true"
-                  style={{ background: seriesColor(index) }}
-                />
-                {groupBy === "time" ? tokenCategoryLabel(label as string) : label}
-              </span>
-            ),
-          )}
+          {rankedGroups.map(({ group }, index) => (
+            <span key={group.key} className="tm-legend-item" role="listitem">
+              <span
+                className="tm-legend-swatch"
+                aria-hidden="true"
+                style={{ background: seriesColor(index) }}
+              />
+              {group.label}
+            </span>
+          ))}
         </div>
       ) : null}
 
@@ -319,11 +351,11 @@ function TimeSeriesBars({
                   title: new Date(point.bucket_start).toLocaleString(),
                   rows: categories
                     .filter((c) => (point.totals[c] ?? 0) > 0)
-                    .map((c, idx) => ({
+                    .map((c) => ({
                       key: c,
                       label: tokenCategoryLabel(c),
                       value: formatCompactNumber(point.totals[c] ?? 0),
-                      color: seriesColor(idx),
+                      color: tokenCategoryColor(c),
                     })),
                 })
               }
@@ -334,11 +366,11 @@ function TimeSeriesBars({
                   title: new Date(point.bucket_start).toLocaleString(),
                   rows: categories
                     .filter((c) => (point.totals[c] ?? 0) > 0)
-                    .map((c, idx) => ({
+                    .map((c) => ({
                       key: c,
                       label: tokenCategoryLabel(c),
                       value: formatCompactNumber(point.totals[c] ?? 0),
-                      color: seriesColor(idx),
+                      color: tokenCategoryColor(c),
                     })),
                 })
               }
@@ -349,11 +381,11 @@ function TimeSeriesBars({
                   title: new Date(point.bucket_start).toLocaleString(),
                   rows: categories
                     .filter((c) => (point.totals[c] ?? 0) > 0)
-                    .map((c, idx) => ({
+                    .map((c) => ({
                       key: c,
                       label: tokenCategoryLabel(c),
                       value: formatCompactNumber(point.totals[c] ?? 0),
-                      color: seriesColor(idx),
+                      color: tokenCategoryColor(c),
                     })),
                 })
               }
@@ -365,7 +397,7 @@ function TimeSeriesBars({
                   <path
                     key={segment.category}
                     d={roundedTopRectPath(x, segment.y, barW, segment.h, 3)}
-                    fill={seriesColor(segment.ci)}
+                    fill={tokenCategoryColor(segment.category)}
                   />
                 ) : (
                   <rect
@@ -374,7 +406,7 @@ function TimeSeriesBars({
                     y={segment.y}
                     width={barW}
                     height={segment.h}
-                    fill={seriesColor(segment.ci)}
+                    fill={tokenCategoryColor(segment.category)}
                   />
                 ),
               )}

@@ -30,6 +30,10 @@
   --tm-series-6: #e66767;
   --tm-series-7: #d55181;
   --tm-series-8: #d95926;
+  /* Re-read context (cache_read) is cheap re-sent prior context and routinely
+   * dwarfs every other bucket — it carries a muted slate rather than a vivid
+   * categorical hue so it reads as background bulk, not headline work. */
+  --tm-token-reread: #47566b;
   /* Thick glass is fully opaque: text-dense sheets sit over bright
    * transcript text, where even a few percent of bleed-through reads as
    * ghost text on a dark ground — and popovers nested inside the composer
@@ -86,6 +90,7 @@ html[data-theme="light"] {
   --tm-series-6: #e34948;
   --tm-series-7: #e87ba4;
   --tm-series-8: #eb6834;
+  --tm-token-reread: #9a9382;
   --glass-bg: rgba(250, 246, 238, 0.8);
   --glass-bg-thick: rgb(250, 247, 240);
   --glass-line: rgba(90, 78, 58, 0.18);
@@ -16259,22 +16264,52 @@ html[data-theme="light"] .wp-hl {
   border: 1px solid var(--line);
 }
 
+.tm-overview-hero-block {
+  display: grid;
+  gap: 0;
+}
+
 .tm-overview-hero {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 2rem;
+  font-size: 2.15rem;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
   color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-overview-hero.is-clear {
+  color: var(--success);
 }
 
 .tm-overview-hero-caption {
-  margin: -6px 0 0;
+  margin: 3px 0 0;
   color: var(--muted-soft);
-  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .tm-overview-hero-note {
   margin: 0;
   color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+/* Hairline shelf under the hero: separates headline from breakdown so the
+   card reads as instrument (numeral + supporting detail), not a flat list. */
+.tm-overview-body {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.tm-overview-empty {
+  margin: 0;
   font-size: 0.82rem;
 }
 
@@ -16282,12 +16317,13 @@ html[data-theme="light"] .wp-hl {
   margin: 0;
   color: var(--muted-soft);
   font-size: 0.76rem;
+  line-height: 1.4;
 }
 
 .tm-stat-list {
   margin: 0;
   display: grid;
-  gap: 4px;
+  gap: 5px;
 }
 
 .tm-stat-row {
@@ -16295,16 +16331,122 @@ html[data-theme="light"] .wp-hl {
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
-  font-size: 0.84rem;
+  font-size: 0.82rem;
 }
 
 .tm-stat-row-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   color: var(--muted);
 }
 
 .tm-stat-row-value {
   font-family: var(--font-mono);
   color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-stat-row.tone-danger .tm-stat-row-value {
+  color: var(--danger);
+}
+
+.tm-stat-row.tone-warn .tm-stat-row-value {
+  color: var(--warn);
+}
+
+.tm-stat-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.tm-stat-swatch.is-newwork {
+  background: var(--tm-series-1);
+}
+
+.tm-stat-swatch.is-reread {
+  background: var(--tm-token-reread);
+}
+
+/* Token tiers (Tokens card) — new work vs re-read context */
+.tm-tier-bar {
+  display: flex;
+  height: 8px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+}
+
+.tm-tier-bar-seg {
+  min-width: 2px;
+}
+
+.tm-tier-bar-seg.is-newwork {
+  background: var(--tm-series-1);
+}
+
+.tm-tier-bar-seg.is-reread {
+  background: var(--tm-token-reread);
+}
+
+.tm-tier-list {
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.tm-tier {
+  display: grid;
+  gap: 4px;
+}
+
+.tm-tier-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tm-tier-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.tm-tier-value {
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sub-rows sit inset under their tier head, one hairline column rule tying
+   the four new-work buckets to the tier they roll up into. */
+.tm-tier-sub {
+  display: grid;
+  gap: 3px;
+  margin-left: 3px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+
+.tm-tier-sub .tm-stat-row {
+  font-size: 0.78rem;
+}
+
+.tm-tier-note {
+  margin: 0 0 0 3px;
+  padding-left: 10px;
+  color: var(--muted-soft);
+  font-size: 0.74rem;
 }
 
 .tm-alerts-card.has-alerts {
@@ -16496,6 +16638,37 @@ html[data-theme="light"] .wp-hl {
   flex-shrink: 0;
 }
 
+/* Token legend: the five buckets split into their two named tiers so the
+   chart's colour groups read as new-work vs re-read at a glance. */
+.tm-token-legend {
+  gap: 8px 22px;
+}
+
+.tm-legend-tier {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.tm-legend-tier-name {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.tm-legend-tier-name::after {
+  content: "";
+  display: inline-block;
+  width: 1px;
+  height: 11px;
+  margin-left: 12px;
+  vertical-align: -2px;
+  background: var(--line-strong);
+}
+
 /* Hover/focus readout — floating chrome, so it takes the glass recipe. */
 .tm-chart-tooltip {
   position: fixed;
@@ -16594,14 +16767,106 @@ html[data-theme="light"] .wp-hl {
   letter-spacing: 0.04em;
 }
 
+/* Small-multiples session-activity trend */
+.tm-smallmult-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.tm-smallmult {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card-soft);
+}
+
+.tm-smallmult-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tm-smallmult-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.tm-smallmult-total {
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-smallmult-svg {
+  width: 100%;
+  height: 60px;
+  display: block;
+}
+
+.tm-smallmult-area {
+  opacity: 0.14;
+}
+
+.tm-smallmult-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  color: var(--muted-soft);
+}
+
+.tm-chart-footnote {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
 /* Activity heatmap */
+.tm-heatmap-scale {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.tm-heatmap-scale-ramp {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.tm-heatmap-scale-ramp span {
+  width: 12px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid var(--line);
+}
+
 .tm-heatmap-scroll {
   overflow-x: auto;
 }
 
 .tm-heatmap {
   border-collapse: collapse;
-  min-width: 720px;
+  min-width: 760px;
+}
+
+.tm-heatmap-corner {
+  width: 92px;
 }
 
 .tm-heatmap-hour {
@@ -16610,16 +16875,30 @@ html[data-theme="light"] .wp-hl {
   color: var(--muted-soft);
   font-weight: 400;
   padding-bottom: 4px;
+  text-align: center;
 }
 
 .tm-heatmap-dow {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--muted);
   text-align: right;
-  padding-right: 8px;
+  padding-right: 10px;
   font-weight: 400;
   white-space: nowrap;
+  vertical-align: middle;
+  line-height: 1.15;
+}
+
+.tm-heatmap-dow-name {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text);
+}
+
+.tm-heatmap-dow-date {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--muted-soft);
 }
 
 .tm-heatmap-cell-wrap {
@@ -16631,6 +16910,19 @@ html[data-theme="light"] .wp-hl {
   height: 20px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
+}
+
+/* Empty cells carry a faint hollow fill so the grid still reads as a grid
+   and a genuinely-empty slot is unmistakably distinct from a low-count one. */
+.tm-heatmap-cell.is-empty {
+  background: color-mix(in srgb, var(--muted-soft) 8%, transparent);
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.tm-heatmap-cell.is-peak {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .tm-heatmap-cell:hover,
@@ -16707,79 +16999,315 @@ html[data-theme="light"] .wp-hl {
   white-space: nowrap;
 }
 
-.tm-dial-grid {
+/* Provider-limit account groups */
+.tm-account-groups {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 12px;
-  margin-bottom: 4px;
 }
 
-.tm-dial-cell {
+.tm-account-group {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card-soft);
+}
+
+.tm-account-head {
   display: flex;
-  justify-content: center;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tm-account-name {
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tm-account-backend {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tm-window-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 12px;
+}
+
+.tm-window-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.tm-window-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tm-window-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.tm-window-glyph {
+  font-size: 0.62rem;
+  color: var(--muted-soft);
+}
+
+.tm-window-row.tone-warn .tm-window-glyph {
+  color: var(--warn);
+}
+
+.tm-window-row.tone-danger .tm-window-glyph {
+  color: var(--danger);
+}
+
+.tm-window-value {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tm-window-trend {
+  margin-top: 2px;
 }
 
 .tm-sparkline-wrap {
   display: grid;
-  gap: 2px;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
 }
 
 .tm-sparkline-scale {
-  justify-self: end;
+  order: 2;
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
+  white-space: nowrap;
 }
 
 .tm-sparkline {
+  order: 1;
   width: 100%;
-  height: auto;
-  overflow: visible;
+  height: 30px;
+  display: block;
 }
 
-.tm-sparkline-empty {
+.tm-sparkline-area {
+  fill: var(--tm-series-1);
+  opacity: 0.12;
+}
+
+.tm-sparkline-empty,
+.tm-sparkline-single {
   margin: 0;
+  font-size: 0.74rem;
+  font-family: var(--font-mono);
 }
 
 /* Drilldown */
+/* Aggregate header — gives the list meaning instead of a raw dump. The
+   headline count is the authoritative full-set total; the chips summarise the
+   loaded page (labelled as such below when the set is larger). */
+.tm-drill-summary {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card-soft);
+}
+
+.tm-drill-summary-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.tm-drill-summary-count {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-drill-summary-caption {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.tm-drill-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tm-drill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text);
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+
+.tm-drill-chip.is-rest {
+  color: var(--muted);
+}
+
+.tm-drill-chip-glyph {
+  font-size: 0.66rem;
+  color: var(--muted-soft);
+}
+
+.tm-drill-chip.tone-good .tm-drill-chip-glyph {
+  color: var(--success);
+}
+
+.tm-drill-chip.tone-warn .tm-drill-chip-glyph {
+  color: var(--warn);
+}
+
+.tm-drill-chip.tone-danger .tm-drill-chip-glyph {
+  color: var(--danger);
+}
+
+.tm-drill-chip-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-soft);
+}
+
+.tm-drill-tools {
+  display: grid;
+  gap: 6px;
+}
+
+.tm-drill-tools-label {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+}
+
+.tm-drill-scope {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
 .tm-drilldown-list {
   margin: 0;
   padding: 0;
   list-style: none;
   display: grid;
-  gap: 2px;
+  gap: 0;
 }
 
 .tm-drilldown-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 4px;
+  gap: 10px;
+  padding: 7px 4px;
   border-bottom: 1px solid var(--line);
-  flex-wrap: wrap;
 }
 
-.tm-drilldown-row.tone-danger .tm-drilldown-label {
+/* Single status indicator — glyph carries colour, text carries the same
+   meaning for the colour-blind (sr-only in the pip, visible inline in the
+   label), so the outcome is stated once and remains non-colour-safe. */
+.tm-drill-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  color: var(--muted-soft);
+}
+
+.tm-drill-status.tone-good {
+  color: var(--success);
+}
+
+.tm-drill-status.tone-warn {
+  color: var(--warn);
+}
+
+.tm-drill-status.tone-danger {
   color: var(--danger);
 }
 
-.tm-drilldown-row.tone-warn .tm-drilldown-label {
+.tm-drill-status-text {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.tm-drilldown-row .tm-drill-status.tone-danger ~ .tm-drilldown-main .tm-drill-status-text {
+  color: var(--danger);
+}
+
+.tm-drilldown-row .tm-drill-status.tone-warn ~ .tm-drilldown-main .tm-drill-status-text {
   color: var(--warn);
+}
+
+.tm-drill-duration {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted-soft);
 }
 
 .tm-drilldown-main {
   display: grid;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
 }
 
 .tm-drilldown-label {
-  font-size: 0.86rem;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
   color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tm-drilldown-secondary {
-  font-size: 0.74rem;
+  font-size: 0.72rem;
 }
 
 .tm-drilldown-meta {
@@ -16791,13 +17319,13 @@ html[data-theme="light"] .wp-hl {
 
 .tm-drilldown-session {
   font-family: var(--font-mono);
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   color: var(--accent-cool);
 }
 
 .tm-drilldown-time {
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: var(--muted-soft);
   white-space: nowrap;
 }
@@ -16986,12 +17514,27 @@ html[data-theme="light"] .wp-hl {
     align-self: center;
   }
 
+  /* Restack the row: status + primary on top, session/time meta on its own
+     full-width line underneath (see the .tm-health-row note above on why the
+     grid-area assignments must stay scoped to this query). */
   .tm-drilldown-row {
-    flex-direction: column;
-    align-items: flex-start;
+    grid-template-columns: 16px minmax(0, 1fr);
+    grid-template-areas:
+      "status main"
+      "meta meta";
+    row-gap: 4px;
+  }
+
+  .tm-drill-status {
+    grid-area: status;
+  }
+
+  .tm-drilldown-main {
+    grid-area: main;
   }
 
   .tm-drilldown-meta {
+    grid-area: meta;
     width: 100%;
     justify-content: space-between;
   }

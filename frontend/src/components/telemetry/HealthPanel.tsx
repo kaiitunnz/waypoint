@@ -1,12 +1,11 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
 import { UsageBar } from "@/components/UsageReadout";
-import { UsageDial } from "@/components/UsageDial";
 import { ChartTooltip, ChartTooltipState } from "@/components/telemetry/ChartTooltip";
 import { shortId } from "@/lib/telemetry";
-import { TelemetryHealth } from "@/lib/types";
+import { LimitSeries, LimitSnapshotView, TelemetryHealth } from "@/lib/types";
 import { formatRelativeTime, usageTone, UsageTone } from "@/lib/usage";
 
 interface HealthPanelProps {
@@ -14,15 +13,12 @@ interface HealthPanelProps {
   loading: boolean;
 }
 
-const SPARK_W = 320;
-const SPARK_H = 56;
-// A sparkline's job is local trend shape, not absolute magnitude (the exact
-// number already reads via the paired dial/numeral) — so it autoscales to
-// its own observed range rather than a fixed 0-100 domain. A mostly-null
-// low-usage series (a 5h/weekly limit window sitting at a few percent) would
-// otherwise flatline against the bottom edge with the rest of the box empty.
-// A floor keeps genuinely flat/near-flat data from collapsing to a hairline.
-const SPARK_MIN_SPAN = 20;
+const SPARK_W = 200;
+const SPARK_H = 30;
+// A mini-trend shows local shape, not magnitude (the paired bar/numeral already
+// carries the exact value), so it autoscales to its own observed range. A floor
+// keeps a near-flat low-usage window from collapsing to a hairline.
+const SPARK_MIN_SPAN = 15;
 
 function toneGlyph(tone: UsageTone): string {
   if (tone === "danger") return "▲";
@@ -51,115 +47,144 @@ function sparklineDomain(values: number[]): [number, number] {
   return [Math.max(0, min - pad), Math.min(100, max + pad)];
 }
 
-function Sparkline({
+// One compact trend line through every non-null sample in time order. Bridging
+// short null gaps keeps the line connected and readable, rather than scattering
+// a lightly-sampled window into disconnected dots with dead vertical space.
+function MiniTrend({
   points,
   onHover,
 }: {
   points: { label: string; percent: number | null }[];
   onHover: (state: ChartTooltipState | null) => void;
 }) {
-  if (points.length === 0) {
-    return <p className="muted tm-sparkline-empty">No samples in range.</p>;
+  const real = points
+    .map((point, index) => ({ ...point, index }))
+    .filter((point): point is { label: string; percent: number; index: number } => point.percent !== null);
+
+  if (real.length === 0) {
+    return <p className="muted tm-sparkline-empty">No recent samples in range.</p>;
   }
-  const [domainMin, domainMax] = sparklineDomain(
-    points.filter((p): p is { label: string; percent: number } => p.percent !== null).map((p) => p.percent),
-  );
+
+  const latest = real[real.length - 1];
+  if (real.length === 1) {
+    return (
+      <p className="tm-sparkline-single muted">
+        <span aria-hidden="true">◦</span> Single sample · {latest.label} at{" "}
+        {Math.round(latest.percent)}%
+      </p>
+    );
+  }
+
+  const [domainMin, domainMax] = sparklineDomain(real.map((p) => p.percent));
   const domainSpan = domainMax - domainMin || 1;
-  const toY = (percent: number) =>
-    SPARK_H - ((Math.min(100, Math.max(0, percent)) - domainMin) / domainSpan) * SPARK_H;
   const stepX = points.length > 1 ? SPARK_W / (points.length - 1) : 0;
-  const segments: string[] = [];
-  // A sample with no adjacent non-null neighbor never joins a 2+ point
-  // polyline segment, so it needs its own visible mark — otherwise a sparse,
-  // mostly-null series (a lightly-used 5h/weekly limit window) renders as
-  // nothing at all rather than as real, if sparse, data.
-  const isolated = new Set<number>();
-  let current: { i: number; xy: string }[] = [];
-  const flush = () => {
-    if (current.length > 1) {
-      segments.push(current.map((p) => p.xy).join(" "));
-    } else if (current.length === 1) {
-      isolated.add(current[0].i);
-    }
-    current = [];
-  };
-  points.forEach((point, i) => {
-    if (point.percent === null) {
-      flush();
-      return;
-    }
-    const x = i * stepX;
-    current.push({ i, xy: `${x},${toY(point.percent)}` });
-  });
-  flush();
+  const toY = (percent: number) =>
+    SPARK_H - 1 - ((Math.min(100, Math.max(0, percent)) - domainMin) / domainSpan) * (SPARK_H - 2);
+  const coords = real.map((point) => ({ ...point, x: point.index * stepX, y: toY(point.percent) }));
+  const line = coords.map((c) => `${c.x},${c.y}`).join(" ");
+  const area = `M ${coords[0].x},${SPARK_H} ${coords.map((c) => `L ${c.x},${c.y}`).join(" ")} L ${
+    coords[coords.length - 1].x
+  },${SPARK_H} Z`;
 
   return (
     <div className="tm-sparkline-wrap">
       <span className="tm-sparkline-scale muted">
-        {Math.round(domainMin)}–{Math.round(domainMax)}% shown
+        {Math.round(domainMin)}–{Math.round(domainMax)}%
       </span>
       <svg
         viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
         className="tm-sparkline"
+        preserveAspectRatio="none"
         role="img"
-        aria-label={`Occupancy over time, from ${points[0].label} to ${points[points.length - 1].label}, ranging ${Math.round(domainMin)}% to ${Math.round(domainMax)}%`}
+        aria-label={`Trend from ${real[0].label} to ${latest.label}, ranging ${Math.round(
+          domainMin,
+        )}% to ${Math.round(domainMax)}%, latest ${Math.round(latest.percent)}%`}
       >
-        <line x1={0} y1={1} x2={SPARK_W} y2={1} className="tm-chart-gridline" />
-        <line x1={0} y1={SPARK_H - 1} x2={SPARK_W} y2={SPARK_H - 1} className="tm-chart-gridline" />
-        {segments.map((segment, i) => (
-          <polyline
-            key={i}
-            points={segment}
-            fill="none"
-            stroke="var(--tm-series-1)"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        <path d={area} className="tm-sparkline-area" />
+        <polyline
+          points={line}
+          fill="none"
+          stroke="var(--tm-series-1)"
+          strokeWidth={1.75}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+        {coords.map((c) => (
+          <circle
+            key={c.index}
+            cx={c.x}
+            cy={c.y}
+            r={5}
+            fill="transparent"
+            tabIndex={0}
+            role="img"
+            aria-label={`${c.label}: ${Math.round(c.percent)}%`}
+            className="tm-hover-point"
+            onMouseEnter={(event) =>
+              onHover({
+                left: event.clientX,
+                top: event.clientY,
+                title: c.label,
+                rows: [{ key: "pct", label: "occupancy", value: `${Math.round(c.percent)}%` }],
+              })
+            }
+            onFocus={() =>
+              onHover({
+                left: 0,
+                top: 0,
+                title: c.label,
+                rows: [{ key: "pct", label: "occupancy", value: `${Math.round(c.percent)}%` }],
+              })
+            }
+            onMouseLeave={() => onHover(null)}
+            onBlur={() => onHover(null)}
           />
         ))}
-        {points.map((point, i) => {
-          if (point.percent === null) return null;
-          const x = i * stepX;
-          const y = toY(point.percent);
-          return (
-            <g key={i}>
-              {isolated.has(i) ? (
-                <circle cx={x} cy={y} r={3} fill="var(--tm-series-1)" stroke="var(--bg-card)" strokeWidth={2} />
-              ) : null}
-              <circle
-                cx={x}
-                cy={y}
-                r={7}
-                fill="transparent"
-                tabIndex={0}
-                role="img"
-                aria-label={`${point.label}: ${Math.round(point.percent)}%`}
-                className="tm-hover-point"
-                onMouseEnter={(event) =>
-                  onHover({
-                    left: event.clientX,
-                    top: event.clientY,
-                    title: point.label,
-                    rows: [{ key: "pct", label: "occupancy", value: `${Math.round(point.percent!)}%` }],
-                  })
-                }
-                onFocus={() =>
-                  onHover({
-                    left: 0,
-                    top: 0,
-                    title: point.label,
-                    rows: [{ key: "pct", label: "occupancy", value: `${Math.round(point.percent!)}%` }],
-                  })
-                }
-                onMouseLeave={() => onHover(null)}
-                onBlur={() => onHover(null)}
-              />
-            </g>
-          );
-        })}
       </svg>
     </div>
   );
+}
+
+function seriesLabel(point: { bucket_start: string }): string {
+  return new Date(point.bucket_start).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+  });
+}
+
+interface AccountGroup {
+  backend: string;
+  accountKey: string;
+  accountLabel: string | null;
+  windows: { snapshot: LimitSnapshotView; series: LimitSeries | undefined }[];
+}
+
+function groupLimitsByAccount(limits: TelemetryHealth["limits"]): AccountGroup[] {
+  const seriesByWindow = new Map<string, LimitSeries>();
+  for (const series of limits.series) {
+    seriesByWindow.set(`${series.backend}:${series.account_key}:${series.window_id}`, series);
+  }
+  const groups = new Map<string, AccountGroup>();
+  for (const snapshot of limits.current) {
+    const groupKey = `${snapshot.backend}:${snapshot.account_key}`;
+    let group = groups.get(groupKey);
+    if (!group) {
+      group = {
+        backend: snapshot.backend,
+        accountKey: snapshot.account_key,
+        accountLabel: snapshot.account_label,
+        windows: [],
+      };
+      groups.set(groupKey, group);
+    }
+    group.windows.push({
+      snapshot,
+      series: seriesByWindow.get(`${snapshot.backend}:${snapshot.account_key}:${snapshot.window_id}`),
+    });
+  }
+  return [...groups.values()];
 }
 
 export function HealthPanel({ health, loading }: HealthPanelProps) {
@@ -167,17 +192,18 @@ export function HealthPanel({ health, loading }: HealthPanelProps) {
   const contextTitleId = useId();
   const limitsTitleId = useId();
 
+  const accountGroups = useMemo(
+    () => (health ? groupLimitsByAccount(health.limits) : []),
+    [health],
+  );
+
   if (loading && !health) {
     return <div className="panel tm-chart-card is-loading" aria-busy="true" />;
   }
   if (!health) return null;
 
   const contextSeriesPoints = health.context.series.map((point) => ({
-    label: new Date(point.bucket_start).toLocaleString([], {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-    }),
+    label: seriesLabel(point),
     percent: point.peak_percent,
   }));
 
@@ -214,7 +240,7 @@ export function HealthPanel({ health, loading }: HealthPanelProps) {
           </ul>
         )}
         <p className="tm-chart-subhead">Peak occupancy over time</p>
-        <Sparkline points={contextSeriesPoints} onHover={setTooltip} />
+        <MiniTrend points={contextSeriesPoints} onHover={setTooltip} />
         <ChartTooltip state={tooltip} />
       </section>
 
@@ -226,45 +252,54 @@ export function HealthPanel({ health, loading }: HealthPanelProps) {
           <p className="muted tm-chart-empty">
             {health.limits.hidden_reason ?? "Hidden while a session filter is active."}
           </p>
-        ) : health.limits.current.length === 0 ? (
+        ) : accountGroups.length === 0 ? (
           <p className="muted tm-chart-empty">No live limit snapshots.</p>
         ) : (
-          <>
-            <div className="tm-dial-grid">
-              {health.limits.current.map((snapshot) => (
-                <div
-                  key={`${snapshot.backend}:${snapshot.account_key}:${snapshot.window_id}`}
-                  className="tm-dial-cell"
-                >
-                  <UsageDial
-                    percent={snapshot.used_percent}
-                    tone={usageTone(snapshot.used_percent)}
-                    label={snapshot.label ?? snapshot.window_id}
-                    caption={`${snapshot.backend}${snapshot.stale ? " · stale" : ""}`}
-                    size="md"
-                  />
-                </div>
-              ))}
-            </div>
-            {health.limits.series.map((series) => (
-              <div key={`${series.backend}:${series.account_key}:${series.window_id}`}>
-                <p className="tm-chart-subhead">
-                  {series.label ?? series.window_id} · {series.backend}
-                </p>
-                <Sparkline
-                  points={series.points.map((point) => ({
-                    label: new Date(point.bucket_start).toLocaleString([], {
-                      month: "short",
-                      day: "numeric",
-                      hour: "numeric",
-                    }),
-                    percent: point.used_percent,
-                  }))}
-                  onHover={setTooltip}
-                />
-              </div>
+          <div className="tm-account-groups">
+            {accountGroups.map((group) => (
+              <article key={`${group.backend}:${group.accountKey}`} className="tm-account-group">
+                <header className="tm-account-head">
+                  <span className="tm-account-name">{group.accountLabel ?? group.accountKey}</span>
+                  <span className="tm-account-backend">{group.backend}</span>
+                </header>
+                <ul className="tm-window-list">
+                  {group.windows.map(({ snapshot, series }) => {
+                    const tone = usageTone(snapshot.used_percent);
+                    const points = (series?.points ?? []).map((point) => ({
+                      label: seriesLabel(point),
+                      percent: point.used_percent,
+                    }));
+                    return (
+                      <li
+                        key={snapshot.window_id}
+                        className={`tm-window-row tone-${tone}`}
+                      >
+                        <div className="tm-window-head">
+                          <span className="tm-window-label">
+                            <span className="tm-window-glyph" aria-hidden="true">
+                              {toneGlyph(tone)}
+                            </span>
+                            {snapshot.label ?? snapshot.window_id}
+                            {snapshot.stale ? (
+                              <span className="tm-health-stale"> · stale</span>
+                            ) : null}
+                          </span>
+                          <span className="tm-window-value">
+                            {Math.round(snapshot.used_percent)}%
+                            <span className="tm-health-tone-word"> {toneWord(tone)}</span>
+                          </span>
+                        </div>
+                        <UsageBar percent={snapshot.used_percent} tone={tone} />
+                        <div className="tm-window-trend">
+                          <MiniTrend points={points} onHover={setTooltip} />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </article>
             ))}
-          </>
+          </div>
         )}
         <ChartTooltip state={tooltip} />
       </section>

@@ -9,6 +9,7 @@ Waypoint is a personal remote-control companion for Claude Code, Codex, and Open
 - raw terminal fallback
 - managed launches for new sessions
 - tmux attachment for existing sessions
+- a usage-telemetry dashboard (tokens, sessions, tool activity, context and provider-limit health)
 
 Waypoint runs on macOS and Linux, and should also work under WSL when the local tooling and network access are available. Some convenience scripts are still OS-specific, for example the backend LaunchAgent helper is macOS-only.
 
@@ -28,6 +29,8 @@ Use GitHub Issues directly for active bugs and feature requests.
 - `frontend/` — Next.js PWA client
 
 A single long-lived **personal assistant** thread — which answers host questions, grounds itself in your running sessions, and manages them via the `waypoint sessions` CLI — can be enabled in `waypoint.yaml`. Its coding backend, model, and permission mode are switchable on the fly, and the thread can be terminated, reattached, or context-cleared from the assistant page; see [`docs/personal_assistant.md`](docs/personal_assistant.md).
+
+The **Telemetry** page turns your session/token/context/rate-limit signals into a local-first, privacy-preserving usage history — token consumption, session and turn activity, tool outcomes, context pressure, and provider limits, with drill-downs and evidence-linked insights (and an optional AI summarizer). Collection is aggregate-only and stays on the host; see [`docs/telemetry.md`](docs/telemetry.md).
 
 ## Supported agent versions
 

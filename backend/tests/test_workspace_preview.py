@@ -194,7 +194,7 @@ def test_env_overrides_parse_workspace_settings(
     monkeypatch.setenv("WAYPOINT_WORKSPACE_DENYLIST", ".git, *.pem ,")
     monkeypatch.setenv("WAYPOINT_WORKSPACE_FOLLOW_SYMLINKS", "1")
 
-    overrides = _env_overrides()
+    overrides = _env_overrides({})
 
     assert overrides["workspace_preview_enabled"] is False
     assert overrides["workspace_max_file_bytes"] == 1024

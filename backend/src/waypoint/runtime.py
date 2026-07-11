@@ -105,7 +105,11 @@ from waypoint.schemas import (
 from waypoint.settings import Settings
 from waypoint.ssh_master import SshMasterManager, SshMasterStatus
 from waypoint.storage import Storage
+from waypoint.telemetry.facts import TelemetryFilter, TelemetryRange
 from waypoint.telemetry.ingest import TelemetryIngester
+from waypoint.telemetry.nl import NLInsight
+from waypoint.telemetry.query import _resolve_preset_range, host_tz_name
+from waypoint.telemetry.summarizer import CodingAgentSummarizer, build_nl_request
 from waypoint.transports import TransportAdapter
 
 TMUX_TRANSPORT_ID = "tmux"
@@ -125,6 +129,13 @@ TELEMETRY_BROADCAST_DEBOUNCE_SECONDS = 1.0
 # windows. Slow cadence — retention is measured in days/months, so a few hours
 # of lag is immaterial and keeps this off any hot path.
 TELEMETRY_MAINTENANCE_INTERVAL_SECONDS = 6 * 60 * 60
+# Default bound on a ``run_oneshot`` turn (CONTRACT-NL.md §2) — long enough for
+# a coding agent to read a payload and reply, short enough that a hung one-shot
+# doesn't tie up a session/tmux slot indefinitely.
+ONE_SHOT_DEFAULT_TIMEOUT_SECONDS = 120.0
+# Poll cadence while awaiting one-shot turn completion. Cheap (a single
+# in-memory storage read) so a short interval doesn't cost anything real.
+ONE_SHOT_POLL_INTERVAL_SECONDS = 0.5
 # The per-session structured log (events.jsonl) is a write-only audit/debug
 # artifact; the SQLite store is the source of truth for replay. Flushing every
 # write turns the streaming path into a syscall per event, so we let the buffer
@@ -157,6 +168,42 @@ def require_existing_local_dir(cwd: str) -> str:
             detail=CWD_NOT_FOUND_DETAIL,
         )
     return resolved
+
+
+def _assemble_agent_reply(events: list[EventRecord]) -> str:
+    """Reconstruct the full agent reply text from a session's raw events.
+
+    ``agent_output`` events sharing ``metadata.item_id`` are streamed deltas —
+    the frontend's live merge concatenates their text in sequence order
+    (``mergeEventText``); this replays that same rule offline over the whole
+    event list. Reasoning-item output (``metadata.item_kind == "reasoning"``)
+    is excluded — a one-shot summarizer wants the model's final prose, not its
+    chain of thought. Multiple distinct reply items (rare for a single-turn
+    one-shot) join with a blank line.
+    """
+    groups: dict[str, list[EventRecord]] = {}
+    order: list[str] = []
+    for event in events:
+        if event.kind != EventKind.AGENT_OUTPUT:
+            continue
+        metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        if metadata.get("item_kind") == "reasoning":
+            continue
+        item_id = metadata.get("item_id")
+        key = (
+            item_id
+            if isinstance(item_id, str) and item_id
+            else f"_solo:{event.sequence}"
+        )
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(event)
+    parts = [
+        "".join(e.text for e in sorted(groups[key], key=lambda e: e.sequence))
+        for key in order
+    ]
+    return "\n\n".join(part for part in parts if part.strip())
 
 
 @dataclass
@@ -383,6 +430,9 @@ class SessionRuntime:
             self._telemetry_maintenance_task = asyncio.create_task(
                 self._telemetry_maintenance_loop(), name="telemetry-maintenance"
             )
+        # Reap any one-shot session orphaned by a crash before the restore
+        # loop below tries to reconnect it — it has no state worth resuming.
+        await self._sweep_orphaned_oneshot_sessions()
         for session in self.storage.list_sessions():
             # ERROR sessions get one passive restore attempt at boot — the
             # plugin's restore_session is responsible for tagging them
@@ -1528,6 +1578,115 @@ class SessionRuntime:
 
     def is_assistant_session(self, session: SessionRecord) -> bool:
         return session.source == SessionSource.ASSISTANT
+
+    # ── generic one-shot managed sessions (telemetry NL, CONTRACT-NL.md §2) ──
+
+    def _telemetry_oneshot_workspace_dir(self) -> Path:
+        return self.settings.data_dir / "telemetry_oneshot"
+
+    async def run_oneshot(
+        self,
+        *,
+        backend: str,
+        transport: str | None,
+        model: str | None,
+        account_profile: str | None,
+        prompt: str,
+        timeout_s: float = ONE_SHOT_DEFAULT_TIMEOUT_SECONDS,
+    ) -> str | None:
+        """Run ``prompt`` through a throwaway managed session and return the reply.
+
+        Generic across backends — dispatches through the normal
+        ``create_session``/``handle_input`` launch path exactly like every
+        other runtime entry point, so there is no per-backend branch here.
+        The session is created under the dedicated ``SessionSource.TELEMETRY``
+        (excluded from the session list the same way the assistant is),
+        relabeled after creation exactly like ``_create_assistant_session``
+        does. Config-dir/account-profile handling comes for free from that
+        normal launch path — the reason a managed session (``claude_tty`` by
+        default) is preferred over a raw ``claude -p`` subprocess.
+
+        Submits ``prompt`` as the one input turn, awaits its completion (status
+        settles to idle/waiting-input, or exited/error on failure) up to
+        ``timeout_s``, then reads back the assembled ``agent_output`` text.
+        Always torn down (terminate + delete) in a ``finally``. Never raises —
+        any failure, including a timeout, returns ``None``.
+        """
+        session: SessionRecord | None = None
+        try:
+            workspace = self._telemetry_oneshot_workspace_dir()
+            workspace.mkdir(parents=True, exist_ok=True)
+            request = SessionCreateRequest(
+                backend=backend,
+                cwd=str(workspace),
+                title="Telemetry insight (one-shot)",
+                model=model,
+                transport=transport,
+                account_profile_id=account_profile,
+            )
+            session = await self.create_session(request)
+            session = self.storage.update_session(
+                session.id, source=SessionSource.TELEMETRY, pinned_at=datetime.now(UTC)
+            )
+            await self.handle_input(
+                session.id, SessionInputRequest(text=prompt, submit=True)
+            )
+            settled = await self._await_oneshot_turn(session.id, timeout_s)
+            if not settled:
+                return None
+            events = self.storage.list_events(session.id)
+            reply = _assemble_agent_reply(events)
+            return reply or None
+        except Exception:
+            log.warning("telemetry one-shot failed", exc_info=True)
+            return None
+        finally:
+            if session is not None:
+                await self._teardown_oneshot_session(session.id)
+
+    async def _await_oneshot_turn(self, session_id: str, timeout_s: float) -> bool:
+        """Poll until ``session_id`` settles, returning whether it settled cleanly.
+
+        "Settled" means status reached idle/waiting-input (the turn
+        finalized) or exited/error (the backend failed/crashed) — the one
+        await-turn-completion primitive a generic one-shot needs and that
+        nothing in the runtime provided before (plan §2.9 review B1).
+        """
+        deadline = monotonic() + timeout_s
+        settled_ok = {SessionStatus.IDLE, SessionStatus.WAITING_INPUT}
+        settled_failed = {SessionStatus.EXITED, SessionStatus.ERROR}
+        while True:
+            session = self.storage.get_session(session_id)
+            if session is None:
+                return False
+            if session.status in settled_ok:
+                return True
+            if session.status in settled_failed:
+                return False
+            if monotonic() >= deadline:
+                return False
+            await asyncio.sleep(ONE_SHOT_POLL_INTERVAL_SECONDS)
+
+    async def _teardown_oneshot_session(self, session_id: str) -> None:
+        with suppress(Exception):
+            await self.terminate(session_id)
+        with suppress(Exception):
+            await self.delete(session_id, force=True)
+
+    async def _sweep_orphaned_oneshot_sessions(self) -> None:
+        """Boot-time reap of any stray ``TELEMETRY`` one-shot session.
+
+        A one-shot's lifetime is seconds; anything still tagged ``TELEMETRY``
+        at boot means the process died mid-flight (crash, forced restart)
+        before its own ``finally`` teardown ran. Unlike a pending
+        side-question there is no durable state worth resuming, so it is
+        simply deleted (mirrors the recovery *intent* of
+        ``recover_pending_side_questions`` — reap what a restart orphaned —
+        without any per-backend mechanism).
+        """
+        for session in self.storage.list_sessions():
+            if session.source == SessionSource.TELEMETRY:
+                await self._teardown_oneshot_session(session.id)
 
     def assistant_summary(self) -> AssistantSummary | None:
         session_id = self.assistant_session_id
@@ -3987,7 +4146,12 @@ class SessionRuntime:
             log.debug("telemetry backfill failed", exc_info=True)
 
     async def _telemetry_maintenance_loop(self) -> None:
-        """Prune expired facts/rollups on a slow cadence (runtime-owned, not a plugin hook)."""
+        """Prune expired facts/rollups + tick the NL digest on a slow cadence.
+
+        Both run off this one runtime-owned periodic task (not the
+        ``Scheduler``, which fires each schedule exactly once and can't
+        recur) — CONTRACT-NL.md §4.
+        """
         interval_seconds = TELEMETRY_MAINTENANCE_INTERVAL_SECONDS
         while True:
             await asyncio.sleep(interval_seconds)
@@ -4004,6 +4168,54 @@ class SessionRuntime:
                 )
             except Exception:
                 log.debug("telemetry prune failed", exc_info=True)
+            try:
+                await self.maybe_generate_nl_digest()
+            except Exception:
+                log.debug("telemetry NL digest tick failed", exc_info=True)
+
+    async def maybe_generate_nl_digest(self) -> NLInsight | None:
+        """Generate + persist a fresh NL-insight digest if one is due.
+
+        Due means ``telemetry_nl.enabled`` and the stored digest (if any) is
+        older than ``telemetry_nl.interval_hours`` — a age-check on the
+        existing maintenance tick, not a new recurring primitive (CONTRACT-NL
+        §4). A corrupt stored row is treated as absent rather than blocking
+        generation. Returns the fresh digest (also persisted) or ``None`` when
+        skipped/disabled/generation failed.
+        """
+        config = self.settings.telemetry_nl
+        if not config.enabled:
+            return None
+        stored_json = self.storage.telemetry.get_nl_insight()
+        if stored_json is not None:
+            with suppress(Exception):
+                existing = NLInsight.model_validate_json(stored_json)
+                age = datetime.now(UTC) - existing.generated_at
+                if age < timedelta(hours=config.interval_hours):
+                    return None
+        return await self.generate_nl_digest()
+
+    async def generate_nl_digest(
+        self, rng: TelemetryRange | None = None, flt: TelemetryFilter | None = None
+    ) -> NLInsight | None:
+        """Generate (and persist) an NL-insight digest now, regardless of cadence.
+
+        Defaults to the unfiltered trailing-7-day range (the weekly digest's
+        scope); an explicit ``rng``/``flt`` is how the on-demand
+        ``POST /api/telemetry/nl-insight`` endpoint generates over the
+        caller's active range/filters instead.
+        """
+        resolved_rng = rng or _resolve_preset_range("7d", host_tz_name())
+        resolved_flt = flt or TelemetryFilter()
+        request = build_nl_request(
+            self.storage, self.settings, resolved_rng, resolved_flt
+        )
+        summarizer = CodingAgentSummarizer(self, self.settings)
+        insight = await summarizer.summarize(request)
+        if insight is not None:
+            self.storage.telemetry.set_nl_insight(insight.model_dump_json())
+            self.mark_telemetry_dirty()
+        return insight
 
     async def _session_broadcast_loop(self) -> None:
         while True:

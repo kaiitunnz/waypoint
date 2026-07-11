@@ -913,18 +913,19 @@ def build_settings(storage: Storage, settings: Settings) -> TelemetrySettingsRes
         privacy_statement=PRIVACY_STATEMENT,
         external_export=False,
         content_capture=False,
-        nl_enabled=False,
+        nl_enabled=settings.telemetry_nl.enabled,
     )
 
 
 def delete_all(storage: Storage) -> TelemetryDeleteResponse:
-    """Delete every retained telemetry fact/rollup/dismissal. Transcripts untouched."""
+    """Delete every retained telemetry fact/rollup/dismissal/NL-digest. Transcripts untouched."""
     far_future = datetime.now(UTC) + timedelta(days=1)
     removed = storage.telemetry.prune(
         facts_before=far_future, rollups_before=far_future
     )
     storage.connection.execute("DELETE FROM telemetry_insight_dismissal")
     storage.connection.commit()
+    storage.telemetry.clear_nl_insight()
     return TelemetryDeleteResponse(
         removed=TelemetryDeleteCounts(
             facts=removed["facts"], rollups=removed["rollups"]

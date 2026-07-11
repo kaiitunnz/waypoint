@@ -6,6 +6,7 @@ hiding), drill-down parameter validation, insight dismissal, and the
 debounced ``telemetry_update`` WS envelope.
 """
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -309,6 +310,75 @@ async def test_insight_dismiss_round_trip(tmp_path: Path) -> None:
         after = await client.get("/api/telemetry/insights", headers=_auth(token))
         types_after = {i["type"] for i in after.json()["insights"]}
         assert "context_pressure" not in types_after
+
+
+async def test_nl_insight_endpoints_404_when_disabled(tmp_path: Path) -> None:
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        get_resp = await client.get("/api/telemetry/nl-insight", headers=_auth(token))
+        post_resp = await client.post("/api/telemetry/nl-insight", headers=_auth(token))
+    assert get_resp.status_code == 404
+    assert post_resp.status_code == 404
+
+
+async def test_nl_insight_post_generates_and_get_returns_it(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path / "data")
+    settings.telemetry_nl.enabled = True
+    app = create_app(settings)
+    context = app.state.context
+    token = context.tokens.issue().token
+
+    async def fake_run_oneshot(**_kwargs: Any) -> str:
+        return json.dumps({"prose": "Quiet week.", "evidence": [], "confidence": "low"})
+
+    context.runtime.run_oneshot = fake_run_oneshot
+
+    async with _client(app) as client:
+        post = await client.post("/api/telemetry/nl-insight", headers=_auth(token))
+        assert post.status_code == 200
+        assert post.json()["insight"]["prose"] == "Quiet week."
+
+        get = await client.get("/api/telemetry/nl-insight", headers=_auth(token))
+        assert get.status_code == 200
+        body = get.json()
+        assert body["available"] is True
+        assert body["insight"]["prose"] == "Quiet week."
+
+
+async def test_nl_insight_get_reports_unavailable_before_first_generation(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path / "data")
+    settings.telemetry_nl.enabled = True
+    app = create_app(settings)
+    context = app.state.context
+    token = context.tokens.issue().token
+
+    async with _client(app) as client:
+        resp = await client.get("/api/telemetry/nl-insight", headers=_auth(token))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["available"] is False
+    assert body["insight"] is None
+
+
+async def test_nl_insight_post_returns_409_on_generation_failure(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path / "data")
+    settings.telemetry_nl.enabled = True
+    app = create_app(settings)
+    context = app.state.context
+    token = context.tokens.issue().token
+
+    async def fake_run_oneshot(**_kwargs: Any) -> None:
+        return None
+
+    context.runtime.run_oneshot = fake_run_oneshot
+
+    async with _client(app) as client:
+        resp = await client.post("/api/telemetry/nl-insight", headers=_auth(token))
+    assert resp.status_code == 409
 
 
 def test_delete_publishes_debounced_telemetry_update(tmp_path: Path) -> None:

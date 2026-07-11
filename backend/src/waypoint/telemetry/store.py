@@ -38,6 +38,9 @@ from waypoint.telemetry.facts import (
 # against the ``telemetry_fact_tag`` side table.
 _TAG_FILTER_SEPARATOR = ":"
 
+# ``telemetry_meta`` key the latest NL-insight digest is stored under (CONTRACT-NL.md §4).
+_NL_INSIGHT_META_KEY = "nl_insight"
+
 
 def _iso_utc(value: datetime) -> str:
     """Normalize to a UTC ISO8601 string so lexical and chronological order agree."""
@@ -373,6 +376,28 @@ class TelemetryStore:
                 ON CONFLICT(k) DO UPDATE SET v = excluded.v
                 """,
                 (key, value),
+            )
+            self._conn.commit()
+
+    def set_nl_insight(self, insight_json: str) -> None:
+        """Persist the latest NL-insight digest (CONTRACT-NL.md §4).
+
+        A single latest-digest slot (stored via ``telemetry_meta``), not a
+        growing table — each successful generation overwrites the previous
+        one. Not touched by ``prune()`` (there is nothing to age out of a
+        single slot; the maintenance loop's own age-check against it is what
+        decides whether to regenerate); cleared by the explicit
+        ``DELETE /api/telemetry`` path instead (see ``clear_nl_insight``).
+        """
+        self.set_meta(_NL_INSIGHT_META_KEY, insight_json)
+
+    def get_nl_insight(self) -> str | None:
+        return self.get_meta(_NL_INSIGHT_META_KEY)
+
+    def clear_nl_insight(self) -> None:
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM telemetry_meta WHERE k = ?", (_NL_INSIGHT_META_KEY,)
             )
             self._conn.commit()
 

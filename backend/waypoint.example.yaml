@@ -108,6 +108,23 @@ plugin_configs:
 #   permission_mode: bypassPermissions  # backend default (usually prompts) if unset
 #   transport: claude_cli         # agent default (Emulated for Claude Code) if unset
 
+# Opt-in NL-insight summarizer for the Telemetry dashboard. Off by default —
+# enabling it sends telemetry aggregates + redacted drill-down samples
+# (never raw prompts/outputs/tool args/paths) to the configured coding agent
+# so it can generate a short prose digest. `managed` mode drives the agent
+# through a throwaway one-shot session launched the normal way (so
+# `claude_tty` gets correct config-dir/account-profile handling); `headless`
+# allows a raw one-shot subprocess for setups where a full session is
+# overkill, but is never the default.
+# telemetry_nl:
+#   enabled: false
+#   backend: claude_code
+#   transport: claude_tty
+#   model: haiku                  # cheap/fast model recommended for a digest
+#   account_profile: work
+#   mode: managed                 # managed | headless
+#   interval_hours: 168           # weekly digest cadence
+
 ssh_targets:
   - id: devbox
     name: SSH coding backend

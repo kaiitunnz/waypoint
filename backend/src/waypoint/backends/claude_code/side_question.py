@@ -77,13 +77,33 @@ _ONE_SHOT_TIMEOUT = 120.0
 # process from loading any ambient MCP server, so no MCP tool ever exists in the
 # forked conversation. ``--disallowedTools "*"`` is belt-and-suspenders denial
 # on top. A ``/btw`` worker has no stream/approval channel to mediate a tool
-# call, so it must expose none. Never relax this to an advisory prompt.
+# call, so it must expose none. This boundary is the enforcement mechanism and
+# must never be relaxed to rely on the advisory prompt below instead.
 _TOOL_ISOLATION_ARGS: tuple[str, ...] = (
     "--tools",
     "",
     "--disallowedTools",
     "*",
     "--strict-mcp-config",
+)
+
+# Answer-quality shaping, NOT an enforcement mechanism — the flags above are the
+# capability boundary. With every tool stripped from its context, an aside asked
+# to do something tool-requiring otherwise emits a pseudo tool-call as prose
+# (and can leak an internal system-reminder) into the answer card instead of
+# declining. This short reminder makes it answer from the conversation or refuse
+# in one plain sentence. Kept minimal; never relied on for safety.
+_SIDE_QUESTION_SYSTEM_PROMPT = (
+    "You are answering a brief, read-only side-question from an existing "
+    "conversation. You have no tools available and cannot read files, run "
+    "commands, browse, or call any tool or MCP server. Answer only from the "
+    "conversation context and your own knowledge. If the question genuinely "
+    "requires a tool or information not in the conversation, say so in one "
+    "sentence."
+)
+_ANSWER_STYLE_ARGS: tuple[str, ...] = (
+    "--append-system-prompt",
+    _SIDE_QUESTION_SYSTEM_PROMPT,
 )
 
 # Per-session asyncio locks for transport_state["pending_side_questions"] mutations.
@@ -252,6 +272,7 @@ async def _run_one_shot_local(
         "--output-format",
         "json",
         *_TOOL_ISOLATION_ARGS,
+        *_ANSWER_STYLE_ARGS,
     ]
     cwd_path = Path(cwd).expanduser()
     proc = await asyncio.create_subprocess_exec(
@@ -295,6 +316,7 @@ async def _run_one_shot_remote(
         "--output-format",
         "json",
         *_TOOL_ISOLATION_ARGS,
+        *_ANSWER_STYLE_ARGS,
     ]
     remote_parts = [
         f"cd {quote_remote_path(cwd)}",

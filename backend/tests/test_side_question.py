@@ -1097,6 +1097,15 @@ async def test_one_shot_local_argv_disables_tools(
         argv[disallowed_idx + 1] == "*"
     ), f"--disallowedTools value is not '*': {argv[disallowed_idx + 1]!r}"
     assert "--strict-mcp-config" in argv, f"--strict-mcp-config not in argv: {argv}"
+    # Answer-quality prompt: makes a tool-requiring aside decline cleanly rather
+    # than emit a pseudo tool-call. Not the enforcement boundary, but must ship.
+    assert (
+        "--append-system-prompt" in argv
+    ), f"--append-system-prompt not in argv: {argv}"
+    prompt_idx = argv.index("--append-system-prompt")
+    assert (
+        "no tools available" in argv[prompt_idx + 1]
+    ), f"side-question system prompt missing/unexpected: {argv[prompt_idx + 1]!r}"
 
 
 async def test_one_shot_remote_argv_disables_tools() -> None:
@@ -1153,6 +1162,13 @@ async def test_one_shot_remote_argv_disables_tools() -> None:
     assert (
         "--strict-mcp-config" in remote_cmd
     ), f"--strict-mcp-config not in remote command: {remote_cmd!r}"
+    # The answer-quality prompt survives shlex.join as a single quoted argument.
+    assert (
+        "--append-system-prompt" in remote_cmd
+    ), f"--append-system-prompt not in remote command: {remote_cmd!r}"
+    assert (
+        "'You are answering a brief, read-only side-question" in remote_cmd
+    ), f"side-question system prompt not quoted intact: {remote_cmd!r}"
 
 
 # ---------------------------------------------------------------------------

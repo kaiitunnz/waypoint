@@ -212,6 +212,10 @@ class Settings(BaseModel):
     # the human-readable ``account_label`` is only ever returned by the API
     # when this is explicitly turned on (an opt-in local-labels carve-out).
     telemetry_local_labels: bool = False
+    # Opt-in host filesystem free-space signal for the volume holding the data
+    # directory (instance-health snapshot). Off by default; when on, reports
+    # free/total space for that volume only (never host-wide or per-mount).
+    telemetry_instance_fs_signals: bool = False
     # Opt-in NL-insight summarizer (CONTRACT-NL.md §1). Off by default.
     telemetry_nl: TelemetryNLConfig = Field(default_factory=TelemetryNLConfig)
 
@@ -393,6 +397,10 @@ def _env_overrides(payload: dict[str, Any]) -> dict[str, Any]:
     if "WAYPOINT_TELEMETRY_LOCAL_LABELS" in os.environ:
         overrides["telemetry_local_labels"] = os.environ[
             "WAYPOINT_TELEMETRY_LOCAL_LABELS"
+        ].lower() not in {"0", "false", "no", ""}
+    if "WAYPOINT_TELEMETRY_INSTANCE_FS_SIGNALS" in os.environ:
+        overrides["telemetry_instance_fs_signals"] = os.environ[
+            "WAYPOINT_TELEMETRY_INSTANCE_FS_SIGNALS"
         ].lower() not in {"0", "false", "no", ""}
     telemetry_nl_overrides = _telemetry_nl_env_overrides(payload.get("telemetry_nl"))
     if telemetry_nl_overrides is not None:

@@ -50,8 +50,9 @@ generic runtime, storage, API, and frontend code never branch on backend id.
   the already-normalized event stream and session-field updates at the runtime's
   existing publish seams. Derivation only enqueues (bounded, error-swallowing —
   telemetry never blocks a turn); a runtime-owned background task drains the queue
-  in yielding batches. A one-time, guarded backfill seeds facts from existing
-  history so the dashboard is populated immediately.
+  in yielding batches. A one-time, guarded backfill can seed facts from existing
+  history so the dashboard is populated immediately — it is off by default and
+  runs only when `telemetry_backfill` is enabled alongside the master switch.
 - **Aggregation + API** (`aggregate.py`, endpoints in `api.py`) — range/rollup
   queries shape the `/api/telemetry/*` responses (`overview`, `tokens`,
   `activity`, `health`, `drilldown`, `insights`, `settings`, and `DELETE`). A
@@ -63,8 +64,11 @@ generic runtime, storage, API, and frontend code never branch on backend id.
 Fact-level telemetry is retained for **90 days**, daily aggregates for **13
 months** (both configurable). Pruning runs on a slow runtime-owned task.
 Deleting a session immediately drops its facts and recomputes affected rollups;
-deleting all telemetry from Settings removes facts, rollups, and dismissals.
-Neither touches the session's separately managed transcript.
+deleting all telemetry from Settings removes facts, rollups, dismissals, and the
+stored NL digest. Neither touches the session's separately managed transcript.
+The all-telemetry delete deliberately keeps the one-time `backfill_done` marker,
+so a later restart with `telemetry_backfill` on cannot recreate the erased
+pre-enable history.
 
 ## Token accounting
 
@@ -123,15 +127,41 @@ maintenance task; a digest can also be regenerated on demand from the card.
 
 ## Configuration
 
+Telemetry is **opt-in and off by default**. With no `telemetry_enabled` setting,
+a fresh install collects nothing, hides the dashboard entry point, and returns
+`404` from every telemetry read/insight endpoint. To turn it on, set
+`telemetry_enabled: true` in `backend/waypoint.yaml` (or
+`WAYPOINT_TELEMETRY_ENABLED=true`) and **restart the backend** — settings load at
+startup. Live collection begins at that point; it does not import earlier
+history unless you also opt in to `telemetry_backfill` (see below).
+
 Backend settings (defaults shown; override in `backend/waypoint.yaml` or via env):
 
 | Setting | Env var | Default | Purpose |
 |---|---|---|---|
-| `telemetry_enabled` | `WAYPOINT_TELEMETRY_ENABLED` | `true` | Master switch for collection. |
+| `telemetry_enabled` | `WAYPOINT_TELEMETRY_ENABLED` | `false` | Master switch: enables live collection and dashboard/API availability. |
+| `telemetry_backfill` | `WAYPOINT_TELEMETRY_BACKFILL` | `false` | One-time import of history from sessions/ledger rows that predate activation. Only runs when the master switch is also on. |
 | `telemetry_retention_days` | `WAYPOINT_TELEMETRY_RETENTION_DAYS` | `90` | Fact-level retention. |
 | `telemetry_rollup_retention_months` | `WAYPOINT_TELEMETRY_ROLLUP_RETENTION_MONTHS` | `13` | Daily-rollup retention. |
 | `telemetry_context_thresholds` | `WAYPOINT_TELEMETRY_CONTEXT_THRESHOLDS` | `70,90,100` | Context/limit warning thresholds. |
 | `telemetry_local_labels` | `WAYPOINT_TELEMETRY_LOCAL_LABELS` | `false` | Show provider-derived account labels instead of the pseudonym. |
+
+Environment variables override YAML. `telemetry_backfill` is a one-time
+migration flag — the import is guarded by a persistent `backfill_done` marker, so
+leaving it `true` is harmless (subsequent restarts are no-ops), but it is
+clearest to remove it after the first enabled boot.
+
+Two upgrade notes for deployments that ran telemetry before it became opt-in:
+existing collectors must add `telemetry_enabled: true` before restarting or
+collection and the dashboard silently go away (existing facts stay on disk but
+become inaccessible until re-enabled). And a config that sets
+`telemetry_nl.enabled: true` without `telemetry_enabled: true` now fails to boot
+— the NL summarizer requires the master switch.
+
+Disabling telemetry later stops new collection but never deletes existing facts;
+use the explicit delete control (or `DELETE /api/telemetry`, which stays
+available while disabled) to erase them. Deletion preserves the `backfill_done`
+marker, so a later re-enable does not re-derive erased pre-enable history.
 
 The opt-in summarizer is configured under a `telemetry_nl` block (or the matching
 `WAYPOINT_TELEMETRY_NL_*` env vars): `enabled` (default `false`), `backend`,

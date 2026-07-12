@@ -75,10 +75,35 @@ export function SettingsPanel({
               </div>
             </dl>
 
+            <div className="tm-nl-settings-row">
+              <label className="tm-nl-toggle-label">
+                <input
+                  type="checkbox"
+                  className="tm-nl-toggle"
+                  checked={settings.nl_enabled}
+                  disabled
+                  readOnly
+                  aria-describedby="tm-nl-settings-caption"
+                />
+                AI insights (opt-in)
+              </label>
+              <span className="tm-nl-toggle-state">
+                {settings.nl_enabled ? "On" : "Off"}
+              </span>
+            </div>
+            <p id="tm-nl-settings-caption" className="tm-settings-statement">
+              When on, a coding agent you configure receives the on-screen
+              aggregates plus a bounded set of redacted drilldown rows (session
+              id, normalized tool name, timestamp, outcome, model) to produce a
+              plain-language digest — never raw prompts, tool arguments, or
+              paths. Set with <code>telemetry_nl.enabled</code> in{" "}
+              <code>waypoint.yaml</code> (or{" "}
+              <code>WAYPOINT_TELEMETRY_NL_ENABLED</code>).
+            </p>
+
             <div className="tm-settings-danger">
               <p className="muted">
-                Deleting telemetry removes every stored fact and rollup. Session
-                transcripts are never affected.
+                Removes all stored facts and rollups; transcripts are untouched.
               </p>
               <button
                 type="button"
@@ -99,7 +124,7 @@ export function SettingsPanel({
               {deleteResult ? (
                 <p className="tm-settings-delete-result" role="status">
                   Removed {deleteResult.removed.facts} facts and {deleteResult.removed.rollups}{" "}
-                  rollup rows. Transcripts unaffected.
+                  rollup rows.
                 </p>
               ) : null}
             </div>

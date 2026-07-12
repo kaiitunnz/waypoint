@@ -158,7 +158,16 @@ interface AccountGroup {
   backend: string;
   accountKey: string;
   accountLabel: string | null;
+  profileLabel: string | null;
   windows: { snapshot: LimitSnapshotView; series: LimitSeries | undefined }[];
+}
+
+// The humanized, always-safe display name ("Default" / a profile name like
+// "nus"). Asserted as optional so this compiles while the field is landing on
+// LimitSnapshotView; falls back to the pseudonymous account key until present.
+function limitProfileLabel(view: LimitSnapshotView): string | null {
+  const label = (view as LimitSnapshotView & { profile_label?: string | null }).profile_label;
+  return label && label.trim().length > 0 ? label : null;
 }
 
 function groupLimitsByAccount(limits: TelemetryHealth["limits"]): AccountGroup[] {
@@ -175,9 +184,12 @@ function groupLimitsByAccount(limits: TelemetryHealth["limits"]): AccountGroup[]
         backend: snapshot.backend,
         accountKey: snapshot.account_key,
         accountLabel: snapshot.account_label,
+        profileLabel: limitProfileLabel(snapshot),
         windows: [],
       };
       groups.set(groupKey, group);
+    } else if (group.profileLabel === null) {
+      group.profileLabel = limitProfileLabel(snapshot);
     }
     group.windows.push({
       snapshot,
@@ -225,8 +237,10 @@ export function HealthPanel({ health, loading }: HealthPanelProps) {
                     {toneGlyph(tone)}
                   </span>
                   <span className="tm-health-label">
-                    {shortId(snapshot.session_id)}
-                    {snapshot.stale ? <span className="tm-health-stale"> · stale</span> : null}
+                    <span className="tm-health-id" title={snapshot.session_id}>
+                      {shortId(snapshot.session_id)}
+                    </span>
+                    {snapshot.stale ? <span className="tm-health-stale">stale</span> : null}
                   </span>
                   <UsageBar percent={snapshot.percent} tone={tone} disabled={snapshot.percent === null} />
                   <span className="tm-health-value">
@@ -259,7 +273,9 @@ export function HealthPanel({ health, loading }: HealthPanelProps) {
             {accountGroups.map((group) => (
               <article key={`${group.backend}:${group.accountKey}`} className="tm-account-group">
                 <header className="tm-account-head">
-                  <span className="tm-account-name">{group.accountLabel ?? group.accountKey}</span>
+                  <span className="tm-account-name">
+                    {group.profileLabel ?? group.accountLabel ?? group.accountKey}
+                  </span>
                   <span className="tm-account-backend">{group.backend}</span>
                 </header>
                 <ul className="tm-window-list">
@@ -280,9 +296,7 @@ export function HealthPanel({ health, loading }: HealthPanelProps) {
                               {toneGlyph(tone)}
                             </span>
                             {snapshot.label ?? snapshot.window_id}
-                            {snapshot.stale ? (
-                              <span className="tm-health-stale"> · stale</span>
-                            ) : null}
+                            {snapshot.stale ? <span className="tm-health-stale">stale</span> : null}
                           </span>
                           <span className="tm-window-value">
                             {Math.round(snapshot.used_percent)}%

@@ -166,8 +166,12 @@ def fold_tokens(
     Each tracked row's raw ledger totals are mapped through
     ``unify_tokens(row.source, ...)`` before folding, onto the 5 disjoint
     buckets (``waypoint.schemas.TOKEN_USAGE_CATEGORIES``); because those
-    buckets never overlap for any backend, ``display_total`` is simply their
-    sum and is always safe — no backend-declared total to trust or gate on.
+    buckets never overlap for any backend, summing them is always safe — no
+    backend-declared total to trust or gate on. ``display_total`` sums only
+    the *new-work* buckets (``fresh_input``/``cache_write``/``output``/
+    ``reasoning``) — ``cache_read`` is the same prior context re-sent every
+    turn, accumulative and meaningless to add to a total, so it's excluded
+    here and reported standalone (``totals["cache_read"]``) instead.
     ``tracked`` is the number of turns with a resolvable ledger record;
     ``total`` is ``len(rows)``.
     """
@@ -181,15 +185,17 @@ def fold_tokens(
         unified = unify_tokens(row["source"], usage.get("totals") or {})
         for category, amount in unified.items():
             totals[category] = totals.get(category, 0) + amount
-    display_total = sum(totals.values())
+    display_total = sum(
+        amount for category, amount in totals.items() if category != "cache_read"
+    )
     return totals, display_total, tracked, len(rows)
 
 
 def grand_total(totals: dict[str, int], display_total: int | None) -> int:
     """A single comparable token quantity for insight gating (CONTRACT.md §4/§7).
 
-    ``display_total`` (``fold_tokens``'s unconditional sum of the unified
-    buckets) is always the safe grand total now; the ``None`` branch is dead
+    ``display_total`` (``fold_tokens``'s new-work-only sum, ``cache_read``
+    excluded) is always the safe grand total now; the ``None`` branch is dead
     but kept so ``TokenTotals.display_total``'s optional type still type-checks.
     """
     return display_total if display_total is not None else sum(totals.values())
@@ -266,6 +272,25 @@ def _is_real_account(account_key: str) -> bool:
     return not account_key.startswith("session:")
 
 
+def _pick_profile_label(labels: list[str]) -> str:
+    """The account group's display name: most common label wins, ties keep first-seen order.
+
+    An account can group sessions launched under different local profiles; this
+    picks one simple, deterministic label to head the group rather than showing
+    every profile that ever touched it.
+    """
+    if not labels:
+        return "Default"
+    counts: dict[str, int] = {}
+    order: list[str] = []
+    for label in labels:
+        if label not in counts:
+            counts[label] = 0
+            order.append(label)
+        counts[label] += 1
+    return max(order, key=lambda label: counts[label])
+
+
 def current_limit_snapshots(
     storage: Storage, flt: TelemetryFilter, now: datetime, settings: Settings
 ) -> list[LimitSnapshotView]:
@@ -273,10 +298,15 @@ def current_limit_snapshots(
         TelemetryFactKind.LIMIT_SNAPSHOT, ALL_TIME_RANGE, flt
     )
     latest: dict[tuple[str, str, str], dict[str, Any]] = {}
+    profile_labels: dict[tuple[str, str], list[str]] = {}
     for row in rows:
         if not _is_real_account(row["account_key"]):
             continue
-        key = (row["backend"], row["account_key"], row["window_id"])
+        account_group = (row["backend"], row["account_key"])
+        profile_labels.setdefault(account_group, []).append(
+            row["profile_label"] or "Default"
+        )
+        key = (*account_group, row["window_id"])
         existing = latest.get(key)
         if existing is None or row["occurred_at"] > existing["occurred_at"]:
             latest[key] = row
@@ -292,6 +322,9 @@ def current_limit_snapshots(
                 account_key=account_key,
                 account_label=(
                     row["account_label"] if settings.telemetry_local_labels else None
+                ),
+                profile_label=_pick_profile_label(
+                    profile_labels[(backend, account_key)]
                 ),
                 window_id=window_id,
                 label=row["window_label"],
@@ -543,6 +576,7 @@ def build_overview(
         tokens=TokenTotals(
             totals=totals,
             display_total=display_total,
+            cached_read_tokens=totals.get("cache_read", 0),
             safe_total=display_total is not None,
             coverage=coverage_label(storage, meter_pct),
             meter_coverage_percent=meter_pct,
@@ -633,6 +667,7 @@ def build_tokens(
                 label=label_fn(key),
                 totals=totals,
                 display_total=display_total,
+                cached_read_tokens=totals.get("cache_read", 0),
                 coverage=coverage_label(storage, meter_pct),
             )
         )
@@ -740,12 +775,17 @@ def _limits_series(
     storage: Storage, rng: TelemetryRange, flt: TelemetryFilter, settings: Settings
 ) -> list[LimitSeries]:
     groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    profile_labels: dict[tuple[str, str], list[str]] = {}
     for row in storage.telemetry.query_facts(
         TelemetryFactKind.LIMIT_SNAPSHOT, rng, flt
     ):
         if not _is_real_account(row["account_key"]):
             continue
-        key = (row["backend"], row["account_key"], row["window_id"])
+        account_group = (row["backend"], row["account_key"])
+        profile_labels.setdefault(account_group, []).append(
+            row["profile_label"] or "Default"
+        )
+        key = (*account_group, row["window_id"])
         groups.setdefault(key, []).append(row)
 
     buckets = hour_range(rng)
@@ -779,6 +819,9 @@ def _limits_series(
                 account_key=account_key,
                 account_label=(
                     account_label if settings.telemetry_local_labels else None
+                ),
+                profile_label=_pick_profile_label(
+                    profile_labels[(backend, account_key)]
                 ),
                 window_id=window_id,
                 label=label,
@@ -913,18 +956,19 @@ def build_settings(storage: Storage, settings: Settings) -> TelemetrySettingsRes
         privacy_statement=PRIVACY_STATEMENT,
         external_export=False,
         content_capture=False,
-        nl_enabled=False,
+        nl_enabled=settings.telemetry_nl.enabled,
     )
 
 
 def delete_all(storage: Storage) -> TelemetryDeleteResponse:
-    """Delete every retained telemetry fact/rollup/dismissal. Transcripts untouched."""
+    """Delete every retained telemetry fact/rollup/dismissal/NL-digest. Transcripts untouched."""
     far_future = datetime.now(UTC) + timedelta(days=1)
     removed = storage.telemetry.prune(
         facts_before=far_future, rollups_before=far_future
     )
     storage.connection.execute("DELETE FROM telemetry_insight_dismissal")
     storage.connection.commit()
+    storage.telemetry.clear_nl_insight()
     return TelemetryDeleteResponse(
         removed=TelemetryDeleteCounts(
             facts=removed["facts"], rollups=removed["rollups"]

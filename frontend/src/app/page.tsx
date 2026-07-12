@@ -9,7 +9,6 @@ import { AssistantMark } from "@/components/AssistantMark";
 import { BackendSwitcher } from "@/components/BackendSwitcher";
 import { BoardPanel } from "@/components/BoardPanel";
 import { InboxDock } from "@/components/InboxDock";
-import { TelemetryDock } from "@/components/TelemetryDock";
 import { LaunchPanel } from "@/components/LaunchPanel";
 import { LoginForm } from "@/components/LoginForm";
 import { SchedulePanel } from "@/components/SchedulePanel";
@@ -1174,7 +1173,10 @@ export default function HomePage() {
       {token ? <BoardPanel channels={boardChannels} /> : null}
       {token ? (
         <SessionList
-          sessions={sessions.filter((session) => session.source !== "assistant")}
+          sessions={sessions.filter(
+            (session) =>
+              session.source !== "assistant" && session.source !== "telemetry",
+          )}
           catalog={catalog}
           onDelete={handleDelete}
           onDeleteExited={handleDeleteExited}
@@ -1211,7 +1213,6 @@ export default function HomePage() {
         </Link>
       ) : null}
       {token ? <InboxDock host={host} token={token} /> : null}
-      {token ? <TelemetryDock /> : null}
       {connectPrompt ? (
         <SshConnectModal
           targetName={connectPrompt.target.name}

@@ -231,8 +231,7 @@ export function ActivityChart({ activity, loading }: ActivityChartProps) {
         ) : (
           <>
             <p className="sr-only">
-              Daily activity across {daily.length} days: {trendSummary}. Each panel is scaled to its
-              own peak so every series stays legible.
+              Daily activity across {daily.length} days: {trendSummary}.
             </p>
             <div className="tm-smallmult-grid">
               {DAILY_SERIES.map((series) => (
@@ -246,9 +245,6 @@ export function ActivityChart({ activity, loading }: ActivityChartProps) {
                 />
               ))}
             </div>
-            <p className="tm-chart-footnote muted">
-              Each panel scales to its own peak — compare shape and rhythm, not height across panels.
-            </p>
           </>
         )}
         <ChartTooltip state={tooltip} />
@@ -319,12 +315,11 @@ export function ActivityChart({ activity, loading }: ActivityChartProps) {
         ) : (
           <>
             <p className="tm-chart-summary">
-              Events by weekday × hour of day, aggregated across the range.
               {heatmapSummary
-                ? ` Busiest: ${DOW_LABELS[heatmapSummary.dow] ?? heatmapSummary.dow} at ${formatHourLabel(
+                ? `Busiest: ${DOW_LABELS[heatmapSummary.dow] ?? heatmapSummary.dow} at ${formatHourLabel(
                     heatmapSummary.hour,
                   )} (${heatmapSummary.count} event${heatmapSummary.count === 1 ? "" : "s"}).`
-                : ""}
+                : "No activity in this range."}
             </p>
             <div className="tm-heatmap-scroll">
               <table className="tm-heatmap" role="table" aria-label="Activity by day of week and hour">

@@ -4,7 +4,11 @@
 // hand-mirroring per-backend constants.
 export type Backend = string;
 export type SessionTransport = string;
-export type SessionSource = "managed" | "attached_tmux" | "assistant";
+export type SessionSource =
+  | "managed"
+  | "attached_tmux"
+  | "assistant"
+  | "telemetry";
 export type LaunchMode = "auto" | "direct" | "tmux_wrapper";
 export type SessionStatus =
   | "starting"
@@ -777,7 +781,12 @@ export type InsightSeverity = "info" | "warning" | "critical";
 
 export interface TokenTotals {
   totals: Record<string, number>;
+  // New-work total (fresh input + cache write + output + reasoning) — cache
+  // reads are excluded; see `cached_read_tokens`.
   display_total: number | null;
+  // Standalone cache-read total (repeated prior context), not part of
+  // `display_total`.
+  cached_read_tokens: number;
   safe_total: boolean;
   coverage: TokenCoverage;
   meter_coverage_percent: number | null;
@@ -811,6 +820,10 @@ export interface LimitSnapshotView {
   // Only populated when the server's `telemetry_local_labels` setting is on
   // (default off); `account_key` is always a pseudonym, never a raw email/org.
   account_label: string | null;
+  // The user-chosen local profile name ("nus") or "Default" for a no-profile
+  // session — never the raw OAuth email/org, so it's shown by default (unlike
+  // `account_label` above, which needs local labels on).
+  profile_label: string | null;
   window_id: string;
   label: string | null;
   used_percent: number;
@@ -846,7 +859,10 @@ export interface TokenGroup {
   key: string;
   label: string;
   totals: Record<string, number>;
+  // See `TokenTotals.display_total` — excludes cache_read.
   display_total: number | null;
+  // See `TokenTotals.cached_read_tokens`.
+  cached_read_tokens: number;
   coverage: TokenCoverage;
 }
 
@@ -899,6 +915,8 @@ export interface LimitSeries {
   account_key: string;
   // See `LimitSnapshotView.account_label` — same local-labels gate.
   account_label: string | null;
+  // See `LimitSnapshotView.profile_label` — always shown, no gate.
+  profile_label: string | null;
   window_id: string;
   label: string | null;
   points: LimitSeriesPoint[];
@@ -998,4 +1016,38 @@ export interface TelemetryDeleteCounts {
 export interface TelemetryDeleteResponse {
   removed: TelemetryDeleteCounts;
   transcripts_unaffected: boolean;
+}
+
+// ── NL insight (PR-NL — mirrors backend/src/waypoint/telemetry/nl.py) ─────
+// Opt-in AI summarizer over the deterministic aggregates. Never itself a
+// measured outcome — every claim links back to the aggregate that produced it.
+
+export interface NLInsightEvidence {
+  statement: string;
+  metric: string;
+  value: string;
+  click_through: Record<string, unknown>;
+}
+
+export type NLConfidence = "low" | "medium" | "high";
+
+export interface NLInsight {
+  prose: string;
+  evidence: NLInsightEvidence[];
+  range: TelemetryRange;
+  filters: TelemetryFilter;
+  confidence: NLConfidence | string;
+  generated_at: string;
+  source_backend: string;
+  source_model: string | null;
+  disclaimer: string;
+}
+
+// GET /api/telemetry/nl-insight — the latest stored digest, its freshness,
+// and whether the feature is available at all (CONTRACT-NL.md §4).
+export interface NLInsightResponse {
+  available: boolean;
+  insight: NLInsight | null;
+  // Whether the stored digest is still within the configured digest interval.
+  fresh: boolean;
 }

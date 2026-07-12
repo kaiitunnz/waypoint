@@ -38,6 +38,9 @@ from waypoint.telemetry.facts import (
 # against the ``telemetry_fact_tag`` side table.
 _TAG_FILTER_SEPARATOR = ":"
 
+# ``telemetry_meta`` key the latest NL-insight digest is stored under (CONTRACT-NL.md §4).
+_NL_INSIGHT_META_KEY = "nl_insight"
+
 
 def _iso_utc(value: datetime) -> str:
     """Normalize to a UTC ISO8601 string so lexical and chronological order agree."""
@@ -119,6 +122,7 @@ class TelemetryStore:
                   occupancy_percent REAL,
                   account_key     TEXT,
                   account_label   TEXT,
+                  profile_label   TEXT,
                   window_id       TEXT,
                   window_label    TEXT,
                   used_percent    REAL,
@@ -165,6 +169,7 @@ class TelemetryStore:
                 );
                 """)
             self._ensure_column("account_label", "TEXT")
+            self._ensure_column("profile_label", "TEXT")
             self._conn.commit()
 
     def _ensure_column(self, column: str, ddl: str) -> None:
@@ -373,6 +378,28 @@ class TelemetryStore:
                 ON CONFLICT(k) DO UPDATE SET v = excluded.v
                 """,
                 (key, value),
+            )
+            self._conn.commit()
+
+    def set_nl_insight(self, insight_json: str) -> None:
+        """Persist the latest NL-insight digest (CONTRACT-NL.md §4).
+
+        A single latest-digest slot (stored via ``telemetry_meta``), not a
+        growing table — each successful generation overwrites the previous
+        one. Not touched by ``prune()`` (there is nothing to age out of a
+        single slot; the maintenance loop's own age-check against it is what
+        decides whether to regenerate); cleared by the explicit
+        ``DELETE /api/telemetry`` path instead (see ``clear_nl_insight``).
+        """
+        self.set_meta(_NL_INSIGHT_META_KEY, insight_json)
+
+    def get_nl_insight(self) -> str | None:
+        return self.get_meta(_NL_INSIGHT_META_KEY)
+
+    def clear_nl_insight(self) -> None:
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM telemetry_meta WHERE k = ?", (_NL_INSIGHT_META_KEY,)
             )
             self._conn.commit()
 
@@ -782,6 +809,7 @@ def _row_from_fact(fact: TelemetryFact) -> dict[str, Any]:
         "occupancy_percent": None,
         "account_key": None,
         "account_label": None,
+        "profile_label": None,
         "window_id": None,
         "window_label": None,
         "used_percent": None,
@@ -807,6 +835,7 @@ def _row_from_fact(fact: TelemetryFact) -> dict[str, Any]:
     elif isinstance(fact, LimitSnapshotFact):
         row["account_key"] = fact.account_key
         row["account_label"] = fact.account_label
+        row["profile_label"] = fact.profile_label
         row["window_id"] = fact.window_id
         row["window_label"] = fact.window_label
         row["used_percent"] = fact.used_percent

@@ -26,7 +26,14 @@ class TokenTotals(BaseModel):
     totals: dict[str, int] = Field(default_factory=dict)
     # Only present when every contributing row supplied a safe, backend-declared
     # display total (CONTRACT.md §4: categories must not otherwise be summed).
+    # New-work total only (fresh input + cache write + output + reasoning) —
+    # cache reads are excluded (same prior context re-sent every turn, not new
+    # work) and reported standalone via ``cached_read_tokens`` instead.
     display_total: int | None = None
+    # Standalone cache-read total, already folded into ``totals["cache_read"]``
+    # but broken out here so the UI can show it distinct from — never added to
+    # — ``display_total``.
+    cached_read_tokens: int = 0
     safe_total: bool = False
     coverage: TokenCoverage = "entire"
     meter_coverage_percent: float | None = None
@@ -61,6 +68,10 @@ class LimitSnapshotView(BaseModel):
     # (default off); ``None`` otherwise (FR-9 — ``account_key`` is always the
     # pseudonym, never a raw email/org).
     account_label: str | None = None
+    # The user-chosen local profile name ("nus") or "Default" for a no-profile
+    # session — never the raw OAuth email/org, so it's FR-9-safe and shown by
+    # default (unlike ``account_label`` above, which needs local labels on).
+    profile_label: str | None = None
     window_id: str
     label: str | None = None
     used_percent: float
@@ -102,7 +113,10 @@ class TokenGroup(BaseModel):
     key: str
     label: str
     totals: dict[str, int] = Field(default_factory=dict)
+    # New-work total (see ``TokenTotals.display_total``) — excludes cache_read.
     display_total: int | None = None
+    # See ``TokenTotals.cached_read_tokens``.
+    cached_read_tokens: int = 0
     coverage: TokenCoverage = "entire"
 
 
@@ -161,6 +175,8 @@ class LimitSeries(BaseModel):
     account_key: str
     # See ``LimitSnapshotView.account_label`` — same local-labels gate.
     account_label: str | None = None
+    # See ``LimitSnapshotView.profile_label`` — always shown, no gate.
+    profile_label: str | None = None
     window_id: str
     label: str | None = None
     points: list[LimitSeriesPoint] = Field(default_factory=list)

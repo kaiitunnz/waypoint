@@ -15956,59 +15956,8 @@ html[data-theme="light"] .wp-hl {
 
 /* ─── Telemetry dashboard ─── */
 
-/* Home entry: bottom-center glass floater (mirrors .inbox-dock/.assistant-fab,
-   centered so it never collides with either corner dock) + a link out of the
-   existing rate-limit "Telemetry" deck. */
-.telemetry-dock {
-  position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: max(20px, env(safe-area-inset-bottom));
-  z-index: 40;
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  padding: 12px 18px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--glass-line);
-  background: var(--glass-bg);
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  text-decoration: none;
-  box-shadow:
-    inset 0 1px 0 var(--glass-hi),
-    var(--shadow);
-  backdrop-filter: var(--glass-blur);
-  transition:
-    border-color 0.16s ease,
-    background 0.16s ease;
-}
-
-.telemetry-dock:hover {
-  border-color: var(--accent-cool);
-}
-
-.telemetry-dock-glyph {
-  display: inline-flex;
-  color: var(--accent-cool);
-}
-
-@media (max-width: 640px) {
-  .telemetry-dock {
-    padding: 0;
-    width: 52px;
-    height: 52px;
-    justify-content: center;
-  }
-
-  .telemetry-dock-label {
-    display: none;
-  }
-}
-
+/* Home entry point into the dashboard is the "View full telemetry" link inside
+   the rate-limit Telemetry deck (.usage-deck-full-link). */
 .usage-deck-full-link {
   font-family: var(--font-mono);
   font-size: 0.72rem;
@@ -16292,13 +16241,6 @@ html[data-theme="light"] .wp-hl {
   text-transform: uppercase;
 }
 
-.tm-overview-hero-note {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.82rem;
-  line-height: 1.4;
-}
-
 /* Hairline shelf under the hero: separates headline from breakdown so the
    card reads as instrument (numeral + supporting detail), not a flat list. */
 .tm-overview-body {
@@ -16362,91 +16304,54 @@ html[data-theme="light"] .wp-hl {
   flex-shrink: 0;
 }
 
-.tm-stat-swatch.is-newwork {
-  background: var(--tm-series-1);
-}
-
-.tm-stat-swatch.is-reread {
-  background: var(--tm-token-reread);
-}
-
-/* Token tiers (Tokens card) — new work vs re-read context */
-.tm-tier-bar {
-  display: flex;
-  height: 8px;
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  background: var(--bg-input);
-  border: 1px solid var(--line);
-}
-
-.tm-tier-bar-seg {
-  min-width: 2px;
-}
-
-.tm-tier-bar-seg.is-newwork {
-  background: var(--tm-series-1);
-}
-
-.tm-tier-bar-seg.is-reread {
-  background: var(--tm-token-reread);
-}
-
-.tm-tier-list {
-  margin: 0;
+/* Tokens-card breakdown rows: the four new-work buckets rolled up under the
+   hero total. */
+.tm-tokens-breakdown {
   display: grid;
-  gap: 10px;
+  gap: 3px;
 }
 
-.tm-tier {
+.tm-tokens-breakdown .tm-stat-row {
+  font-size: 0.78rem;
+}
+
+/* Cached re-reads: a standalone, subordinate value fenced off from the
+   new-work breakdown by a hairline — deliberately not a "+ …" line, so it never
+   reads as part of the total. */
+.tm-token-reread-block {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
   display: grid;
-  gap: 4px;
+  gap: 2px;
 }
 
-.tm-tier-head {
+.tm-token-reread-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
 }
 
-.tm-tier-name {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
+.tm-token-reread-label {
   font-family: var(--font-mono);
   font-size: 0.72rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--text);
+  color: var(--muted);
 }
 
-.tm-tier-value {
+.tm-token-reread-value {
   font-family: var(--font-mono);
-  font-size: 0.92rem;
-  color: var(--text-strong);
+  font-size: 0.82rem;
+  color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
-/* Sub-rows sit inset under their tier head, one hairline column rule tying
-   the four new-work buckets to the tier they roll up into. */
-.tm-tier-sub {
-  display: grid;
-  gap: 3px;
-  margin-left: 3px;
-  padding-left: 10px;
-  border-left: 1px solid var(--line);
-}
-
-.tm-tier-sub .tm-stat-row {
-  font-size: 0.78rem;
-}
-
-.tm-tier-note {
-  margin: 0 0 0 3px;
-  padding-left: 10px;
+.tm-token-reread-note {
+  margin: 0;
+  font-size: 0.7rem;
   color: var(--muted-soft);
-  font-size: 0.74rem;
 }
 
 .tm-alerts-card.has-alerts {
@@ -16601,6 +16506,22 @@ html[data-theme="light"] .wp-hl {
 
 .tm-rowlabel {
   font-size: 9px;
+}
+
+/* Cached re-reads ride a faint secondary axis so the new-work bars stay
+   legible instead of being flattened by a co-equal stack segment. */
+.tm-chart-axis-label-reread {
+  fill: var(--tm-token-reread);
+}
+
+.tm-reread-line {
+  stroke-width: 1.5;
+  opacity: 0.7;
+  stroke-dasharray: 3 3;
+}
+
+.tm-reread-dot {
+  opacity: 0.7;
 }
 
 .tm-bar-group,
@@ -16862,11 +16783,17 @@ html[data-theme="light"] .wp-hl {
 
 .tm-heatmap {
   border-collapse: collapse;
-  min-width: 760px;
+  /* Size to content, not a fixed floor: a floor wider than the cells + labels
+     would distribute the slack into the label column and reopen a gap between
+     the weekday labels and the first hour. The 24 fixed-width cells already
+     force a min-content wide enough to scroll on a phone. */
+  min-width: max-content;
 }
 
+/* The label column auto-sizes to the widest weekday/date label instead of a
+   fixed width, so the hour cells butt right up against the labels. */
 .tm-heatmap-corner {
-  width: 92px;
+  width: auto;
 }
 
 .tm-heatmap-hour {
@@ -16880,7 +16807,7 @@ html[data-theme="light"] .wp-hl {
 
 .tm-heatmap-dow {
   text-align: right;
-  padding-right: 10px;
+  padding-right: 8px;
   font-weight: 400;
   white-space: nowrap;
   vertical-align: middle;
@@ -16962,14 +16889,31 @@ html[data-theme="light"] .wp-hl {
 }
 
 .tm-health-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
   font-family: var(--font-mono);
   color: var(--text);
+}
+
+.tm-health-id {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* A non-shrinking marker: the id truncates, but "stale" always stays legible. */
 .tm-health-stale {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--muted-soft);
 }
 
@@ -17564,6 +17508,18 @@ html[data-theme="light"] .wp-hl {
     min-height: 40px;
   }
 
+  /* The chart SVG scales down to phone width, shrinking its viewBox-unit type
+     into illegibility; enlarge the axis and row labels (in viewBox units) so
+     they stay readable after the downscale. Ranked row labels are truncated to
+     a char budget sized for this larger type, so they still clear the margin. */
+  .tm-chart-axis-label {
+    font-size: 12px;
+  }
+
+  .tm-rowlabel {
+    font-size: 12px;
+  }
+
   .theme-toggle {
     width: 40px;
     height: 40px;
@@ -17572,4 +17528,172 @@ html[data-theme="light"] .wp-hl {
   .pager-btn {
     min-height: 40px;
   }
+}
+
+/* ─── NL insight (PR-NL) ─── */
+
+.tm-nl-card {
+  border-color: color-mix(in srgb, var(--accent-cool) 35%, var(--line));
+}
+
+.tm-nl-badge {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent-cool);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 45%, var(--line));
+  white-space: nowrap;
+}
+
+.tm-nl-optin {
+  text-align: left;
+  padding: 12px 0;
+  line-height: 1.5;
+}
+
+.tm-nl-optin code {
+  font-family: var(--font-mono);
+  font-size: 0.84em;
+  color: var(--text);
+}
+
+.tm-nl-label {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent-cool);
+}
+
+.tm-nl-prose {
+  font-family: var(--font-sans);
+}
+
+.tm-nl-prose-list {
+  margin: 0;
+  padding-left: 1.15em;
+  display: grid;
+  gap: 5px;
+  line-height: 1.45;
+}
+
+.tm-nl-prose-list li {
+  padding-left: 2px;
+}
+
+/* Evidence is supporting links, not a second dashboard — collapse it so the
+   card leads with the bulleted prose. */
+.tm-nl-evidence {
+  display: grid;
+  gap: 4px;
+}
+
+.tm-nl-evidence-toggle {
+  min-height: 32px;
+  font-size: 0.72rem;
+}
+
+.tm-nl-evidence-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.tm-nl-evidence-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  font-size: 0.82rem;
+}
+
+.tm-nl-evidence-text {
+  min-width: 0;
+  color: var(--muted);
+}
+
+.tm-nl-evidence-text strong {
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-nl-disclaimer {
+  margin: 0;
+  font-size: 0.76rem;
+  font-style: italic;
+}
+
+.tm-nl-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 0.76rem;
+}
+
+.tm-nl-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tm-nl-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+  color: var(--text);
+}
+
+/* A disabled/inert switch: it reflects `nl_enabled`, it doesn't set it —
+   there is no settings-PATCH endpoint for this yet (CONTRACT-NL.md §1). */
+.tm-nl-toggle {
+  appearance: none;
+  width: 32px;
+  height: 18px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+  position: relative;
+  cursor: not-allowed;
+}
+
+.tm-nl-toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: var(--muted-soft);
+  transition: transform 0.14s ease;
+}
+
+.tm-nl-toggle:checked {
+  border-color: color-mix(in srgb, var(--accent-cool) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent-cool) 18%, var(--bg-input));
+}
+
+.tm-nl-toggle:checked::after {
+  transform: translateX(14px);
+  background: var(--accent-cool);
+}
+
+.tm-nl-toggle-state {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted-soft);
 }

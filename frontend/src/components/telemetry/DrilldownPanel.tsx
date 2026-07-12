@@ -204,7 +204,7 @@ function SummaryHeader({
 
       {statusChips.length > 0 && scoped ? (
         <p className="tm-drill-scope muted">
-          Breakdown reflects the {shown} facts on this page, of {formatCompactNumber(total)} total.
+          Breakdown covers this page ({shown} of {formatCompactNumber(total)}).
         </p>
       ) : null}
     </div>

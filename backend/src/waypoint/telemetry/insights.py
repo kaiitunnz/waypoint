@@ -7,7 +7,8 @@ Two rule types ship in PR1 — the ones that need no tool-outcome data:
   (70/90/100). Emitted as two independently dismissible ``type`` values —
   ``context_pressure`` for context occupancy, ``near_limit`` for provider
   limits — sharing the same threshold set and severity mapping.
-- **token volume change**: fires only when the selected range's token volume
+- **token volume change**: fires only when the selected range's new-work
+  token total (``fold_tokens``'s ``display_total`` — cache reads excluded)
   moves >=25% AND >=10k tokens vs. the immediately preceding equal-length
   range, with >=10 tracked (meter-covered) agent turns and >=80% meter
   coverage in *both* ranges. Below any gate -> no insight (silence, never a

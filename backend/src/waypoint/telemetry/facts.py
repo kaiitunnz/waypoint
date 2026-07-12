@@ -206,11 +206,18 @@ class LimitSnapshotFact(TelemetryFactBase):
     resolved account identity (never a raw email/org, FR-9); ``account_label``
     carries the human-readable name and is only ever surfaced by the API when
     the ``telemetry_local_labels`` setting opts into local labels.
+
+    ``profile_label`` is different: it's the session's local, user-chosen
+    ``account_profile_label`` (or ``"Default"`` when the session has no
+    ``account_profile_id``) — never the raw OAuth email/org — so it's FR-9-safe
+    to show by default and is the primary, always-shown display name for an
+    account group.
     """
 
     kind: Literal[TelemetryFactKind.LIMIT_SNAPSHOT] = TelemetryFactKind.LIMIT_SNAPSHOT
     account_key: str
     account_label: str | None = None
+    profile_label: str | None = None
     window_id: str
     window_label: str | None = None
     used_percent: float

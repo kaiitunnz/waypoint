@@ -457,6 +457,15 @@ than guessing. `display_total_tokens` is supplied only when the provider's
 categories do not overlap (Claude sums; Codex uses `totalTokens`; OpenCode
 omits it), so the UI never synthesizes an unsafe grand total.
 
+The `TokenUsageRecord` also carries the **resolved model and effort in effect at
+that turn**, so the usage-telemetry layer can attribute usage to the actual model
+at turn time rather than the session's latest setting. That telemetry layer
+([`docs/telemetry.md`](telemetry.md)) derives its facts *generically* from the
+normalized event stream, token ledger, and rate-limit snapshots — the only
+per-plugin obligations are populating that model/effort on the record and
+implementing `rate_limit_account` (below) so provider limits attribute to an
+account. A new agent gets the dashboard for free.
+
 ### Context-window rebase (optional)
 
 Sometimes only the *denominator* of the current context window changes, with no

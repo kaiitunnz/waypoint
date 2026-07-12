@@ -4,6 +4,7 @@ import logging
 import mimetypes
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -98,6 +99,7 @@ from waypoint.telemetry.api_models import (
     TokenGroupBy,
 )
 from waypoint.telemetry.facts import TelemetryFactKind
+from waypoint.telemetry.nl import NLInsight
 from waypoint.telemetry.query import parse_range_filter
 from waypoint.usage_dashboard import build_dashboard
 from waypoint.workspace_git import git_file_diff, git_list_files, git_status
@@ -1136,7 +1138,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
         kind: Annotated[TelemetryFactKind, Query()],
         page: Annotated[int, Query(ge=1)] = 1,
-        page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+        page_size: Annotated[int, Query(ge=1, le=200)] = 20,
     ) -> Any:
         rng, flt = parse_range_filter(request, context.settings)
         return telemetry_aggregate.build_drilldown(
@@ -1181,6 +1183,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         result = telemetry_aggregate.delete_all(context.storage)
         context.runtime.mark_telemetry_dirty()
         return result.model_dump(mode="json")
+
+    def _require_nl_enabled() -> None:
+        if not context.settings.telemetry_nl.enabled:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="the NL-insight summarizer is disabled (telemetry_nl.enabled=false)",
+            )
+
+    @app.get("/api/telemetry/nl-insight")
+    async def telemetry_nl_insight_get(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        _require_nl_enabled()
+        stored_json = context.storage.telemetry.get_nl_insight()
+        if stored_json is None:
+            return {"insight": None, "available": False, "fresh": False}
+        insight = NLInsight.model_validate_json(stored_json)
+        age = datetime.now(UTC) - insight.generated_at
+        fresh = age < timedelta(hours=context.settings.telemetry_nl.interval_hours)
+        return {
+            "insight": insight.model_dump(mode="json"),
+            "available": True,
+            "fresh": fresh,
+        }
+
+    @app.post("/api/telemetry/nl-insight")
+    async def telemetry_nl_insight_generate(
+        request: Request,
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        _require_nl_enabled()
+        rng, flt = parse_range_filter(request, context.settings)
+        insight = await context.runtime.generate_nl_digest(rng, flt)
+        if insight is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="NL-insight generation failed or timed out",
+            )
+        return {"insight": insight.model_dump(mode="json")}
 
     @app.post("/api/sessions/{session_id}/terminate")
     async def session_terminate(

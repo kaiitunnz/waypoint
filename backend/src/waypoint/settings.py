@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -99,6 +99,40 @@ class AssistantConfig(BaseModel):
     permission_mode: str | None = None
 
 
+class TelemetryNLConfig(BaseModel):
+    """Opt-in NL-insight summarizer config (CONTRACT-NL.md §1).
+
+    Off by default: enabling it sends telemetry aggregates + redacted
+    drill-down samples (never raw prompts/outputs/args/paths) to the
+    configured coding agent so it can generate a prose digest. ``managed``
+    mode drives the agent through ``runtime.run_oneshot`` — a throwaway
+    managed session launched the normal way, which is why ``claude_tty`` is
+    the default transport (it threads config-dir/account-profile correctly,
+    unlike a raw ``claude -p`` subprocess). ``headless`` allows that raw
+    one-shot subprocess mode for setups where a full session is overkill; it
+    is never the default.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    backend: BackendId = "claude_code"
+    transport: SessionTransportId = "claude_tty"
+    model: str | None = None
+    account_profile: str | None = None
+    mode: Literal["managed", "headless"] = "managed"
+    # Weekly by default; how long a stored digest must age before the
+    # maintenance loop generates a fresh one.
+    interval_hours: int = 168
+    # Optional session preset (id or name) resolved via ``PresetManager`` at
+    # launch time, exactly like ``sessions start --preset``. When set, the
+    # preset's backend/transport/model/permission_mode/account_profile
+    # override the individual fields above wherever the preset defines them;
+    # the fields above remain the fallback for whatever the preset leaves
+    # unset (or when no preset is configured at all).
+    preset: str | None = None
+
+
 class Settings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8787
@@ -172,6 +206,8 @@ class Settings(BaseModel):
     # the human-readable ``account_label`` is only ever returned by the API
     # when this is explicitly turned on (an opt-in local-labels carve-out).
     telemetry_local_labels: bool = False
+    # Opt-in NL-insight summarizer (CONTRACT-NL.md §1). Off by default.
+    telemetry_nl: TelemetryNLConfig = Field(default_factory=TelemetryNLConfig)
 
     @field_validator("plugin_configs", mode="before")
     @classmethod
@@ -244,7 +280,7 @@ def load_settings(config_path_override: Path | None = None) -> Settings:
     payload["config_path"] = (
         expanded if expanded is not None and expanded.exists() else None
     )
-    payload.update(_env_overrides())
+    payload.update(_env_overrides(payload))
     payload = _normalize_payload(payload)
     return Settings.model_validate(payload)
 
@@ -265,7 +301,7 @@ def _load_config_payload(
     return dict(data)
 
 
-def _env_overrides() -> dict[str, Any]:
+def _env_overrides(payload: dict[str, Any]) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     if "WAYPOINT_HOST" in os.environ:
         overrides["host"] = os.environ["WAYPOINT_HOST"]
@@ -342,7 +378,48 @@ def _env_overrides() -> dict[str, Any]:
         overrides["telemetry_local_labels"] = os.environ[
             "WAYPOINT_TELEMETRY_LOCAL_LABELS"
         ].lower() not in {"0", "false", "no", ""}
+    telemetry_nl_overrides = _telemetry_nl_env_overrides(payload.get("telemetry_nl"))
+    if telemetry_nl_overrides is not None:
+        overrides["telemetry_nl"] = telemetry_nl_overrides
     return overrides
+
+
+def _telemetry_nl_env_overrides(existing: Any) -> dict[str, Any] | None:
+    """Env overrides for the ``telemetry_nl`` block, deep-merged over any
+    YAML-configured values (a flat ``payload.update`` would otherwise drop
+    every YAML field the env doesn't happen to override)."""
+    nl: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+    changed = False
+    if "WAYPOINT_TELEMETRY_NL_ENABLED" in os.environ:
+        nl["enabled"] = os.environ["WAYPOINT_TELEMETRY_NL_ENABLED"].lower() not in {
+            "0",
+            "false",
+            "no",
+            "",
+        }
+        changed = True
+    if "WAYPOINT_TELEMETRY_NL_BACKEND" in os.environ:
+        nl["backend"] = os.environ["WAYPOINT_TELEMETRY_NL_BACKEND"]
+        changed = True
+    if "WAYPOINT_TELEMETRY_NL_TRANSPORT" in os.environ:
+        nl["transport"] = os.environ["WAYPOINT_TELEMETRY_NL_TRANSPORT"]
+        changed = True
+    if "WAYPOINT_TELEMETRY_NL_MODEL" in os.environ:
+        nl["model"] = os.environ["WAYPOINT_TELEMETRY_NL_MODEL"]
+        changed = True
+    if "WAYPOINT_TELEMETRY_NL_ACCOUNT_PROFILE" in os.environ:
+        nl["account_profile"] = os.environ["WAYPOINT_TELEMETRY_NL_ACCOUNT_PROFILE"]
+        changed = True
+    if "WAYPOINT_TELEMETRY_NL_MODE" in os.environ:
+        nl["mode"] = os.environ["WAYPOINT_TELEMETRY_NL_MODE"]
+        changed = True
+    if "WAYPOINT_TELEMETRY_NL_INTERVAL_HOURS" in os.environ:
+        nl["interval_hours"] = int(os.environ["WAYPOINT_TELEMETRY_NL_INTERVAL_HOURS"])
+        changed = True
+    if "WAYPOINT_TELEMETRY_NL_PRESET" in os.environ:
+        nl["preset"] = os.environ["WAYPOINT_TELEMETRY_NL_PRESET"]
+        changed = True
+    return nl if changed else None
 
 
 def _normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:

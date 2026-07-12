@@ -41,6 +41,8 @@ import {
   TelemetryTokens,
   TokenGroupBy,
   Insight,
+  NLInsight,
+  NLInsightResponse,
   UsageDashboardResponse,
 } from "@/lib/types";
 import { parseDiffPreviewPayload, type EventDiffPreview } from "@/lib/events";
@@ -618,6 +620,46 @@ export async function deleteTelemetry(
   });
   await ensureOk(response, "failed to delete telemetry");
   return (await response.json()) as TelemetryDeleteResponse;
+}
+
+// ── NL insight (PR-NL — CONTRACT-NL.md §4) ───────────────────────────────
+//
+// Gated on `telemetry_nl.enabled`: the backend answers 404/409 while the
+// feature is off. That is the expected "not opted in" state, not a fetch
+// failure — both functions resolve to `null` rather than throwing so the
+// UI shows an opt-in prompt instead of an error banner.
+
+export async function fetchNLInsight(
+  host: string,
+  token: string,
+): Promise<NLInsightResponse | null> {
+  const response = await fetch(`${host}/api/telemetry/nl-insight`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (response.status === 404 || response.status === 409) {
+    return null;
+  }
+  await ensureOk(response, "failed to fetch NL insight");
+  return (await response.json()) as NLInsightResponse;
+}
+
+export async function generateNLInsight(
+  host: string,
+  token: string,
+  range: TelemetryRangeState,
+  filters: TelemetryFiltersState,
+): Promise<NLInsight | null> {
+  const params = telemetryParams(range, filters);
+  const response = await fetch(`${host}/api/telemetry/nl-insight?${params.toString()}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (response.status === 404 || response.status === 409) {
+    return null;
+  }
+  await ensureOk(response, "failed to generate NL insight");
+  return (await response.json()) as NLInsight;
 }
 
 export async function setSessionPermissionMode(

@@ -47,6 +47,11 @@ class SessionSource(StrEnum):
     # runtime, protected from deletion/termination via the public API,
     # and surfaced on its own UI page rather than the session list.
     ASSISTANT = "assistant"
+    # A throwaway one-shot session driving a generic non-interactive agent
+    # task (e.g. the NL-insight summarizer's ``runtime.run_oneshot``). Lives
+    # for one turn and is torn down (terminate + delete) by its caller;
+    # excluded from the session list the same way ``ASSISTANT`` is.
+    TELEMETRY = "telemetry"
 
 
 class LaunchMode(StrEnum):

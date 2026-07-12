@@ -147,8 +147,10 @@ export function TokenChart({ tokens, loading, groupBy, onGroupByChange }: TokenC
   }
   if (!tokens) return null;
 
-  const hasData =
-    groupBy === "time" ? timeSeries.some((p) => Object.keys(p.totals).length > 0) : rankedGroups.length > 0;
+  // `categories` already keeps only keys with a positive amount, so an all-zero
+  // range (unify_tokens always emits all 5 keys, 0 where absent) yields an empty
+  // list and falls through to the empty state instead of a blank SVG.
+  const hasData = groupBy === "time" ? categories.length > 0 : rankedGroups.length > 0;
 
   const plotW = CHART_W - PAD_LEFT - PAD_RIGHT;
   const plotH = CHART_H - PAD_TOP - PAD_BOTTOM;

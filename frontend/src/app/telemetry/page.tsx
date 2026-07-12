@@ -126,8 +126,17 @@ export default function TelemetryPage() {
     setDrilldownPage(1);
   }, [range, filters]);
 
+  // Monotonic request ids guard each refresher against stale responses: a
+  // slower earlier fetch must not overwrite state from a newer one (a preset /
+  // filter change, or a telemetry_update firing mid-edit). Each call captures
+  // its id and only applies state + clears loading while it is still the latest.
+  const overviewReqRef = useRef(0);
+  const tokensReqRef = useRef(0);
+  const drilldownReqRef = useRef(0);
+
   const refreshOverviewGroup = useCallback(async () => {
     if (!host || !token) return;
+    const requestId = ++overviewReqRef.current;
     if (customRangeIncomplete) {
       setOverviewLoading(false);
       setActivityLoading(false);
@@ -146,6 +155,7 @@ export default function TelemetryPage() {
         fetchTelemetryHealth(host, token, range, filters),
         fetchTelemetryInsights(host, token, range, filters),
       ]);
+      if (requestId !== overviewReqRef.current) return;
       setOverview(overviewRes);
       setActivity(activityRes);
       setHealth(healthRes);
@@ -157,18 +167,22 @@ export default function TelemetryPage() {
         handleAuthFailure();
         return;
       }
+      if (requestId !== overviewReqRef.current) return;
       setState((current) => (current === "ready" ? current : "error"));
       setError(err instanceof Error ? err.message : "failed to load telemetry");
     } finally {
-      setOverviewLoading(false);
-      setActivityLoading(false);
-      setHealthLoading(false);
-      setInsightsLoading(false);
+      if (requestId === overviewReqRef.current) {
+        setOverviewLoading(false);
+        setActivityLoading(false);
+        setHealthLoading(false);
+        setInsightsLoading(false);
+      }
     }
   }, [host, token, range, filters, customRangeIncomplete, handleAuthFailure]);
 
   const refreshTokens = useCallback(async () => {
     if (!host || !token) return;
+    const requestId = ++tokensReqRef.current;
     if (customRangeIncomplete) {
       setTokensLoading(false);
       return;
@@ -176,20 +190,25 @@ export default function TelemetryPage() {
     setTokensLoading(true);
     try {
       const res = await fetchTelemetryTokens(host, token, range, filters, tokenGroupBy);
+      if (requestId !== tokensReqRef.current) return;
       setTokens(res);
     } catch (err) {
       if (isAuthError(err)) {
         handleAuthFailure();
         return;
       }
+      if (requestId !== tokensReqRef.current) return;
       setError(err instanceof Error ? err.message : "failed to load token usage");
     } finally {
-      setTokensLoading(false);
+      if (requestId === tokensReqRef.current) {
+        setTokensLoading(false);
+      }
     }
   }, [host, token, range, filters, tokenGroupBy, customRangeIncomplete, handleAuthFailure]);
 
   const refreshDrilldown = useCallback(async () => {
     if (!host || !token) return;
+    const requestId = ++drilldownReqRef.current;
     if (customRangeIncomplete) {
       setDrilldownLoading(false);
       return;
@@ -205,15 +224,19 @@ export default function TelemetryPage() {
         drilldownPage,
         DRILLDOWN_PAGE_SIZE,
       );
+      if (requestId !== drilldownReqRef.current) return;
       setDrilldown(res);
     } catch (err) {
       if (isAuthError(err)) {
         handleAuthFailure();
         return;
       }
+      if (requestId !== drilldownReqRef.current) return;
       setError(err instanceof Error ? err.message : "failed to load drilldown");
     } finally {
-      setDrilldownLoading(false);
+      if (requestId === drilldownReqRef.current) {
+        setDrilldownLoading(false);
+      }
     }
   }, [
     host,

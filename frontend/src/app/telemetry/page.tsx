@@ -55,6 +55,19 @@ const REFRESH_DEBOUNCE_MS = 400;
 
 type LoadState = "loading" | "ready" | "error";
 
+// Insight click-throughs carry the aggregate endpoint they were derived from;
+// route "View evidence" to the matching section so it lands on the data behind
+// the claim. Anything unrecognized (or absent) falls back to the drilldown.
+function scrollToEvidenceSection(endpoint: string | undefined): void {
+  const target =
+    typeof endpoint === "string" && endpoint.includes("/health")
+      ? "tm-health-anchor"
+      : typeof endpoint === "string" && endpoint.includes("/tokens")
+        ? "tm-tokens-anchor"
+        : "tm-drilldown-anchor";
+  document.getElementById(target)?.scrollIntoView({ behavior: "smooth" });
+}
+
 export default function TelemetryPage() {
   const router = useRouter();
   const { theme } = useTheme();
@@ -401,7 +414,7 @@ export default function TelemetryPage() {
       setDrilldownKind(kindParam as TelemetryFactKind);
       setDrilldownPage(1);
     }
-    document.getElementById("tm-drilldown-anchor")?.scrollIntoView({ behavior: "smooth" });
+    scrollToEvidenceSection(insight.click_through.endpoint);
   }, []);
 
   const handleGenerateNLInsight = useCallback(async () => {
@@ -440,7 +453,8 @@ export default function TelemetryPage() {
       setDrilldownKind(kindParam as TelemetryFactKind);
       setDrilldownPage(1);
     }
-    document.getElementById("tm-drilldown-anchor")?.scrollIntoView({ behavior: "smooth" });
+    const endpoint = typeof clickThrough.endpoint === "string" ? clickThrough.endpoint : undefined;
+    scrollToEvidenceSection(endpoint);
   }, []);
 
   const handleDeleteTelemetry = useCallback(async () => {

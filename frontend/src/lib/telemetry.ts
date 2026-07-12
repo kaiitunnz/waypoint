@@ -350,12 +350,22 @@ export function formatRangeLabel(range: TelemetryRange): string {
   const start = new Date(range.start);
   const end = new Date(range.end);
   const fmt: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
-  const startLabel = Number.isNaN(start.getTime()) ? range.start : start.toLocaleDateString(undefined, fmt);
+  // With the host-tz offset from the range echo, shift each instant by it and
+  // render in UTC so the day matches the host-tz calendar day the range covers.
+  // Without a usable offset (older payload / NaN), fall back to the browser tz.
+  const offset = range.utc_offset_minutes;
+  const shiftMinutes = typeof offset === "number" && !Number.isNaN(offset) ? offset : null;
+  const fmtDay = (instant: Date): string =>
+    shiftMinutes !== null
+      ? new Date(instant.getTime() + shiftMinutes * 60_000).toLocaleDateString(undefined, {
+          ...fmt,
+          timeZone: "UTC",
+        })
+      : instant.toLocaleDateString(undefined, fmt);
+  const startLabel = Number.isNaN(start.getTime()) ? range.start : fmtDay(start);
   // `end` is exclusive; show the inclusive last day for a human-readable range.
   const inclusiveEnd = Number.isNaN(end.getTime()) ? end : new Date(end.getTime() - 1000);
-  const endLabel = Number.isNaN(end.getTime())
-    ? range.end
-    : inclusiveEnd.toLocaleDateString(undefined, fmt);
+  const endLabel = Number.isNaN(end.getTime()) ? range.end : fmtDay(inclusiveEnd);
   return `${startLabel} – ${endLabel} (${range.tz})`;
 }
 

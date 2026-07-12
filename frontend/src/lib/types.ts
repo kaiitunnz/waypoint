@@ -760,6 +760,11 @@ export interface TelemetryRange {
   start: string;
   end: string;
   tz: string;
+  // Host-tz UTC offset (integer minutes east of UTC) at the range instant, so
+  // the client can render the host's calendar days without knowing its IANA
+  // zone. Optional: older payloads omit it and the client falls back to the
+  // browser tz.
+  utc_offset_minutes?: number;
 }
 
 export interface TelemetryFilter {

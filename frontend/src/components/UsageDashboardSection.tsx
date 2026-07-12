@@ -27,6 +27,9 @@ interface UsageDashboardSectionProps {
   host: string;
   token: string;
   sessions: SessionRecord[];
+  // Master telemetry opt-in. The rate-limit deck always renders; only the
+  // full-telemetry dashboard link is gated on this.
+  telemetryEnabled: boolean;
   onAuthFailure?: () => void;
 }
 
@@ -184,6 +187,7 @@ export function UsageDashboardSection({
   host,
   token,
   sessions,
+  telemetryEnabled,
   onAuthFailure,
 }: UsageDashboardSectionProps) {
   const [open, setOpen] = useState(false);
@@ -334,9 +338,11 @@ export function UsageDashboardSection({
               <span className="usage-deck-status-detail">{status.detail}</span>
             </div>
             <div className="usage-deck-status-actions">
-              <Link className="usage-deck-full-link" href="/telemetry">
-                View full telemetry →
-              </Link>
+              {telemetryEnabled ? (
+                <Link className="usage-deck-full-link" href="/telemetry">
+                  View full telemetry →
+                </Link>
+              ) : null}
               {status.freshest ? (
                 <span
                   className="usage-deck-status-sweep"

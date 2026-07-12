@@ -27,8 +27,10 @@ import {
   fetchTelemetrySettings,
   fetchTelemetryTokens,
   fetchNLInsight,
+  fetchMe,
   generateNLInsight,
   isAuthError,
+  isTelemetryDisabledError,
 } from "@/lib/api";
 import { agentTransports, useBackendCatalog } from "@/lib/backends";
 import { clearToken, readHost, readToken } from "@/lib/store";
@@ -54,6 +56,11 @@ const DRILLDOWN_PAGE_SIZE = 20;
 const REFRESH_DEBOUNCE_MS = 400;
 
 type LoadState = "loading" | "ready" | "error";
+// Master telemetry opt-in, resolved from `/api/me` before any telemetry fetch.
+// It starts "unknown" so the refreshers and the WS subscription stay dormant
+// until the capability is known — a fresh mount must never touch a telemetry
+// endpoint while the feature might be disabled.
+type TelemetryCapability = "unknown" | "enabled" | "disabled";
 
 // Insight click-throughs carry the aggregate endpoint they were derived from;
 // route "View evidence" to the matching section so it lands on the data behind
@@ -75,6 +82,7 @@ export default function TelemetryPage() {
   const [token, setToken] = useState("");
   const [state, setState] = useState<LoadState>("loading");
   const [error, setError] = useState("");
+  const [telemetryCap, setTelemetryCap] = useState<TelemetryCapability>("unknown");
 
   const [range, setRange] = useState(() => readTelemetryQuery().range);
   const [filters, setFilters] = useState(() => readTelemetryQuery().filters);
@@ -128,6 +136,31 @@ export default function TelemetryPage() {
     }
   }, [router]);
 
+  // Resolve the telemetry capability before any telemetry fetch fires. Until
+  // this settles, `telemetryCap` stays "unknown" and every refresher + the WS
+  // subscription short-circuit, so a disabled backend is never probed.
+  useEffect(() => {
+    if (!host || !token) return;
+    let active = true;
+    fetchMe(host, token)
+      .then((me) => {
+        if (!active) return;
+        setTelemetryCap(me.telemetry_enabled ? "enabled" : "disabled");
+      })
+      .catch((err) => {
+        if (!active) return;
+        if (isAuthError(err)) {
+          handleAuthFailure();
+          return;
+        }
+        setState("error");
+        setError(err instanceof Error ? err.message : "failed to load telemetry");
+      });
+    return () => {
+      active = false;
+    };
+  }, [host, token, handleAuthFailure]);
+
   // Persist range/filters (skip the very first render, which is what we just read).
   const skipPersist = useRef(true);
   useEffect(() => {
@@ -148,7 +181,7 @@ export default function TelemetryPage() {
   const drilldownReqRef = useRef(0);
 
   const refreshOverviewGroup = useCallback(async () => {
-    if (!host || !token) return;
+    if (!host || !token || telemetryCap !== "enabled") return;
     const requestId = ++overviewReqRef.current;
     if (customRangeIncomplete) {
       setOverviewLoading(false);
@@ -180,6 +213,10 @@ export default function TelemetryPage() {
         handleAuthFailure();
         return;
       }
+      if (isTelemetryDisabledError(err)) {
+        setTelemetryCap("disabled");
+        return;
+      }
       if (requestId !== overviewReqRef.current) return;
       setState((current) => (current === "ready" ? current : "error"));
       setError(err instanceof Error ? err.message : "failed to load telemetry");
@@ -191,10 +228,10 @@ export default function TelemetryPage() {
         setInsightsLoading(false);
       }
     }
-  }, [host, token, range, filters, customRangeIncomplete, handleAuthFailure]);
+  }, [host, token, range, filters, customRangeIncomplete, telemetryCap, handleAuthFailure]);
 
   const refreshTokens = useCallback(async () => {
-    if (!host || !token) return;
+    if (!host || !token || telemetryCap !== "enabled") return;
     const requestId = ++tokensReqRef.current;
     if (customRangeIncomplete) {
       setTokensLoading(false);
@@ -210,6 +247,10 @@ export default function TelemetryPage() {
         handleAuthFailure();
         return;
       }
+      if (isTelemetryDisabledError(err)) {
+        setTelemetryCap("disabled");
+        return;
+      }
       if (requestId !== tokensReqRef.current) return;
       setError(err instanceof Error ? err.message : "failed to load token usage");
     } finally {
@@ -217,10 +258,10 @@ export default function TelemetryPage() {
         setTokensLoading(false);
       }
     }
-  }, [host, token, range, filters, tokenGroupBy, customRangeIncomplete, handleAuthFailure]);
+  }, [host, token, range, filters, tokenGroupBy, customRangeIncomplete, telemetryCap, handleAuthFailure]);
 
   const refreshDrilldown = useCallback(async () => {
-    if (!host || !token) return;
+    if (!host || !token || telemetryCap !== "enabled") return;
     const requestId = ++drilldownReqRef.current;
     if (customRangeIncomplete) {
       setDrilldownLoading(false);
@@ -244,6 +285,10 @@ export default function TelemetryPage() {
         handleAuthFailure();
         return;
       }
+      if (isTelemetryDisabledError(err)) {
+        setTelemetryCap("disabled");
+        return;
+      }
       if (requestId !== drilldownReqRef.current) return;
       setError(err instanceof Error ? err.message : "failed to load drilldown");
     } finally {
@@ -259,11 +304,12 @@ export default function TelemetryPage() {
     drilldownKind,
     drilldownPage,
     customRangeIncomplete,
+    telemetryCap,
     handleAuthFailure,
   ]);
 
   const refreshSettings = useCallback(async () => {
-    if (!host || !token) return;
+    if (!host || !token || telemetryCap !== "enabled") return;
     setSettingsLoading(true);
     try {
       const res = await fetchTelemetrySettings(host, token);
@@ -273,11 +319,15 @@ export default function TelemetryPage() {
         handleAuthFailure();
         return;
       }
+      if (isTelemetryDisabledError(err)) {
+        setTelemetryCap("disabled");
+        return;
+      }
       setError(err instanceof Error ? err.message : "failed to load telemetry settings");
     } finally {
       setSettingsLoading(false);
     }
-  }, [host, token, handleAuthFailure]);
+  }, [host, token, telemetryCap, handleAuthFailure]);
 
   useEffect(() => {
     void refreshOverviewGroup();
@@ -300,7 +350,7 @@ export default function TelemetryPage() {
   // doesn't depend on [range, filters]. A 404/409 (feature off or not yet
   // deployed) resolves to `null`, not an error (CONTRACT-NL.md §4).
   const refreshNLInsight = useCallback(async () => {
-    if (!host || !token) return;
+    if (!host || !token || telemetryCap !== "enabled") return;
     setNlLoading(true);
     try {
       const res = await fetchNLInsight(host, token);
@@ -310,11 +360,15 @@ export default function TelemetryPage() {
         handleAuthFailure();
         return;
       }
+      if (isTelemetryDisabledError(err)) {
+        setTelemetryCap("disabled");
+        return;
+      }
       // Non-blocking: the NL card degrades to its empty state on failure.
     } finally {
       setNlLoading(false);
     }
-  }, [host, token, handleAuthFailure]);
+  }, [host, token, telemetryCap, handleAuthFailure]);
 
   useEffect(() => {
     void refreshNLInsight();
@@ -336,7 +390,7 @@ export default function TelemetryPage() {
   }, [refreshOverviewGroup, refreshTokens, refreshDrilldown]);
 
   useEffect(() => {
-    if (!host || !token) return;
+    if (!host || !token || telemetryCap !== "enabled") return;
     let active = true;
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -386,7 +440,7 @@ export default function TelemetryPage() {
       if (debounceTimer !== null) clearTimeout(debounceTimer);
       socket?.close();
     };
-  }, [host, token, handleAuthFailure]);
+  }, [host, token, telemetryCap, handleAuthFailure]);
 
   const handleDismissInsight = useCallback(
     async (insight: Insight) => {
@@ -517,7 +571,42 @@ export default function TelemetryPage() {
         </div>
       ) : null}
 
-      {state === "error" && !overview ? (
+      {telemetryCap === "disabled" ? (
+        <section className="panel bordered board-empty telemetry-disabled">
+          <h2>Telemetry is disabled</h2>
+          <p className="muted">
+            The usage telemetry dashboard is opt-in. No usage facts are collected while it is off.
+          </p>
+          <p className="muted">
+            To turn it on, add this to <code>backend/waypoint.yaml</code> and restart the backend:
+          </p>
+          <pre className="telemetry-disabled-snippet">
+            <code>telemetry_enabled: true</code>
+          </pre>
+          <p className="muted">
+            Live collection starts after the restart. It does not import earlier history by default —
+            add <code>telemetry_backfill: true</code> for a one-time import of sessions that predate
+            activation.
+          </p>
+          <div className="telemetry-disabled-actions">
+            {deleteResult ? (
+              <p className="muted" role="status">
+                Removed {deleteResult.removed.facts} facts and {deleteResult.removed.rollups} rollups.
+                Transcripts were not affected.
+              </p>
+            ) : (
+              <button
+                type="button"
+                className="danger"
+                disabled={deleting}
+                onClick={() => void handleDeleteTelemetry()}
+              >
+                {deleting ? "Deleting…" : "Delete retained telemetry"}
+              </button>
+            )}
+          </div>
+        </section>
+      ) : state === "error" && !overview ? (
         <section className="panel bordered board-empty">
           <h2>Couldn’t load telemetry</h2>
           <p className="muted">The backend didn’t respond. Check that Waypoint is running, then retry.</p>

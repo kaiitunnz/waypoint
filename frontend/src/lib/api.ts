@@ -1891,6 +1891,19 @@ export function isAuthError(error: unknown): error is AuthError {
   return error instanceof AuthError;
 }
 
+// A telemetry endpoint returns 404 with this detail while the feature is
+// disabled. `ensureOk` surfaces the detail as the Error message, so the
+// `/telemetry` page can recognize a disabled-state 404 (e.g. a setting that
+// changed between the `/api/me` capability fetch and a telemetry request during
+// a backend restart) and fall back to its disabled view rather than an outage.
+export function isTelemetryDisabledError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    !(error instanceof AuthError) &&
+    error.message.toLowerCase().startsWith("telemetry is disabled")
+  );
+}
+
 export async function forkSideQuestion(
   host: string,
   token: string,

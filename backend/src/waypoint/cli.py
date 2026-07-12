@@ -3,6 +3,7 @@ import importlib.metadata
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 from collections.abc import AsyncIterator, Callable
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Annotated, Any, NamedTuple, Protocol, cast
 
 import click
+import httpx
 import typer
 import uvicorn
 from fastapi import HTTPException
@@ -27,6 +29,7 @@ from waypoint.backends.registry import get_registry
 from waypoint.client import (
     WaypointClient,
     WaypointError,
+    base_url,
     is_event_envelope,
     session_status_from_envelope,
     write_cli_token,
@@ -41,6 +44,7 @@ from waypoint.schemas import (
 )
 from waypoint.settings import Settings, load_settings
 from waypoint.storage import Storage
+from waypoint.telemetry.ingest import TelemetryIngester
 
 # Statuses that, by default, end a `sessions wait`: the session is idle,
 # blocked on the user, or finished. `starting`/`running`/`interrupted` are
@@ -3633,6 +3637,10 @@ def maintenance_stats(ctx: typer.Context) -> None:
         stats = storage.db_stats()
         orphans = storage.scan_orphan_session_dirs(settings.sessions_dir)
         stats["orphan_session_dirs"] = len(orphans)
+        stats["telemetry_backfill"] = {
+            "done": storage.telemetry.get_meta("backfill_done") == "true",
+            "through": storage.telemetry.get_meta("backfill_through"),
+        }
         typer.echo(json.dumps(stats, indent=2))
     finally:
         storage.close()
@@ -3784,6 +3792,115 @@ def maintenance_clear_structured_logs(
             except OSError as exc:
                 typer.echo(f"skipped {log_path}: {exc}")
         typer.echo(f"Deleted {removed} events.jsonl files ({total / 1e6:.1f} MB).")
+    finally:
+        storage.close()
+
+
+def _backend_reachable(settings: Settings) -> bool:
+    """Best-effort probe of the configured host/port for a live backend.
+
+    Keys on the configured host/port, so it cannot prove no server exists (a
+    server on a different port/config is invisible here) — the write-lock probe
+    is the correctness backstop for that case.
+    """
+    try:
+        response = httpx.get(f"{base_url(settings)}/health", timeout=1.0)
+    except httpx.HTTPError:
+        return False
+    return response.is_success
+
+
+def _database_write_locked(settings: Settings) -> bool:
+    """Detect a concurrent writer holding the database, regardless of port.
+
+    Probes on a throwaway connection (never the writable ``Storage`` this
+    command later opens, which would self-lock). ``BEGIN IMMEDIATE`` acquires
+    the WAL write lock; if another writer holds it the attempt raises. In WAL
+    the lock is held only during an actual write, so an idle backend passes —
+    best-effort per the RFC, backing the "stop the server first" instruction.
+    """
+    db_path = settings.database_path
+    if not db_path.exists():
+        return False
+    conn = sqlite3.connect(str(db_path), timeout=0.5)
+    try:
+        conn.execute("PRAGMA busy_timeout = 500")
+        conn.execute("BEGIN IMMEDIATE")
+        conn.rollback()
+        return False
+    except sqlite3.OperationalError:
+        return True
+    finally:
+        conn.close()
+
+
+@maintenance_app.command("rebuild-telemetry")
+def maintenance_rebuild_telemetry(
+    ctx: typer.Context,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Re-run even if a backfill already completed for this database.",
+        ),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", help="Skip the confirmation prompt (scripting/CI)."),
+    ] = False,
+) -> None:
+    """Re-derive telemetry facts from existing sessions/events/ledger, rebuild rollups.
+
+    Reuses the boot-time backfill code path. Run with the backend stopped.
+    """
+    settings = _settings_from_ctx(ctx)
+    if _backend_reachable(settings) or _database_write_locked(settings):
+        typer.echo(
+            "A Waypoint backend appears to be using this database. Stop it first "
+            "(waypointctl stop) before rebuilding telemetry.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    storage = Storage(settings.database_path)
+    try:
+        already = storage.telemetry.get_meta("backfill_done") == "true"
+        if already and not force:
+            typer.echo(
+                "A telemetry backfill already completed for this database. "
+                "Re-running re-derives history, including any previously deleted "
+                "or pre-enablement activity. Pass --force to proceed.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        if already and not yes:
+            typer.confirm(
+                "Re-derive telemetry history now? This re-derives history, "
+                "including any previously deleted or pre-enablement activity.",
+                abort=True,
+            )
+
+        asyncio.run(TelemetryIngester(storage, get_registry()).backfill(force=already))
+
+        stats = storage.db_stats()
+        typer.echo(
+            json.dumps(
+                {
+                    "telemetry_facts": stats.get("telemetry_facts", {}).get(
+                        "row_count"
+                    ),
+                    "telemetry_daily_rollup": stats.get(
+                        "telemetry_daily_rollup", {}
+                    ).get("row_count"),
+                    "backfill_through": storage.telemetry.get_meta("backfill_through"),
+                    "note": (
+                        "Activity is recovered as far back as the events table; "
+                        "token totals only as far back as the token ledger."
+                    ),
+                },
+                indent=2,
+            )
+        )
     finally:
         storage.close()
 

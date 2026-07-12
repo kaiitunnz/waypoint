@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.9.1](https://github.com/kaiitunnz/waypoint/compare/v0.9.0...v0.9.1) (2026-07-12)
+
+
+### Features
+
+* make the usage telemetry dashboard opt-in ([#297](https://github.com/kaiitunnz/waypoint/issues/297)) ([eea18ba](https://github.com/kaiitunnz/waypoint/commit/eea18ba5b9a482c2bad7b7adb3842686334af2cc))
+
+
+### Bug Fixes
+
+* harden the AI usage telemetry dashboard against review findings ([#292](https://github.com/kaiitunnz/waypoint/issues/292)) ([cf5c37a](https://github.com/kaiitunnz/waypoint/commit/cf5c37a0ff80a08a0b2db5bc5b8f7a90ec70f3ef))
+* resolve deferred telemetry review items (dead rollups, loop offload, edges) ([#294](https://github.com/kaiitunnz/waypoint/issues/294)) ([1757d9e](https://github.com/kaiitunnz/waypoint/commit/1757d9eaa9596620bdc3a023a9e5f9b46af72677))
+
+
+### Performance Improvements
+
+* speed up telemetry rollup recompute and dashboard aggregation ([#296](https://github.com/kaiitunnz/waypoint/issues/296)) ([1ac1ffa](https://github.com/kaiitunnz/waypoint/commit/1ac1ffaa250b81e8ac483c9ad81375c6147d9948))
+
+
+### Miscellaneous Chores
+
+* release 0.9.1 ([7a1c0d2](https://github.com/kaiitunnz/waypoint/commit/7a1c0d2d912154f7f306bd3bd57a329947430bee))
+
 ## [0.9.0](https://github.com/kaiitunnz/waypoint/compare/v0.8.2...v0.9.0) (2026-07-12)
 
 

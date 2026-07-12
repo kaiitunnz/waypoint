@@ -491,7 +491,8 @@ class TelemetryIngester:
 
     async def start(self) -> None:
         if self._task is None:
-            self._seed_last_transitions()
+            # Off the event loop: the seed hits SQLite under the shared lock.
+            await asyncio.to_thread(self._seed_last_transitions)
             self._task = asyncio.create_task(
                 self._drain_loop(), name="telemetry-ingest-drain"
             )

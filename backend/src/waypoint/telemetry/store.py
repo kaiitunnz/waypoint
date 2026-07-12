@@ -17,7 +17,7 @@ could drift apart.
 import json
 import sqlite3
 import threading
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -40,6 +40,12 @@ _TAG_FILTER_SEPARATOR = ":"
 
 # ``telemetry_meta`` key the latest NL-insight digest is stored under (CONTRACT-NL.md §4).
 _NL_INSIGHT_META_KEY = "nl_insight"
+
+# The daily-rollup primary key a fact contributes to: (day, backend, model,
+# repo, source, transport, is_child). Recomputing one key rescans that key's
+# day-bounded slice from scratch, so accumulating the affected keys across a
+# batch and recomputing each once is byte-identical to recomputing per fact.
+_RollupKey = tuple[str, str, str, str, str, str, int]
 
 
 def _iso_utc(value: datetime) -> str:
@@ -70,6 +76,29 @@ def _day_bounds_utc(day: str) -> tuple[str, str]:
     start_utc = start_local.astimezone(UTC)
     end_utc = (start_local + timedelta(days=1)).astimezone(UTC)
     return start_utc.isoformat(), end_utc.isoformat()
+
+
+def _offset_modifier(minutes: int) -> str:
+    """A SQLite date-modifier shifting a UTC instant to a host-tz wall clock.
+
+    ``date`` / ``strftime`` need an explicit sign on the minutes modifier, so a
+    negative (west-of-UTC) offset formats as ``-300 minutes``. A single fixed
+    offset across a range differs from a per-instant tz resolution at a DST
+    boundary — immaterial on this non-DST host.
+    """
+    return f"{minutes:+d} minutes"
+
+
+def _host_offset_modifier() -> str:
+    """``_offset_modifier`` for the host's current UTC offset.
+
+    Uses the same tz source as ``_day_key`` (naive ``astimezone()``), so
+    ``date(occurred_at, _host_offset_modifier())`` matches ``_day_key`` for a
+    fixed offset.
+    """
+    offset = datetime.now().astimezone().utcoffset()
+    minutes = round(offset.total_seconds() / 60) if offset is not None else 0
+    return _offset_modifier(minutes)
 
 
 def _parse_tag_term(term: str) -> tuple[str, str] | None:
@@ -130,9 +159,15 @@ class TelemetryStore:
                   PRIMARY KEY (kind, source, fact_id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_tf_kind_time      ON telemetry_facts(kind, occurred_at);
-                CREATE INDEX IF NOT EXISTS idx_tf_kind_backend_time ON telemetry_facts(kind, backend, occurred_at);
                 CREATE INDEX IF NOT EXISTS idx_tf_session        ON telemetry_facts(session_id);
                 CREATE INDEX IF NOT EXISTS idx_tf_time           ON telemetry_facts(occurred_at);
+
+                -- ``idx_tf_kind_backend_time`` bought nothing measurable:
+                -- backend is ~3-cardinality and every backend-filtered read
+                -- also constrains kind+time, so the planner rides
+                -- ``idx_tf_kind_time`` and filters backend as a residual at the
+                -- same latency. Drop it (~4.5MB + a per-fact write) on boot.
+                DROP INDEX IF EXISTS idx_tf_kind_backend_time;
 
                 CREATE TABLE IF NOT EXISTS telemetry_fact_tag (
                   kind TEXT NOT NULL, source TEXT NOT NULL, fact_id TEXT NOT NULL,
@@ -178,21 +213,37 @@ class TelemetryStore:
         self, fact: TelemetryFact, *, tags: dict[str, str] | None = None
     ) -> bool:
         with self._lock:
-            wrote = self._ingest_fact_locked(fact, tags or {})
+            keys = self._ingest_fact_locked(fact, tags or {})
+            for key in keys or ():
+                self._recompute_rollup_key(*key)
             self._conn.commit()
-            return wrote
+            return keys is not None
 
     def ingest_facts(
         self, facts: Iterable[tuple[TelemetryFact, dict[str, str]]]
     ) -> int:
         with self._lock:
-            written = sum(
-                1 for fact, tags in facts if self._ingest_fact_locked(fact, tags)
-            )
+            written = 0
+            keys_to_recompute: set[_RollupKey] = set()
+            for fact, tags in facts:
+                keys = self._ingest_fact_locked(fact, tags)
+                if keys is not None:
+                    written += 1
+                    keys_to_recompute |= keys
+            # Coalesce: a same-day/same-dims batch collapses to one recompute per
+            # key instead of one per fact, and recompute-from-scratch depends
+            # only on the final table state, so the result is byte-identical.
+            for key in keys_to_recompute:
+                self._recompute_rollup_key(*key)
             self._conn.commit()
             return written
 
-    def _ingest_fact_locked(self, fact: TelemetryFact, tags: dict[str, str]) -> bool:
+    def _ingest_fact_locked(
+        self, fact: TelemetryFact, tags: dict[str, str]
+    ) -> set[_RollupKey] | None:
+        """Insert/replace one fact, returning the rollup keys the caller must
+        recompute (the fact's new key plus its pre-revision key), or ``None``
+        when the fact was a dedup/stale-revision no-op."""
         existing = self._conn.execute(
             """
             SELECT revision, occurred_at, backend, model_at_turn, repo_name,
@@ -202,9 +253,9 @@ class TelemetryStore:
             (fact.kind, fact.source, fact.fact_id),
         ).fetchone()
         if existing is not None and existing["revision"] > fact.revision:
-            return False
+            return None
         if existing is not None and existing["revision"] == fact.revision:
-            return False
+            return None
 
         row = _row_from_fact(fact)
         columns = list(row)
@@ -223,10 +274,13 @@ class TelemetryStore:
             [row[c] for c in columns],
         )
 
-        self._conn.execute(
-            "DELETE FROM telemetry_fact_tag WHERE kind = ? AND source = ? AND fact_id = ?",
-            (fact.kind, fact.source, fact.fact_id),
-        )
+        # A brand-new row has no prior tags to clear, so skip the DELETE unless
+        # this is a revision (existing row) or the fact actually carries tags.
+        if existing is not None or tags:
+            self._conn.execute(
+                "DELETE FROM telemetry_fact_tag WHERE kind = ? AND source = ? AND fact_id = ?",
+                (fact.kind, fact.source, fact.fact_id),
+            )
         for key, value in tags.items():
             self._conn.execute(
                 """
@@ -236,7 +290,7 @@ class TelemetryStore:
                 (fact.kind, fact.source, fact.fact_id, key, value),
             )
 
-        keys_to_recompute: set[tuple[str, str, str, str, str, str, int]] = set()
+        keys_to_recompute: set[_RollupKey] = set()
         if existing is not None:
             keys_to_recompute.add(
                 (
@@ -260,9 +314,7 @@ class TelemetryStore:
                 int(fact.dims.is_child),
             )
         )
-        for rollup_key in keys_to_recompute:
-            self._recompute_rollup_key(*rollup_key)
-        return True
+        return keys_to_recompute
 
     # ── maintenance ───────────────────────────────────────────────────────
 
@@ -296,15 +348,23 @@ class TelemetryStore:
     def rebuild_rollups_from_facts(self) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM telemetry_daily_rollup")
-            rows = self._conn.execute("""
-                SELECT DISTINCT backend, COALESCE(model_at_turn, '') AS model,
-                       COALESCE(repo_name, '') AS repo_name, src_source, transport, is_child,
-                       occurred_at
+            # DISTINCT on the host-tz day directly (not raw ``occurred_at``,
+            # which is near-unique and defeats the DISTINCT — 54k rows for 155
+            # keys). ``date(occurred_at, <offset>)`` matches ``_day_key`` for a
+            # fixed offset (naive UTC substr would misbucket near midnight).
+            modifier = _host_offset_modifier()
+            rows = self._conn.execute(
+                """
+                SELECT DISTINCT date(occurred_at, ?) AS day, backend,
+                       COALESCE(model_at_turn, '') AS model,
+                       COALESCE(repo_name, '') AS repo_name, src_source, transport, is_child
                 FROM telemetry_facts WHERE partial = 0
-                """).fetchall()
+                """,
+                (modifier,),
+            ).fetchall()
             keys = {
                 (
-                    _day_key(datetime.fromisoformat(row["occurred_at"])),
+                    row["day"],
                     row["backend"],
                     row["model"],
                     row["repo_name"],
@@ -492,11 +552,22 @@ class TelemetryStore:
         offset: int | None = None,
         partial: bool = False,
         descending: bool = False,
+        columns: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
+        """Fact rows for ``kind``/``rng``/``flt``.
+
+        ``columns`` narrows the projection for read-heavy callers (token fold,
+        heatmap) that touch only a handful of the ~38 columns; the returned
+        dicts then carry ONLY those keys, so a projection must list every
+        column its caller reads. Defaults to the full row.
+        """
         with self._lock:
             where, params = self._filter_clause(
                 rng, flt, extra_kind=kind, partial=partial
             )
+            # ``columns`` must stay developer-controlled (interpolated, not
+            # bound) — never forward untrusted input here.
+            projection = "*" if columns is None else ", ".join(columns)
             # Stable tiebreak (source, fact_id) after occurred_at so paginated
             # drilldown results (LIMIT/OFFSET) never reorder or repeat a row
             # across pages when several facts share the same instant. Drill-down
@@ -504,7 +575,7 @@ class TelemetryStore:
             # the most recent, most relevant facts rather than the oldest.
             direction = "DESC" if descending else "ASC"
             sql = (
-                f"SELECT * FROM telemetry_facts WHERE {where} "
+                f"SELECT {projection} FROM telemetry_facts WHERE {where} "
                 f"ORDER BY occurred_at {direction}, source {direction}, "
                 f"fact_id {direction}"
             )
@@ -528,6 +599,41 @@ class TelemetryStore:
                 f"SELECT COUNT(*) AS n FROM telemetry_facts WHERE {where}", params
             ).fetchone()
             return int(row["n"])
+
+    def heatmap_counts(
+        self, rng: TelemetryRange, flt: TelemetryFilter
+    ) -> list[tuple[int, int, int]]:
+        """``(dow, hour, count)`` buckets over TURN + TOOL_CALL facts in range.
+
+        Buckets in SQL (≤168 rows) instead of materializing every fact and
+        counting in Python. ``occurred_at`` is shifted by the range's host UTC
+        offset so cells land on the host-tz wall clock the dashboard renders.
+        SQLite ``strftime('%w')`` numbers Sunday=0..Saturday=6, but the
+        ``ActivityHeatmapCell.dow`` contract is Monday=0 (Python
+        ``datetime.weekday()``), hence the ``+ 6) % 7`` shift. A single offset
+        across the range differs from a per-instant tz resolution at a DST
+        boundary — immaterial on this non-DST host.
+        """
+        with self._lock:
+            where, params = self._filter_clause(
+                rng,
+                flt,
+                extra_kind=(TelemetryFactKind.TURN, TelemetryFactKind.TOOL_CALL),
+                partial=False,
+            )
+            modifier = _offset_modifier(rng.utc_offset_minutes)
+            rows = self._conn.execute(
+                f"""
+                SELECT (CAST(strftime('%w', occurred_at, ?) AS INTEGER) + 6) % 7 AS dow,
+                       CAST(strftime('%H', occurred_at, ?) AS INTEGER) AS hour,
+                       COUNT(*) AS n
+                FROM telemetry_facts WHERE {where}
+                GROUP BY dow, hour
+                ORDER BY dow, hour
+                """,
+                [modifier, modifier, *params],
+            ).fetchall()
+            return [(int(r["dow"]), int(r["hour"]), int(r["n"])) for r in rows]
 
     def query_rollup(
         self, rng: TelemetryRange, flt: TelemetryFilter
@@ -613,15 +719,26 @@ class TelemetryStore:
         ``fact_id`` that dodges the store's PK dedup).
         """
         with self._lock:
+            # One newest row per session via a window function (≤ session-count
+            # rows) instead of scanning every lifecycle fact. The tiebreak makes
+            # exact-timestamp ties resolve to a single deterministic row (a bare
+            # MAX(...) join could return several tied rows); which tied
+            # transition wins is immaterial to the dedup seed.
             rows = self._conn.execute(
                 """
-                SELECT session_id, transition FROM telemetry_facts
-                WHERE kind = ? AND transition IS NOT NULL
-                ORDER BY occurred_at ASC
+                SELECT session_id, transition FROM (
+                    SELECT session_id, transition,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY session_id
+                               ORDER BY occurred_at DESC, source DESC, fact_id DESC
+                           ) AS rn
+                    FROM telemetry_facts
+                    WHERE kind = ? AND transition IS NOT NULL
+                )
+                WHERE rn = 1
                 """,
                 (TelemetryFactKind.SESSION_LIFECYCLE,),
             ).fetchall()
-            # Ascending scan, last write wins → the newest transition per session.
             return {row["session_id"]: row["transition"] for row in rows}
 
     def _descendant_session_ids(self, root_id: str) -> set[str]:
@@ -654,11 +771,18 @@ class TelemetryStore:
         rng: TelemetryRange,
         flt: TelemetryFilter,
         *,
-        extra_kind: TelemetryFactKind,
+        extra_kind: TelemetryFactKind | Sequence[TelemetryFactKind],
         partial: bool,
     ) -> tuple[str, list[Any]]:
-        clauses = ["kind = ?", "occurred_at >= ?", "occurred_at < ?"]
-        params: list[Any] = [extra_kind, _iso_utc(rng.start), _iso_utc(rng.end)]
+        kinds: Sequence[TelemetryFactKind] = (
+            [extra_kind] if isinstance(extra_kind, TelemetryFactKind) else extra_kind
+        )
+        clauses = [
+            f"kind IN ({', '.join('?' for _ in kinds)})",
+            "occurred_at >= ?",
+            "occurred_at < ?",
+        ]
+        params: list[Any] = [*kinds, _iso_utc(rng.start), _iso_utc(rng.end)]
         if not partial:
             clauses.append("partial = 0")
         if flt.backends:

@@ -1318,3 +1318,83 @@ def test_transitive_descendants_scope_tokens_and_drilldown(tmp_path: Path) -> No
     )
     assert drilldown_own.total == 1
     assert drilldown_own.items[0].session_id == "parent"
+
+
+# ── column projection + SQL heatmap (perf paths) ───────────────────────────
+
+
+def test_agent_turn_projection_covers_every_token_fold_path(tmp_path: Path) -> None:
+    # The narrowed projection on ``agent_turn_rows`` must carry every column any
+    # downstream consumer reads; a missing one would ``KeyError`` in a group_by
+    # or the ledger join. Exercise the REAL token-fold path for all group_by
+    # keys and the overview, plus lock the projected column set.
+    storage = Storage(tmp_path / "db.sqlite")
+    now = _make_session(storage, "s1")
+    _make_session(storage, "s2")
+    _seed_agent_turn(
+        storage,
+        "s1",
+        fact_id="t1",
+        occurred_at=now,
+        totals={"input_tokens": 100},
+        model_at_turn="m1",
+    )
+    _seed_agent_turn(
+        storage,
+        "s2",
+        fact_id="t2",
+        occurred_at=now,
+        totals={"input_tokens": 50},
+        model_at_turn="m2",
+    )
+    rng = _full_range()
+
+    rows = aggregate.agent_turn_rows(storage, rng, TelemetryFilter())
+    assert rows
+    for row in rows:
+        assert set(row) == set(aggregate._AGENT_TURN_COLUMNS)
+
+    for group_by in ("time", "backend", "model", "repo", "session"):
+        tokens = aggregate.build_tokens(storage, rng, TelemetryFilter(), group_by)
+        assert tokens.groups  # no KeyError on any grouping column
+
+    by_model = aggregate.build_tokens(storage, rng, TelemetryFilter(), "model")
+    assert {g.key: g.display_total for g in by_model.groups} == {"m1": 100, "m2": 50}
+
+    overview = aggregate.build_overview(storage, _settings(), rng, TelemetryFilter())
+    assert overview.tokens.display_total == 150
+
+
+def test_build_activity_heatmap_buckets_host_weekday_hour(tmp_path: Path) -> None:
+    # End-to-end through ``build_activity``: a known Sunday and Monday pin the
+    # Monday=0 contract (SQLite ``%w`` is Sunday=0), and the heatmap total must
+    # equal the turn+tool_call fact count in range.
+    storage = Storage(tmp_path / "db.sqlite")
+    _make_session(storage, "s1")
+    sunday = datetime(2026, 3, 15, 9, 0, tzinfo=UTC)  # weekday()==6
+    monday = datetime(2026, 3, 16, 13, 0, tzinfo=UTC)  # weekday()==0
+    for fid, at in (("t-sun", sunday), ("t-mon-a", monday), ("t-mon-b", monday)):
+        storage.telemetry.ingest_fact(
+            TurnFact(
+                fact_id=fid,
+                source="codex",
+                session_id="s1",
+                occurred_at=at,
+                dims=_dims(),
+                turn_kind=TurnKind.AGENT,
+            )
+        )
+
+    rng = TelemetryRange(
+        start=datetime(2026, 3, 14, tzinfo=UTC),
+        end=datetime(2026, 3, 18, tzinfo=UTC),
+        tz="UTC",
+        utc_offset_minutes=0,
+    )
+    activity = aggregate.build_activity(storage, rng, TelemetryFilter())
+    cells = {(c.dow, c.hour): c.count for c in activity.heatmap}
+
+    assert cells[(6, 9)] == 1  # Sunday
+    assert cells[(0, 13)] == 2  # Monday, two turns same hour
+    assert (2, 5) not in cells  # quiet cell omitted
+    assert sum(c.count for c in activity.heatmap) == 3

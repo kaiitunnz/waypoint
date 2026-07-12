@@ -91,8 +91,7 @@ def _orphan_data_insight(snapshot: InstanceSnapshot) -> Insight | None:
         observed_at=snapshot.observed_at,
         safety_note=(
             "Review with `waypoint maintenance prune-orphans` (dry-run by "
-            "default); deletion is never automatic and requires explicit "
-            "confirmation."
+            "default); it never deletes automatically."
         ),
     )
 
@@ -117,16 +116,16 @@ def _redundant_logs_insight(snapshot: InstanceSnapshot) -> Insight | None:
     if redundant.orphan_overlap_count:
         overlap_clause = (
             f" ({redundant.orphan_overlap_count} more are inside orphaned "
-            "directories, handled by the orphan-data card)"
+            "directories)"
         )
     return Insight(
         signature=signature,
         type="redundant_logs",
         statement=(
             f"{actionable_count} inactive events.jsonl log"
-            f"{'' if actionable_count == 1 else 's'} duplicate SQLite events "
+            f"{'' if actionable_count == 1 else 's'} duplicate stored events "
             f"and can be cleared to reclaim {format_bytes(actionable_bytes)}"
-            f"{overlap_clause}. Running-session logs are excluded."
+            f"{overlap_clause}."
         ),
         metrics={
             "candidate_count": actionable_count,
@@ -166,9 +165,7 @@ def _database_vacuum_insight(snapshot: InstanceSnapshot) -> Insight | None:
         type="database_vacuum",
         statement=(
             f"The database has {format_bytes(reclaim.free_bytes)} of free pages "
-            f"({reclaim.free_percent * 100:.0f}% of the file). A VACUUM may "
-            "reclaim space, but it is an operator decision, not a guaranteed "
-            "filesystem saving."
+            f"({reclaim.free_percent * 100:.0f}% of the file)."
         ),
         metrics={
             "page_size": reclaim.page_size,
@@ -185,8 +182,7 @@ def _database_vacuum_insight(snapshot: InstanceSnapshot) -> Insight | None:
         severity="info",
         observed_at=snapshot.observed_at,
         safety_note=(
-            "Run `waypoint maintenance vacuum` deliberately; VACUUM rewrites "
-            "the database and does not guarantee the freed pages return to the "
-            "filesystem."
+            "Run `waypoint maintenance vacuum` when you choose to; it may not "
+            "return the freed space to the filesystem."
         ),
     )

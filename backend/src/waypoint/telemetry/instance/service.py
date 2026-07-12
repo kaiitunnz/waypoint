@@ -40,9 +40,8 @@ STALE_CEILING = timedelta(hours=24)
 DAILY_TICK_MINUTE = (0, 5)
 
 _CLI_NOTE = (
-    "Measured by Waypoint's read-only instance snapshot. `waypoint maintenance "
-    "stats` reports a narrower subset and is the place to run the maintenance "
-    "commands referenced here."
+    "Measured by a read-only snapshot. Run the maintenance commands above with "
+    "`waypoint maintenance`."
 )
 
 

@@ -81,7 +81,7 @@ INSTANCE_CLAIM_TEMPLATES: dict[str, _Template] = {
         focus="overview",
     ),
     "data_quality_note": _Template(
-        text="This snapshot is {data_quality} as of the shown observation time.",
+        text="This snapshot is {data_quality}.",
         allowed_evidence=frozenset({"data_quality"}),
         focus="overview",
     ),
@@ -108,8 +108,7 @@ INSTANCE_CLAIM_TEMPLATES: dict[str, _Template] = {
     "vacuum_candidate": _Template(
         text=(
             "The database has {db_free_bytes} of free pages ({db_free_percent}); "
-            "a VACUUM may reclaim space but is an operator decision, not a "
-            "guaranteed saving."
+            "a VACUUM may reclaim some of it."
         ),
         allowed_evidence=frozenset({"db_free_bytes", "db_free_percent"}),
         focus="database",

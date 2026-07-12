@@ -41,6 +41,7 @@ import { formatRangeLabel, readTelemetryQuery, writeTelemetryQuery } from "@/lib
 import { useTheme } from "@/lib/theme";
 import {
   Insight,
+  NLGenerationStatus,
   NLInsightEvidence,
   NLInsightResponse,
   SessionEnvelope,
@@ -117,7 +118,10 @@ export default function TelemetryPage() {
 
   const [nlResponse, setNlResponse] = useState<NLInsightResponse | null>(null);
   const [nlLoading, setNlLoading] = useState(true);
-  const [nlGenerating, setNlGenerating] = useState(false);
+  // Server-owned regeneration status: seeded from the GET, updated by the
+  // nl_insight_status WebSocket frame, and set optimistically on click — so a
+  // reload or a second tab reflects "Regenerating…"/failed it didn't initiate.
+  const [nlGeneration, setNlGeneration] = useState<NLGenerationStatus | null>(null);
 
   const [instance, setInstance] = useState<TelemetryInstance | null>(null);
   const [instanceLoading, setInstanceLoading] = useState(true);
@@ -365,6 +369,8 @@ export default function TelemetryPage() {
     try {
       const res = await fetchNLInsight(host, token);
       setNlResponse(res);
+      // Reconcile the button/failed state to the server on every load.
+      setNlGeneration(res?.generation ?? null);
     } catch (err) {
       if (isAuthError(err)) {
         handleAuthFailure();
@@ -477,6 +483,15 @@ export default function TelemetryPage() {
     };
   }, [refreshOverviewGroup, refreshTokens, refreshDrilldown, refreshInstance]);
 
+  // The NL card is intentionally excluded from the generic telemetry_update
+  // fan-out (its digest changes only on regeneration, not fact ingestion); it
+  // rides the dedicated nl_insight_status frame instead. A ref keeps the WS
+  // effect stable while pointing at the latest refresher.
+  const refreshNLInsightRef = useRef(refreshNLInsight);
+  useEffect(() => {
+    refreshNLInsightRef.current = refreshNLInsight;
+  }, [refreshNLInsight]);
+
   useEffect(() => {
     if (!host || !token || telemetryCap !== "enabled") return;
     let active = true;
@@ -503,6 +518,13 @@ export default function TelemetryPage() {
         token,
         (message: SessionEnvelope) => {
           if (message.type === "telemetry_update") scheduleRefresh();
+          if (message.type === "nl_insight_status") {
+            const status = message.payload as unknown as NLGenerationStatus;
+            setNlGeneration(status);
+            // Settle-success persisted a new digest — refetch it (the card is
+            // out of the generic refresher). Failure leaves the prior digest.
+            if (status.status === "idle") void refreshNLInsightRef.current();
+          }
           if (message.type === "auth_revoked") handleAuthFailure();
         },
         () => {
@@ -562,13 +584,31 @@ export default function TelemetryPage() {
 
   const handleGenerateNLInsight = useCallback(async () => {
     if (!host || !token) return;
-    setNlGenerating(true);
+    // Optimistic: reflect "Regenerating…" immediately, then reconcile to the
+    // server's authoritative status (the run itself is detached — the settle
+    // arrives over the WebSocket). The button stays server-driven on reload.
+    setNlGeneration((prev) => ({
+      status: "generating",
+      generation_id: prev?.generation_id ?? null,
+      requested_at: prev?.requested_at ?? null,
+      range: prev?.range ?? null,
+      filters: prev?.filters ?? null,
+      error: null,
+      settled_at: null,
+    }));
     try {
-      const insight = await generateNLInsight(host, token, range, filters);
-      if (insight) {
-        setNlResponse({ available: true, insight, fresh: true });
-      } else {
+      const ack = await generateNLInsight(host, token, range, filters);
+      if (!ack) {
         setError("AI insights are off, or generation is not available yet.");
+        setNlGeneration((prev) => (prev?.status === "generating" ? null : prev));
+        return;
+      }
+      setNlGeneration(ack.generation);
+      if (ack.requested_range_differs) {
+        setError(
+          "A regeneration over a different range is already running — " +
+            "try again when it finishes.",
+        );
       }
     } catch (err) {
       if (isAuthError(err)) {
@@ -576,8 +616,7 @@ export default function TelemetryPage() {
         return;
       }
       setError(err instanceof Error ? err.message : "failed to generate AI insight");
-    } finally {
-      setNlGenerating(false);
+      setNlGeneration((prev) => (prev?.status === "generating" ? null : prev));
     }
   }, [host, token, range, filters, handleAuthFailure]);
 
@@ -725,7 +764,7 @@ export default function TelemetryPage() {
             nlEnabled={settings?.nl_enabled ?? false}
             response={nlResponse}
             loading={nlLoading}
-            generating={nlGenerating}
+            generation={nlGeneration}
             onGenerate={() => void handleGenerateNLInsight()}
             onEvidenceClick={handleNLEvidenceClick}
           />

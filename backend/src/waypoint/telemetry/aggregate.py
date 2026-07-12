@@ -999,6 +999,7 @@ def delete_all(storage: Storage) -> TelemetryDeleteResponse:
     )
     storage.telemetry.clear_insight_dismissals()
     storage.telemetry.clear_nl_insight()
+    storage.telemetry.clear_nl_insight_status()
     # Instance-health daily points + the cached current snapshot are retained
     # telemetry too (PRD FR-4): a delete removes them, never operational data.
     storage.telemetry.clear_instance_snapshots()

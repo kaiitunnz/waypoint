@@ -7,7 +7,11 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
 import { confidenceLabel } from "@/lib/telemetry";
-import { NLInsightEvidence, NLInsightResponse } from "@/lib/types";
+import {
+  NLGenerationStatus,
+  NLInsightEvidence,
+  NLInsightResponse,
+} from "@/lib/types";
 import { formatRelativeTime } from "@/lib/usage";
 
 // The summarizer returns markdown (a "- " bullet list, occasional **bold**);
@@ -18,21 +22,39 @@ interface NLInsightCardProps {
   nlEnabled: boolean;
   response: NLInsightResponse | null;
   loading: boolean;
-  generating: boolean;
+  // Server-owned regeneration status (seeded on load, pushed over the
+  // WebSocket) — the button and failed affordance derive from it so reloads
+  // and other tabs stay consistent, not from local-only state.
+  generation: NLGenerationStatus | null;
   onGenerate: () => void;
   onEvidenceClick: (evidence: NLInsightEvidence) => void;
+}
+
+// A live "Regenerating…" lamp shown while a run this client can see is active.
+function GeneratingLamp() {
+  return (
+    <span className="tm-nl-status is-generating" role="status">
+      <span className="tm-nl-status-dot" aria-hidden="true" />
+      Regenerating…
+    </span>
+  );
 }
 
 export function NLInsightCard({
   nlEnabled,
   response,
   loading,
-  generating,
+  generation,
   onGenerate,
   onEvidenceClick,
 }: NLInsightCardProps) {
   const titleId = useId();
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+
+  const status = generation?.status ?? "idle";
+  const generating = status === "generating";
+  const failed = status === "failed";
+  const failureReason = generation?.error ?? null;
 
   if (!nlEnabled) {
     return (
@@ -62,15 +84,22 @@ export function NLInsightCard({
       <section className="panel tm-chart-card tm-nl-card" aria-labelledby={titleId}>
         <header className="tm-chart-head">
           <h3 id={titleId}>AI insight</h3>
+          {generating ? <GeneratingLamp /> : null}
         </header>
         <p className="muted tm-chart-empty">No digest yet for this range.</p>
+        {failed ? (
+          <p className="tm-nl-failed" role="status">
+            <span className="tm-nl-status-dot" aria-hidden="true" />
+            Last generation failed{failureReason ? `: ${failureReason}` : ""}.
+          </p>
+        ) : null}
         <button
           type="button"
           className="tm-insight-evidence"
           onClick={onGenerate}
           disabled={generating}
         >
-          {generating ? "Generating…" : "Generate now"}
+          {generating ? "Generating…" : failed ? "Retry" : "Generate now"}
         </button>
       </section>
     );
@@ -82,9 +111,13 @@ export function NLInsightCard({
         <h3 id={titleId}>
           {response?.available ? "Insights available" : "AI insight"}
         </h3>
-        <span className="tm-nl-badge">
-          {confidenceLabel(insight.confidence)} confidence
-        </span>
+        {generating ? (
+          <GeneratingLamp />
+        ) : (
+          <span className="tm-nl-badge">
+            {confidenceLabel(insight.confidence)} confidence
+          </span>
+        )}
       </header>
 
       <div className="tm-nl-prose">
@@ -161,6 +194,14 @@ export function NLInsightCard({
 
       <p className="tm-nl-disclaimer muted">{insight.disclaimer}</p>
 
+      {failed ? (
+        <p className="tm-nl-failed" role="status">
+          <span className="tm-nl-status-dot" aria-hidden="true" />
+          Last regeneration failed{failureReason ? `: ${failureReason}` : ""} —
+          the digest above is unchanged.
+        </p>
+      ) : null}
+
       <footer className="tm-nl-footer">
         <span className="muted">
           {formatRelativeTime(insight.generated_at)} · {insight.source_backend}
@@ -173,7 +214,7 @@ export function NLInsightCard({
           onClick={onGenerate}
           disabled={generating}
         >
-          {generating ? "Regenerating…" : "Regenerate"}
+          {generating ? "Regenerating…" : failed ? "Retry" : "Regenerate"}
         </button>
       </footer>
     </section>

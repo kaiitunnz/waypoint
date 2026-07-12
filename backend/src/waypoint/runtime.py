@@ -110,7 +110,13 @@ from waypoint.telemetry.ingest import TelemetryIngester
 from waypoint.telemetry.instance import service as instance_service
 from waypoint.telemetry.instance.model import DataQuality as InstanceDataQuality
 from waypoint.telemetry.instance.nl import build_instance_nl_aggregate
-from waypoint.telemetry.nl import NLInsight, NLInstanceBullet
+from waypoint.telemetry.nl import (
+    NLGenerationState,
+    NLGenerationStatus,
+    NLGenerationTrigger,
+    NLInsight,
+    NLInstanceBullet,
+)
 from waypoint.telemetry.query import (
     host_tz_name,
     resolve_preset_range,
@@ -220,6 +226,23 @@ class _StructuredLogHandle:
 
     handle: TextIO
     pending: int = 0
+
+
+@dataclass(frozen=True)
+class _NLActiveRun:
+    """The in-flight NL-digest regeneration: the single-flight authority.
+
+    Held on ``SessionRuntime._nl_active`` while a run is active (``None``
+    otherwise). ``range``/``filters`` are the *resolved* query descriptor the run
+    targets — a new trigger coalesces when they match and is rejected-with-reason
+    when they differ. ``generation_id`` guards the settle so a superseded/deleted
+    run's late ``finally`` cannot re-write a stale marker.
+    """
+
+    generation_id: str
+    range: TelemetryRange
+    filters: TelemetryFilter
+    requested_at: datetime
 
 
 SAFE_NAME = re.compile(r"[^a-zA-Z0-9_-]+")
@@ -397,6 +420,13 @@ class SessionRuntime:
         # refresh so a ≥5-minute-old cache is revalidated off the request path.
         self._instance_bootstrap_task: asyncio.Task[None] | None = None
         self._instance_refresh_task: asyncio.Task[None] | None = None
+        # NL-digest regeneration is single-flight and detached from the request:
+        # ``_nl_active`` is the in-process authority (a plain attribute mutated
+        # only on this event loop — an await-free check-and-set, no lock), and
+        # ``_nl_generation_task`` is the tracked detached run cancelled in
+        # ``stop()``. The persisted status marker is derived state (CONTRACT-NL §5).
+        self._nl_active: _NLActiveRun | None = None
+        self._nl_generation_task: asyncio.Task[None] | None = None
         # Id of the personal-assistant singleton, populated by
         # ``_ensure_assistant_session`` during ``start``. ``None`` when the
         # assistant is disabled or its bootstrap failed.
@@ -445,6 +475,9 @@ class SessionRuntime:
                 self._telemetry_backfill_task = asyncio.create_task(
                     self._run_telemetry_backfill(), name="telemetry-backfill"
                 )
+            # Settle any ``generating`` marker orphaned by a prior process before
+            # the maintenance task can start a run and before we serve POSTs (FR-7).
+            self._reconcile_nl_status()
             self._telemetry_maintenance_task = asyncio.create_task(
                 self._telemetry_maintenance_loop(), name="telemetry-maintenance"
             )
@@ -514,6 +547,7 @@ class SessionRuntime:
         for instance_task in (
             self._instance_bootstrap_task,
             self._instance_refresh_task,
+            self._nl_generation_task,
         ):
             if instance_task is not None:
                 instance_task.cancel()
@@ -521,6 +555,7 @@ class SessionRuntime:
                     await instance_task
         self._instance_bootstrap_task = None
         self._instance_refresh_task = None
+        self._nl_generation_task = None
         if self.telemetry_ingester is not None:
             await self.telemetry_ingester.stop()
         for task in self.monitor_tasks.values():
@@ -4371,6 +4406,11 @@ class SessionRuntime:
         §4). A corrupt stored row is treated as absent rather than blocking
         generation. Returns the fresh digest (also persisted) or ``None`` when
         skipped/disabled/generation failed.
+
+        Routes through the same single-flight launcher as the on-demand POST so a
+        cadence tick and a manual regenerate share one guard, then awaits the run
+        to completion (the cadence is synchronous by contract; only the POST is
+        non-blocking) and returns the persisted digest.
         """
         config = self.settings.telemetry_nl
         if not config.enabled:
@@ -4382,7 +4422,17 @@ class SessionRuntime:
                 age = datetime.now(UTC) - existing.generated_at
                 if age < timedelta(hours=config.interval_hours):
                     return None
-        return await self.generate_nl_digest()
+        await self.start_nl_digest_generation()
+        task = self._nl_generation_task
+        if task is not None:
+            with suppress(Exception):
+                await task
+        latest = self.storage.telemetry.get_nl_insight()
+        if latest is None:
+            return None
+        with suppress(Exception):
+            return NLInsight.model_validate_json(latest)
+        return None
 
     async def generate_nl_digest(
         self, rng: TelemetryRange | None = None, flt: TelemetryFilter | None = None
@@ -4412,6 +4462,190 @@ class SessionRuntime:
             self.storage.telemetry.set_nl_insight(insight.model_dump_json())
             self.mark_telemetry_dirty()
         return insight
+
+    async def start_nl_digest_generation(
+        self, rng: TelemetryRange | None = None, flt: TelemetryFilter | None = None
+    ) -> NLGenerationTrigger:
+        """Single-flight launcher for a detached NL-digest regeneration.
+
+        The in-process ``_nl_active`` flag is the guard, set here with an
+        await-free check-and-set (the runtime is single-threaded on one event
+        loop). When a run is already active a matching trigger coalesces and a
+        divergent one is rejected-with-reason (never a silent wrong-range write) —
+        both echo the active run's descriptor. Otherwise it claims the flag, writes
+        the ``generating`` marker (derived state, for the GET + restart), schedules
+        the tracked run, and emits the start signal. Returns immediately; the run
+        settles the marker and emits the settle signal from its own ``finally``.
+        """
+        resolved_rng = rng or resolve_preset_range("7d", host_tz_name())
+        resolved_flt = flt or TelemetryFilter()
+        active = self._nl_active
+        if active is not None:
+            coalesced = active.range == resolved_rng and active.filters == resolved_flt
+            return NLGenerationTrigger(
+                status=self._nl_status_generating(active),
+                coalesced=coalesced,
+                requested_range_differs=not coalesced,
+            )
+        # --- await-free critical section: claim the flag before the first await ---
+        active = _NLActiveRun(
+            generation_id=secrets.token_hex(16),
+            range=resolved_rng,
+            filters=resolved_flt,
+            requested_at=datetime.now(UTC),
+        )
+        self._nl_active = active
+        status = self._nl_status_generating(active)
+        self.storage.telemetry.set_nl_insight_status(status.model_dump_json())
+        self._nl_generation_task = asyncio.create_task(
+            self._run_nl_generation(active), name="nl-generation"
+        )
+        # --- end critical section; publishing after the flag is set is race-free ---
+        await self._publish_nl_status(status)
+        return NLGenerationTrigger(status=status, started=True)
+
+    def _nl_status_generating(self, active: _NLActiveRun) -> NLGenerationStatus:
+        return NLGenerationStatus(
+            status=NLGenerationState.GENERATING,
+            generation_id=active.generation_id,
+            requested_at=active.requested_at,
+            range=active.range,
+            filters=active.filters,
+        )
+
+    async def _run_nl_generation(self, active: _NLActiveRun) -> None:
+        """Run one regeneration, then settle the marker + emit the settle signal.
+
+        ``generate_nl_digest`` persists the digest on success; here we only own
+        the lifecycle (flag + marker + WebSocket). The settle is generation-id
+        guarded so a delete/supersede that replaced the marker turns a late finish
+        into a no-op.
+        """
+        error: str | None = None
+        try:
+            insight = await self.generate_nl_digest(active.range, active.filters)
+            if insight is None:
+                error = "generation failed or timed out"
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.debug("NL-insight generation task failed", exc_info=True)
+            error = "generation failed or timed out"
+        finally:
+            if self._nl_active is active:
+                self._nl_active = None
+            settled = self._settle_nl_status(active, error)
+            if settled is not None:
+                await self._publish_nl_status(settled)
+
+    def _settle_nl_status(
+        self, active: _NLActiveRun, error: str | None
+    ) -> NLGenerationStatus | None:
+        """Write the terminal marker (idle/failed) iff it still owns the marker."""
+        stored = self.storage.telemetry.get_nl_insight_status()
+        if stored is None:
+            # Cleared out from under us (delete raced) — nothing to settle.
+            return None
+        with suppress(Exception):
+            current = NLGenerationStatus.model_validate_json(stored)
+            if (
+                current.generation_id is not None
+                and current.generation_id != active.generation_id
+            ):
+                # A delete/supersede replaced the marker (generation-id guard).
+                return None
+        if error is None:
+            settled = NLGenerationStatus.idle()
+        else:
+            settled = NLGenerationStatus(
+                status=NLGenerationState.FAILED,
+                generation_id=active.generation_id,
+                requested_at=active.requested_at,
+                range=active.range,
+                filters=active.filters,
+                error=error,
+                settled_at=datetime.now(UTC),
+            )
+        self.storage.telemetry.set_nl_insight_status(settled.model_dump_json())
+        return settled
+
+    async def cancel_nl_generation(self) -> None:
+        """Cancel + await the active regeneration task (used by the delete path).
+
+        Cross-thread-safe by construction: the cancel runs on the event loop (not
+        inside ``delete_all``'s worker thread, which cannot cancel a task). The
+        task's id-guarded settle runs during the awaited cancellation; the caller
+        then clears the marker, so no stale status is stranded.
+        """
+        task = self._nl_generation_task
+        if task is None or task.done():
+            return
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        # Only null what we actually cancelled: DELETE and POST are not
+        # serialized, so a POST can claim a fresh run during the ``await`` above.
+        # Identity-guarding the clears keeps that new run tracked (rather than
+        # clobbering it into an untracked, off-single-flight run) while still
+        # clearing the flag for a task cancelled before its body — and thus its
+        # ``finally`` — ever ran.
+        if self._nl_generation_task is task:
+            self._nl_generation_task = None
+            self._nl_active = None
+
+    def nl_generation_status(self) -> NLGenerationStatus:
+        """The current regeneration status marker (``idle`` when absent/corrupt)."""
+        stored = self.storage.telemetry.get_nl_insight_status()
+        if stored is None:
+            return NLGenerationStatus.idle()
+        try:
+            return NLGenerationStatus.model_validate_json(stored)
+        except Exception:
+            return NLGenerationStatus.idle()
+
+    def _reconcile_nl_status(self) -> None:
+        """Settle a stale ``generating`` marker left by a dead process (FR-7).
+
+        A persisted ``generating`` marker at boot is stale by definition — the
+        task that owned it is gone. Must run during ``start()`` before the
+        maintenance task and before the app serves POSTs, so it never clobbers a
+        freshly-started run.
+        """
+        stored = self.storage.telemetry.get_nl_insight_status()
+        if stored is None:
+            return
+        try:
+            current = NLGenerationStatus.model_validate_json(stored)
+        except Exception:
+            self.storage.telemetry.set_nl_insight_status(
+                NLGenerationStatus.idle().model_dump_json()
+            )
+            return
+        if current.status != NLGenerationState.GENERATING:
+            return
+        reconciled = NLGenerationStatus(
+            status=NLGenerationState.FAILED,
+            generation_id=current.generation_id,
+            requested_at=current.requested_at,
+            range=current.range,
+            filters=current.filters,
+            error="interrupted by restart",
+            settled_at=datetime.now(UTC),
+        )
+        self.storage.telemetry.set_nl_insight_status(reconciled.model_dump_json())
+
+    async def _publish_nl_status(self, status: NLGenerationStatus) -> None:
+        """Push the NL regeneration status to all clients (start + settle).
+
+        A dedicated, un-debounced frame (distinct from ``telemetry_update``, which
+        only fires on completion and is debounced) so a *start* transition reaches
+        every tab promptly.
+        """
+        await self.broadcast.publish(
+            SessionEnvelope(
+                type="nl_insight_status", payload=status.model_dump(mode="json")
+            )
+        )
 
     async def _generate_instance_bullets(
         self, summarizer: "CodingAgentSummarizer"

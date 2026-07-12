@@ -406,7 +406,9 @@ async def test_nl_insight_endpoints_404_when_disabled(tmp_path: Path) -> None:
     assert post_resp.status_code == 404
 
 
-async def test_nl_insight_post_generates_and_get_returns_it(tmp_path: Path) -> None:
+async def test_nl_insight_post_accepts_and_get_returns_it_after_settle(
+    tmp_path: Path,
+) -> None:
     settings = Settings(data_dir=tmp_path / "data", telemetry_enabled=True)
     settings.telemetry_nl.enabled = True
     app = create_app(settings)
@@ -419,15 +421,25 @@ async def test_nl_insight_post_generates_and_get_returns_it(tmp_path: Path) -> N
     context.runtime.run_oneshot = fake_run_oneshot
 
     async with _client(app) as client:
+        # The POST is now non-blocking: it returns 202 with the generating marker
+        # and detaches the run instead of holding the request open for it.
         post = await client.post("/api/telemetry/nl-insight", headers=_auth(token))
-        assert post.status_code == 200
-        assert post.json()["insight"]["prose"] == "Quiet week."
+        assert post.status_code == 202
+        gen = post.json()["generation"]
+        assert gen["status"] == "generating"
+        assert gen["generation_id"]
+
+        # Drive the detached run to completion, then the digest is readable.
+        task = context.runtime._nl_generation_task
+        assert task is not None
+        await task
 
         get = await client.get("/api/telemetry/nl-insight", headers=_auth(token))
         assert get.status_code == 200
         body = get.json()
         assert body["available"] is True
         assert body["insight"]["prose"] == "Quiet week."
+        assert body["generation"]["status"] == "idle"
 
 
 async def test_nl_insight_get_reports_unavailable_before_first_generation(
@@ -447,7 +459,7 @@ async def test_nl_insight_get_reports_unavailable_before_first_generation(
     assert body["insight"] is None
 
 
-async def test_nl_insight_post_returns_409_on_generation_failure(
+async def test_nl_insight_post_failure_settles_status_to_failed(
     tmp_path: Path,
 ) -> None:
     settings = Settings(data_dir=tmp_path / "data", telemetry_enabled=True)
@@ -462,8 +474,21 @@ async def test_nl_insight_post_returns_409_on_generation_failure(
     context.runtime.run_oneshot = fake_run_oneshot
 
     async with _client(app) as client:
+        # Failure is no longer a POST 409 (the POST doesn't wait for the outcome);
+        # it surfaces via the status marker + settle signal.
         resp = await client.post("/api/telemetry/nl-insight", headers=_auth(token))
-    assert resp.status_code == 409
+        assert resp.status_code == 202
+
+        task = context.runtime._nl_generation_task
+        assert task is not None
+        await task
+
+        get = await client.get("/api/telemetry/nl-insight", headers=_auth(token))
+        body = get.json()
+        assert body["generation"]["status"] == "failed"
+        assert body["generation"]["error"]
+        # The prior digest (none here) is left intact.
+        assert body["insight"] is None
 
 
 def test_delete_publishes_debounced_telemetry_update(tmp_path: Path) -> None:

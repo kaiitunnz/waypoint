@@ -618,7 +618,8 @@ export interface SessionEnvelope {
     | "clipboard_copy"
     | "side_question"
     | "inbox_update"
-    | "telemetry_update";
+    | "telemetry_update"
+    | "nl_insight_status";
   payload: Record<string, unknown>;
 }
 
@@ -1069,13 +1070,38 @@ export interface NLInsight {
   instance_bullets?: NLInstanceBullet[];
 }
 
+// Server-owned regeneration lifecycle (CONTRACT-NL.md §5). Lets any client —
+// including one that did not initiate the run — reflect "Regenerating…"/failed.
+export type NLGenerationState = "idle" | "generating" | "failed";
+
+export interface NLGenerationStatus {
+  status: NLGenerationState;
+  generation_id: string | null;
+  requested_at: string | null;
+  range: TelemetryRange | null;
+  filters: TelemetryFilter | null;
+  error: string | null;
+  settled_at: string | null;
+}
+
 // GET /api/telemetry/nl-insight — the latest stored digest, its freshness,
-// and whether the feature is available at all (CONTRACT-NL.md §4).
+// whether the feature is available at all, and the current regeneration status
+// (CONTRACT-NL.md §4/§5).
 export interface NLInsightResponse {
   available: boolean;
   insight: NLInsight | null;
   // Whether the stored digest is still within the configured digest interval.
   fresh: boolean;
+  generation: NLGenerationStatus;
+}
+
+// POST /api/telemetry/nl-insight — 202 ack: the run is detached. `coalesced`
+// when the trigger matched an in-flight run; `requested_range_differs` when a
+// run over a different range/filters is already active (reject-with-reason).
+export interface NLGenerateAck {
+  generation: NLGenerationStatus;
+  coalesced: boolean;
+  requested_range_differs: boolean;
 }
 
 // ── Instance health & capacity (mirrors telemetry/instance) ───────────────

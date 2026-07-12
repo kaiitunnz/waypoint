@@ -32,6 +32,7 @@ from waypoint.telemetry.facts import (
     TurnFact,
     TurnKind,
 )
+from waypoint.telemetry.query import host_utc_offset_minutes
 
 
 def _build(tmp_path: Path) -> tuple[Any, str]:
@@ -105,6 +106,20 @@ async def test_overview_empty_instance_returns_zeros_not_error(tmp_path: Path) -
     assert body["sessions"]["active_now"] == 0
     assert body["tool_calls"] == 0
     assert "start" in body["range"] and "end" in body["range"] and "tz" in body["range"]
+
+
+async def test_range_echo_carries_numeric_utc_offset(tmp_path: Path) -> None:
+    # The frontend can't use ``tz`` (a tzname() abbreviation) as a JS timeZone,
+    # so the echo also carries a deterministic numeric offset (#10d).
+    app, token = _build(tmp_path)
+    async with _client(app) as client:
+        resp = await client.get(
+            "/api/telemetry/overview", params={"preset": "7d"}, headers=_auth(token)
+        )
+    assert resp.status_code == 200
+    rng = resp.json()["range"]
+    assert isinstance(rng["utc_offset_minutes"], int)
+    assert rng["utc_offset_minutes"] == host_utc_offset_minutes()
 
 
 async def test_custom_range_requires_both_start_and_end(tmp_path: Path) -> None:

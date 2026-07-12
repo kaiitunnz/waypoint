@@ -4,7 +4,7 @@ import logging
 import sqlite3
 import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -731,6 +731,27 @@ class Storage:
             "UPDATE sessions SET session_token_usage = ? WHERE id = ?",
             (json.dumps(blob), session_id),
         )
+
+    @_synchronized
+    def token_usage_records_for_sessions(
+        self, session_ids: Iterable[str]
+    ) -> list[dict[str, Any]]:
+        """Raw per-turn ledger rows for a set of sessions (telemetry token join).
+
+        Holds the shared connection lock so telemetry shapers can run under
+        ``asyncio.to_thread`` without the cross-thread ``sqlite3`` misuse a bare
+        ``connection.execute`` from the worker thread would risk.
+        """
+        ids = list(session_ids)
+        if not ids:
+            return []
+        placeholders = ", ".join("?" for _ in ids)
+        rows = self.connection.execute(
+            "SELECT session_id, source, record_id, usage_json "
+            f"FROM session_token_usage_records WHERE session_id IN ({placeholders})",
+            ids,
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     @_synchronized
     def rebuild_aggregate_from_ledger(

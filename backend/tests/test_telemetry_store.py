@@ -18,8 +18,6 @@ from waypoint.schemas import (
     SessionRecord,
     SessionSource,
     SessionStatus,
-    TokenUsageInit,
-    TokenUsageRecord,
 )
 from waypoint.storage import Storage
 from waypoint.telemetry.facts import (
@@ -216,20 +214,6 @@ def test_rollup_delta_matches_rebuild(tmp_path: Path) -> None:
         )
     )
 
-    # Agent turn backed by a ledger record — the rollup's token bucket joins
-    # back to session_token_usage_records, so seed the ledger first.
-    storage.record_token_usage(
-        "s1",
-        TokenUsageRecord(
-            record_id="turn-1",
-            source="codex",
-            observed_at=now,
-            totals={"input_tokens": 100, "output_tokens": 20},
-            display_total_tokens=120,
-            model="gpt-5-codex",
-        ),
-        init=TokenUsageInit(coverage="entire_waypoint_session", observed_from=now),
-    )
     # ``model_at_turn`` left unset so this fact stays in the same (model="")
     # rollup bucket as the other facts above — model-dimension splitting is
     # covered separately in test_rollup_splits_by_model.
@@ -260,15 +244,42 @@ def test_rollup_delta_matches_rebuild(tmp_path: Path) -> None:
     assert delta_metrics["turns_user"] == 1
     assert delta_metrics["turns_agent"] == 1
     assert delta_metrics["tool_calls"] == 1
-    assert delta_metrics["tool_outcomes"] == {"succeeded": 1}
     assert delta_metrics["lifecycle"] == {"created": 1, "running": 1}
-    assert delta_metrics["tokens"] == {"input_tokens": 100, "output_tokens": 20}
-    assert delta_metrics["display_total"] == 120
-    assert delta_metrics["active_denom"] == 1
+    # The rollup carries only these four read-by-production keys; the dead
+    # token/outcome/active_denom keys were dropped (#7).
+    assert set(delta_metrics) == {
+        "turns_user",
+        "turns_agent",
+        "tool_calls",
+        "lifecycle",
+    }
 
     storage.telemetry.rebuild_rollups_from_facts()
     rebuilt_metrics = _rollup_row(storage, day)
     assert rebuilt_metrics == delta_metrics
+
+
+def _table_exists(storage: Storage, name: str) -> bool:
+    row = storage.connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+    ).fetchone()
+    return row is not None
+
+
+def test_init_schema_drops_dead_rollup_session_table(tmp_path: Path) -> None:
+    # A database that predates #7 may still carry telemetry_rollup_session;
+    # re-running init_schema (every boot) must shed it.
+    storage = Storage(tmp_path / "db.sqlite")
+    assert not _table_exists(storage, "telemetry_rollup_session")
+
+    storage.connection.execute(
+        "CREATE TABLE telemetry_rollup_session (day TEXT PRIMARY KEY)"
+    )
+    storage.connection.commit()
+    assert _table_exists(storage, "telemetry_rollup_session")
+
+    storage.telemetry.init_schema()
+    assert not _table_exists(storage, "telemetry_rollup_session")
 
 
 def test_rollup_splits_by_model(tmp_path: Path) -> None:
@@ -385,7 +396,6 @@ def test_delete_session_cascades_without_touching_other_sessions(
 
     metrics = _require_rollup(storage, day)
     assert metrics["lifecycle"] == {"created": 1}
-    assert metrics["active_denom"] == 1
 
     # Session "b"'s transcript is untouched by "a"'s deletion.
     b_events = storage.list_events("b")

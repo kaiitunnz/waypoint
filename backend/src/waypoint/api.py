@@ -1097,9 +1097,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         rng, flt = parse_range_filter(request, context.settings)
-        return telemetry_aggregate.build_overview(
-            context.storage, context.settings, rng, flt
-        ).model_dump(mode="json")
+        overview = await asyncio.to_thread(
+            telemetry_aggregate.build_overview,
+            context.storage,
+            context.settings,
+            rng,
+            flt,
+        )
+        return overview.model_dump(mode="json")
 
     @app.get("/api/telemetry/tokens")
     async def telemetry_tokens(
@@ -1108,9 +1113,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         group_by: Annotated[TokenGroupBy, Query()] = "time",
     ) -> Any:
         rng, flt = parse_range_filter(request, context.settings)
-        return telemetry_aggregate.build_tokens(
-            context.storage, rng, flt, group_by
-        ).model_dump(mode="json")
+        tokens = await asyncio.to_thread(
+            telemetry_aggregate.build_tokens, context.storage, rng, flt, group_by
+        )
+        return tokens.model_dump(mode="json")
 
     @app.get("/api/telemetry/activity")
     async def telemetry_activity(
@@ -1118,9 +1124,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         rng, flt = parse_range_filter(request, context.settings)
-        return telemetry_aggregate.build_activity(context.storage, rng, flt).model_dump(
-            mode="json"
+        activity = await asyncio.to_thread(
+            telemetry_aggregate.build_activity, context.storage, rng, flt
         )
+        return activity.model_dump(mode="json")
 
     @app.get("/api/telemetry/health")
     async def telemetry_health(
@@ -1128,9 +1135,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         rng, flt = parse_range_filter(request, context.settings)
-        return telemetry_aggregate.build_health(
-            context.storage, context.settings, rng, flt
-        ).model_dump(mode="json")
+        health = await asyncio.to_thread(
+            telemetry_aggregate.build_health,
+            context.storage,
+            context.settings,
+            rng,
+            flt,
+        )
+        return health.model_dump(mode="json")
 
     @app.get("/api/telemetry/drilldown")
     async def telemetry_drilldown(
@@ -1141,9 +1153,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         page_size: Annotated[int, Query(ge=1, le=200)] = 20,
     ) -> Any:
         rng, flt = parse_range_filter(request, context.settings)
-        return telemetry_aggregate.build_drilldown(
-            context.storage, rng, flt, kind, page, page_size
-        ).model_dump(mode="json")
+        drilldown = await asyncio.to_thread(
+            telemetry_aggregate.build_drilldown,
+            context.storage,
+            rng,
+            flt,
+            kind,
+            page,
+            page_size,
+        )
+        return drilldown.model_dump(mode="json")
 
     @app.get("/api/telemetry/insights")
     async def telemetry_insights_list(
@@ -1151,8 +1170,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         rng, flt = parse_range_filter(request, context.settings)
-        insights = telemetry_insights.compute_insights(
-            context.storage, context.settings, rng, flt
+        insights = await asyncio.to_thread(
+            telemetry_insights.compute_insights,
+            context.storage,
+            context.settings,
+            rng,
+            flt,
         )
         return TelemetryInsightsResponse(insights=insights).model_dump(mode="json")
 
@@ -1180,7 +1203,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def telemetry_delete(
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
-        result = telemetry_aggregate.delete_all(context.storage)
+        result = await asyncio.to_thread(
+            telemetry_aggregate.delete_all, context.storage
+        )
         context.runtime.mark_telemetry_dirty()
         return result.model_dump(mode="json")
 

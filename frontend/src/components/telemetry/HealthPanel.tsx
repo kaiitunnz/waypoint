@@ -221,7 +221,7 @@ export function HealthPanel({ health, loading }: HealthPanelProps) {
 
   return (
     <>
-      <section className="panel tm-chart-card" aria-labelledby={contextTitleId}>
+      <section id="tm-health-anchor" className="panel tm-chart-card" aria-labelledby={contextTitleId}>
         <header className="tm-chart-head">
           <h3 id={contextTitleId}>Context health</h3>
         </header>

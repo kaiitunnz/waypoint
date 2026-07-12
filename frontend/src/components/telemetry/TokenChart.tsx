@@ -156,7 +156,7 @@ export function TokenChart({ tokens, loading, groupBy, onGroupByChange }: TokenC
   const plotH = CHART_H - PAD_TOP - PAD_BOTTOM;
 
   return (
-    <section className="panel tm-chart-card" aria-labelledby={titleId}>
+    <section id="tm-tokens-anchor" className="panel tm-chart-card" aria-labelledby={titleId}>
       <header className="tm-chart-head">
         <h3 id={titleId}>Token usage</h3>
         <label className="tm-chart-select-label">

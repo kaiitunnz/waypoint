@@ -3,11 +3,10 @@
 Analogous to ``usage_dashboard.py`` but reading the telemetry fact/rollup
 tables instead of live session snapshots. Token totals are computed by
 walking ``AGENT`` ``TurnFact`` rows and joining back to the per-turn ledger
-(``session_token_usage_records``) exactly like ``TelemetryStore``'s own
-rollup recompute does (``_agent_turn_tokens``) — the rollup itself doesn't
-persist enough detail (which individual turns lacked a ledger match) to
-derive meter coverage, so the fact-level walk is authoritative here and also
-naturally supports the arbitrary (non-day-aligned) windows insights compare.
+(``session_token_usage_records``); the daily rollup deliberately carries no
+token detail, so this fact-level walk is the authoritative token source and
+also naturally supports the arbitrary (non-day-aligned) windows insights
+compare.
 
 Coverage vocabulary (``entire``/``tracked_since``/``partial``): ``entire``
 when every matching agent turn has a ledger record (or there are none to
@@ -141,12 +140,7 @@ def ledger_rows_for_sessions(
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
     if not session_ids:
         return {}
-    placeholders = ", ".join("?" for _ in session_ids)
-    rows = storage.connection.execute(
-        "SELECT session_id, source, record_id, usage_json "
-        f"FROM session_token_usage_records WHERE session_id IN ({placeholders})",
-        list(session_ids),
-    ).fetchall()
+    rows = storage.token_usage_records_for_sessions(session_ids)
     ledger: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in rows:
         try:
@@ -972,8 +966,7 @@ def delete_all(storage: Storage) -> TelemetryDeleteResponse:
     removed = storage.telemetry.prune(
         facts_before=far_future, rollups_before=far_future
     )
-    storage.connection.execute("DELETE FROM telemetry_insight_dismissal")
-    storage.connection.commit()
+    storage.telemetry.clear_insight_dismissals()
     storage.telemetry.clear_nl_insight()
     return TelemetryDeleteResponse(
         removed=TelemetryDeleteCounts(

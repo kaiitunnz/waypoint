@@ -156,17 +156,11 @@ class TelemetryStore:
                 );
                 CREATE TABLE IF NOT EXISTS telemetry_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 
-                -- Internal bookkeeping (not part of the frozen contract's public
-                -- tables): dedupes which sessions contributed to a rollup key so
-                -- ``active_denom`` is an exact distinct count rather than an
-                -- estimate, and survives partial recomputation.
-                CREATE TABLE IF NOT EXISTS telemetry_rollup_session (
-                  day TEXT NOT NULL, backend TEXT NOT NULL, model TEXT NOT NULL,
-                  repo_name TEXT NOT NULL, src_source TEXT NOT NULL,
-                  transport TEXT NOT NULL, is_child INTEGER NOT NULL,
-                  session_id TEXT NOT NULL,
-                  PRIMARY KEY (day, backend, model, repo_name, src_source, transport, is_child, session_id)
-                );
+                -- ``telemetry_rollup_session`` backed a since-removed
+                -- ``active_denom`` metric that no reader consumed; drop it on
+                -- every boot so existing on-disk databases shed it (no
+                -- migration framework — this idempotent DROP is the shedder).
+                DROP TABLE IF EXISTS telemetry_rollup_session;
                 """)
             self._ensure_column("account_label", "TEXT")
             self._ensure_column("profile_label", "TEXT")
@@ -296,16 +290,12 @@ class TelemetryStore:
                 "DELETE FROM telemetry_daily_rollup WHERE day < ?", (rollups_cutoff,)
             )
             rollups_removed = cursor.rowcount or 0
-            self._conn.execute(
-                "DELETE FROM telemetry_rollup_session WHERE day < ?", (rollups_cutoff,)
-            )
             self._conn.commit()
             return {"facts": facts_removed, "rollups": rollups_removed}
 
     def rebuild_rollups_from_facts(self) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM telemetry_daily_rollup")
-            self._conn.execute("DELETE FROM telemetry_rollup_session")
             rows = self._conn.execute("""
                 SELECT DISTINCT backend, COALESCE(model_at_turn, '') AS model,
                        COALESCE(repo_name, '') AS repo_name, src_source, transport, is_child,
@@ -418,7 +408,7 @@ class TelemetryStore:
         start_utc, end_utc = _day_bounds_utc(day)
         rows = self._conn.execute(
             """
-            SELECT kind, turn_kind, transition, tool_name, outcome, session_id, source, fact_id
+            SELECT kind, turn_kind, transition
             FROM telemetry_facts
             WHERE backend = ? AND COALESCE(model_at_turn, '') = ? AND COALESCE(repo_name, '') = ?
               AND src_source = ? AND transport = ? AND is_child = ? AND partial = 0
@@ -436,14 +426,6 @@ class TelemetryStore:
             ),
         ).fetchall()
 
-        self._conn.execute(
-            """
-            DELETE FROM telemetry_rollup_session
-            WHERE day = ? AND backend = ? AND model = ? AND repo_name = ?
-              AND src_source = ? AND transport = ? AND is_child = ?
-            """,
-            (day, backend, model, repo_name, src_source, transport, is_child),
-        )
         if not rows:
             self._conn.execute(
                 """
@@ -458,14 +440,9 @@ class TelemetryStore:
         turns_user = 0
         turns_agent = 0
         tool_calls = 0
-        tool_outcomes: dict[str, int] = {}
         lifecycle: dict[str, int] = {}
-        tokens: dict[str, int] = {}
-        display_totals: list[int | None] = []
-        session_ids: set[str] = set()
 
         for row in rows:
-            session_ids.add(row["session_id"])
             kind = row["kind"]
             if kind == TelemetryFactKind.SESSION_LIFECYCLE:
                 lifecycle[row["transition"]] = lifecycle.get(row["transition"], 0) + 1
@@ -474,53 +451,14 @@ class TelemetryStore:
                     turns_user += 1
                 elif row["turn_kind"] == TurnKind.AGENT:
                     turns_agent += 1
-                    ledger = self._agent_turn_tokens(
-                        row["session_id"], row["source"], row["fact_id"]
-                    )
-                    if ledger is None:
-                        display_totals.append(None)
-                    else:
-                        totals, display_total = ledger
-                        for category, amount in totals.items():
-                            tokens[category] = tokens.get(category, 0) + amount
-                        display_totals.append(display_total)
             elif kind == TelemetryFactKind.TOOL_CALL:
                 tool_calls += 1
-                tool_outcomes[row["outcome"]] = tool_outcomes.get(row["outcome"], 0) + 1
 
-        for session_id in session_ids:
-            self._conn.execute(
-                """
-                INSERT OR IGNORE INTO telemetry_rollup_session
-                    (day, backend, model, repo_name, src_source, transport, is_child, session_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    day,
-                    backend,
-                    model,
-                    repo_name,
-                    src_source,
-                    transport,
-                    is_child,
-                    session_id,
-                ),
-            )
-
-        display_total = (
-            sum(d for d in display_totals if d is not None)
-            if display_totals and all(d is not None for d in display_totals)
-            else None
-        )
         metrics = {
-            "tokens": tokens,
-            "display_total": display_total,
             "turns_user": turns_user,
             "turns_agent": turns_agent,
             "tool_calls": tool_calls,
-            "tool_outcomes": tool_outcomes,
             "lifecycle": lifecycle,
-            "active_denom": len(session_ids),
         }
         self._conn.execute(
             """
@@ -541,38 +479,6 @@ class TelemetryStore:
                 json.dumps(metrics),
             ),
         )
-
-    def _agent_turn_tokens(
-        self, session_id: str, source: str, fact_id: str
-    ) -> tuple[dict[str, int], int | None] | None:
-        """Look up the per-turn token ledger row an AGENT ``TurnFact`` derives from.
-
-        The ledger (``session_token_usage_records``) is the source of truth for
-        token amounts (plan §2.1: "reuse the existing ledger... do not
-        duplicate it"); facts carry no token columns of their own, so the
-        rollup's token bucket joins back to it by the shared ``record_id``.
-        """
-        row = self._conn.execute(
-            """
-            SELECT usage_json FROM session_token_usage_records
-            WHERE session_id = ? AND source = ? AND record_id = ?
-            """,
-            (session_id, source, fact_id),
-        ).fetchone()
-        if row is None:
-            return None
-        try:
-            usage = json.loads(row["usage_json"])
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(usage, dict):
-            return None
-        raw_totals = usage.get("totals") or {}
-        totals = {
-            str(k): int(v) for k, v in raw_totals.items() if isinstance(v, int | float)
-        }
-        display_total = usage.get("display_total_tokens")
-        return totals, display_total if isinstance(display_total, int) else None
 
     # ── queries ───────────────────────────────────────────────────────────
 
@@ -692,6 +598,31 @@ class TelemetryStore:
                 (range_key,),
             ).fetchall()
             return {row["signature"] for row in rows}
+
+    def clear_insight_dismissals(self) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM telemetry_insight_dismissal")
+            self._conn.commit()
+
+    def latest_lifecycle_transitions(self) -> dict[str, str]:
+        """The most recent lifecycle transition per session (by ``occurred_at``).
+
+        Seeds the ingester's in-memory transition dedup at startup so the first
+        status event for a known session after a restart doesn't re-mint a
+        transition fact already persisted (a fresh event sequence yields a new
+        ``fact_id`` that dodges the store's PK dedup).
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT session_id, transition FROM telemetry_facts
+                WHERE kind = ? AND transition IS NOT NULL
+                ORDER BY occurred_at ASC
+                """,
+                (TelemetryFactKind.SESSION_LIFECYCLE,),
+            ).fetchall()
+            # Ascending scan, last write wins → the newest transition per session.
+            return {row["session_id"]: row["transition"] for row in rows}
 
     def _descendant_session_ids(self, root_id: str) -> set[str]:
         """Every transitive descendant of ``root_id`` (excluding ``root_id`` itself).

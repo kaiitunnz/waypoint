@@ -17,7 +17,7 @@ import hashlib
 import json
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any
@@ -152,9 +152,14 @@ class TelemetryIngester:
         *,
         batch_size: int = 200,
         drain_debounce_seconds: float = 1.0,
+        on_persisted: Callable[[], None] | None = None,
     ) -> None:
         self._storage = storage
         self._store = storage.telemetry
+        # Fired after a batch is actually persisted, so the runtime's
+        # telemetry_update broadcast can only announce facts already stored —
+        # never a burst that a slow drain hasn't written yet.
+        self._on_persisted = on_persisted
         # Backend-plugin lookup for resolving a rate-limit snapshot's account
         # when the session has no verified probe (``resolve_account``). Only
         # ``None`` in tests that don't exercise that fallback; the runtime
@@ -486,9 +491,21 @@ class TelemetryIngester:
 
     async def start(self) -> None:
         if self._task is None:
+            self._seed_last_transitions()
             self._task = asyncio.create_task(
                 self._drain_loop(), name="telemetry-ingest-drain"
             )
+
+    def _seed_last_transitions(self) -> None:
+        """Rehydrate the in-memory transition dedup from persisted facts (#10b)."""
+        try:
+            persisted = self._store.latest_lifecycle_transitions()
+        except Exception:
+            log.debug("telemetry last-transition seed failed", exc_info=True)
+            return
+        for session_id, transition in persisted.items():
+            with suppress(ValueError):
+                self._last_transition[session_id] = LifecycleTransition(transition)
 
     async def stop(self) -> None:
         if self._task is not None:
@@ -529,6 +546,9 @@ class TelemetryIngester:
             self._store.ingest_facts(batch)
         except Exception:
             log.debug("telemetry drain batch failed", exc_info=True)
+            return
+        if self._on_persisted is not None:
+            self._on_persisted()
 
     # ── backfill (one-shot, off the hot path) ───────────────────────────────
 

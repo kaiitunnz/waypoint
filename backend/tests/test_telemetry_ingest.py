@@ -965,3 +965,67 @@ def test_start_stop_drains_queued_facts(tmp_path: Path) -> None:
         await ingester.stop()
 
     asyncio.run(_run())
+
+
+def test_on_persisted_fires_only_after_the_batch_is_drained(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1")
+    # Record the persisted fact count at the moment the callback fires, to
+    # prove the dirty signal (broadcast trigger, #10a) can only reflect
+    # already-stored facts — never a still-queued enqueue.
+    persisted_counts: list[int] = []
+    ingester = TelemetryIngester(
+        storage,
+        on_persisted=lambda: persisted_counts.append(len(_facts(storage, "s1"))),
+    )
+
+    ingester.derive_from_session_created(session)
+    assert persisted_counts == []  # enqueue alone must not signal
+    assert _facts(storage, "s1") == []
+
+    ingester._drain_available()
+    assert persisted_counts == [1]  # signalled once, after the fact was stored
+
+
+def test_seed_last_transitions_dedups_across_restart(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1")
+    now = datetime.now(UTC)
+
+    first = TelemetryIngester(storage)
+    first.derive_from_event(
+        session,
+        EventRecord(
+            session_id="s1",
+            ts=now,
+            kind=EventKind.SYSTEM_NOTE,
+            text="a",
+            metadata={"status": SessionStatus.IDLE},
+            sequence=5,
+        ),
+    )
+    first._drain_available()
+    before = [r for r in _facts(storage, "s1") if r["kind"] == "session_lifecycle"]
+    assert len(before) == 1
+
+    # A fresh ingester models a process restart: without seeding, the next
+    # IDLE event (new sequence → new fact_id) would dodge the store's PK dedup
+    # and re-mint a duplicate transition (#10b).
+    second = TelemetryIngester(storage)
+    second._seed_last_transitions()
+    second.derive_from_event(
+        session,
+        EventRecord(
+            session_id="s1",
+            ts=now,
+            kind=EventKind.SYSTEM_NOTE,
+            text="b",
+            metadata={"status": SessionStatus.IDLE},
+            sequence=9,
+        ),
+    )
+    second._drain_available()
+
+    after = [r for r in _facts(storage, "s1") if r["kind"] == "session_lifecycle"]
+    assert len(after) == 1
+    assert after[0]["fact_id"] == "s1:5"

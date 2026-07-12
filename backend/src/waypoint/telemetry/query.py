@@ -8,6 +8,7 @@ rollup buckets ``TelemetryStore`` maintains (both derive the calendar day the
 same way), rather than drifting apart under two independent tz calculations.
 """
 
+import calendar
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, Request, status
@@ -28,6 +29,33 @@ def host_tz_name() -> str:
     against the same local system tz via naive ``astimezone()``.
     """
     return datetime.now().astimezone().tzname() or "UTC"
+
+
+def host_utc_offset_minutes() -> int:
+    """The host's current UTC offset in minutes east of UTC (e.g. Singapore = 480).
+
+    A deterministic numeric companion to ``host_tz_name()`` (a ``tzname()``
+    abbreviation that isn't a valid JS ``timeZone``): the frontend shifts each
+    range instant by this offset and formats in UTC so the rendered calendar
+    day matches the host-tz day the range actually covers.
+    """
+    offset = datetime.now().astimezone().utcoffset()
+    return round(offset.total_seconds() / 60) if offset is not None else 0
+
+
+def subtract_calendar_months(moment: datetime, months: int) -> datetime:
+    """``moment`` shifted back ``months`` calendar months, clamping the day.
+
+    Calendar-correct rollup retention: a naive ``months * 31`` days
+    over-retains (it treats every month as its longest). Clamps the
+    day-of-month so e.g. Mar 31 minus one month is Feb 28/29, never an invalid
+    date.
+    """
+    month_index = moment.year * 12 + (moment.month - 1) - months
+    year, month_zero = divmod(month_index, 12)
+    month = month_zero + 1
+    last_day = calendar.monthrange(year, month)[1]
+    return moment.replace(year=year, month=month, day=min(moment.day, last_day))
 
 
 def _parse_bool(raw: str | None, *, default: bool) -> bool:
@@ -75,7 +103,10 @@ def resolve_preset_range(preset: str, tz: str) -> TelemetryRange:
     else:  # pragma: no cover - guarded by the caller
         raise ValueError(preset)
     return TelemetryRange(
-        start=datetime.fromisoformat(start), end=datetime.fromisoformat(end), tz=tz
+        start=datetime.fromisoformat(start),
+        end=datetime.fromisoformat(end),
+        tz=tz,
+        utc_offset_minutes=host_utc_offset_minutes(),
     )
 
 
@@ -118,7 +149,9 @@ def parse_range_filter(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="'end' must be after 'start'",
             )
-        rng = TelemetryRange(start=start, end=end, tz=tz)
+        rng = TelemetryRange(
+            start=start, end=end, tz=tz, utc_offset_minutes=host_utc_offset_minutes()
+        )
     else:
         rng = resolve_preset_range("7d", tz)
 

@@ -242,12 +242,17 @@ class TelemetryRange(BaseModel):
 
     Interpreted in the displayed Waypoint-host timezone with an inclusive
     ``start`` and exclusive ``end`` instant (Appendix: Date range). ``tz`` is the
-    IANA name the host is configured with and is echoed back so the UI can show it.
+    host tz's abbreviated name (``tzname()``) echoed back as a human label;
+    ``utc_offset_minutes`` is the deterministic numeric offset (minutes east of
+    UTC) the UI uses to render the correct host-tz calendar day, since ``tz`` is
+    not a valid JS ``timeZone``. Defaults to ``0`` (UTC) for ranges constructed
+    outside the request path.
     """
 
     start: datetime
     end: datetime
     tz: str
+    utc_offset_minutes: int = 0
 
 
 class TelemetryFilter(BaseModel):

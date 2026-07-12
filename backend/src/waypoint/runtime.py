@@ -108,7 +108,11 @@ from waypoint.storage import Storage
 from waypoint.telemetry.facts import TelemetryFilter, TelemetryRange
 from waypoint.telemetry.ingest import TelemetryIngester
 from waypoint.telemetry.nl import NLInsight
-from waypoint.telemetry.query import host_tz_name, resolve_preset_range
+from waypoint.telemetry.query import (
+    host_tz_name,
+    resolve_preset_range,
+    subtract_calendar_months,
+)
 from waypoint.telemetry.summarizer import CodingAgentSummarizer, build_nl_request
 from waypoint.transports import TransportAdapter
 
@@ -398,7 +402,9 @@ class SessionRuntime:
         # snapshot's account via a plugin's ``rate_limit_account`` for
         # sessions with no verified-account probe (CC, profile-less Codex).
         self.telemetry_ingester: TelemetryIngester | None = (
-            TelemetryIngester(storage, self.registry)
+            TelemetryIngester(
+                storage, self.registry, on_persisted=self.mark_telemetry_dirty
+            )
             if settings.telemetry_enabled
             else None
         )
@@ -4038,7 +4044,6 @@ class SessionRuntime:
             "context_usage" in updates or "rate_limit_usage" in updates
         ):
             self.telemetry_ingester.derive_from_session_update(session, updates)
-            self.mark_telemetry_dirty()
         if publish:
             self._publish_session_state(session_id)
         return session
@@ -4111,7 +4116,6 @@ class SessionRuntime:
             return
         if self.telemetry_ingester is not None:
             self.telemetry_ingester.derive_from_token_record(session, record)
-            self.mark_telemetry_dirty()
         if publish:
             self._publish_session_state(session_id)
 
@@ -4178,7 +4182,6 @@ class SessionRuntime:
             self._telemetry_created_seen.add(session.id)
             ingester.derive_from_session_created(session)
         ingester.derive_from_event(session, event)
-        self.mark_telemetry_dirty()
 
     def _publish_session_state(self, session_id: str) -> None:
         # Streaming hot path: mark the session dirty and let the debounced
@@ -4259,8 +4262,8 @@ class SessionRuntime:
                 facts_before = now - timedelta(
                     days=self.settings.telemetry_retention_days
                 )
-                rollups_before = now - timedelta(
-                    days=self.settings.telemetry_rollup_retention_months * 31
+                rollups_before = subtract_calendar_months(
+                    now, self.settings.telemetry_rollup_retention_months
                 )
                 self.storage.telemetry.prune(
                     facts_before=facts_before, rollups_before=rollups_before

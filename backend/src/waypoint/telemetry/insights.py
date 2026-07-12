@@ -124,7 +124,12 @@ def _token_volume_change_insight(
     storage: Storage, rng: TelemetryRange, flt: TelemetryFilter
 ) -> Insight | None:
     duration = rng.end - rng.start
-    previous_rng = TelemetryRange(start=rng.start - duration, end=rng.start, tz=rng.tz)
+    previous_rng = TelemetryRange(
+        start=rng.start - duration,
+        end=rng.start,
+        tz=rng.tz,
+        utc_offset_minutes=rng.utc_offset_minutes,
+    )
 
     current_rows = agent_turn_rows(storage, rng, flt)
     previous_rows = agent_turn_rows(storage, previous_rng, flt)

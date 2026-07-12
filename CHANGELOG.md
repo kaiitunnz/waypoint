@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/kaiitunnz/waypoint/compare/v0.8.2...v0.9.0) (2026-07-12)
+
+
+### Features
+
+* add opt-in natural-language telemetry insights ([#289](https://github.com/kaiitunnz/waypoint/issues/289)) ([bbe8e9e](https://github.com/kaiitunnz/waypoint/commit/bbe8e9e22b42053474d5cd4b2f072af61a8200a8))
+* add the AI usage telemetry dashboard ([#288](https://github.com/kaiitunnz/waypoint/issues/288)) ([4c00f16](https://github.com/kaiitunnz/waypoint/commit/4c00f16369b4ce3c62b7b113b516453210028c91))
+
 ## [0.8.2](https://github.com/kaiitunnz/waypoint/compare/v0.8.1...v0.8.2) (2026-07-11)
 
 

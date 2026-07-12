@@ -32,13 +32,28 @@ class NLInsightEvidence(BaseModel):
     click_through: dict[str, Any] = Field(default_factory=dict)
 
 
+class NLInstanceBullet(BaseModel):
+    """A server-rendered instance health/capacity digest bullet (CONTRACT §FR-5).
+
+    Unlike ``prose``, instance bullets are never free-form model text: the model
+    selects a fixed claim template + allowlisted evidence ids, and the server
+    fills the numbers and renders ``text`` itself. ``template_id`` records which
+    claim was rendered so it stays auditable.
+    """
+
+    text: str
+    template_id: str
+    evidence: list[NLInsightEvidence] = Field(default_factory=list)
+
+
 class NLInsight(BaseModel):
     """A generated natural-language digest over a range/filter.
 
     ``prose`` is the human-readable summary; every material claim it makes must
     also appear in ``evidence`` linked to its aggregate. ``confidence`` and the
     ``disclaimer`` keep it honest — an NL digest is an inference over measured
-    facts, never itself a measured outcome.
+    facts, never itself a measured outcome. ``instance_bullets`` carries the
+    server-rendered instance health/capacity claims (never free-form prose).
     """
 
     prose: str
@@ -50,6 +65,7 @@ class NLInsight(BaseModel):
     source_backend: str
     source_model: str | None = None
     disclaimer: str
+    instance_bullets: list[NLInstanceBullet] = Field(default_factory=list)
 
 
 class NLInsightRequest(BaseModel):

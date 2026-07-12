@@ -108,7 +108,9 @@ from waypoint.storage import Storage
 from waypoint.telemetry.facts import TelemetryFilter, TelemetryRange
 from waypoint.telemetry.ingest import TelemetryIngester
 from waypoint.telemetry.instance import service as instance_service
-from waypoint.telemetry.nl import NLInsight
+from waypoint.telemetry.instance.model import DataQuality as InstanceDataQuality
+from waypoint.telemetry.instance.nl import build_instance_nl_aggregate
+from waypoint.telemetry.nl import NLInsight, NLInstanceBullet
 from waypoint.telemetry.query import (
     host_tz_name,
     resolve_preset_range,
@@ -4406,9 +4408,30 @@ class SessionRuntime:
         summarizer = CodingAgentSummarizer(self, self.settings)
         insight = await summarizer.summarize(request)
         if insight is not None:
+            insight.instance_bullets = await self._generate_instance_bullets(summarizer)
             self.storage.telemetry.set_nl_insight(insight.model_dump_json())
             self.mark_telemetry_dirty()
         return insight
+
+    async def _generate_instance_bullets(
+        self, summarizer: "CodingAgentSummarizer"
+    ) -> list[NLInstanceBullet]:
+        """Server-rendered instance bullets via the prose-free instance call.
+
+        Best-effort: an unavailable snapshot or a failed selection yields no
+        bullets rather than an ungrounded claim.
+        """
+        try:
+            result = await asyncio.to_thread(
+                instance_service.build_instance, self.storage, self.settings
+            )
+            if result.snapshot.data_quality == InstanceDataQuality.UNAVAILABLE:
+                return []
+            aggregate = build_instance_nl_aggregate(result.snapshot, result.insights)
+            return await summarizer.summarize_instance(aggregate)
+        except Exception:
+            log.debug("instance NL bullet generation failed", exc_info=True)
+            return []
 
     async def _session_broadcast_loop(self) -> None:
         while True:

@@ -124,7 +124,9 @@ async def test_maybe_generate_nl_digest_regenerates_when_stale(tmp_path: Path) -
 
     assert result is not None
     assert result.prose == "fresh digest"
-    assert len(calls) == 1
+    # Two one-shot calls: the usage-prose digest plus the separate prose-free
+    # instance health/capacity selection call (PRD FR-5).
+    assert len(calls) == 2
     stored = storage.telemetry.get_nl_insight()
     assert stored is not None
     assert NLInsight.model_validate_json(stored).prose == "fresh digest"

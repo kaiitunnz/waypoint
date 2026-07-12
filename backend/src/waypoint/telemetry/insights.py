@@ -134,8 +134,8 @@ def _token_volume_change_insight(
         | {row["session_id"] for row in previous_rows},
     )
 
-    cur_totals, cur_display, cur_tracked, cur_total = fold_tokens(current_rows, ledger)
-    prev_totals, prev_display, prev_tracked, prev_total = fold_tokens(
+    _cur_totals, cur_display, cur_tracked, cur_total = fold_tokens(current_rows, ledger)
+    _prev_totals, prev_display, prev_tracked, prev_total = fold_tokens(
         previous_rows, ledger
     )
 
@@ -149,8 +149,8 @@ def _token_volume_change_insight(
     ):
         return None
 
-    current_total = grand_total(cur_totals, cur_display)
-    previous_total = grand_total(prev_totals, prev_display)
+    current_total = grand_total(cur_display)
+    previous_total = grand_total(prev_display)
     diff = current_total - previous_total
     if abs(diff) < _VOLUME_CHANGE_MIN_TOKENS:
         return None

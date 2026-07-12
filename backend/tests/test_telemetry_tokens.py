@@ -87,3 +87,26 @@ def test_unify_tokens_missing_fields_default_to_zero() -> None:
 def test_unify_tokens_unknown_source_falls_back_to_disjoint_native() -> None:
     raw = {"input_tokens": 5, "output_tokens": 7}
     assert unify_tokens("some_future_backend", raw) == unify_tokens("claude_code", raw)
+
+
+def test_unify_tokens_clamps_negative_codex_subtractions() -> None:
+    # A malformed provider payload where the "cached"/"reasoning" subsets exceed
+    # their declared totals must never push a bucket negative and silently
+    # reduce every downstream sum.
+    raw = {
+        "input_tokens": 20,
+        "cached_input_tokens": 50,
+        "output_tokens": 10,
+        "reasoning_output_tokens": 40,
+    }
+    unified = unify_tokens("codex", raw)
+    assert unified["fresh_input"] == 0
+    assert unified["output"] == 0
+    assert all(amount >= 0 for amount in unified.values())
+
+
+def test_unify_tokens_clamps_negative_opencode_reasoning() -> None:
+    raw = {"input_tokens": 15, "output_tokens": 5, "reasoning_tokens": 30}
+    unified = unify_tokens("opencode", raw)
+    assert unified["output"] == 0
+    assert all(amount >= 0 for amount in unified.values())

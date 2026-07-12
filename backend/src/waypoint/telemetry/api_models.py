@@ -24,11 +24,12 @@ InsightSeverity = Literal["info", "warning", "critical"]
 
 class TokenTotals(BaseModel):
     totals: dict[str, int] = Field(default_factory=dict)
-    # Only present when every contributing row supplied a safe, backend-declared
-    # display total (CONTRACT.md §4: categories must not otherwise be summed).
-    # New-work total only (fresh input + cache write + output + reasoning) —
-    # cache reads are excluded (same prior context re-sent every turn, not new
-    # work) and reported standalone via ``cached_read_tokens`` instead.
+    # New-work total (fresh input + cache write + output + reasoning) — cache
+    # reads are excluded (same prior context re-sent every turn, not new work)
+    # and reported standalone via ``cached_read_tokens`` instead. Always safe to
+    # sum: ``unify_tokens`` folds every backend onto disjoint buckets, so this
+    # is always populated (the ``int | None`` type is retained only for wire
+    # stability, never null in practice).
     display_total: int | None = None
     # Standalone cache-read total, already folded into ``totals["cache_read"]``
     # but broken out here so the UI can show it distinct from — never added to

@@ -160,7 +160,7 @@ def ledger_rows_for_sessions(
 
 def fold_tokens(
     rows: list[dict[str, Any]], ledger: dict[tuple[str, str, str], dict[str, Any]]
-) -> tuple[dict[str, int], int | None, int, int]:
+) -> tuple[dict[str, int], int, int, int]:
     """Fold a set of AGENT ``TurnFact`` rows into ``(totals, display_total, tracked, total)``.
 
     Each tracked row's raw ledger totals are mapped through
@@ -191,14 +191,15 @@ def fold_tokens(
     return totals, display_total, tracked, len(rows)
 
 
-def grand_total(totals: dict[str, int], display_total: int | None) -> int:
+def grand_total(display_total: int) -> int:
     """A single comparable token quantity for insight gating (CONTRACT.md §4/§7).
 
-    ``display_total`` (``fold_tokens``'s new-work-only sum, ``cache_read``
-    excluded) is always the safe grand total now; the ``None`` branch is dead
-    but kept so ``TokenTotals.display_total``'s optional type still type-checks.
+    Identity today: ``display_total`` (``fold_tokens``'s new-work-only sum,
+    ``cache_read`` excluded) is always the safe grand total. Kept as a named
+    seam so insight gating has one place to change if the definition ever
+    diverges from ``display_total``.
     """
-    return display_total if display_total is not None else sum(totals.values())
+    return display_total
 
 
 def coverage_label(
@@ -469,8 +470,13 @@ def _count_active_sessions_historical(
     as_of_range = TelemetryRange(
         start=ALL_TIME_RANGE.start, end=at, tz=ALL_TIME_RANGE.tz
     )
+    # Lifecycle facts carry no ``model_at_turn`` (liveness isn't per-turn
+    # model-attributable), so active-now is deliberately model-filter-
+    # independent in both paths — the live path already ignores model. Keeping
+    # the model clause here would exclude every lifecycle row and always yield 0.
+    lifecycle_flt = flt.model_copy(update={"models": []})
     rows = storage.telemetry.query_facts(
-        TelemetryFactKind.SESSION_LIFECYCLE, as_of_range, flt
+        TelemetryFactKind.SESSION_LIFECYCLE, as_of_range, lifecycle_flt
     )
     latest: dict[str, dict[str, Any]] = {}
     for row in rows:

@@ -385,6 +385,7 @@ class SessionRuntime:
         # re-enqueueing on every subsequent event).
         self._telemetry_created_seen: set[str] = set()
         self._telemetry_maintenance_task: asyncio.Task[None] | None = None
+        self._telemetry_backfill_task: asyncio.Task[None] | None = None
         # Id of the personal-assistant singleton, populated by
         # ``_ensure_assistant_session`` during ``start``. ``None`` when the
         # assistant is disabled or its bootstrap failed.
@@ -424,7 +425,7 @@ class SessionRuntime:
             await self.telemetry_ingester.start()
             # Backfill and pruning run off the boot path so a large history
             # never delays startup or blocks a turn.
-            asyncio.create_task(
+            self._telemetry_backfill_task = asyncio.create_task(
                 self._run_telemetry_backfill(), name="telemetry-backfill"
             )
             self._telemetry_maintenance_task = asyncio.create_task(
@@ -478,6 +479,11 @@ class SessionRuntime:
 
     async def stop(self) -> None:
         await self.scheduler.stop()
+        if self._telemetry_backfill_task is not None:
+            self._telemetry_backfill_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._telemetry_backfill_task
+            self._telemetry_backfill_task = None
         if self._telemetry_maintenance_task is not None:
             self._telemetry_maintenance_task.cancel()
             with suppress(asyncio.CancelledError):

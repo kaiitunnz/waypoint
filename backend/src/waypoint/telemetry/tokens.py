@@ -47,10 +47,10 @@ def unify_tokens(source: str, raw_totals: dict[str, int]) -> dict[str, int]:
         output_total = _amount(raw_totals, "output_tokens")
         reasoning_output = _amount(raw_totals, "reasoning_output_tokens")
         return {
-            "fresh_input": input_total - cached_input,
+            "fresh_input": max(0, input_total - cached_input),
             "cache_read": cached_input,
             "cache_write": 0,
-            "output": output_total - reasoning_output,
+            "output": max(0, output_total - reasoning_output),
             "reasoning": reasoning_output,
         }
     if source == "opencode":
@@ -60,7 +60,7 @@ def unify_tokens(source: str, raw_totals: dict[str, int]) -> dict[str, int]:
             "fresh_input": _amount(raw_totals, "input_tokens"),
             "cache_read": _amount(raw_totals, "cache_read_tokens"),
             "cache_write": _amount(raw_totals, "cache_write_tokens"),
-            "output": output_total - reasoning,
+            "output": max(0, output_total - reasoning),
             "reasoning": reasoning,
         }
     # claude_code, and any future/unrecognized source: treated as already

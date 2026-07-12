@@ -24,7 +24,11 @@ from waypoint.telemetry.instance.model import (
     DataQuality,
     InstanceSnapshot,
 )
-from waypoint.telemetry.query import host_utc_offset_minutes
+from waypoint.telemetry.query import (
+    host_tz_name,
+    host_utc_offset_minutes,
+    subtract_calendar_months,
+)
 from waypoint.telemetry.store import _day_key
 
 # PRD FR-4: current cache freshness window and the stale-reuse ceiling.
@@ -65,8 +69,6 @@ class TelemetryInstance(BaseModel):
 
 
 def _unavailable_snapshot(now: datetime) -> InstanceSnapshot:
-    from waypoint.telemetry.query import host_tz_name
-
     return InstanceSnapshot(
         observed_at=now,
         tz=host_tz_name(),
@@ -93,8 +95,6 @@ def _store_current(storage: Storage, snapshot: InstanceSnapshot) -> None:
 def _history(
     storage: Storage, settings: Settings, now: datetime
 ) -> list[InstanceHistoryPoint]:
-    from waypoint.telemetry.query import subtract_calendar_months
-
     start = subtract_calendar_months(now, settings.telemetry_rollup_retention_months)
     rows = storage.telemetry.query_instance_history(
         start_day=_day_key(start), end_day=_day_key(now)
@@ -199,8 +199,6 @@ def record_instance_daily_if_due(
     now = now or datetime.now(UTC)
     offset = host_utc_offset_minutes()
     day = _day_key(now)
-    from waypoint.telemetry.query import host_tz_name
-
     tz = host_tz_name()
 
     if storage.telemetry.instance_daily_quality(day, offset) == "complete":

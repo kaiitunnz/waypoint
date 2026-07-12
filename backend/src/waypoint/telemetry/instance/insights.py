@@ -12,7 +12,6 @@ suppressed by a stale dismissal.
 from waypoint.telemetry.api_models import Insight, InsightClickThrough
 from waypoint.telemetry.facts import TelemetryFilter, TelemetryRange
 from waypoint.telemetry.instance.model import (
-    DataQuality,
     InstanceSnapshot,
     StorageCategory,
     format_bytes,
@@ -191,8 +190,3 @@ def _database_vacuum_insight(snapshot: InstanceSnapshot) -> Insight | None:
             "filesystem."
         ),
     )
-
-
-def snapshot_is_actionable(snapshot: InstanceSnapshot) -> bool:
-    """Whether the snapshot is complete enough to trust insight gates."""
-    return snapshot.data_quality != DataQuality.UNAVAILABLE

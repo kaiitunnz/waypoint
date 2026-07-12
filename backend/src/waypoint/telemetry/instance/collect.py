@@ -31,6 +31,7 @@ from waypoint.telemetry.instance.model import (
 )
 from waypoint.telemetry.instance.roconn import budgeted_query, open_readonly
 from waypoint.telemetry.instance.walk import FootprintWalker, TreeFootprint
+from waypoint.telemetry.query import host_tz_name, host_utc_offset_minutes
 
 # Attachment sidecar stems (see ``attachments.py`` ``_ATTACHMENT_ID``): one JSON
 # sidecar per stored attachment, so their count is the attachment count.
@@ -125,8 +126,6 @@ def _seed_inode(seen: set[tuple[int, int]], path: Path) -> None:
 def collect_snapshot(
     settings: Settings, *, now: datetime | None = None
 ) -> InstanceSnapshot:
-    from waypoint.telemetry.query import host_tz_name, host_utc_offset_minutes
-
     observed_at = now or datetime.now(UTC)
     data_dir = settings.data_dir
     db_path = settings.database_path

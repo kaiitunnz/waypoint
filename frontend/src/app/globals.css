@@ -17601,10 +17601,18 @@ html[data-theme="light"] .wp-hl {
 
 .tm-inst-overlays {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px 16px;
+  flex-direction: column;
+  gap: 4px;
   font-size: 0.76rem;
   color: var(--muted);
+}
+.tm-inst-overlay-eyebrow {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
 }
 .tm-inst-overlay {
   font-family: var(--font-mono);

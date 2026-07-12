@@ -97,7 +97,9 @@ function CategoryTable({ categories }: { categories: CategoryFootprint[] }) {
         <tr>
           <th scope="col">Category</th>
           <th scope="col">Size</th>
-          <th scope="col">Entries</th>
+          <th scope="col" title="Regular files counted in this category (not directories)">
+            Files
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -334,17 +336,27 @@ export function InstanceHealthPanel({
 
           {snapshot.structured_logs.length > 0 || snapshot.redundant_logs.count > 0 ? (
             <div className="tm-inst-overlays">
+              <p className="tm-inst-overlay-eyebrow">
+                Already included in the categories above — not added to the total
+              </p>
               {snapshot.structured_logs.map((log) => (
                 <span key={log.tree} className="tm-inst-overlay">
-                  {log.tree === "orphan_sessions" ? "Orphan" : "Live"} structured logs:{" "}
-                  <ByteValue bytes={log.bytes} /> ({log.count})
+                  {log.tree === "orphan_sessions" ? "Orphan" : "Live"}-tree structured logs:{" "}
+                  <ByteValue bytes={log.bytes} /> ({log.count}{" "}
+                  {log.count === 1 ? "file" : "files"})
                 </span>
               ))}
               {snapshot.redundant_logs.count > 0 ? (
                 <span className="tm-inst-overlay">
-                  Redundant-log candidates: <ByteValue bytes={snapshot.redundant_logs.bytes} /> (
-                  {snapshot.redundant_logs.count}) · {snapshot.redundant_logs.running_excluded_count}{" "}
-                  running excluded
+                  Redundant-log cleanup candidates:{" "}
+                  <ByteValue bytes={snapshot.redundant_logs.bytes} /> (
+                  {snapshot.redundant_logs.count})
+                  {snapshot.redundant_logs.orphan_overlap_count > 0
+                    ? ` · ${snapshot.redundant_logs.orphan_overlap_count} of them inside orphan dirs`
+                    : ""}
+                  {snapshot.redundant_logs.running_excluded_count > 0
+                    ? ` · ${snapshot.redundant_logs.running_excluded_count} running excluded`
+                    : ""}
                 </span>
               ) : null}
             </div>
@@ -352,11 +364,18 @@ export function InstanceHealthPanel({
 
           <div className="tm-inst-facts">
             <div className="tm-inst-fact">
-              <span className="tm-inst-fact-label">Sessions</span>
+              <span className="tm-inst-fact-label" title="Session directories on disk">
+                Session dirs
+              </span>
               <span className="tm-inst-fact-value">{snapshot.counts.session_dir_count}</span>
             </div>
             <div className="tm-inst-fact">
-              <span className="tm-inst-fact-label">Orphans</span>
+              <span
+                className="tm-inst-fact-label"
+                title="Session directories with no matching stored session"
+              >
+                Orphan dirs
+              </span>
               <span className="tm-inst-fact-value">{snapshot.counts.orphan_dir_count}</span>
             </div>
             <div className="tm-inst-fact">
@@ -364,14 +383,24 @@ export function InstanceHealthPanel({
               <span className="tm-inst-fact-value">{snapshot.counts.attachment_count}</span>
             </div>
             <div className="tm-inst-fact">
-              <span className="tm-inst-fact-label">WAL</span>
+              <span
+                className="tm-inst-fact-label"
+                title="Write-ahead log size — part of SQLite companions above"
+              >
+                WAL (in companions)
+              </span>
               <span className="tm-inst-fact-value">
                 <ByteValue bytes={snapshot.wal_bytes} />
               </span>
             </div>
             {snapshot.database.measured ? (
               <div className="tm-inst-fact">
-                <span className="tm-inst-fact-label">DB free pages</span>
+                <span
+                  className="tm-inst-fact-label"
+                  title="Reusable free space inside the database file (reclaimable by VACUUM)"
+                >
+                  DB reclaimable
+                </span>
                 <span className="tm-inst-fact-value">
                   <ByteValue bytes={snapshot.database.free_bytes} /> (
                   {(snapshot.database.free_percent * 100).toFixed(0)}%)
@@ -398,14 +427,14 @@ export function InstanceHealthPanel({
             </ul>
           ) : null}
 
-          <HistoryTrend history={instance?.history ?? []} />
-
           <MaintenanceCards
             insights={instance?.insights ?? []}
             dismissingSignature={dismissingSignature}
             onDismiss={onDismiss}
             onFocus={onInsightFocus}
           />
+
+          <HistoryTrend history={instance?.history ?? []} />
 
           {instance?.cli_note ? <p className="tm-inst-clinote muted">{instance.cli_note}</p> : null}
         </>

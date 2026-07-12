@@ -10,6 +10,7 @@ import { ActivityChart } from "@/components/telemetry/ActivityChart";
 import { DrilldownPanel } from "@/components/telemetry/DrilldownPanel";
 import { HealthPanel } from "@/components/telemetry/HealthPanel";
 import { InsightCards } from "@/components/telemetry/InsightCards";
+import { InstanceHealthPanel } from "@/components/telemetry/InstanceHealthPanel";
 import { NLInsightCard } from "@/components/telemetry/NLInsightCard";
 import { OverviewCards } from "@/components/telemetry/OverviewCards";
 import { SettingsPanel } from "@/components/telemetry/SettingsPanel";
@@ -23,6 +24,7 @@ import {
   fetchTelemetryDrilldown,
   fetchTelemetryHealth,
   fetchTelemetryInsights,
+  fetchTelemetryInstance,
   fetchTelemetryOverview,
   fetchTelemetrySettings,
   fetchTelemetryTokens,
@@ -31,6 +33,7 @@ import {
   generateNLInsight,
   isAuthError,
   isTelemetryDisabledError,
+  refreshTelemetryInstance,
 } from "@/lib/api";
 import { agentTransports, useBackendCatalog } from "@/lib/backends";
 import { clearToken, readHost, readToken } from "@/lib/store";
@@ -46,6 +49,7 @@ import {
   TelemetryDrilldown,
   TelemetryFactKind,
   TelemetryHealth,
+  TelemetryInstance,
   TelemetryOverview,
   TelemetrySettingsResponse,
   TelemetryTokens,
@@ -71,7 +75,9 @@ function scrollToEvidenceSection(endpoint: string | undefined): void {
       ? "tm-health-anchor"
       : typeof endpoint === "string" && endpoint.includes("/tokens")
         ? "tm-tokens-anchor"
-        : "tm-drilldown-anchor";
+        : typeof endpoint === "string" && endpoint.includes("/instance")
+          ? "tm-instance-anchor"
+          : "tm-drilldown-anchor";
   document.getElementById(target)?.scrollIntoView({ behavior: "smooth" });
 }
 
@@ -112,6 +118,10 @@ export default function TelemetryPage() {
   const [nlResponse, setNlResponse] = useState<NLInsightResponse | null>(null);
   const [nlLoading, setNlLoading] = useState(true);
   const [nlGenerating, setNlGenerating] = useState(false);
+
+  const [instance, setInstance] = useState<TelemetryInstance | null>(null);
+  const [instanceLoading, setInstanceLoading] = useState(true);
+  const [instanceRefreshing, setInstanceRefreshing] = useState(false);
 
   const catalog = useBackendCatalog(host || null, token || null, null);
 
@@ -374,20 +384,98 @@ export default function TelemetryPage() {
     void refreshNLInsight();
   }, [refreshNLInsight]);
 
+  // The instance snapshot is instance-wide, not range/filter-scoped, so this
+  // does not depend on [range, filters]. The GET serves a cached snapshot and
+  // revalidates off the request path; a telemetry_update frame refetches it.
+  const refreshInstance = useCallback(async () => {
+    if (!host || !token || telemetryCap !== "enabled") return;
+    setInstanceLoading(true);
+    try {
+      const res = await fetchTelemetryInstance(host, token);
+      setInstance(res);
+    } catch (err) {
+      if (isAuthError(err)) {
+        handleAuthFailure();
+        return;
+      }
+      if (isTelemetryDisabledError(err)) {
+        setTelemetryCap("disabled");
+        return;
+      }
+      // Non-blocking: the panel degrades to its unavailable state on failure.
+    } finally {
+      setInstanceLoading(false);
+    }
+  }, [host, token, telemetryCap, handleAuthFailure]);
+
+  useEffect(() => {
+    void refreshInstance();
+  }, [refreshInstance]);
+
+  const handleRefreshInstance = useCallback(async () => {
+    if (!host || !token) return;
+    setInstanceRefreshing(true);
+    try {
+      const res = await refreshTelemetryInstance(host, token);
+      setInstance(res);
+    } catch (err) {
+      if (isAuthError(err)) {
+        handleAuthFailure();
+        return;
+      }
+      setError(err instanceof Error ? err.message : "failed to refresh instance health");
+    } finally {
+      setInstanceRefreshing(false);
+    }
+  }, [host, token, handleAuthFailure]);
+
+  const handleDismissInstanceInsight = useCallback(
+    async (insight: Insight) => {
+      if (!host || !token) return;
+      setDismissingSignature(insight.signature);
+      try {
+        await dismissTelemetryInsight(host, token, range, filters, insight.signature);
+        setInstance((prev) =>
+          prev
+            ? {
+                ...prev,
+                insights: prev.insights.filter((i) => i.signature !== insight.signature),
+              }
+            : prev,
+        );
+      } catch (err) {
+        if (isAuthError(err)) {
+          handleAuthFailure();
+          return;
+        }
+        setError(err instanceof Error ? err.message : "failed to dismiss recommendation");
+      } finally {
+        setDismissingSignature(null);
+      }
+    },
+    [host, token, range, filters, handleAuthFailure],
+  );
+
+  const handleInstanceInsightFocus = useCallback(() => {
+    document.getElementById("tm-instance-anchor")?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
   // Live refresh: re-fetch whenever the runtime reports telemetry facts
   // changed, debounced so a burst of ingested facts triggers one refetch.
   const latestRefreshersRef = useRef({
     overview: refreshOverviewGroup,
     tokens: refreshTokens,
     drilldown: refreshDrilldown,
+    instance: refreshInstance,
   });
   useEffect(() => {
     latestRefreshersRef.current = {
       overview: refreshOverviewGroup,
       tokens: refreshTokens,
       drilldown: refreshDrilldown,
+      instance: refreshInstance,
     };
-  }, [refreshOverviewGroup, refreshTokens, refreshDrilldown]);
+  }, [refreshOverviewGroup, refreshTokens, refreshDrilldown, refreshInstance]);
 
   useEffect(() => {
     if (!host || !token || telemetryCap !== "enabled") return;
@@ -405,6 +493,7 @@ export default function TelemetryPage() {
         void latestRefreshersRef.current.overview();
         void latestRefreshersRef.current.tokens();
         void latestRefreshersRef.current.drilldown();
+        void latestRefreshersRef.current.instance();
       }, REFRESH_DEBOUNCE_MS);
     }
 
@@ -659,6 +748,16 @@ export default function TelemetryPage() {
           <ActivityChart activity={activity} loading={activityLoading} />
 
           <HealthPanel health={health} loading={healthLoading} />
+
+          <InstanceHealthPanel
+            instance={instance}
+            loading={instanceLoading}
+            refreshing={instanceRefreshing}
+            onRefresh={() => void handleRefreshInstance()}
+            dismissingSignature={dismissingSignature}
+            onDismiss={(insight) => void handleDismissInstanceInsight(insight)}
+            onInsightFocus={handleInstanceInsightFocus}
+          />
 
           <div id="tm-drilldown-anchor" />
           <DrilldownPanel

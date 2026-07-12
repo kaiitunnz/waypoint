@@ -36,6 +36,7 @@ import {
   TelemetryDrilldown,
   TelemetryFactKind,
   TelemetryHealth,
+  TelemetryInstance,
   TelemetryOverview,
   TelemetrySettingsResponse,
   TelemetryTokens,
@@ -620,6 +621,32 @@ export async function deleteTelemetry(
   });
   await ensureOk(response, "failed to delete telemetry");
   return (await response.json()) as TelemetryDeleteResponse;
+}
+
+// ── Instance health & capacity ───────────────────────────────────────────
+
+export async function fetchTelemetryInstance(
+  host: string,
+  token: string,
+): Promise<TelemetryInstance> {
+  const response = await fetch(`${host}/api/telemetry/instance`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  await ensureOk(response, "failed to fetch instance health");
+  return (await response.json()) as TelemetryInstance;
+}
+
+export async function refreshTelemetryInstance(
+  host: string,
+  token: string,
+): Promise<TelemetryInstance> {
+  const response = await fetch(`${host}/api/telemetry/instance/refresh`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await ensureOk(response, "failed to refresh instance health");
+  return (await response.json()) as TelemetryInstance;
 }
 
 // ── NL insight (PR-NL — CONTRACT-NL.md §4) ───────────────────────────────

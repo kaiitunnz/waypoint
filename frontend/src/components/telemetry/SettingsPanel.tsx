@@ -94,9 +94,11 @@ export function SettingsPanel({
             <p id="tm-nl-settings-caption" className="tm-settings-statement">
               When on, a coding agent you configure receives the on-screen
               aggregates plus a bounded set of redacted drilldown rows (session
-              id, normalized tool name, timestamp, outcome, model) to produce a
-              plain-language digest — never raw prompts, tool arguments, or
-              paths. Set with <code>telemetry_nl.enabled</code> in{" "}
+              id, normalized tool name, timestamp, outcome, model), and the
+              aggregate instance health &amp; capacity metrics (category sizes,
+              counts, and maintenance signals) to produce a plain-language
+              digest — never raw prompts, tool arguments, filenames, or paths.
+              Set with <code>telemetry_nl.enabled</code> in{" "}
               <code>waypoint.yaml</code> (or{" "}
               <code>WAYPOINT_TELEMETRY_NL_ENABLED</code>).
             </p>

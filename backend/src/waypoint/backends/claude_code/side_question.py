@@ -70,6 +70,22 @@ log = logging.getLogger("waypoint.backends.claude_code.side_question")
 MAX_ATTEMPTS = 3
 _ONE_SHOT_TIMEOUT = 120.0
 
+# Capability boundary for the ``/btw`` one-shot, applied identically on the
+# local and remote paths. Enforcement lives here in the CLI flags, not in a
+# prompt reminder: ``--tools ""`` disables every built-in tool, and
+# ``--strict-mcp-config`` with no accompanying ``--mcp-config`` stops the aside
+# process from loading any ambient MCP server, so no MCP tool ever exists in the
+# forked conversation. ``--disallowedTools "*"`` is belt-and-suspenders denial
+# on top. A ``/btw`` worker has no stream/approval channel to mediate a tool
+# call, so it must expose none. Never relax this to an advisory prompt.
+_TOOL_ISOLATION_ARGS: tuple[str, ...] = (
+    "--tools",
+    "",
+    "--disallowedTools",
+    "*",
+    "--strict-mcp-config",
+)
+
 # Per-session asyncio locks for transport_state["pending_side_questions"] mutations.
 _session_locks: dict[str, asyncio.Lock] = {}
 
@@ -235,8 +251,7 @@ async def _run_one_shot_local(
         fork_id,
         "--output-format",
         "json",
-        "--tools",
-        "",
+        *_TOOL_ISOLATION_ARGS,
     ]
     cwd_path = Path(cwd).expanduser()
     proc = await asyncio.create_subprocess_exec(
@@ -279,8 +294,7 @@ async def _run_one_shot_remote(
         fork_id,
         "--output-format",
         "json",
-        "--tools",
-        "",
+        *_TOOL_ISOLATION_ARGS,
     ]
     remote_parts = [
         f"cd {quote_remote_path(cwd)}",

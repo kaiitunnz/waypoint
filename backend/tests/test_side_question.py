@@ -1026,7 +1026,7 @@ async def test_recover_covers_extra_backend_ids(
 
 
 # ---------------------------------------------------------------------------
-# Fix 1: --tools "" disables tools in one-shot argv
+# Fix 1: built-in and MCP tools are disabled in the one-shot argv
 # ---------------------------------------------------------------------------
 
 
@@ -1034,7 +1034,11 @@ async def test_one_shot_local_argv_disables_tools(
     runtime: Any,
     plugin: Any,
 ) -> None:
-    """The local one-shot must pass --tools "" so Claude cannot call any tool."""
+    """The local one-shot must isolate the aside from every built-in and MCP tool.
+
+    ``--tools ""`` denies built-ins, ``--disallowedTools "*"`` denies every
+    surfaced tool, and ``--strict-mcp-config`` (with no ``--mcp-config``) stops
+    any ambient MCP server from loading. All three must be present."""
     session = _make_session(runtime.storage, thread_id="thread-abc")
     _write_side_questions(
         runtime,
@@ -1086,10 +1090,17 @@ async def test_one_shot_local_argv_disables_tools(
     assert (
         argv[tools_idx + 1] == ""
     ), f"--tools value is not empty: {argv[tools_idx + 1]!r}"
+    # MCP isolation: deny every surfaced tool and refuse ambient MCP config.
+    assert "--disallowedTools" in argv, f"--disallowedTools not in argv: {argv}"
+    disallowed_idx = argv.index("--disallowedTools")
+    assert (
+        argv[disallowed_idx + 1] == "*"
+    ), f"--disallowedTools value is not '*': {argv[disallowed_idx + 1]!r}"
+    assert "--strict-mcp-config" in argv, f"--strict-mcp-config not in argv: {argv}"
 
 
 async def test_one_shot_remote_argv_disables_tools() -> None:
-    """The remote one-shot command string must include --tools ''."""
+    """The remote one-shot command must isolate tools with quoting preserved."""
     from waypoint.launch_targets import SshLaunchTargetConfig
 
     target = SshLaunchTargetConfig(id="box", name="Box", ssh_destination="user@host")
@@ -1113,16 +1124,35 @@ async def test_one_shot_remote_argv_disables_tools() -> None:
 
         return _FakeProc()
 
-    with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+    # Neutralize the launch target's shell wrapping so the assertions inspect
+    # the remote command this module builds — the ``cd ... && exec
+    # shlex.join(claude_args)`` string whose quoting side_question.py owns —
+    # rather than the second bash-wrapping layer that belongs to launch_targets.
+    with (
+        patch.object(
+            SshLaunchTargetConfig, "wrap_remote_command", lambda self, cmd: cmd
+        ),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+    ):
         await sq_module._run_one_shot_remote(
             "What branch?", "thread-1", "fork-1", "~/project", target, "claude"
         )
 
     assert captured_args, "subprocess was never called"
     # The remote command is the last arg passed to ssh; the claude args are
-    # embedded in it.  Check the full command string contains --tools.
-    full_cmd = " ".join(captured_args[0])
-    assert "--tools" in full_cmd, f"--tools not in remote command: {full_cmd!r}"
+    # embedded in it via shlex.join. Assert all three isolation flags survive,
+    # with the empty value and literal asterisk shell-quoted rather than
+    # expanded by the remote shell.
+    remote_cmd = captured_args[0][-1]
+    assert (
+        "--tools ''" in remote_cmd
+    ), f"--tools '' not in remote command: {remote_cmd!r}"
+    assert (
+        "--disallowedTools '*'" in remote_cmd
+    ), f"--disallowedTools '*' not in remote command: {remote_cmd!r}"
+    assert (
+        "--strict-mcp-config" in remote_cmd
+    ), f"--strict-mcp-config not in remote command: {remote_cmd!r}"
 
 
 # ---------------------------------------------------------------------------

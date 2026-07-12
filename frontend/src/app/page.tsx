@@ -150,6 +150,7 @@ export default function HomePage() {
   const [launchTargets, setLaunchTargets] = useState<LaunchTargetSummary[]>([]);
   const [sessionPresets, setSessionPresets] = useState<SessionPresetSummary[]>([]);
   const [defaultPresetId, setDefaultPresetId] = useState<string | null>(null);
+  const [telemetryEnabled, setTelemetryEnabled] = useState(false);
   const [activeLaunchTargetId, setActiveLaunchTargetId] = useState("");
   // Password-auth SSH connect prompt. ``retry`` re-runs the launch that hit a
   // 409 once the ControlMaster is up; ``null`` when the prompt was opened
@@ -328,6 +329,7 @@ export default function HomePage() {
         }
         setSessionPresets(me.session_presets ?? []);
         setDefaultPresetId(me.default_preset_id ?? null);
+        setTelemetryEnabled(me.telemetry_enabled ?? false);
         setSchedules(scheduleItems);
         setMessageSchedules(messageItems);
         const storedTargetId = readLaunchTarget(host);
@@ -1167,6 +1169,7 @@ export default function HomePage() {
           host={host}
           token={token}
           sessions={sessions}
+          telemetryEnabled={telemetryEnabled}
           onAuthFailure={handleAuthFailure}
         />
       ) : null}

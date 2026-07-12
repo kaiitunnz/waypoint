@@ -15972,6 +15972,30 @@ html[data-theme="light"] .wp-hl {
   text-decoration: underline;
 }
 
+/* Disabled state shown on /telemetry when the master switch is off. Flat,
+   opaque, in-flow content — reuses the .board-empty layout inside .panel. */
+.telemetry-disabled code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--text-strong);
+}
+
+.telemetry-disabled-snippet {
+  margin: 4px 0;
+  padding: 12px 14px;
+  background: var(--bg-card-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-strong);
+  overflow-x: auto;
+}
+
+.telemetry-disabled-actions {
+  margin-top: 8px;
+}
+
 /* Page-level grid: every telemetry section is a direct child of .page-shell's
    grid, spaced by its existing `gap`, so no extra top-level wrapper needed. */
 

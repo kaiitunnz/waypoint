@@ -109,8 +109,16 @@ plugin_configs:
 #   transport: claude_cli         # agent default (Emulated for Claude Code) if unset
 
 # Usage telemetry backing the Telemetry dashboard (aggregate-only, local, no
-# content capture). All values shown at their defaults; see docs/telemetry.md.
-# telemetry_enabled: true
+# content capture). Opt-in and OFF by default: while disabled, nothing is
+# collected, the dashboard link is hidden, and telemetry read APIs 404.
+# Set telemetry_enabled: true and restart the backend to turn it on. See
+# docs/telemetry.md. All other values shown at their defaults.
+# telemetry_enabled: false
+# telemetry_backfill: false                 # one-time import of history from
+#                                           # sessions that predate activation.
+#                                           # Separate opt-in: enabling live
+#                                           # collection does not import history
+#                                           # unless this is also true.
 # telemetry_retention_days: 90              # fact-level retention
 # telemetry_rollup_retention_months: 13     # daily-rollup retention
 # telemetry_context_thresholds: [70, 90, 100]  # context/limit warning thresholds

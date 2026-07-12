@@ -357,6 +357,9 @@ export interface MeResponse {
   assistant?: AssistantSummary | null;
   session_presets?: SessionPresetSummary[];
   default_preset_id?: string | null;
+  // Master telemetry opt-in. When false (or absent), the dashboard entry point
+  // is hidden and the /telemetry page renders its disabled state.
+  telemetry_enabled?: boolean;
 }
 
 // Full preset spec (with launch_env values); returned only from the

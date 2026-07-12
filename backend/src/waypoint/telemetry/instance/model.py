@@ -16,6 +16,18 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+_BYTE_UNITS = ("B", "KiB", "MiB", "GiB", "TiB", "PiB")
+
+
+def format_bytes(num_bytes: int) -> str:
+    """Human-readable IEC size (e.g. ``14.6 KiB``). Sub-KiB shows exact bytes."""
+    value = float(num_bytes)
+    for unit in _BYTE_UNITS:
+        if value < 1024 or unit == _BYTE_UNITS[-1]:
+            return f"{int(value)} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} PiB"
+
 
 class StorageCategory(StrEnum):
     """The mutually-exclusive footprint categories, in hard-link dedup order.

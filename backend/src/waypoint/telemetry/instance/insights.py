@@ -15,6 +15,7 @@ from waypoint.telemetry.instance.model import (
     DataQuality,
     InstanceSnapshot,
     StorageCategory,
+    format_bytes,
 )
 
 # PRD FR-3: a vacuum insight requires BOTH >=100 MiB free AND >=20% free pages.
@@ -76,7 +77,7 @@ def _orphan_data_insight(snapshot: InstanceSnapshot) -> Insight | None:
         statement=(
             f"{count} orphaned session director"
             f"{'y' if count == 1 else 'ies'} consume "
-            f"{_mib(orphan_bytes):.1f} MiB with no matching stored session."
+            f"{format_bytes(orphan_bytes)} with no matching stored session."
         ),
         metrics={
             "orphan_dir_count": count,
@@ -125,7 +126,7 @@ def _redundant_logs_insight(snapshot: InstanceSnapshot) -> Insight | None:
         statement=(
             f"{actionable_count} inactive events.jsonl log"
             f"{'' if actionable_count == 1 else 's'} duplicate SQLite events "
-            f"and can be cleared to reclaim {_mib(actionable_bytes):.1f} MiB"
+            f"and can be cleared to reclaim {format_bytes(actionable_bytes)}"
             f"{overlap_clause}. Running-session logs are excluded."
         ),
         metrics={
@@ -165,7 +166,7 @@ def _database_vacuum_insight(snapshot: InstanceSnapshot) -> Insight | None:
         signature=signature,
         type="database_vacuum",
         statement=(
-            f"The database has {_mib(reclaim.free_bytes):.0f} MiB of free pages "
+            f"The database has {format_bytes(reclaim.free_bytes)} of free pages "
             f"({reclaim.free_percent * 100:.0f}% of the file). A VACUUM may "
             "reclaim space, but it is an operator decision, not a guaranteed "
             "filesystem saving."

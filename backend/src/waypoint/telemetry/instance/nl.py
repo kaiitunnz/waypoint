@@ -22,20 +22,11 @@ from waypoint.telemetry.instance.model import (
     DataQuality,
     InstanceSnapshot,
     StorageCategory,
+    format_bytes,
 )
 from waypoint.telemetry.nl import NLInsightEvidence, NLInstanceBullet
 
 _ENDPOINT = "/api/telemetry/instance"
-_UNITS = ("B", "KiB", "MiB", "GiB", "TiB")
-
-
-def format_bytes(num_bytes: int) -> str:
-    value = float(num_bytes)
-    for unit in _UNITS:
-        if value < 1024 or unit == _UNITS[-1]:
-            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
-        value /= 1024
-    return f"{value:.1f} TiB"
 
 
 class InstanceNLAggregate(BaseModel):

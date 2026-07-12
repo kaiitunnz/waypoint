@@ -14,7 +14,8 @@ frontend share. The concrete summarizer and its runtime plumbing live in
 """
 
 from datetime import datetime
-from typing import Any, Protocol
+from enum import StrEnum
+from typing import Any, Protocol, Self
 
 from pydantic import BaseModel, Field
 
@@ -66,6 +67,58 @@ class NLInsight(BaseModel):
     source_model: str | None = None
     disclaimer: str
     instance_bullets: list[NLInstanceBullet] = Field(default_factory=list)
+
+
+class NLGenerationState(StrEnum):
+    """Lifecycle of the single server-owned NL-digest regeneration (CONTRACT-NL §5).
+
+    ``idle`` — no run in flight (the digest slot is authoritative). ``generating``
+    — a detached run is producing a new digest. ``failed`` — the last run failed or
+    timed out and left the prior digest intact; sticks until the next success.
+    """
+
+    IDLE = "idle"
+    GENERATING = "generating"
+    FAILED = "failed"
+
+
+class NLGenerationStatus(BaseModel):
+    """Server-owned regeneration status, separate from the digest slot.
+
+    Persisted as a small ``telemetry_meta`` marker so a fresh page load (or a
+    second tab) can render "Regenerating…"/failed without having initiated the
+    run, and reconciled to a terminal state on restart. It carries only lifecycle
+    metadata plus the ``range``/``filters`` the active run targets (already echoed
+    by the digest) — no telemetry facts.
+    """
+
+    status: NLGenerationState = NLGenerationState.IDLE
+    generation_id: str | None = None
+    requested_at: datetime | None = None
+    range: TelemetryRange | None = None
+    filters: TelemetryFilter | None = None
+    error: str | None = None
+    settled_at: datetime | None = None
+
+    @classmethod
+    def idle(cls) -> Self:
+        return cls(status=NLGenerationState.IDLE)
+
+
+class NLGenerationTrigger(BaseModel):
+    """How a regeneration trigger (POST/cadence) was handled — not persisted.
+
+    The API renders the ``202`` body from this: ``started`` when a fresh run was
+    launched, ``coalesced`` when the trigger matched an in-flight run's
+    range/filters, ``requested_range_differs`` when a run is active over a
+    *different* range/filters (reject-with-reason, never a silent wrong-range
+    write). ``status`` always carries the authoritative in-flight/settled marker.
+    """
+
+    status: NLGenerationStatus
+    started: bool = False
+    coalesced: bool = False
+    requested_range_differs: bool = False
 
 
 class NLInsightRequest(BaseModel):

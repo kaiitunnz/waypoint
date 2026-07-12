@@ -41,6 +41,12 @@ _TAG_FILTER_SEPARATOR = ":"
 # ``telemetry_meta`` key the latest NL-insight digest is stored under (CONTRACT-NL.md §4).
 _NL_INSIGHT_META_KEY = "nl_insight"
 
+# ``telemetry_meta`` key the server-owned NL-digest regeneration status marker is
+# stored under (CONTRACT-NL.md §5): a small lifecycle record kept distinct from
+# the digest slot so status transitions never risk the digest's integrity, read
+# by the GET and reconciled to a terminal state on restart.
+_NL_INSIGHT_STATUS_META_KEY = "nl_insight_status"
+
 # ``telemetry_meta`` key the cached current instance-health snapshot is stored
 # under (PRD FR-4): a single latest slot, served with a 5-minute freshness
 # window and cleared by the explicit DELETE path.
@@ -470,6 +476,26 @@ class TelemetryStore:
         with self._lock:
             self._conn.execute(
                 "DELETE FROM telemetry_meta WHERE k = ?", (_NL_INSIGHT_META_KEY,)
+            )
+            self._conn.commit()
+
+    def set_nl_insight_status(self, status_json: str) -> None:
+        """Persist the NL-digest regeneration status marker (CONTRACT-NL.md §5).
+
+        A single slot mirroring the digest slot: ``generating`` while a run is in
+        flight, cleared to ``idle`` on success or ``failed`` with a reason on
+        failure. Derived state — the in-process single-flight flag is the guard;
+        this exists so the GET and restart reconciliation can read the lifecycle.
+        """
+        self.set_meta(_NL_INSIGHT_STATUS_META_KEY, status_json)
+
+    def get_nl_insight_status(self) -> str | None:
+        return self.get_meta(_NL_INSIGHT_STATUS_META_KEY)
+
+    def clear_nl_insight_status(self) -> None:
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM telemetry_meta WHERE k = ?", (_NL_INSIGHT_STATUS_META_KEY,)
             )
             self._conn.commit()
 

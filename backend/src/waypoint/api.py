@@ -1267,6 +1267,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def telemetry_delete(
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
+        # Cancel any in-flight NL regeneration from the event loop (a worker
+        # thread cannot cancel a task) before clearing the digest + status marker.
+        # The task's id-guarded settle runs during the awaited cancellation, so
+        # ``delete_all`` clearing the marker afterwards leaves nothing stranded.
+        await context.runtime.cancel_nl_generation()
         result = await asyncio.to_thread(
             telemetry_aggregate.delete_all, context.storage
         )
@@ -1286,9 +1291,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Any:
         require_telemetry_enabled()
         _require_nl_enabled()
+        generation = context.runtime.nl_generation_status().model_dump(mode="json")
         stored_json = context.storage.telemetry.get_nl_insight()
         if stored_json is None:
-            return {"insight": None, "available": False, "fresh": False}
+            return {
+                "insight": None,
+                "available": False,
+                "fresh": False,
+                "generation": generation,
+            }
         insight = NLInsight.model_validate_json(stored_json)
         age = datetime.now(UTC) - insight.generated_at
         fresh = age < timedelta(hours=context.settings.telemetry_nl.interval_hours)
@@ -1296,23 +1307,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "insight": insight.model_dump(mode="json"),
             "available": True,
             "fresh": fresh,
+            "generation": generation,
         }
 
     @app.post("/api/telemetry/nl-insight")
     async def telemetry_nl_insight_generate(
         request: Request,
+        response: Response,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         require_telemetry_enabled()
         _require_nl_enabled()
+        # Input validation stays synchronous (a bad range/filter is a 4xx now);
+        # generation itself is detached, so the trigger returns 202 immediately and
+        # the outcome surfaces via the ``generation`` field on GET + the WebSocket.
         rng, flt = parse_range_filter(request, context.settings)
-        insight = await context.runtime.generate_nl_digest(rng, flt)
-        if insight is None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="NL-insight generation failed or timed out",
-            )
-        return {"insight": insight.model_dump(mode="json")}
+        trigger = await context.runtime.start_nl_digest_generation(rng, flt)
+        response.status_code = status.HTTP_202_ACCEPTED
+        return {
+            "generation": trigger.status.model_dump(mode="json"),
+            "coalesced": trigger.coalesced,
+            "requested_range_differs": trigger.requested_range_differs,
+        }
 
     @app.post("/api/sessions/{session_id}/terminate")
     async def session_terminate(

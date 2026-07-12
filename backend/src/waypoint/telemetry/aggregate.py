@@ -125,12 +125,30 @@ def range_key(rng: TelemetryRange) -> str:
 # ── token totals (facts + ledger join) ────────────────────────────────────
 
 
+# Every column an ``agent_turn_rows`` consumer reads: the AGENT filter
+# (turn_kind), the ledger join key (session_id, source, fact_id), day/group
+# bucketing (occurred_at, backend, model_at_turn, repo_name). Narrowing the
+# projection to these avoids materializing all ~38 columns per turn row.
+_AGENT_TURN_COLUMNS = (
+    "turn_kind",
+    "session_id",
+    "source",
+    "fact_id",
+    "occurred_at",
+    "backend",
+    "model_at_turn",
+    "repo_name",
+)
+
+
 def agent_turn_rows(
     storage: Storage, rng: TelemetryRange, flt: TelemetryFilter
 ) -> list[dict[str, Any]]:
     return [
         row
-        for row in storage.telemetry.query_facts(TelemetryFactKind.TURN, rng, flt)
+        for row in storage.telemetry.query_facts(
+            TelemetryFactKind.TURN, rng, flt, columns=_AGENT_TURN_COLUMNS
+        )
         if row["turn_kind"] == TurnKind.AGENT
     ]
 
@@ -218,16 +236,20 @@ def _is_stale(
 
 
 def current_context_snapshots(
-    storage: Storage, flt: TelemetryFilter, now: datetime
+    storage: Storage,
+    flt: TelemetryFilter,
+    now: datetime,
+    sessions: list[SessionRecord] | None = None,
 ) -> list[ContextSnapshotView]:
     # "Current" context occupancy is a property of sessions that are still
     # live: an exited/errored session holds no context window (FR-6). Restrict
     # to sessions whose latest status is active so the panel shows the handful
     # of running sessions, not every session that ever recorded a snapshot.
+    # ``sessions`` lets a caller share one ``list_sessions()`` across shapers.
+    if sessions is None:
+        sessions = storage.list_sessions()
     active_ids = {
-        session.id
-        for session in storage.list_sessions()
-        if session.status in _ACTIVE_STATUSES
+        session.id for session in sessions if session.status in _ACTIVE_STATUSES
     }
     if not active_ids:
         return []
@@ -346,13 +368,16 @@ def severity_for_percent(
 
 
 def alerting_context(
-    storage: Storage, settings: Settings, flt: TelemetryFilter
+    storage: Storage,
+    settings: Settings,
+    flt: TelemetryFilter,
+    sessions: list[SessionRecord] | None = None,
 ) -> list[ContextSnapshotView]:
     low = settings.telemetry_context_thresholds[0]
     now = datetime.now(UTC)
     return [
         snapshot
-        for snapshot in current_context_snapshots(storage, flt, now)
+        for snapshot in current_context_snapshots(storage, flt, now, sessions)
         if not snapshot.stale
         and snapshot.percent is not None
         and snapshot.percent >= low
@@ -426,7 +451,10 @@ def _session_matches_filter(
 
 
 def count_active_sessions(
-    storage: Storage, flt: TelemetryFilter, rng: TelemetryRange
+    storage: Storage,
+    flt: TelemetryFilter,
+    rng: TelemetryRange,
+    sessions: list[SessionRecord] | None = None,
 ) -> int:
     """Point-in-time count of sessions active at ``rng.end`` matching ``flt`` (FR-3).
 
@@ -439,12 +467,17 @@ def count_active_sessions(
     recorded before that instant.
     """
     if rng.end >= datetime.now(UTC):
-        return _count_active_sessions_live(storage, flt)
+        return _count_active_sessions_live(storage, flt, sessions)
     return _count_active_sessions_historical(storage, flt, rng.end)
 
 
-def _count_active_sessions_live(storage: Storage, flt: TelemetryFilter) -> int:
-    sessions = storage.list_sessions()
+def _count_active_sessions_live(
+    storage: Storage,
+    flt: TelemetryFilter,
+    sessions: list[SessionRecord] | None = None,
+) -> int:
+    if sessions is None:
+        sessions = storage.list_sessions()
     descendant_ids = (
         _descendant_session_ids(sessions, flt.parent_session_id)
         if flt.parent_session_id
@@ -560,6 +593,10 @@ def build_overview(
     window. The two can diverge for hour-granularity queries; this is
     expected, not a bug (the fact-scan fallback above doesn't have this gap).
     """
+    # One ``list_sessions()`` shared by the active-now count and the context
+    # alert scan below, instead of each re-fetching the session table.
+    sessions = storage.list_sessions()
+
     lifecycle_totals, turns_user, turns_agent, tool_calls = session_counts_totals(
         storage, rng, flt
     )
@@ -586,12 +623,12 @@ def build_overview(
             exited=lifecycle_totals.get("exited", 0),
             interrupted=lifecycle_totals.get("interrupted", 0),
             error=lifecycle_totals.get("error", 0),
-            active_now=count_active_sessions(storage, flt, rng),
+            active_now=count_active_sessions(storage, flt, rng, sessions),
         ),
         turns=TurnCounts(user=turns_user, agent=turns_agent),
         tool_calls=tool_calls,
         alerts=TelemetryAlerts(
-            context=alerting_context(storage, settings, flt),
+            context=alerting_context(storage, settings, flt, sessions),
             limits=alerting_limits(storage, settings, flt),
         ),
         limit_card_hidden=hidden,
@@ -734,15 +771,9 @@ def build_activity(
 
     daily = [ActivityDaily(day=day, **by_day.get(day, {})) for day in day_range(rng)]
 
-    heatmap_counts: dict[tuple[int, int], int] = {}
-    for kind in (TelemetryFactKind.TURN, TelemetryFactKind.TOOL_CALL):
-        for row in storage.telemetry.query_facts(kind, rng, flt):
-            occurred = datetime.fromisoformat(row["occurred_at"]).astimezone()
-            key = (occurred.weekday(), occurred.hour)
-            heatmap_counts[key] = heatmap_counts.get(key, 0) + 1
     heatmap = [
         ActivityHeatmapCell(dow=dow, hour=hour, count=count)
-        for (dow, hour), count in sorted(heatmap_counts.items())
+        for dow, hour, count in storage.telemetry.heatmap_counts(rng, flt)
     ]
 
     return TelemetryActivity(range=rng, filters_echo=flt, daily=daily, heatmap=heatmap)

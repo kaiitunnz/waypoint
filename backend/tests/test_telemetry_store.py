@@ -11,6 +11,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from waypoint.schemas import (
     EventKind,
@@ -453,6 +454,228 @@ def test_ingest_facts_batches_and_returns_written_count(tmp_path: Path) -> None:
     fact_b = _lifecycle_fact("s1", LifecycleTransition.STARTING, occurred_at=now)
     written = storage.telemetry.ingest_facts([(fact_a, {}), (fact_b, {}), (fact_a, {})])
     assert written == 2
+
+
+def _same_day_batch(now: datetime) -> list[tuple[Any, dict[str, str]]]:
+    """Five distinct facts sharing one (day, dims, model="") rollup key."""
+    return [
+        (_lifecycle_fact("s1", LifecycleTransition.CREATED, occurred_at=now), {}),
+        (_lifecycle_fact("s1", LifecycleTransition.RUNNING, occurred_at=now), {}),
+        (
+            TurnFact(
+                fact_id="u1",
+                source="codex",
+                session_id="s1",
+                occurred_at=now,
+                dims=_dims(),
+                turn_kind=TurnKind.USER,
+            ),
+            {},
+        ),
+        (
+            TurnFact(
+                fact_id="a1",
+                source="codex",
+                session_id="s1",
+                occurred_at=now,
+                dims=_dims(),
+                turn_kind=TurnKind.AGENT,
+            ),
+            {},
+        ),
+        (
+            ToolCallFact(
+                fact_id="tool1",
+                source="codex",
+                session_id="s1",
+                occurred_at=now,
+                dims=_dims(),
+                tool_name="Read",
+                outcome=ToolOutcome.SUCCEEDED,
+            ),
+            {},
+        ),
+    ]
+
+
+def test_ingest_facts_coalesces_recompute_and_matches_per_fact(tmp_path: Path) -> None:
+    # A same-day/same-dims batch must recompute the shared rollup key exactly
+    # ONCE (not once per fact), and yield a rollup byte-identical to feeding the
+    # same facts through the singular ``ingest_fact`` path.
+    batch = Storage(tmp_path / "batch.sqlite")
+    now = _make_session(batch, "s1")
+    day = now.astimezone().date().isoformat()
+    facts = _same_day_batch(now)
+
+    with patch.object(
+        batch.telemetry,
+        "_recompute_rollup_key",
+        wraps=batch.telemetry._recompute_rollup_key,
+    ) as spy:
+        written = batch.telemetry.ingest_facts(facts)
+    assert written == 5
+    assert spy.call_count == 1
+    batch_metrics = _require_rollup(batch, day)
+    assert batch_metrics == {
+        "turns_user": 1,
+        "turns_agent": 1,
+        "tool_calls": 1,
+        "lifecycle": {"created": 1, "running": 1},
+    }
+
+    per_fact = Storage(tmp_path / "per_fact.sqlite")
+    _make_session(per_fact, "s1")
+    for fact, tags in _same_day_batch(now):
+        per_fact.telemetry.ingest_fact(fact, tags=tags)
+    assert _require_rollup(per_fact, day) == batch_metrics
+
+
+def test_ingest_facts_in_batch_revision_moves_across_days_leaves_no_stale_row(
+    tmp_path: Path,
+) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    _make_session(storage, "s1")
+    day1_at = datetime(2026, 3, 15, 12, tzinfo=UTC)
+    day2_at = datetime(2026, 3, 17, 12, tzinfo=UTC)
+    day1 = day1_at.astimezone().date().isoformat()
+    day2 = day2_at.astimezone().date().isoformat()
+
+    v0 = TurnFact(
+        fact_id="a1",
+        source="codex",
+        session_id="s1",
+        occurred_at=day1_at,
+        dims=_dims(),
+        turn_kind=TurnKind.AGENT,
+        revision=0,
+    )
+    v1 = TurnFact(
+        fact_id="a1",
+        source="codex",
+        session_id="s1",
+        occurred_at=day2_at,
+        dims=_dims(),
+        turn_kind=TurnKind.AGENT,
+        revision=1,
+    )
+    storage.telemetry.ingest_facts([(v0, {}), (v1, {})])
+
+    # The fact moved to day2 in the same batch; day1's rollup key must be
+    # recomputed too (from the batch union) so it is deleted, not left stale.
+    assert _rollup_row(storage, day1) is None
+    assert _require_rollup(storage, day2)["turns_agent"] == 1
+
+
+class _RecordingConnection:
+    """Proxy that records executed SQL; ``sqlite3.Connection.execute`` is a
+    read-only C method and can't be patched directly."""
+
+    def __init__(self, real: Any) -> None:
+        self._real = real
+        self.executed: list[str] = []
+
+    def execute(self, sql: str, *args: Any, **kwargs: Any) -> Any:
+        self.executed.append(sql)
+        return self._real.execute(sql, *args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._real, name)
+
+
+def _tag_deletes(recorder: _RecordingConnection) -> list[str]:
+    return [sql for sql in recorder.executed if "DELETE FROM telemetry_fact_tag" in sql]
+
+
+def test_new_fact_without_tags_skips_tag_delete(tmp_path: Path) -> None:
+    # A brand-new untagged fact should not issue a tag-table DELETE (#7).
+    storage = Storage(tmp_path / "db.sqlite")
+    now = _make_session(storage, "s1")
+    fact = _lifecycle_fact("s1", LifecycleTransition.CREATED, occurred_at=now)
+
+    recorder = _RecordingConnection(storage.telemetry._conn)
+    storage.telemetry._conn = recorder  # type: ignore[assignment]
+    storage.telemetry.ingest_fact(fact)
+    assert _tag_deletes(recorder) == []
+
+    # A tagged new fact still writes (and clears) its tags.
+    recorder.executed.clear()
+    tagged = _lifecycle_fact("s1", LifecycleTransition.STARTING, occurred_at=now)
+    storage.telemetry.ingest_fact(tagged, tags={"role": "lead"})
+    assert _tag_deletes(recorder)
+
+    # A revision still clears prior tags even when untagged.
+    recorder.executed.clear()
+    revised = SessionLifecycleFact(
+        fact_id=fact.fact_id,
+        source="runtime",
+        session_id="s1",
+        occurred_at=now,
+        revision=1,
+        dims=_dims(),
+        transition=LifecycleTransition.CREATED,
+    )
+    storage.telemetry.ingest_fact(revised)
+    assert _tag_deletes(recorder)
+
+
+def test_heatmap_counts_bucket_weekday_hour_and_total(tmp_path: Path) -> None:
+    # Pins a KNOWN Sunday and Monday to explicit Monday=0 ``dow`` values to
+    # catch the SQLite ``%w`` (Sunday=0) off-by-one, plus an hour bucket, a
+    # quiet cell (omitted), and total-count == fact-count invariants.
+    storage = Storage(tmp_path / "db.sqlite")
+    _make_session(storage, "s1")
+    sunday = datetime(2026, 3, 15, 10, 0, tzinfo=UTC)  # weekday()==6
+    monday = datetime(2026, 3, 16, 14, 0, tzinfo=UTC)  # weekday()==0
+
+    def _turn(fact_id: str, at: datetime) -> None:
+        storage.telemetry.ingest_fact(
+            TurnFact(
+                fact_id=fact_id,
+                source="codex",
+                session_id="s1",
+                occurred_at=at,
+                dims=_dims(),
+                turn_kind=TurnKind.AGENT,
+            )
+        )
+
+    _turn("t-sun", sunday)
+    _turn("t-mon-1", monday)
+    _turn("t-mon-2", monday + timedelta(minutes=30))  # same host hour → count 2
+    storage.telemetry.ingest_fact(
+        ToolCallFact(
+            fact_id="tool-mon",
+            source="codex",
+            session_id="s1",
+            occurred_at=monday + timedelta(minutes=45),  # same cell → count 3
+            dims=_dims(),
+            tool_name="Read",
+            outcome=ToolOutcome.SUCCEEDED,
+        )
+    )
+
+    rng = TelemetryRange(
+        start=datetime(2026, 3, 14, tzinfo=UTC),
+        end=datetime(2026, 3, 18, tzinfo=UTC),
+        tz="UTC",
+        utc_offset_minutes=0,
+    )
+    cells = {
+        (dow, hour): count
+        for dow, hour, count in storage.telemetry.heatmap_counts(rng, TelemetryFilter())
+    }
+
+    assert cells[(6, 10)] == 1  # Sunday 10:00 → Monday=0 contract dow 6
+    assert cells[(0, 14)] == 3  # Monday 14:xx: two turns + one tool_call
+    assert (1, 0) not in cells  # a quiet cell is omitted, not zero-filled
+
+    turn_count = storage.telemetry.count_facts(
+        TelemetryFactKind.TURN, rng, TelemetryFilter()
+    )
+    tool_count = storage.telemetry.count_facts(
+        TelemetryFactKind.TOOL_CALL, rng, TelemetryFilter()
+    )
+    assert sum(cells.values()) == turn_count + tool_count == 4
 
 
 def test_query_facts_and_count_facts(tmp_path: Path) -> None:

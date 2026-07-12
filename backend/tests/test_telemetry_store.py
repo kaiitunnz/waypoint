@@ -678,6 +678,45 @@ def test_heatmap_counts_bucket_weekday_hour_and_total(tmp_path: Path) -> None:
     assert sum(cells.values()) == turn_count + tool_count == 4
 
 
+def test_heatmap_counts_applies_signed_host_offset(tmp_path: Path) -> None:
+    # Exercises the signed offset shift (and cross-midnight) that the zero-offset
+    # test above cannot: one UTC instant buckets into different host-tz cells
+    # under a positive (east, day-crossing) vs a negative (west) offset.
+    storage = Storage(tmp_path / "db.sqlite")
+    _make_session(storage, "s1")
+    # Sunday 23:30 UTC (weekday()==6).
+    at = datetime(2026, 3, 15, 23, 30, tzinfo=UTC)
+    storage.telemetry.ingest_fact(
+        TurnFact(
+            fact_id="t1",
+            source="codex",
+            session_id="s1",
+            occurred_at=at,
+            dims=_dims(),
+            turn_kind=TurnKind.AGENT,
+        )
+    )
+    window = dict(
+        start=datetime(2026, 3, 14, tzinfo=UTC),
+        end=datetime(2026, 3, 18, tzinfo=UTC),
+        tz="x",
+    )
+
+    def _cells(offset: int) -> dict[tuple[int, int], int]:
+        rng = TelemetryRange(**window, utc_offset_minutes=offset)
+        return {
+            (dow, hour): count
+            for dow, hour, count in storage.telemetry.heatmap_counts(
+                rng, TelemetryFilter()
+            )
+        }
+
+    # +08:00 → local Mon 07:30 → Monday=0 dow 0, hour 7 (crossed midnight).
+    assert _cells(480) == {(0, 7): 1}
+    # -05:00 → local Sun 18:30 → dow 6, hour 18 (still Sunday).
+    assert _cells(-300) == {(6, 18): 1}
+
+
 def test_query_facts_and_count_facts(tmp_path: Path) -> None:
     storage = Storage(tmp_path / "db.sqlite")
     now = _make_session(storage, "s1")

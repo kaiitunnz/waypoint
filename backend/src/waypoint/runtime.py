@@ -4579,15 +4579,19 @@ class SessionRuntime:
         """
         task = self._nl_generation_task
         if task is None or task.done():
-            self._nl_active = None
             return
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
-        self._nl_generation_task = None
-        # A task cancelled before its body ran never executes its ``finally``, so
-        # clear the single-flight flag here or a delete would wedge it forever.
-        self._nl_active = None
+        # Only null what we actually cancelled: DELETE and POST are not
+        # serialized, so a POST can claim a fresh run during the ``await`` above.
+        # Identity-guarding the clears keeps that new run tracked (rather than
+        # clobbering it into an untracked, off-single-flight run) while still
+        # clearing the flag for a task cancelled before its body — and thus its
+        # ``finally`` — ever ran.
+        if self._nl_generation_task is task:
+            self._nl_generation_task = None
+            self._nl_active = None
 
     def nl_generation_status(self) -> NLGenerationStatus:
         """The current regeneration status marker (``idle`` when absent/corrupt)."""

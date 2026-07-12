@@ -271,6 +271,51 @@ async def test_cancel_clears_active_and_task(tmp_path: Path) -> None:
     assert runtime._nl_active is None
 
 
+async def test_cancel_does_not_clobber_a_run_started_during_await(
+    tmp_path: Path,
+) -> None:
+    # DELETE (cancel) and a POST (start) are not serialized: a POST can claim a
+    # fresh run while cancel is parked on `await task`. The cancel's post-await
+    # clears must be identity-guarded so they never orphan that new run.
+    runtime, _ = _make_runtime(tmp_path)
+    _gated_run_oneshot(runtime, json.dumps({"prose": "a", "evidence": []}))
+    await runtime.start_nl_digest_generation(_range(7, 0), TelemetryFilter())
+    task_a = runtime._nl_generation_task
+
+    # Force a real yield window inside A's settle so a start can interleave while
+    # cancel_nl_generation is parked awaiting the cancelled task.
+    publish_gate = asyncio.Event()
+    orig_publish = runtime._publish_nl_status
+    gated_once = [False]
+
+    async def gated_publish(status: NLGenerationStatus) -> None:
+        if not gated_once[0]:
+            gated_once[0] = True
+            await publish_gate.wait()
+        await orig_publish(status)
+
+    runtime._publish_nl_status = gated_publish  # type: ignore[method-assign]
+
+    cancel_task = asyncio.create_task(runtime.cancel_nl_generation())
+    await asyncio.sleep(0.05)  # A unwinds to its finally, clears the flag, parks
+    assert runtime._nl_active is None
+
+    # A POST claims a fresh run in the cancel's await window.
+    _gated_run_oneshot(runtime, json.dumps({"prose": "b", "evidence": []}))
+    await runtime.start_nl_digest_generation(_range(30, 0), TelemetryFilter())
+    task_b = runtime._nl_generation_task
+    run_b = runtime._nl_active
+    assert task_b is not task_a
+    assert run_b is not None
+
+    publish_gate.set()
+    await cancel_task
+
+    # The new run must survive the older run's cancellation.
+    assert runtime._nl_generation_task is task_b
+    assert runtime._nl_active is run_b
+
+
 async def test_cadence_shares_single_flight_guard(tmp_path: Path) -> None:
     runtime, storage = _make_runtime(tmp_path)
     gate = _gated_run_oneshot(
@@ -281,7 +326,10 @@ async def test_cadence_shares_single_flight_guard(tmp_path: Path) -> None:
     manual = await runtime.start_nl_digest_generation(_range(7, 0), TelemetryFilter())
     task = runtime._nl_generation_task
 
-    # ...the cadence tick coalesces onto it rather than starting a second run.
+    # ...the cadence tick shares the guard rather than starting a second run.
+    # (It defaults to the 7d preset, which differs from this hand-built range, so
+    # it exercises the divergent-reject branch — either way, no second run: the
+    # single-flight property is that _nl_generation_task is unchanged.)
     cadence = asyncio.create_task(runtime.maybe_generate_nl_digest())
     await asyncio.sleep(0.05)  # let the cadence reach the launcher + await the run
     assert runtime._nl_generation_task is task

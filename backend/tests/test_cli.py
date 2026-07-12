@@ -3748,3 +3748,68 @@ def test_maintenance_stats_reports_backfill_state(tmp_path: Path) -> None:
     )
     assert after["telemetry_backfill"]["done"] is True
     assert after["telemetry_backfill"]["through"] is not None
+
+
+def test_rebuild_telemetry_real_lock_probe_passes_when_unlocked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _config(tmp_path)
+    db_path = _settings_from_arg(str(cfg)).database_path
+    _seed_telemetry_source(db_path)
+    # Exercise the real _database_write_locked against an unlocked DB; keep the
+    # network probe stubbed so the test never depends on a live host backend.
+    monkeypatch.undo()
+    monkeypatch.setattr("waypoint.cli._backend_reachable", lambda _s: False)
+
+    result = runner.invoke(
+        app, ["--config", str(cfg), "maintenance", "rebuild-telemetry"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _fact_count(db_path) > 0
+
+
+def test_rebuild_telemetry_confirm_prompt_proceeds_on_yes(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    db_path = _settings_from_arg(str(cfg)).database_path
+    _seed_telemetry_source(db_path)
+    _mark_backfilled(db_path)
+
+    storage = Storage(db_path)
+    try:
+        storage.connection.execute("DELETE FROM telemetry_facts")
+        storage.connection.commit()
+    finally:
+        storage.close()
+
+    result = runner.invoke(
+        app,
+        ["--config", str(cfg), "maintenance", "rebuild-telemetry", "--force"],
+        input="y\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _fact_count(db_path) > 0
+
+
+def test_rebuild_telemetry_confirm_prompt_aborts_on_no(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    db_path = _settings_from_arg(str(cfg)).database_path
+    _seed_telemetry_source(db_path)
+    _mark_backfilled(db_path)
+
+    storage = Storage(db_path)
+    try:
+        storage.connection.execute("DELETE FROM telemetry_facts")
+        storage.connection.commit()
+    finally:
+        storage.close()
+
+    result = runner.invoke(
+        app,
+        ["--config", str(cfg), "maintenance", "rebuild-telemetry", "--force"],
+        input="n\n",
+    )
+
+    assert result.exit_code != 0
+    assert _fact_count(db_path) == 0

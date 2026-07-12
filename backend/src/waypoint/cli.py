@@ -3880,7 +3880,7 @@ def maintenance_rebuild_telemetry(
                 abort=True,
             )
 
-        asyncio.run(TelemetryIngester(storage, get_registry()).backfill(force=already))
+        asyncio.run(TelemetryIngester(storage, get_registry()).backfill(force=force))
 
         stats = storage.db_stats()
         typer.echo(

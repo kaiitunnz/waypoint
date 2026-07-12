@@ -565,6 +565,8 @@ class TelemetryStore:
             where, params = self._filter_clause(
                 rng, flt, extra_kind=kind, partial=partial
             )
+            # ``columns`` must stay developer-controlled (interpolated, not
+            # bound) — never forward untrusted input here.
             projection = "*" if columns is None else ", ".join(columns)
             # Stable tiebreak (source, fact_id) after occurred_at so paginated
             # drilldown results (LIMIT/OFFSET) never reorder or repeat a row

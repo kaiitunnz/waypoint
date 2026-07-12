@@ -884,6 +884,44 @@ def test_backfill_derives_facts_and_is_idempotent(tmp_path: Path) -> None:
     assert count_after == count_before
 
 
+def test_backfill_force_re_derives_past_completed_marker(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "db.sqlite")
+    session = _make_session(storage, "s1")
+    storage.append_event(
+        EventRecord(
+            session_id="s1",
+            ts=session.created_at,
+            kind=EventKind.USER_INPUT,
+            text="hello",
+            sequence=1,
+        )
+    )
+
+    ingester = TelemetryIngester(storage)
+    asyncio.run(ingester.backfill())
+    assert storage.telemetry.get_meta("backfill_done") == "true"
+
+    # Wipe facts but leave the marker: the default no-ops, force re-derives.
+    storage.connection.execute("DELETE FROM telemetry_facts")
+    storage.connection.commit()
+
+    asyncio.run(ingester.backfill())
+    assert (
+        storage.connection.execute(
+            "SELECT COUNT(*) AS n FROM telemetry_facts"
+        ).fetchone()["n"]
+        == 0
+    )
+
+    asyncio.run(ingester.backfill(force=True))
+    assert (
+        storage.connection.execute(
+            "SELECT COUNT(*) AS n FROM telemetry_facts"
+        ).fetchone()["n"]
+        > 0
+    )
+
+
 def test_privacy_no_raw_text_or_paths_persisted(tmp_path: Path) -> None:
     storage = Storage(tmp_path / "db.sqlite")
     session = _make_session(

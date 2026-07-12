@@ -553,13 +553,16 @@ class TelemetryIngester:
 
     # ── backfill (one-shot, off the hot path) ───────────────────────────────
 
-    async def backfill(self) -> None:
+    async def backfill(self, *, force: bool = False) -> None:
         """One guarded pass deriving facts from existing data, then a rollup rebuild.
 
         Guarded by ``telemetry_meta['backfill_done']`` so it runs at most once
-        ever per database; safe to call unconditionally at boot.
+        ever per database; safe to call unconditionally at boot. Pass
+        ``force=True`` to re-derive past a completed marker (the supported
+        ``waypoint maintenance rebuild-telemetry`` override); boot callers keep
+        the default so their one-shot behavior is unchanged.
         """
-        if self._store.get_meta("backfill_done") == "true":
+        if not force and self._store.get_meta("backfill_done") == "true":
             return
         for session in self._storage.list_sessions():
             self.derive_from_session_created(session)

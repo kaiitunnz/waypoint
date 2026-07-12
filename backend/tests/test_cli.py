@@ -1,4 +1,6 @@
+import asyncio
 import json
+import sqlite3
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -13,12 +15,22 @@ from typer.testing import CliRunner
 from waypoint.cli import (
     _backend_choices,
     _json_safe,
+    _settings_from_arg,
     app,
     exit_code_for_wait,
     parse_wait_until,
 )
 from waypoint.client import WaypointClient
+from waypoint.schemas import (
+    EventKind,
+    EventRecord,
+    SessionRecord,
+    SessionSource,
+    SessionStatus,
+)
 from waypoint.settings import Settings
+from waypoint.storage import Storage
+from waypoint.telemetry.ingest import TelemetryIngester
 
 runner = CliRunner()
 
@@ -3548,3 +3560,256 @@ def test_accounts_list_unknown_launch_target_errors(
     )
     assert result.exit_code != 0
     assert "unknown launch target" in result.output
+
+
+# ── maintenance rebuild-telemetry ────────────────────────────────────────────
+
+
+def _seed_telemetry_source(db_path: Path) -> None:
+    """Seed one session + a user-input event so a backfill derives real facts."""
+    storage = Storage(db_path)
+    try:
+        now = datetime.now(UTC)
+        storage.create_session(
+            SessionRecord(
+                id="s1",
+                backend="codex",
+                source=SessionSource.MANAGED,
+                transport="tmux",
+                title="t",
+                cwd="/home/user/projects/waypoint",
+                repo_name="/home/user/projects/waypoint",
+                status=SessionStatus.IDLE,
+                created_at=now,
+                updated_at=now,
+                last_event_at=now,
+                raw_log_path="/tmp/raw.log",
+                structured_log_path="/tmp/events.jsonl",
+                resolved_model="gpt-5-codex",
+                spawner_session_id=None,
+                tags={},
+            )
+        )
+        storage.append_event(
+            EventRecord(
+                session_id="s1",
+                ts=now,
+                kind=EventKind.USER_INPUT,
+                text="hello",
+                sequence=1,
+            )
+        )
+    finally:
+        storage.close()
+
+
+def _mark_backfilled(db_path: Path) -> None:
+    storage = Storage(db_path)
+    try:
+        asyncio.run(TelemetryIngester(storage).backfill())
+    finally:
+        storage.close()
+
+
+def _fact_count(db_path: Path) -> int:
+    storage = Storage(db_path)
+    try:
+        return storage.connection.execute(
+            "SELECT COUNT(*) AS n FROM telemetry_facts"
+        ).fetchone()["n"]
+    finally:
+        storage.close()
+
+
+@pytest.fixture(autouse=True)
+def _stub_probes(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Default to "no live backend" so tests exercise the command body; the two
+    # refusal tests override these explicitly.
+    monkeypatch.setattr("waypoint.cli._backend_reachable", lambda _s: False)
+    monkeypatch.setattr("waypoint.cli._database_write_locked", lambda _s: False)
+
+
+def test_rebuild_telemetry_initial_import_needs_no_force(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    db_path = _settings_from_arg(str(cfg)).database_path
+    _seed_telemetry_source(db_path)
+
+    result = runner.invoke(
+        app, ["--config", str(cfg), "maintenance", "rebuild-telemetry"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _fact_count(db_path) > 0
+    summary = json.loads(result.output)
+    assert summary["telemetry_facts"] > 0
+    assert summary["backfill_through"] is not None
+
+
+def test_rebuild_telemetry_refuses_when_done_without_force(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    db_path = _settings_from_arg(str(cfg)).database_path
+    _seed_telemetry_source(db_path)
+    _mark_backfilled(db_path)
+
+    result = runner.invoke(
+        app, ["--config", str(cfg), "maintenance", "rebuild-telemetry"]
+    )
+
+    assert result.exit_code == 1
+    assert "--force" in result.output
+
+
+def test_rebuild_telemetry_force_yes_re_derives(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    db_path = _settings_from_arg(str(cfg)).database_path
+    _seed_telemetry_source(db_path)
+    _mark_backfilled(db_path)
+
+    storage = Storage(db_path)
+    try:
+        storage.connection.execute("DELETE FROM telemetry_facts")
+        storage.connection.commit()
+    finally:
+        storage.close()
+    assert _fact_count(db_path) == 0
+
+    result = runner.invoke(
+        app,
+        ["--config", str(cfg), "maintenance", "rebuild-telemetry", "--force", "--yes"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _fact_count(db_path) > 0
+
+
+def test_rebuild_telemetry_refuses_when_backend_reachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _config(tmp_path)
+    db_path = _settings_from_arg(str(cfg)).database_path
+    _seed_telemetry_source(db_path)
+    monkeypatch.setattr("waypoint.cli._backend_reachable", lambda _s: True)
+
+    result = runner.invoke(
+        app,
+        ["--config", str(cfg), "maintenance", "rebuild-telemetry", "--force", "--yes"],
+    )
+
+    assert result.exit_code == 1
+    assert "Stop it first" in result.output
+
+
+def test_rebuild_telemetry_refuses_when_database_write_locked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _config(tmp_path)
+    db_path = _settings_from_arg(str(cfg)).database_path
+    _seed_telemetry_source(db_path)
+    # Real lock probe against a sibling connection holding an open write txn.
+    monkeypatch.undo()
+    monkeypatch.setattr("waypoint.cli._backend_reachable", lambda _s: False)
+
+    holder = sqlite3.connect(str(db_path))
+    try:
+        holder.execute("BEGIN IMMEDIATE")
+        result = runner.invoke(
+            app,
+            [
+                "--config",
+                str(cfg),
+                "maintenance",
+                "rebuild-telemetry",
+                "--force",
+                "--yes",
+            ],
+        )
+    finally:
+        holder.rollback()
+        holder.close()
+
+    assert result.exit_code == 1
+    assert "Stop it first" in result.output
+
+
+def test_maintenance_stats_reports_backfill_state(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    db_path = _settings_from_arg(str(cfg)).database_path
+    _seed_telemetry_source(db_path)
+
+    before = json.loads(
+        runner.invoke(app, ["--config", str(cfg), "maintenance", "stats"]).output
+    )
+    assert before["telemetry_backfill"] == {"done": False, "through": None}
+
+    _mark_backfilled(db_path)
+
+    after = json.loads(
+        runner.invoke(app, ["--config", str(cfg), "maintenance", "stats"]).output
+    )
+    assert after["telemetry_backfill"]["done"] is True
+    assert after["telemetry_backfill"]["through"] is not None
+
+
+def test_rebuild_telemetry_real_lock_probe_passes_when_unlocked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _config(tmp_path)
+    db_path = _settings_from_arg(str(cfg)).database_path
+    _seed_telemetry_source(db_path)
+    # Exercise the real _database_write_locked against an unlocked DB; keep the
+    # network probe stubbed so the test never depends on a live host backend.
+    monkeypatch.undo()
+    monkeypatch.setattr("waypoint.cli._backend_reachable", lambda _s: False)
+
+    result = runner.invoke(
+        app, ["--config", str(cfg), "maintenance", "rebuild-telemetry"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _fact_count(db_path) > 0
+
+
+def test_rebuild_telemetry_confirm_prompt_proceeds_on_yes(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    db_path = _settings_from_arg(str(cfg)).database_path
+    _seed_telemetry_source(db_path)
+    _mark_backfilled(db_path)
+
+    storage = Storage(db_path)
+    try:
+        storage.connection.execute("DELETE FROM telemetry_facts")
+        storage.connection.commit()
+    finally:
+        storage.close()
+
+    result = runner.invoke(
+        app,
+        ["--config", str(cfg), "maintenance", "rebuild-telemetry", "--force"],
+        input="y\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _fact_count(db_path) > 0
+
+
+def test_rebuild_telemetry_confirm_prompt_aborts_on_no(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    db_path = _settings_from_arg(str(cfg)).database_path
+    _seed_telemetry_source(db_path)
+    _mark_backfilled(db_path)
+
+    storage = Storage(db_path)
+    try:
+        storage.connection.execute("DELETE FROM telemetry_facts")
+        storage.connection.commit()
+    finally:
+        storage.close()
+
+    result = runner.invoke(
+        app,
+        ["--config", str(cfg), "maintenance", "rebuild-telemetry", "--force"],
+        input="n\n",
+    )
+
+    assert result.exit_code != 0
+    assert _fact_count(db_path) == 0

@@ -42,7 +42,7 @@ import {
   TelemetryTokens,
   TokenGroupBy,
   Insight,
-  NLInsight,
+  NLGenerateAck,
   NLInsightResponse,
   UsageDashboardResponse,
 } from "@/lib/types";
@@ -671,22 +671,26 @@ export async function fetchNLInsight(
   return (await response.json()) as NLInsightResponse;
 }
 
+// Triggers a regeneration and returns immediately (HTTP 202) — the run is
+// detached server-side, and its outcome arrives via the WebSocket nl_insight_
+// status frame / the `generation` field on the GET, not this response. Resolves
+// to `null` while the feature is off (404).
 export async function generateNLInsight(
   host: string,
   token: string,
   range: TelemetryRangeState,
   filters: TelemetryFiltersState,
-): Promise<NLInsight | null> {
+): Promise<NLGenerateAck | null> {
   const params = telemetryParams(range, filters);
   const response = await fetch(`${host}/api/telemetry/nl-insight?${params.toString()}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (response.status === 404 || response.status === 409) {
+  if (response.status === 404) {
     return null;
   }
   await ensureOk(response, "failed to generate NL insight");
-  return (await response.json()) as NLInsight;
+  return (await response.json()) as NLGenerateAck;
 }
 
 export async function setSessionPermissionMode(

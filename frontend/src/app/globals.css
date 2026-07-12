@@ -17916,6 +17916,56 @@ html[data-theme="light"] .wp-hl {
   white-space: nowrap;
 }
 
+/* Regeneration lifecycle: a bare-text status with a currentColor lamp dot
+   (generating = the card's cool accent, pulsing; failed = danger). Flat
+   in-flow content — no glass, colors derived from tokens for both themes. */
+.tm-nl-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.tm-nl-status.is-generating {
+  color: var(--accent-cool);
+}
+
+.tm-nl-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+  flex: none;
+}
+
+.tm-nl-status.is-generating .tm-nl-status-dot {
+  animation: tm-nl-lamp-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes tm-nl-lamp-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 0%, transparent);
+  }
+}
+
+.tm-nl-failed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
 .tm-nl-optin {
   text-align: left;
   padding: 12px 0;

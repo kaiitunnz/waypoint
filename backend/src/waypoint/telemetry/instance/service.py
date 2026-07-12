@@ -40,10 +40,9 @@ STALE_CEILING = timedelta(hours=24)
 DAILY_TICK_MINUTE = (0, 5)
 
 _CLI_NOTE = (
-    "These categories come from the shared read-only instance snapshot. "
-    "`waypoint maintenance stats` currently reports only database and WAL "
-    "sizes, table/event counts, and an orphan-directory count — not the tree "
-    "sizes, attachment footprint, or reclaimability shown here."
+    "Measured by Waypoint's read-only instance snapshot. `waypoint maintenance "
+    "stats` reports a narrower subset and is the place to run the maintenance "
+    "commands referenced here."
 )
 
 

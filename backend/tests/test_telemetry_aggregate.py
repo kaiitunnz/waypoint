@@ -452,6 +452,43 @@ def test_build_overview_active_now_reconstructs_from_facts_for_historical_range(
     assert earlier_overview.sessions.active_now == 0
 
 
+def test_active_now_is_model_filter_independent_in_both_paths(
+    tmp_path: Path,
+) -> None:
+    # active-now is a liveness count; lifecycle facts carry no model, so a
+    # model filter must not change it — historically it used to zero the count
+    # (lifecycle rows never match a concrete model) while the live path ignored
+    # the filter, flipping the same query between a real count and 0.
+    storage = Storage(tmp_path / "db.sqlite")
+    now = datetime.now(UTC)
+    _make_session(storage, "live", status=SessionStatus.RUNNING)
+    _make_session(storage, "past", status=SessionStatus.EXITED)
+    storage.telemetry.ingest_fact(
+        SessionLifecycleFact(
+            fact_id="past:running",
+            source="runtime",
+            session_id="past",
+            occurred_at=now - timedelta(days=10),
+            dims=_dims(),
+            transition=LifecycleTransition.RUNNING,
+        )
+    )
+
+    live_rng = _full_range()
+    historical_rng = TelemetryRange(
+        start=now - timedelta(days=11), end=now - timedelta(days=9), tz="UTC"
+    )
+    model_flt = TelemetryFilter(models=["claude-opus-4"])
+
+    assert aggregate.count_active_sessions(
+        storage, TelemetryFilter(), live_rng
+    ) == aggregate.count_active_sessions(storage, model_flt, live_rng)
+    assert aggregate.count_active_sessions(
+        storage, TelemetryFilter(), historical_rng
+    ) == aggregate.count_active_sessions(storage, model_flt, historical_rng)
+    assert aggregate.count_active_sessions(storage, model_flt, historical_rng) == 1
+
+
 def test_build_overview_empty_range_is_zero_not_error(tmp_path: Path) -> None:
     storage = Storage(tmp_path / "db.sqlite")
     _make_session(storage, "s1")

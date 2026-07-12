@@ -87,7 +87,7 @@ The preferred width remains unchanged in React state and local storage. Sheet wi
 
 ### Root layout state
 
-While the workspace preview is open, set the current dock width custom property as today and set an explicit mode attribute when `dockSheet` is true. Remove both open and mode attributes during close/unmount cleanup.
+While the workspace preview is open, set the current dock width custom property as today and set an explicit mode attribute when `dockSheet` is true. Use `useLayoutEffect` (or an equivalent pre-paint mechanism) for this root mutation, so the dock modifier class and body-padding selector change before the browser paints a resize transition. On every `dockSheet` transition, explicitly set or clear the mode attribute in that same pre-paint effect; remove both open and mode attributes during close/unmount cleanup.
 
 The wide-screen body-padding selector must exclude sheet mode. This prevents a saved 1400px preference, viewed in a 1200px window, from both filling the screen as a sheet and adding 1400px of left body padding.
 
@@ -106,7 +106,7 @@ The existing container query continues to respond to the actual rendered dock wi
 
 - Drag and keyboard resize continue to clamp the candidate saved width as they do today.
 - In sheet mode, the resize separator is not exposed or focusable because it is not displayed.
-- Keep the existing dock-local Escape handler for the side dock. While an open `dockSheet` is active (including the phone regime), add a bubbling `keydown` handler on `window`, not `document`. For an Escape event that reaches it, close only when `event.defaultPrevented` is false; document-level modal handlers therefore receive and may consume Escape before the sheet evaluates it. Register the handler only for the open sheet and remove it during cleanup.
+- Update the dock-local Escape handler to close only when `event.key === "Escape"` and `event.defaultPrevented` is false, then call `event.preventDefault()` as it closes. Explorer controls can therefore consume Escape without closing the dock, and a dock-local close prevents the window handler from closing a second time. While an open `dockSheet` is active (including the phone regime), add a bubbling `keydown` handler on `window`, not `document`. For an Escape event that reaches it, close only when `event.defaultPrevented` is false; document-level modal handlers therefore receive and may consume Escape before the sheet evaluates it. Register the handler only for the open sheet and remove it during cleanup.
 - Do not move focus merely because a non-modal side dock changes to a sheet. The window-level sheet handler makes Escape reliable even when the active element remains outside the portal; closing therefore leaves focus at the existing active element.
 - The visible close button calls the existing close callback.
 - No local-storage migration is necessary. Existing numeric values remain valid preferences.
@@ -182,7 +182,7 @@ Adopt Option 1. It solves the reachability defect without mutating the saved pre
 2. Expand the same window until the saved width fits and confirm the side dock returns at the original saved width.
 3. While in sheet mode on a wide viewport, confirm no large left body-padding gap is introduced behind the session content.
 4. Repeat the shrink/expand cycle with a file open and tree branches expanded; confirm explorer state survives.
-5. With focus on the explorer, the original opener, and an underlying session control respectively, use Escape in sheet mode and confirm it closes the explorer. Confirm an Escape event already consumed by a higher-priority modal/control does not close the sheet.
+5. With focus on the explorer, the original opener, and an underlying session control respectively, use Escape in sheet mode and confirm it closes the explorer. Confirm the explorer filter's Escape-to-clear behavior and an Escape event consumed by a higher-priority modal/control do not close the sheet.
 6. Use the close button in both modes, then reopen the explorer.
 7. Verify phone-sized viewports still use the existing full-screen sheet and have no visible resize seam.
 
@@ -190,12 +190,12 @@ Adopt Option 1. It solves the reachability defect without mutating the saved pre
 
 | Risk | Mitigation |
 | --- | --- |
-| Root layout and dock class disagree during an update | Derive both from the same `dockSheet` value in `SessionDetail` and update them in the same effect/render path. |
+| Root layout and dock class disagree during an update | Derive both from the same `dockSheet` value in `SessionDetail` and update the root attributes with `useLayoutEffect` before paint. |
 | Full-screen mode leaves wide-screen body padding active | Explicitly exclude sheet mode from the body-padding selector and include the 1200px-view/1400px-saved-width manual test. |
 | Resize listeners leak or use stale state | Register one listener in an effect with cleanup; calculate mode from current React state rather than capturing width in a listener. |
 | CSS for phones and constrained desktops diverges | Share a single sheet selector for both modes rather than copying declarations. |
 | Browser chrome or mobile keyboard changes the visual viewport | Use the layout viewport for this width policy, consistent with existing CSS media queries; retain the independent phone breakpoint. |
-| Sheet Escape conflicts with another control that owns Escape | Install the document handler only while the sheet is open and honor `event.defaultPrevented` before closing. |
+| Sheet Escape conflicts with another control that owns Escape | Install the bubbling window handler only while the sheet is open and honor `event.defaultPrevented` before closing. |
 
 ## Security, Privacy, and Compliance
 

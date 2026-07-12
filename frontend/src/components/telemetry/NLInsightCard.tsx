@@ -100,6 +100,28 @@ export function NLInsightCard({
         </ReactMarkdown>
       </div>
 
+      {insight.instance_bullets && insight.instance_bullets.length > 0 ? (
+        <div className="tm-nl-instance">
+          <p className="tm-nl-instance-eyebrow">Instance health &amp; capacity</p>
+          <ul className="tm-nl-instance-list">
+            {insight.instance_bullets.map((bullet, i) => (
+              <li key={`${bullet.template_id}:${i}`} className="tm-nl-instance-row">
+                <span className="tm-nl-instance-text">{bullet.text}</span>
+                {bullet.evidence.length > 0 ? (
+                  <button
+                    type="button"
+                    className="tm-insight-evidence"
+                    onClick={() => onEvidenceClick(bullet.evidence[0])}
+                  >
+                    View →
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {insight.evidence.length > 0 ? (
         <div className="tm-nl-evidence">
           <button

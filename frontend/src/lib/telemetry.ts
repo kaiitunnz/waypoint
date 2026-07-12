@@ -7,6 +7,7 @@ import {
 } from "@/lib/tokens";
 import {
   InsightSeverity,
+  InstanceStorageCategory,
   LifecycleTransition,
   TelemetryFactKind,
   TelemetryParentScope,
@@ -299,6 +300,50 @@ export function tokenCategoryColor(category: string): string {
   return TOKEN_CATEGORY_COLORS[category as UnifiedTokenCategory] ?? "var(--tm-series-6)";
 }
 
+// ── Instance health & capacity categories ────────────────────────────────
+// Fixed accounting order (mirrors the backend StorageCategory enum) — also the
+// stacked-bar order. Colors draw from the shared categorical series slots.
+export const INSTANCE_CATEGORY_ORDER: readonly InstanceStorageCategory[] = [
+  "database",
+  "sqlite_companions",
+  "live_sessions",
+  "orphan_sessions",
+  "attachments",
+  "unclassified",
+];
+
+const INSTANCE_CATEGORY_LABELS: Record<InstanceStorageCategory, string> = {
+  database: "Database",
+  sqlite_companions: "SQLite companions",
+  live_sessions: "Live sessions",
+  orphan_sessions: "Orphan sessions",
+  attachments: "Attachments",
+  unclassified: "Unclassified",
+};
+
+const INSTANCE_CATEGORY_COLORS: Record<InstanceStorageCategory, string> = {
+  database: "var(--tm-series-1)",
+  sqlite_companions: "var(--tm-series-2)",
+  live_sessions: "var(--tm-series-3)",
+  orphan_sessions: "var(--tm-series-4)",
+  attachments: "var(--tm-series-5)",
+  unclassified: "var(--tm-series-6)",
+};
+
+export function instanceCategoryLabel(category: string): string {
+  return (
+    INSTANCE_CATEGORY_LABELS[category as InstanceStorageCategory] ??
+    category
+      .split("_")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ")
+  );
+}
+
+export function instanceCategoryColor(category: string): string {
+  return INSTANCE_CATEGORY_COLORS[category as InstanceStorageCategory] ?? "var(--tm-series-6)";
+}
+
 export interface TokenTierSplit {
   newWork: number;
   reread: number;
@@ -338,6 +383,27 @@ const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat("en-US", {
 
 export function formatCompactNumber(value: number): string {
   return COMPACT_NUMBER_FORMATTER.format(value);
+}
+
+const BYTE_UNITS = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"] as const;
+
+// Human-readable IEC byte size (mirrors the backend's format_bytes). The exact
+// value is kept for an accessible title/aria-label so screen readers and
+// hover both see the precise number.
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < BYTE_UNITS.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const rounded = unit === 0 ? Math.round(value) : value.toFixed(1);
+  return `${rounded} ${BYTE_UNITS[unit]}`;
+}
+
+export function formatExactBytes(bytes: number): string {
+  return `${bytes.toLocaleString("en-US")} bytes`;
 }
 
 export function confidenceLabel(confidence: string): string {

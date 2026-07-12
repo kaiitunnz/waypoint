@@ -41,6 +41,11 @@ _TAG_FILTER_SEPARATOR = ":"
 # ``telemetry_meta`` key the latest NL-insight digest is stored under (CONTRACT-NL.md §4).
 _NL_INSIGHT_META_KEY = "nl_insight"
 
+# ``telemetry_meta`` key the cached current instance-health snapshot is stored
+# under (PRD FR-4): a single latest slot, served with a 5-minute freshness
+# window and cleared by the explicit DELETE path.
+_INSTANCE_CURRENT_META_KEY = "instance_snapshot_current"
+
 # The daily-rollup primary key a fact contributes to: (day, backend, model,
 # repo, source, transport, is_child). Recomputing one key rescans that key's
 # day-bounded slice from scratch, so accumulating the affected keys across a
@@ -190,6 +195,21 @@ class TelemetryStore:
                   PRIMARY KEY (signature, range_key)
                 );
                 CREATE TABLE IF NOT EXISTS telemetry_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+
+                -- One aggregate instance-health point per host-local calendar
+                -- day. Keyed on the stable numeric UTC offset (not the tz
+                -- abbreviation, which flips on DST though the zone is
+                -- unchanged); the abbreviation is stored for display only.
+                CREATE TABLE IF NOT EXISTS telemetry_instance_snapshot (
+                  day TEXT NOT NULL,
+                  utc_offset_minutes INTEGER NOT NULL,
+                  tz TEXT NOT NULL,
+                  observed_at TEXT NOT NULL,
+                  data_quality TEXT NOT NULL,
+                  total_bytes INTEGER NOT NULL,
+                  payload_json TEXT NOT NULL,
+                  PRIMARY KEY (day, utc_offset_minutes)
+                );
 
                 -- ``telemetry_rollup_session`` backed a since-removed
                 -- ``active_denom`` metric that no reader consumed; drop it on
@@ -451,6 +471,121 @@ class TelemetryStore:
             self._conn.execute(
                 "DELETE FROM telemetry_meta WHERE k = ?", (_NL_INSIGHT_META_KEY,)
             )
+            self._conn.commit()
+
+    # ── instance health & capacity (PRD FR-4) ─────────────────────────────
+
+    def set_instance_current(self, payload_json: str) -> None:
+        """Cache the current instance-health snapshot (a single latest slot)."""
+        self.set_meta(_INSTANCE_CURRENT_META_KEY, payload_json)
+
+    def get_instance_current(self) -> str | None:
+        return self.get_meta(_INSTANCE_CURRENT_META_KEY)
+
+    def clear_instance_current(self) -> None:
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM telemetry_meta WHERE k = ?", (_INSTANCE_CURRENT_META_KEY,)
+            )
+            self._conn.commit()
+
+    def instance_daily_count(self) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM telemetry_instance_snapshot"
+            ).fetchone()
+            return int(row["n"]) if row is not None else 0
+
+    def instance_daily_quality(self, day: str, utc_offset_minutes: int) -> str | None:
+        """The stored point's data-quality for a (day, offset), or ``None`` if absent."""
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT data_quality FROM telemetry_instance_snapshot
+                WHERE day = ? AND utc_offset_minutes = ?
+                """,
+                (day, utc_offset_minutes),
+            ).fetchone()
+            return row["data_quality"] if row is not None else None
+
+    def upsert_instance_daily(
+        self,
+        *,
+        day: str,
+        utc_offset_minutes: int,
+        tz: str,
+        observed_at: datetime,
+        data_quality: str,
+        total_bytes: int,
+        payload_json: str,
+    ) -> bool:
+        """Store today's daily point, honoring first-complete-wins semantics.
+
+        The (day, offset) pair is the uniqueness key: the first *complete* point
+        for a date wins and is never overwritten; a stored *partial* point may be
+        replaced by a later point (partial or complete). A period is never
+        duplicated. Returns whether a row was written.
+        """
+        with self._lock:
+            existing = self.instance_daily_quality(day, utc_offset_minutes)
+            if existing == "complete":
+                return False
+            self._conn.execute(
+                """
+                INSERT INTO telemetry_instance_snapshot
+                  (day, utc_offset_minutes, tz, observed_at, data_quality,
+                   total_bytes, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(day, utc_offset_minutes) DO UPDATE SET
+                  tz = excluded.tz, observed_at = excluded.observed_at,
+                  data_quality = excluded.data_quality,
+                  total_bytes = excluded.total_bytes,
+                  payload_json = excluded.payload_json
+                """,
+                (
+                    day,
+                    utc_offset_minutes,
+                    tz,
+                    _iso_utc(observed_at),
+                    data_quality,
+                    total_bytes,
+                    payload_json,
+                ),
+            )
+            self._conn.commit()
+            return True
+
+    def query_instance_history(
+        self, *, start_day: str, end_day: str
+    ) -> list[dict[str, Any]]:
+        """Daily points with ``start_day <= day <= end_day``, oldest first."""
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT day, utc_offset_minutes, tz, observed_at, data_quality,
+                       total_bytes, payload_json
+                FROM telemetry_instance_snapshot
+                WHERE day >= ? AND day <= ?
+                ORDER BY day ASC
+                """,
+                (start_day, end_day),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def prune_instance_snapshots(self, *, rollups_before: datetime) -> int:
+        """Drop daily points older than the rollup-retention cutoff."""
+        with self._lock:
+            cutoff = _day_key(rollups_before)
+            cursor = self._conn.execute(
+                "DELETE FROM telemetry_instance_snapshot WHERE day < ?", (cutoff,)
+            )
+            self._conn.commit()
+            return cursor.rowcount or 0
+
+    def clear_instance_snapshots(self) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM telemetry_instance_snapshot")
+            self.clear_instance_current()
             self._conn.commit()
 
     # ── rollup recompute ──────────────────────────────────────────────────

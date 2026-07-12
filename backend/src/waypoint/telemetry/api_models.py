@@ -15,7 +15,14 @@ from waypoint.telemetry.facts import TelemetryFactKind, TelemetryFilter, Telemet
 
 TokenCoverage = Literal["entire", "tracked_since", "partial"]
 TokenGroupBy = Literal["time", "backend", "model", "repo", "session"]
-InsightType = Literal["near_limit", "context_pressure", "token_volume_change"]
+InsightType = Literal[
+    "near_limit",
+    "context_pressure",
+    "token_volume_change",
+    "orphan_data",
+    "redundant_logs",
+    "database_vacuum",
+]
 InsightSeverity = Literal["info", "warning", "critical"]
 
 
@@ -249,6 +256,11 @@ class Insight(BaseModel):
     filters: TelemetryFilter
     click_through: InsightClickThrough
     severity: InsightSeverity
+    # Instance-health insights add an observation time and a safety note
+    # describing why the candidate is safe/conditional and which maintenance
+    # command or doc to consult (PRD FR-3/FR-6). Usage insights leave both null.
+    observed_at: datetime | None = None
+    safety_note: str | None = None
 
 
 class TelemetryInsightsResponse(BaseModel):

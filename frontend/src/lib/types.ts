@@ -784,7 +784,13 @@ export interface TelemetryFilter {
 
 export type TokenCoverage = "entire" | "tracked_since" | "partial";
 export type TokenGroupBy = "time" | "backend" | "model" | "repo" | "session";
-export type InsightType = "near_limit" | "context_pressure" | "token_volume_change";
+export type InsightType =
+  | "near_limit"
+  | "context_pressure"
+  | "token_volume_change"
+  | "orphan_data"
+  | "redundant_logs"
+  | "database_vacuum";
 export type InsightSeverity = "info" | "warning" | "critical";
 
 export interface TokenTotals {
@@ -990,6 +996,10 @@ export interface Insight {
   filters: TelemetryFilter;
   click_through: InsightClickThrough;
   severity: InsightSeverity;
+  // Instance-health insights add an observation time and a safety note; usage
+  // insights leave both null.
+  observed_at?: string | null;
+  safety_note?: string | null;
 }
 
 export interface TelemetryInsightsResponse {
@@ -1039,6 +1049,12 @@ export interface NLInsightEvidence {
 
 export type NLConfidence = "low" | "medium" | "high";
 
+export interface NLInstanceBullet {
+  text: string;
+  template_id: string;
+  evidence: NLInsightEvidence[];
+}
+
 export interface NLInsight {
   prose: string;
   evidence: NLInsightEvidence[];
@@ -1049,6 +1065,8 @@ export interface NLInsight {
   source_backend: string;
   source_model: string | null;
   disclaimer: string;
+  // Server-rendered instance health/capacity claims (never free-form prose).
+  instance_bullets?: NLInstanceBullet[];
 }
 
 // GET /api/telemetry/nl-insight — the latest stored digest, its freshness,
@@ -1058,4 +1076,98 @@ export interface NLInsightResponse {
   insight: NLInsight | null;
   // Whether the stored digest is still within the configured digest interval.
   fresh: boolean;
+}
+
+// ── Instance health & capacity (mirrors telemetry/instance) ───────────────
+
+export type InstanceStorageCategory =
+  | "database"
+  | "sqlite_companions"
+  | "live_sessions"
+  | "orphan_sessions"
+  | "attachments"
+  | "unclassified";
+
+export type InstanceDataQuality = "complete" | "partial" | "unavailable";
+
+export interface CategoryFootprint {
+  category: InstanceStorageCategory;
+  bytes: number;
+  entry_count: number;
+  partial: boolean;
+  unavailable: boolean;
+}
+
+export interface StructuredLogBreakdown {
+  tree: InstanceStorageCategory;
+  bytes: number;
+  count: number;
+}
+
+export interface RedundantLogCandidate {
+  bytes: number;
+  count: number;
+  running_excluded_count: number;
+  orphan_overlap_bytes: number;
+  orphan_overlap_count: number;
+}
+
+export interface DatabaseReclaim {
+  measured: boolean;
+  page_size: number;
+  page_count: number;
+  freelist_count: number;
+  free_bytes: number;
+  free_percent: number;
+}
+
+export interface FilesystemSignal {
+  measured: boolean;
+  total_bytes: number;
+  free_bytes: number;
+}
+
+export interface InstanceCounts {
+  table_rows: Record<string, number>;
+  events_by_kind: Record<string, number>;
+  session_dir_count: number;
+  orphan_dir_count: number;
+  attachment_count: number;
+}
+
+export interface InstanceSnapshot {
+  observed_at: string;
+  tz: string;
+  utc_offset_minutes: number;
+  data_quality: InstanceDataQuality;
+  categories: CategoryFootprint[];
+  total_bytes: number;
+  structured_logs: StructuredLogBreakdown[];
+  redundant_logs: RedundantLogCandidate;
+  database: DatabaseReclaim;
+  filesystem: FilesystemSignal;
+  counts: InstanceCounts;
+  wal_bytes: number;
+  notes: string[];
+}
+
+export interface InstanceHistoryPoint {
+  day: string;
+  tz: string;
+  utc_offset_minutes: number;
+  observed_at: string;
+  data_quality: InstanceDataQuality;
+  total_bytes: number;
+  category_bytes: Record<string, number>;
+}
+
+export interface TelemetryInstance {
+  snapshot: InstanceSnapshot;
+  stale: boolean;
+  stale_reason: string | null;
+  age_seconds: number | null;
+  refresh_due: boolean;
+  insights: Insight[];
+  history: InstanceHistoryPoint[];
+  cli_note: string;
 }

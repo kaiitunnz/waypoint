@@ -99,6 +99,8 @@ from waypoint.telemetry.api_models import (
     TokenGroupBy,
 )
 from waypoint.telemetry.facts import TelemetryFactKind
+from waypoint.telemetry.instance import insights as instance_insights
+from waypoint.telemetry.instance import service as instance_service
 from waypoint.telemetry.nl import NLInsight
 from waypoint.telemetry.query import parse_range_filter
 from waypoint.usage_dashboard import build_dashboard
@@ -1211,11 +1213,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
         require_telemetry_enabled()
-        rng, _flt = parse_range_filter(request, context.settings)
-        context.storage.telemetry.dismiss_insight(
-            signature, telemetry_aggregate.range_key(rng)
-        )
+        # Instance-health insights dismiss under a fixed range key (they are not
+        # range-scoped); everything else keys on the resolved range.
+        if instance_insights.is_instance_signature(signature):
+            range_key = instance_insights.INSTANCE_RANGE_KEY
+        else:
+            rng, _flt = parse_range_filter(request, context.settings)
+            range_key = telemetry_aggregate.range_key(rng)
+        context.storage.telemetry.dismiss_insight(signature, range_key)
         return InsightDismissResponse(signature=signature).model_dump(mode="json")
+
+    @app.get("/api/telemetry/instance")
+    async def telemetry_instance(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        require_telemetry_enabled()
+        result = await asyncio.to_thread(
+            instance_service.build_instance,
+            context.storage,
+            context.settings,
+            refresh=False,
+        )
+        # A ≥5-minute-old cache is served immediately and revalidated off the
+        # request path (never inline), so the walk never blocks the response.
+        if result.refresh_due:
+            context.runtime.schedule_instance_refresh()
+        return result.model_dump(mode="json")
+
+    @app.post("/api/telemetry/instance/refresh")
+    async def telemetry_instance_refresh(
+        _: Annotated[str, Depends(token_dependency())],
+    ) -> Any:
+        require_telemetry_enabled()
+        result = await asyncio.to_thread(
+            instance_service.build_instance,
+            context.storage,
+            context.settings,
+            refresh=True,
+        )
+        context.runtime.mark_telemetry_dirty()
+        return result.model_dump(mode="json")
 
     @app.get("/api/telemetry/settings")
     async def telemetry_settings_view(

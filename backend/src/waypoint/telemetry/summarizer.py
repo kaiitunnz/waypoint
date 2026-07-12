@@ -24,7 +24,17 @@ from waypoint.storage import Storage
 from waypoint.telemetry import aggregate
 from waypoint.telemetry import insights as telemetry_insights
 from waypoint.telemetry.facts import TelemetryFactKind, TelemetryFilter, TelemetryRange
-from waypoint.telemetry.nl import NLInsight, NLInsightEvidence, NLInsightRequest
+from waypoint.telemetry.instance.nl import (
+    INSTANCE_CLAIM_TEMPLATES,
+    InstanceNLAggregate,
+    render_instance_bullets,
+)
+from waypoint.telemetry.nl import (
+    NLInsight,
+    NLInsightEvidence,
+    NLInsightRequest,
+    NLInstanceBullet,
+)
 
 if TYPE_CHECKING:
     from waypoint.runtime import SessionRuntime
@@ -59,6 +69,22 @@ Respond with ONLY a JSON object of exactly this shape and nothing else:
 {"prose": "...", "evidence": [{"statement": "...", "metric": "...", "value": "...", "click_through": {}}], "confidence": "low|medium|high"}
 
 Telemetry payload:
+"""
+
+_INSTANCE_INSTRUCTION_PROMPT = """You are selecting which instance health & capacity claims to surface on your reader's own Waypoint dashboard, from the JSON payload below (a privacy-safe aggregate plus a fixed menu of claim templates).
+
+You do NOT write the claim text or any numbers. You only choose which templates to show and which of their allowed evidence ids to attach. The server fills every number and renders the final text — anything you write as prose is discarded.
+
+Rules — follow exactly:
+- Choose 1 to 5 templates from "templates" that are the most useful given the "aggregate" numbers. Prefer templates whose numbers are non-trivial (large footprint, a present orphan/redundant-log/vacuum condition).
+- For each chosen template, include only evidence ids listed in that template's "allowed_evidence".
+- Do not choose a template whose data looks empty or zero in the aggregate.
+- Never invent a template id, an evidence id, a number, or free-form prose.
+
+Respond with ONLY a JSON array of this exact shape and nothing else:
+[{"template_id": "...", "evidence_ids": ["..."]}]
+
+Payload:
 """
 
 
@@ -329,3 +355,60 @@ class CodingAgentSummarizer:
         except Exception:  # noqa: BLE001
             log.warning("NL-insight summarize failed", exc_info=True)
             return None
+
+    async def summarize_instance(
+        self, aggregate: InstanceNLAggregate
+    ) -> list[NLInstanceBullet]:
+        """Generate server-rendered instance bullets via a prose-free call.
+
+        A dedicated call whose prompt never asks for prose and whose payload is
+        the path-free instance aggregate only, so the usage-prose channel never
+        sees instance numbers. The model returns only template/evidence
+        selections; the server validates and renders. Degrades to ``[]``.
+        """
+        config = self._settings.telemetry_nl
+        backend, transport, model, account_profile, permission_mode = (
+            _resolve_oneshot_launch(self._runtime, config)
+        )
+        try:
+            payload_obj = {
+                "aggregate": aggregate.model_dump(mode="json"),
+                "templates": {
+                    tid: {
+                        "allowed_evidence": sorted(t.allowed_evidence),
+                        "requires_condition": t.requires_insight,
+                    }
+                    for tid, t in INSTANCE_CLAIM_TEMPLATES.items()
+                },
+            }
+            # Fail closed if the aggregate ever carried a path-like string.
+            assert_no_path_like_strings(payload_obj)
+            payload = json.dumps(payload_obj, indent=2)
+            raw = await self._runtime.run_oneshot(
+                backend=backend,
+                transport=transport,
+                model=model,
+                account_profile=account_profile,
+                permission_mode=permission_mode,
+                instruction=_INSTANCE_INSTRUCTION_PROMPT,
+                payload=payload,
+                timeout_s=GENERATION_TIMEOUT_SECONDS,
+            )
+            if not raw:
+                return []
+            return render_instance_bullets(_parse_selections(raw), aggregate)
+        except Exception:  # noqa: BLE001
+            log.warning("instance NL selection failed", exc_info=True)
+            return []
+
+
+def _parse_selections(raw: str) -> object:
+    """Parse the model's reply into a selections list, tolerating a fence/wrapper."""
+    text = _strip_code_fence(raw)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(parsed, dict):
+        return parsed.get("selections", [])
+    return parsed

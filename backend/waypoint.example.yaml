@@ -124,6 +124,8 @@ plugin_configs:
 # telemetry_context_thresholds: [70, 90, 100]  # context/limit warning thresholds
 # telemetry_local_labels: false             # show provider account labels instead
 #                                           # of the pseudonymous key (opt-in)
+# telemetry_instance_fs_signals: false      # report host free space for the volume
+#                                           # holding the data dir (free/total only)
 
 # Opt-in NL-insight summarizer for the Telemetry dashboard. Off by default —
 # enabling it sends telemetry aggregates + redacted drill-down samples

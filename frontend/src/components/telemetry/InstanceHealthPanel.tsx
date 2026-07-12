@@ -134,7 +134,7 @@ function HistoryTrend({ history }: { history: InstanceHistoryPoint[] }) {
   if (points.length < 2) {
     return (
       <p className="tm-inst-trend-empty muted">
-        A daily footprint trend appears here once more than one day of history is recorded.
+        A daily trend appears after a second day of history.
       </p>
     );
   }
@@ -337,7 +337,7 @@ export function InstanceHealthPanel({
           {snapshot.structured_logs.length > 0 || snapshot.redundant_logs.count > 0 ? (
             <div className="tm-inst-overlays">
               <p className="tm-inst-overlay-eyebrow">
-                Already included in the categories above — not added to the total
+                Already counted above — not added to the total
               </p>
               {snapshot.structured_logs.map((log) => (
                 <span key={log.tree} className="tm-inst-overlay">

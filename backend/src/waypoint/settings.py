@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from waypoint.backends.plugin_config import PluginConfig
 from waypoint.backends.registry import get_registry
@@ -195,8 +195,14 @@ class Settings(BaseModel):
     # ``enabled: false``.
     assistant: AssistantConfig | None = None
     # Usage telemetry (session lifecycle/turn/tool/context/limit facts +
-    # daily rollups) backing the Telemetry dashboard.
-    telemetry_enabled: bool = True
+    # daily rollups) backing the Telemetry dashboard. Opt-in: off unless the
+    # operator sets it (master switch for collection and dashboard access).
+    telemetry_enabled: bool = False
+    # One-time historical import of pre-enable session/ledger history. Separate
+    # opt-in so enabling live collection does not retroactively derive facts
+    # from activity that predates the decision. Only runs when the master
+    # switch is also on; the ``backfill_done`` marker keeps it one-shot.
+    telemetry_backfill: bool = False
     telemetry_retention_days: int = 90
     telemetry_rollup_retention_months: int = 13
     # Context-window occupancy percent thresholds (low, elevated, critical)
@@ -224,6 +230,12 @@ class Settings(BaseModel):
                 raw if isinstance(raw, schema) else schema.model_validate(raw or {})
             )
         return dispatched
+
+    @model_validator(mode="after")
+    def _require_master_switch_for_nl(self) -> "Settings":
+        if self.telemetry_nl.enabled and not self.telemetry_enabled:
+            raise ValueError("telemetry_nl.enabled requires telemetry_enabled: true")
+        return self
 
     @property
     def database_path(self) -> Path:
@@ -356,6 +368,10 @@ def _env_overrides(payload: dict[str, Any]) -> dict[str, Any]:
     if "WAYPOINT_TELEMETRY_ENABLED" in os.environ:
         overrides["telemetry_enabled"] = os.environ[
             "WAYPOINT_TELEMETRY_ENABLED"
+        ].lower() not in {"0", "false", "no", ""}
+    if "WAYPOINT_TELEMETRY_BACKFILL" in os.environ:
+        overrides["telemetry_backfill"] = os.environ[
+            "WAYPOINT_TELEMETRY_BACKFILL"
         ].lower() not in {"0", "false", "no", ""}
     if "WAYPOINT_TELEMETRY_RETENTION_DAYS" in os.environ:
         overrides["telemetry_retention_days"] = int(

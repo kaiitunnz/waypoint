@@ -641,6 +641,10 @@ class MeResponse(BaseModel):
     # populate its selector without a second round-trip. Env values are omitted.
     session_presets: list[SessionPresetSummary] = Field(default_factory=list)
     default_preset_id: str | None = None
+    # Whether usage telemetry is enabled. The frontend uses this capability to
+    # decide whether to offer the dashboard entry point and to short-circuit
+    # the `/telemetry` page to its disabled state before any telemetry fetch.
+    telemetry_enabled: bool = False
 
 
 class EventsPageResponse(BaseModel):

@@ -36,7 +36,7 @@ from waypoint.telemetry.query import host_utc_offset_minutes
 
 
 def _build(tmp_path: Path) -> tuple[Any, str]:
-    settings = Settings(data_dir=tmp_path / "data")
+    settings = Settings(data_dir=tmp_path / "data", telemetry_enabled=True)
     app = create_app(settings)
     context = app.state.context
     token = context.tokens.issue().token
@@ -407,7 +407,7 @@ async def test_nl_insight_endpoints_404_when_disabled(tmp_path: Path) -> None:
 
 
 async def test_nl_insight_post_generates_and_get_returns_it(tmp_path: Path) -> None:
-    settings = Settings(data_dir=tmp_path / "data")
+    settings = Settings(data_dir=tmp_path / "data", telemetry_enabled=True)
     settings.telemetry_nl.enabled = True
     app = create_app(settings)
     context = app.state.context
@@ -433,7 +433,7 @@ async def test_nl_insight_post_generates_and_get_returns_it(tmp_path: Path) -> N
 async def test_nl_insight_get_reports_unavailable_before_first_generation(
     tmp_path: Path,
 ) -> None:
-    settings = Settings(data_dir=tmp_path / "data")
+    settings = Settings(data_dir=tmp_path / "data", telemetry_enabled=True)
     settings.telemetry_nl.enabled = True
     app = create_app(settings)
     context = app.state.context
@@ -450,7 +450,7 @@ async def test_nl_insight_get_reports_unavailable_before_first_generation(
 async def test_nl_insight_post_returns_409_on_generation_failure(
     tmp_path: Path,
 ) -> None:
-    settings = Settings(data_dir=tmp_path / "data")
+    settings = Settings(data_dir=tmp_path / "data", telemetry_enabled=True)
     settings.telemetry_nl.enabled = True
     app = create_app(settings)
     context = app.state.context
@@ -467,7 +467,7 @@ async def test_nl_insight_post_returns_409_on_generation_failure(
 
 
 def test_delete_publishes_debounced_telemetry_update(tmp_path: Path) -> None:
-    settings = Settings(data_dir=tmp_path / "data")
+    settings = Settings(data_dir=tmp_path / "data", telemetry_enabled=True)
     app = create_app(settings)
     context = app.state.context
     token = context.tokens.issue().token

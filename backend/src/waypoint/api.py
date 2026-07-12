@@ -267,6 +267,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 redact_preset(preset) for preset in context.runtime.presets.list()
             ],
             default_preset_id=_default_preset_id(context),
+            telemetry_enabled=context.settings.telemetry_enabled,
         )
 
     @app.post(
@@ -1091,11 +1092,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return refreshed.model_dump(mode="json")
 
+    def require_telemetry_enabled() -> None:
+        # Master opt-in gate. Runs after token auth (the token dependency
+        # resolves before the handler body) and 404s so a disabled deployment
+        # does not advertise the telemetry surface. DELETE stays ungated as a
+        # narrow privacy-cleanup path.
+        if not context.settings.telemetry_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    "telemetry is disabled; enable it in your Waypoint config "
+                    "or set WAYPOINT_TELEMETRY_ENABLED=true, then restart the "
+                    "backend"
+                ),
+            )
+
     @app.get("/api/telemetry/overview")
     async def telemetry_overview(
         request: Request,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
+        require_telemetry_enabled()
         rng, flt = parse_range_filter(request, context.settings)
         overview = await asyncio.to_thread(
             telemetry_aggregate.build_overview,
@@ -1112,6 +1129,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: Annotated[str, Depends(token_dependency())],
         group_by: Annotated[TokenGroupBy, Query()] = "time",
     ) -> Any:
+        require_telemetry_enabled()
         rng, flt = parse_range_filter(request, context.settings)
         tokens = await asyncio.to_thread(
             telemetry_aggregate.build_tokens, context.storage, rng, flt, group_by
@@ -1123,6 +1141,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
+        require_telemetry_enabled()
         rng, flt = parse_range_filter(request, context.settings)
         activity = await asyncio.to_thread(
             telemetry_aggregate.build_activity, context.storage, rng, flt
@@ -1134,6 +1153,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
+        require_telemetry_enabled()
         rng, flt = parse_range_filter(request, context.settings)
         health = await asyncio.to_thread(
             telemetry_aggregate.build_health,
@@ -1152,6 +1172,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         page: Annotated[int, Query(ge=1)] = 1,
         page_size: Annotated[int, Query(ge=1, le=200)] = 20,
     ) -> Any:
+        require_telemetry_enabled()
         rng, flt = parse_range_filter(request, context.settings)
         drilldown = await asyncio.to_thread(
             telemetry_aggregate.build_drilldown,
@@ -1169,6 +1190,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
+        require_telemetry_enabled()
         rng, flt = parse_range_filter(request, context.settings)
         insights = await asyncio.to_thread(
             telemetry_insights.compute_insights,
@@ -1185,6 +1207,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
+        require_telemetry_enabled()
         rng, _flt = parse_range_filter(request, context.settings)
         context.storage.telemetry.dismiss_insight(
             signature, telemetry_aggregate.range_key(rng)
@@ -1195,6 +1218,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def telemetry_settings_view(
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
+        require_telemetry_enabled()
         return telemetry_aggregate.build_settings(
             context.storage, context.settings
         ).model_dump(mode="json")
@@ -1220,6 +1244,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def telemetry_nl_insight_get(
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
+        require_telemetry_enabled()
         _require_nl_enabled()
         stored_json = context.storage.telemetry.get_nl_insight()
         if stored_json is None:
@@ -1238,6 +1263,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         _: Annotated[str, Depends(token_dependency())],
     ) -> Any:
+        require_telemetry_enabled()
         _require_nl_enabled()
         rng, flt = parse_range_filter(request, context.settings)
         insight = await context.runtime.generate_nl_digest(rng, flt)

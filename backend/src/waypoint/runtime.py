@@ -424,16 +424,20 @@ class SessionRuntime:
         self._broadcast_flusher = asyncio.create_task(
             self._session_broadcast_loop(), name="session-broadcast-flusher"
         )
-        self._telemetry_broadcast_task = asyncio.create_task(
-            self._telemetry_broadcast_loop(), name="telemetry-broadcast-flusher"
-        )
         if self.telemetry_ingester is not None:
             await self.telemetry_ingester.start()
-            # Backfill and pruning run off the boot path so a large history
-            # never delays startup or blocks a turn.
-            self._telemetry_backfill_task = asyncio.create_task(
-                self._run_telemetry_backfill(), name="telemetry-backfill"
+            # The broadcast flusher only has a purpose while collection is on;
+            # keeping it off when disabled makes the disabled state complete.
+            self._telemetry_broadcast_task = asyncio.create_task(
+                self._telemetry_broadcast_loop(), name="telemetry-broadcast-flusher"
             )
+            # Backfill and pruning run off the boot path so a large history
+            # never delays startup or blocks a turn. Historical import is a
+            # separate opt-in from live collection.
+            if self.settings.telemetry_backfill:
+                self._telemetry_backfill_task = asyncio.create_task(
+                    self._run_telemetry_backfill(), name="telemetry-backfill"
+                )
             self._telemetry_maintenance_task = asyncio.create_task(
                 self._telemetry_maintenance_loop(), name="telemetry-maintenance"
             )

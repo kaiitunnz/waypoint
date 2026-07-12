@@ -225,6 +225,25 @@ migration flag — the import is guarded by a persistent `backfill_done` marker,
 leaving it `true` is harmless (subsequent restarts are no-ops), but it is
 clearest to remove it after the first enabled boot.
 
+To re-run the import on demand — after enabling telemetry without
+`telemetry_backfill`, or to recover history you deleted and later decided you
+want — use `waypoint maintenance rebuild-telemetry`. It re-derives facts from
+the existing `sessions`/`events`/token-ledger rows and rebuilds the rollups via
+the same code path as the boot backfill. Run it **with the backend stopped**
+(`waypointctl stop`); the command refuses when it detects a live backend on the
+configured host/port or a concurrent writer holding the database. Because the
+`backfill_done` marker is one-shot and preserved across deletion, a database
+that already backfilled requires `--force` plus a confirmation that names the
+effect — re-deriving history includes any previously deleted or pre-enablement
+activity. Add `--yes` to skip the prompt for scripting. Re-running is safe to
+repeat: facts upsert on their primary key and rollups are fully rebuilt, so
+totals never double-count. One recovery-depth caveat: activity is recovered as
+far back as the `events` table reaches, but token totals only as far back as the
+token ledger, so token charts may start later than activity charts.
+`waypoint maintenance stats` reports the current `telemetry_backfill` state
+(`done`, `through`) so you can see whether a re-run is warranted and confirm the
+result afterward.
+
 Two upgrade notes for deployments that ran telemetry before it became opt-in:
 existing collectors must add `telemetry_enabled: true` before restarting or
 collection and the dashboard silently go away (existing facts stay on disk but
@@ -238,7 +257,9 @@ become inaccessible until re-enabled). And a config that sets
 Disabling telemetry later stops new collection but never deletes existing facts;
 use the explicit delete control (or `DELETE /api/telemetry`, which stays
 available while disabled) to erase them. Deletion preserves the `backfill_done`
-marker, so a later re-enable does not re-derive erased pre-enable history.
+marker, so a later re-enable does not re-derive erased pre-enable history; the
+only way back is the deliberate, confirmed `waypoint maintenance
+rebuild-telemetry --force` (see above).
 
 The opt-in summarizer is configured under a `telemetry_nl` block (or the matching
 `WAYPOINT_TELEMETRY_NL_*` env vars): `enabled` (default `false`), `backend`,

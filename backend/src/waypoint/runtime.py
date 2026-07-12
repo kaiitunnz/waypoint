@@ -107,6 +107,7 @@ from waypoint.ssh_master import SshMasterManager, SshMasterStatus
 from waypoint.storage import Storage
 from waypoint.telemetry.facts import TelemetryFilter, TelemetryRange
 from waypoint.telemetry.ingest import TelemetryIngester
+from waypoint.telemetry.instance import service as instance_service
 from waypoint.telemetry.nl import NLInsight
 from waypoint.telemetry.query import (
     host_tz_name,
@@ -390,6 +391,10 @@ class SessionRuntime:
         self._telemetry_created_seen: set[str] = set()
         self._telemetry_maintenance_task: asyncio.Task[None] | None = None
         self._telemetry_backfill_task: asyncio.Task[None] | None = None
+        # Instance-health snapshot: a boot bootstrap and a debounced background
+        # refresh so a ≥5-minute-old cache is revalidated off the request path.
+        self._instance_bootstrap_task: asyncio.Task[None] | None = None
+        self._instance_refresh_task: asyncio.Task[None] | None = None
         # Id of the personal-assistant singleton, populated by
         # ``_ensure_assistant_session`` during ``start``. ``None`` when the
         # assistant is disabled or its bootstrap failed.
@@ -440,6 +445,11 @@ class SessionRuntime:
                 )
             self._telemetry_maintenance_task = asyncio.create_task(
                 self._telemetry_maintenance_loop(), name="telemetry-maintenance"
+            )
+            # Compute an initial current snapshot + (on first enablement or a due
+            # tick) a daily history point, off the boot path.
+            self._instance_bootstrap_task = asyncio.create_task(
+                self._bootstrap_instance_snapshot(), name="instance-bootstrap"
             )
         # Reap any one-shot session orphaned by a crash before the restore
         # loop below tries to reconnect it — it has no state worth resuming.
@@ -499,6 +509,16 @@ class SessionRuntime:
             with suppress(asyncio.CancelledError):
                 await self._telemetry_maintenance_task
             self._telemetry_maintenance_task = None
+        for instance_task in (
+            self._instance_bootstrap_task,
+            self._instance_refresh_task,
+        ):
+            if instance_task is not None:
+                instance_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await instance_task
+        self._instance_bootstrap_task = None
+        self._instance_refresh_task = None
         if self.telemetry_ingester is not None:
             await self.telemetry_ingester.stop()
         for task in self.monitor_tasks.values():
@@ -4272,12 +4292,73 @@ class SessionRuntime:
                 self.storage.telemetry.prune(
                     facts_before=facts_before, rollups_before=rollups_before
                 )
+                self.storage.telemetry.prune_instance_snapshots(
+                    rollups_before=rollups_before
+                )
             except Exception:
                 log.debug("telemetry prune failed", exc_info=True)
+            try:
+                # A daily instance-health point when due (idempotent, gated to
+                # on/after 00:05 host-local except the first-ever point).
+                wrote = await asyncio.to_thread(
+                    instance_service.record_instance_daily_if_due,
+                    self.storage,
+                    self.settings,
+                )
+                if wrote:
+                    self.mark_telemetry_dirty()
+            except Exception:
+                log.debug("instance daily point tick failed", exc_info=True)
             try:
                 await self.maybe_generate_nl_digest()
             except Exception:
                 log.debug("telemetry NL digest tick failed", exc_info=True)
+
+    async def _bootstrap_instance_snapshot(self) -> None:
+        """Compute the initial current snapshot + a due daily point, off boot."""
+        try:
+            wrote = await asyncio.to_thread(self._bootstrap_instance_sync)
+            if wrote:
+                self.mark_telemetry_dirty()
+        except Exception:
+            log.debug("instance snapshot bootstrap failed", exc_info=True)
+
+    def _bootstrap_instance_sync(self) -> bool:
+        snapshot = instance_service.compute_current_snapshot(
+            self.storage, self.settings
+        )
+        return instance_service.record_instance_daily_if_due(
+            self.storage, self.settings, snapshot=snapshot
+        )
+
+    def schedule_instance_refresh(self) -> None:
+        """Recompute the current instance snapshot in the background (deduped).
+
+        Called when a ``GET /api/telemetry/instance`` serves a ≥5-minute-old
+        cache, so the multi-second walk runs off the request path. A no-op when
+        telemetry is disabled or a refresh is already in flight.
+        """
+        if self.telemetry_ingester is None:
+            return
+        if (
+            self._instance_refresh_task is not None
+            and not self._instance_refresh_task.done()
+        ):
+            return
+        self._instance_refresh_task = asyncio.create_task(
+            self._refresh_instance_snapshot(), name="instance-refresh"
+        )
+
+    async def _refresh_instance_snapshot(self) -> None:
+        try:
+            await asyncio.to_thread(
+                instance_service.compute_current_snapshot,
+                self.storage,
+                self.settings,
+            )
+            self.mark_telemetry_dirty()
+        except Exception:
+            log.debug("instance snapshot refresh failed", exc_info=True)
 
     async def maybe_generate_nl_digest(self) -> NLInsight | None:
         """Generate + persist a fresh NL-insight digest if one is due.

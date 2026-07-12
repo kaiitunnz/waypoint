@@ -571,7 +571,11 @@ export default function TelemetryPage() {
         </div>
       ) : null}
 
-      {telemetryCap === "disabled" ? (
+      {telemetryCap === "unknown" ? (
+        <section className="panel bordered board-empty">
+          <h2>Loading telemetry…</h2>
+        </section>
+      ) : telemetryCap === "disabled" ? (
         <section className="panel bordered board-empty telemetry-disabled">
           <h2>Telemetry is disabled</h2>
           <p className="muted">

@@ -156,7 +156,10 @@ existing collectors must add `telemetry_enabled: true` before restarting or
 collection and the dashboard silently go away (existing facts stay on disk but
 become inaccessible until re-enabled). And a config that sets
 `telemetry_nl.enabled: true` without `telemetry_enabled: true` now fails to boot
-— the NL summarizer requires the master switch.
+— the NL summarizer requires the master switch. Because of that fail-fast, a
+`WAYPOINT_TELEMETRY_ENABLED=false` env kill-switch over a YAML config that leaves
+`telemetry_nl.enabled: true` must also disable the summarizer
+(`WAYPOINT_TELEMETRY_NL_ENABLED=false`) so the resolved config stays valid.
 
 Disabling telemetry later stops new collection but never deletes existing facts;
 use the explicit delete control (or `DELETE /api/telemetry`, which stays

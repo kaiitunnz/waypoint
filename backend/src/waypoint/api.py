@@ -1098,6 +1098,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # does not advertise the telemetry surface. DELETE stays ungated as a
         # narrow privacy-cleanup path.
         if not context.settings.telemetry_enabled:
+            # The "telemetry is disabled" prefix is matched by the frontend's
+            # isTelemetryDisabledError (lib/api.ts) for its mid-restart-race
+            # fallback; keep them in sync (pinned by test_telemetry_opt_in).
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=(

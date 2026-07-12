@@ -1896,6 +1896,8 @@ export function isAuthError(error: unknown): error is AuthError {
 // `/telemetry` page can recognize a disabled-state 404 (e.g. a setting that
 // changed between the `/api/me` capability fetch and a telemetry request during
 // a backend restart) and fall back to its disabled view rather than an outage.
+// The prefix is set by `require_telemetry_enabled()` in backend/.../api.py and
+// pinned by test_telemetry_opt_in's 404-detail assertions — keep them in sync.
 export function isTelemetryDisabledError(error: unknown): boolean {
   return (
     error instanceof Error &&
